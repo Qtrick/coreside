@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+src-tauri/target/
+
+# Environment secrets — never commit real keys
+.env
+.env.*
+!.env.example
+!.env.*.example
+.env.local
+.env.*.local
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Logs and caches
+*.log
+npm-debug.log*
+.eslintcache
+coverage/
+.vite/
+*.tsbuildinfo
+
+# Reference extracts (do not commit large trees)
+.reference/
+
+# Local fallback database directory
+.coreside/
+
+# Test / temp
+tmp/
+*.tmp

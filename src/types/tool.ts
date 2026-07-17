@@ -1,0 +1,163 @@
+import { z } from "zod";
+
+export const ComponentTypeSchema = z.enum([
+  "container",
+  "row",
+  "column",
+  "card",
+  "tabs",
+  "divider",
+  "spacer",
+  "heading",
+  "text",
+  "badge",
+  "image",
+  "emptyState",
+  "textInput",
+  "textArea",
+  "numberInput",
+  "select",
+  "checkbox",
+  "dateInput",
+  "list",
+  "checklist",
+  "table",
+  "counter",
+  "progress",
+  "stat",
+  "button",
+  "buttonGroup",
+  "quiz",
+]);
+
+export type ComponentType = z.infer<typeof ComponentTypeSchema>;
+
+export const ActionSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("setValue"),
+    target: z.string().min(1),
+    value: z.unknown(),
+  }),
+  z.object({
+    type: z.literal("toggle"),
+    target: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("increment"),
+    target: z.string().min(1),
+    amount: z.number().optional(),
+  }),
+  z.object({
+    type: z.literal("decrement"),
+    target: z.string().min(1),
+    amount: z.number().optional(),
+  }),
+  z.object({
+    type: z.literal("reset"),
+    target: z.string().min(1),
+    value: z.unknown().optional(),
+  }),
+  z.object({
+    type: z.literal("appendItem"),
+    target: z.string().min(1),
+    item: z.unknown(),
+  }),
+  z.object({
+    type: z.literal("removeItem"),
+    target: z.string().min(1),
+    index: z.number().int().nonnegative().optional(),
+    id: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("updateItem"),
+    target: z.string().min(1),
+    index: z.number().int().nonnegative().optional(),
+    id: z.string().optional(),
+    patch: z.record(z.unknown()),
+  }),
+  z.object({
+    type: z.literal("selectTab"),
+    target: z.string().min(1),
+    tabId: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("submitToAgent"),
+    eventName: z.string().min(1),
+    includeFields: z.array(z.string()).optional(),
+    componentId: z.string().optional(),
+  }),
+]);
+
+export type ActionDefinition = z.infer<typeof ActionSchema>;
+
+export type ToolComponent = {
+  id: string;
+  type: ComponentType | string;
+  props?: Record<string, unknown>;
+  children?: ToolComponent[];
+  actions?: ActionDefinition[];
+  valueKey?: string;
+};
+
+export const ToolComponentSchema: z.ZodType<ToolComponent> = z.lazy(() =>
+  z.object({
+    id: z.string().min(1),
+    type: z.string().min(1),
+    props: z.record(z.unknown()).optional(),
+    children: z.array(ToolComponentSchema).optional(),
+    actions: z.array(ActionSchema).optional(),
+    valueKey: z.string().optional(),
+  }),
+);
+
+export const ToolLayoutSchema = z
+  .object({
+    type: z.string().optional(),
+  })
+  .passthrough()
+  .optional();
+
+export const ToolDefinitionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().default(""),
+  layout: ToolLayoutSchema,
+  components: z.array(ToolComponentSchema).default([]),
+  version: z.number().int().positive().optional(),
+});
+
+export type ToolDefinition = z.infer<typeof ToolDefinitionSchema>;
+
+export const ToolSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional().nullable(),
+  version: z.number().int().optional().nullable(),
+  updatedAt: z.string().optional().nullable(),
+  createdAt: z.string().optional().nullable(),
+});
+
+export type ToolSummary = z.infer<typeof ToolSummarySchema>;
+
+export const ToolVersionSchema = z.object({
+  id: z.string(),
+  toolId: z.string(),
+  version: z.number().int(),
+  changeSummary: z.string().optional().nullable(),
+  createdAt: z.string(),
+  definition: ToolDefinitionSchema.optional(),
+});
+
+export type ToolVersion = z.infer<typeof ToolVersionSchema>;
+
+export type ToolState = Record<string, unknown>;
+
+export const ToolInteractionEventSchema = z.object({
+  eventType: z.literal("tool_interaction"),
+  toolId: z.string(),
+  componentId: z.string().optional(),
+  eventName: z.string(),
+  values: z.record(z.unknown()),
+});
+
+export type ToolInteractionEvent = z.infer<typeof ToolInteractionEventSchema>;

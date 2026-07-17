@@ -1,0 +1,72 @@
+//! Secret redaction and user-facing error sanitization.
+
+use regex::Regex;
+use once_cell::sync::Lazy;
+
+static KEY_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    vec![
+        Regex::new(r"(?i)(AIza[0-9A-Za-z\-_]{20,})").expect("valid regex"),
+        Regex::new(r"(?i)(sk-[A-Za-z0-9\-_]{20,})").expect("valid regex"),
+        Regex::new(r"(?i)(Bearer\s+[A-Za-z0-9\-._~+/]+=*)").expect("valid regex"),
+        Regex::new(r#"(?i)(api[_-]?key[=:]\s*)([^\s&"']+)"#).expect("valid regex"),
+        Regex::new(r"(?i)(key[=:]\s*)([A-Za-z0-9\-_]{16,})").expect("valid regex"),
+    ]
+});
+
+/// Redact known API key shapes and an optional concrete key value from text.
+pub fn redact_secrets(text: &str, key: Option<&str>) -> String {
+    let mut out = text.to_string();
+
+    if let Some(k) = key {
+        if !k.is_empty() {
+            out = out.replace(k, "[REDACTED]");
+        }
+    }
+
+    for re in KEY_PATTERNS.iter() {
+        out = re
+            .replace_all(&out, |caps: &regex::Captures| {
+                if caps.len() >= 3 {
+                    format!("{}[REDACTED]", &caps[1])
+                } else {
+                    "[REDACTED]".to_string()
+                }
+            })
+            .into_owned();
+    }
+
+    out
+}
+
+/// Produce a short, safe error message for the frontend.
+pub fn sanitize_error(err: &str, key: Option<&str>) -> String {
+    let redacted = redact_secrets(err, key);
+    let trimmed = redacted.trim();
+    if trimmed.is_empty() {
+        return "An unexpected error occurred.".to_string();
+    }
+    // Keep messages readable but bounded.
+    if trimmed.len() > 400 {
+        format!("{}…", &trimmed[..400])
+    } else {
+        trimmed.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redacts_concrete_key() {
+        let s = redact_secrets("using key=abcSECRET123xyz failed", Some("abcSECRET123xyz"));
+        assert!(!s.contains("abcSECRET123xyz"));
+        assert!(s.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn redacts_gemini_style_key() {
+        let s = redact_secrets("AIzaSyA-test-key-value-1234567890abcd", None);
+        assert_eq!(s, "[REDACTED]");
+    }
+}
