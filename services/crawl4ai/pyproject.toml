@@ -1,0 +1,25 @@
+# Coreside Crawl4AI sidecar
+# Pin: crawl4ai==0.9.2 | Python >=3.10,<3.14 preferred (dev: 3.13)
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coreside-crawler"
+version = "0.1.0"
+description = "Coreside managed Crawl4AI research sidecar (stdio NDJSON)"
+requires-python = ">=3.10"
+dependencies = [
+  "crawl4ai==0.9.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
+
+[tool.setuptools.packages.find]
+include = ["coreside_crawler*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["coreside_crawler/tests"]

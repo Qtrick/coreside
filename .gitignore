@@ -33,6 +33,13 @@ coverage/
 # Reference extracts (do not commit large trees)
 .reference/
 
+# Crawl4AI local runtime (venv, browsers cache data)
+services/crawl4ai/.venv/
+services/crawl4ai/.crawler-data/
+services/crawl4ai/**/__pycache__/
+services/crawl4ai/**/.pytest_cache/
+*.pyc
+
 # Local fallback database directory
 .coreside/
 

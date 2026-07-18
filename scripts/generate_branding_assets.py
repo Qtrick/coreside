@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""Generate Coreside branding assets from supplied solid-background sources.
+
+Produces genuine RGBA transparent marks (no baked checkerboard) and
+Liquid-Glass-inspired dock icon variants.
+
+Usage (from repo root):
+  python3 scripts/generate_branding_assets.py
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
+
+
+REPO = Path(__file__).resolve().parents[1]
+DEFAULT_SRC = Path(
+    "/Users/qunyingfan/.cursor/projects/Users-qunyingfan-Coreside/assets"
+)
+OUT = REPO / "src" / "assets" / "branding"
+RES = REPO / "src-tauri" / "resources" / "branding"
+ICONS = REPO / "src-tauri" / "icons"
+
+
+def soft_mask_from_luma(rgb: Image.Image, *, mark_is_light: bool) -> Image.Image:
+    gray = rgb.convert("L")
+    if mark_is_light:
+        alpha = gray.point(lambda p: min(255, max(0, int((p / 255.0) ** 0.9 * 255))))
+    else:
+        inv = Image.eval(gray, lambda p: 255 - p)
+        alpha = inv.point(lambda p: min(255, max(0, int((p / 255.0) ** 0.9 * 255))))
+    return alpha.point(lambda p: 0 if p < 18 else (255 if p > 240 else p))
+
+
+def compose_mark(
+    rgb: Image.Image, alpha: Image.Image, *, force_rgb: tuple[int, int, int]
+) -> Image.Image:
+    out = Image.new("RGBA", rgb.size, (0, 0, 0, 0))
+    color = Image.new("RGBA", rgb.size, (*force_rgb, 255))
+    return Image.composite(color, out, alpha)
+
+
+def trim_mark(mark: Image.Image, *, alpha_threshold: int = 12) -> Image.Image:
+    """Crop transparent margins so the glyph can fill the dock tile."""
+    alpha = mark.getchannel("A")
+    bbox = alpha.point(lambda p: 255 if p > alpha_threshold else 0).getbbox()
+    if not bbox:
+        return mark
+    return mark.crop(bbox)
+
+
+def rounded_squircle(size: int, radius_ratio: float = 0.223) -> Image.Image:
+    r = int(size * radius_ratio)
+    mask = Image.new("L", (size, size), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=r, fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=size * 0.004))
+    return mask.point(lambda p: 255 if p > 128 else int(p * 1.2) if p > 40 else 0)
+
+
+def make_dock_icon(
+    bg_rgb: tuple[int, int, int], mark: Image.Image, out_path: Path, size: int = 1024
+) -> None:
+    """Build a macOS-sized dock icon.
+
+    The squircle is inset in a transparent canvas so the on-Dock visual size
+    matches other apps. Inside the squircle the mark stays large.
+    """
+    # Outer transparent margin (~11%) so the tile matches native Dock icon scale.
+    outer = int(size * 0.11)
+    inner = size - 2 * outer
+
+    tile = Image.new("RGBA", (inner, inner), (0, 0, 0, 0))
+    base = Image.new("RGBA", (inner, inner), (*bg_rgb, 255))
+    mask = rounded_squircle(inner)
+    tile.paste(base, (0, 0), mask)
+
+    highlight = Image.new("RGBA", (inner, inner), (0, 0, 0, 0))
+    hdraw = ImageDraw.Draw(highlight)
+    for i, alpha in enumerate([28, 18, 10]):
+        pad = int(inner * (0.02 + i * 0.01))
+        hdraw.ellipse(
+            (pad, -int(inner * 0.35), inner - pad, int(inner * 0.55)),
+            fill=(255, 255, 255, alpha),
+        )
+    highlight.putalpha(ImageChops.multiply(highlight.split()[-1], mask))
+    tile = Image.alpha_composite(tile, highlight)
+
+    ring = Image.new("RGBA", (inner, inner), (0, 0, 0, 0))
+    rdraw = ImageDraw.Draw(ring)
+    inset = int(inner * 0.028)
+    r = int(inner * 0.223) - inset // 2
+    edge = (255, 255, 255, 36) if sum(bg_rgb) < 380 else (0, 0, 0, 22)
+    rdraw.rounded_rectangle(
+        (inset, inset, inner - 1 - inset, inner - 1 - inset),
+        radius=max(8, r),
+        outline=edge,
+        width=max(2, inner // 256),
+    )
+    ring.putalpha(ImageChops.multiply(ring.split()[-1], mask))
+    tile = Image.alpha_composite(tile, ring)
+
+    # Fill most of the squircle: trim source margins, keep comfortable pad.
+    glyph = trim_mark(mark)
+    mark_pad = int(inner * 0.08)
+    avail = inner - 2 * mark_pad
+    # Fit glyph to the largest square that preserves aspect ratio.
+    gw, gh = glyph.size
+    scale = min(avail / gw, avail / gh)
+    tw, th = max(1, int(gw * scale)), max(1, int(gh * scale))
+    mark_resized = glyph.resize((tw, th), Image.Resampling.LANCZOS)
+    ox = mark_pad + (avail - tw) // 2
+    oy = mark_pad + (avail - th) // 2
+    tile.alpha_composite(mark_resized, (ox, oy))
+
+    icon = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    icon.alpha_composite(tile, (outer, outer))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    icon.save(out_path, optimize=True)
+
+
+def validate_rgba(path: Path) -> None:
+    im = Image.open(path)
+    if im.mode != "RGBA":
+        raise SystemExit(f"{path} is {im.mode}, expected RGBA")
+    for xy in [
+        (0, 0),
+        (im.width - 1, 0),
+        (0, im.height - 1),
+        (im.width - 1, im.height - 1),
+    ]:
+        if im.getpixel(xy)[3] != 0:
+            raise SystemExit(f"{path} corner {xy} not transparent: {im.getpixel(xy)}")
+    hist = im.getchannel("A").histogram()
+    if hist[0] < 1000:
+        raise SystemExit(f"{path} has too few transparent pixels")
+    print(f"OK {path.name}: transparent corners + alpha channel")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--src", type=Path, default=DEFAULT_SRC)
+    args = parser.parse_args()
+    src: Path = args.src
+
+    black_bg = Image.open(
+        next(src.glob("Coreside_Black_Logo*.png"))
+    ).convert("RGB")
+    white_bg = Image.open(
+        next(src.glob("Coreside_White_Logo*.png"))
+    ).convert("RGB")
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    RES.mkdir(parents=True, exist_ok=True)
+    ICONS.mkdir(parents=True, exist_ok=True)
+
+    black_bg.save(OUT / "coreside-icon-dark-source.png")
+    white_bg.save(OUT / "coreside-icon-light-source.png")
+
+    mark_white = compose_mark(
+        black_bg, soft_mask_from_luma(black_bg, mark_is_light=True), force_rgb=(255, 255, 255)
+    )
+    mark_black = compose_mark(
+        white_bg, soft_mask_from_luma(white_bg, mark_is_light=False), force_rgb=(0, 0, 0)
+    )
+
+    for path, img in [
+        (OUT / "coreside-mark-white-transparent.png", mark_white),
+        (OUT / "coreside-mark-black-transparent.png", mark_black),
+        (RES / "coreside-mark-white-transparent.png", mark_white),
+        (RES / "coreside-mark-black-transparent.png", mark_black),
+    ]:
+        img.save(path, optimize=True)
+        validate_rgba(path)
+
+    make_dock_icon((18, 18, 18), mark_white, OUT / "coreside-dock-dark.png")
+    make_dock_icon((246, 246, 244), mark_black, OUT / "coreside-dock-light.png")
+    make_dock_icon((18, 18, 18), mark_white, RES / "coreside-dock-dark.png")
+    make_dock_icon((246, 246, 244), mark_black, RES / "coreside-dock-light.png")
+
+    dock_dark = Image.open(OUT / "coreside-dock-dark.png")
+    for name, size in {
+        "32x32.png": 32,
+        "128x128.png": 128,
+        "128x128@2x.png": 256,
+        "icon.png": 1024,
+    }.items():
+        dock_dark.resize((size, size), Image.Resampling.LANCZOS).save(
+            ICONS / name, optimize=True
+        )
+
+    print("Branding assets generated.")
+
+
+if __name__ == "__main__":
+    main()

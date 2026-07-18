@@ -1,24 +1,23 @@
 # Roadmap
 
-## Current consumer MVP
+## Shipped in recent consumer phases
 
-- Desktop chatbot shell
-- Gemini provider adapter
-- Declarative personal tools + quiz
-- Preview / apply / undo
-- Local SQLite persistence
-- Themes + settings + secondary tool window
+- BYOK AI providers + Action Log + mentions + automations + exports
+- Projects, project context (FTS), context menus, chat navigation no-op
+- Web Research via local Crawl4AI sidecar (web/image/video discovery), citations, SSRF-safe page fetch
+- Media Library + live wallpapers with local assets
+- Bounded agent `tool_use` loop with approval for media imports
 
-## Next AI-harness improvements
+## Next recommended development
 
-- Better intent classification (chat vs build vs edit)
-- Smarter context selection and truncation
-- More reliable tool edits and stable ID preservation
-- Safe component-level patches (not only full snapshots)
-- Prompt repair with strict limits
-- Stronger tool-selection awareness
-- More sophisticated personal games within the registry
-- Optional file / image input
+- Project file uploads and multimodal project context
+- Better semantic retrieval / optional local embeddings
+- Better source-quality ranking and search-query planning
+- More media providers and wallpaper templates
+- Stronger agent self-review for complex tool edits
+- Project templates
+- Optional cloud synchronization
+- More advanced personal games within the registry
 
 ## Later custom tools and games
 
@@ -28,6 +27,7 @@
 
 ## Later cloud synchronization
 
+- **Research-first cloud** (Exa + orchestration + budgets; Crawl4AI as workers) — see [CLOUD_HOSTING.md](./CLOUD_HOSTING.md)
 - Optional encrypted sync of conversations and tools
 - Device pairing — still personal-first
 

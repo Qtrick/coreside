@@ -9,14 +9,19 @@ This repository is the **consumer MVP foundation**: a real desktop application w
 ## Current consumer MVP scope
 
 - Desktop app via Tauri 2
-- Chat with a real AI provider (Gemini)
-- Structured tool proposals with preview → apply / discard
-- Declarative trusted component renderer (utilities + quiz)
-- Local persistence for conversations, tools, versions, and tool state
-- Undo for the latest tool change
-- System / Light / Dark themes
-- Open a tool in a secondary native window
-- Missing API-key setup guidance without crashing
+- BYOK provider setup (Gemini, OpenAI, Anthropic, OpenRouter) with OS credential storage
+- **Projects** with instructions, chat membership, context menus, and local FTS project context
+- Chat navigation with current-chat no-op and per-chat draft/scroll preservation
+- Chat with structured tool proposals (preview → apply / discard) and bounded `tool_use` loop
+- Trusted **Web Research** — Exa (optional) for indexed discovery + local Crawl4AI for page inspection, with citations and Safe Search
+- **Media Library** with validated imports and source attribution
+- Wallpapers (canvas presets + local image/video/animated assets) under Added Settings → Templates
+- `@` tool mentions, Action Log Base Setting, local automations, tool export
+- Trusted `clock` component with offline HTML export
+- Declarative trusted component renderer
+- Local SQLite persistence for conversations, tools, versions, settings, automations, projects, media
+- System / Light / Dark themes and user-editable workspace appearance
+- Secondary native tool windows
 
 Out of scope for this phase: teams, billing, cloud sync, accounts, arbitrary code execution, marketplaces, and enterprise administration.
 
@@ -83,6 +88,8 @@ The AI generates structured JSON and declarative component definitions — not u
 cp .env.example .env
 # Paste your key into .env (AI_API_KEY or GEMINI_API_KEY)
 npm install
+npm run crawl4ai:setup   # local Crawl4AI engine (page inspection)
+# Optional: set EXA_API_KEY= in .env for indexed open-web discovery
 ```
 
 ## `.env` configuration
@@ -111,6 +118,17 @@ Default Gemini model when unset: `gemini-3.5-flash`.
 Never commit a populated `.env`. The file is gitignored (`.env` and `.env.*`, with `.env.example` kept).
 
 API keys are loaded only in Rust. They are never sent to the frontend, SQLite, logs, or tool definitions.
+
+## Branding
+
+Coreside uses a protected brand mark:
+
+- **In-app Light:** black transparent mark
+- **In-app Dark:** white transparent mark  
+- **Dock (OS Light):** dark-background icon with white mark
+- **Dock (OS Dark):** light-background icon with black mark
+
+In-app logos follow the Coreside Appearance setting. Dock icons follow the **operating system** appearance even if the in-app theme is overridden. Details: [docs/BRANDING.md](docs/BRANDING.md).
 
 ## Running development mode
 
@@ -153,7 +171,7 @@ Automated tests use a mock AI provider / fixtures and do **not** require a paid 
 
 ## Architecture overview
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Cloud feasibility for research and related systems: [docs/CLOUD_HOSTING.md](docs/CLOUD_HOSTING.md).
 
 Request flow:
 
@@ -208,8 +226,12 @@ See [docs/ROADMAP.md](docs/ROADMAP.md). Next focus: stronger agent harness (inte
 ## Documentation index
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Cloud hosting feasibility](docs/CLOUD_HOSTING.md)
 - [Agent protocol](docs/AGENT_PROTOCOL.md)
+- [Web Research](docs/WEB_RESEARCH.md)
+- [Branding](docs/BRANDING.md)
 - [Security](docs/SECURITY.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
 - [Partial Update review](docs/PARTIAL_UPDATE_REVIEW.md)
 - [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
 - [Roadmap](docs/ROADMAP.md)

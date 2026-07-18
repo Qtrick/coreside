@@ -5,15 +5,14 @@ use tauri::State;
 use tokio_util::sync::CancellationToken;
 
 use super::CommandError;
-use crate::ai::create_provider;
+use crate::ai::{create_provider, model_catalog, ModelCatalog};
 use crate::config::PublicAiStatus;
+use crate::credentials::resolve_credentials;
+use crate::db;
 use crate::state::AppState;
 
 const APP_DESCRIPTION: &str =
     "An AI-native personal software environment that begins as a chatbot and builds tools inside itself.";
-
-const MISSING_KEY_MESSAGE: &str =
-    "Add AI_API_KEY (or GEMINI_API_KEY) to the project .env file, then restart npm run dev.";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,26 +35,69 @@ pub fn get_app_info() -> AppInfo {
 
 #[tauri::command]
 pub fn get_ai_status(state: State<'_, AppState>) -> PublicAiStatus {
-    let (status, message) = if state.config.has_api_key() {
-        ("ready", None)
-    } else if state.config.provider.eq_ignore_ascii_case("mock") {
-        // Mock provider is usable without a key.
-        ("ready", Some("Using mock AI provider (no API key required).".to_string()))
-    } else {
-        ("missing_key", Some(MISSING_KEY_MESSAGE.to_string()))
+    let _ = state.reload_config();
+    let resolved = {
+        let db = state.db.lock();
+        resolve_credentials(&db, None)
     };
-    state.config.public_ai_status(status, message)
+
+    let (status, message) = if resolved.has_api_key() {
+        let msg = match resolved.source.as_str() {
+            "connection" => Some("Connected with a secure provider credential.".to_string()),
+            "env" => Some("Using development environment credential.".to_string()),
+            _ => None,
+        };
+        ("ready", msg)
+    } else if resolved.provider.eq_ignore_ascii_case("mock") {
+        (
+            "ready",
+            Some("Using mock AI provider (no API key required).".to_string()),
+        )
+    } else {
+        (
+            "missing_key",
+            Some(
+                "Connect an AI provider in Settings to chat. Your key stays on this device."
+                    .to_string(),
+            ),
+        )
+    };
+
+    resolved.to_app_config().public_ai_status_with_source(
+        status,
+        message,
+        &resolved.source,
+        resolved.active_connection_id.clone(),
+    )
+}
+
+#[tauri::command]
+pub fn get_model_catalog(state: State<'_, AppState>) -> Result<ModelCatalog, CommandError> {
+    let resolved = {
+        let db = state.db.lock();
+        resolve_credentials(&db, None)
+    };
+    let selected = {
+        let db = state.db.lock();
+        db::get_settings(&db)?
+            .get("preferredModel")
+            .cloned()
+            .unwrap_or_else(|| "auto".to_string())
+    };
+    Ok(model_catalog(&resolved.to_app_config(), &selected))
 }
 
 #[tauri::command]
 pub async fn test_ai_connection(
     state: State<'_, AppState>,
 ) -> Result<crate::ai::ProviderHealth, CommandError> {
-    let config = state.config.clone();
-    let key = config.api_key.clone();
+    let resolved = {
+        let db = state.db.lock();
+        resolve_credentials(&db, None)
+    };
+    let key = resolved.api_key.clone();
+    let config = resolved.to_app_config();
 
-    // Never silently fall back to mock when a real provider is selected but unconfigured —
-    // that would report a false-positive "connection successful".
     let provider = create_provider(&config).map_err(|e| {
         CommandError::sanitized(e.code(), e, key.as_deref())
     })?;

@@ -10,6 +10,16 @@ use rusqlite::{Connection, OptionalExtension};
 use thiserror::Error;
 
 const MIGRATION_001: &str = include_str!("../../migrations/001_initial.sql");
+const MIGRATION_002: &str = include_str!("../../migrations/002_added_settings.sql");
+const MIGRATION_003: &str = include_str!("../../migrations/003_provider_connections.sql");
+const MIGRATION_004: &str = include_str!("../../migrations/004_action_log.sql");
+const MIGRATION_005: &str = include_str!("../../migrations/005_automations.sql");
+const MIGRATION_006: &str = include_str!("../../migrations/006_projects.sql");
+const MIGRATION_007: &str = include_str!("../../migrations/007_media_search.sql");
+const MIGRATION_008: &str = include_str!("../../migrations/008_media_thumbnails.sql");
+const MIGRATION_009: &str = include_str!("../../migrations/009_crawler.sql");
+const MIGRATION_010: &str = include_str!("../../migrations/010_exa_wallpapers.sql");
+const MIGRATION_011: &str = include_str!("../../migrations/011_action_log_mode.sql");
 
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -74,23 +84,40 @@ impl Database {
             );",
         )?;
 
+        self.apply_migration("001_initial", MIGRATION_001)?;
+        self.apply_migration("002_added_settings", MIGRATION_002)?;
+        self.apply_migration("003_provider_connections", MIGRATION_003)?;
+        self.apply_migration("004_action_log", MIGRATION_004)?;
+        self.apply_migration("005_automations", MIGRATION_005)?;
+        self.apply_migration("006_projects", MIGRATION_006)?;
+        self.apply_migration("007_media_search", MIGRATION_007)?;
+        self.apply_migration("008_media_thumbnails", MIGRATION_008)?;
+        self.apply_migration("009_crawler", MIGRATION_009)?;
+        self.apply_migration("010_exa_wallpapers", MIGRATION_010)?;
+        self.apply_migration("011_action_log_mode", MIGRATION_011)?;
+
+        Ok(())
+    }
+
+    fn apply_migration(&self, name: &str, sql: &str) -> DbResult<()> {
         let applied: Option<i64> = self
             .conn
             .query_row(
                 "SELECT id FROM _migrations WHERE name = ?1",
-                ["001_initial"],
+                [name],
                 |row| row.get(0),
             )
             .optional()?;
 
         if applied.is_none() {
-            self.conn.execute_batch(MIGRATION_001)?;
-            self.conn.execute(
-                "INSERT INTO _migrations (name) VALUES (?1)",
-                ["001_initial"],
-            )?;
+            // Apply DDL + migration bookkeeping atomically so a mid-script
+            // failure cannot leave partial schema (e.g. half-added columns)
+            // without a recorded migration version.
+            let tx = self.conn.unchecked_transaction()?;
+            tx.execute_batch(sql)?;
+            tx.execute("INSERT INTO _migrations (name) VALUES (?1)", [name])?;
+            tx.commit()?;
         }
-
         Ok(())
     }
 
@@ -178,7 +205,7 @@ mod tests {
         let path = dir.path().join("test.db");
         let mut db = Database::open_path(&path).unwrap();
 
-        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Hello").unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Hello", None).unwrap();
         let msg = insert_message(
             &mut db,
             &conv.id,
@@ -253,10 +280,47 @@ mod tests {
     }
 
     #[test]
+    fn added_settings_roundtrip_and_rejects_core() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("t.db")).unwrap();
+
+        let bad = crate::settings::UpsertAddedSettingInput {
+            id: "core.settings.appearance".into(),
+            owner_tool_id: None,
+            label: "Nope".into(),
+            description: None,
+            setting_type: "string".into(),
+            default_value: None,
+            current_value: None,
+            constraints: None,
+        };
+        assert!(upsert_added_setting(&mut db, &bad).is_err());
+
+        let ok = crate::settings::UpsertAddedSettingInput {
+            id: "tool.water.units".into(),
+            owner_tool_id: None,
+            label: "Units".into(),
+            description: Some("ml or oz".into()),
+            setting_type: "string".into(),
+            default_value: Some(serde_json::json!("ml")),
+            current_value: Some(serde_json::json!("oz")),
+            constraints: Some(serde_json::json!({"enum": ["ml", "oz"]})),
+        };
+        let saved = upsert_added_setting(&mut db, &ok).unwrap();
+        assert_eq!(saved.id, "tool.water.units");
+        assert_eq!(saved.version, 1);
+
+        let listed = list_added_settings(&db, None).unwrap();
+        assert_eq!(listed.len(), 1);
+        delete_added_setting(&mut db, "tool.water.units").unwrap();
+        assert!(list_added_settings(&db, None).unwrap().is_empty());
+    }
+
+    #[test]
     fn renames_default_conversation_title() {
         let dir = tempdir().unwrap();
         let mut db = Database::open_path(&dir.path().join("t.db")).unwrap();
-        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "New chat").unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "New chat", None).unwrap();
         let renamed =
             maybe_rename_conversation_from_message(&mut db, &conv.id, "Track my water").unwrap();
         assert_eq!(renamed.as_deref(), Some("Track my water"));
@@ -265,5 +329,121 @@ mod tests {
         assert!(again.is_none());
         let loaded = get_conversation(&db, &conv.id).unwrap();
         assert_eq!(loaded.title, "Track my water");
+    }
+
+    #[test]
+    fn provider_connections_schema_has_no_api_key_column() {
+        let migration = include_str!("../../migrations/003_provider_connections.sql").to_lowercase();
+        assert!(
+            !migration.contains("api_key"),
+            "migration must not define an api_key column"
+        );
+        assert!(migration.contains("keyring_account"));
+
+        let dir = tempdir().unwrap();
+        let db = Database::open_path(&dir.path().join("provider.db")).unwrap();
+        let mut stmt = db
+            .conn()
+            .prepare("PRAGMA table_info(provider_connections)")
+            .unwrap();
+        let cols: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            !cols.iter().any(|c| c.eq_ignore_ascii_case("api_key")),
+            "provider_connections must not have api_key; got {cols:?}"
+        );
+        assert!(cols.iter().any(|c| c == "keyring_account"));
+        assert!(cols.iter().any(|c| c == "is_active"));
+    }
+
+    #[test]
+    fn provider_connection_roundtrip_stores_keyring_account_only() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("pc.db")).unwrap();
+        let now = "2026-01-01T00:00:00Z".to_string();
+        let row = ProviderConnection {
+            id: "conn-1".into(),
+            provider: "openai".into(),
+            label: "Work".into(),
+            base_url: None,
+            model_default: Some("gpt-4.1-mini".into()),
+            keyring_account: "coreside:conn-1".into(),
+            is_active: false,
+            last_status: None,
+            last_tested_at: None,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        let saved = upsert_provider_connection(&mut db, &row).unwrap();
+        assert_eq!(saved.keyring_account, "coreside:conn-1");
+        let active = set_active_provider_connection(&mut db, "conn-1").unwrap();
+        assert!(active.is_active);
+        let fetched = get_active_provider_connection(&db).unwrap().unwrap();
+        assert_eq!(fetched.id, "conn-1");
+    }
+
+    #[test]
+    fn crawler_migration_seeds_resource_profile() {
+        let dir = tempdir().unwrap();
+        let db = Database::open_path(&dir.path().join("crawler.db")).unwrap();
+        let profile: String = db
+            .conn()
+            .query_row(
+                "SELECT value FROM crawler_settings WHERE key = 'webResearchResourceProfile'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(profile, "balanced");
+        let tables: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN (
+                    'crawler_runtime','crawler_settings','crawl_sources','crawl_jobs',
+                    'crawl_job_sources','domain_crawl_state','crawler_cache_metadata'
+                 )",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 7);
+    }
+
+    #[test]
+    fn exa_migration_seeds_profile_and_ledger() {
+        let dir = tempdir().unwrap();
+        let db = Database::open_path(&dir.path().join("exa.db")).unwrap();
+        let profile: String = db
+            .conn()
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'searchProfile'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(profile, "saver");
+        let soft: String = db
+            .conn()
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'exaBudgetSoftPercent'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(soft, "75");
+        let tables: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN (
+                    'exa_usage_ledger','wallpaper_templates'
+                 )",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 2);
     }
 }

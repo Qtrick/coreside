@@ -20,6 +20,9 @@ export const ConversationSchema = z.object({
   id: z.string(),
   title: z.string(),
   workspaceId: z.string().optional().nullable(),
+  projectId: z.string().optional().nullable(),
+  pinned: z.boolean().optional().default(false),
+  archived: z.boolean().optional().default(false),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

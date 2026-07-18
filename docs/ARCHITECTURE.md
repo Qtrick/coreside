@@ -14,7 +14,7 @@ React shell (chat / sidebar / tool canvas / settings)
   ↓  Tauri IPC (no API keys)
 Rust commands
   ↓
-AI provider adapter  ·  SQLite repositories  ·  window manager
+AI provider adapter  ·  SQLite  ·  Web Research sidecar (Crawl4AI stdio)  ·  window manager
 ```
 
 ## Rust / TypeScript boundary
@@ -37,14 +37,19 @@ src/
 ├── app/                 App bootstrap + hash routes for tool windows
 ├── components/
 │   ├── chat/
+│   ├── context-menu/
 │   ├── layout/
+│   ├── media/
+│   ├── projects/
+│   ├── search/
 │   ├── settings/
 │   ├── sidebar/
 │   ├── tool-canvas/
+│   ├── wallpaper/
 │   └── tool-renderer/   Registry + nodes (including quiz)
 ├── hooks/
-├── lib/                 Tauri API wrappers, Zod schemas, actions
-├── stores/              Zustand app store
+├── lib/                 Tauri API, navigation, media, wallpapers
+├── stores/              Zustand app store (AppView navigation)
 ├── styles/              Design tokens + global CSS
 └── types/
 ```
@@ -53,11 +58,19 @@ src/
 
 ```text
 src-tauri/src/
-├── ai/           Provider trait, Gemini, mock, prompts, parser, schema
+├── ai/           Providers, prompts, parser, schema, tool_loop, capabilities
+├── projects/     Projects CRUD, FTS indexing, retrieval, summaries, export
+├── search/       Research registry, SSRF-safe fetch, citations (legacy Brave storage readable)
+├── research/     Crawl4AI SearchProvider adapter
+├── crawler/      Sidecar supervisor, installation probe, resource profiles
+├── media/        Import validation, storage, metadata
+├── wallpapers/   Trusted wallpaper schemas + validation
+├── automations/  Scheduler + executor
+├── credentials/  Keyring resolve for AI providers
 ├── commands/     Tauri IPC surface
 ├── config/       Env loading
 ├── db/           SQLite + repositories
-├── security/     Redaction / sanitization
+├── security/     Redaction + protected resources
 ├── windows/      Secondary tool windows
 ├── state.rs
 ├── lib.rs
@@ -67,9 +80,13 @@ src-tauri/src/
 ## Database architecture
 
 - File: platform app-data directory under `coreside/coreside.db`
-- Migrations run automatically on startup (`src-tauri/migrations/`)
-- Tables: `settings`, `workspaces`, `conversations`, `messages`, `tools`, `tool_versions`, `tool_state`
+- Migrations run automatically on startup (`src-tauri/migrations/` — through `011_action_log_mode`)
+- Tables include: `settings`, `workspaces`, `conversations`, `messages`, `tools`, `tool_versions`, `tool_state`, `projects`, `chat_summaries`, `message_fts`, `media_assets`, `search_sessions`, `search_results`, `exa_usage_ledger`, crawler tables, automations, provider_connections
 - Tool apply/undo use transactions so malformed mid-writes cannot half-update tools
+
+## Cloud hosting (future)
+
+Desktop Coreside is not lifted wholesale into the cloud. Exa search, research orchestration, and usage/budgets are the strongest cloud candidates; Crawl4AI needs a worker fleet; keyring, Dock, and live wallpapers stay on-device. Full analysis: [CLOUD_HOSTING.md](./CLOUD_HOSTING.md).
 
 ## AI request flow
 

@@ -1,0 +1,338 @@
+//! Resolve effective AI credentials: secure connection → .env fallback.
+
+use crate::config::{
+    self, AppConfig, DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_ANTHROPIC_MODEL, DEFAULT_GEMINI_BASE_URL,
+    DEFAULT_GEMINI_MODEL, DEFAULT_OPENAI_BASE_URL, DEFAULT_OPENAI_MODEL,
+    DEFAULT_OPENROUTER_BASE_URL, DEFAULT_OPENROUTER_MODEL,
+};
+use crate::credentials::{self, CredentialError};
+use crate::db::{self, Database, ProviderConnection};
+
+#[derive(Debug, Clone)]
+pub struct ResolvedCredentials {
+    pub provider: String,
+    pub api_key: Option<String>,
+    pub model: String,
+    pub base_url: String,
+    pub source: String, // "connection" | "env" | "none"
+    pub active_connection_id: Option<String>,
+    pub env_path: Option<String>,
+}
+
+impl ResolvedCredentials {
+    pub fn has_api_key(&self) -> bool {
+        self.api_key
+            .as_ref()
+            .map(|k| !k.trim().is_empty())
+            .unwrap_or(false)
+    }
+
+    pub fn to_app_config(&self) -> AppConfig {
+        AppConfig {
+            provider: self.provider.clone(),
+            api_key: self.api_key.clone(),
+            model: self.model.clone(),
+            base_url: self.base_url.clone(),
+            log_level: "info".into(),
+            env_path: self.env_path.clone(),
+        }
+    }
+}
+
+pub fn defaults_for(provider: &str) -> (String, String) {
+    match provider {
+        "openai" => (
+            DEFAULT_OPENAI_MODEL.to_string(),
+            DEFAULT_OPENAI_BASE_URL.to_string(),
+        ),
+        // Compatible endpoints require an explicit base URL on the connection.
+        "compatible" => (DEFAULT_OPENAI_MODEL.to_string(), String::new()),
+        "anthropic" | "claude" => (
+            DEFAULT_ANTHROPIC_MODEL.to_string(),
+            DEFAULT_ANTHROPIC_BASE_URL.to_string(),
+        ),
+        "openrouter" => (
+            DEFAULT_OPENROUTER_MODEL.to_string(),
+            DEFAULT_OPENROUTER_BASE_URL.to_string(),
+        ),
+        _ => (
+            DEFAULT_GEMINI_MODEL.to_string(),
+            DEFAULT_GEMINI_BASE_URL.to_string(),
+        ),
+    }
+}
+
+/// Build resolved credentials from a connection row + keyring secret lookup.
+pub fn from_connection_with_secret(
+    conn: &ProviderConnection,
+    get_secret: impl FnOnce(&str) -> Result<String, CredentialError>,
+) -> Result<ResolvedCredentials, String> {
+    let key = get_secret(&conn.keyring_account).map_err(|e| e.to_string())?;
+    let key = key.trim().to_string();
+    if key.is_empty() {
+        return Err("Credential not found".into());
+    }
+    let (default_model, default_base) = defaults_for(&conn.provider);
+    Ok(ResolvedCredentials {
+        provider: conn.provider.clone(),
+        api_key: Some(key),
+        model: conn
+            .model_default
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(default_model),
+        base_url: conn
+            .base_url
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(default_base),
+        source: "connection".into(),
+        active_connection_id: Some(conn.id.clone()),
+        env_path: None,
+    })
+}
+
+fn from_connection(conn: &ProviderConnection) -> Result<ResolvedCredentials, String> {
+    from_connection_with_secret(conn, credentials::get_secret)
+}
+
+/// Resolve a specific connection by id (for test-before-activate). Does not prefer active.
+pub fn resolve_connection_by_id(
+    db: &Database,
+    connection_id: &str,
+) -> Result<ResolvedCredentials, String> {
+    let id = connection_id.trim();
+    if id.is_empty() {
+        return Err("connectionId is required".into());
+    }
+    let conn = db::get_provider_connection(db, id).map_err(|e| e.to_string())?;
+    from_connection(&conn)
+}
+
+/// Resolve credentials for chat / status.
+///
+/// Precedence:
+/// 1. Active secure connection (`is_active=1`)
+/// 2. Explicit `connection_id` (when no active secret is available)
+/// 3. `.env`
+/// 4. none
+pub fn resolve_credentials(
+    db: &Database,
+    connection_id: Option<&str>,
+) -> ResolvedCredentials {
+    resolve_credentials_with(
+        db,
+        connection_id,
+        |account| credentials::get_secret(account),
+        config::load_config,
+    )
+}
+
+fn resolve_credentials_with<F, E>(
+    db: &Database,
+    connection_id: Option<&str>,
+    get_secret: F,
+    load_env: E,
+) -> ResolvedCredentials
+where
+    F: Fn(&str) -> Result<String, CredentialError>,
+    E: FnOnce() -> AppConfig,
+{
+    // 1. Active secure connection
+    if let Ok(Some(conn)) = db::get_active_provider_connection(db) {
+        if let Ok(resolved) = from_connection_with_secret(&conn, &get_secret) {
+            return resolved;
+        }
+    }
+
+    // 2. Explicit connection id (only when active is missing/unusable)
+    if let Some(id) = connection_id.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Ok(conn) = db::get_provider_connection(db, id) {
+            if let Ok(resolved) = from_connection_with_secret(&conn, &get_secret) {
+                return resolved;
+            }
+        }
+    }
+
+    // 3–4. .env fallback, else none
+    let env = load_env();
+    let source = if env.has_api_key() {
+        "env"
+    } else {
+        "none"
+    };
+    ResolvedCredentials {
+        provider: env.provider,
+        api_key: env.api_key,
+        model: env.model,
+        base_url: env.base_url,
+        source: source.into(),
+        active_connection_id: None,
+        env_path: env.env_path,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::credentials::account_for_connection;
+    use crate::db::{self, Database, ProviderConnection};
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use tempfile::tempdir;
+
+    fn sample_conn(id: &str, provider: &str, active: bool) -> ProviderConnection {
+        let now = "2026-01-01T00:00:00Z".to_string();
+        ProviderConnection {
+            id: id.to_string(),
+            provider: provider.to_string(),
+            label: format!("{provider} label"),
+            base_url: None,
+            model_default: None,
+            keyring_account: account_for_connection(id),
+            is_active: active,
+            last_status: None,
+            last_tested_at: None,
+            created_at: now.clone(),
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn precedence_active_beats_explicit_and_env() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("cred.db")).unwrap();
+        let active = sample_conn("active-1", "openai", false);
+        let other = sample_conn("other-1", "anthropic", false);
+        db::upsert_provider_connection(&mut db, &active).unwrap();
+        db::upsert_provider_connection(&mut db, &other).unwrap();
+        db::set_active_provider_connection(&mut db, "active-1").unwrap();
+
+        let secrets = HashMap::from([
+            (account_for_connection("active-1"), "sk-active-key".to_string()),
+            (account_for_connection("other-1"), "sk-other-key".to_string()),
+        ]);
+        let env_cfg = AppConfig {
+            provider: "gemini".into(),
+            api_key: Some("env-key".into()),
+            model: DEFAULT_GEMINI_MODEL.into(),
+            base_url: DEFAULT_GEMINI_BASE_URL.into(),
+            log_level: "info".into(),
+            env_path: None,
+        };
+
+        let resolved = resolve_credentials_with(
+            &db,
+            Some("other-1"),
+            |account| {
+                secrets
+                    .get(account)
+                    .cloned()
+                    .ok_or(CredentialError::NotFound)
+            },
+            || env_cfg.clone(),
+        );
+
+        assert_eq!(resolved.source, "connection");
+        assert_eq!(resolved.active_connection_id.as_deref(), Some("active-1"));
+        assert_eq!(resolved.api_key.as_deref(), Some("sk-active-key"));
+        assert_eq!(resolved.provider, "openai");
+    }
+
+    #[test]
+    fn precedence_explicit_when_no_active() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("cred2.db")).unwrap();
+        let conn = sample_conn("only-1", "anthropic", false);
+        db::upsert_provider_connection(&mut db, &conn).unwrap();
+
+        let secrets = Mutex::new(HashMap::from([(
+            account_for_connection("only-1"),
+            "sk-ant-test".to_string(),
+        )]));
+        let env_cfg = AppConfig {
+            provider: "gemini".into(),
+            api_key: Some("env-key".into()),
+            model: DEFAULT_GEMINI_MODEL.into(),
+            base_url: DEFAULT_GEMINI_BASE_URL.into(),
+            log_level: "info".into(),
+            env_path: None,
+        };
+
+        let resolved = resolve_credentials_with(
+            &db,
+            Some("only-1"),
+            |account| {
+                secrets
+                    .lock()
+                    .unwrap()
+                    .get(account)
+                    .cloned()
+                    .ok_or(CredentialError::NotFound)
+            },
+            || env_cfg.clone(),
+        );
+
+        assert_eq!(resolved.source, "connection");
+        assert_eq!(resolved.active_connection_id.as_deref(), Some("only-1"));
+        assert_eq!(resolved.api_key.as_deref(), Some("sk-ant-test"));
+        assert_eq!(resolved.provider, "anthropic");
+    }
+
+    #[test]
+    fn precedence_falls_back_to_env() {
+        let dir = tempdir().unwrap();
+        let db = Database::open_path(&dir.path().join("cred3.db")).unwrap();
+        let env_cfg = AppConfig {
+            provider: "openrouter".into(),
+            api_key: Some("or-env-key".into()),
+            model: DEFAULT_OPENROUTER_MODEL.into(),
+            base_url: DEFAULT_OPENROUTER_BASE_URL.into(),
+            log_level: "info".into(),
+            env_path: Some("/tmp/.env".into()),
+        };
+
+        let resolved = resolve_credentials_with(
+            &db,
+            None,
+            |_| Err(CredentialError::NotFound),
+            || env_cfg.clone(),
+        );
+
+        assert_eq!(resolved.source, "env");
+        assert_eq!(resolved.api_key.as_deref(), Some("or-env-key"));
+        assert_eq!(resolved.provider, "openrouter");
+        assert!(resolved.active_connection_id.is_none());
+    }
+
+    #[test]
+    fn precedence_none_when_no_sources() {
+        let dir = tempdir().unwrap();
+        let db = Database::open_path(&dir.path().join("cred4.db")).unwrap();
+        let env_cfg = AppConfig {
+            provider: "gemini".into(),
+            api_key: None,
+            model: DEFAULT_GEMINI_MODEL.into(),
+            base_url: DEFAULT_GEMINI_BASE_URL.into(),
+            log_level: "info".into(),
+            env_path: None,
+        };
+
+        let resolved = resolve_credentials_with(
+            &db,
+            Some("missing"),
+            |_| Err(CredentialError::NotFound),
+            || env_cfg.clone(),
+        );
+
+        assert_eq!(resolved.source, "none");
+        assert!(!resolved.has_api_key());
+    }
+
+    #[test]
+    fn compatible_defaults_require_explicit_base() {
+        let (model, base) = defaults_for("compatible");
+        assert_eq!(model, DEFAULT_OPENAI_MODEL);
+        assert!(base.is_empty());
+    }
+}

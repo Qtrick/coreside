@@ -1,14 +1,32 @@
 //! Tauri command handlers.
 
 mod ai_cmds;
+mod attachment_cmds;
+mod automation_cmds;
 mod conversation_cmds;
+mod credential_cmds;
+mod crawler_cmds;
+mod exa_cmds;
+mod export_cmds;
+mod media_cmds;
 mod message_cmds;
+mod project_cmds;
+mod search_cmds;
 mod settings_cmds;
 mod tool_cmds;
 
 pub use ai_cmds::*;
+pub use attachment_cmds::*;
+pub use automation_cmds::*;
 pub use conversation_cmds::*;
+pub use credential_cmds::*;
+pub use crawler_cmds::*;
+pub use exa_cmds::*;
+pub use export_cmds::*;
+pub use media_cmds::*;
 pub use message_cmds::*;
+pub use project_cmds::*;
+pub use search_cmds::*;
 pub use settings_cmds::*;
 pub use tool_cmds::*;
 

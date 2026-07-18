@@ -1,4 +1,5 @@
 import type { ComponentType, CSSProperties, ReactNode } from "react";
+import { useEffect, useState } from "react";
 import type { ActionDefinition, ToolComponent } from "@/types/tool";
 import { useToolRuntime } from "./context";
 
@@ -412,6 +413,89 @@ export function CounterNode({ component }: ToolNodeProps) {
     <div className="tr-counter" data-component-id={component.id}>
       <span className="muted">{asString(component.props?.label, "Count")}</span>
       <span className="tr-counter-value">{value}</span>
+    </div>
+  );
+}
+
+export function ClockNode({ component }: ToolNodeProps) {
+  const { getValue, setValue } = useToolRuntime();
+  const hour24Key = stateKeyFor(component, "hour24Key");
+  const secondsKey = `${component.id}:showSeconds`;
+  const dateKey = `${component.id}:showDate`;
+  const hour24 = asBoolean(
+    getValue(hour24Key, component.props?.hour24 ?? false),
+    asBoolean(component.props?.hour24, false),
+  );
+  const showSeconds = asBoolean(
+    getValue(secondsKey, component.props?.showSeconds ?? true),
+    true,
+  );
+  const showDate = asBoolean(
+    getValue(dateKey, component.props?.showDate ?? true),
+    true,
+  );
+  const title = asString(component.props?.title, "Clock");
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 250);
+    return () => window.clearInterval(id);
+  }, []);
+
+  let hours = now.getHours();
+  let suffix = "";
+  if (!hour24) {
+    suffix = hours >= 12 ? " PM" : " AM";
+    hours = hours % 12;
+    if (hours === 0) hours = 12;
+  }
+  const pad = (n: number) => String(n).padStart(2, "0");
+  let time = `${pad(hours)}:${pad(now.getMinutes())}`;
+  if (showSeconds) time += `:${pad(now.getSeconds())}`;
+  time += suffix;
+
+  return (
+    <div className="tr-clock" data-component-id={component.id}>
+      {title ? <div className="tr-clock-title">{title}</div> : null}
+      <div className="tr-clock-time" aria-live="polite">
+        {time}
+      </div>
+      {showDate ? (
+        <div className="tr-clock-date">
+          {now.toLocaleDateString(undefined, {
+            weekday: "long",
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          })}
+        </div>
+      ) : null}
+      <div className="tr-clock-controls button-row">
+        <button
+          type="button"
+          className="btn btn-secondary"
+          aria-pressed={hour24}
+          onClick={() => setValue(hour24Key, !hour24)}
+        >
+          {hour24 ? "24-hour" : "12-hour"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          aria-pressed={showSeconds}
+          onClick={() => setValue(secondsKey, !showSeconds)}
+        >
+          Seconds
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          aria-pressed={showDate}
+          onClick={() => setValue(dateKey, !showDate)}
+        >
+          Date
+        </button>
+      </div>
     </div>
   );
 }

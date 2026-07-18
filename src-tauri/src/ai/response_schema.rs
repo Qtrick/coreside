@@ -1,5 +1,7 @@
 //! Serde types for structured agent JSON responses.
 
+use super::capability_registry::ToolCallRequest;
+use super::settings_change::SettingsChangePayload;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -10,6 +12,8 @@ pub const SCHEMA_VERSION: &str = "1";
 pub enum ResponseType {
     Message,
     ToolChange,
+    ToolUse,
+    SettingsChange,
     Noop,
 }
 
@@ -18,6 +22,8 @@ impl ResponseType {
         match self {
             Self::Message => "message",
             Self::ToolChange => "tool_change",
+            Self::ToolUse => "tool_use",
+            Self::SettingsChange => "settings_change",
             Self::Noop => "noop",
         }
     }
@@ -130,6 +136,18 @@ impl ToolChangePayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct SourceCitation {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_domain: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentResponsePayload {
     #[serde(default = "default_schema_version")]
     pub schema_version: String,
@@ -137,6 +155,12 @@ pub struct AgentResponsePayload {
     pub response_type: ResponseType,
     #[serde(default)]
     pub tool_change: Option<ToolChangePayload>,
+    #[serde(default)]
+    pub settings_change: Option<SettingsChangePayload>,
+    #[serde(default)]
+    pub tool_calls: Option<Vec<ToolCallRequest>>,
+    #[serde(default)]
+    pub citations: Option<Vec<SourceCitation>>,
     #[serde(default)]
     pub diagnostics: Option<Value>,
 }
@@ -154,12 +178,31 @@ impl AgentResponsePayload {
 
     pub fn validate(&self) -> Result<(), String> {
         if self.assistant_message.trim().is_empty()
-            && !matches!(self.response_type, ResponseType::Noop)
+            && !matches!(self.response_type, ResponseType::Noop | ResponseType::ToolUse)
         {
             return Err("assistantMessage must be non-empty".into());
         }
 
         match self.response_type {
+            ResponseType::ToolUse => {
+                let calls = self
+                    .tool_calls
+                    .as_ref()
+                    .filter(|c| !c.is_empty())
+                    .ok_or_else(|| {
+                        "toolCalls required and must be non-empty for responseType tool_use"
+                            .to_string()
+                    })?;
+                if calls.len() > super::capability_registry::TOOL_LOOP_MAX_STEPS {
+                    return Err(format!(
+                        "toolCalls exceeds max of {}",
+                        super::capability_registry::TOOL_LOOP_MAX_STEPS
+                    ));
+                }
+                for call in calls {
+                    super::capability_registry::validate_tool_call(call)?;
+                }
+            }
             ResponseType::ToolChange => {
                 let tc = self
                     .tool_change
@@ -175,6 +218,12 @@ impl AgentResponsePayload {
                 if tool.name.trim().is_empty() {
                     return Err("tool.name must be non-empty".into());
                 }
+                crate::security::assert_not_protected(&tool.id)?;
+                if let Some(target) = tc.target_tool_id.as_ref() {
+                    if !target.trim().is_empty() {
+                        crate::security::assert_not_protected(target)?;
+                    }
+                }
                 if matches!(tc.action, ToolAction::Update | ToolAction::Replace)
                     && tc
                         .target_tool_id
@@ -185,9 +234,49 @@ impl AgentResponsePayload {
                     return Err("targetToolId required for update/replace".into());
                 }
             }
-            ResponseType::Message | ResponseType::Noop => {}
+            ResponseType::SettingsChange => {
+                let sc = self.settings_change.as_ref().ok_or_else(|| {
+                    "settingsChange required for responseType settings_change".to_string()
+                })?;
+                sc.validate()?;
+            }
+            ResponseType::Message | ResponseType::Noop => {
+                if let Some(sc) = &self.settings_change {
+                    sc.validate()?;
+                }
+            }
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn tool_use_requires_non_empty_tool_calls() {
+        let missing = AgentResponsePayload {
+            schema_version: "1".into(),
+            assistant_message: "Searching…".into(),
+            response_type: ResponseType::ToolUse,
+            tool_change: None,
+            settings_change: None,
+            tool_calls: None,
+            citations: None,
+            diagnostics: None,
+        };
+        assert!(missing.validate().is_err());
+
+        let valid = AgentResponsePayload {
+            tool_calls: Some(vec![ToolCallRequest {
+                capability: "web_search".into(),
+                arguments: json!({ "query": "rust async" }),
+            }]),
+            ..missing
+        };
+        assert!(valid.validate().is_ok());
     }
 }

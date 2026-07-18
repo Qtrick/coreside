@@ -69,6 +69,12 @@ pub fn apply_tool_change(
         .tool
         .ok_or_else(|| CommandError::new("invalid", "toolChange.tool is required"))?;
 
+    // Reject protected core.* ids (branding, base settings, platform internals).
+    super::settings_cmds::reject_protected_ids(&[tool_def.id.as_str()])?;
+    if let Some(ref target) = tool_change.target_tool_id {
+        super::settings_cmds::reject_protected_ids(&[target.as_str()])?;
+    }
+
     let workspace_id = workspace_id.unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
     let _ = db::ensure_default_workspace(&db)?;
 

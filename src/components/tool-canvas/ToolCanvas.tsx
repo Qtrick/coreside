@@ -1,4 +1,4 @@
-import { ExternalLink, History, X } from "lucide-react";
+import { Download, ExternalLink, History, X } from "lucide-react";
 import { useCallback } from "react";
 import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
 import { useAppStore } from "@/stores/app-store";
@@ -12,6 +12,7 @@ export function ToolCanvas() {
     openToolWindow,
     undoTool,
     sendMessage,
+    openExportDialog,
   } = useAppStore();
 
   const onStateChange = useCallback(
@@ -63,6 +64,15 @@ export function ToolCanvas() {
           </div>
         </div>
         <div className="tool-header-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => openExportDialog(activeTool.id, activeTool.name)}
+            aria-label="Export tool"
+          >
+            <Download size={16} aria-hidden />
+            Export
+          </button>
           <button
             type="button"
             className="btn btn-secondary"

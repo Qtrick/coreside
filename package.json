@@ -16,6 +16,13 @@
     "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "verify": "npm run typecheck && npm run lint && npm run test && npm run check:rust && npm run test:rust && npm run build:web",
+    "brand:generate": "python3 scripts/generate_branding_assets.py",
+    "crawl4ai:setup": "node scripts/crawl4ai-setup.mjs",
+    "crawl4ai:doctor": "node scripts/crawl4ai-doctor.mjs",
+    "crawl4ai:smoke": "node scripts/crawl4ai-smoke.mjs",
+    "crawl4ai:test": "node scripts/crawl4ai-test.mjs",
+    "crawl4ai:clean": "node scripts/crawl4ai-clean.mjs",
+    "crawl4ai:stats": "node scripts/crawl4ai-stats.mjs stats",
     "tauri": "tauri"
   },
   "dependencies": {

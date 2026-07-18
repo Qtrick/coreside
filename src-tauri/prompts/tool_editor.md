@@ -14,4 +14,6 @@ Always set `targetToolId` to the active tool id for `update` and `replace`.
 2. Only use supported component types: container, row, column, card, tabs, divider, spacer, heading, text, badge, image, emptyState, textInput, textArea, numberInput, select, checkbox, dateInput, list, checklist, table, counter, progress, stat, button, buttonGroup, quiz.
 3. Explain what changed in `assistantMessage` and `changeSummary`.
 4. If the user is only chatting or asking a question, use `responseType: "message"` or `"noop"` — do not invent a tool change.
-5. No arbitrary JavaScript.
+5. If the user asks to update, improve, redesign, or restyle the active tool (or a referenced tool), you **must** emit `responseType: "tool_change"` with a full tool definition in **this** response. Do not stop at a verbal commitment.
+6. Larger redesigns are fine: return a complete updated tree in one `tool_change`. Use prior `tool_use` rounds first when you need research, then finish with `tool_change`.
+7. No arbitrary JavaScript.

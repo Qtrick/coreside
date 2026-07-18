@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
-import { useAppStore } from "@/stores/app-store";
+import { api } from "@/lib/tauri";
+import { applyAppearanceCssVars, useAppStore } from "@/stores/app-store";
 
 function parseToolRoute(hash: string): string | null {
   const match = hash.match(/^#\/tool\/([^/?#]+)/);
@@ -82,7 +83,9 @@ export function App() {
   const bootError = useAppStore((s) => s.bootError);
   const theme = useAppStore((s) => s.theme);
   const resolvedTheme = useAppStore((s) => s.resolvedTheme);
+  const appearance = useAppStore((s) => s.appearance);
   const applyResolvedTheme = useAppStore((s) => s.applyResolvedTheme);
+  const dockIcon = useAppStore((s) => s.dockIcon);
   const toolRoute =
     typeof window !== "undefined" ? parseToolRoute(window.location.hash) : null;
 
@@ -94,7 +97,8 @@ export function App() {
 
   useEffect(() => {
     applyThemeToDocument(resolvedTheme);
-  }, [resolvedTheme]);
+    applyAppearanceCssVars(resolvedTheme, appearance);
+  }, [resolvedTheme, appearance]);
 
   useEffect(() => {
     if (theme !== "system") return;
@@ -107,9 +111,24 @@ export function App() {
     return () => media.removeEventListener("change", sync);
   }, [theme, applyResolvedTheme]);
 
+  // Dock icon: `auto` follows OS; `dark` / `light` lock the tile. Independent of in-app theme.
+  useEffect(() => {
+    if (!bootstrapped) return;
+    const apply = () => {
+      const osIsDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      void api.setDockIcon(dockIcon, osIsDark).catch(() => {
+        // Non-macOS / web preview: command may no-op or be unavailable.
+      });
+    };
+    apply();
+    if (dockIcon !== "auto") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [bootstrapped, dockIcon]);
+
   useEffect(() => {
     const onHash = () => {
-      // Force remount via full reload for secondary window route changes.
       if (parseToolRoute(window.location.hash)) {
         window.location.reload();
       }

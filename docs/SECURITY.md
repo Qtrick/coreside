@@ -2,10 +2,21 @@
 
 ## API-key handling
 
-- Keys load from `.env` in the Rust process only (`AI_API_KEY` / `GEMINI_API_KEY`).
+- Consumer keys are entered in the provider setup dialog and stored in OS secure credential storage (`keyring`), never SQLite.
+- `.env` remains a development fallback only.
 - Frontend receives `keyDetected: boolean` and status strings — never the key.
-- Keys are not stored in SQLite, chat messages, tool definitions, or settings IPC.
+- Keys are not stored in chat messages, tool definitions, action logs, or exports.
 - Logs and error sanitization redact secret-like substrings.
+
+## Action Log
+
+- Base Setting `actionLogMode` is `off` | `always` | `intelligent` (default off) and is user-only (not agent-editable). Legacy `actionLogEnabled` remains synced.
+- When enabled, only sanitized operational labels are shown/persisted — never chain-of-thought, prompts, or secrets. Intelligent mode surfaces the log only when substantive work occurred (search, tool changes, etc.).
+
+## Automations & exports
+
+- Automations cannot run shell/JS or target protected resources; they run only while Coreside is open.
+- Exports strip credentials and require a user-chosen save path.
 
 ## Why AI calls occur in Rust
 
@@ -18,6 +29,40 @@ The agent must not return executable JavaScript for the host app. Coreside does 
 ## Component validation
 
 Only registry-listed component types render. Unknown types fail closed. Rust validates structured tool payloads before persistence; the frontend validates again for defense in depth.
+
+## Protected core
+
+Reserved identifiers (`core.branding*`, `core.settings*`, `core.navigation`, `core.security`, `core.database`, `core.versioning`, `core.search*`, `core.media*`, `core.wallpaper*`, `core.agent.tool_loop`, `core.projects*`) cannot be created, updated, deleted, or shadowed by generated tools or Added Settings. See `src-tauri/src/security/protected_resources.rs`.
+
+Base Settings structure (Appearance, AI Agent, Data, Accessibility, About) is product-owned. Theme preference, accent colors, solid backgrounds, borders, text colors, and allowlisted live wallpapers are user preferences and may be changed via the allowlisted `settings_change` agent path. Added Settings are user/tool-owned and cannot use protected IDs.
+
+Brand logo and dock-icon files are not writable through the agent protocol.
+
+## SSRF and outbound fetch
+
+Web Research, page fetch, and media import run in Rust with URL validation before any crawl or HTTP request:
+
+- Rejects `file://`, localhost, loopback, link-local, and RFC1918 private ranges
+- Limits redirects, response size, and HTML script stripping for page text extraction
+- Local Crawl4AI sidecar (stdio) re-checks URLs; robots.txt always enforced; stealth/proxies disabled
+- AI provider keys live in keyring or `.env` only — never SQLite, chat logs, or the crawler process
+- Exa search keys use the same keyring → `.env` precedence; never SQLite; never passed to Crawl4AI
+- Local Exa monthly budget and search profiles are protected settings (agent cannot change via generic `set_setting`)
+- Web Research indexed discovery uses Exa Search (not Exa Agent); see [EXA_INTEGRATION.md](./EXA_INTEGRATION.md) and [CRAWLER_SECURITY.md](./CRAWLER_SECURITY.md)
+
+## Readability and wallpapers
+
+- Wallpapers live under Added Settings → Templates (not Base Settings structure)
+- Wallpaper definitions cannot inject arbitrary CSS/JS or override protected semantic tokens
+- Readability contrast helpers clamp unsafe color combinations; see [READABILITY.md](./READABILITY.md)
+
+## Media validation
+
+Imported assets must pass magic-byte detection and MIME allowlists. Executables, HTML, and unknown formats are rejected. Content is stored under app data and deduplicated by hash.
+
+## Project isolation
+
+Full-text project context search is scoped by `project_id`. FTS rows outside the project's conversation membership are excluded (fail closed).
 
 ## Local data
 

@@ -1,12 +1,14 @@
 //! Environment-based configuration loader.
 //!
 //! Precedence:
-//! 1. Provider-neutral `AI_*` values
-//! 2. Aliases for the selected `AI_PROVIDER` (`GEMINI_*`, `OPENAI_*`, `ANTHROPIC_*` / `CLAUDE_*`)
+//! 1. Aliases for the selected `AI_PROVIDER`
+//!    (`GEMINI_*`, `OPENAI_*`, `ANTHROPIC_*` / `CLAUDE_*`, `OPENROUTER_*`)
+//! 2. Provider-neutral `AI_*` values
 //! 3. Built-in defaults for non-secret values only
 //!
-//! Only the Gemini adapter is implemented today. Keys for other providers are
-//! accepted so `.env` can hold them ahead of future adapters.
+//! Gemini and OpenRouter adapters are implemented today. Keys for other
+//! providers are accepted so `.env` can hold them ahead of future adapters.
+//! OpenAI, Anthropic, and compatible endpoints are also supported at runtime.
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -25,10 +27,8 @@ pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 pub const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-5";
 pub const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 
-/// Back-compat alias used by existing tests and docs.
-pub const DEFAULT_MODEL: &str = DEFAULT_GEMINI_MODEL;
-/// Back-compat alias used by existing tests and docs.
-pub const DEFAULT_BASE_URL: &str = DEFAULT_GEMINI_BASE_URL;
+pub const DEFAULT_OPENROUTER_MODEL: &str = "google/gemini-2.5-flash";
+pub const DEFAULT_OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -37,6 +37,8 @@ pub struct AppConfig {
     pub model: String,
     pub base_url: String,
     pub log_level: String,
+    /// Absolute path of the `.env` that was loaded, if any.
+    pub env_path: Option<String>,
 }
 
 impl AppConfig {
@@ -54,6 +56,16 @@ impl AppConfig {
         status: &str,
         message: Option<String>,
     ) -> PublicAiStatus {
+        self.public_ai_status_with_source(status, message, "env", None)
+    }
+
+    pub fn public_ai_status_with_source(
+        &self,
+        status: &str,
+        message: Option<String>,
+        source: &str,
+        active_connection_id: Option<String>,
+    ) -> PublicAiStatus {
         PublicAiStatus {
             provider: self.provider.clone(),
             model: self.model.clone(),
@@ -61,6 +73,9 @@ impl AppConfig {
             status: status.to_string(),
             message,
             base_url: self.base_url.clone(),
+            env_path: self.env_path.clone(),
+            source: source.to_string(),
+            active_connection_id,
         }
     }
 }
@@ -75,11 +90,17 @@ pub struct PublicAiStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     pub base_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env_path: Option<String>,
+    /// `connection` | `env` | `none`
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_connection_id: Option<String>,
 }
 
 /// Load `.env` from project root (walk up from cwd, or parent of `CARGO_MANIFEST_DIR`), then build config.
 pub fn load_config() -> AppConfig {
-    load_dotenv_files();
+    let env_path = load_dotenv_files();
 
     let provider = first_nonempty(&[env::var("AI_PROVIDER").ok()])
         .unwrap_or_else(|| DEFAULT_PROVIDER.to_string())
@@ -101,49 +122,68 @@ pub fn load_config() -> AppConfig {
         model,
         base_url,
         log_level,
+        env_path: env_path.map(|p| p.display().to_string()),
     }
 }
 
 fn resolve_api_key(provider: &str) -> Option<String> {
-    let mut candidates = vec![env::var("AI_API_KEY").ok()];
+    // Prefer the active provider's alias, then the neutral AI_API_KEY.
+    // This lets several keys live in `.env` while AI_PROVIDER selects which one is used.
+    let mut candidates: Vec<Option<String>> = Vec::new();
     match provider {
         "gemini" => candidates.push(env::var("GEMINI_API_KEY").ok()),
-        "openai" => candidates.push(env::var("OPENAI_API_KEY").ok()),
+        "openai" | "compatible" => candidates.push(env::var("OPENAI_API_KEY").ok()),
         "anthropic" | "claude" => {
             candidates.push(env::var("ANTHROPIC_API_KEY").ok());
             candidates.push(env::var("CLAUDE_API_KEY").ok());
         }
+        "openrouter" => candidates.push(env::var("OPENROUTER_API_KEY").ok()),
         "mock" => {}
-        // Unknown provider: still accept common aliases so keys are not lost.
         _ => {
             candidates.push(env::var("GEMINI_API_KEY").ok());
             candidates.push(env::var("OPENAI_API_KEY").ok());
             candidates.push(env::var("ANTHROPIC_API_KEY").ok());
             candidates.push(env::var("CLAUDE_API_KEY").ok());
+            candidates.push(env::var("OPENROUTER_API_KEY").ok());
         }
     }
+    candidates.push(env::var("AI_API_KEY").ok());
     first_nonempty(&candidates)
 }
 
 fn resolve_model(provider: &str) -> String {
-    let mut candidates = vec![env::var("AI_MODEL").ok()];
+    let mut candidates: Vec<Option<String>> = Vec::new();
     let default = match provider {
-        "openai" => {
+        "openai" | "compatible" => {
             candidates.push(env::var("OPENAI_MODEL").ok());
+            candidates.push(env::var("AI_MODEL").ok());
             DEFAULT_OPENAI_MODEL
         }
         "anthropic" | "claude" => {
             candidates.push(env::var("ANTHROPIC_MODEL").ok());
             candidates.push(env::var("CLAUDE_MODEL").ok());
+            candidates.push(env::var("AI_MODEL").ok());
             DEFAULT_ANTHROPIC_MODEL
         }
+        "openrouter" => {
+            candidates.push(env::var("OPENROUTER_MODEL").ok());
+            // Only accept AI_MODEL when it looks like an OpenRouter id (vendor/model).
+            if let Ok(m) = env::var("AI_MODEL") {
+                if m.contains('/') {
+                    candidates.push(Some(m));
+                }
+            }
+            DEFAULT_OPENROUTER_MODEL
+        }
         "mock" => {
+            candidates.push(env::var("AI_MODEL").ok());
             candidates.push(env::var("GEMINI_MODEL").ok());
             "mock-fixture"
         }
         // gemini (default) and anything else
         _ => {
             candidates.push(env::var("GEMINI_MODEL").ok());
+            candidates.push(env::var("AI_MODEL").ok());
             DEFAULT_GEMINI_MODEL
         }
     };
@@ -151,43 +191,73 @@ fn resolve_model(provider: &str) -> String {
 }
 
 fn resolve_base_url(provider: &str) -> String {
-    let mut candidates = vec![env::var("AI_BASE_URL").ok()];
+    let mut candidates: Vec<Option<String>> = Vec::new();
     let default = match provider {
         "openai" => {
             candidates.push(env::var("OPENAI_BASE_URL").ok());
+            candidates.push(env::var("AI_BASE_URL").ok());
             DEFAULT_OPENAI_BASE_URL
+        }
+        "compatible" => {
+            // Compatible must set AI_BASE_URL / OPENAI_BASE_URL; no silent vendor default.
+            candidates.push(env::var("OPENAI_BASE_URL").ok());
+            candidates.push(env::var("AI_BASE_URL").ok());
+            ""
         }
         "anthropic" | "claude" => {
             candidates.push(env::var("ANTHROPIC_BASE_URL").ok());
+            candidates.push(env::var("AI_BASE_URL").ok());
             DEFAULT_ANTHROPIC_BASE_URL
         }
+        "openrouter" => {
+            candidates.push(env::var("OPENROUTER_BASE_URL").ok());
+            candidates.push(env::var("AI_BASE_URL").ok());
+            DEFAULT_OPENROUTER_BASE_URL
+        }
         "mock" => {
+            candidates.push(env::var("AI_BASE_URL").ok());
             candidates.push(env::var("GEMINI_BASE_URL").ok());
             "mock://local"
         }
         _ => {
             candidates.push(env::var("GEMINI_BASE_URL").ok());
+            candidates.push(env::var("AI_BASE_URL").ok());
             DEFAULT_GEMINI_BASE_URL
         }
     };
     first_nonempty(&candidates).unwrap_or_else(|| default.to_string())
 }
 
+fn strip_env_quotes(raw: &str) -> String {
+    let s = raw.trim();
+    if s.len() >= 2 {
+        let bytes = s.as_bytes();
+        if (bytes[0] == b'"' && bytes[s.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[s.len() - 1] == b'\'')
+        {
+            return s[1..s.len() - 1].trim().to_string();
+        }
+    }
+    s.to_string()
+}
+
 fn first_nonempty(candidates: &[Option<String>]) -> Option<String> {
     candidates
         .iter()
         .flatten()
-        .map(|s| s.trim().to_string())
+        .map(|s| strip_env_quotes(s))
         .find(|s| !s.is_empty())
 }
 
-fn load_dotenv_files() {
-    for path in candidate_env_paths() {
+fn load_dotenv_files() -> Option<PathBuf> {
+    let candidates = candidate_env_paths();
+    for path in &candidates {
         if path.is_file() {
-            match dotenvy::from_path(&path) {
+            // Override so Refresh Status picks up keys after the user saves `.env`.
+            match dotenvy::from_path_override(path) {
                 Ok(()) => {
-                    tracing::debug!(path = %path.display(), "loaded .env");
-                    return;
+                    tracing::info!(path = %path.display(), "loaded .env");
+                    return Some(path.clone());
                 }
                 Err(e) => {
                     tracing::warn!(path = %path.display(), error = %e, "failed to load .env");
@@ -195,8 +265,13 @@ fn load_dotenv_files() {
             }
         }
     }
+    tracing::warn!(
+        candidates = ?candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+        "no .env file found; AI keys will be missing until one is created"
+    );
     // Fall back to default dotenv search (cwd).
     let _ = dotenvy::dotenv();
+    None
 }
 
 fn candidate_env_paths() -> Vec<PathBuf> {
@@ -218,6 +293,9 @@ fn candidate_env_paths() -> Vec<PathBuf> {
         }
     }
 
+    // Deduplicate while preserving order.
+    let mut seen = std::collections::HashSet::new();
+    paths.retain(|p| seen.insert(p.clone()));
     paths
 }
 
@@ -230,9 +308,10 @@ mod tests {
         let cfg = AppConfig {
             provider: "gemini".into(),
             api_key: Some("  ".into()),
-            model: DEFAULT_MODEL.into(),
-            base_url: DEFAULT_BASE_URL.into(),
+            model: DEFAULT_GEMINI_MODEL.into(),
+            base_url: DEFAULT_GEMINI_BASE_URL.into(),
             log_level: "info".into(),
+            env_path: None,
         };
         assert!(!cfg.has_api_key());
     }
@@ -242,19 +321,29 @@ mod tests {
         let cfg = AppConfig {
             provider: "gemini".into(),
             api_key: Some("secret-key".into()),
-            model: DEFAULT_MODEL.into(),
-            base_url: DEFAULT_BASE_URL.into(),
+            model: DEFAULT_GEMINI_MODEL.into(),
+            base_url: DEFAULT_GEMINI_BASE_URL.into(),
             log_level: "info".into(),
+            env_path: Some("/tmp/.env".into()),
         };
         let status = cfg.public_ai_status("ready", None);
         let json = serde_json::to_string(&status).unwrap();
         assert!(!json.contains("secret-key"));
         assert!(status.key_detected);
+        assert_eq!(status.env_path.as_deref(), Some("/tmp/.env"));
     }
 
     #[test]
     fn provider_defaults_are_distinct() {
         assert_ne!(DEFAULT_GEMINI_BASE_URL, DEFAULT_OPENAI_BASE_URL);
         assert_ne!(DEFAULT_OPENAI_BASE_URL, DEFAULT_ANTHROPIC_BASE_URL);
+        assert_ne!(DEFAULT_OPENROUTER_BASE_URL, DEFAULT_OPENAI_BASE_URL);
+    }
+
+    #[test]
+    fn strip_quotes_from_env_values() {
+        assert_eq!(strip_env_quotes("\"abc\""), "abc");
+        assert_eq!(strip_env_quotes("'abc'"), "abc");
+        assert_eq!(strip_env_quotes("  abc  "), "abc");
     }
 }

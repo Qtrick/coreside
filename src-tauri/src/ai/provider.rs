@@ -53,4 +53,12 @@ pub trait AiProvider: Send + Sync {
     async fn health_check(&self, cancel: CancellationToken) -> Result<ProviderHealth, AiError>;
 
     async fn chat(&self, request: AgentRequest) -> Result<AgentResponse, AiError>;
+
+    /// Optional cheap availability check. Auto intentionally does not call this
+    /// (probe+chat doubles rate-limit usage); kept for health diagnostics.
+    #[allow(dead_code)]
+    async fn probe(&self, cancel: CancellationToken) -> Result<(), AiError> {
+        let _ = cancel;
+        Ok(())
+    }
 }

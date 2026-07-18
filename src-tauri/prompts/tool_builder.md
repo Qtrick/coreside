@@ -1,6 +1,6 @@
 # Tool Builder Guide (coreside-prompt-v1)
 
-When the user wants a **new** tool, respond with `responseType: "tool_change"` and `toolChange.action: "create"`.
+When the user wants a **new** tool, respond with `responseType: "tool_change"` and `toolChange.action: "create"` **in the same turn** — include the full tool definition. Do not only say you will create it later.
 
 ## Tool shape
 ```json

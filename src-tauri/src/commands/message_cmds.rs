@@ -1,17 +1,159 @@
 //! Agent turn: send_message + cancel_request.
 
-use serde::Serialize;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio_util::sync::CancellationToken;
 
 use super::CommandError;
 use crate::ai::{
-    build_agent_prompt, create_provider, parse_agent_response, AgentMessage, AgentRequest,
-    ParsedAgentResponse, ResponseType, ToolChangePayload, PROMPT_VERSION,
+    build_agent_prompt_with_references, chat_with_auto, is_allowed_setting_key,
+    parse_agent_response, project_context_for_prompt, AgentCapability, AgentMessage, AgentRequest,
+    ParsedAgentResponse, ResponseType, SettingsChangePayload, SourceCitation, ToolCallRequest,
+    ToolCallResult, ToolChangePayload, ToolLoop, ToolLoopContext, PROMPT_VERSION,
 };
 use crate::db::{self, Message};
+use crate::search::SearchRegistry;
+use crate::security::{redact_secrets, sanitize_error};
 use crate::state::AppState;
+
+const MAX_TOOL_USE_ROUNDS: usize = 6;
+
+#[derive(Debug, Default)]
+struct SearchTurnMetadata {
+    citations: Vec<SourceCitation>,
+    search_results: serde_json::Value,
+}
+
+fn calls_need_search_registry(calls: &[ToolCallRequest]) -> bool {
+    calls.iter().any(|c| {
+        matches!(
+            AgentCapability::parse(&c.capability),
+            Some(
+                AgentCapability::WebSearch
+                    | AgentCapability::ImageSearch
+                    | AgentCapability::VideoSearch
+            )
+        )
+    })
+}
+
+fn action_label_for_capability(cap: &str) -> &'static str {
+    match AgentCapability::parse(cap) {
+        Some(AgentCapability::WebSearch) => "Searching the web",
+        Some(AgentCapability::ImageSearch) => "Searching for images",
+        Some(AgentCapability::VideoSearch) => "Searching for videos",
+        Some(AgentCapability::FetchWebPage) => "Fetching web page",
+        Some(AgentCapability::ProjectContextSearch) => "Searching project context",
+        Some(AgentCapability::GetProjectSummary) => "Loading project summary",
+        Some(AgentCapability::InspectMediaResult) => "Inspecting media result",
+        Some(AgentCapability::ImportMediaAsset) => "Preparing media import",
+        _ => "Running tool",
+    }
+}
+
+fn merge_tool_results_into_metadata(meta: &mut SearchTurnMetadata, results: &[ToolCallResult]) {
+    use crate::search::{ImageSearchResponse, VideoSearchResponse, WebSearchResponse};
+
+    let mut search_map = meta
+        .search_results
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    let mut pending_imports = Vec::new();
+
+    for result in results {
+        if !result.ok {
+            continue;
+        }
+        match AgentCapability::parse(&result.capability) {
+            Some(AgentCapability::WebSearch) => {
+                if let Ok(resp) =
+                    serde_json::from_value::<WebSearchResponse>(result.output.clone())
+                {
+                    for r in &resp.results {
+                        meta.citations.push(SourceCitation {
+                            id: r.id.clone(),
+                            title: r.title.clone(),
+                            url: r.url.clone(),
+                            display_domain: r.display_domain.clone(),
+                            snippet: r.snippet.clone(),
+                        });
+                    }
+                    if let Ok(v) = serde_json::to_value(resp) {
+                        search_map.insert("web".into(), v);
+                    }
+                }
+            }
+            Some(AgentCapability::ImageSearch) => {
+                if let Ok(resp) =
+                    serde_json::from_value::<ImageSearchResponse>(result.output.clone())
+                {
+                    for r in &resp.results {
+                        meta.citations.push(SourceCitation {
+                            id: r.id.clone(),
+                            title: r.title.clone(),
+                            url: r.page_url.clone(),
+                            display_domain: r.source.clone(),
+                            snippet: Some(r.image_url.clone()),
+                        });
+                    }
+                    if let Ok(v) = serde_json::to_value(resp) {
+                        search_map.insert("images".into(), v);
+                    }
+                }
+            }
+            Some(AgentCapability::VideoSearch) => {
+                if let Ok(resp) =
+                    serde_json::from_value::<VideoSearchResponse>(result.output.clone())
+                {
+                    for r in &resp.results {
+                        meta.citations.push(SourceCitation {
+                            id: r.id.clone(),
+                            title: r.title.clone(),
+                            url: r.url.clone(),
+                            display_domain: None,
+                            snippet: r.duration.clone(),
+                        });
+                    }
+                    if let Ok(v) = serde_json::to_value(resp) {
+                        search_map.insert("videos".into(), v);
+                    }
+                }
+            }
+            Some(AgentCapability::ImportMediaAsset) => {
+                // Never auto-import: only surface proposed imports for explicit user approval.
+                if result.pending_approval == Some(true) {
+                    if let Some(proposed) = result.output.get("proposedImport") {
+                        pending_imports.push(proposed.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    meta.search_results = json!(search_map);
+    if !pending_imports.is_empty() {
+        search_map = meta
+            .search_results
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        search_map.insert("pendingMediaImports".into(), json!(pending_imports));
+        meta.search_results = json!(search_map);
+    }
+}
+
+fn search_not_configured_message() -> String {
+    "Web research is not ready. Configure Exa for open-web search (Settings), or install the local Crawl4AI engine and provide a URL/domain seed.".into()
+}
+
+fn sanitize_for_log(err: &impl std::fmt::Display, key: Option<&str>) -> String {
+    sanitize_error(&err.to_string(), key)
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,35 +164,286 @@ pub struct SendMessageResult {
     pub assistant_message: String,
     pub response_type: ResponseType,
     pub tool_change: Option<ToolChangePayload>,
+    pub settings_change: Option<SettingsChangePayload>,
     pub diagnostics: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_message_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum AgentTurnEvent {
+    #[serde(rename_all = "camelCase")]
+    Action {
+        conversation_id: String,
+        label: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    Text {
+        conversation_id: String,
+        text: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    Error {
+        conversation_id: String,
+        message: String,
+    },
+}
+
+fn emit_turn(app: &AppHandle, event: AgentTurnEvent) {
+    let _ = app.emit("agent-turn", event);
+}
+
+fn emit_action(app: &AppHandle, conversation_id: &str, label: &str) {
+    emit_turn(
+        app,
+        AgentTurnEvent::Action {
+            conversation_id: conversation_id.to_string(),
+            label: label.to_string(),
+        },
+    );
+}
+
+/// Trusted UI label only — never prompts, CoT, keys, or raw provider payloads.
+fn sanitize_action_label(label: &str, api_key: Option<&str>) -> String {
+    let redacted = redact_secrets(label, api_key);
+    let trimmed = redacted.trim();
+    if trimmed.is_empty() {
+        return "Action".to_string();
+    }
+    // Bound length so accidental dumps cannot land in the Action Log.
+    if trimmed.chars().count() > 160 {
+        let truncated: String = trimmed.chars().take(160).collect();
+        format!("{truncated}…")
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn record_action(
+    app: &AppHandle,
+    conversation_id: &str,
+    log: &mut Option<Vec<serde_json::Value>>,
+    label: &str,
+    event_type: &str,
+    api_key: Option<&str>,
+) {
+    let Some(events) = log else {
+        // Action Log default-off: do not emit or collect events when disabled.
+        return;
+    };
+    let safe_label = sanitize_action_label(label, api_key);
+    emit_action(app, conversation_id, &safe_label);
+    let sequence = events.len() as i64;
+    events.push(json!({
+        "id": format!("act-{sequence}"),
+        "eventType": event_type,
+        "label": safe_label,
+        "status": "completed",
+        "sequence": sequence,
+    }));
+}
+
+async fn emit_text_fluidly(
+    app: &AppHandle,
+    conversation_id: &str,
+    text: &str,
+    cancel: &CancellationToken,
+) {
+    if text.is_empty() {
+        return;
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut emitted = String::new();
+    let mut since_emit = 0usize;
+
+    for ch in chars {
+        if cancel.is_cancelled() {
+            break;
+        }
+        emitted.push(ch);
+        since_emit += 1;
+        let boundary = ch.is_whitespace() || matches!(ch, '.' | ',' | ';' | ':' | '!' | '?');
+        if since_emit >= 2 || boundary {
+            emit_turn(
+                app,
+                AgentTurnEvent::Text {
+                    conversation_id: conversation_id.to_string(),
+                    text: emitted.clone(),
+                },
+            );
+            since_emit = 0;
+            let delay = if boundary { 18 } else { 10 };
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+        }
+    }
+
+    emit_turn(
+        app,
+        AgentTurnEvent::Text {
+            conversation_id: conversation_id.to_string(),
+            text: text.to_string(),
+        },
+    );
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolMentionInput {
+    pub tool_id: String,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatAttachmentInput {
+    pub id: String,
+    pub name: String,
+    pub mime_type: String,
+    pub byte_size: i64,
+    pub local_filename: String,
+}
+
 #[tauri::command]
 pub async fn send_message(
+    app: AppHandle,
     state: State<'_, AppState>,
     content: String,
     conversation_id: String,
     active_tool_id: Option<String>,
+    model: Option<String>,
+    mentions: Option<Vec<ToolMentionInput>>,
+    attachments: Option<Vec<ChatAttachmentInput>>,
 ) -> Result<SendMessageResult, CommandError> {
-    let content = content.trim().to_string();
-    if content.is_empty() {
+    let mut content = content.trim().to_string();
+    let attachments = attachments.unwrap_or_default();
+    if content.is_empty() && attachments.is_empty() {
         return Err(CommandError::new("invalid", "Message content cannot be empty"));
     }
+    if attachments.len() > crate::commands::attachment_cmds::MAX_ATTACHMENTS_PER_MESSAGE {
+        return Err(CommandError::new("invalid", "Too many attachments"));
+    }
+    if content.is_empty() {
+        content = "Shared attachments".to_string();
+    }
 
-    let config = state.config.clone();
+    let _ = state.reload_config();
+    let config = {
+        let db = state.db.lock();
+        crate::credentials::resolve_credentials(&db, None).to_app_config()
+    };
     let api_key = config.api_key.clone();
+    let api_key_ref = api_key.as_deref();
 
-    // 1. Persist user message + load context (sync DB section)
-    let (user_message, history, active_tool, request_key) = {
+    // Action Log is opt-in (default off). When disabled, skip event collection entirely.
+    let action_log_mode = {
+        let db = state.db.lock();
+        db::action_log_mode(&db)
+    };
+    let mut action_log: Option<Vec<serde_json::Value>> = {
+        if action_log_mode.collects() {
+            Some(Vec::new())
+        } else {
+            None
+        }
+    };
+
+    record_action(
+        &app,
+        &conversation_id,
+        &mut action_log,
+        "Preparing your request",
+        "request_started",
+        api_key_ref,
+    );
+
+    let model_preference = {
+        let explicit = model
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        if let Some(m) = explicit {
+            m
+        } else {
+            let db = state.db.lock();
+            db::get_settings(&db)?
+                .get("preferredModel")
+                .cloned()
+                .unwrap_or_else(|| "auto".to_string())
+        }
+    };
+
+    let (user_message, history, active_tool, referenced_tools, request_key, project_id) = {
         let mut db = state.db.lock();
-        let _ = db::get_conversation(&db, &conversation_id)?;
+        let conv = db::get_conversation(&db, &conversation_id)?;
+        let project_id = conv.project_id.clone();
 
-        let user_message = db::insert_message(&mut db, &conversation_id, "user", &content, None)?;
+        let mention_meta = {
+            let mut meta = serde_json::Map::new();
+            if let Some(rows) = mentions.as_ref().filter(|m| !m.is_empty()) {
+                meta.insert(
+                    "mentions".into(),
+                    json!(rows
+                        .iter()
+                        .map(|m| json!({
+                            "toolId": m.tool_id,
+                            "label": m.label,
+                        }))
+                        .collect::<Vec<_>>()),
+                );
+            }
+            if !attachments.is_empty() {
+                meta.insert(
+                    "attachments".into(),
+                    json!(attachments
+                        .iter()
+                        .map(|a| json!({
+                            "id": a.id,
+                            "name": a.name,
+                            "mimeType": a.mime_type,
+                            "byteSize": a.byte_size,
+                            "localFilename": a.local_filename,
+                        }))
+                        .collect::<Vec<_>>()),
+                );
+            }
+            if meta.is_empty() {
+                None
+            } else {
+                Some(serde_json::Value::Object(meta))
+            }
+        };
+
+        let user_message = db::insert_message(
+            &mut db,
+            &conversation_id,
+            "user",
+            &content,
+            mention_meta.as_ref(),
+        )?;
         let _ = db::maybe_rename_conversation_from_message(&mut db, &conversation_id, &content)?;
 
         let history = db::get_recent_messages(&db, &conversation_id, 40)?;
+
+        let mut referenced_tools = Vec::new();
+        let mut seen_ref_ids = std::collections::HashSet::new();
+        if let Some(rows) = mentions.as_ref() {
+            for mention in rows {
+                if !seen_ref_ids.insert(mention.tool_id.clone()) {
+                    continue;
+                }
+                match db::get_tool(&db, &mention.tool_id) {
+                    Ok(t) => {
+                        let mut def = t.definition;
+                        def.normalize_for_frontend();
+                        referenced_tools.push(def);
+                    }
+                    Err(crate::db::DbError::NotFound(_)) => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        }
 
         let active_tool = if let Some(ref tid) = active_tool_id {
             match db::get_tool(&db, tid) {
@@ -67,13 +460,74 @@ pub async fn send_message(
         };
 
         let request_key = conversation_id.clone();
-        (user_message, history, active_tool, request_key)
+        (user_message, history, active_tool, referenced_tools, request_key, project_id)
     };
 
-    // 2–4. Build prompts and call provider
-    let system_prompt = build_agent_prompt(active_tool.as_ref(), None);
+    if let Some(rows) = mentions.as_ref() {
+        let mut seen_labels = std::collections::HashSet::new();
+        for mention in rows {
+            let label = mention
+                .label
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| mention.tool_id.clone());
+            if !seen_labels.insert(label.clone()) {
+                continue;
+            }
+            record_action(
+                &app,
+                &conversation_id,
+                &mut action_log,
+                &format!("Referenced @{label}"),
+                "tool_reference_resolved",
+                api_key_ref,
+            );
+        }
+    }
 
-    let messages: Vec<AgentMessage> = history
+    record_action(
+        &app,
+        &conversation_id,
+        &mut action_log,
+        "Building agent context",
+        "context_loaded",
+        api_key_ref,
+    );
+
+    let project_context = {
+        let db = state.db.lock();
+        if let Some(ref pid) = project_id {
+            match project_context_for_prompt(&db, pid, &content) {
+                Ok(Some(ctx)) => {
+                    record_action(
+                        &app,
+                        &conversation_id,
+                        &mut action_log,
+                        "Loaded project context",
+                        "project_context_loaded",
+                        api_key_ref,
+                    );
+                    Some(ctx)
+                }
+                Ok(None) => None,
+                Err(e) => {
+                    tracing::warn!(error = %e, "project context load failed");
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    };
+
+    let system_prompt = build_agent_prompt_with_references(
+        active_tool.as_ref(),
+        &referenced_tools,
+        None,
+        project_context.as_ref(),
+    );
+
+    let mut chat_messages: Vec<AgentMessage> = history
         .iter()
         .filter(|m| m.role == "user" || m.role == "assistant")
         .map(|m| AgentMessage {
@@ -82,42 +536,301 @@ pub async fn send_message(
         })
         .collect();
 
+    if !attachments.is_empty() {
+        let note = attachments
+            .iter()
+            .map(|a| format!("- {} ({}, {} bytes)", a.name, a.mime_type, a.byte_size))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if let Some(last) = chat_messages.last_mut() {
+            if last.role == "user" {
+                last.content = format!(
+                    "{}\n\nThe user attached these files (stored locally in Coreside):\n{}",
+                    last.content, note
+                );
+            }
+        }
+        record_action(
+            &app,
+            &conversation_id,
+            &mut action_log,
+            &format!("Attached {} file(s)", attachments.len()),
+            "attachments_included",
+            api_key_ref,
+        );
+    }
+
     let cancel = CancellationToken::new();
     state.register_request(&request_key, cancel.clone());
 
-    let provider = create_provider(&config).map_err(|e| {
-        state.take_request(&request_key);
-        CommandError::sanitized(e.code(), e, api_key.as_deref())
-    })?;
-
-    let agent_result = provider
-        .chat(AgentRequest {
-            system_prompt,
-            messages,
+    let app_for_actions = app.clone();
+    let conversation_for_actions = conversation_id.clone();
+    let api_key_for_cb = api_key.clone();
+    let action_log_live = std::sync::Arc::new(std::sync::Mutex::new(action_log.take()));
+    let action_log_for_cb = action_log_live.clone();
+    let resolved = chat_with_auto(
+        &config,
+        &model_preference,
+        AgentRequest {
+            system_prompt: system_prompt.clone(),
+            messages: chat_messages.clone(),
             cancel: cancel.clone(),
-        })
+        },
+        move |label| {
+            let key = api_key_for_cb.as_deref();
+            if let Ok(mut guard) = action_log_for_cb.lock() {
+                record_action(
+                    &app_for_actions,
+                    &conversation_for_actions,
+                    &mut guard,
+                    label,
+                    "provider_request_started",
+                    key,
+                );
+            }
+            // When Action Log is disabled (guard holds None), skip live action emissions.
+        },
+    )
+    .await;
+
+    action_log = action_log_live.lock().ok().and_then(|mut g| g.take());
+
+    let mut resolved = match resolved {
+        Ok(r) => r,
+        Err(e) => {
+            state.take_request(&request_key);
+            let message = sanitize_error(&e.to_string(), api_key_ref);
+            tracing::warn!(
+                code = e.code(),
+                error = %sanitize_for_log(&e, api_key_ref),
+                "send_message provider failed"
+            );
+            emit_turn(
+                &app,
+                AgentTurnEvent::Error {
+                    conversation_id: conversation_id.clone(),
+                    message: message.clone(),
+                },
+            );
+            return Err(CommandError::sanitized(e.code(), e, api_key_ref));
+        }
+    };
+
+    record_action(
+        &app,
+        &conversation_id,
+        &mut action_log,
+        "Parsing the response",
+        "proposal_parsed",
+        api_key_ref,
+    );
+
+    let mut parsed: ParsedAgentResponse =
+        parse_agent_response(&resolved.response.raw_text).map_err(|e| {
+            state.take_request(&request_key);
+            tracing::warn!(error = %sanitize_for_log(&e, api_key_ref), "send_message parse failed");
+            let message = sanitize_error(&e, api_key_ref);
+            emit_turn(
+                &app,
+                AgentTurnEvent::Error {
+                    conversation_id: conversation_id.clone(),
+                    message: message.clone(),
+                },
+            );
+            CommandError::sanitized("parse", e, api_key_ref)
+        })?;
+    parsed.payload.normalize_for_frontend();
+
+    let mut search_meta = SearchTurnMetadata::default();
+    let mut tool_round = 0usize;
+
+    while parsed.payload.response_type == ResponseType::ToolUse {
+        tool_round += 1;
+        if tool_round > MAX_TOOL_USE_ROUNDS || cancel.is_cancelled() {
+            parsed.payload.response_type = ResponseType::Message;
+            if parsed.payload.assistant_message.trim().is_empty() {
+                parsed.payload.assistant_message =
+                    "I could not finish running the requested tools.".into();
+            }
+            parsed.payload.tool_calls = None;
+            break;
+        }
+
+        let tool_calls = parsed
+            .payload
+            .tool_calls
+            .clone()
+            .unwrap_or_default();
+
+        for call in &tool_calls {
+            record_action(
+                &app,
+                &conversation_id,
+                &mut action_log,
+                action_label_for_capability(&call.capability),
+                "tool_started",
+                api_key_ref,
+            );
+        }
+
+        let registry = if calls_need_search_registry(&tool_calls) {
+            let engine_ready = crate::crawler::detect_installation().state
+                == crate::crawler::InstallationState::Ready;
+            let exa_ok = crate::exa::has_exa_key();
+            if engine_ready || exa_ok {
+                Some(SearchRegistry::default_local(
+                    state.crawler.clone(),
+                    state.db.clone(),
+                ))
+            } else {
+                parsed.payload.response_type = ResponseType::Message;
+                parsed.payload.assistant_message = search_not_configured_message();
+                parsed.payload.tool_calls = None;
+                break;
+            }
+        } else {
+            None
+        };
+
+        let tool_loop = ToolLoop::new(registry).map_err(|e| {
+            state.take_request(&request_key);
+            CommandError::new("invalid", e)
+        })?;
+        let loop_ctx = ToolLoopContext {
+            project_id: project_id.clone(),
+            conversation_id: Some(conversation_id.clone()),
+        };
+
+        let tool_results = tool_loop
+            .run(&state, &loop_ctx, tool_calls.clone(), &cancel)
+            .await;
+
+        if cancel.is_cancelled() {
+            parsed.payload.response_type = ResponseType::Message;
+            if parsed.payload.assistant_message.trim().is_empty() {
+                parsed.payload.assistant_message = "Stopped.".into();
+            }
+            parsed.payload.tool_calls = None;
+            break;
+        }
+
+        merge_tool_results_into_metadata(&mut search_meta, &tool_results);
+
+        record_action(
+            &app,
+            &conversation_id,
+            &mut action_log,
+            "Synthesizing answer from tool results",
+            "tool_results_received",
+            api_key_ref,
+        );
+
+        let tool_use_note = if parsed.payload.assistant_message.trim().is_empty() {
+            "Running requested tools.".to_string()
+        } else {
+            parsed.payload.assistant_message.clone()
+        };
+        chat_messages.push(AgentMessage {
+            role: "assistant".into(),
+            content: tool_use_note,
+        });
+        chat_messages.push(AgentMessage {
+            role: "user".into(),
+            content: format!(
+                "Tool execution results (JSON):\n```json\n{}\n```\n\n\
+                 Respond with responseType \"message\" and a helpful assistantMessage grounded in these results. \
+                 You may include a citations array with id, title, url, displayDomain, and optional snippet.",
+                serde_json::to_string_pretty(&tool_results).unwrap_or_else(|_| "[]".into())
+            ),
+        });
+
+        let app_for_actions = app.clone();
+        let conversation_for_actions = conversation_id.clone();
+        let api_key_for_cb = api_key.clone();
+        let action_log_live = std::sync::Arc::new(std::sync::Mutex::new(action_log.take()));
+        let action_log_for_cb = action_log_live.clone();
+
+        let follow_up = chat_with_auto(
+            &config,
+            &model_preference,
+            AgentRequest {
+                system_prompt: system_prompt.clone(),
+                messages: chat_messages.clone(),
+                cancel: cancel.clone(),
+            },
+            move |label| {
+                let key = api_key_for_cb.as_deref();
+                if let Ok(mut guard) = action_log_for_cb.lock() {
+                    record_action(
+                        &app_for_actions,
+                        &conversation_for_actions,
+                        &mut guard,
+                        label,
+                        "provider_request_started",
+                        key,
+                    );
+                }
+            },
+        )
         .await;
+
+        action_log = action_log_live.lock().ok().and_then(|mut g| g.take());
+
+        resolved = match follow_up {
+            Ok(r) => r,
+            Err(e) => {
+                state.take_request(&request_key);
+                let message = sanitize_error(&e.to_string(), api_key_ref);
+                emit_turn(
+                    &app,
+                    AgentTurnEvent::Error {
+                        conversation_id: conversation_id.clone(),
+                        message: message.clone(),
+                    },
+                );
+                return Err(CommandError::sanitized(e.code(), e, api_key_ref));
+            }
+        };
+
+        parsed = parse_agent_response(&resolved.response.raw_text).map_err(|e| {
+            state.take_request(&request_key);
+            CommandError::sanitized("parse", e, api_key_ref)
+        })?;
+        parsed.payload.normalize_for_frontend();
+    }
 
     state.take_request(&request_key);
 
-    let agent_response = agent_result.map_err(|e| {
-        CommandError::sanitized(e.code(), e, api_key.as_deref())
-    })?;
+    if !search_meta.citations.is_empty() && parsed.payload.citations.is_none() {
+        parsed.payload.citations = Some(search_meta.citations.clone());
+    }
 
-    // 5. Parse / validate
-    let mut parsed: ParsedAgentResponse = parse_agent_response(&agent_response.raw_text).map_err(|e| {
-        CommandError::sanitized("parse", e, api_key.as_deref())
-    })?;
-    parsed.payload.normalize_for_frontend();
+    record_action(
+        &app,
+        &conversation_id,
+        &mut action_log,
+        "Writing reply",
+        "provider_response_received",
+        api_key_ref,
+    );
+    emit_text_fluidly(
+        &app,
+        &conversation_id,
+        &parsed.payload.assistant_message,
+        &cancel,
+    )
+    .await;
 
     let diagnostics = {
         let mut d = json!({
             "promptVersion": PROMPT_VERSION,
-            "provider": agent_response.provider_id,
-            "model": agent_response.model,
-            "usage": agent_response.usage,
+            "provider": resolved.response.provider_id,
+            "model": resolved.model_used,
+            "usage": resolved.response.usage,
             "recovered": parsed.recovered,
             "parseWarnings": parsed.parse_warnings,
+            "autoMode": resolved.auto_mode,
+            "attempts": resolved.attempts,
         });
         if let Some(extra) = &parsed.payload.diagnostics {
             d["providerDiagnostics"] = extra.clone();
@@ -130,19 +843,102 @@ pub async fn send_message(
         tc.normalize_for_frontend();
     }
 
-    let metadata = json!({
+    let settings_change = parsed.payload.settings_change.clone();
+    if let Some(ref sc) = settings_change {
+        record_action(
+            &app,
+            &conversation_id,
+            &mut action_log,
+            "Applying appearance preferences",
+            "change_applied",
+            api_key_ref,
+        );
+        let pairs = sc.to_kv_pairs().map_err(|e| {
+            CommandError::sanitized("validation", e, api_key_ref)
+        })?;
+        {
+            let mut db = state.db.lock();
+            for (key, value) in &pairs {
+                // Base Settings like actionLogEnabled are not agent-allowlisted.
+                if !is_allowed_setting_key(key) {
+                    return Err(CommandError::new(
+                        "forbidden",
+                        format!(
+                            "Agent cannot change Base Setting '{key}' via settings_change"
+                        ),
+                    ));
+                }
+                // Defense in depth: re-normalize allowlisted appearance KVs before persist.
+                let normalized = crate::ai::normalize_setting_kv(key, value)
+                    .map_err(|e| CommandError::sanitized("validation", e, api_key_ref))?;
+                db::set_setting(&mut db, key, &normalized)?;
+            }
+        }
+    }
+
+    if tool_change.is_some() {
+        record_action(
+            &app,
+            &conversation_id,
+            &mut action_log,
+            "Preparing tool change preview",
+            "tool_change_proposed",
+            api_key_ref,
+        );
+    }
+
+    let raw_events = action_log.clone().unwrap_or_default();
+    let action_events = if db::should_attach_action_events(action_log_mode, &raw_events) {
+        raw_events
+    } else {
+        Vec::new()
+    };
+    let mut metadata = json!({
         "schemaVersion": parsed.payload.schema_version,
         "responseType": parsed.payload.response_type.as_str(),
         "toolChange": tool_change,
+        "settingsChange": settings_change,
         "toolChangeStatus": if tool_change.is_some() { "pending" } else { "none" },
         "pending": tool_change.is_some(),
         "recovered": parsed.recovered,
         "diagnostics": diagnostics,
+        "actionEvents": action_events,
+        "requestId": user_message.id,
     });
+    if let Some(citations) = &parsed.payload.citations {
+        if !citations.is_empty() {
+            metadata["citations"] = serde_json::to_value(citations).unwrap_or(json!([]));
+        }
+    }
+    if search_meta.search_results.is_object()
+        && !search_meta.search_results.as_object().unwrap().is_empty()
+    {
+        metadata["searchResults"] = search_meta.search_results.clone();
+    }
 
-    // 6. Persist assistant message with pending tool change preview in metadata
     let assistant_message = {
         let mut db = state.db.lock();
+        if let Some(events) = action_log.as_ref() {
+            for (i, event) in events.iter().enumerate() {
+                let label = event
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Action");
+                let event_type = event
+                    .get("eventType")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("request_started");
+                let _ = db::insert_action_event(
+                    &mut db,
+                    &user_message.id,
+                    Some(&conversation_id),
+                    event_type,
+                    label,
+                    "completed",
+                    i as i64,
+                );
+            }
+        }
         db::insert_message(
             &mut db,
             &conversation_id,
@@ -152,12 +948,12 @@ pub async fn send_message(
         )?
     };
 
-    // 7. Return frontend-shaped result
     Ok(SendMessageResult {
         message_id: assistant_message.id,
         assistant_message: parsed.payload.assistant_message,
         response_type: parsed.payload.response_type,
         tool_change,
+        settings_change,
         diagnostics,
         user_message_id: Some(user_message.id),
     })
@@ -168,13 +964,22 @@ pub fn cancel_request(
     state: State<'_, AppState>,
     conversation_id: Option<String>,
 ) -> Result<bool, CommandError> {
-    match conversation_id {
-        Some(id) if !id.trim().is_empty() => Ok(state.cancel_request(&id)),
+    let cancelled = match conversation_id {
+        Some(id) if !id.trim().is_empty() => state.cancel_request(&id),
         _ => {
             state.cancel_all();
-            Ok(true)
+            true
         }
-    }
+    };
+    // Propagate Stop into the Crawl4AI sidecar (best-effort; do not block UI).
+    let crawler = state.crawler.clone();
+    tauri::async_runtime::spawn(async move {
+        let n = crawler.cancel_active().await;
+        if n > 0 {
+            tracing::info!(cancelled = n, "cancelled active Crawl4AI research requests");
+        }
+    });
+    Ok(cancelled)
 }
 
 #[tauri::command]

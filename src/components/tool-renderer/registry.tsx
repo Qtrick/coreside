@@ -8,6 +8,7 @@ import {
   CardNode,
   CheckboxNode,
   ChecklistNode,
+  ClockNode,
   ColumnNode,
   ContainerNode,
   CounterNode,
@@ -63,6 +64,7 @@ export const componentRegistry: Record<
   button: ButtonNode,
   buttonGroup: ButtonGroupNode,
   quiz: QuizNode,
+  clock: ClockNode,
 };
 
 export function resolveComponent(

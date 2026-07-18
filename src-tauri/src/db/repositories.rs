@@ -4,10 +4,15 @@ use std::collections::HashMap;
 
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 use super::{now_rfc3339, Database, DbError, DbResult, DEFAULT_WORKSPACE_ID};
 use crate::ai::{layout_type_string, ToolDefinition};
+use crate::automations::{
+    Automation, AutomationAction, AutomationRun, AutomationTrigger, MissedRunPolicy,
+};
+use crate::settings::{validate_added_setting_id, AddedSettingRecord, UpsertAddedSettingInput};
 
 // ── Models ──────────────────────────────────────────────────────────────────
 
@@ -17,6 +22,9 @@ pub struct Conversation {
     pub id: String,
     pub workspace_id: String,
     pub title: String,
+    pub project_id: Option<String>,
+    pub pinned: bool,
+    pub archived: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -82,6 +90,11 @@ pub fn set_setting(db: &mut Database, key: &str, value: &str) -> DbResult<()> {
     Ok(())
 }
 
+pub fn get_setting(db: &Database, key: &str) -> DbResult<Option<String>> {
+    let mut map = get_settings(db)?;
+    Ok(map.remove(key))
+}
+
 // ── Workspaces ──────────────────────────────────────────────────────────────
 
 pub fn ensure_default_workspace(db: &Database) -> DbResult<String> {
@@ -109,44 +122,57 @@ pub fn ensure_default_workspace(db: &Database) -> DbResult<String> {
 pub fn list_conversations(db: &Database, workspace_id: Option<&str>) -> DbResult<Vec<Conversation>> {
     let ws = workspace_id.unwrap_or(DEFAULT_WORKSPACE_ID);
     let mut stmt = db.conn().prepare(
-        "SELECT id, workspace_id, title, created_at, updated_at
+        "SELECT id, workspace_id, title, project_id, pinned, archived, created_at, updated_at
          FROM conversations WHERE workspace_id = ?1
          ORDER BY updated_at DESC",
     )?;
-    let rows = stmt.query_map([ws], |row| {
-        Ok(Conversation {
-            id: row.get(0)?,
-            workspace_id: row.get(1)?,
-            title: row.get(2)?,
-            created_at: row.get(3)?,
-            updated_at: row.get(4)?,
-        })
-    })?;
+    let rows = stmt.query_map([ws], map_conversation_row)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub(crate) fn map_conversation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> {
+    let pinned: i64 = row.get(4)?;
+    let archived: i64 = row.get(5)?;
+    Ok(Conversation {
+        id: row.get(0)?,
+        workspace_id: row.get(1)?,
+        title: row.get(2)?,
+        project_id: row.get(3)?,
+        pinned: pinned != 0,
+        archived: archived != 0,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
+    })
 }
 
 pub fn create_conversation(
     db: &mut Database,
     workspace_id: &str,
     title: &str,
+    project_id: Option<&str>,
 ) -> DbResult<Conversation> {
     let id = format!("conv-{}", Uuid::new_v4());
     let now = now_rfc3339();
     db.conn().execute(
-        "INSERT INTO conversations (id, workspace_id, title, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![id, workspace_id, title, now, now],
+        "INSERT INTO conversations (id, workspace_id, title, project_id, pinned, archived, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 0, 0, ?5, ?6)",
+        params![id, workspace_id, title, project_id, now, now],
     )?;
     Ok(Conversation {
         id,
         workspace_id: workspace_id.to_string(),
         title: title.to_string(),
+        project_id: project_id.map(|s| s.to_string()),
+        pinned: false,
+        archived: false,
         created_at: now.clone(),
         updated_at: now,
     })
 }
 
 pub fn delete_conversation(db: &mut Database, id: &str) -> DbResult<()> {
+    // Fail closed: never leave orphan FTS rows that could leak deleted chat text.
+    crate::projects::remove_conversation_from_index(db, id)?;
     let n = db
         .conn()
         .execute("DELETE FROM conversations WHERE id = ?1", [id])?;
@@ -184,6 +210,13 @@ pub fn maybe_rename_conversation_from_message(
         "UPDATE conversations SET title = ?1, updated_at = ?2 WHERE id = ?3",
         params![title, now, id],
     )?;
+    // Keep FTS title column in sync for project-scoped search.
+    if current.project_id.is_some() {
+        crate::projects::remove_conversation_from_index(db, id)?;
+        for message in get_messages(db, id)? {
+            crate::projects::index_message_for_conversation(db, &message)?;
+        }
+    }
     Ok(Some(title))
 }
 
@@ -202,26 +235,22 @@ fn title_from_content(content: &str) -> String {
 }
 
 pub fn clear_conversations(db: &mut Database) -> DbResult<u64> {
-    let n = db.conn().execute("DELETE FROM messages", [])?;
-    let _ = n;
-    let n = db.conn().execute("DELETE FROM conversations", [])?;
-    Ok(n as u64)
+    db.with_transaction(|conn| {
+        // message_fts has no FK to conversations — must clear explicitly.
+        conn.execute("DELETE FROM message_fts", [])?;
+        conn.execute("DELETE FROM messages", [])?;
+        let n = conn.execute("DELETE FROM conversations", [])?;
+        Ok(n as u64)
+    })
 }
 
 pub fn get_conversation(db: &Database, id: &str) -> DbResult<Conversation> {
     db.conn()
         .query_row(
-            "SELECT id, workspace_id, title, created_at, updated_at FROM conversations WHERE id = ?1",
+            "SELECT id, workspace_id, title, project_id, pinned, archived, created_at, updated_at
+             FROM conversations WHERE id = ?1",
             [id],
-            |row| {
-                Ok(Conversation {
-                    id: row.get(0)?,
-                    workspace_id: row.get(1)?,
-                    title: row.get(2)?,
-                    created_at: row.get(3)?,
-                    updated_at: row.get(4)?,
-                })
-            },
+            map_conversation_row,
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(format!("conversation {id}")),
@@ -281,14 +310,18 @@ pub fn insert_message(
         params![id, conversation_id, role, content, meta_str, now],
     )?;
     touch_conversation(db, conversation_id)?;
-    Ok(Message {
+    let message = Message {
         id,
         conversation_id: conversation_id.to_string(),
         role: role.to_string(),
         content: content.to_string(),
         metadata: metadata.cloned(),
         created_at: now,
-    })
+    };
+    if let Err(e) = crate::projects::index_message_for_conversation(db, &message) {
+        tracing::warn!(error = %e, message_id = %message.id, "failed to index message");
+    }
+    Ok(message)
 }
 
 pub fn get_message(db: &Database, id: &str) -> DbResult<Message> {
@@ -329,6 +362,19 @@ pub fn update_message_metadata(
         return Err(DbError::NotFound(format!("message {id}")));
     }
     Ok(())
+}
+
+/// Delete `message_id` and every later message in the same conversation (by created_at, then id).
+pub fn delete_messages_from(db: &mut Database, message_id: &str) -> DbResult<u64> {
+    let msg = get_message(db, message_id)?;
+    let n = db.conn().execute(
+        "DELETE FROM messages
+         WHERE conversation_id = ?1
+           AND (created_at > ?2 OR (created_at = ?2 AND id >= ?3))",
+        params![msg.conversation_id, msg.created_at, msg.id],
+    )?;
+    touch_conversation(db, &msg.conversation_id)?;
+    Ok(n as u64)
 }
 
 // ── Tools ───────────────────────────────────────────────────────────────────
@@ -440,6 +486,11 @@ pub fn apply_tool_change(
     target_tool_id: Option<&str>,
     change_summary: &str,
 ) -> DbResult<ToolRecord> {
+    crate::security::assert_not_protected(&definition.id).map_err(DbError::Invalid)?;
+    if let Some(target) = target_tool_id {
+        crate::security::assert_not_protected(target).map_err(DbError::Invalid)?;
+    }
+
     db.with_transaction(|conn| {
         let now = now_rfc3339();
         let tool_id = match action {
@@ -662,3 +713,948 @@ pub fn get_tool_state(db: &Database, tool_id: &str) -> DbResult<Option<serde_jso
         None => Ok(None),
     }
 }
+
+// ── Added settings ──────────────────────────────────────────────────────────
+
+fn parse_json_value(raw: &str) -> Value {
+    serde_json::from_str(raw).unwrap_or(Value::Null)
+}
+
+fn map_added_setting_row(
+    id: String,
+    owner_tool_id: Option<String>,
+    label: String,
+    description: String,
+    setting_type: String,
+    default_value: String,
+    current_value: String,
+    constraints: String,
+    version: i64,
+    created_at: String,
+    updated_at: String,
+) -> AddedSettingRecord {
+    AddedSettingRecord {
+        id,
+        owner_tool_id,
+        label,
+        description,
+        setting_type,
+        default_value: parse_json_value(&default_value),
+        current_value: parse_json_value(&current_value),
+        constraints: parse_json_value(&constraints),
+        version,
+        created_at,
+        updated_at,
+    }
+}
+
+pub fn list_added_settings(
+    db: &Database,
+    owner_tool_id: Option<&str>,
+) -> DbResult<Vec<AddedSettingRecord>> {
+    let mut out = Vec::new();
+    if let Some(owner) = owner_tool_id {
+        let mut stmt = db.conn().prepare(
+            "SELECT id, owner_tool_id, label, description, setting_type,
+                    default_value, current_value, constraints, version, created_at, updated_at
+             FROM added_settings WHERE owner_tool_id = ?1
+             ORDER BY label ASC, id ASC",
+        )?;
+        let rows = stmt.query_map([owner], |row| {
+            Ok(map_added_setting_row(
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+                row.get(9)?,
+                row.get(10)?,
+            ))
+        })?;
+        for row in rows {
+            out.push(row?);
+        }
+    } else {
+        let mut stmt = db.conn().prepare(
+            "SELECT id, owner_tool_id, label, description, setting_type,
+                    default_value, current_value, constraints, version, created_at, updated_at
+             FROM added_settings
+             ORDER BY label ASC, id ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(map_added_setting_row(
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+                row.get(9)?,
+                row.get(10)?,
+            ))
+        })?;
+        for row in rows {
+            out.push(row?);
+        }
+    }
+    Ok(out)
+}
+
+pub fn upsert_added_setting(
+    db: &mut Database,
+    input: &UpsertAddedSettingInput,
+) -> DbResult<AddedSettingRecord> {
+    validate_added_setting_id(&input.id).map_err(DbError::Invalid)?;
+
+    let now = now_rfc3339();
+    let description = input.description.clone().unwrap_or_default();
+    let default_value = input
+        .default_value
+        .clone()
+        .unwrap_or(Value::Null)
+        .to_string();
+    let current_value = input
+        .current_value
+        .clone()
+        .unwrap_or_else(|| {
+            input
+                .default_value
+                .clone()
+                .unwrap_or(Value::Null)
+        })
+        .to_string();
+    let constraints = input
+        .constraints
+        .clone()
+        .unwrap_or_else(|| serde_json::json!({}))
+        .to_string();
+
+    // Optional FK: only set owner when the tool exists.
+    let owner = match input.owner_tool_id.as_deref() {
+        Some(oid) if !oid.trim().is_empty() => {
+            let exists: Option<String> = db
+                .conn()
+                .query_row("SELECT id FROM tools WHERE id = ?1", [oid], |r| r.get(0))
+                .optional()?;
+            exists
+        }
+        _ => None,
+    };
+
+    let existing: Option<(i64, String)> = db
+        .conn()
+        .query_row(
+            "SELECT version, created_at FROM added_settings WHERE id = ?1",
+            [&input.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+
+    let (version, created_at) = if let Some((ver, created)) = existing {
+        let next = ver + 1;
+        db.conn().execute(
+            "UPDATE added_settings SET owner_tool_id = ?1, label = ?2, description = ?3,
+             setting_type = ?4, default_value = ?5, current_value = ?6, constraints = ?7,
+             version = ?8, updated_at = ?9 WHERE id = ?10",
+            params![
+                owner,
+                input.label,
+                description,
+                input.setting_type,
+                default_value,
+                current_value,
+                constraints,
+                next,
+                now,
+                input.id
+            ],
+        )?;
+        (next, created)
+    } else {
+        db.conn().execute(
+            "INSERT INTO added_settings (
+                id, owner_tool_id, label, description, setting_type,
+                default_value, current_value, constraints, version, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?10)",
+            params![
+                input.id,
+                owner,
+                input.label,
+                description,
+                input.setting_type,
+                default_value,
+                current_value,
+                constraints,
+                now,
+                now
+            ],
+        )?;
+        (1, now.clone())
+    };
+
+    Ok(AddedSettingRecord {
+        id: input.id.clone(),
+        owner_tool_id: owner,
+        label: input.label.clone(),
+        description,
+        setting_type: input.setting_type.clone(),
+        default_value: parse_json_value(&default_value),
+        current_value: parse_json_value(&current_value),
+        constraints: parse_json_value(&constraints),
+        version,
+        created_at,
+        updated_at: now,
+    })
+}
+
+pub fn delete_added_setting(db: &mut Database, id: &str) -> DbResult<()> {
+    validate_added_setting_id(id).map_err(DbError::Invalid)?;
+    let n = db
+        .conn()
+        .execute("DELETE FROM added_settings WHERE id = ?1", [id])?;
+    if n == 0 {
+        return Err(DbError::NotFound(format!("added setting {id}")));
+    }
+    Ok(())
+}
+
+// ── Provider connections (metadata only) ─────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderConnection {
+    pub id: String,
+    pub provider: String,
+    pub label: String,
+    pub base_url: Option<String>,
+    pub model_default: Option<String>,
+    pub keyring_account: String,
+    pub is_active: bool,
+    pub last_status: Option<String>,
+    pub last_tested_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+fn map_provider_connection(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProviderConnection> {
+    Ok(ProviderConnection {
+        id: row.get(0)?,
+        provider: row.get(1)?,
+        label: row.get(2)?,
+        base_url: row.get(3)?,
+        model_default: row.get(4)?,
+        keyring_account: row.get(5)?,
+        is_active: row.get::<_, i64>(6)? != 0,
+        last_status: row.get(7)?,
+        last_tested_at: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
+}
+
+const PROVIDER_CONNECTION_COLS: &str = "id, provider, label, base_url, model_default, keyring_account,
+    is_active, last_status, last_tested_at, created_at, updated_at";
+
+pub fn list_provider_connections(db: &Database) -> DbResult<Vec<ProviderConnection>> {
+    let mut stmt = db.conn().prepare(&format!(
+        "SELECT {PROVIDER_CONNECTION_COLS} FROM provider_connections ORDER BY updated_at DESC"
+    ))?;
+    let rows = stmt.query_map([], map_provider_connection)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+pub fn get_provider_connection(db: &Database, id: &str) -> DbResult<ProviderConnection> {
+    db.conn()
+        .query_row(
+            &format!("SELECT {PROVIDER_CONNECTION_COLS} FROM provider_connections WHERE id = ?1"),
+            [id],
+            map_provider_connection,
+        )
+        .optional()?
+        .ok_or_else(|| DbError::NotFound(format!("provider connection {id}")))
+}
+
+pub fn get_active_provider_connection(db: &Database) -> DbResult<Option<ProviderConnection>> {
+    db.conn()
+        .query_row(
+            &format!(
+                "SELECT {PROVIDER_CONNECTION_COLS} FROM provider_connections WHERE is_active = 1 LIMIT 1"
+            ),
+            [],
+            map_provider_connection,
+        )
+        .optional()
+        .map_err(DbError::from)
+}
+
+pub fn upsert_provider_connection(
+    db: &mut Database,
+    connection: &ProviderConnection,
+) -> DbResult<ProviderConnection> {
+    let now = now_rfc3339();
+    db.conn().execute(
+        "INSERT INTO provider_connections (
+            id, provider, label, base_url, model_default, keyring_account,
+            is_active, last_status, last_tested_at, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT(id) DO UPDATE SET
+            provider = excluded.provider,
+            label = excluded.label,
+            base_url = excluded.base_url,
+            model_default = excluded.model_default,
+            keyring_account = excluded.keyring_account,
+            is_active = excluded.is_active,
+            last_status = excluded.last_status,
+            last_tested_at = excluded.last_tested_at,
+            updated_at = excluded.updated_at",
+        params![
+            connection.id,
+            connection.provider,
+            connection.label,
+            connection.base_url,
+            connection.model_default,
+            connection.keyring_account,
+            if connection.is_active { 1 } else { 0 },
+            connection.last_status,
+            connection.last_tested_at,
+            connection.created_at.clone(),
+            now,
+        ],
+    )?;
+    get_provider_connection(db, &connection.id)
+}
+
+pub fn set_active_provider_connection(
+    db: &mut Database,
+    id: &str,
+) -> DbResult<ProviderConnection> {
+    // Ensure the target exists before mutating.
+    let _ = get_provider_connection(db, id)?;
+    db.with_transaction(|conn| {
+        conn.execute("UPDATE provider_connections SET is_active = 0", [])?;
+        let n = conn.execute(
+            "UPDATE provider_connections SET is_active = 1, updated_at = ?1 WHERE id = ?2",
+            params![now_rfc3339(), id],
+        )?;
+        if n == 0 {
+            return Err(DbError::NotFound(format!("provider connection {id}")));
+        }
+        Ok(())
+    })?;
+    set_setting(db, "activeProviderConnectionId", id)?;
+    get_provider_connection(db, id)
+}
+
+pub fn clear_active_provider_connection(db: &mut Database) -> DbResult<()> {
+    db.conn()
+        .execute("UPDATE provider_connections SET is_active = 0", [])?;
+    set_setting(db, "activeProviderConnectionId", "")?;
+    Ok(())
+}
+
+pub fn delete_provider_connection(db: &mut Database, id: &str) -> DbResult<()> {
+    let existing = get_provider_connection(db, id)?;
+    let n = db
+        .conn()
+        .execute("DELETE FROM provider_connections WHERE id = ?1", [id])?;
+    if n == 0 {
+        return Err(DbError::NotFound(format!("provider connection {id}")));
+    }
+    if existing.is_active {
+        set_setting(db, "activeProviderConnectionId", "")?;
+    }
+    Ok(())
+}
+
+pub fn update_provider_connection_status(
+    db: &mut Database,
+    id: &str,
+    status: &str,
+) -> DbResult<()> {
+    let now = now_rfc3339();
+    let n = db.conn().execute(
+        "UPDATE provider_connections SET last_status = ?1, last_tested_at = ?2, updated_at = ?2 WHERE id = ?3",
+        params![status, now, id],
+    )?;
+    if n == 0 {
+        return Err(DbError::NotFound(format!("provider connection {id}")));
+    }
+    Ok(())
+}
+
+// ── Action Log events (sanitized only) ───────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionEvent {
+    pub id: String,
+    pub request_id: String,
+    pub conversation_id: Option<String>,
+    pub event_type: String,
+    pub label: String,
+    pub status: String,
+    pub metadata_json: Option<String>,
+    pub sequence: i64,
+    pub created_at: String,
+}
+
+/// Action Log Base Setting modes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionLogMode {
+    Off,
+    Always,
+    Intelligent,
+}
+
+impl ActionLogMode {
+    pub fn parse(raw: &str) -> Self {
+        match raw.trim().to_lowercase().as_str() {
+            "always" | "on" | "true" | "1" | "yes" => Self::Always,
+            "intelligent" | "auto" | "smart" => Self::Intelligent,
+            _ => Self::Off,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Always => "always",
+            Self::Intelligent => "intelligent",
+        }
+    }
+
+    pub fn collects(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
+pub fn action_log_mode(db: &Database) -> ActionLogMode {
+    match get_settings(db) {
+        Ok(map) => {
+            if let Some(mode) = map
+                .get("actionLogMode")
+                .or_else(|| map.get("action_log_mode"))
+            {
+                return ActionLogMode::parse(mode);
+            }
+            // Legacy boolean.
+            map.get("actionLogEnabled")
+                .or_else(|| map.get("action_log_enabled"))
+                .map(|v| ActionLogMode::parse(v))
+                .unwrap_or(ActionLogMode::Off)
+        }
+        Err(_) => ActionLogMode::Off,
+    }
+}
+
+pub fn is_action_log_enabled(db: &Database) -> bool {
+    action_log_mode(db).collects()
+}
+
+/// Whether Action Log UI should surface these events for the active mode.
+pub fn action_events_are_substantive(events: &[serde_json::Value]) -> bool {
+    const SUBSTANTIVE: &[&str] = &[
+        "tool_started",
+        "tool_completed",
+        "tool_failed",
+        "tool_reference_resolved",
+        "change_applied",
+        "tool_change_proposed",
+        "search_started",
+        "search_completed",
+        "crawl_started",
+        "crawl_completed",
+        "project_context_loaded",
+    ];
+    events.iter().any(|evt| {
+        let Some(obj) = evt.as_object() else {
+            return false;
+        };
+        let ty = obj
+            .get("eventType")
+            .or_else(|| obj.get("event_type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if SUBSTANTIVE.iter().any(|s| *s == ty) {
+            return true;
+        }
+        // Labels that indicate real work when type is generic.
+        let label = obj
+            .get("label")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_lowercase();
+        label.contains("search")
+            || label.contains("crawl")
+            || label.contains("tool")
+            || label.contains("propos")
+            || label.contains("appear")
+            || label.contains("import")
+            || label.contains("fetch")
+            || label.contains("project")
+    })
+}
+
+pub fn should_attach_action_events(mode: ActionLogMode, events: &[serde_json::Value]) -> bool {
+    match mode {
+        ActionLogMode::Off => false,
+        ActionLogMode::Always => !events.is_empty(),
+        ActionLogMode::Intelligent => action_events_are_substantive(events),
+    }
+}
+
+pub fn insert_action_event(
+    db: &mut Database,
+    request_id: &str,
+    conversation_id: Option<&str>,
+    event_type: &str,
+    label: &str,
+    status: &str,
+    sequence: i64,
+) -> DbResult<ActionEvent> {
+    let id = format!("act-{}", Uuid::new_v4());
+    let created_at = now_rfc3339();
+    // Labels only — never persist prompts, CoT, keys, or free-form metadata blobs.
+    let safe_label = {
+        let redacted = crate::security::redact_secrets(label, None);
+        let trimmed = redacted.trim();
+        if trimmed.is_empty() {
+            "Action".to_string()
+        } else if trimmed.chars().count() > 160 {
+            let truncated: String = trimmed.chars().take(160).collect();
+            format!("{truncated}…")
+        } else {
+            trimmed.to_string()
+        }
+    };
+    let safe_status = match status.trim() {
+        "completed" | "failed" | "cancelled" | "running" => status.trim().to_string(),
+        _ => "completed".to_string(),
+    };
+    db.conn().execute(
+        "INSERT INTO action_events (
+            id, request_id, conversation_id, event_type, label, status,
+            metadata_json, sequence, created_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8)",
+        params![
+            id,
+            request_id,
+            conversation_id,
+            event_type,
+            safe_label,
+            safe_status,
+            sequence,
+            created_at
+        ],
+    )?;
+    Ok(ActionEvent {
+        id,
+        request_id: request_id.to_string(),
+        conversation_id: conversation_id.map(str::to_string),
+        event_type: event_type.to_string(),
+        label: safe_label,
+        status: safe_status,
+        metadata_json: None,
+        sequence,
+        created_at,
+    })
+}
+
+pub fn list_action_events_for_request(
+    db: &Database,
+    request_id: &str,
+) -> DbResult<Vec<ActionEvent>> {
+    let mut stmt = db.conn().prepare(
+        "SELECT id, request_id, conversation_id, event_type, label, status,
+                metadata_json, sequence, created_at
+         FROM action_events
+         WHERE request_id = ?1
+         ORDER BY sequence ASC, created_at ASC",
+    )?;
+    let rows = stmt.query_map([request_id], |row| {
+        Ok(ActionEvent {
+            id: row.get(0)?,
+            request_id: row.get(1)?,
+            conversation_id: row.get(2)?,
+            event_type: row.get(3)?,
+            label: row.get(4)?,
+            status: row.get(5)?,
+            metadata_json: row.get(6)?,
+            sequence: row.get(7)?,
+            created_at: row.get(8)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+// ── Automations & workspace backgrounds ──────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceBackground {
+    pub id: String,
+    pub workspace_id: String,
+    pub name: String,
+    pub kind: String,
+    pub definition_json: String,
+    pub sort_order: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+fn parse_missed_policy(raw: &str) -> MissedRunPolicy {
+    match raw.trim().to_lowercase().as_str() {
+        "skip" => MissedRunPolicy::Skip,
+        _ => MissedRunPolicy::RunOnce,
+    }
+}
+
+fn map_automation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Automation> {
+    let trigger_json: String = row.get(6)?;
+    let action_json: String = row.get(8)?;
+    let trigger: AutomationTrigger = serde_json::from_str(&trigger_json).unwrap_or(
+        AutomationTrigger::Interval {
+            interval_minutes: 60,
+            timezone: None,
+        },
+    );
+    let action: AutomationAction = serde_json::from_str(&action_json).unwrap_or(
+        AutomationAction::SetWorkspaceBackground {
+            workspace_id: DEFAULT_WORKSPACE_ID.into(),
+            preset_id: String::new(),
+        },
+    );
+    let policy: String = row.get(11)?;
+    Ok(Automation {
+        id: row.get(0)?,
+        workspace_id: row.get(1)?,
+        owner_tool_id: row.get(2)?,
+        name: row.get(3)?,
+        enabled: row.get::<_, i64>(4)? == 1,
+        trigger,
+        action,
+        requires_ai: row.get::<_, i64>(9)? == 1,
+        provider_connection_id: row.get(10)?,
+        missed_run_policy: parse_missed_policy(&policy),
+        next_run_at: row.get(12)?,
+        last_run_at: row.get(13)?,
+        last_status: row.get(14)?,
+        consecutive_failures: row.get(15)?,
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
+    })
+}
+
+const AUTOMATION_COLS: &str = "id, workspace_id, owner_tool_id, name, enabled,
+    trigger_type, trigger_json, action_type, action_json, requires_ai,
+    provider_connection_id, missed_run_policy, next_run_at, last_run_at,
+    last_status, consecutive_failures, created_at, updated_at";
+
+pub fn list_automations(db: &Database) -> DbResult<Vec<Automation>> {
+    let mut stmt = db.conn().prepare(&format!(
+        "SELECT {AUTOMATION_COLS} FROM automations ORDER BY updated_at DESC"
+    ))?;
+    let rows = stmt.query_map([], map_automation)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn get_automation(db: &Database, id: &str) -> DbResult<Automation> {
+    db.conn()
+        .query_row(
+            &format!("SELECT {AUTOMATION_COLS} FROM automations WHERE id = ?1"),
+            [id],
+            map_automation,
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(format!("automation {id}")),
+            other => DbError::Sqlite(other),
+        })
+}
+
+pub fn list_due_automations(db: &Database, now_rfc3339: &str) -> DbResult<Vec<Automation>> {
+    let mut stmt = db.conn().prepare(&format!(
+        "SELECT {AUTOMATION_COLS} FROM automations
+         WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?1
+         ORDER BY next_run_at ASC"
+    ))?;
+    let rows = stmt.query_map([now_rfc3339], map_automation)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn upsert_automation(db: &mut Database, automation: &Automation) -> DbResult<Automation> {
+    let trigger_type = match &automation.trigger {
+        AutomationTrigger::Interval { .. } => "interval",
+        AutomationTrigger::Daily { .. } => "daily",
+        AutomationTrigger::Weekly { .. } => "weekly",
+    };
+    let action_type = match &automation.action {
+        AutomationAction::CycleWorkspaceBackgrounds { .. } => "cycle_workspace_backgrounds",
+        AutomationAction::SetWorkspaceBackground { .. } => "set_workspace_background",
+        AutomationAction::SetToolStateValue { .. } => "set_tool_state_value",
+        AutomationAction::AiPrompt { .. } => "ai_prompt",
+    };
+    let trigger_json = serde_json::to_string(&automation.trigger)?;
+    let action_json = serde_json::to_string(&automation.action)?;
+    let policy = match automation.missed_run_policy {
+        MissedRunPolicy::Skip => "skip",
+        MissedRunPolicy::RunOnce => "run_once",
+    };
+    db.conn().execute(
+        "INSERT INTO automations (
+            id, workspace_id, owner_tool_id, name, enabled, trigger_type, trigger_json,
+            action_type, action_json, requires_ai, provider_connection_id, missed_run_policy,
+            next_run_at, last_run_at, last_status, consecutive_failures, created_at, updated_at
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
+         ON CONFLICT(id) DO UPDATE SET
+            name=excluded.name, enabled=excluded.enabled, trigger_type=excluded.trigger_type,
+            trigger_json=excluded.trigger_json, action_type=excluded.action_type,
+            action_json=excluded.action_json, requires_ai=excluded.requires_ai,
+            provider_connection_id=excluded.provider_connection_id,
+            missed_run_policy=excluded.missed_run_policy, next_run_at=excluded.next_run_at,
+            last_run_at=excluded.last_run_at, last_status=excluded.last_status,
+            consecutive_failures=excluded.consecutive_failures, updated_at=excluded.updated_at",
+        params![
+            automation.id,
+            automation.workspace_id,
+            automation.owner_tool_id,
+            automation.name,
+            if automation.enabled { 1 } else { 0 },
+            trigger_type,
+            trigger_json,
+            action_type,
+            action_json,
+            if automation.requires_ai { 1 } else { 0 },
+            automation.provider_connection_id,
+            policy,
+            automation.next_run_at,
+            automation.last_run_at,
+            automation.last_status,
+            automation.consecutive_failures,
+            automation.created_at,
+            automation.updated_at,
+        ],
+    )?;
+    get_automation(db, &automation.id)
+}
+
+pub fn update_automation_schedule(
+    db: &mut Database,
+    id: &str,
+    next_run_at: Option<&str>,
+    last_run_at: Option<&str>,
+    last_status: Option<&str>,
+    consecutive_failures: i64,
+    enabled: bool,
+) -> DbResult<()> {
+    let now = now_rfc3339();
+    let n = db.conn().execute(
+        "UPDATE automations SET next_run_at=?1, last_run_at=?2, last_status=?3,
+         consecutive_failures=?4, enabled=?5, updated_at=?6 WHERE id=?7",
+        params![
+            next_run_at,
+            last_run_at,
+            last_status,
+            consecutive_failures,
+            if enabled { 1 } else { 0 },
+            now,
+            id
+        ],
+    )?;
+    if n == 0 {
+        return Err(DbError::NotFound(format!("automation {id}")));
+    }
+    Ok(())
+}
+
+pub fn delete_automation(db: &mut Database, id: &str) -> DbResult<()> {
+    let n = db
+        .conn()
+        .execute("DELETE FROM automations WHERE id = ?1", [id])?;
+    if n == 0 {
+        return Err(DbError::NotFound(format!("automation {id}")));
+    }
+    Ok(())
+}
+
+pub fn insert_automation_run(
+    db: &mut Database,
+    id: &str,
+    automation_id: &str,
+    scheduled_at: Option<&str>,
+    started_at: &str,
+    completed_at: Option<&str>,
+    status: &str,
+    result_summary: Option<&str>,
+    error_category: Option<&str>,
+) -> DbResult<()> {
+    let created_at = now_rfc3339();
+    db.conn().execute(
+        "INSERT INTO automation_runs (
+            id, automation_id, scheduled_at, started_at, completed_at, status,
+            result_summary, error_category, created_at
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        params![
+            id,
+            automation_id,
+            scheduled_at,
+            started_at,
+            completed_at,
+            status,
+            result_summary,
+            error_category,
+            created_at
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn list_automation_runs(
+    db: &Database,
+    automation_id: &str,
+    limit: usize,
+) -> DbResult<Vec<AutomationRun>> {
+    let mut stmt = db.conn().prepare(
+        "SELECT id, automation_id, scheduled_at, started_at, completed_at, status,
+                result_summary, error_category, created_at
+         FROM automation_runs WHERE automation_id = ?1
+         ORDER BY created_at DESC LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![automation_id, limit as i64], |row| {
+        Ok(AutomationRun {
+            id: row.get(0)?,
+            automation_id: row.get(1)?,
+            scheduled_at: row.get(2)?,
+            started_at: row.get(3)?,
+            completed_at: row.get(4)?,
+            status: row.get(5)?,
+            result_summary: row.get(6)?,
+            error_category: row.get(7)?,
+            created_at: row.get(8)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn list_workspace_backgrounds(
+    db: &Database,
+    workspace_id: &str,
+) -> DbResult<Vec<WorkspaceBackground>> {
+    let mut stmt = db.conn().prepare(
+        "SELECT id, workspace_id, name, kind, definition_json, sort_order, created_at, updated_at
+         FROM workspace_backgrounds WHERE workspace_id = ?1 ORDER BY sort_order ASC, created_at ASC",
+    )?;
+    let rows = stmt.query_map([workspace_id], |row| {
+        Ok(WorkspaceBackground {
+            id: row.get(0)?,
+            workspace_id: row.get(1)?,
+            name: row.get(2)?,
+            kind: row.get(3)?,
+            definition_json: row.get(4)?,
+            sort_order: row.get(5)?,
+            created_at: row.get(6)?,
+            updated_at: row.get(7)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn get_workspace_background(db: &Database, id: &str) -> DbResult<WorkspaceBackground> {
+    db.conn()
+        .query_row(
+            "SELECT id, workspace_id, name, kind, definition_json, sort_order, created_at, updated_at
+             FROM workspace_backgrounds WHERE id = ?1",
+            [id],
+            |row| {
+                Ok(WorkspaceBackground {
+                    id: row.get(0)?,
+                    workspace_id: row.get(1)?,
+                    name: row.get(2)?,
+                    kind: row.get(3)?,
+                    definition_json: row.get(4)?,
+                    sort_order: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                })
+            },
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                DbError::NotFound(format!("workspace background {id}"))
+            }
+            other => DbError::Sqlite(other),
+        })
+}
+
+pub fn upsert_workspace_background(
+    db: &mut Database,
+    bg: &WorkspaceBackground,
+) -> DbResult<WorkspaceBackground> {
+    db.conn().execute(
+        "INSERT INTO workspace_backgrounds (
+            id, workspace_id, name, kind, definition_json, sort_order, created_at, updated_at
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+         ON CONFLICT(id) DO UPDATE SET
+            name=excluded.name, kind=excluded.kind, definition_json=excluded.definition_json,
+            sort_order=excluded.sort_order, updated_at=excluded.updated_at",
+        params![
+            bg.id,
+            bg.workspace_id,
+            bg.name,
+            bg.kind,
+            bg.definition_json,
+            bg.sort_order,
+            bg.created_at,
+            bg.updated_at
+        ],
+    )?;
+    get_workspace_background(db, &bg.id)
+}
+
+#[cfg(test)]
+mod action_log_mode_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parses_modes() {
+        assert_eq!(ActionLogMode::parse("intelligent"), ActionLogMode::Intelligent);
+        assert_eq!(ActionLogMode::parse("always"), ActionLogMode::Always);
+        assert_eq!(ActionLogMode::parse("false"), ActionLogMode::Off);
+    }
+
+    #[test]
+    fn intelligent_filters_boilerplate() {
+        let boilerplate = vec![
+            json!({"eventType": "request_started", "label": "Preparing your request"}),
+            json!({"eventType": "context_loaded", "label": "Building agent context"}),
+        ];
+        assert!(!should_attach_action_events(
+            ActionLogMode::Intelligent,
+            &boilerplate
+        ));
+        let with_tool = vec![
+            json!({"eventType": "request_started", "label": "Preparing your request"}),
+            json!({"eventType": "tool_change_proposed", "label": "Preparing tool change preview"}),
+        ];
+        assert!(should_attach_action_events(
+            ActionLogMode::Intelligent,
+            &with_tool
+        ));
+        assert!(should_attach_action_events(
+            ActionLogMode::Always,
+            &boilerplate
+        ));
+    }
+}
+

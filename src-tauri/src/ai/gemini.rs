@@ -48,6 +48,8 @@ impl GeminiProvider {
     }
 
     fn response_schema() -> Value {
+        // Keep this conservative: Gemini rejects many OpenAPI features
+        // (`nullable`, complex `anyOf`) which previously caused opaque 400s.
         json!({
             "type": "object",
             "properties": {
@@ -55,17 +57,41 @@ impl GeminiProvider {
                 "assistantMessage": { "type": "string" },
                 "responseType": {
                     "type": "string",
-                    "enum": ["message", "tool_change", "noop"]
+                    "enum": ["message", "tool_change", "tool_use", "settings_change", "noop"]
+                },
+                "toolCalls": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "capability": { "type": "string" },
+                            "arguments": { "type": "object" }
+                        },
+                        "required": ["capability"]
+                    }
+                },
+                "citations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "string" },
+                            "title": { "type": "string" },
+                            "url": { "type": "string" },
+                            "displayDomain": { "type": "string" },
+                            "snippet": { "type": "string" }
+                        },
+                        "required": ["id", "title", "url"]
+                    }
                 },
                 "toolChange": {
                     "type": "object",
-                    "nullable": true,
                     "properties": {
                         "action": {
                             "type": "string",
                             "enum": ["create", "update", "replace"]
                         },
-                        "targetToolId": { "type": "string", "nullable": true },
+                        "targetToolId": { "type": "string" },
                         "changeSummary": { "type": "string" },
                         "tool": {
                             "type": "object",
@@ -74,15 +100,10 @@ impl GeminiProvider {
                                 "name": { "type": "string" },
                                 "description": { "type": "string" },
                                 "layout": {
-                                    "anyOf": [
-                                        { "type": "string" },
-                                        {
-                                            "type": "object",
-                                            "properties": {
-                                                "type": { "type": "string" }
-                                            }
-                                        }
-                                    ]
+                                    "type": "object",
+                                    "properties": {
+                                        "type": { "type": "string" }
+                                    }
                                 },
                                 "components": {
                                     "type": "array",
@@ -93,6 +114,87 @@ impl GeminiProvider {
                         }
                     },
                     "required": ["action", "changeSummary"]
+                },
+                "settingsChange": {
+                    "type": "object",
+                    "properties": {
+                        "theme": {
+                            "type": "string",
+                            "enum": ["system", "light", "dark"]
+                        },
+                        "accentPrimary": {
+                            "type": "object",
+                            "properties": {
+                                "light": { "type": "string" },
+                                "dark": { "type": "string" }
+                            }
+                        },
+                        "accentSecondary": {
+                            "type": "object",
+                            "properties": {
+                                "light": { "type": "string" },
+                                "dark": { "type": "string" }
+                            }
+                        },
+                        "background": {
+                            "type": "object",
+                            "properties": {
+                                "light": { "type": "string" },
+                                "dark": { "type": "string" }
+                            }
+                        },
+                        "surface": {
+                            "type": "object",
+                            "properties": {
+                                "light": { "type": "string" },
+                                "dark": { "type": "string" }
+                            }
+                        },
+                        "surfaceMuted": {
+                            "type": "object",
+                            "properties": {
+                                "light": { "type": "string" },
+                                "dark": { "type": "string" }
+                            }
+                        },
+                        "border": {
+                            "type": "object",
+                            "properties": {
+                                "light": { "type": "string" },
+                                "dark": { "type": "string" }
+                            }
+                        },
+                        "textPrimary": {
+                            "type": "object",
+                            "properties": {
+                                "light": { "type": "string" },
+                                "dark": { "type": "string" }
+                            }
+                        },
+                        "textSecondary": {
+                            "type": "object",
+                            "properties": {
+                                "light": { "type": "string" },
+                                "dark": { "type": "string" }
+                            }
+                        },
+                        "wallpaper": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {
+                                    "type": "string",
+                                    "enum": ["none", "matrix", "aurora", "particles", "rain", "pulse"]
+                                },
+                                "color": { "type": "string" },
+                                "secondaryColor": { "type": "string" },
+                                "speed": { "type": "number" },
+                                "density": { "type": "number" },
+                                "opacity": { "type": "number" }
+                            },
+                            "required": ["kind"]
+                        },
+                        "changeSummary": { "type": "string" }
+                    }
                 },
                 "diagnostics": { "type": "object" }
             },
@@ -297,7 +399,7 @@ impl AiProvider for GeminiProvider {
             return Err(AiError::Validation("No messages to send".into()));
         }
 
-        let body = json!({
+        let mut body = json!({
             "systemInstruction": {
                 "parts": [{ "text": request.system_prompt }]
             },
@@ -309,10 +411,30 @@ impl AiProvider for GeminiProvider {
             }
         });
 
-        // Ensure schemaVersion hint is in system prompt context via body already.
         let _ = SCHEMA_VERSION;
 
-        let payload = self.send_generate(body, request.cancel.clone()).await?;
+        let payload = match self.send_generate(body.clone(), request.cancel.clone()).await {
+            Ok(payload) => payload,
+            Err(err) => {
+                let msg = err.to_string().to_lowercase();
+                let looks_like_schema = msg.contains("schema")
+                    || msg.contains("invalid argument")
+                    || msg.contains("400");
+                if !looks_like_schema {
+                    return Err(err);
+                }
+                tracing::warn!(
+                    error = %redact_secrets(&err.to_string(), Some(&self.api_key)),
+                    "Gemini structured schema rejected; retrying with JSON mime only"
+                );
+                if let Some(gen) = body.get_mut("generationConfig") {
+                    if let Some(obj) = gen.as_object_mut() {
+                        obj.remove("responseSchema");
+                    }
+                }
+                self.send_generate(body, request.cancel.clone()).await?
+            }
+        };
         let raw_text = Self::extract_text(&payload)?;
         let usage = Self::extract_usage(&payload);
 
@@ -322,5 +444,19 @@ impl AiProvider for GeminiProvider {
             model: self.model.clone(),
             provider_id: self.provider_id().to_string(),
         })
+    }
+
+    async fn probe(&self, cancel: CancellationToken) -> Result<(), AiError> {
+        let body = json!({
+            "contents": [{
+                "role": "user",
+                "parts": [{ "text": "ping" }]
+            }],
+            "generationConfig": {
+                "maxOutputTokens": 8
+            }
+        });
+        let _ = self.send_generate(body, cancel).await?;
+        Ok(())
     }
 }

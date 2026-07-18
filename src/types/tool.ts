@@ -28,6 +28,7 @@ export const ComponentTypeSchema = z.enum([
   "button",
   "buttonGroup",
   "quiz",
+  "clock",
 ]);
 
 export type ComponentType = z.infer<typeof ComponentTypeSchema>;

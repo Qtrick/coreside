@@ -30,7 +30,7 @@ pub fn create_conversation(
     let title = title
         .filter(|t| !t.trim().is_empty())
         .unwrap_or_else(|| "New chat".to_string());
-    Ok(db::create_conversation(&mut db, &ws, &title)?)
+    Ok(db::create_conversation(&mut db, &ws, &title, None)?)
 }
 
 #[tauri::command]
@@ -49,6 +49,16 @@ pub fn get_messages(
 ) -> Result<Vec<Message>, CommandError> {
     let db = state.db.lock();
     Ok(db::get_messages(&db, &conversation_id)?)
+}
+
+/// Remove a message and everything after it in the conversation (used by edit & resend).
+#[tauri::command]
+pub fn delete_messages_from(
+    state: State<'_, AppState>,
+    message_id: String,
+) -> Result<u64, CommandError> {
+    let mut db = state.db.lock();
+    Ok(db::delete_messages_from(&mut db, &message_id)?)
 }
 
 #[tauri::command]

@@ -1,13 +1,28 @@
 //! Coreside Tauri library entrypoint.
 
 mod ai;
+mod automations;
+mod branding;
 mod commands;
 mod config;
+mod credentials;
+mod crawler;
 mod db;
+mod exa;
+mod exports;
+mod media;
+mod projects;
+mod research;
+mod search;
 mod security;
+mod settings;
 mod state;
+mod wallpapers;
 mod windows;
 
+use std::sync::Arc;
+
+use automations::SchedulerHandle;
 use state::AppState;
 use tauri::Manager;
 use tracing_subscriber::{fmt, EnvFilter};
@@ -34,20 +49,32 @@ pub fn run() {
     }
 
     let app_state = AppState::new(config, database);
+    let scheduler_handle = Arc::new(SchedulerHandle::default());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(app_state)
+        .manage(scheduler_handle.clone())
         .invoke_handler(tauri::generate_handler![
             commands::get_app_info,
             commands::get_ai_status,
+            commands::get_model_catalog,
             commands::test_ai_connection,
+            commands::list_provider_connections,
+            commands::upsert_provider_connection,
+            commands::delete_provider_connection,
+            commands::set_active_provider_connection,
+            commands::test_provider_connection,
+            commands::provider_key_hints,
             commands::list_conversations,
             commands::create_conversation,
             commands::delete_conversation,
             commands::get_messages,
+            commands::delete_messages_from,
             commands::send_message,
             commands::cancel_request,
+            commands::stage_chat_attachment,
+            commands::get_chat_attachment_src,
             commands::discard_tool_change,
             commands::apply_tool_change,
             commands::list_tools,
@@ -58,21 +85,106 @@ pub fn run() {
             commands::get_tool_state,
             commands::get_settings,
             commands::set_setting,
+            commands::list_added_settings,
+            commands::upsert_added_setting,
+            commands::delete_added_setting,
+            commands::validate_change_targets,
+            commands::set_dock_icon,
+            commands::set_dock_icon_for_os_appearance,
             commands::clear_conversations,
             commands::clear_tools,
             commands::open_tool_window,
+            commands::list_automations,
+            commands::upsert_automation,
+            commands::set_automation_enabled,
+            commands::delete_automation,
+            commands::list_automation_runs,
+            commands::run_automation_now,
+            commands::list_workspace_backgrounds,
+            commands::upsert_workspace_background,
+            commands::export_tool,
+            commands::list_export_formats,
+            commands::list_projects_cmd,
+            commands::get_project_cmd,
+            commands::create_project_cmd,
+            commands::update_project_cmd,
+            commands::archive_project_cmd,
+            commands::restore_project_cmd,
+            commands::delete_project_cmd,
+            commands::create_conversation_in_project,
+            commands::assign_chats_to_project,
+            commands::assign_conversation_to_project_cmd,
+            commands::remove_chat_from_project,
+            commands::list_project_conversations_cmd,
+            commands::list_unassigned_conversations_cmd,
+            commands::search_project_context_cmd,
+            commands::refresh_project_summary,
+            commands::rebuild_project_index_cmd,
+            commands::rename_conversation_cmd,
+            commands::duplicate_conversation_cmd,
+            commands::export_project,
+            commands::set_project_wallpaper_cmd,
+            commands::touch_project_opened,
+            commands::get_search_connection,
+            commands::configure_search_connection,
+            commands::delete_search_connection,
+            commands::test_search_connection,
+            commands::get_exa_connection,
+            commands::configure_exa_connection,
+            commands::delete_exa_connection,
+            commands::test_exa_connection,
+            commands::get_exa_usage,
+            commands::list_exa_usage,
+            commands::get_exa_budget,
+            commands::set_exa_budget,
+            commands::get_search_profile,
+            commands::set_search_profile,
+            commands::web_search_cmd,
+            commands::image_search_cmd,
+            commands::video_search_cmd,
+            commands::fetch_web_page_cmd,
+            commands::list_search_sessions_cmd,
+            commands::get_search_session_cmd,
+            commands::clear_search_history_cmd,
+            commands::get_crawler_status,
+            commands::get_crawler_installation,
+            commands::cleanup_crawler_cache,
+            commands::get_crawler_cache_stats,
+            commands::set_web_research_resource_profile,
+            commands::list_media_assets_cmd,
+            commands::get_media_asset_cmd,
+            commands::delete_media_asset_cmd,
+            commands::import_media_asset_cmd,
+            commands::touch_media_asset_cmd,
+            commands::get_media_asset_src_cmd,
+            commands::get_media_asset_thumb_src_cmd,
+            commands::media_asset_usage_cmd,
         ])
-        .setup(|_app| {
+        .setup(move |app| {
+            branding::apply_display_name();
+            let handle = scheduler_handle.clone();
+            let app_handle = app.handle().clone();
+            automations::spawn_scheduler(app_handle, handle);
             tracing::info!("Coreside setup complete");
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building Coreside")
         .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
-                if let Some(state) = app.try_state::<AppState>() {
-                    state.cancel_all();
+            match event {
+                tauri::RunEvent::Ready => {
+                    branding::apply_display_name();
                 }
+                tauri::RunEvent::Exit => {
+                    if let Some(state) = app.try_state::<AppState>() {
+                        state.cancel_all();
+                        let crawler = state.crawler.clone();
+                        tauri::async_runtime::block_on(async move {
+                            let _ = crawler.shutdown().await;
+                        });
+                    }
+                }
+                _ => {}
             }
         });
 }
