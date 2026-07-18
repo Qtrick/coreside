@@ -1,0 +1,16 @@
+---
+alwaysApply: true
+---
+PreBase is an AI-assisted desktop IDE and code visualization platform.
+
+Long-term vision:
+- Combine development, visualization, AI assistance, and deployment.
+- Allow developers to understand codebases visually.
+- Represent projects as interactive node graphs.
+- Eventually evolve into a complete development environment.
+
+Current architecture:
+- Electron
+- TypeScript
+- Vite
+- Interactive graph visualization

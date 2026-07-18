@@ -1,0 +1,46 @@
+---
+alwaysApply: true
+description: PreBase development workflow
+---
+
+You are working on the PreBase desktop application.
+
+Do not begin implementation until the relevant files have been inspected.
+Before making code changes:
+Do not begin implementation until the relevant files have been inspected.
+1. Read all relevant files.
+2. Understand the existing architecture.
+3. Identify the root cause of the issue.
+4. Explain the root cause before implementing changes.
+
+Implementation:
+
+5. Make the smallest safe change possible.
+6. Preserve existing functionality.
+7. Follow existing project conventions.
+
+Verification:
+
+8. Run build, lint, and type checking when available.
+9. Review the entire diff.
+10. Search for:
+   - regressions
+   - edge cases
+   - performance issues
+   - memory leaks
+   - rendering issues
+   - unused code
+
+Definition of Done:
+
+11. Do not claim success unless verification was performed.
+12. Do not claim success if known issues remain.
+13. If uncertain, explicitly state uncertainty.
+
+Final Output:
+
+14. Report:
+   - root cause
+   - files changed
+   - verification performed
+   - remaining risks
