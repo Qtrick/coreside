@@ -1,16 +1,1286 @@
 ---
+description: Core product, architecture, design, security, and long-term vision context for Coreside
 alwaysApply: true
 ---
-PreBase is an AI-assisted desktop IDE and code visualization platform.
 
-Long-term vision:
-- Combine development, visualization, AI assistance, and deployment.
-- Allow developers to understand codebases visually.
-- Represent projects as interactive node graphs.
-- Eventually evolve into a complete development environment.
+# Coreside Project Context
 
-Current architecture:
-- Electron
-- TypeScript
-- Vite
-- Interactive graph visualization
+## Product Identity
+
+The product is named:
+
+Coreside
+
+Always use exactly this capitalization.
+
+Do not use:
+
+- CoreSide
+- Core Side
+- Core-Side
+- Coreside AI as the primary product name
+- Partial Update as the product name
+- Provider-specific branding as the product identity
+- Temporary scaffold names
+
+Coreside is a consumer-first, AI-native desktop application in which the AI does not merely create external applications or files. The AI progressively builds, modifies, and expands the application environment that the user is already using.
+
+The application begins as a capable conversational AI interface. Over time, each user’s version of Coreside becomes structurally different because the user can ask the agent to create personal tools, dashboards, interfaces, automations, wallpapers, settings, layouts, workflows, games, and other persistent capabilities inside Coreside itself.
+
+Every installation begins from the same protected foundation, but the user-editable layer evolves differently for every person.
+
+The central product idea is:
+
+> Coreside is a conversational application that can progressively build itself around the user.
+
+Coreside should not be treated as:
+
+- A normal chatbot with a few generated widgets
+- A generic app builder that only exports external websites
+- An unrestricted code-generation sandbox
+- An IDE
+- A browser
+- A collection of disconnected AI tools
+- A marketplace-first product
+- An enterprise dashboard
+- A wrapper around one AI provider
+- A clone of ChatGPT, Claude, or Partial Update
+
+Its primary differentiation is that conversations can become persistent internal software.
+
+---
+
+# Core Product Vision
+
+A normal chatbot answers questions.
+
+Coreside should be able to answer a question, create something useful from that conversation, place it inside the user’s environment, preserve it, update it later, connect it to other tools, and allow the user to continue evolving it through natural language.
+
+Examples include:
+
+- A user asks for a schedule planner, and Coreside creates a persistent schedule-planning tool.
+- A user asks for a digital clock, then later adds timezone support, color controls, alarms, and export.
+- A user creates a study dashboard inside a Biology project.
+- A user creates a small personal game and continues adding mechanics over time.
+- A user asks for a recurring background rotation, and Coreside creates a safe automation.
+- A user creates a custom workspace with panels, shortcuts, dashboards, and project-specific surfaces.
+- A user references an existing tool with `@Tool Name` and asks the agent to modify it.
+- A user creates an interactive surface inline in a conversation and later promotes it into a permanent personal tool.
+- A user searches the web for information or media and uses approved results inside a tool or wallpaper.
+
+The goal is not for the AI to regenerate the entire application for every change.
+
+The goal is for the AI to make precise, persistent, safe, and understandable modifications to the user-editable portion of Coreside.
+
+---
+
+# Consumer-First Product Direction
+
+The current primary target is the individual consumer.
+
+Coreside should be useful for:
+
+- Personal productivity
+- Personal organization
+- Study and education
+- Creative tools
+- Personal dashboards
+- Small games
+- Trackers
+- Timers
+- Planning
+- Research
+- Visual tools
+- Personal workflows
+- Custom interfaces
+- Temporary utilities
+- Long-term personal software
+
+The consumer product should remain:
+
+- Easy to understand
+- Local-first where practical
+- Useful without an enterprise account
+- Provider-neutral
+- Friendly to bring-your-own-key users
+- Visually calm
+- Flexible without appearing technical
+- Capable without exposing internal complexity
+- Safe enough that the agent can modify the user environment without risking the protected core
+
+Do not prematurely turn the consumer application into an organization-management product.
+
+Enterprise infrastructure should be anticipated architecturally, but consumer development remains the current priority unless a task explicitly changes that priority.
+
+---
+
+# Long-Term Enterprise Vision
+
+Coreside may later become a company-managed internal software environment.
+
+The enterprise opportunity is not merely “an enterprise chatbot.”
+
+The long-term enterprise concept is:
+
+> Organizations can use Coreside to rapidly create, distribute, operate, and maintain internal tools that they do not currently have.
+
+Many organizations lack small but valuable software capabilities because:
+
+- Purchasing a full external service takes time.
+- Procurement and legal review are slow.
+- The required functionality is too narrow to justify a dedicated SaaS subscription.
+- Existing enterprise software does not fit the exact workflow.
+- Internal engineering teams prioritize larger projects.
+- Departments independently pay for overlapping tools.
+- Employees use spreadsheets and manual workflows while waiting for a formal solution.
+- The organization needs a temporary capability before adopting a permanent provider.
+
+Coreside can eventually allow an employee to request a capability such as:
+
+- AI-assisted outbound outreach
+- An internal approval tracker
+- A temporary recruiting dashboard
+- A project-specific data-entry tool
+- A department workflow
+- A custom reporting interface
+- A research assistant
+- An internal knowledge interface
+- A scheduling tool
+- A temporary replacement for unavailable software
+- A bridge while a more reliable provider is being procured
+
+A company-managed Coreside team could discuss the request, build or approve the capability, distribute it to the relevant employees, monitor its use, maintain it, and later replace or retire it.
+
+This allows an organization to operate more effectively instead of waiting for every software need to become a formal procurement project.
+
+Some Coreside-created tools may become permanent internal capabilities.
+
+Others may act as temporary placeholders until the organization adopts a mature external provider.
+
+Both uses are valid.
+
+## Future enterprise capabilities may include
+
+- Organization-managed Coreside deployments
+- Shared organization templates
+- Department-specific environments
+- Internal tool libraries
+- Approved capability packs
+- Centralized model gateways
+- Organization-provided model access
+- Bring-your-own-provider policies
+- Centralized search and research providers
+- Shared project contexts
+- Internal knowledge connectors
+- Role-based access control
+- Tool request and approval workflows
+- Tool review and certification
+- Organization-wide distribution
+- Department-level distribution
+- Version-controlled internal tools
+- Staged rollouts
+- Rollbacks
+- Usage analytics
+- Cost controls
+- Audit logs
+- Compliance policies
+- Data-retention controls
+- SSO and identity-provider integration
+- SCIM or directory synchronization
+- Private deployment
+- Enterprise key management
+- Internal APIs
+- Database connectors
+- CRM integrations
+- ERP integrations
+- Email integrations
+- Calendar integrations
+- Slack or Microsoft Teams integrations
+- Internal file-system and document integrations
+- Data-warehouse integrations
+- Ticketing and project-management integrations
+- Policy-controlled web access
+- Policy-controlled agent capabilities
+- Temporary tools with expiration dates
+- Tool ownership and maintenance assignment
+- Replacement tracking when a temporary tool is superseded by a formal provider
+
+## Enterprise architecture principle
+
+Consumer-created tools and future enterprise tools should use the same fundamental declarative surface, capability, versioning, validation, and operation architecture wherever practical.
+
+The enterprise version should add:
+
+- Governance
+- Distribution
+- Identity
+- Permissions
+- Compliance
+- Shared infrastructure
+- Administrative controls
+
+It should not require replacing the entire consumer runtime with an unrelated product.
+
+## Current enterprise non-goal
+
+Do not implement enterprise functionality merely because it is described in this context.
+
+Unless explicitly requested, do not add:
+
+- Organizations
+- Employee roles
+- Team billing
+- Enterprise authentication
+- Shared cloud workspaces
+- Central administration
+- Organization deployment
+- Corporate analytics
+- SSO
+- Public collaboration
+- Multiuser permissions
+
+The enterprise vision should influence clean boundaries and future extensibility, not distract from completing the current consumer application.
+
+---
+
+# Foundational Product Model
+
+Coreside consists of two major layers.
+
+## Protected Core
+
+The Protected Core is the immutable and trusted foundation required for the product to remain functional, recoverable, secure, and identifiable.
+
+It includes:
+
+- Product name
+- Coreside logos
+- Application icons
+- Dock icons
+- Brand mappings
+- Base Settings structure
+- Appearance controls
+- Accessibility controls
+- Data controls
+- Provider credential management
+- OS credential storage
+- Search-budget enforcement
+- Search-provider infrastructure
+- Crawl infrastructure
+- Database engine
+- Database migrations
+- Protected navigation
+- Recovery controls
+- Security boundaries
+- Validation infrastructure
+- Versioning infrastructure
+- Export security
+- Automation safety limits
+- Readability enforcement
+- Capability-pack trust registry
+- Protected agent instructions
+- Application update infrastructure
+
+The runtime agent must not be able to:
+
+- Delete the Protected Core
+- Rename protected resources
+- Replace protected resources
+- Hide security settings
+- Disable credential protections
+- Remove recovery controls
+- Modify logos or Dock icons
+- Disable validation
+- Increase protected resource limits
+- Bypass provider budgets
+- Disable readability enforcement
+- Grant generated surfaces arbitrary system access
+
+## User-Editable Layer
+
+The User-Editable Layer is where Coreside becomes personalized.
+
+It may include:
+
+- Personal tools
+- Inline surfaces
+- Personal Home
+- User dashboards
+- Workspace panels
+- Project panels
+- Added Settings
+- Template Settings
+- Wallpapers
+- Custom layouts
+- User sidebar shortcuts
+- Automations
+- Imported media
+- User-created capability configurations
+- Project-specific interfaces
+- Games
+- Trackers
+- Forms
+- Charts
+- Clocks
+- Calculators
+- Study tools
+- Research tools
+
+The AI may create and modify this layer through trusted, validated operations.
+
+The boundary between the Protected Core and User-Editable Layer must remain explicit in:
+
+- Types
+- Database records
+- Rust validation
+- Frontend validation
+- Agent prompts
+- Tests
+- Documentation
+
+Do not rely on visual separation alone.
+
+---
+
+# Technical Direction
+
+Coreside is a desktop application.
+
+The intended primary architecture is:
+
+- Tauri for the desktop shell
+- Rust for trusted native logic
+- React and TypeScript for the user interface
+- SQLite for local persistence
+- OS-secure credential storage for API keys and secrets
+- A local Python sidecar for Crawl4AI
+- Exa for indexed web discovery
+- Crawl4AI for selected-page crawling and extraction
+- Trusted declarative components for generated interfaces
+- Versioned operation protocols for agent-created changes
+
+Use the actual repository as the source of truth.
+
+This file describes product and architectural direction, but it does not prove that every described feature is already implemented.
+
+Before modifying a system:
+
+1. Inspect the actual implementation.
+2. Identify what exists.
+3. Identify what is incomplete.
+4. Identify current conventions.
+5. Preserve working systems.
+6. Avoid duplicating architecture.
+
+Do not create a second competing system because this context names an ideal architecture differently from the current code.
+
+Migrate deliberately when necessary.
+
+---
+
+# Rust Responsibilities
+
+Rust is the primary trusted boundary.
+
+Rust should own or enforce:
+
+- Secure credentials
+- Provider requests where appropriate
+- Exa search requests
+- Search budgets
+- Search usage accounting
+- Crawl4AI sidecar supervision
+- Database access
+- Migrations
+- Filesystem access
+- Native dialogs
+- Media validation
+- Media storage
+- Export writing
+- URL security
+- Protected-resource validation
+- Operation validation
+- Transaction application
+- Revision conflict checks
+- Automation scheduling
+- Automation limits
+- Native windows
+- Process lifecycle
+- Secret redaction
+- Recovery behavior
+
+Do not move sensitive enforcement into React merely because it is easier.
+
+Frontend validation improves user experience but is not a security boundary.
+
+---
+
+# TypeScript and React Responsibilities
+
+React and TypeScript should own:
+
+- Consumer interface
+- Chat experience
+- Projects interface
+- Tool rendering
+- Inline surface rendering
+- Settings interface
+- Added Settings
+- Template Settings
+- Wallpaper library
+- Media Library
+- Search-result presentation
+- Citation rendering
+- Previews
+- Approval flows
+- Context menus
+- Accessibility
+- Local interaction state
+- Optimistic UI where safe
+- Error boundaries
+- Visual feedback
+- Surface layouts
+- Semantic design tokens
+
+Avoid:
+
+- Giant components
+- Duplicate global stores
+- Storing secrets
+- Bypassing Rust commands
+- Treating frontend state as authoritative persistence
+- Raw model-generated HTML
+- Raw model-generated JavaScript
+- Raw model-generated CSS affecting the protected application
+
+---
+
+# AI Provider Architecture
+
+Coreside must remain provider-neutral.
+
+The application may support providers such as:
+
+- Google Gemini
+- OpenAI
+- Anthropic
+- OpenRouter
+- Compatible providers added through trusted adapters
+
+Do not make the product identity dependent on one model provider.
+
+The user should be able to:
+
+- Enter a provider key through a protected BYOK interface
+- Store the key securely through the operating system
+- Select an active provider
+- Select a model
+- Test the connection
+- Replace the key
+- Remove a provider
+- Retain `.env` support as a development fallback
+
+API keys must never be stored in:
+
+- SQLite
+- localStorage
+- Generated tools
+- Agent messages
+- Action Logs
+- Exports
+- Search caches
+- Diagnostics
+- Plaintext application settings
+
+Do not silently fall back from secure credential storage to plaintext.
+
+---
+
+# Agent Architecture
+
+The agent is not merely a text-completion endpoint.
+
+It should evolve into a bounded, capability-driven application agent.
+
+The trusted agent workflow should resemble:
+
+1. Understand the user’s request.
+2. Determine the active chat and project.
+3. Retrieve relevant local context.
+4. Resolve explicit `@` references.
+5. Determine whether external research is needed.
+6. Use trusted capabilities.
+7. Produce structured application operations.
+8. Validate those operations.
+9. Show previews or approvals when required.
+10. Apply accepted operations transactionally.
+11. Save versions and history.
+12. Return a grounded response.
+
+The agent must operate through typed capabilities.
+
+It must not receive unrestricted access to:
+
+- Shell commands
+- The filesystem
+- Tauri commands
+- Browser processes
+- API keys
+- Arbitrary JavaScript execution
+- Arbitrary package installation
+- Arbitrary network requests
+- Protected database tables
+- Protected Base Settings
+
+Agent work must be bounded through:
+
+- Maximum tool steps
+- Maximum retries
+- Maximum operation count
+- Maximum search requests
+- Maximum crawl pages
+- Maximum event depth
+- Maximum queued work
+- Timeouts
+- Cancellation
+- Cost controls
+- Validation
+
+---
+
+# Generative Interface Direction
+
+Coreside is inspired in part by the core product lesson of Partial Update:
+
+AI-generated interfaces should behave like persistent application state that can be updated in place, rather than disposable chat output.
+
+Coreside must adapt this safely.
+
+Do not copy Partial Update’s unrestricted execution model.
+
+Coreside should use:
+
+- Trusted declarative components
+- Stable surface IDs
+- Stable component IDs
+- Stable instance IDs
+- Fine-grained operations
+- Versioned schemas
+- Revisions
+- Conflict detection
+- Transactions
+- Validation
+- Rollback
+- State preservation
+- Capability packs
+- Protected renderers
+
+Coreside should never render arbitrary model-generated application code directly inside the protected webview.
+
+Do not permit:
+
+- Arbitrary script tags
+- Arbitrary JavaScript
+- Arbitrary global CSS
+- Runtime CDN injection
+- Arbitrary iframe permissions
+- Arbitrary network requests
+- Arbitrary Tauri access
+- Unbounded animation loops
+
+The preferred long-term model is:
+
+Conversation
+→ structured intent
+→ trusted operations
+→ validated user-editable surfaces
+→ persistence
+→ future precise modifications
+
+---
+
+# Surfaces and Tools
+
+A surface is a persistent generated interface that can appear in different locations.
+
+Possible placements include:
+
+- Inline in chat
+- Tool Canvas
+- Workspace panel
+- Project panel
+- Personal Home
+- Secondary window
+
+A Personal Tool is a persistent user-facing surface promoted into the Tools area.
+
+Surfaces should support:
+
+- Stable IDs
+- Stable instance IDs
+- State
+- Revisions
+- Version history
+- Fine-grained updates
+- Collapse and expand
+- Promotion
+- Duplication
+- Export
+- Archiving
+- Restoration
+- Branching
+- Replay
+- Error boundaries
+- Accessibility
+
+Creating two tools with similar names must not cause one to overwrite the other.
+
+Renaming a tool must not change its stable identity.
+
+Small changes should use small operations instead of replacing an entire surface whenever supported.
+
+---
+
+# Capability Packs
+
+Coreside should grow through trusted capability packs rather than unrestricted external libraries.
+
+A capability pack may provide:
+
+- Component types
+- Actions
+- Events
+- Schemas
+- Renderers
+- Migrations
+- Resource limits
+- Agent-facing descriptions
+
+Potential trusted capabilities include:
+
+- Forms
+- SVG
+- Charts
+- Math
+- Code editing
+- Canvas
+- Audio
+- Rich data tables
+- Timers
+- Media galleries
+- Drawing
+- Safe animation presets
+
+Capability packs must be:
+
+- Bundled or explicitly trusted
+- Versioned
+- Validated
+- Permission-bounded
+- Disableable
+- Migratable
+- Testable
+
+The runtime agent must not install arbitrary packages or load arbitrary libraries from a CDN.
+
+---
+
+# Projects and Context
+
+Projects organize related chats and context.
+
+Examples:
+
+- Biology
+- Personal Finance
+- Coreside Development
+- College Planning
+- Fitness
+- Creative Writing
+
+A project may include:
+
+- Chats
+- Project instructions
+- Project summaries
+- Relevant tools
+- Relevant media
+- Relevant automations
+- Project panels
+- Project wallpaper assignments
+
+The agent should have access to relevant context across the active project.
+
+This does not mean sending every project message to the model on every turn.
+
+Use:
+
+- Project instructions
+- Current chat context
+- Chat summaries
+- Project summaries
+- Local full-text retrieval
+- Explicit references
+- Relevant tool context
+- Bounded retrieved snippets
+
+Project isolation is mandatory.
+
+A chat in Project A must not automatically receive data from Project B.
+
+Enforce isolation in trusted database and Rust queries, not only in the frontend.
+
+---
+
+# Chat Navigation and Organization
+
+Chats should be persistent and directly navigable from any primary application page.
+
+Clicking a different chat should:
+
+- Open the requested chat
+- Restore its project context
+- Restore its draft where practical
+- Restore its scroll position where practical
+- Update sidebar selection
+- Avoid showing stale content from the previous chat
+
+Clicking the chat that is already open should be a no-op.
+
+It must not:
+
+- Remount the chat
+- Clear the draft
+- Reset scroll
+- Restart generation
+- Close active panels
+- Add duplicate route history
+- Flash the interface
+
+Projects and chats should have accessible context menus and visible overflow-menu equivalents.
+
+---
+
+# Web Search and Research
+
+Coreside’s web research architecture uses Exa and Crawl4AI together.
+
+## Exa
+
+Exa is the indexed discovery and ranking layer.
+
+It should be used for:
+
+- Finding relevant URLs
+- Current information
+- External source discovery
+- Image-source discovery
+- Video-source discovery
+- Domain and date filtering
+- Compact highlights
+- Source ranking
+
+## Crawl4AI
+
+Crawl4AI is the local selected-page inspection layer.
+
+It should be used for:
+
+- Direct user-provided URLs
+- Deep extraction from selected Exa results
+- Cleaned page content
+- Dynamic-page rendering where required
+- Link extraction
+- Image extraction
+- Video-reference extraction
+- Site-local discovery
+- Bounded crawling
+
+## Preferred research sequence
+
+Local project context
+→ cached sources
+→ cached search results
+→ one efficient Exa search when needed
+→ select strong sources
+→ Crawl4AI only for sources requiring deeper inspection
+→ grounded response with citations
+
+Do not:
+
+- Search on every message
+- Use Exa when a direct URL is already available
+- Crawl every Exa result
+- Repeat nearly identical searches
+- Use expensive search modes by default
+- Pretend a search occurred
+- Fabricate citations
+
+Search should be optimized to preserve monthly limits through:
+
+- Necessity classification
+- Query deduplication
+- Cache reuse
+- In-flight request coalescing
+- Follow-up source reuse
+- Small default result counts
+- Bounded refinements
+- Search profiles
+- Usage accounting
+- Local monthly budgets
+- Crawl4AI handoff
+
+---
+
+# Media Library
+
+External media should become persistent Coreside content only after approval and validation.
+
+The Media Library may contain:
+
+- Images
+- Animated images
+- Videos
+- Audio
+- Generated patterns
+- Wallpaper media
+- Tool assets
+
+Imported media must be validated for:
+
+- MIME type
+- File signature
+- File size
+- Dimensions
+- Duration
+- Duplicate hashes
+- Safe filename
+- Path traversal
+- Executable content
+- HTML disguised as media
+
+Media metadata should preserve:
+
+- Source page
+- Original URL where appropriate
+- Creator where known
+- License where known
+- Attribution where known
+- Import date
+- Project association
+- Usage dependencies
+
+Do not claim that media is free to use when license information is unavailable.
+
+---
+
+# Wallpapers and Readability
+
+Wallpapers belong under:
+
+Added Settings
+→ Templates
+→ Wallpapers
+
+They do not belong in protected Base Settings.
+
+User-facing terminology is:
+
+- Wallpaper
+- Wallpapers
+
+Moving wallpapers display a:
+
+Live
+
+badge.
+
+Wallpaper types may include:
+
+- None
+- Solid color
+- Gradient
+- Image
+- Animated image
+- Muted looping video
+- Slideshow
+- Trusted ambient animation
+- Trusted particle preset
+- Trusted geometric preset
+
+Users should be able to:
+
+- Search wallpapers
+- Preview wallpapers
+- Apply wallpapers
+- Create wallpapers
+- Duplicate wallpapers
+- Hide built-in wallpapers
+- Delete custom wallpapers
+- Restore hidden built-ins
+
+Built-in renderer infrastructure remains protected.
+
+The active wallpaper must have one authoritative source of truth.
+
+Selection, focus, hover, and preview are distinct states.
+
+## Readability is non-negotiable
+
+No wallpaper, theme, color, image, animation, or video may make the protected Coreside interface unreadable.
+
+Core UI must use protected semantic tokens and adaptive surfaces.
+
+The readability system should evaluate:
+
+- Colors
+- Gradients
+- Images
+- Video poster frames
+- Background variance
+- Foreground contrast
+- Surface opacity
+- Border contrast
+- Focus indicators
+- Button labels
+- Selected states
+
+When necessary, Coreside should automatically increase:
+
+- Overlay strength
+- Surface opacity
+- Border visibility
+- Foreground contrast
+
+The agent must not be able to disable readability enforcement.
+
+Protected logos must not be recolored by user themes.
+
+---
+
+# Automations
+
+Users may create safe recurring automations.
+
+Examples:
+
+- Rotate backgrounds every five hours
+- Reset a tracker daily
+- Clear completed tasks weekly
+- Run a checklist every morning
+- Change a tool setting at a scheduled time
+
+Prefer deterministic automations.
+
+Use AI-backed automations only when the result genuinely requires model generation.
+
+AI-backed automations must disclose:
+
+- Provider use
+- Model use
+- API-credit use
+- Frequency
+- Requirement that Coreside is running
+
+Automations must be:
+
+- Persisted
+- Bounded
+- Cancelable
+- Pauseable
+- Editable
+- Deletable
+- Protected against duplicate concurrent runs
+- Protected against catch-up storms
+- Protected against repeated failure loops
+
+The scheduler belongs in trusted Rust infrastructure.
+
+Do not allow arbitrary shell, Python, or JavaScript automations.
+
+---
+
+# Action Log
+
+Action Log is a protected Base Setting.
+
+Default:
+
+Off
+
+When disabled:
+
+- Do not display optional action events.
+- Do not persist optional action events.
+
+When enabled, it may show sanitized events such as:
+
+- Loaded project context
+- Resolved a tool reference
+- Searched the web
+- Selected sources
+- Validated a change
+- Created a preview
+- Saved a version
+- Created an automation
+- Exported a tool
+
+The Action Log is not model chain-of-thought.
+
+Never expose:
+
+- Hidden reasoning
+- System prompts
+- Developer prompts
+- API keys
+- Authorization headers
+- Raw provider payloads
+- Protected security details
+- Private database queries
+
+---
+
+# Persistence and Versioning
+
+The defining value of Coreside depends on persistence.
+
+A generated feature is not complete if it disappears after restart.
+
+Persist where appropriate:
+
+- Chats
+- Projects
+- Project membership
+- Project instructions
+- Summaries
+- Tools
+- Surfaces
+- Surface state
+- Component definitions
+- Added Settings
+- Wallpapers
+- Automations
+- Media
+- Branches
+- Snapshots
+- Versions
+- Application transactions
+- Citations
+- Approved layouts
+
+Use automatic database migrations.
+
+Existing user data must survive upgrades.
+
+Persistent application changes should be versioned and undoable where practical.
+
+Cross-surface changes should use transaction-level history so one undo can restore all resources changed by one approved agent action.
+
+---
+
+# Security Principles
+
+Coreside must be secure by default.
+
+Never trade protected-core security for generative flexibility.
+
+Requirements include:
+
+- Secrets remain in OS-secure storage.
+- Search keys never enter Crawl4AI.
+- Generated surfaces cannot access secrets.
+- Generated surfaces cannot access Tauri commands.
+- Generated surfaces cannot access arbitrary files.
+- Generated surfaces cannot execute shell commands.
+- Generated surfaces cannot install packages.
+- Generated surfaces cannot make unrestricted network requests.
+- Every application operation is schema validated.
+- Protected-resource checks occur in Rust.
+- Revisions prevent stale overwrites.
+- Event loops are detected.
+- Agent submissions are rate limited.
+- Search and provider spending are bounded.
+- Imported media is validated.
+- URLs are validated.
+- Private-network crawling is blocked.
+- Diagnostics are redacted.
+- Project and branch boundaries are enforced.
+
+When evaluating a feature inspired by another system, separate:
+
+1. The user value.
+2. The unsafe implementation.
+3. The safe Coreside adaptation.
+
+Do not reject useful concepts merely because the original implementation is unsafe.
+
+Do not copy unsafe behavior merely because it is powerful.
+
+---
+
+# Design Language
+
+Coreside should feel:
+
+- Calm
+- Personal
+- Modern
+- Smooth
+- Slightly premium
+- Approachable
+- Capable
+- Restrained
+
+Avoid:
+
+- Blue-purple AI gradients
+- Excessive glassmorphism
+- Enterprise-dashboard aesthetics
+- IDE-like density
+- Excessive nested cards
+- Random animation
+- Emoji-based navigation
+- Harsh borders
+- Sharp, aggressive shapes
+- Overly technical setup language
+- Giant status cards
+- Inconsistent selection states
+
+Use:
+
+- Neutral light and dark surfaces
+- System appearance support
+- Green and warm accent directions where consistent with the current design system
+- Smooth rounded geometry
+- Clear spacing
+- Accessible contrast
+- Visible focus states
+- Consistent icons
+- Compact settings
+- Responsive layouts
+- Reduced-motion support
+
+Follow the current implemented design tokens unless a task explicitly requests redesign.
+
+---
+
+# Development Principles
+
+## Inspect before modifying
+
+Never assume a planned feature exists.
+
+Never assume a documented feature works.
+
+Inspect:
+
+- Code
+- State
+- Database
+- Runtime behavior
+- Tests
+- Current visual result
+
+## Preserve working systems
+
+Do not rebuild Coreside from scratch.
+
+Do not remove a working system merely because another architecture appears cleaner.
+
+Make migrations deliberate.
+
+Maintain backward compatibility where practical.
+
+## Fix root causes
+
+Do not hide state bugs with cosmetic CSS.
+
+Do not add arbitrary delays to hide race conditions.
+
+Do not duplicate stores to avoid understanding existing state.
+
+Do not add mock UI for unimplemented behavior.
+
+## Use the smallest safe architecture
+
+Avoid unnecessary abstraction.
+
+Avoid new dependencies when existing or native solutions are sufficient.
+
+Do not sacrifice required behavior for architectural elegance.
+
+## Plan, build, review, reiterate
+
+For substantial changes:
+
+1. Inspect the repository.
+2. Write or update the implementation plan.
+3. Identify affected systems.
+4. Implement one coherent phase.
+5. Run checks.
+6. Launch the actual application.
+7. Test manually.
+8. Use the code-reviewer-editor subagent to review and edit current code changes.
+9. Fix findings.
+10. Repeat until stable.
+
+## Test real behavior
+
+A feature is not complete because:
+
+- A component exists
+- A function compiles
+- A migration runs
+- A button renders
+- A mock test passes
+
+Test:
+
+- Actual interaction
+- Persistence
+- Restart
+- Failure states
+- Cancellation
+- Accessibility
+- Security
+- Existing-data compatibility
+- Light mode
+- Dark mode
+- Narrow layouts where relevant
+
+---
+
+# Current Priority Order
+
+Unless an explicit task changes priorities, prefer work in this order:
+
+1. Stable consumer chat and provider behavior
+2. Protected-core safety
+3. Persistent user-created tools and surfaces
+4. Precise agent editing and state preservation
+5. Projects and project context
+6. Search and research quality
+7. Media and wallpapers
+8. Automations
+9. Layout personalization
+10. Branching, replay, and deeper generative-interface capabilities
+11. Packaging and performance
+12. Future collaboration and enterprise infrastructure
+
+Do not let distant enterprise features prevent completion of the consumer foundation.
+
+At the same time, avoid designs that make future organization management, tool distribution, permissions, and internal integrations impossible without replacing the entire runtime.
+
+---
+
+# Final Product Goal
+
+The long-term goal is for Coreside to become a personal software environment that grows through conversation.
+
+For consumers, it should make custom software feel as accessible as asking a question.
+
+For organizations, it may eventually become an internal software layer that allows teams to create, distribute, maintain, govern, and retire useful capabilities faster than traditional procurement or development cycles permit.
+
+The enduring product principle is:
+
+> Coreside should let users turn needs into persistent software inside the environment where those needs are expressed, while preserving a protected, reliable, and recoverable core.

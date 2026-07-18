@@ -1,9 +1,9 @@
 ---
 alwaysApply: true
-description: PreBase development workflow
+description: Coreside development workflow
 ---
 
-You are working on the PreBase desktop application.
+You are working on the Coreside desktop application.
 
 Do not begin implementation until the relevant files have been inspected.
 Before making code changes:
