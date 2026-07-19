@@ -1,0 +1,152 @@
+{
+  "access_date": "2026-07-18",
+  "root": "/Users/qunyingfan/Coreside/.reference/partial-update/partialupdate-main",
+  "count": 29,
+  "files": [
+    {
+      "path": ".env.example",
+      "bytes": 1079,
+      "ext": ".example"
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 2097,
+      "ext": ""
+    },
+    {
+      "path": ".secrets.example",
+      "bytes": 315,
+      "ext": ".example"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1068,
+      "ext": ""
+    },
+    {
+      "path": "README.md",
+      "bytes": 6033,
+      "ext": ".md"
+    },
+    {
+      "path": "migrations/0001_better_auth.sql",
+      "bytes": 1730,
+      "ext": ".sql"
+    },
+    {
+      "path": "migrations/0002_user_roles.sql",
+      "bytes": 170,
+      "ext": ".sql"
+    },
+    {
+      "path": "package-lock.json",
+      "bytes": 58122,
+      "ext": ".json"
+    },
+    {
+      "path": "package.json",
+      "bytes": 1289,
+      "ext": ".json"
+    },
+    {
+      "path": "public/index.html",
+      "bytes": 530,
+      "ext": ".html"
+    },
+    {
+      "path": "scripts/dev-secure.sh",
+      "bytes": 1300,
+      "ext": ".sh"
+    },
+    {
+      "path": "spec.md",
+      "bytes": 2321,
+      "ext": ".md"
+    },
+    {
+      "path": "src/app.css",
+      "bytes": 5771,
+      "ext": ".css"
+    },
+    {
+      "path": "src/app.html",
+      "bytes": 1358,
+      "ext": ".html"
+    },
+    {
+      "path": "src/auth/email.ts",
+      "bytes": 1452,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/auth/profile.ts",
+      "bytes": 877,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/auth/providers.ts",
+      "bytes": 1722,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/auth/roles.ts",
+      "bytes": 4029,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/auth/routes.ts",
+      "bytes": 30631,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/auth/server.ts",
+      "bytes": 3425,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/debug.ts",
+      "bytes": 12868,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/env.ts",
+      "bytes": 1191,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/getPrompt.ts",
+      "bytes": 354,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/index.ts",
+      "bytes": 100960,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/initialPrompt.md",
+      "bytes": 10508,
+      "ext": ".md"
+    },
+    {
+      "path": "src/page.css",
+      "bytes": 2151,
+      "ext": ".css"
+    },
+    {
+      "path": "tsconfig.json",
+      "bytes": 414,
+      "ext": ".json"
+    },
+    {
+      "path": "worker-configuration.d.ts",
+      "bytes": 514500,
+      "ext": ".ts"
+    },
+    {
+      "path": "wrangler.jsonc",
+      "bytes": 4258,
+      "ext": ".jsonc"
+    }
+  ]
+}

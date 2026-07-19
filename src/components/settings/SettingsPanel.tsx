@@ -5,6 +5,7 @@ import dockLightUrl from "@/assets/branding/coreside-dock-light.png";
 import { CoresideLogo } from "@/components/branding/CoresideLogo";
 import { AgentBehaviorSettings } from "@/components/settings/AgentBehaviorSettings";
 import { AiProviderSettings } from "@/components/settings/AiProviderSettings";
+import { RecoverySettings } from "@/components/settings/RecoverySettings";
 import { WallpaperSettings } from "@/components/settings/WallpaperSettings";
 import { api } from "@/lib/tauri";
 import type { DockIconPreference, ThemePreference } from "@/types/agent";
@@ -250,6 +251,8 @@ export function SettingsPanel() {
               <code>prefers-reduced-motion</code> — it is not overridden here.
             </p>
           </section>
+
+          <RecoverySettings />
 
           <section className="settings-section" aria-labelledby="about-heading">
             <h3 id="about-heading">About</h3>

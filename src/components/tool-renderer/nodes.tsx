@@ -75,7 +75,7 @@ export function CardNode({ component, renderChild }: ToolNodeProps) {
 }
 
 export function TabsNode({ component, renderChild }: ToolNodeProps) {
-  const { getValue, setValue } = useToolRuntime();
+  const { getValue, setValueOptimistic } = useToolRuntime();
   const tabs = Array.isArray(component.props?.tabs)
     ? (component.props?.tabs as Array<{ id: string; label: string }>)
     : (component.children ?? []).map((child) => ({
@@ -99,7 +99,7 @@ export function TabsNode({ component, renderChild }: ToolNodeProps) {
             className="btn btn-secondary"
             role="tab"
             aria-selected={active === tab.id}
-            onClick={() => setValue(valueKey, tab.id)}
+            onClick={() => setValueOptimistic(valueKey, tab.id)}
           >
             {tab.label}
           </button>
@@ -281,7 +281,7 @@ export function SelectNode({ component }: ToolNodeProps) {
 }
 
 export function CheckboxNode({ component }: ToolNodeProps) {
-  const { getValue, setValue } = useToolRuntime();
+  const { getValue, setValueOptimistic } = useToolRuntime();
   const key = component.valueKey ?? component.id;
   const label = asString(component.props?.label, "Checkbox");
   return (
@@ -289,7 +289,7 @@ export function CheckboxNode({ component }: ToolNodeProps) {
       <input
         type="checkbox"
         checked={asBoolean(getValue(key, component.props?.defaultValue ?? false))}
-        onChange={(e) => setValue(key, e.target.checked)}
+        onChange={(e) => setValueOptimistic(key, e.target.checked)}
       />
       <span>{label}</span>
     </label>
@@ -749,10 +749,504 @@ export function QuizNode({ component }: ToolNodeProps) {
   );
 }
 
+/** Runtime V2 — rich form + capability-pack nodes (trusted, no CDN). */
+
+export function FormNode({ component, renderChild }: ToolNodeProps) {
+  const { runActions } = useToolRuntime();
+  const reusable = asBoolean(component.props?.reusable, true);
+  const [submitted, setSubmitted] = useState(false);
+  if (!reusable && submitted) {
+    return (
+      <div className="tr-form tr-form-done" data-component-id={component.id}>
+        <p className="muted">Submitted</p>
+      </div>
+    );
+  }
+  return (
+    <form
+      className="tr-form"
+      data-component-id={component.id}
+      onSubmit={(e) => {
+        e.preventDefault();
+        const actions = (component.actions ?? []) as ActionDefinition[];
+        runActions(actions);
+        if (!reusable) setSubmitted(true);
+      }}
+    >
+      {component.children?.map((child) => (
+        <div key={child.id}>{renderChild(child)}</div>
+      ))}
+    </form>
+  );
+}
+
+export function FieldGroupNode({ component, renderChild }: ToolNodeProps) {
+  const legend = asString(component.props?.label, asString(component.props?.legend));
+  return (
+    <fieldset className="tr-field-group" data-component-id={component.id}>
+      {legend ? <legend>{legend}</legend> : null}
+      {component.children?.map((child) => (
+        <div key={child.id}>{renderChild(child)}</div>
+      ))}
+    </fieldset>
+  );
+}
+
+export function RadioGroupNode({ component }: ToolNodeProps) {
+  const { getValue, setValue } = useToolRuntime();
+  const key = stateKeyFor(component, "valueKey");
+  const options = Array.isArray(component.props?.options)
+    ? (component.props?.options as Array<{ value: string; label: string }>)
+    : [];
+  const value = asString(getValue(key), asString(component.props?.defaultValue));
+  return (
+    <div className="tr-radio-group" role="radiogroup" aria-label={asString(component.props?.label, key)} data-component-id={component.id}>
+      {options.map((opt) => (
+        <label key={opt.value} className="tr-radio">
+          <input
+            type="radio"
+            name={key}
+            value={opt.value}
+            checked={value === opt.value}
+            onChange={() => setValue(key, opt.value)}
+          />
+          {opt.label}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+export function SliderNode({ component }: ToolNodeProps) {
+  const { getValue, setValue } = useToolRuntime();
+  const key = stateKeyFor(component, "valueKey");
+  const min = asNumber(component.props?.min, 0);
+  const max = asNumber(component.props?.max, 100);
+  const step = asNumber(component.props?.step, 1);
+  const value = asNumber(getValue(key), asNumber(component.props?.defaultValue, min));
+  return (
+    <label className="tr-slider" data-component-id={component.id}>
+      <span>{asString(component.props?.label, key)}: {value}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={value}
+        onChange={(e) => setValue(key, Number(e.target.value))}
+      />
+    </label>
+  );
+}
+
+export function SwitchNode({ component }: ToolNodeProps) {
+  const { getValue, setValueOptimistic } = useToolRuntime();
+  const key = stateKeyFor(component, "valueKey");
+  const on = asBoolean(getValue(key), asBoolean(component.props?.defaultValue));
+  return (
+    <label className="tr-switch" data-component-id={component.id}>
+      <input
+        type="checkbox"
+        role="switch"
+        checked={on}
+        onChange={() => setValueOptimistic(key, !on)}
+      />
+      {asString(component.props?.label, key)}
+    </label>
+  );
+}
+
+export function ColorInputNode({ component }: ToolNodeProps) {
+  const { getValue, setValue } = useToolRuntime();
+  const key = stateKeyFor(component, "valueKey");
+  const value = asString(getValue(key), asString(component.props?.defaultValue, "#2f8f63"));
+  return (
+    <label className="tr-color" data-component-id={component.id}>
+      {asString(component.props?.label, "Color")}
+      <input type="color" value={value} onChange={(e) => setValue(key, e.target.value)} />
+    </label>
+  );
+}
+
+export function TimeInputNode({ component }: ToolNodeProps) {
+  const { getValue, setValue } = useToolRuntime();
+  const key = stateKeyFor(component, "valueKey");
+  const value = asString(getValue(key), asString(component.props?.defaultValue, ""));
+  return (
+    <label className="tr-time" data-component-id={component.id}>
+      {asString(component.props?.label, "Time")}
+      <input type="time" value={value} onChange={(e) => setValue(key, e.target.value)} />
+    </label>
+  );
+}
+
+export function DateTimeInputNode({ component }: ToolNodeProps) {
+  const { getValue, setValue } = useToolRuntime();
+  const key = stateKeyFor(component, "valueKey");
+  const value = asString(getValue(key), asString(component.props?.defaultValue, ""));
+  return (
+    <label className="tr-datetime" data-component-id={component.id}>
+      {asString(component.props?.label, "Date & time")}
+      <input type="datetime-local" value={value} onChange={(e) => setValue(key, e.target.value)} />
+    </label>
+  );
+}
+
+export function SubmitButtonNode({ component }: ToolNodeProps) {
+  return (
+    <button type="submit" className="btn btn-primary" data-component-id={component.id}>
+      {asString(component.props?.label, "Submit")}
+    </button>
+  );
+}
+
+export function ResetButtonNode({ component }: ToolNodeProps) {
+  return (
+    <button type="reset" className="btn btn-secondary" data-component-id={component.id}>
+      {asString(component.props?.label, "Reset")}
+    </button>
+  );
+}
+
+export function ValidationMessageNode({ component }: ToolNodeProps) {
+  const message = asString(component.props?.message);
+  if (!message) return null;
+  return (
+    <p className="tr-validation" role="alert" data-component-id={component.id}>
+      {message}
+    </p>
+  );
+}
+
+export function FilePickerNode({ component }: ToolNodeProps) {
+  return (
+    <p className="muted tr-file-picker" data-component-id={component.id}>
+      File picker is limited to Media Library imports — use mediaPicker or import via chat.
+      {asString(component.props?.label) ? ` (${asString(component.props?.label)})` : ""}
+    </p>
+  );
+}
+
+export function MediaPickerNode({ component }: ToolNodeProps) {
+  const { getValue, setValue } = useToolRuntime();
+  const key = stateKeyFor(component, "valueKey");
+  const value = asString(getValue(key));
+  return (
+    <label className="tr-media-picker" data-component-id={component.id}>
+      {asString(component.props?.label, "Media asset id")}
+      <input
+        type="text"
+        value={value}
+        placeholder="media-…"
+        onChange={(e) => setValue(key, e.target.value)}
+      />
+    </label>
+  );
+}
+
+export function SvgSceneNode({ component, renderChild }: ToolNodeProps) {
+  const width = asNumber(component.props?.width, 320);
+  const height = asNumber(component.props?.height, 240);
+  const viewBox = asString(component.props?.viewBox, `0 0 ${width} ${height}`);
+  return (
+    <svg
+      className="tr-svg-scene"
+      width={width}
+      height={height}
+      viewBox={viewBox}
+      role="img"
+      aria-label={asString(component.props?.ariaLabel, asString(component.props?.title, "SVG diagram"))}
+      data-component-id={component.id}
+    >
+      {component.children?.map((child) => (
+        <g key={child.id}>{renderChild(child)}</g>
+      ))}
+    </svg>
+  );
+}
+
+const SAFE_SVG_ATTRS = new Set([
+  "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "width", "height",
+  "d", "points", "fill", "stroke", "strokeWidth", "stroke-width", "opacity",
+  "fillOpacity", "strokeOpacity", "transform", "viewBox", "preserveAspectRatio",
+  "fontSize", "font-size", "textAnchor", "text-anchor", "dominantBaseline",
+  "clipPath", "clip-path", "offset", "stopColor", "stop-color", "stopOpacity",
+]);
+
+function svgProps(component: ToolComponent): Record<string, string | number> {
+  const out: Record<string, string | number> = {};
+  const props = component.props ?? {};
+  for (const [k, v] of Object.entries(props)) {
+    if (k.startsWith("on") || k === "dangerouslySetInnerHTML") continue;
+    if (k === "href" || k === "xlinkHref" || k === "xlink:href") continue;
+    if (!SAFE_SVG_ATTRS.has(k)) continue;
+    if (typeof v === "string") {
+      const lower = v.trim().toLowerCase();
+      if (lower.startsWith("javascript:") || lower.startsWith("data:text/html")) continue;
+      out[k] = v;
+    } else if (typeof v === "number" && Number.isFinite(v)) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+export function SvgRectNode({ component }: ToolNodeProps) {
+  return <rect data-component-id={component.id} {...svgProps(component)} />;
+}
+export function SvgCircleNode({ component }: ToolNodeProps) {
+  return <circle data-component-id={component.id} {...svgProps(component)} />;
+}
+export function SvgEllipseNode({ component }: ToolNodeProps) {
+  return <ellipse data-component-id={component.id} {...svgProps(component)} />;
+}
+export function SvgLineNode({ component }: ToolNodeProps) {
+  return <line data-component-id={component.id} {...svgProps(component)} />;
+}
+export function SvgPathNode({ component }: ToolNodeProps) {
+  return <path data-component-id={component.id} {...svgProps(component)} />;
+}
+export function SvgTextNode({ component }: ToolNodeProps) {
+  return (
+    <text data-component-id={component.id} {...svgProps(component)}>
+      {asString(component.props?.text)}
+    </text>
+  );
+}
+export function SvgGroupNode({ component, renderChild }: ToolNodeProps) {
+  return (
+    <g data-component-id={component.id} {...svgProps(component)}>
+      {component.children?.map((child) => (
+        <g key={child.id}>{renderChild(child)}</g>
+      ))}
+    </g>
+  );
+}
+
+function ChartNode({ component, kind }: { component: ToolComponent; kind: string }) {
+  const data = Array.isArray(component.props?.data)
+    ? (component.props?.data as Array<{ label?: string; value: number; x?: number; y?: number }>)
+    : [];
+  const bounded = data.slice(0, 2000);
+  const max = Math.max(1, ...bounded.map((d) => Math.abs(Number(d.value) || 0)));
+  return (
+    <figure className="tr-chart" data-component-id={component.id} data-chart={kind}>
+      <figcaption className="tr-heading">{asString(component.props?.title, kind)}</figcaption>
+      <div className="tr-chart-bars" role="img" aria-label={asString(component.props?.ariaLabel, "Chart")}>
+        {bounded.map((d, i) => {
+          const v = Number(d.value) || 0;
+          const h = Math.round((Math.abs(v) / max) * 100);
+          return (
+            <div key={i} className="tr-chart-bar-wrap" title={`${d.label ?? i}: ${v}`}>
+              <div className="tr-chart-bar" style={{ height: `${h}%` }} />
+              <span className="muted">{d.label ?? String(i)}</span>
+            </div>
+          );
+        })}
+      </div>
+      <table className="tr-chart-a11y">
+        <caption>Accessible data</caption>
+        <thead>
+          <tr>
+            <th scope="col">Label</th>
+            <th scope="col">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bounded.map((d, i) => (
+            <tr key={i}>
+              <td>{d.label ?? i}</td>
+              <td>{d.value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </figure>
+  );
+}
+
+export function ChartLineNode({ component }: ToolNodeProps) {
+  return <ChartNode component={component} kind="line" />;
+}
+export function ChartBarNode({ component }: ToolNodeProps) {
+  return <ChartNode component={component} kind="bar" />;
+}
+export function ChartPieNode({ component }: ToolNodeProps) {
+  return <ChartNode component={component} kind="pie" />;
+}
+export function ChartDonutNode({ component }: ToolNodeProps) {
+  return <ChartNode component={component} kind="donut" />;
+}
+export function ChartAreaNode({ component }: ToolNodeProps) {
+  return <ChartNode component={component} kind="area" />;
+}
+export function ChartScatterNode({ component }: ToolNodeProps) {
+  return <ChartNode component={component} kind="scatter" />;
+}
+
+export function CodeEditorNode({ component }: ToolNodeProps) {
+  const { getValue, setValue, runActions } = useToolRuntime();
+  const key = stateKeyFor(component, "valueKey");
+  const value = asString(getValue(key), asString(component.props?.value, asString(component.props?.defaultValue)));
+  const readOnly = asBoolean(component.props?.readOnly);
+  const language = asString(component.props?.language, "text");
+  return (
+    <div className="tr-code-editor" data-component-id={component.id}>
+      <div className="muted">Code editor ({language}) — does not execute code</div>
+      <textarea
+        className="tr-code-area"
+        value={value}
+        readOnly={readOnly}
+        spellCheck={false}
+        aria-label={asString(component.props?.ariaLabel, "Code editor")}
+        rows={asNumber(component.props?.rows, 12)}
+        onChange={(e) => setValue(key, e.target.value.slice(0, 200_000))}
+      />
+      {component.actions?.length ? (
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => runActions(component.actions as ActionDefinition[])}
+        >
+          {asString(component.props?.submitLabel, "Submit to agent")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function MathInlineNode({ component }: ToolNodeProps) {
+  const expr = asString(component.props?.expression, asString(component.props?.tex));
+  return (
+    <span className="tr-math-inline" data-component-id={component.id} aria-label={asString(component.props?.ariaLabel, expr)}>
+      <code>{expr}</code>
+    </span>
+  );
+}
+
+export function MathBlockNode({ component }: ToolNodeProps) {
+  const expr = asString(component.props?.expression, asString(component.props?.tex));
+  return (
+    <div className="tr-math-block" data-component-id={component.id} role="math" aria-label={asString(component.props?.ariaLabel, expr)}>
+      <pre><code>{expr}</code></pre>
+    </div>
+  );
+}
+
+export function CanvasSceneNode({ component }: ToolNodeProps) {
+  const objects = Array.isArray(component.props?.objects)
+    ? (component.props?.objects as Array<Record<string, unknown>>).slice(0, 200)
+    : [];
+  const width = asNumber(component.props?.width, 320);
+  const height = asNumber(component.props?.height, 240);
+  return (
+    <div
+      className="tr-canvas-scene"
+      data-component-id={component.id}
+      style={{ width, height, position: "relative", border: "1px solid var(--border)" }}
+      role="img"
+      aria-label={asString(component.props?.ariaLabel, "Canvas scene")}
+    >
+      {objects.map((obj, i) => {
+        const type = asString(obj.type, "rect");
+        const style: CSSProperties = {
+          position: "absolute",
+          left: asNumber(obj.x),
+          top: asNumber(obj.y),
+          width: asNumber(obj.width, 40),
+          height: asNumber(obj.height, 40),
+          background: asString(obj.fill, "var(--accent-primary)"),
+          borderRadius: type === "circle" ? "50%" : undefined,
+        };
+        return <div key={i} style={style} title={asString(obj.label)} />;
+      })}
+    </div>
+  );
+}
+
+export function AudioPlayerNode({ component }: ToolNodeProps) {
+  const src = asString(component.props?.src);
+  if (!src.startsWith("asset:") && !src.startsWith("blob:") && !src.startsWith("/")) {
+    return (
+      <p className="muted" data-component-id={component.id}>
+        Audio requires a local Media Library source.
+      </p>
+    );
+  }
+  return (
+    <audio
+      className="tr-audio"
+      data-component-id={component.id}
+      controls
+      preload="metadata"
+      src={src}
+      aria-label={asString(component.props?.ariaLabel, "Audio player")}
+    />
+  );
+}
+
+export function DataTableNode({ component }: ToolNodeProps) {
+  const columns = Array.isArray(component.props?.columns)
+    ? (component.props?.columns as Array<{ id: string; label: string }>)
+    : [];
+  const rows = Array.isArray(component.props?.rows)
+    ? (component.props?.rows as Array<Record<string, unknown>>).slice(0, 500)
+    : [];
+  return (
+    <div className="tr-data-table" data-component-id={component.id}>
+      <table>
+        <caption>{asString(component.props?.title, "Data table")}</caption>
+        <thead>
+          <tr>
+            {columns.map((c) => (
+              <th key={c.id} scope="col">{c.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i}>
+              {columns.map((c) => (
+                <td key={c.id}>{String(row[c.id] ?? "")}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function DictationButtonNode({ component }: ToolNodeProps) {
+  return (
+    <button
+      type="button"
+      className="btn btn-secondary"
+      data-component-id={component.id}
+      disabled
+      title="Dictation is a follow-up milestone — permission extension point only"
+    >
+      {asString(component.props?.label, "Dictation (coming soon)")}
+    </button>
+  );
+}
+
 export function UnsupportedNode({ component }: ToolNodeProps) {
   return (
-    <div className="tr-fallback" data-component-id={component.id} role="alert">
-      Unsupported component type: <strong>{component.type}</strong>
+    <div
+      className="tr-fallback tr-unknown-component"
+      data-component-id={component.id}
+      role="alert"
+      aria-live="polite"
+    >
+      <strong>Protected placeholder</strong>
+      <p>
+        This component type is not available in Coreside yet:{" "}
+        <code>{component.type}</code>
+      </p>
     </div>
   );
 }

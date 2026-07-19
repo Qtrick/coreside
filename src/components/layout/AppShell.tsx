@@ -16,9 +16,12 @@ import { EditProjectDialog } from "@/components/projects/EditProjectDialog";
 import { AddChatsToProjectDialog } from "@/components/projects/AddChatsToProjectDialog";
 import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
 import { RenameConversationDialog } from "@/components/projects/RenameConversationDialog";
+import { CommandPalette } from "@/components/CommandPalette";
 import { useAppStore } from "@/stores/app-store";
+import { useEffect, useState } from "react";
 
 export function AppShell() {
+  const [commandOpen, setCommandOpen] = useState(false);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const view = useAppStore((s) => s.view);
   const activeToolId = useAppStore((s) => s.activeToolId);
@@ -73,6 +76,17 @@ export function AppShell() {
     (s) => s.setRenameConversationDialogOpen,
   );
   const renameConversation = useAppStore((s) => s.renameConversation);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCommandOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const navigateToProjects = useAppStore((s) => s.navigateToProjects);
   const navigateToProject = useAppStore((s) => s.navigateToProject);
@@ -239,6 +253,7 @@ export function AppShell() {
             : Promise.resolve()
         }
       />
+      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
     </div>
   );
 }

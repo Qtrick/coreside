@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { AppShell } from "@/components/layout/AppShell";
+import { ConflictBanner } from "@/components/chat/ConflictBanner";
 import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
 import { api } from "@/lib/tauri";
 import { applyAppearanceCssVars, useAppStore } from "@/stores/app-store";
@@ -52,6 +53,7 @@ function ToolWindowView({ toolId }: { toolId: string }) {
 
   return (
     <div className="tool-window">
+      <ConflictBanner />
       <header style={{ marginBottom: "1rem" }}>
         <h1
           style={{

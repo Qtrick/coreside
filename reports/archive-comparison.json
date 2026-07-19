@@ -1,0 +1,36 @@
+{
+  "access_date": "2026-07-18",
+  "partial_update_archive": {
+    "path": "/Users/qunyingfan/Downloads/Partial Update Main.zip",
+    "sha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
+    "size": 161880,
+    "mtime": "2026-07-13T15:23:12",
+    "extract": ".reference/partial-update/partialupdate-main",
+    "file_count": 29
+  },
+  "coreside_uploaded_archive": {
+    "path": "/Users/qunyingfan/Downloads/Coreside Chat AI.zip",
+    "sha256": "196696bd77f286649e9c73f5a5e0dd02dbaf20d59322c2c117f735eaf5392535",
+    "size": 2228890,
+    "mtime": "2026-07-17T23:47:26",
+    "extract": ".reference/coreside-uploaded/coreside-main",
+    "file_count": 372
+  },
+  "active_repository": {
+    "path": "/Users/qunyingfan/Coreside",
+    "branch": "main",
+    "file_count_excl_generated": 414,
+    "vs_uploaded": {
+      "only_in_active": 42,
+      "only_in_uploaded": 0,
+      "common": 372,
+      "note": "Active repo is a strict superset of uploaded archive source; extras are local .cursor rules, .env, crawl4ai cache/pyc."
+    }
+  },
+  "partial_update_vs_github": {},
+  "secrets_scan": {
+    "partial_update": "Only .env.example and .secrets.example present; no live credentials in archive.",
+    "coreside_uploaded": "Only .env.example; no committed secrets.",
+    "active_repo": ".env present locally (gitignored); redacted from reports."
+  }
+}

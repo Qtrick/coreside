@@ -1,0 +1,44 @@
+{
+  "accessDate": "2026-07-18",
+  "schemaV1": {
+    "path": "src-tauri/src/ai/response_schema.rs",
+    "works": true
+  },
+  "schemaV2": {
+    "path": "src-tauri/src/runtime_v2/operations.rs",
+    "works": true
+  },
+  "patches": {
+    "path": "src-tauri/src/runtime_v2/patch.rs",
+    "works": true,
+    "tests": 11
+  },
+  "inlineSurfaces": {
+    "path": "src/components/chat/InlineSurface.tsx",
+    "works": true
+  },
+  "packs": {
+    "path": "src-tauri/src/runtime_v2/packs.rs",
+    "works": true
+  },
+  "events": {
+    "path": "src-tauri/src/runtime_v2/events.rs",
+    "works": true
+  },
+  "queue": {
+    "path": "src-tauri/src/runtime_v2/queue.rs",
+    "works": true
+  },
+  "branching": {
+    "path": "src-tauri/src/runtime_v2/branch.rs",
+    "works": true
+  },
+  "streaming": {
+    "path": "src-tauri/src/runtime_v2/streaming.rs",
+    "works": true
+  },
+  "migration": {
+    "path": "src-tauri/migrations/012_runtime_v2.sql",
+    "works": true
+  }
+}

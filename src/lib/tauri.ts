@@ -61,7 +61,29 @@ import type {
 export type AgentTurnEvent =
   | { kind: "action"; conversationId: string; label: string }
   | { kind: "text"; conversationId: string; text: string }
-  | { kind: "error"; conversationId: string; message: string };
+  | { kind: "error"; conversationId: string; message: string }
+  | {
+      kind: "operation";
+      conversationId: string;
+      operationId: string;
+      status: string;
+    }
+  | {
+      kind: "sync";
+      conversationId?: string | null;
+      surfaceIds: string[];
+      revision?: number | null;
+      syncKind: string;
+    }
+  | {
+      kind: "conflict";
+      conversationId?: string | null;
+      message: string;
+      conflicts: string[];
+    };
+
+const agentTurnHandlers = new Set<(event: AgentTurnEvent) => void>();
+let agentTurnUnlisten: (() => void) | null = null;
 
 /** Subscribe to live agent-turn events. Returns an unsubscribe fn. */
 export async function listenAgentTurn(
@@ -70,10 +92,21 @@ export async function listenAgentTurn(
   if (!isTauriRuntime()) {
     return () => undefined;
   }
-  const unlisten = await listen<AgentTurnEvent>("agent-turn", (event) => {
-    handler(event.payload);
-  });
-  return unlisten;
+  agentTurnHandlers.add(handler);
+  if (!agentTurnUnlisten) {
+    agentTurnUnlisten = await listen<AgentTurnEvent>("agent-turn", (event) => {
+      for (const h of agentTurnHandlers) {
+        h(event.payload);
+      }
+    });
+  }
+  return () => {
+    agentTurnHandlers.delete(handler);
+    if (agentTurnHandlers.size === 0 && agentTurnUnlisten) {
+      agentTurnUnlisten();
+      agentTurnUnlisten = null;
+    }
+  };
 }
 
 export class TauriCommandError extends Error {
@@ -267,6 +300,11 @@ const mockDb = {
   aiConfigured: false,
   providerConnections: [] as ProviderConnection[],
   mediaAssets: [] as MediaAsset[],
+  surfaceState: new Map<string, Record<string, unknown>>(),
+  surfaceDrafts: new Map<string, import("@/types/runtime-v2").SurfaceDraft>(),
+  routeState: new Map<string, import("@/types/runtime-v2").RouteState>(),
+  continuity: new Map<string, import("@/types/runtime-v2").ContinuitySnapshot>(),
+  contextLedger: [] as import("@/types/runtime-v2").ContextLedgerEntry[],
   searchSessions: [] as Array<{
     id: string;
     conversationId?: string | null;
@@ -1760,6 +1798,265 @@ async function mockInvoke<T>(
       return (before - mockDb.searchSessions.length) as T;
     }
 
+    case "get_surface_state_cmd": {
+      const surfaceId = String(args?.surfaceId ?? "");
+      return (mockDb.surfaceState.get(surfaceId) ?? {}) as T;
+    }
+
+    case "save_surface_state_cmd": {
+      const surfaceId = String(args?.surfaceId ?? "");
+      mockDb.surfaceState.set(
+        surfaceId,
+        (args?.stateJson as Record<string, unknown>) ?? {},
+      );
+      return undefined as T;
+    }
+
+    case "get_draft_cmd": {
+      const surfaceId = String(args?.surfaceId ?? "");
+      const componentId = String(args?.componentId ?? "");
+      const windowId = String(args?.windowId ?? "main");
+      const key = `${surfaceId}:${componentId}:${windowId}`;
+      return (mockDb.surfaceDrafts.get(key) ?? null) as T;
+    }
+
+    case "save_draft_cmd": {
+      const input = (args?.args ?? args) as {
+        surfaceId?: string;
+        componentId?: string;
+        windowId?: string;
+        baseRevision?: number;
+        draft?: unknown;
+        formId?: string | null;
+        persistencePolicy?: string;
+        force?: boolean;
+      };
+      const surfaceId = String(input.surfaceId ?? "");
+      const componentId = String(input.componentId ?? "");
+      const windowId = String(input.windowId ?? "main");
+      const baseRevision = Number(input.baseRevision ?? 0);
+      const key = `${surfaceId}:${componentId}:${windowId}`;
+      const existing = mockDb.surfaceDrafts.get(key);
+      if (existing && !input.force && existing.baseRevision >= baseRevision) {
+        throw new TauriCommandError(
+          `draft revision conflict: stored ${existing.baseRevision}, requested ${baseRevision}`,
+          "draft_conflict",
+        );
+      }
+      const stamp = now();
+      const row: import("@/types/runtime-v2").SurfaceDraft = {
+        id: existing?.id ?? crypto.randomUUID(),
+        surfaceId,
+        componentId,
+        formId: input.formId ?? null,
+        windowId,
+        baseRevision,
+        draft: input.draft ?? {},
+        persistencePolicy: input.persistencePolicy ?? "session",
+        updatedAt: stamp,
+        createdAt: existing?.createdAt ?? stamp,
+      };
+      mockDb.surfaceDrafts.set(key, row);
+      return row as T;
+    }
+
+    case "schedule_patches_cmd":
+    case "flush_patch_scheduler_cmd":
+      return [] as T;
+
+    case "get_route_state_cmd": {
+      const applicationId = String(args?.applicationId ?? "");
+      const windowId = String(args?.windowId ?? "main");
+      const key = `${applicationId}:${windowId}`;
+      const existing = mockDb.routeState.get(key);
+      if (!existing) {
+        throw new TauriCommandError(
+          `route ${applicationId}/${windowId} not found`,
+          "not_found",
+        );
+      }
+      return existing as T;
+    }
+
+    case "set_route_state_cmd": {
+      const input = (args?.args ?? args) as {
+        applicationId?: string;
+        windowId?: string;
+        currentRouteId?: string | null;
+        routeParams?: Record<string, unknown>;
+        history?: unknown[];
+        historyIndex?: number;
+      };
+      const applicationId = String(input.applicationId ?? "");
+      const windowId = String(input.windowId ?? "main");
+      const key = `${applicationId}:${windowId}`;
+      const stamp = now();
+      const row: import("@/types/runtime-v2").RouteState = {
+        id: mockDb.routeState.get(key)?.id ?? crypto.randomUUID(),
+        applicationId,
+        windowId,
+        currentRouteId: input.currentRouteId ?? null,
+        routeParams: input.routeParams ?? {},
+        history: input.history ?? [],
+        historyIndex: Number(input.historyIndex ?? 0),
+        updatedAt: stamp,
+      };
+      mockDb.routeState.set(key, row);
+      return row as T;
+    }
+
+    case "navigate_route_cmd": {
+      const input = (args?.args ?? args) as {
+        applicationId?: string;
+        windowId?: string;
+        routeId?: string;
+        routeParams?: Record<string, unknown>;
+        pushHistory?: boolean;
+      };
+      const applicationId = String(input.applicationId ?? "");
+      const windowId = String(input.windowId ?? "main");
+      const routeId = String(input.routeId ?? "");
+      const routeParams = input.routeParams ?? {};
+      const key = `${applicationId}:${windowId}`;
+      const existing = mockDb.routeState.get(key);
+      if (
+        existing &&
+        existing.currentRouteId === routeId &&
+        JSON.stringify(existing.routeParams) === JSON.stringify(routeParams)
+      ) {
+        return { state: existing, changed: false } as T;
+      }
+      const history = existing?.history ? [...existing.history] : [];
+      let historyIndex = existing?.historyIndex ?? 0;
+      if (input.pushHistory !== false) {
+        history.push({ routeId, params: routeParams });
+        historyIndex = history.length - 1;
+      }
+      const stamp = now();
+      const state: import("@/types/runtime-v2").RouteState = {
+        id: existing?.id ?? crypto.randomUUID(),
+        applicationId,
+        windowId,
+        currentRouteId: routeId,
+        routeParams,
+        history,
+        historyIndex,
+        updatedAt: stamp,
+      };
+      mockDb.routeState.set(key, state);
+      return { state, changed: true } as T;
+    }
+
+    case "append_context_ledger_cmd": {
+      const input = (args?.args ?? args) as {
+        conversationId?: string;
+        projectId?: string | null;
+        branchId?: string | null;
+        entryType?: string;
+        visibility?: string;
+        payload?: unknown;
+        summary?: string;
+        expirationClass?: string | null;
+      };
+      const stamp = now();
+      const row: import("@/types/runtime-v2").ContextLedgerEntry = {
+        id: crypto.randomUUID(),
+        conversationId: String(input.conversationId ?? ""),
+        projectId: input.projectId ?? null,
+        branchId: input.branchId ?? null,
+        entryType: String(input.entryType ?? "interaction"),
+        visibility: String(input.visibility ?? "model_context_only"),
+        payload: input.payload ?? {},
+        summary: String(input.summary ?? ""),
+        expirationClass: String(input.expirationClass ?? "session"),
+        createdAt: stamp,
+      };
+      mockDb.contextLedger.unshift(row);
+      return row as T;
+    }
+
+    case "list_context_ledger_cmd": {
+      const conversationId = String(args?.conversationId ?? "");
+      const limit = Number(args?.limit ?? 50);
+      return mockDb.contextLedger
+        .filter((e) => e.conversationId === conversationId)
+        .slice(0, limit) as T;
+    }
+
+    case "get_provider_profile_cmd": {
+      const providerId = String(args?.providerId ?? "gemini");
+      const modelId = String(args?.modelId ?? "*");
+      const stamp = now();
+      return {
+        id: crypto.randomUUID(),
+        providerId,
+        modelId,
+        profile: "native_streaming_operations",
+        capabilities: { supportsApplicationChanges: true },
+        lastTestedAt: null,
+        benchmark: null,
+        createdAt: stamp,
+        updatedAt: stamp,
+      } as T;
+    }
+
+    case "get_continuity_cmd": {
+      const surfaceId = String(args?.surfaceId ?? "");
+      const windowId = String(args?.windowId ?? "main");
+      const key = `${surfaceId}:${windowId}`;
+      const existing = mockDb.continuity.get(key);
+      if (!existing) {
+        throw new TauriCommandError(
+          `continuity ${surfaceId}/${windowId} not found`,
+          "not_found",
+        );
+      }
+      return existing as T;
+    }
+
+    case "save_continuity_cmd":
+    case "suspend_surface_cmd": {
+      const input =
+        command === "suspend_surface_cmd"
+          ? {
+              surfaceId: String(args?.surfaceId ?? ""),
+              windowId: String(args?.windowId ?? "main"),
+              focus: {},
+              scroll: {},
+              media: {},
+              suspensionState: "suspended",
+            }
+          : ((args?.args ?? args) as {
+              surfaceId?: string;
+              windowId?: string;
+              focus?: Record<string, unknown>;
+              scroll?: Record<string, unknown>;
+              media?: Record<string, unknown>;
+              suspensionState?: string;
+            });
+      const surfaceId = String(input.surfaceId ?? "");
+      const windowId = String(input.windowId ?? "main");
+      const key = `${surfaceId}:${windowId}`;
+      const stamp = now();
+      const row: import("@/types/runtime-v2").ContinuitySnapshot = {
+        id: mockDb.continuity.get(key)?.id ?? crypto.randomUUID(),
+        surfaceId,
+        windowId,
+        focus: input.focus ?? {},
+        scroll: input.scroll ?? {},
+        media: input.media ?? {},
+        suspensionState:
+          input.suspensionState === "background"
+            ? "background"
+            : input.suspensionState === "suspended"
+              ? "suspended"
+              : "active",
+        updatedAt: stamp,
+      };
+      mockDb.continuity.set(key, row);
+      return row as T;
+    }
+
     default:
       throw new TauriCommandError(`Unknown command: ${command}`);
   }
@@ -1809,6 +2106,11 @@ export function __resetMockDb(): void {
   mockDb.aiConfigured = false;
   mockDb.providerConnections = [];
   mockDb.mediaAssets = [];
+  mockDb.surfaceState.clear();
+  mockDb.surfaceDrafts.clear();
+  mockDb.routeState.clear();
+  mockDb.continuity.clear();
+  mockDb.contextLedger = [];
 }
 
 export const api = {
@@ -1869,6 +2171,10 @@ export const api = {
     invoke<void>("cancel_request", { conversationId }),
   discardToolChange: (messageId: string) =>
     invoke<ChatMessage>("discard_tool_change", { messageId }),
+  discardKernelProposal: (messageId: string) =>
+    invoke<ChatMessage>("discard_kernel_proposal", { messageId }),
+  setKernelProposalStatus: (messageId: string, status: "applied" | "discarded") =>
+    invoke<ChatMessage>("set_kernel_proposal_status", { messageId, status }),
   applyToolChange: async (args: {
     conversationId: string;
     messageId: string;
@@ -2136,4 +2442,323 @@ export const api = {
     invoke<MediaAsset>("import_media_asset_cmd", { input }),
   touchMediaAsset: (assetId: string) =>
     invoke<void>("touch_media_asset_cmd", { assetId }),
+
+  // Runtime V2
+  listCapabilityPacks: () =>
+    invoke<Array<Record<string, unknown>>>("list_capability_packs"),
+  listConversationSurfaces: (conversationId: string) =>
+    invoke<import("@/types/runtime-v2").SurfaceRecord[]>(
+      "list_conversation_surfaces",
+      { conversationId },
+    ),
+  getSurface: (surfaceId: string) =>
+    invoke<import("@/types/runtime-v2").SurfaceRecord>("get_surface_cmd", {
+      surfaceId,
+    }),
+  createInlineSurface: (args: {
+    conversationId: string;
+    messageId?: string | null;
+    projectId?: string | null;
+    name: string;
+    definition: unknown;
+    capabilityPacks?: string[];
+  }) =>
+    invoke<import("@/types/runtime-v2").SurfaceRecord>(
+      "create_inline_surface_cmd",
+      {
+        args: {
+          conversationId: args.conversationId,
+          messageId: args.messageId ?? null,
+          projectId: args.projectId ?? null,
+          name: args.name,
+          definition: args.definition,
+          capabilityPacks: args.capabilityPacks ?? [],
+        },
+      },
+    ),
+  updateSurface: (args: {
+    surfaceId: string;
+    definition: unknown;
+    changeSummary?: string;
+    baseRevision?: number | null;
+  }) =>
+    invoke<import("@/types/runtime-v2").SurfaceRecord>("update_surface_cmd", {
+      args,
+    }),
+  promoteSurface: (surfaceId: string) =>
+    invoke<import("@/types/runtime-v2").SurfaceRecord>("promote_surface_cmd", {
+      surfaceId,
+    }),
+  saveSurfaceState: (surfaceId: string, stateJson: ToolState) =>
+    invoke<void>("save_surface_state_cmd", { surfaceId, stateJson }),
+  getSurfaceState: (surfaceId: string) =>
+    invoke<ToolState>("get_surface_state_cmd", { surfaceId }),
+  getDraft: (surfaceId: string, componentId: string, windowId?: string | null) =>
+    invoke<import("@/types/runtime-v2").SurfaceDraft | null>("get_draft_cmd", {
+      surfaceId,
+      componentId,
+      windowId: windowId ?? null,
+    }),
+  saveDraft: (args: {
+    surfaceId: string;
+    componentId: string;
+    windowId?: string | null;
+    baseRevision: number;
+    draft: unknown;
+    formId?: string | null;
+    persistencePolicy?: string;
+    force?: boolean;
+  }) =>
+    invoke<import("@/types/runtime-v2").SurfaceDraft>("save_draft_cmd", {
+      args: {
+        ...args,
+        windowId: args.windowId ?? "main",
+      },
+    }),
+  schedulePatches: (args: {
+    conversationId?: string | null;
+    turnId?: string | null;
+    surfaceId?: string | null;
+    priority: string;
+    operations: import("@/types/runtime-v2").AppOperation[];
+    sourceType: string;
+    fromAgent?: boolean;
+    applyImmediately?: boolean;
+    approvalGranted?: boolean;
+  }) =>
+    invoke<import("@/types/runtime-v2").ScheduledPatch[]>("schedule_patches_cmd", {
+      args,
+    }),
+  flushPatchScheduler: (args?: {
+    conversationId?: string | null;
+    sourceType?: string;
+    approvalGranted?: boolean;
+  }) =>
+    invoke<Record<string, unknown>[]>("flush_patch_scheduler_cmd", {
+      conversationId: args?.conversationId ?? null,
+      sourceType: args?.sourceType ?? "user",
+      approvalGranted: args?.approvalGranted ?? true,
+    }),
+  getRouteState: (applicationId: string, windowId?: string | null) =>
+    invoke<import("@/types/runtime-v2").RouteState>("get_route_state_cmd", {
+      applicationId,
+      windowId: windowId ?? null,
+    }),
+  setRouteState: (args: {
+    applicationId: string;
+    windowId?: string | null;
+    currentRouteId?: string | null;
+    routeParams: Record<string, unknown>;
+    history: unknown[];
+    historyIndex: number;
+  }) =>
+    invoke<import("@/types/runtime-v2").RouteState>("set_route_state_cmd", {
+      args: {
+        ...args,
+        windowId: args.windowId ?? "main",
+      },
+    }),
+  navigateRoute: (args: {
+    applicationId: string;
+    windowId?: string | null;
+    routeId: string;
+    routeParams?: Record<string, unknown>;
+    pushHistory?: boolean;
+  }) =>
+    invoke<import("@/types/runtime-v2").NavigateResult>("navigate_route_cmd", {
+      args: {
+        ...args,
+        windowId: args.windowId ?? "main",
+        routeParams: args.routeParams ?? {},
+      },
+    }),
+  appendContextLedger: (args: {
+    conversationId: string;
+    projectId?: string | null;
+    branchId?: string | null;
+    entryType: string;
+    visibility?: string;
+    payload: unknown;
+    summary: string;
+    expirationClass?: string | null;
+  }) =>
+    invoke<import("@/types/runtime-v2").ContextLedgerEntry>(
+      "append_context_ledger_cmd",
+      { args },
+    ),
+  listContextLedger: (
+    conversationId: string,
+    projectId?: string | null,
+    limit?: number,
+  ) =>
+    invoke<import("@/types/runtime-v2").ContextLedgerEntry[]>(
+      "list_context_ledger_cmd",
+      {
+        conversationId,
+        projectId: projectId ?? null,
+        limit: limit ?? null,
+      },
+    ),
+  getProviderProfile: (providerId: string, modelId?: string | null) =>
+    invoke<import("@/types/runtime-v2").ProviderConformanceRecord>(
+      "get_provider_profile_cmd",
+      {
+        providerId,
+        modelId: modelId ?? null,
+      },
+    ),
+  getContinuity: (surfaceId: string, windowId?: string | null) =>
+    invoke<import("@/types/runtime-v2").ContinuitySnapshot>("get_continuity_cmd", {
+      surfaceId,
+      windowId: windowId ?? null,
+    }),
+  saveContinuity: (args: {
+    surfaceId: string;
+    windowId?: string | null;
+    focus: Record<string, unknown>;
+    scroll: Record<string, unknown>;
+    media: Record<string, unknown>;
+    suspensionState?: string;
+  }) =>
+    invoke<import("@/types/runtime-v2").ContinuitySnapshot>("save_continuity_cmd", {
+      args: {
+        ...args,
+        windowId: args.windowId ?? "main",
+      },
+    }),
+  suspendSurface: (surfaceId: string, windowId?: string | null) =>
+    invoke<import("@/types/runtime-v2").ContinuitySnapshot>("suspend_surface_cmd", {
+      surfaceId,
+      windowId: windowId ?? null,
+    }),
+  applyOperations: (args: {
+    conversationId?: string | null;
+    projectId?: string | null;
+    turnId?: string | null;
+    summary?: string;
+    operations: import("@/types/runtime-v2").AppOperation[];
+    silent?: boolean;
+  }) => invoke<Record<string, unknown>>("apply_operations_cmd", { args }),
+  undoTransaction: (transactionId: string) =>
+    invoke<Record<string, unknown>>("undo_transaction_cmd", { transactionId }),
+  listTransactions: (conversationId: string, limit?: number) =>
+    invoke<Record<string, unknown>[]>("list_transactions_cmd", {
+      conversationId,
+      limit: limit ?? null,
+    }),
+  branchConversation: (args: {
+    sourceConversationId: string;
+    sourceMessageId: string;
+    branchName?: string;
+  }) => invoke<unknown>("branch_conversation_cmd", { args }),
+  listBranches: (conversationId: string) =>
+    invoke<Record<string, unknown>[]>("list_branches_cmd", { conversationId }),
+  createSnapshot: (
+    conversationId: string,
+    projectId?: string | null,
+    description?: string,
+  ) =>
+    invoke<Record<string, unknown>>("create_snapshot_cmd", {
+      conversationId,
+      projectId: projectId ?? null,
+      description: description ?? null,
+    }),
+  getSnapshot: (snapshotId: string) =>
+    invoke<Record<string, unknown>>("get_snapshot_cmd", { snapshotId }),
+  deleteSnapshot: (snapshotId: string) =>
+    invoke<void>("delete_snapshot_cmd", { snapshotId }),
+  listAgentQueue: (conversationId: string) =>
+    invoke<Record<string, unknown>[]>("list_agent_queue_cmd", {
+      conversationId,
+    }),
+  cancelQueueItem: (itemId: string) =>
+    invoke<Record<string, unknown>>("cancel_queue_item_cmd", { itemId }),
+  removeQueueItem: (itemId: string) =>
+    invoke<void>("remove_queue_item_cmd", { itemId }),
+  listDiagnostics: (conversationId: string, limit?: number) =>
+    invoke<unknown[]>("list_diagnostics_cmd", {
+      conversationId,
+      limit: limit ?? null,
+    }),
+  storeDiagnostics: (
+    conversationId: string | null,
+    turnId: string | null,
+    payload: unknown,
+  ) =>
+    invoke<string>("store_diagnostics_cmd", {
+      conversationId,
+      turnId,
+      payload,
+    }),
+  runtimeV2Limits: () => invoke<Record<string, unknown>>("runtime_v2_limits"),
+
+  // Application Kernel
+  kernelCapabilityCatalog: () => invoke<Record<string, unknown>>("kernel_capability_catalog"),
+  kernelApplyChange: (request: Record<string, unknown>) =>
+    invoke<Record<string, unknown>>("kernel_apply_change", { request }),
+  kernelCompileIntent: (intent: Record<string, unknown>) =>
+    invoke<Record<string, unknown>>("kernel_compile_intent", { intent }),
+  kernelListManifests: () =>
+    invoke<import("@/types/application-kernel").ManifestRecord[]>("kernel_list_manifests"),
+  kernelGetManifest: (applicationId: string) =>
+    invoke<import("@/types/application-kernel").ManifestRecord>("kernel_get_manifest", {
+      applicationId,
+    }),
+  kernelRestoreLastKnownGood: (applicationId: string) =>
+    invoke<import("@/types/application-kernel").ManifestRecord>(
+      "kernel_restore_last_known_good",
+      { applicationId },
+    ),
+  kernelGetRecoveryState: () =>
+    invoke<import("@/types/application-kernel").RecoveryState>("kernel_get_recovery_state"),
+  kernelSetRecoveryMode: (enabled: boolean) =>
+    invoke<import("@/types/application-kernel").RecoveryState>("kernel_set_recovery_mode", {
+      enabled,
+    }),
+  kernelClearRecovery: () =>
+    invoke<import("@/types/application-kernel").RecoveryState>("kernel_clear_recovery"),
+  kernelSetRecoveryFlags: (flags: {
+    disableUserSurfaces?: boolean | null;
+    disableCustomLayouts?: boolean | null;
+    disableCapabilityPacks?: boolean | null;
+  }) =>
+    invoke<import("@/types/application-kernel").RecoveryState>("kernel_set_recovery_flags", {
+      disableUserSurfaces: flags.disableUserSurfaces ?? null,
+      disableCustomLayouts: flags.disableCustomLayouts ?? null,
+      disableCapabilityPacks: flags.disableCapabilityPacks ?? null,
+    }),
+  kernelEnterSafeStartup: (reason: string) =>
+    invoke<import("@/types/application-kernel").RecoveryState>("kernel_enter_safe_startup", {
+      reason,
+    }),
+  kernelUnifiedSearch: (query: string, limit?: number) =>
+    invoke<import("@/types/application-kernel").UnifiedSearchHit[]>("kernel_unified_search", {
+      query,
+      limit: limit ?? null,
+    }),
+  kernelExportPackage: (applicationId: string) =>
+    invoke<Record<string, unknown>>("kernel_export_package", { applicationId }),
+  kernelPreviewPackage: (bytes: number[]) =>
+    invoke<import("@/types/application-kernel").PackagePreview>("kernel_preview_package", {
+      bytes,
+    }),
+  kernelImportPackage: (bytes: number[], approve: boolean, remintIds?: boolean) =>
+    invoke<import("@/types/application-kernel").ApplicationManifest>("kernel_import_package", {
+      bytes,
+      approve,
+      remintIds: remintIds ?? true,
+    }),
+  kernelApplicationSummary: (applicationId: string) =>
+    invoke<Record<string, unknown>>("kernel_application_summary", { applicationId }),
+  kernelGrantPermission: (applicationId: string, permission: string) =>
+    invoke<Record<string, unknown>>("kernel_grant_permission", {
+      applicationId,
+      permission,
+      scope: null,
+    }),
+  kernelRevokePermission: (applicationId: string, permission: string) =>
+    invoke<void>("kernel_revoke_permission", { applicationId, permission }),
+  kernelGarbageCollect: () => invoke<number>("kernel_garbage_collect"),
+  kernelVisualChecks: (width: number) =>
+    invoke<Record<string, unknown>>("kernel_visual_checks", { width }),
 };

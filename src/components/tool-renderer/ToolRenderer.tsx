@@ -9,6 +9,7 @@ type ToolRendererProps = {
   tool: ToolDefinition;
   state: ToolState;
   onStateChange: (state: ToolState) => void;
+  onPersistState?: (state: ToolState) => Promise<void>;
   onSubmitToAgent?: (payload: {
     toolId: string;
     eventName: string;
@@ -82,6 +83,7 @@ export function ToolRenderer({
   tool,
   state,
   onStateChange,
+  onPersistState,
   onSubmitToAgent,
 }: ToolRendererProps) {
   const allowedTargets = useMemo(
@@ -119,6 +121,19 @@ export function ToolRenderer({
     [onStateChange, state],
   );
 
+  const setValueOptimistic = useCallback(
+    (key: string, value: unknown) => {
+      const previous = state[key];
+      const next = { ...state, [key]: value };
+      onStateChange(next);
+      const persist = onPersistState ?? (async (saved) => onStateChange(saved));
+      void persist(next).catch(() => {
+        onStateChange({ ...state, [key]: previous });
+      });
+    },
+    [onPersistState, onStateChange, state],
+  );
+
   const getValue = useCallback(
     <T,>(key: string, fallback?: T): T => {
       if (key in state) return state[key] as T;
@@ -133,9 +148,10 @@ export function ToolRenderer({
       state,
       runActions,
       setValue,
+      setValueOptimistic,
       getValue,
     }),
-    [getValue, runActions, setValue, state, tool.id],
+    [getValue, runActions, setValue, setValueOptimistic, state, tool.id],
   );
 
   if (!tool.components?.length) {

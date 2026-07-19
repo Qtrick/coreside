@@ -1,0 +1,21 @@
+{
+  "product": "Coreside",
+  "auditedAt": "2026-07-18",
+  "phase": "chat_proposal_conflict_packages_live_wiring",
+  "priorTestsRerun": {
+    "test:application-kernel": { "passed": true, "count": 26 },
+    "test": { "passed": true, "count": 56 },
+    "typecheck": { "passed": true },
+    "manual_acceptance_A_AB": { "passed": false, "note": "Checklist documented; interactive Tauri run pending" }
+  },
+  "systems": [
+    { "id": "change_proposal_ui", "status": "complete_but_unverified", "notes": "ChangeProposalCard in MessageBubble + composer sticky; apply/discard status stamps" },
+    { "id": "zip_packages", "status": "complete_and_verified", "notes": "ZIP export + legacy JSON import; unit tests" },
+    { "id": "multiwindow_conflict_ux", "status": "complete_but_unverified", "notes": "ConflictBanner + sync/conflict listen in main and tool windows" },
+    { "id": "visual_verification", "status": "complete_but_unverified", "notes": "DOM verifySurfaceElement + InlineSurface warnings" },
+    { "id": "event_bus_live", "status": "complete_but_unverified", "notes": "Persist + dispatch + hydrate from SQLite on boot" },
+    { "id": "request_queue_live", "status": "complete_but_unverified", "notes": "send_message enqueues when conversation busy" },
+    { "id": "ndjson_live", "status": "complete_but_unverified", "notes": "Harvest from raw text when schema ops empty" },
+    { "id": "manual_acceptance_A_AB", "status": "partial", "notes": "docs/MANUAL_ACCEPTANCE_A_AB.md; not fully executed on Tauri" }
+  ]
+}

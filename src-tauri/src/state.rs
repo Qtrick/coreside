@@ -9,21 +9,25 @@ use tokio_util::sync::CancellationToken;
 use crate::config::{self, AppConfig};
 use crate::crawler::CrawlerSupervisor;
 use crate::db::Database;
+use crate::runtime_v2::EventBus;
 
 pub struct AppState {
     pub config: Mutex<AppConfig>,
     pub db: Arc<Mutex<Database>>,
     pub active_requests: Mutex<HashMap<String, CancellationToken>>,
     pub crawler: Arc<CrawlerSupervisor>,
+    pub event_bus: Mutex<EventBus>,
 }
 
 impl AppState {
     pub fn new(config: AppConfig, db: Database) -> Self {
+        let event_bus = EventBus::load_from_db(&db);
         Self {
             config: Mutex::new(config),
             db: Arc::new(Mutex::new(db)),
             active_requests: Mutex::new(HashMap::new()),
             crawler: Arc::new(CrawlerSupervisor::new()),
+            event_bus: Mutex::new(event_bus),
         }
     }
 

@@ -10,14 +10,12 @@
 
 ## Next recommended development
 
+- Full interactive A–AB / AD manual acceptance on a real Tauri build (`docs/MANUAL_ACCEPTANCE_A_AB.md`)
+- Deeper caret/selection preservation instrumentation
+- Local provider conformance benchmark runs (record real measurements only)
 - Project file uploads and multimodal project context
 - Better semantic retrieval / optional local embeddings
-- Better source-quality ranking and search-query planning
-- More media providers and wallpaper templates
-- Stronger agent self-review for complex tool edits
-- Project templates
-- Optional cloud synchronization
-- More advanced personal games within the registry
+- Voice / Wasm sandbox / enterprise connectors (only after acceptance passes)
 
 ## Later custom tools and games
 

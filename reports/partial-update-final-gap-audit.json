@@ -1,0 +1,27 @@
+{
+  "product": "Coreside",
+  "auditedAt": "2026-07-18",
+  "phase": "final_partial_update_gap_completion",
+  "systems": [
+    { "id": "keyed_preservation", "status": "complete_but_unverified" },
+    { "id": "component_identity", "status": "complete_and_verified" },
+    { "id": "draft_protection", "status": "complete_but_unverified" },
+    { "id": "focus_preservation", "status": "complete_but_unverified" },
+    { "id": "selection_preservation", "status": "partial" },
+    { "id": "scroll_continuity", "status": "complete_but_unverified" },
+    { "id": "media_preservation", "status": "complete_but_unverified" },
+    { "id": "patch_scheduler", "status": "complete_but_unverified" },
+    { "id": "patch_dependencies", "status": "complete_but_unverified" },
+    { "id": "patch_backpressure", "status": "complete_but_unverified" },
+    { "id": "target_readiness", "status": "partial" },
+    { "id": "generated_routes", "status": "complete_but_unverified" },
+    { "id": "direct_manipulation", "status": "complete_but_unverified" },
+    { "id": "manual_edit_provenance", "status": "complete_but_unverified" },
+    { "id": "optimistic_reconciliation", "status": "complete_but_unverified" },
+    { "id": "context_ledgers", "status": "complete_but_unverified" },
+    { "id": "provider_conformance", "status": "complete_but_unverified" },
+    { "id": "hydration_suspension", "status": "complete_but_unverified" },
+    { "id": "unrestricted_html_js", "status": "intentionally_rejected" },
+    { "id": "public_multiuser", "status": "intentionally_rejected" }
+  ]
+}

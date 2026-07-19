@@ -3147,3 +3147,155 @@ img {
     scroll-behavior: auto !important;
   }
 }
+
+/* Runtime V2 — inline generative surfaces */
+.inline-surfaces {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.inline-surface {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.inline-surface.full-width {
+  width: 100%;
+}
+
+.inline-surface-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.inline-surface-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.inline-surface-actions {
+  display: flex;
+  gap: 0.15rem;
+}
+
+.inline-surface-body {
+  padding: 0.75rem;
+}
+
+.inline-surface.collapsed .inline-surface-body {
+  display: none;
+}
+
+.new-updates-chip {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 2;
+  margin: 0 auto 0.5rem;
+  display: block;
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.draft-conflict-banner {
+  margin: 0.5rem 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--surface-muted);
+}
+
+.draft-conflict-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.customize-mode-panel {
+  margin-top: 0.5rem;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--surface);
+}
+
+.customize-component-list {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  max-height: 10rem;
+  overflow: auto;
+}
+
+.app-route-shell-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.app-route-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.tr-chart-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.35rem;
+  min-height: 120px;
+  margin: 0.5rem 0;
+}
+
+.tr-chart-bar-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.tr-chart-bar {
+  width: 100%;
+  max-width: 2rem;
+  background: var(--accent-primary);
+  border-radius: 4px 4px 0 0;
+  min-height: 2px;
+}
+
+.tr-chart-a11y {
+  width: 100%;
+  font-size: 0.85rem;
+}
+
+.tr-code-area {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  min-height: 10rem;
+  resize: vertical;
+}
+
+.tr-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}

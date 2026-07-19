@@ -67,6 +67,8 @@ src-tauri/src/
 ├── wallpapers/   Trusted wallpaper schemas + validation
 ├── automations/  Scheduler + executor
 ├── credentials/  Keyring resolve for AI providers
+├── runtime_v2/   Surfaces, patches, transactions, packs, limits, preservation, patch scheduler, routes, context ledger
+├── application_kernel/  Trusted mutation gateway for generated apps
 ├── commands/     Tauri IPC surface
 ├── config/       Env loading
 ├── db/           SQLite + repositories
@@ -76,6 +78,10 @@ src-tauri/src/
 ├── lib.rs
 └── main.rs
 ```
+
+## Application Kernel
+
+Durable generated-application changes enter through `application_kernel::apply_change` (agent turns additionally pass `patch_scheduler::schedule_and_apply`): validate ops, enforce protected boundaries and permissions, classify risk, evaluate local policy, then persist via Runtime V2 transactions plus manifest/data operations. Continuity systems (preservation, drafts, routes, context ledger, provider conformance) live under `runtime_v2`. See [APPLICATION_KERNEL.md](./APPLICATION_KERNEL.md), [PRESERVATION_ENGINE.md](./PRESERVATION_ENGINE.md), [PATCH_SCHEDULER.md](./PATCH_SCHEDULER.md), and [PARTIAL_UPDATE_FINAL_GAP_AUDIT.md](./PARTIAL_UPDATE_FINAL_GAP_AUDIT.md).
 
 ## Database architecture
 

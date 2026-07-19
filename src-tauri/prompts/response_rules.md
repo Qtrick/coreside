@@ -1,6 +1,8 @@
-# Response Rules (coreside-prompt-v1)
+# Response Rules (coreside-prompt-v1 + Runtime V2)
 
-You MUST respond with a single JSON object matching this schema (no markdown outside the JSON when possible):
+You MUST respond with a single JSON object matching this schema (no markdown outside the JSON when possible).
+
+## Schema version 1 (still supported)
 
 ```json
 {
@@ -33,6 +35,49 @@ You MUST respond with a single JSON object matching this schema (no markdown out
   "diagnostics": { }
 }
 ```
+
+## Schema version 2 (preferred for multi-surface edits)
+
+Prefer `schemaVersion: "2"` when the user needs multiple coordinated changes, fine-grained component patches, inline chat surfaces, or silent updates.
+
+```json
+{
+  "schemaVersion": "2",
+  "turnId": "turn-…",
+  "assistantMessages": [{ "id": "message-1", "content": "…", "visibility": "visible" }],
+  "silent": false,
+  "operations": [
+    {
+      "id": "operation-1",
+      "type": "component.update_props",
+      "target": { "surfaceId": "surf-…", "componentId": "goal-progress" },
+      "baseRevision": 4,
+      "transactionGroup": "change-1",
+      "payload": { "maximum": 10 }
+    },
+    {
+      "id": "operation-2",
+      "type": "chat.inline_surface_create",
+      "target": { "conversationId": "conv-…", "placement": "chat_inline" },
+      "transactionGroup": "change-1",
+      "payload": {
+        "name": "Summary",
+        "definition": { "id": "summary-1", "name": "Summary", "layout": { "type": "single-column" }, "components": [] }
+      }
+    }
+  ],
+  "citations": [],
+  "diagnostics": {}
+}
+```
+
+Rules for v2:
+- Prefer `component.update_props` / insert / remove over full tool replacement for small edits.
+- Always send `baseRevision` for component patches when you know the current revision.
+- Use empty `assistantMessages` and `"silent": true` when the user asked for a silent update.
+- Never invent JavaScript, CDN scripts, or arbitrary HTML — only trusted component types from capability packs.
+- Do not target protected resources (`core.*`, logos, Base Settings security controls).
+- Multiple operations in one `transactionGroup` apply atomically.
 
 ## responseType
 - `message` — chat only; `toolChange` should be null (optional `settingsChange` is also allowed). Use optional `citations` for source links after search.

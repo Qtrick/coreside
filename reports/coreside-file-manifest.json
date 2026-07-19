@@ -1,0 +1,1897 @@
+{
+  "access_date": "2026-07-18",
+  "root": "/Users/qunyingfan/Coreside",
+  "count": 378,
+  "files": [
+    {
+      "path": ".cursor/rules/Coreside-development.mdc",
+      "bytes": 1119,
+      "ext": ".mdc"
+    },
+    {
+      "path": ".cursor/rules/Ponytail-Code-Reduction.mdc",
+      "bytes": 2939,
+      "ext": ".mdc"
+    },
+    {
+      "path": ".cursor/rules/project-context.mdc",
+      "bytes": 31064,
+      "ext": ".mdc"
+    },
+    {
+      "path": ".env",
+      "bytes": 976,
+      "ext": ""
+    },
+    {
+      "path": ".env.example",
+      "bytes": 2721,
+      "ext": ".example"
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 683,
+      "ext": ""
+    },
+    {
+      "path": "README.md",
+      "bytes": 8696,
+      "ext": ".md"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "bytes": 1752,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/AGENT_PROTOCOL.md",
+      "bytes": 5313,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "bytes": 4668,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/AUTOMATIONS.md",
+      "bytes": 854,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/BRANDING.md",
+      "bytes": 3534,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/CLOUD_HOSTING.md",
+      "bytes": 17242,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/CRAWL4AI_INTEGRATION.md",
+      "bytes": 2543,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/CRAWLER_CACHE.md",
+      "bytes": 1036,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/CRAWLER_COMPLIANCE.md",
+      "bytes": 1073,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/CRAWLER_INSTALLATION.md",
+      "bytes": 1853,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/CRAWLER_RESOURCE_LIMITS.md",
+      "bytes": 1413,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/CRAWLER_SECURITY.md",
+      "bytes": 1436,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/EXA_INTEGRATION.md",
+      "bytes": 2293,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/EXA_RESEARCH.md",
+      "bytes": 4084,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/EXPORTS.md",
+      "bytes": 938,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/IMPLEMENTATION_PLAN.md",
+      "bytes": 1853,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/LIVE_WALLPAPERS.md",
+      "bytes": 1213,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/MEDIA_LIBRARY.md",
+      "bytes": 1572,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/PARTIAL_UPDATE_REVIEW.md",
+      "bytes": 4984,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/PROJECTS.md",
+      "bytes": 1230,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/PROJECT_CONTEXT.md",
+      "bytes": 1091,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/PROVIDERS.md",
+      "bytes": 1000,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/READABILITY.md",
+      "bytes": 980,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/ROADMAP.md",
+      "bytes": 1478,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/SEARCH_OPTIMIZATION.md",
+      "bytes": 2014,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/SEARCH_USAGE.md",
+      "bytes": 1494,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/SECURITY.md",
+      "bytes": 4934,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/TEMPLATE_SETTINGS.md",
+      "bytes": 974,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/WALLPAPERS.md",
+      "bytes": 1283,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/WEB_RESEARCH.md",
+      "bytes": 1075,
+      "ext": ".md"
+    },
+    {
+      "path": "docs/WEB_SEARCH.md",
+      "bytes": 425,
+      "ext": ".md"
+    },
+    {
+      "path": "eslint.config.js",
+      "bytes": 1034,
+      "ext": ".js"
+    },
+    {
+      "path": "index.html",
+      "bytes": 685,
+      "ext": ".html"
+    },
+    {
+      "path": "package-lock.json",
+      "bytes": 221658,
+      "ext": ".json"
+    },
+    {
+      "path": "package.json",
+      "bytes": 1995,
+      "ext": ".json"
+    },
+    {
+      "path": "public/branding/coreside-mark-black-transparent.png",
+      "bytes": 37008,
+      "ext": ".png"
+    },
+    {
+      "path": "public/branding/coreside-mark-white-transparent.png",
+      "bytes": 57724,
+      "ext": ".png"
+    },
+    {
+      "path": "reports/archive-comparison.json",
+      "bytes": 1365,
+      "ext": ".json"
+    },
+    {
+      "path": "reports/partial-update-file-manifest.json",
+      "bytes": 2688,
+      "ext": ".json"
+    },
+    {
+      "path": "scripts/crawl4ai-clean.mjs",
+      "bytes": 734,
+      "ext": ".mjs"
+    },
+    {
+      "path": "scripts/crawl4ai-doctor.mjs",
+      "bytes": 640,
+      "ext": ".mjs"
+    },
+    {
+      "path": "scripts/crawl4ai-setup.mjs",
+      "bytes": 3292,
+      "ext": ".mjs"
+    },
+    {
+      "path": "scripts/crawl4ai-smoke.mjs",
+      "bytes": 713,
+      "ext": ".mjs"
+    },
+    {
+      "path": "scripts/crawl4ai-stats.mjs",
+      "bytes": 794,
+      "ext": ".mjs"
+    },
+    {
+      "path": "scripts/crawl4ai-test.mjs",
+      "bytes": 683,
+      "ext": ".mjs"
+    },
+    {
+      "path": "scripts/generate_branding_assets.py",
+      "bytes": 7125,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/README.md",
+      "bytes": 1247,
+      "ext": ".md"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/__init__.py",
+      "bytes": 226,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/__main__.py",
+      "bytes": 99,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/cache.py",
+      "bytes": 1649,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/cleanup.py",
+      "bytes": 1431,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/compliance.py",
+      "bytes": 2536,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/configs.py",
+      "bytes": 3878,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/crawler_manager.py",
+      "bytes": 15420,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/discovery/__init__.py",
+      "bytes": 443,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/discovery/direct_url.py",
+      "bytes": 487,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/discovery/domain_seeder.py",
+      "bytes": 1249,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/discovery/page_links.py",
+      "bytes": 874,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/discovery/ranking.py",
+      "bytes": 1332,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/discovery/rss.py",
+      "bytes": 1363,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/discovery/sitemap.py",
+      "bytes": 4035,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/dispatchers.py",
+      "bytes": 1328,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/errors.py",
+      "bytes": 1999,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/extraction.py",
+      "bytes": 1308,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/media.py",
+      "bytes": 4020,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/normalization.py",
+      "bytes": 5031,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/protocol.py",
+      "bytes": 2500,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/rate_limits.py",
+      "bytes": 150,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/resources.py",
+      "bytes": 3670,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/security.py",
+      "bytes": 3224,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/service.py",
+      "bytes": 10081,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/tests/conftest.py",
+      "bytes": 144,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler/tests/test_protocol_security.py",
+      "bytes": 3332,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler.egg-info/PKG-INFO",
+      "bytes": 297,
+      "ext": ""
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler.egg-info/SOURCES.txt",
+      "bytes": 1087,
+      "ext": ".txt"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler.egg-info/dependency_links.txt",
+      "bytes": 1,
+      "ext": ".txt"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler.egg-info/requires.txt",
+      "bytes": 56,
+      "ext": ".txt"
+    },
+    {
+      "path": "services/crawl4ai/coreside_crawler.egg-info/top_level.txt",
+      "bytes": 17,
+      "ext": ".txt"
+    },
+    {
+      "path": "services/crawl4ai/pyproject.toml",
+      "bytes": 609,
+      "ext": ".toml"
+    },
+    {
+      "path": "services/crawl4ai/requirements.lock",
+      "bytes": 1675,
+      "ext": ".lock"
+    },
+    {
+      "path": "services/crawl4ai/scripts/doctor.py",
+      "bytes": 1139,
+      "ext": ".py"
+    },
+    {
+      "path": "services/crawl4ai/scripts/smoke_test.py",
+      "bytes": 1380,
+      "ext": ".py"
+    },
+    {
+      "path": "src/app/App.tsx",
+      "bytes": 4880,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/assets/branding/coreside-dock-dark.png",
+      "bytes": 83832,
+      "ext": ".png"
+    },
+    {
+      "path": "src/assets/branding/coreside-dock-light.png",
+      "bytes": 90364,
+      "ext": ".png"
+    },
+    {
+      "path": "src/assets/branding/coreside-icon-dark-source.png",
+      "bytes": 163021,
+      "ext": ".png"
+    },
+    {
+      "path": "src/assets/branding/coreside-icon-light-source.png",
+      "bytes": 259977,
+      "ext": ".png"
+    },
+    {
+      "path": "src/assets/branding/coreside-mark-black-transparent.png",
+      "bytes": 37008,
+      "ext": ".png"
+    },
+    {
+      "path": "src/assets/branding/coreside-mark-white-transparent.png",
+      "bytes": 57724,
+      "ext": ".png"
+    },
+    {
+      "path": "src/assets/branding/manifest.ts",
+      "bytes": 974,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/components/action-log/ActionLog.tsx",
+      "bytes": 2042,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/automations/AutomationsPanel.tsx",
+      "bytes": 5840,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/branding/CoresideLogo.tsx",
+      "bytes": 618,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/chat/ChatPanel.tsx",
+      "bytes": 2161,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/chat/Composer.tsx",
+      "bytes": 14675,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/chat/MentionMenu.tsx",
+      "bytes": 1584,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/chat/MessageAttachments.tsx",
+      "bytes": 2153,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/chat/MessageBubble.tsx",
+      "bytes": 7620,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/chat/MessageList.tsx",
+      "bytes": 5333,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/chat/ModelPicker.tsx",
+      "bytes": 1608,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/chat/ProjectIndicator.tsx",
+      "bytes": 671,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/chat/ToolChangePreview.tsx",
+      "bytes": 1314,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/context-menu/ChatContextMenu.tsx",
+      "bytes": 2468,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/context-menu/ContextMenu.tsx",
+      "bytes": 5772,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/context-menu/ProjectContextMenu.tsx",
+      "bytes": 1790,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/export/ExportDialog.tsx",
+      "bytes": 5434,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/layout/AppShell.tsx",
+      "bytes": 9419,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/media/MediaAssetCard.tsx",
+      "bytes": 1398,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/media/MediaDetails.tsx",
+      "bytes": 4406,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/media/MediaImportDialog.tsx",
+      "bytes": 5447,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/media/MediaLibrary.tsx",
+      "bytes": 9074,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/media/MediaPreview.tsx",
+      "bytes": 2212,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/projects/AddChatsToProjectDialog.tsx",
+      "bytes": 4813,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/projects/CreateProjectDialog.tsx",
+      "bytes": 4759,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/projects/DeleteProjectDialog.tsx",
+      "bytes": 4345,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/projects/EditProjectDialog.tsx",
+      "bytes": 4434,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/projects/ProjectList.tsx",
+      "bytes": 4158,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/projects/ProjectPage.tsx",
+      "bytes": 4620,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/projects/ProjectsListPage.tsx",
+      "bytes": 1974,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/projects/RenameConversationDialog.tsx",
+      "bytes": 2546,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/providers/ProviderSetupDialog.tsx",
+      "bytes": 14521,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/search/ImageResultCard.tsx",
+      "bytes": 2427,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/search/SearchHistoryPanel.tsx",
+      "bytes": 6841,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/search/SearchProviderSetup.tsx",
+      "bytes": 24597,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/search/SearchResults.tsx",
+      "bytes": 6027,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/search/SourceList.tsx",
+      "bytes": 1211,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/search/VideoResultCard.tsx",
+      "bytes": 2586,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/search/WebResultCard.tsx",
+      "bytes": 951,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/settings/AgentBehaviorSettings.tsx",
+      "bytes": 3671,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/settings/AiProviderSettings.tsx",
+      "bytes": 6860,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/settings/SettingsPanel.tsx",
+      "bytes": 11519,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/settings/WallpaperSettings.tsx",
+      "bytes": 4434,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/sidebar/Sidebar.tsx",
+      "bytes": 13490,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/tool-canvas/ToolCanvas.tsx",
+      "bytes": 3201,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/tool-renderer/ToolRenderer.tsx",
+      "bytes": 4431,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/tool-renderer/context.tsx",
+      "bytes": 1034,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/tool-renderer/nodes.tsx",
+      "bytes": 23691,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/tool-renderer/registry.tsx",
+      "bytes": 1556,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/ui/ModalPortal.tsx",
+      "bytes": 334,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/wallpaper/LiveWallpaper.tsx",
+      "bytes": 13810,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/components/wallpaper/WallpaperProposalDialog.tsx",
+      "bytes": 5501,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/lib/action-log.test.ts",
+      "bytes": 1577,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/action-log.ts",
+      "bytes": 1664,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/actions.ts",
+      "bytes": 6443,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/media.ts",
+      "bytes": 2710,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/mentions/index.ts",
+      "bytes": 5149,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/mentions/mentions.test.ts",
+      "bytes": 2894,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/navigation/chat.test.ts",
+      "bytes": 2522,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/navigation/chat.ts",
+      "bytes": 1303,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/navigation/index.ts",
+      "bytes": 255,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/navigation/types.ts",
+      "bytes": 752,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/open-url.ts",
+      "bytes": 349,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/readability/contrast.test.ts",
+      "bytes": 2645,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/readability/contrast.ts",
+      "bytes": 3919,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/tauri.ts",
+      "bytes": 72669,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/tool-schema.ts",
+      "bytes": 2573,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/wallpaper.test.ts",
+      "bytes": 4689,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/lib/wallpaper.ts",
+      "bytes": 2915,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/main.tsx",
+      "bytes": 333,
+      "ext": ".tsx"
+    },
+    {
+      "path": "src/stores/app-store.ts",
+      "bytes": 45742,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/styles/global.css",
+      "bytes": 59910,
+      "ext": ".css"
+    },
+    {
+      "path": "src/styles/tokens.css",
+      "bytes": 1986,
+      "ext": ".css"
+    },
+    {
+      "path": "src/types/agent.ts",
+      "bytes": 7100,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/types/attachments.ts",
+      "bytes": 266,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/types/media.ts",
+      "bytes": 2727,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/types/messages.ts",
+      "bytes": 958,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/types/project.ts",
+      "bytes": 2299,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/types/providers.ts",
+      "bytes": 1305,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/types/search.ts",
+      "bytes": 7327,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/types/settings.ts",
+      "bytes": 590,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/types/tool.ts",
+      "bytes": 3931,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/types/wallpaper.ts",
+      "bytes": 5608,
+      "ext": ".ts"
+    },
+    {
+      "path": "src/vite-env.d.ts",
+      "bytes": 160,
+      "ext": ".ts"
+    },
+    {
+      "path": "src-tauri/Cargo.lock",
+      "bytes": 132375,
+      "ext": ".lock"
+    },
+    {
+      "path": "src-tauri/Cargo.toml",
+      "bytes": 2012,
+      "ext": ".toml"
+    },
+    {
+      "path": "src-tauri/Info.plist",
+      "bytes": 891,
+      "ext": ".plist"
+    },
+    {
+      "path": "src-tauri/build.rs",
+      "bytes": 39,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/capabilities/default.json",
+      "bytes": 492,
+      "ext": ".json"
+    },
+    {
+      "path": "src-tauri/gen/schemas/acl-manifests.json",
+      "bytes": 71449,
+      "ext": ".json"
+    },
+    {
+      "path": "src-tauri/gen/schemas/capabilities.json",
+      "bytes": 399,
+      "ext": ".json"
+    },
+    {
+      "path": "src-tauri/gen/schemas/desktop-schema.json",
+      "bytes": 133493,
+      "ext": ".json"
+    },
+    {
+      "path": "src-tauri/gen/schemas/macOS-schema.json",
+      "bytes": 133493,
+      "ext": ".json"
+    },
+    {
+      "path": "src-tauri/icons/128x128.png",
+      "bytes": 7985,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/128x128@2x.png",
+      "bytes": 18022,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/32x32.png",
+      "bytes": 1547,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/64x64.png",
+      "bytes": 3646,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/Square107x107Logo.png",
+      "bytes": 6501,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/Square142x142Logo.png",
+      "bytes": 8944,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/Square150x150Logo.png",
+      "bytes": 9506,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/Square284x284Logo.png",
+      "bytes": 20420,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/Square30x30Logo.png",
+      "bytes": 1499,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/Square310x310Logo.png",
+      "bytes": 22579,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/Square44x44Logo.png",
+      "bytes": 2425,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/Square71x71Logo.png",
+      "bytes": 4098,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/Square89x89Logo.png",
+      "bytes": 5205,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/StoreLogo.png",
+      "bytes": 2747,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher.xml",
+      "bytes": 261,
+      "ext": ".xml"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-hdpi/ic_launcher.png",
+      "bytes": 2316,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-hdpi/ic_launcher_foreground.png",
+      "bytes": 10472,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-hdpi/ic_launcher_round.png",
+      "bytes": 2641,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-mdpi/ic_launcher.png",
+      "bytes": 2220,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-mdpi/ic_launcher_foreground.png",
+      "bytes": 6537,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-mdpi/ic_launcher_round.png",
+      "bytes": 2519,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-xhdpi/ic_launcher.png",
+      "bytes": 5131,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-xhdpi/ic_launcher_foreground.png",
+      "bytes": 14718,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-xhdpi/ic_launcher_round.png",
+      "bytes": 5818,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-xxhdpi/ic_launcher.png",
+      "bytes": 8157,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-xxhdpi/ic_launcher_foreground.png",
+      "bytes": 23805,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-xxhdpi/ic_launcher_round.png",
+      "bytes": 9194,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher.png",
+      "bytes": 11723,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_foreground.png",
+      "bytes": 33197,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_round.png",
+      "bytes": 12717,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/android/values/ic_launcher_background.xml",
+      "bytes": 115,
+      "ext": ".xml"
+    },
+    {
+      "path": "src-tauri/icons/icon.icns",
+      "bytes": 210695,
+      "ext": ".icns"
+    },
+    {
+      "path": "src-tauri/icons/icon.ico",
+      "bytes": 32247,
+      "ext": ".ico"
+    },
+    {
+      "path": "src-tauri/icons/icon.png",
+      "bytes": 40671,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-20x20@1x.png",
+      "bytes": 856,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-20x20@2x-1.png",
+      "bytes": 1954,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-20x20@2x.png",
+      "bytes": 1954,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-20x20@3x.png",
+      "bytes": 3150,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-29x29@1x.png",
+      "bytes": 1353,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-29x29@2x-1.png",
+      "bytes": 3066,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-29x29@2x.png",
+      "bytes": 3066,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-29x29@3x.png",
+      "bytes": 4821,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-40x40@1x.png",
+      "bytes": 1954,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-40x40@2x-1.png",
+      "bytes": 4422,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-40x40@2x.png",
+      "bytes": 4422,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-40x40@3x.png",
+      "bytes": 6995,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-512@2x.png",
+      "bytes": 72986,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-60x60@2x.png",
+      "bytes": 6995,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-60x60@3x.png",
+      "bytes": 11343,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-76x76@1x.png",
+      "bytes": 4178,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-76x76@2x.png",
+      "bytes": 9395,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/icons/ios/AppIcon-83.5x83.5@2x.png",
+      "bytes": 10422,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/migrations/001_initial.sql",
+      "bytes": 2486,
+      "ext": ".sql"
+    },
+    {
+      "path": "src-tauri/migrations/002_added_settings.sql",
+      "bytes": 740,
+      "ext": ".sql"
+    },
+    {
+      "path": "src-tauri/migrations/003_provider_connections.sql",
+      "bytes": 730,
+      "ext": ".sql"
+    },
+    {
+      "path": "src-tauri/migrations/004_action_log.sql",
+      "bytes": 700,
+      "ext": ".sql"
+    },
+    {
+      "path": "src-tauri/migrations/005_automations.sql",
+      "bytes": 2201,
+      "ext": ".sql"
+    },
+    {
+      "path": "src-tauri/migrations/006_projects.sql",
+      "bytes": 1744,
+      "ext": ".sql"
+    },
+    {
+      "path": "src-tauri/migrations/007_media_search.sql",
+      "bytes": 1747,
+      "ext": ".sql"
+    },
+    {
+      "path": "src-tauri/migrations/008_media_thumbnails.sql",
+      "bytes": 119,
+      "ext": ".sql"
+    },
+    {
+      "path": "src-tauri/migrations/009_crawler.sql",
+      "bytes": 2444,
+      "ext": ".sql"
+    },
+    {
+      "path": "src-tauri/migrations/010_exa_wallpapers.sql",
+      "bytes": 1235,
+      "ext": ".sql"
+    },
+    {
+      "path": "src-tauri/migrations/011_action_log_mode.sql",
+      "bytes": 629,
+      "ext": ".sql"
+    },
+    {
+      "path": "src-tauri/prompts/protected_resources.md",
+      "bytes": 5219,
+      "ext": ".md"
+    },
+    {
+      "path": "src-tauri/prompts/response_rules.md",
+      "bytes": 4674,
+      "ext": ".md"
+    },
+    {
+      "path": "src-tauri/prompts/system.md",
+      "bytes": 3244,
+      "ext": ".md"
+    },
+    {
+      "path": "src-tauri/prompts/tool_builder.md",
+      "bytes": 1254,
+      "ext": ".md"
+    },
+    {
+      "path": "src-tauri/prompts/tool_editor.md",
+      "bytes": 1468,
+      "ext": ".md"
+    },
+    {
+      "path": "src-tauri/resources/branding/coreside-dock-dark.png",
+      "bytes": 83832,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/resources/branding/coreside-dock-light.png",
+      "bytes": 90364,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/resources/branding/coreside-mark-black-transparent.png",
+      "bytes": 37008,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/resources/branding/coreside-mark-white-transparent.png",
+      "bytes": 57724,
+      "ext": ".png"
+    },
+    {
+      "path": "src-tauri/src/ai/anthropic.rs",
+      "bytes": 6669,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/ai/auto.rs",
+      "bytes": 8069,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/ai/capability_registry.rs",
+      "bytes": 8759,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/ai/errors.rs",
+      "bytes": 907,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/ai/gemini.rs",
+      "bytes": 16756,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/ai/mock.rs",
+      "bytes": 15008,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/ai/mod.rs",
+      "bytes": 8355,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/ai/openai.rs",
+      "bytes": 8049,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/ai/openrouter.rs",
+      "bytes": 8896,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/ai/prompt_builder.rs",
+      "bytes": 6759,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/ai/provider.rs",
+      "bytes": 1761,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/ai/response_parser.rs",
+      "bytes": 17625,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/ai/response_schema.rs",
+      "bytes": 8834,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/ai/settings_change.rs",
+      "bytes": 21566,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/ai/tool_loop.rs",
+      "bytes": 17903,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/automations/executor.rs",
+      "bytes": 3056,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/automations/mod.rs",
+      "bytes": 553,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/automations/models.rs",
+      "bytes": 5474,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/automations/scheduler.rs",
+      "bytes": 5426,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/automations/validation.rs",
+      "bytes": 2844,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/branding/mod.rs",
+      "bytes": 6247,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/ai_cmds.rs",
+      "bytes": 3360,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/attachment_cmds.rs",
+      "bytes": 5081,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/automation_cmds.rs",
+      "bytes": 5939,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/conversation_cmds.rs",
+      "bytes": 1933,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/crawler_cmds.rs",
+      "bytes": 3147,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/credential_cmds.rs",
+      "bytes": 14293,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/exa_cmds.rs",
+      "bytes": 5311,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/export_cmds.rs",
+      "bytes": 7640,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/media_cmds.rs",
+      "bytes": 3755,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/message_cmds.rs",
+      "bytes": 33514,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/mod.rs",
+      "bytes": 2001,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/project_cmds.rs",
+      "bytes": 8731,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/search_cmds.rs",
+      "bytes": 10448,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/settings_cmds.rs",
+      "bytes": 14019,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/commands/tool_cmds.rs",
+      "bytes": 4539,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/config/env.rs",
+      "bytes": 11876,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/config/mod.rs",
+      "bytes": 347,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/crawler/cancellation.rs",
+      "bytes": 701,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/crawler/errors.rs",
+      "bytes": 1091,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/crawler/health.rs",
+      "bytes": 1302,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/crawler/installation.rs",
+      "bytes": 4898,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/crawler/mod.rs",
+      "bytes": 710,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/crawler/models.rs",
+      "bytes": 3650,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/crawler/protocol.rs",
+      "bytes": 4933,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/crawler/resources.rs",
+      "bytes": 1806,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/crawler/supervisor.rs",
+      "bytes": 17285,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/credentials/mod.rs",
+      "bytes": 2345,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/credentials/resolve.rs",
+      "bytes": 11065,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/db/mod.rs",
+      "bytes": 15609,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/db/repositories.rs",
+      "bytes": 55868,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/exa/budget.rs",
+      "bytes": 6017,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/exa/cache.rs",
+      "bytes": 3451,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/exa/client.rs",
+      "bytes": 10533,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/exa/credentials.rs",
+      "bytes": 3904,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/exa/errors.rs",
+      "bytes": 3716,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/exa/mod.rs",
+      "bytes": 1564,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/exa/models.rs",
+      "bytes": 6349,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/exa/profiles.rs",
+      "bytes": 5365,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/exa/usage.rs",
+      "bytes": 5270,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/exports/mod.rs",
+      "bytes": 9093,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/lib.rs",
+      "bytes": 7196,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/main.rs",
+      "bytes": 412,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/media/download.rs",
+      "bytes": 1869,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/media/errors.rs",
+      "bytes": 876,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/media/limits.rs",
+      "bytes": 1114,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/media/metadata.rs",
+      "bytes": 10092,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/media/mod.rs",
+      "bytes": 1215,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/media/models.rs",
+      "bytes": 1420,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/media/repository.rs",
+      "bytes": 9706,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/media/storage.rs",
+      "bytes": 2260,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/media/thumbnails.rs",
+      "bytes": 3382,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/media/validation.rs",
+      "bytes": 4010,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/projects/export.rs",
+      "bytes": 4615,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/projects/indexing.rs",
+      "bytes": 5179,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/projects/mod.rs",
+      "bytes": 1492,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/projects/models.rs",
+      "bytes": 2090,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/projects/repository.rs",
+      "bytes": 18949,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/projects/retrieval.rs",
+      "bytes": 6389,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/projects/summaries.rs",
+      "bytes": 4732,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/projects/validation.rs",
+      "bytes": 4010,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/research/discovery.rs",
+      "bytes": 3835,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/research/hybrid.rs",
+      "bytes": 14475,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/research/mod.rs",
+      "bytes": 422,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/research/provider.rs",
+      "bytes": 13608,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/research/ranking.rs",
+      "bytes": 3512,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/cache.rs",
+      "bytes": 1547,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/citations.rs",
+      "bytes": 1700,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/errors.rs",
+      "bytes": 997,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/fetch.rs",
+      "bytes": 6147,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/history.rs",
+      "bytes": 12233,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/images.rs",
+      "bytes": 374,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/mock.rs",
+      "bytes": 3796,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/mod.rs",
+      "bytes": 1161,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/models.rs",
+      "bytes": 3122,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/normalization.rs",
+      "bytes": 2548,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/provider.rs",
+      "bytes": 906,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/registry.rs",
+      "bytes": 3639,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/safety.rs",
+      "bytes": 5752,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/videos.rs",
+      "bytes": 374,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/search/web.rs",
+      "bytes": 412,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/security/mod.rs",
+      "bytes": 2301,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/security/protected_resources.rs",
+      "bytes": 5421,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/settings/mod.rs",
+      "bytes": 3672,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/state.rs",
+      "bytes": 1863,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/wallpapers/mod.rs",
+      "bytes": 170,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/wallpapers/models.rs",
+      "bytes": 1652,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/wallpapers/registry.rs",
+      "bytes": 3280,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/wallpapers/validation.rs",
+      "bytes": 3518,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/src/windows/mod.rs",
+      "bytes": 1204,
+      "ext": ".rs"
+    },
+    {
+      "path": "src-tauri/tauri.conf.json",
+      "bytes": 1401,
+      "ext": ".json"
+    },
+    {
+      "path": "tests/actions.test.ts",
+      "bytes": 3322,
+      "ext": ".ts"
+    },
+    {
+      "path": "tests/response-fixtures.test.ts",
+      "bytes": 3516,
+      "ext": ".ts"
+    },
+    {
+      "path": "tests/setup.ts",
+      "bytes": 43,
+      "ext": ".ts"
+    },
+    {
+      "path": "tests/tool-schema.test.ts",
+      "bytes": 1905,
+      "ext": ".ts"
+    },
+    {
+      "path": "tsconfig.json",
+      "bytes": 666,
+      "ext": ".json"
+    },
+    {
+      "path": "vite.config.ts",
+      "bytes": 925,
+      "ext": ".ts"
+    }
+  ]
+}

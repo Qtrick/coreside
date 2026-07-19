@@ -20,6 +20,9 @@ const MIGRATION_008: &str = include_str!("../../migrations/008_media_thumbnails.
 const MIGRATION_009: &str = include_str!("../../migrations/009_crawler.sql");
 const MIGRATION_010: &str = include_str!("../../migrations/010_exa_wallpapers.sql");
 const MIGRATION_011: &str = include_str!("../../migrations/011_action_log_mode.sql");
+const MIGRATION_012: &str = include_str!("../../migrations/012_runtime_v2.sql");
+const MIGRATION_013: &str = include_str!("../../migrations/013_application_kernel.sql");
+const MIGRATION_014: &str = include_str!("../../migrations/014_continuity_scheduler.sql");
 
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -95,6 +98,9 @@ impl Database {
         self.apply_migration("009_crawler", MIGRATION_009)?;
         self.apply_migration("010_exa_wallpapers", MIGRATION_010)?;
         self.apply_migration("011_action_log_mode", MIGRATION_011)?;
+        self.apply_migration("012_runtime_v2", MIGRATION_012)?;
+        self.apply_migration("013_application_kernel", MIGRATION_013)?;
+        self.apply_migration("014_continuity_scheduler", MIGRATION_014)?;
 
         Ok(())
     }

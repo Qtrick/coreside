@@ -7,9 +7,10 @@ use serde_json::{json, Value};
 
 pub const SCHEMA_VERSION: &str = "1";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseType {
+    #[default]
     Message,
     ToolChange,
     ToolUse,
@@ -146,12 +147,14 @@ pub struct SourceCitation {
     pub snippet: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentResponsePayload {
     #[serde(default = "default_schema_version")]
     pub schema_version: String,
+    #[serde(default)]
     pub assistant_message: String,
+    #[serde(default = "default_response_type")]
     pub response_type: ResponseType,
     #[serde(default)]
     pub tool_change: Option<ToolChangePayload>,
@@ -163,6 +166,19 @@ pub struct AgentResponsePayload {
     pub citations: Option<Vec<SourceCitation>>,
     #[serde(default)]
     pub diagnostics: Option<Value>,
+    /// Runtime V2 multi-operation list (schemaVersion "2").
+    #[serde(default)]
+    pub operations: Option<Vec<Value>>,
+    #[serde(default)]
+    pub silent: Option<bool>,
+    #[serde(default)]
+    pub turn_id: Option<String>,
+    #[serde(default)]
+    pub assistant_messages: Option<Vec<Value>>,
+}
+
+fn default_response_type() -> ResponseType {
+    ResponseType::Message
 }
 
 fn default_schema_version() -> String {
@@ -177,8 +193,43 @@ impl AgentResponsePayload {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        let has_ops = self
+            .operations
+            .as_ref()
+            .map(|o| !o.is_empty())
+            .unwrap_or(false);
+        let silent = self.silent.unwrap_or(false);
+        let has_v2_visible = self
+            .assistant_messages
+            .as_ref()
+            .map(|msgs| {
+                msgs.iter().any(|m| {
+                    let vis = m
+                        .get("visibility")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("visible");
+                    vis != "silent"
+                        && m.get("content")
+                            .and_then(|v| v.as_str())
+                            .map(|s| !s.trim().is_empty())
+                            .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+
+        if has_ops {
+            let ops: Vec<crate::runtime_v2::AppOperation> = serde_json::from_value(
+                Value::Array(self.operations.clone().unwrap_or_default()),
+            )
+            .map_err(|e| format!("invalid operations: {e}"))?;
+            crate::runtime_v2::validate_operations(&ops)?;
+        }
+
         if self.assistant_message.trim().is_empty()
             && !matches!(self.response_type, ResponseType::Noop | ResponseType::ToolUse)
+            && !has_ops
+            && !silent
+            && !has_v2_visible
         {
             return Err("assistantMessage must be non-empty".into());
         }
@@ -267,6 +318,10 @@ mod tests {
             tool_calls: None,
             citations: None,
             diagnostics: None,
+            operations: None,
+            silent: None,
+            turn_id: None,
+            assistant_messages: None,
         };
         assert!(missing.validate().is_err());
 

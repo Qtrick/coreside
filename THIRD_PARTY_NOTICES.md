@@ -40,3 +40,36 @@ Crawl4AI itself depends on additional open-source packages (including Playwright
 
 Exa is a third-party network service, not redistributed source code. API usage is subject to Exa’s terms and pricing. Coreside does not ship Exa credentials.
 
+## Partial Update (conceptual inspiration)
+
+- **Project:** [Partial Update](https://github.com/philholden/partialupdate)
+- **License:** MIT
+- **Copyright:** Copyright (c) 2026 Phil Holden
+- **Use in Coreside:** Architectural inspiration for Generative Interface Runtime V2 (persistent generative UI, structured interactions, targeting, silent updates). **No Partial Update source files were copied** into the Coreside application tree.
+- **Reference extract (not committed):** `.reference/partial-update/`
+- **Docs:** `docs/PARTIAL_UPDATE_REVIEW.md`, `docs/PARTIAL_UPDATE_EXHAUSTIVE_AUDIT.md`
+
+```
+MIT License
+
+Copyright (c) 2026 Phil Holden
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+

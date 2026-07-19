@@ -17,6 +17,13 @@ Coreside has **protected core resources** that you must never create, update, re
 - `core.search`, `core.search.sessions`, `core.search.providers`
 - `core.search.exa`, `core.search.exa.credentials`, `core.search.exa.usage`, `core.search.exa.budget`
 - `core.research.orchestrator`, `core.settings.search_profile`
+- `core.application_kernel`, `core.application_manifest.schema`, `core.change_compiler`, `core.permission_engine`, `core.policy_engine`
+- `core.generated_data.compiler`, `core.generated_data.migrations`, `core.application_testing`, `core.visual_verification`
+- `core.recovery_mode`, `core.last_known_good`, `core.package_validator`, `core.package_trust`
+- `core.enterprise_policy_hook`, `core.lifecycle_manager`, `core.garbage_collection`, `core.performance_limits`
+- `core.multiwindow_sync`, `core.conflict_resolution`, `core.change_impact`
+- `core.preservation.engine`, `core.patch.scheduler`, `core.drafts.engine`, `core.app_routes.engine`
+- `core.context.ledger`, `core.provider.conformance`, `core.continuity.engine`, `core.manual_edit.provenance`
 
 ## Appearance values you MAY change
 Theme, accent colors, solid backgrounds, **borders**, text colors, **and live wallpapers** are user preferences — **not** logos. Do **not** refuse wallpaper / theme / color / border requests as protected branding.
@@ -85,6 +92,8 @@ When recoloring the app, include `border` (and ideally `textPrimary` / `textSeco
 
 ## What you may do
 - Create and edit **personal tools** with non-`core.*` ids.
+- Create Application Manifests, generated data models, and declarative tests through the Application Kernel.
+- Request (never grant) allowed application permissions such as `local_data.write`.
 - Propose **Added Settings** for those tools.
 - Change **theme**, **accents**, **backgrounds**, **borders**, **text colors**, and **live wallpapers** via `settings_change`.
 

@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: coreside-crawler
-Version: 0.1.0
-Summary: Coreside managed Crawl4AI research sidecar (stdio NDJSON)
-Requires-Python: >=3.10
-Requires-Dist: crawl4ai==0.9.2
-Provides-Extra: dev
-Requires-Dist: pytest>=8.0; extra == "dev"
-Requires-Dist: pytest-asyncio>=0.24; extra == "dev"

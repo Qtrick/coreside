@@ -9,6 +9,11 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { ActionLog } from "@/components/action-log/ActionLog";
+import {
+  ChangeProposalCard,
+  kernelProposalFromMetadata,
+} from "@/components/chat/ChangeProposalCard";
+import { InlineSurfacesForMessage } from "@/components/chat/InlineSurface";
 import { MessageAttachments } from "@/components/chat/MessageAttachments";
 import {
   SearchResults,
@@ -93,6 +98,14 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
           : null,
       )
     : { citations: [], searchResults: null };
+
+  const kernelProposal = !isUser
+    ? kernelProposalFromMetadata(
+        message.metadata && typeof message.metadata === "object"
+          ? (message.metadata as Record<string, unknown>)
+          : null,
+      )
+    : null;
 
   return (
     <article
@@ -208,6 +221,22 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
               citations={searchData.citations}
               searchResults={searchData.searchResults}
             />
+            <InlineSurfacesForMessage
+              conversationId={message.conversationId}
+              messageId={message.id}
+            />
+            {kernelProposal ? (
+              <ChangeProposalCard
+                proposalId={kernelProposal.proposalId}
+                summary={kernelProposal.summary}
+                impactSummary={kernelProposal.impactSummary}
+                risk={kernelProposal.risk}
+                operations={kernelProposal.operations}
+                messageId={message.id}
+                conversationId={message.conversationId}
+                status={kernelProposal.status}
+              />
+            ) : null}
             <ActionLog message={message} />
           </>
         )}

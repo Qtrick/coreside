@@ -1,46 +1,40 @@
-# Implementation Plan — Exa + Crawl4AI Hybrid, Wallpapers Templates, Readability
+# Implementation Plan — Final Partial Update Gap Completion
 
 **Product:** Coreside  
-**Status:** Hybrid MVP shipped — see Remaining below  
-**Last updated:** 2026-07-17
+**Status:** Continuity / scheduler / preservation phase shipped (foundation)  
+**Last updated:** 2026-07-18
 
-## Current-state findings (resolved)
+Prior: Application Kernel + Runtime V2. Research: [PARTIAL_UPDATE_FINAL_GAP_RESEARCH.md](./PARTIAL_UPDATE_FINAL_GAP_RESEARCH.md). Audit: [PARTIAL_UPDATE_FINAL_GAP_AUDIT.md](./PARTIAL_UPDATE_FINAL_GAP_AUDIT.md).
 
-- Exa + Crawl4AI hybrid via `HybridSearchProvider` ([`research/hybrid.rs`](../src-tauri/src/research/hybrid.rs)).
-- Brave removed from active path; legacy citations remain readable.
-- Wallpaper “None stays selected” fixed via `activeCanvasPresetId` from `wallpaperJson`.
-- Wallpapers under Added Settings → Templates (not Base Settings).
-- Migration `010_exa_wallpapers.sql`; `EXA_API_KEY=` in `.env` / `.env.example`.
+## Completed this phase
 
-## Architecture
+1. Migration `014_continuity_scheduler.sql`
+2. Preservation engine + frontend helpers
+3. Draft protection + conflict banner
+4. Patch Scheduler (deps, priority, backpressure, supersession) wired into agent apply path
+5. Generated route state + AppRouteShell + same-route no-op
+6. Customize mode → same operation protocol + provenance
+7. Optimistic local controls with rollback
+8. Context ledger (model-only)
+9. Provider conformance seeded profiles
+10. Surface state hydration + continuity suspension
+11. Safe parity demo documentation
 
+## Explicitly partial / deferred
+
+- Full caret/selection fidelity across every control type
+- View-transition presets beyond CSS reduced-motion awareness
+- Local provider benchmark numbers (no fabricated metrics)
+- Public multiuser collaboration (rejected/deferred)
+- Unrestricted HTML/JS (rejected)
+
+## Verify
+
+```bash
+npm run audit:partial-update-final-gaps
+npm run test:runtime-v2
+npm run test:preservation
+npm run test:patch-scheduler
+npm run typecheck
+npm run test
 ```
-Necessity → cache/coalesce → Exa Search (discovery+highlights)
-  → rank/select → Crawl4AI (≤N pages, profile-bounded) → citations + usage ledger
-```
-
-Direct URL → Crawl4AI only (no Exa).  
-No Exa key → honest setup / local-only (no fake SERP).  
-**Never** route default search through Exa Agent.
-
-## Phases
-
-1. Exa research docs ✅  
-2. Rust `exa/` client + credentials + usage/budget + migration ✅  
-3. Hybrid orchestrator + registry + agent prompts ✅  
-4. Settings UI (Exa + profiles + usage) ✅  
-5. Wallpaper Templates + selection fix + Live badges ✅ (Apply-only)  
-6. Readability MVP (tokens + contrast helpers) ✅  
-7. Docs + verify + code-reviewer-editor loops ✅  
-
-## Remaining (next iteration)
-
-- Deeper necessity classifier + Thorough refinement loop  
-- Persistent Exa query-cache table + query-history privacy toggle  
-- Full wallpaper create/delete/hide/preview-vs-apply  
-- Full readability (gradient/image/video sampling)  
-- Exa HTTP cancellation tied to agent cancel token  
-
-## Defaults
-
-Saver profile; Exa Contents fallback off; Deep Reasoning never silent; result max 10; local budget optional and independent of Exa balance.

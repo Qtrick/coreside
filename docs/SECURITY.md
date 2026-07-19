@@ -22,9 +22,15 @@
 
 The webview is an untrusted UI surface. Keeping provider credentials and HTTP in Rust prevents exposure via DevTools, frontend bundles, or XSS-style generative UI attacks.
 
-## No arbitrary scripts
+## Continuity and patch security
 
-The agent must not return executable JavaScript for the host app. Coreside does not `eval` model output, inject `<script>` tags, or load arbitrary CDNs requested by the model.
+- Drafts are isolated by surface/component/window; agents cannot read another surface’s draft.
+- Preservation policies are trusted enums; incompatible state is not preserved across types/permissions.
+- Patch queue limits and priority ceilings are protected (`core.patch_*`); agents cannot raise them or assign `critical_recovery`.
+- Dependency cycles and superseded previews are rejected; stale proposals cannot apply after manual edits without rebase.
+- Context ledger entries are project-scoped; model-only visibility is not user-visible chat clutter and must not cross projects.
+- Provider conformance profiles are trusted; agents cannot mark a provider conformant or force a weak fallback when a stronger validated mode exists.
+- Restart hydration never auto-resumes audio, microphone, or provider generation.
 
 ## Component validation
 
@@ -32,7 +38,7 @@ Only registry-listed component types render. Unknown types fail closed. Rust val
 
 ## Protected core
 
-Reserved identifiers (`core.branding*`, `core.settings*`, `core.navigation`, `core.security`, `core.database`, `core.versioning`, `core.search*`, `core.media*`, `core.wallpaper*`, `core.agent.tool_loop`, `core.projects*`) cannot be created, updated, deleted, or shadowed by generated tools or Added Settings. See `src-tauri/src/security/protected_resources.rs`.
+Reserved identifiers (`core.branding*`, `core.settings*`, `core.navigation`, `core.security`, `core.database`, `core.versioning`, `core.search*`, `core.media*`, `core.wallpaper*`, `core.agent.tool_loop`, `core.projects*`, `core.application_kernel`, `core.recovery_mode`, `core.package_validator`, `core.policy_engine`, and related Application Kernel IDs) cannot be created, updated, deleted, or shadowed by generated tools or Added Settings. See `src-tauri/src/security/protected_resources.rs`.
 
 Base Settings structure (Appearance, AI Agent, Data, Accessibility, About) is product-owned. Theme preference, accent colors, solid backgrounds, borders, text colors, and allowlisted live wallpapers are user preferences and may be changed via the allowlisted `settings_change` agent path. Added Settings are user/tool-owned and cannot use protected IDs.
 
@@ -83,3 +89,13 @@ Inspired by Partial Update’s own warnings:
 ## Future sandboxing plan
 
 Later phases may explore sandboxed custom TypeScript or Wasm components. That is explicitly outside this MVP. Until then, declarative registry components remain the only generation path.
+
+## Continuity and patch security
+
+- Drafts are isolated by surface/component/window; agents cannot read another surface’s draft.
+- Preservation policies are trusted enums; incompatible state is not preserved across types/permissions.
+- Patch queue limits and priority ceilings are protected; agents cannot raise them or assign `critical_recovery` / `direct_user_interaction` / `active_turn_preview`.
+- Dependency cycles and superseded previews are rejected; stale proposals cannot apply after manual edits without rebase.
+- Context ledger entries are project-scoped; model-only visibility is not user-visible chat clutter and must not cross projects.
+- Provider conformance profiles are trusted; agents cannot mark a provider conformant or force a weak fallback when a stronger validated mode exists.
+- Restart hydration never auto-resumes audio, microphone, or provider generation.

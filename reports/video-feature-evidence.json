@@ -1,0 +1,94 @@
+{
+  "access_date": "2026-07-18",
+  "video_url": "https://www.youtube.com/watch?v=f39MnczcJZA",
+  "playlist": "https://www.youtube.com/watch?v=f39MnczcJZA&list=PLdYOUh501F8o",
+  "title": "What if AI replies in HTML not Markdown?",
+  "transcript_source": "YouTube ASR via youtube-transcript-api",
+  "transcript_lines": 331,
+  "features": [
+    {
+      "id": "VID-HTML",
+      "ts": "00:00:34",
+      "feature": "HTML not Markdown responses",
+      "quote": "LLM responds with HTML, not markdown"
+    },
+    {
+      "id": "VID-FORMS",
+      "ts": "00:00:44",
+      "feature": "Forms submit back to LLM",
+      "quote": "forms that submit their own responses"
+    },
+    {
+      "id": "VID-TTT",
+      "ts": "00:00:52",
+      "feature": "Tic-tac-toe styled forms",
+      "quote": "game of tic-tac-toe"
+    },
+    {
+      "id": "VID-TRANSLATE",
+      "ts": "00:02:04",
+      "feature": "Per-client translation + silent spelling",
+      "quote": "Translate... Silently correct spelling"
+    },
+    {
+      "id": "VID-MP",
+      "ts": "00:03:14",
+      "feature": "Multiplayer Connect 4",
+      "quote": "play John at Connect 4"
+    },
+    {
+      "id": "VID-WIKI",
+      "ts": "00:03:47",
+      "feature": "Full page redesign Wikipedia",
+      "quote": "replace the whole page... Wikipedia"
+    },
+    {
+      "id": "VID-SVG-MATH",
+      "ts": "00:04:02",
+      "feature": "SVG MathML HTML CSS pages",
+      "quote": "SVG, MathML, HTML, and CSS"
+    },
+    {
+      "id": "VID-CANVAS",
+      "ts": "00:05:17",
+      "feature": "Whimsical canvas/3D water typing",
+      "quote": "raindrop falls on the canvas 3D water"
+    },
+    {
+      "id": "VID-CSS-DEV",
+      "ts": "00:05:34",
+      "feature": "CSS/Figma workflow iteration",
+      "quote": "super helpful for web development"
+    },
+    {
+      "id": "VID-CDN-CM",
+      "ts": "00:08:53",
+      "feature": "CDN CodeMirror playground",
+      "quote": "memorized a bunch of CDN URLs... CodeMirror"
+    },
+    {
+      "id": "VID-TAILWIND",
+      "ts": "00:10:45",
+      "feature": "Tailwind styling via CDN",
+      "quote": "style this with Tailwind"
+    },
+    {
+      "id": "VID-PRIVATE",
+      "ts": "00:11:46",
+      "feature": "Private messages / Hangman secrecy",
+      "quote": "private messages"
+    },
+    {
+      "id": "VID-APP",
+      "ts": "00:11:35",
+      "feature": "Real functional multiuser lunch menu app",
+      "quote": "real functional application"
+    },
+    {
+      "id": "VID-ALIGN",
+      "ts": "00:14:04",
+      "feature": "Multiuser alignment failure demo",
+      "quote": "alignment was terrible"
+    }
+  ]
+}

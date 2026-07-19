@@ -173,6 +173,8 @@ Automated tests use a mock AI provider / fixtures and do **not** require a paid 
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Cloud feasibility for research and related systems: [docs/CLOUD_HOSTING.md](docs/CLOUD_HOSTING.md).
 
+**Application Kernel** — trusted gateway for generated apps (manifests, data models, risk proposals, Recovery Mode, `.coreside-app` packages): start at [docs/APPLICATION_KERNEL.md](docs/APPLICATION_KERNEL.md). Related: [APPLICATION_MANIFEST.md](docs/APPLICATION_MANIFEST.md), [CHANGE_COMPILER.md](docs/CHANGE_COMPILER.md), [RECOVERY_MODE.md](docs/RECOVERY_MODE.md), [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
+
 Request flow:
 
 1. User message → conversation + optional active tool context
@@ -207,7 +209,7 @@ Summary: secrets stay in Rust; model output is validated; only registry componen
 
 ## Partial Update inspiration and attribution
 
-Coreside studied **Partial Update** (MIT, Copyright © 2026 Phil Holden) for generative UI and structured interaction ideas. Unrestricted HTML/JS/CDN injection and Cloudflare-required runtime pieces were intentionally **not** adopted. Details: [docs/PARTIAL_UPDATE_REVIEW.md](docs/PARTIAL_UPDATE_REVIEW.md).
+Coreside studied **Partial Update** (MIT, Copyright © 2026 Phil Holden) for generative UI and structured interaction ideas. Unrestricted HTML/JS/CDN injection and Cloudflare-required runtime pieces were intentionally **not** adopted. Generative Interface Runtime V2 adapts the strongest ideas (multi-ops, patches, inline surfaces, packs, branching, queue) through trusted components — see [docs/GENERATIVE_INTERFACE_RUNTIME_V2.md](docs/GENERATIVE_INTERFACE_RUNTIME_V2.md). Final gap work (preservation, patch scheduler, navigation continuity, Customize mode, context ledgers, provider conformance): [docs/PARTIAL_UPDATE_FINAL_GAP_AUDIT.md](docs/PARTIAL_UPDATE_FINAL_GAP_AUDIT.md), [docs/PRESERVATION_ENGINE.md](docs/PRESERVATION_ENGINE.md), [docs/PATCH_SCHEDULER.md](docs/PATCH_SCHEDULER.md). Attribution: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Future direction
 
@@ -226,6 +228,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md). Next focus: stronger agent harness (inte
 ## Documentation index
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Application Kernel](docs/APPLICATION_KERNEL.md)
 - [Cloud hosting feasibility](docs/CLOUD_HOSTING.md)
 - [Agent protocol](docs/AGENT_PROTOCOL.md)
 - [Web Research](docs/WEB_RESEARCH.md)

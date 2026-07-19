@@ -115,6 +115,10 @@ export const SendMessageResultSchema = z.object({
   toolChange: ToolChangeSchema.nullable().optional(),
   settingsChange: SettingsChangeSchema.nullable().optional(),
   diagnostics: AgentDiagnosticsSchema,
+  userMessageId: z.string().nullable().optional(),
+  runtimeV2: z.record(z.unknown()).nullable().optional(),
+  queued: z.boolean().nullable().optional(),
+  queueItemId: z.string().nullable().optional(),
 });
 
 export type SendMessageResult = z.infer<typeof SendMessageResultSchema>;

@@ -13,6 +13,8 @@ mod exports;
 mod media;
 mod projects;
 mod research;
+mod application_kernel;
+mod runtime_v2;
 mod search;
 mod security;
 mod settings;
@@ -76,6 +78,8 @@ pub fn run() {
             commands::stage_chat_attachment,
             commands::get_chat_attachment_src,
             commands::discard_tool_change,
+            commands::discard_kernel_proposal,
+            commands::set_kernel_proposal_status,
             commands::apply_tool_change,
             commands::list_tools,
             commands::get_tool,
@@ -159,9 +163,91 @@ pub fn run() {
             commands::get_media_asset_src_cmd,
             commands::get_media_asset_thumb_src_cmd,
             commands::media_asset_usage_cmd,
+            commands::list_capability_packs,
+            commands::list_conversation_surfaces,
+            commands::get_surface_cmd,
+            commands::create_inline_surface_cmd,
+            commands::update_surface_cmd,
+            commands::promote_surface_cmd,
+            commands::save_surface_state_cmd,
+            commands::get_surface_state_cmd,
+            commands::get_draft_cmd,
+            commands::save_draft_cmd,
+            commands::schedule_patches_cmd,
+            commands::flush_patch_scheduler_cmd,
+            commands::get_route_state_cmd,
+            commands::set_route_state_cmd,
+            commands::navigate_route_cmd,
+            commands::append_context_ledger_cmd,
+            commands::list_context_ledger_cmd,
+            commands::get_provider_profile_cmd,
+            commands::get_continuity_cmd,
+            commands::save_continuity_cmd,
+            commands::suspend_surface_cmd,
+            commands::apply_operations_cmd,
+            commands::validate_agent_response_v2,
+            commands::undo_transaction_cmd,
+            commands::list_transactions_cmd,
+            commands::get_transaction_cmd,
+            commands::branch_conversation_cmd,
+            commands::list_branches_cmd,
+            commands::create_snapshot_cmd,
+            commands::get_snapshot_cmd,
+            commands::delete_snapshot_cmd,
+            commands::enqueue_agent_turn_cmd,
+            commands::list_agent_queue_cmd,
+            commands::cancel_queue_item_cmd,
+            commands::remove_queue_item_cmd,
+            commands::activate_next_queue_cmd,
+            commands::complete_queue_item_cmd,
+            commands::recover_agent_queue_cmd,
+            commands::store_diagnostics_cmd,
+            commands::list_diagnostics_cmd,
+            commands::runtime_v2_limits,
+            commands::kernel_capability_catalog,
+            commands::kernel_apply_change,
+            commands::kernel_compile_intent,
+            commands::kernel_list_manifests,
+            commands::kernel_get_manifest,
+            commands::kernel_ensure_tool_manifest,
+            commands::kernel_restore_last_known_good,
+            commands::kernel_mark_last_known_good,
+            commands::kernel_upsert_data_model,
+            commands::kernel_create_record,
+            commands::kernel_query_records,
+            commands::kernel_grant_permission,
+            commands::kernel_revoke_permission,
+            commands::kernel_list_permissions,
+            commands::kernel_get_recovery_state,
+            commands::kernel_set_recovery_mode,
+            commands::kernel_enter_safe_startup,
+            commands::kernel_clear_recovery,
+            commands::kernel_set_recovery_flags,
+            commands::kernel_export_package,
+            commands::kernel_export_package_bytes,
+            commands::kernel_preview_package,
+            commands::kernel_import_package,
+            commands::kernel_application_summary,
+            commands::kernel_data_model_summary,
+            commands::kernel_recent_transactions,
+            commands::kernel_upsert_test,
+            commands::kernel_run_test,
+            commands::kernel_visual_checks,
+            commands::kernel_garbage_collect,
+            commands::kernel_create_job,
+            commands::kernel_get_job,
+            commands::kernel_interrupt_jobs,
+            commands::kernel_set_policy_override,
+            commands::kernel_clear_policy_override,
+            commands::kernel_unified_search,
         ])
         .setup(move |app| {
             branding::apply_display_name();
+            // Interrupt in-flight application jobs after unclean restart (do not resume provider calls)
+            if let Some(state) = app.try_state::<AppState>() {
+                let mut db = state.db.lock();
+                let _ = application_kernel::lifecycle::interrupt_active_jobs(&mut db);
+            }
             let handle = scheduler_handle.clone();
             let app_handle = app.handle().clone();
             automations::spawn_scheduler(app_handle, handle);

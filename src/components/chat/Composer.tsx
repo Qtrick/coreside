@@ -28,6 +28,8 @@ import type { StagedAttachment } from "@/types/attachments";
 import { MentionMenu } from "./MentionMenu";
 import { ModelPicker } from "./ModelPicker";
 import { ToolChangePreview } from "./ToolChangePreview";
+import { KernelProposalPreview } from "./KernelProposalPreview";
+import { ConflictBanner } from "./ConflictBanner";
 
 const MAX_ATTACHMENTS = 5;
 const MAX_FILE_BYTES = 12 * 1024 * 1024;
@@ -290,6 +292,8 @@ export function Composer() {
   return (
     <div className="composer">
       <ToolChangePreview />
+      <KernelProposalPreview />
+      <ConflictBanner />
       {needsSetup ? (
         <div className="setup-banner" role="status">
           <div className="setup-banner-icon" aria-hidden>

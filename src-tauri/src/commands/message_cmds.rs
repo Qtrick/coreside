@@ -168,6 +168,14 @@ pub struct SendMessageResult {
     pub diagnostics: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_message_id: Option<String>,
+    /// Kernel Runtime V2 apply / proposal payload (includes operations when pending).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_v2: Option<serde_json::Value>,
+    /// Set when the turn was queued because another request is active.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queued: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_item_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -187,6 +195,26 @@ pub enum AgentTurnEvent {
     Error {
         conversation_id: String,
         message: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    Operation {
+        conversation_id: String,
+        operation_id: String,
+        status: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    Sync {
+        conversation_id: Option<String>,
+        surface_ids: Vec<String>,
+        revision: Option<i64>,
+        #[serde(rename = "syncKind")]
+        sync_kind: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    Conflict {
+        conversation_id: Option<String>,
+        message: String,
+        conflicts: Vec<String>,
     },
 }
 
@@ -325,6 +353,39 @@ pub async fn send_message(
     }
     if content.is_empty() {
         content = "Shared attachments".to_string();
+    }
+
+    // If a turn is already active for this chat, enqueue instead of overlapping.
+    if state.active_requests.lock().contains_key(&conversation_id) {
+        let mut db = state.db.lock();
+        let item = crate::runtime_v2::enqueue(
+            &mut db,
+            &conversation_id,
+            &json!({
+                "content": content,
+                "activeToolId": active_tool_id,
+                "model": model,
+            }),
+            100,
+        )?;
+        emit_action(
+            &app,
+            &conversation_id,
+            "Queued your message until the current reply finishes",
+        );
+        return Ok(SendMessageResult {
+            message_id: String::new(),
+            assistant_message: "Your message was queued. It will run when the current reply finishes."
+                .into(),
+            response_type: ResponseType::Message,
+            tool_change: None,
+            settings_change: None,
+            diagnostics: None,
+            user_message_id: None,
+            runtime_v2: None,
+            queued: Some(true),
+            queue_item_id: Some(item.id),
+        });
     }
 
     let _ = state.reload_config();
@@ -805,6 +866,36 @@ pub async fn send_message(
         parsed.payload.citations = Some(search_meta.citations.clone());
     }
 
+    // Runtime V2: resolve visible assistant text before streaming
+    if parsed.payload.schema_version == "2" {
+        if parsed.payload.assistant_message.trim().is_empty() {
+            if let Some(msgs) = &parsed.payload.assistant_messages {
+                let texts: Vec<String> = msgs
+                    .iter()
+                    .filter_map(|m| {
+                        let vis = m
+                            .get("visibility")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("visible");
+                        if vis == "silent" {
+                            return None;
+                        }
+                        m.get("content")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                    })
+                    .filter(|s| !s.trim().is_empty())
+                    .collect();
+                if !texts.is_empty() {
+                    parsed.payload.assistant_message = texts.join("\n\n");
+                }
+            }
+        }
+        if parsed.payload.silent.unwrap_or(false) {
+            parsed.payload.assistant_message.clear();
+        }
+    }
+
     record_action(
         &app,
         &conversation_id,
@@ -813,13 +904,15 @@ pub async fn send_message(
         "provider_response_received",
         api_key_ref,
     );
-    emit_text_fluidly(
-        &app,
-        &conversation_id,
-        &parsed.payload.assistant_message,
-        &cancel,
-    )
-    .await;
+    if !parsed.payload.assistant_message.trim().is_empty() {
+        emit_text_fluidly(
+            &app,
+            &conversation_id,
+            &parsed.payload.assistant_message,
+            &cancel,
+        )
+        .await;
+    }
 
     let diagnostics = {
         let mut d = json!({
@@ -887,6 +980,160 @@ pub async fn send_message(
         );
     }
 
+    // Runtime V2: apply multi-surface operations when present
+    let mut v2_apply: Option<serde_json::Value> = None;
+    if parsed.payload.schema_version == "2" {
+        // Live NDJSON path: if operations array empty, harvest NDJSON frames from raw text.
+        let mut operations_from_payload: Option<Vec<crate::runtime_v2::AppOperation>> = None;
+        if let Some(ops_val) = &parsed.payload.operations {
+            if !ops_val.is_empty() {
+                if let Ok(ops) = serde_json::from_value::<Vec<crate::runtime_v2::AppOperation>>(
+                    json!(ops_val),
+                ) {
+                    operations_from_payload = Some(ops);
+                }
+            }
+        }
+        if operations_from_payload.as_ref().map(|o| o.is_empty()).unwrap_or(true) {
+            let mut parser = crate::runtime_v2::NdjsonFrameParser::new();
+            for ev in parser.push(&resolved.response.raw_text) {
+                if let Ok(crate::runtime_v2::StreamEvent::OperationFrameCompleted { operation }) =
+                    &ev
+                {
+                    emit_turn(
+                        &app,
+                        AgentTurnEvent::Operation {
+                            conversation_id: conversation_id.clone(),
+                            operation_id: operation.id.clone(),
+                            status: "validated".into(),
+                        },
+                    );
+                }
+            }
+            for ev in parser.finish() {
+                let _ = ev;
+            }
+            let harvested = parser.completed_operations().to_vec();
+            if !harvested.is_empty() {
+                operations_from_payload = Some(harvested);
+            }
+        }
+
+        if let Some(operations) = operations_from_payload {
+            if !operations.is_empty() {
+                let silent = parsed.payload.silent.unwrap_or(false);
+                let schedule_result = {
+                    let mut db = state.db.lock();
+                    let mut bus = state.event_bus.lock();
+                    let mut bus_opt = Some(&mut *bus);
+                    crate::runtime_v2::patch_scheduler::schedule_and_apply(
+                        &mut db,
+                        &mut bus_opt,
+                        crate::runtime_v2::patch_scheduler::ScheduleRequest {
+                            conversation_id: Some(conversation_id.clone()),
+                            turn_id: parsed.payload.turn_id.clone(),
+                            surface_id: None,
+                            priority: crate::runtime_v2::patch_scheduler::PatchPriority::ApprovedPersistentChange,
+                            operations,
+                            source_type: "agent".into(),
+                            from_agent: true,
+                        },
+                        false,
+                    )
+                };
+                match schedule_result {
+                    Ok(scheduled) => {
+                        // Prefer last applied ChangeResult for UI metadata; proposals use first pending.
+                        let mut handled = false;
+                        for change in scheduled.applied {
+                            if let Some(result) = change.apply {
+                                if result.conflicts.is_empty() {
+                                    record_action(
+                                        &app,
+                                        &conversation_id,
+                                        &mut action_log,
+                                        "Applied application operations",
+                                        "change_applied",
+                                        api_key_ref,
+                                    );
+                                    let surface_ids: Vec<String> =
+                                        result.surfaces.iter().map(|s| s.id.clone()).collect();
+                                    emit_turn(
+                                        &app,
+                                        AgentTurnEvent::Sync {
+                                            conversation_id: Some(conversation_id.clone()),
+                                            surface_ids,
+                                            revision: result
+                                                .surfaces
+                                                .first()
+                                                .map(|s| s.current_revision),
+                                            sync_kind: "transaction_applied".into(),
+                                        },
+                                    );
+                                } else {
+                                    emit_turn(
+                                        &app,
+                                        AgentTurnEvent::Conflict {
+                                            conversation_id: Some(conversation_id.clone()),
+                                            message: "This change conflicts with another window or newer revision.".into(),
+                                            conflicts: result.conflicts.clone(),
+                                        },
+                                    );
+                                }
+                                v2_apply = serde_json::to_value(result).ok();
+                                handled = true;
+                            } else if !handled {
+                                v2_apply = Some(json!({
+                                    "proposalId": change.proposal_id,
+                                    "risk": change.risk,
+                                    "impactSummary": change.impact_summary,
+                                    "summary": change.summary,
+                                    "operations": change.operations,
+                                    "status": "pending",
+                                    "silent": silent,
+                                }));
+                                record_action(
+                                    &app,
+                                    &conversation_id,
+                                    &mut action_log,
+                                    "Proposed a change that needs your approval",
+                                    "change_proposed",
+                                    api_key_ref,
+                                );
+                                handled = true;
+                            }
+                        }
+                        let _ = scheduled.scheduled;
+                        let _ = scheduled.superseded;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Patch scheduler apply failed");
+                        let message = sanitize_error(&e.to_string(), api_key_ref);
+                        emit_turn(
+                            &app,
+                            AgentTurnEvent::Error {
+                                conversation_id: conversation_id.clone(),
+                                message: message.clone(),
+                            },
+                        );
+                        record_action(
+                            &app,
+                            &conversation_id,
+                            &mut action_log,
+                            "Could not apply application changes",
+                            "change_failed",
+                            api_key_ref,
+                        );
+                        v2_apply = Some(json!({
+                            "error": message,
+                            "category": "scheduler",
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
     let raw_events = action_log.clone().unwrap_or_default();
     let action_events = if db::should_attach_action_events(action_log_mode, &raw_events) {
         raw_events
@@ -904,6 +1151,8 @@ pub async fn send_message(
         "diagnostics": diagnostics,
         "actionEvents": action_events,
         "requestId": user_message.id,
+        "runtimeV2": v2_apply,
+        "silent": parsed.payload.silent.unwrap_or(false),
     });
     if let Some(citations) = &parsed.payload.citations {
         if !citations.is_empty() {
@@ -948,6 +1197,27 @@ pub async fn send_message(
         )?
     };
 
+    // Bind inline surfaces created this turn to the assistant message when unset,
+    // so InlineSurfacesForMessage can render them under the correct bubble.
+    if let Some(apply) = &v2_apply {
+        if let Some(surfaces) = apply.get("surfaces").and_then(|v| v.as_array()) {
+            let db = state.db.lock();
+            for surface in surfaces {
+                if let Some(surface_id) = surface.get("id").and_then(|v| v.as_str()) {
+                    let _ = db.conn().execute(
+                        "UPDATE surfaces SET message_id = ?1
+                         WHERE id = ?2 AND conversation_id = ?3 AND message_id IS NULL",
+                        rusqlite::params![
+                            assistant_message.id,
+                            surface_id,
+                            conversation_id
+                        ],
+                    );
+                }
+            }
+        }
+    }
+
     Ok(SendMessageResult {
         message_id: assistant_message.id,
         assistant_message: parsed.payload.assistant_message,
@@ -956,7 +1226,51 @@ pub async fn send_message(
         settings_change,
         diagnostics,
         user_message_id: Some(user_message.id),
+        runtime_v2: v2_apply,
+        queued: None,
+        queue_item_id: None,
     })
+}
+
+#[tauri::command]
+pub fn set_kernel_proposal_status(
+    state: State<'_, AppState>,
+    message_id: String,
+    status: String,
+) -> Result<crate::db::Message, CommandError> {
+    let normalized = status.trim().to_ascii_lowercase();
+    if normalized != "applied" && normalized != "discarded" {
+        return Err(CommandError::new(
+            "invalid",
+            "status must be applied or discarded",
+        ));
+    }
+    let mut db = state.db.lock();
+    let mut msg = db::get_message(&db, &message_id)?;
+    let mut meta = msg.metadata.unwrap_or_else(|| json!({}));
+    if let Some(obj) = meta.as_object_mut() {
+        if !obj.contains_key("runtimeV2") {
+            obj.insert("runtimeV2".into(), json!({}));
+        }
+        if let Some(rv) = obj.get_mut("runtimeV2").and_then(|v| v.as_object_mut()) {
+            rv.insert("status".into(), json!(normalized));
+        }
+        obj.insert(
+            "kernelProposalStatus".into(),
+            json!(normalized),
+        );
+    }
+    db::update_message_metadata(&mut db, &message_id, &meta)?;
+    msg.metadata = Some(meta);
+    Ok(msg)
+}
+
+#[tauri::command]
+pub fn discard_kernel_proposal(
+    state: State<'_, AppState>,
+    message_id: String,
+) -> Result<crate::db::Message, CommandError> {
+    set_kernel_proposal_status(state, message_id, "discarded".into())
 }
 
 #[tauri::command]

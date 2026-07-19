@@ -32,7 +32,8 @@ pub use tool_loop::{project_context_for_prompt, ToolLoop, ToolLoopContext};
 pub use provider::{AgentMessage, AgentRequest, AiProvider, ProviderHealth};
 pub use response_parser::{parse_agent_response, ParsedAgentResponse};
 pub use response_schema::{
-    layout_type_string, ResponseType, SourceCitation, ToolChangePayload, ToolDefinition,
+    layout_type_string, ResponseType, SourceCitation, ToolAction, ToolChangePayload,
+    ToolComponent, ToolDefinition,
 };
 pub use settings_change::{
     is_allowed_setting_key, normalize_hex_or_none, normalize_setting_kv, parse_wallpaper_setting,

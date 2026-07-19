@@ -1,0 +1,1560 @@
+{
+  "accessDate": "2026-07-18",
+  "count": 56,
+  "features": [
+    {
+      "id": "PU-HTML-RESP",
+      "name": "HTML not Markdown responses",
+      "category": "generative",
+      "description": "LLM returns HTML bodies",
+      "status": "rejected_security",
+      "userValue": 9,
+      "partialUpdate": {
+        "path": "src/initialPrompt.md",
+        "lines": "183-183"
+      },
+      "coreside": {
+        "path": "src-tauri/src/ai/response_schema.rs",
+        "lines": "1-280"
+      },
+      "videoTimestamp": "00:00:34",
+      "consumerValue": 9,
+      "technicalComplexity": 8,
+      "securityRisk": 10,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Reject for security \u2014 use trusted components",
+      "implementationPhase": "\u2014",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "Arbitrary HTML/JS in protected webview",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-FORMS",
+      "name": "Structured forms to LLM",
+      "category": "interaction",
+      "description": "Forms submit structured data back",
+      "status": "implemented_differently",
+      "userValue": 9,
+      "partialUpdate": {
+        "path": "src/initialPrompt.md",
+        "lines": "98-127"
+      },
+      "coreside": {
+        "path": "src/types/tool.ts",
+        "lines": "84-89"
+      },
+      "videoTimestamp": "00:00:44",
+      "consumerValue": 9,
+      "technicalComplexity": 5,
+      "securityRisk": 4,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Keep submitToAgent; extend rich forms",
+      "implementationPhase": "12",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-TTT",
+      "name": "Game-styled forms",
+      "category": "generative",
+      "description": "Tic-tac-toe via forms",
+      "status": "safe_adaptation_required",
+      "userValue": 7,
+      "partialUpdate": {
+        "path": "src/initialPrompt.md",
+        "lines": "211-266"
+      },
+      "coreside": {
+        "path": "src/components/tool-renderer/nodes.tsx",
+        "lines": "1-50"
+      },
+      "videoTimestamp": "00:00:52",
+      "consumerValue": 7,
+      "technicalComplexity": 6,
+      "securityRisk": 5,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Adapt via quiz/button components",
+      "implementationPhase": "12",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-PROTOCOL",
+      "name": "Delimiter protocol PpqUtcLGQdYN4oqc",
+      "category": "protocol",
+      "description": "SERVER/CLIENT/BODY framing",
+      "status": "implemented_differently",
+      "userValue": 8,
+      "partialUpdate": {
+        "path": "spec.md",
+        "lines": "10-68"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/operations.rs",
+        "lines": "1-100"
+      },
+      "videoTimestamp": "00:00:28",
+      "consumerValue": 8,
+      "technicalComplexity": 7,
+      "securityRisk": 3,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "JSON schema v2 operations instead of delimiters",
+      "implementationPhase": "7",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-MARKERS",
+      "name": "template for + <?marker>",
+      "category": "protocol",
+      "description": "Path markers for regions",
+      "status": "implemented_differently",
+      "userValue": 9,
+      "partialUpdate": {
+        "path": "src/initialPrompt.md",
+        "lines": "69-76"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/patch.rs",
+        "lines": "1-80"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 9,
+      "technicalComplexity": 6,
+      "securityRisk": 3,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Stable component/surface IDs",
+      "implementationPhase": "9",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-MULTI-MSG",
+      "name": "Multiple messages per turn",
+      "category": "protocol",
+      "description": "SPLIT_MESSAGE",
+      "status": "implemented_equivalent",
+      "userValue": 8,
+      "partialUpdate": {
+        "path": "spec.md",
+        "lines": "12-16"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/operations.rs",
+        "lines": "40-80"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 8,
+      "technicalComplexity": 4,
+      "securityRisk": 2,
+      "performanceRisk": 4,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "assistantMessages[] in schema v2",
+      "implementationPhase": "7",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-INCLUDE-EXCLUDE",
+      "name": "Client include/exclude routing",
+      "category": "multiuser",
+      "description": "SERVER_PROPS clients routing",
+      "status": "deferred_collaboration_scope",
+      "userValue": 6,
+      "partialUpdate": {
+        "path": "spec.md",
+        "lines": "43-52"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/operations.rs",
+        "lines": "Audience enum"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 6,
+      "technicalComplexity": 7,
+      "securityRisk": 6,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "audience extension point only",
+      "implementationPhase": "39",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-SUBSCRIBE",
+      "name": "window.partialupdates.subscribe",
+      "category": "events",
+      "description": "Path subscriptions",
+      "status": "safe_adaptation_required",
+      "userValue": 8,
+      "partialUpdate": {
+        "path": "spec.md",
+        "lines": "74-83"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/events.rs",
+        "lines": "1-120"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 8,
+      "technicalComplexity": 6,
+      "securityRisk": 7,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Typed EventBus with loop limits",
+      "implementationPhase": "13",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-WS",
+      "name": "Hibernatable WebSockets",
+      "category": "runtime",
+      "description": "DO websocket sync",
+      "status": "deferred_collaboration_scope",
+      "userValue": 5,
+      "partialUpdate": {
+        "path": "src/index.ts",
+        "lines": "184-218"
+      },
+      "coreside": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 5,
+      "technicalComplexity": 8,
+      "securityRisk": 5,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Defer multiuser sync",
+      "implementationPhase": "39",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-QUEUE",
+      "name": "LLM request queue limit 5",
+      "category": "queue",
+      "description": "Durable queue",
+      "status": "implemented_differently",
+      "userValue": 8,
+      "partialUpdate": {
+        "path": "src/index.ts",
+        "lines": "159-160"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/queue.rs",
+        "lines": "1-100"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 8,
+      "technicalComplexity": 4,
+      "securityRisk": 3,
+      "performanceRisk": 4,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Local per-conversation queue",
+      "implementationPhase": "19",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-RATELIMIT",
+      "name": "Browser/IP rate limits",
+      "category": "safety",
+      "description": "Cookie signed limits",
+      "status": "implemented_differently",
+      "userValue": 8,
+      "partialUpdate": {
+        "path": "src/index.ts",
+        "lines": "163-175"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/limits.rs",
+        "lines": "1-40"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 8,
+      "technicalComplexity": 5,
+      "securityRisk": 2,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "BYOK + event/search budgets",
+      "implementationPhase": "19",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-FORK",
+      "name": "Fork chat + read-only fork pages",
+      "category": "branching",
+      "description": "fork_index + snapshot",
+      "status": "implemented_differently",
+      "userValue": 8,
+      "partialUpdate": {
+        "path": "src/index.ts",
+        "lines": "289-320"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/branch.rs",
+        "lines": "1-120"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 8,
+      "technicalComplexity": 6,
+      "securityRisk": 3,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Local chat_branches + snapshots",
+      "implementationPhase": "16",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-REPLAY",
+      "name": "Replay page with pacing",
+      "category": "replay",
+      "description": "ReplayTurn rendering",
+      "status": "partially_implemented",
+      "userValue": 7,
+      "partialUpdate": {
+        "path": "src/index.ts",
+        "lines": "262-284"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/transactions.rs",
+        "lines": "list_transactions"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 7,
+      "technicalComplexity": 6,
+      "securityRisk": 2,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Transaction list + replay UI follow-up",
+      "implementationPhase": "17",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "Replay UI shell via transactions",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-UNDO",
+      "name": "Hard undo multi-turn",
+      "category": "history",
+      "description": "normalizeUndoCount",
+      "status": "implemented_differently",
+      "userValue": 8,
+      "partialUpdate": {
+        "path": "src/index.ts",
+        "lines": "2018-2030"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/transactions.rs",
+        "lines": "undo_transaction"
+      },
+      "videoTimestamp": "",
+      "consumerValue": 8,
+      "technicalComplexity": 5,
+      "securityRisk": 3,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Cross-surface undo_transaction",
+      "implementationPhase": "17",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-DEBUG",
+      "name": "/debug raw/pretty history",
+      "category": "debug",
+      "description": "debug.ts",
+      "status": "partially_implemented",
+      "userValue": 7,
+      "partialUpdate": {
+        "path": "src/debug.ts",
+        "lines": "1-100"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/mod.rs",
+        "lines": "store_diagnostics"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 7,
+      "technicalComplexity": 4,
+      "securityRisk": 6,
+      "performanceRisk": 4,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Developer Mode diagnostics",
+      "implementationPhase": "18",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-AUTH",
+      "name": "Better Auth OAuth roles",
+      "category": "auth",
+      "description": "auth/*",
+      "status": "deferred_enterprise_scope",
+      "userValue": 3,
+      "partialUpdate": {
+        "path": "src/auth/roles.ts",
+        "lines": "1-157"
+      },
+      "coreside": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 3,
+      "technicalComplexity": 7,
+      "securityRisk": 4,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Local consumer; defer cloud auth",
+      "implementationPhase": "41",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-CDN",
+      "name": "CDN Tailwind/D3/CodeMirror",
+      "category": "libraries",
+      "description": "Arbitrary CDN inject",
+      "status": "rejected_security",
+      "userValue": 8,
+      "partialUpdate": {
+        "path": "README.md",
+        "lines": "CDN section"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/packs.rs",
+        "lines": "1-120"
+      },
+      "videoTimestamp": "00:08:53",
+      "consumerValue": 8,
+      "technicalComplexity": 9,
+      "securityRisk": 10,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Bundled capability packs only",
+      "implementationPhase": "14",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "No CDN",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-JS",
+      "name": "Arbitrary generated JS",
+      "category": "security",
+      "description": "Script in HTML bodies",
+      "status": "rejected_security",
+      "userValue": 9,
+      "partialUpdate": {
+        "path": "src/initialPrompt.md",
+        "lines": "201-208"
+      },
+      "coreside": {
+        "path": "docs/GENERATIVE_UI_SECURITY_MODEL.md",
+        "lines": "\u2014"
+      },
+      "videoTimestamp": "00:00:40",
+      "consumerValue": 9,
+      "technicalComplexity": 9,
+      "securityRisk": 10,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Reject",
+      "implementationPhase": "\u2014",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-TRANSLATE",
+      "name": "Per-client translation",
+      "category": "i18n",
+      "description": "Silent translate",
+      "status": "deferred_consumer_scope",
+      "userValue": 6,
+      "partialUpdate": {
+        "path": "src/initialPrompt.md",
+        "lines": "163-163"
+      },
+      "coreside": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "videoTimestamp": "00:02:04",
+      "consumerValue": 6,
+      "technicalComplexity": 5,
+      "securityRisk": 2,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "After Runtime V2 stable",
+      "implementationPhase": "40",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-MULTIPLAYER",
+      "name": "Multiplayer Connect 4",
+      "category": "multiuser",
+      "description": "Shared game state",
+      "status": "deferred_collaboration_scope",
+      "userValue": 7,
+      "partialUpdate": {
+        "path": "README.md",
+        "lines": "multiplayer"
+      },
+      "coreside": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "videoTimestamp": "00:03:14",
+      "consumerValue": 7,
+      "technicalComplexity": 8,
+      "securityRisk": 6,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Defer",
+      "implementationPhase": "39",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-PRIVATE",
+      "name": "Private model history include ids",
+      "category": "multiuser",
+      "description": "Hangman secrets",
+      "status": "deferred_collaboration_scope",
+      "userValue": 5,
+      "partialUpdate": {
+        "path": "src/initialPrompt.md",
+        "lines": "50-54"
+      },
+      "coreside": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "videoTimestamp": "00:11:46",
+      "consumerValue": 5,
+      "technicalComplexity": 7,
+      "securityRisk": 5,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Defer",
+      "implementationPhase": "39",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-WIKI",
+      "name": "Full page redesign Wikipedia",
+      "category": "generative",
+      "description": "Replace whole page",
+      "status": "rejected_product_direction",
+      "userValue": 7,
+      "partialUpdate": {
+        "path": "README.md",
+        "lines": "Wikipedia"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/",
+        "lines": "editable zones"
+      },
+      "videoTimestamp": "00:03:47",
+      "consumerValue": 7,
+      "technicalComplexity": 8,
+      "securityRisk": 9,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Safe layout zones only; no full chrome replace",
+      "implementationPhase": "15",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-SVG",
+      "name": "SVG in responses",
+      "category": "capability",
+      "description": "SVG scenes",
+      "status": "safe_adaptation_required",
+      "userValue": 8,
+      "partialUpdate": {
+        "path": "src/initialPrompt.md",
+        "lines": "270"
+      },
+      "coreside": {
+        "path": "src/components/tool-renderer/nodes.tsx",
+        "lines": "SvgScene"
+      },
+      "videoTimestamp": "00:04:02",
+      "consumerValue": 8,
+      "technicalComplexity": 5,
+      "securityRisk": 4,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "coreside.svg pack",
+      "implementationPhase": "14",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-MATH",
+      "name": "MathML",
+      "category": "capability",
+      "description": "MathML pages",
+      "status": "safe_adaptation_required",
+      "userValue": 6,
+      "partialUpdate": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "src/components/tool-renderer/nodes.tsx",
+        "lines": "MathBlock"
+      },
+      "videoTimestamp": "00:05:12",
+      "consumerValue": 6,
+      "technicalComplexity": 4,
+      "securityRisk": 2,
+      "performanceRisk": 4,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "coreside.math pack",
+      "implementationPhase": "14",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-CANVAS",
+      "name": "Canvas/3D whimsical",
+      "category": "capability",
+      "description": "3D water typing",
+      "status": "safe_adaptation_required",
+      "userValue": 5,
+      "partialUpdate": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "src/components/tool-renderer/nodes.tsx",
+        "lines": "CanvasScene"
+      },
+      "videoTimestamp": "00:05:17",
+      "consumerValue": 5,
+      "technicalComplexity": 7,
+      "securityRisk": 6,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Declarative canvas limits; no WebGL JS",
+      "implementationPhase": "14",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-CODEMIRROR",
+      "name": "CodeMirror playground",
+      "category": "capability",
+      "description": "CDN editor",
+      "status": "safe_adaptation_required",
+      "userValue": 8,
+      "partialUpdate": {
+        "path": "README.md",
+        "lines": "CodeMirror"
+      },
+      "coreside": {
+        "path": "src/components/tool-renderer/nodes.tsx",
+        "lines": "CodeEditor"
+      },
+      "videoTimestamp": "00:09:01",
+      "consumerValue": 8,
+      "technicalComplexity": 5,
+      "securityRisk": 3,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Bundled textarea editor; no auto-exec",
+      "implementationPhase": "14",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-TAILWIND",
+      "name": "Tailwind via CDN",
+      "category": "libraries",
+      "description": "style with Tailwind",
+      "status": "rejected_security",
+      "userValue": 4,
+      "partialUpdate": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "videoTimestamp": "00:10:45",
+      "consumerValue": 4,
+      "technicalComplexity": 3,
+      "securityRisk": 9,
+      "performanceRisk": 3,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Reject CDN; use design tokens",
+      "implementationPhase": "\u2014",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-SILENT",
+      "name": "Silent updates",
+      "category": "ux",
+      "description": "No bubbles",
+      "status": "implemented_equivalent",
+      "userValue": 8,
+      "partialUpdate": {
+        "path": "src/initialPrompt.md",
+        "lines": "151-161"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/operations.rs",
+        "lines": "silent"
+      },
+      "videoTimestamp": "00:02:09",
+      "consumerValue": 8,
+      "technicalComplexity": 3,
+      "securityRisk": 2,
+      "performanceRisk": 3,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "schema v2 silent",
+      "implementationPhase": "7",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-INSTANCES",
+      "name": "Instance numbers ttt/1 ttt/2",
+      "category": "lifecycle",
+      "description": "Multiple apps",
+      "status": "implemented_equivalent",
+      "userValue": 9,
+      "partialUpdate": {
+        "path": "src/initialPrompt.md",
+        "lines": "268"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/surfaces.rs",
+        "lines": "instance_id"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 9,
+      "technicalComplexity": 4,
+      "securityRisk": 3,
+      "performanceRisk": 4,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "instance_id per surface",
+      "implementationPhase": "8",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-STREAM",
+      "name": "Progressive stream apply",
+      "category": "streaming",
+      "description": "UpdateStreamParser",
+      "status": "implemented_differently",
+      "userValue": 9,
+      "partialUpdate": {
+        "path": "src/index.ts",
+        "lines": "3428"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/streaming.rs",
+        "lines": "NdjsonFrameParser"
+      },
+      "videoTimestamp": "00:00:23",
+      "consumerValue": 9,
+      "technicalComplexity": 7,
+      "securityRisk": 4,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "NDJSON validated frames",
+      "implementationPhase": "11",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "CS-V1-TOOL",
+      "name": "Coreside schema v1 tool_change",
+      "category": "coreside",
+      "description": "Full tool snapshot",
+      "status": "partially_implemented",
+      "userValue": 8,
+      "partialUpdate": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "src-tauri/src/ai/response_schema.rs",
+        "lines": "117-166"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 8,
+      "technicalComplexity": 3,
+      "securityRisk": 2,
+      "performanceRisk": 3,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Keep + add patches",
+      "implementationPhase": "9",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "Full replace still default for v1",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "CS-INLINE",
+      "name": "Inline generative surfaces",
+      "category": "coreside",
+      "description": "Chat inline",
+      "status": "missing_high_value",
+      "userValue": 10,
+      "partialUpdate": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "src/components/chat/InlineSurface.tsx",
+        "lines": "1-100"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 10,
+      "technicalComplexity": 6,
+      "securityRisk": 3,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Implement now",
+      "implementationPhase": "10",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "CS-PATCH",
+      "name": "Fine-grained patches",
+      "category": "coreside",
+      "description": "component.update_props",
+      "status": "missing_high_value",
+      "userValue": 10,
+      "partialUpdate": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/patch.rs",
+        "lines": "1-100"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 10,
+      "technicalComplexity": 5,
+      "securityRisk": 4,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Implement now",
+      "implementationPhase": "9",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "CS-PACKS",
+      "name": "Capability packs",
+      "category": "coreside",
+      "description": "Trusted packs",
+      "status": "missing_high_value",
+      "userValue": 9,
+      "partialUpdate": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/packs.rs",
+        "lines": "1-100"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 9,
+      "technicalComplexity": 5,
+      "securityRisk": 5,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Implement now",
+      "implementationPhase": "14",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "CS-BRANCH",
+      "name": "Chat branching",
+      "category": "coreside",
+      "description": "Branch from message",
+      "status": "missing_high_value",
+      "userValue": 8,
+      "partialUpdate": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/branch.rs",
+        "lines": "1-80"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 8,
+      "technicalComplexity": 5,
+      "securityRisk": 3,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Implement now",
+      "implementationPhase": "16",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "CS-QUEUE",
+      "name": "Request queue UI",
+      "category": "coreside",
+      "description": "Queue",
+      "status": "missing_high_value",
+      "userValue": 7,
+      "partialUpdate": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/queue.rs",
+        "lines": "1-80"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 7,
+      "technicalComplexity": 4,
+      "securityRisk": 2,
+      "performanceRisk": 4,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Implement now",
+      "implementationPhase": "19",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "WICG-DPU",
+      "name": "Declarative Partial Updates platform",
+      "category": "spec",
+      "description": "Chrome DPU APIs",
+      "status": "obsolete_or_reference_only",
+      "userValue": 4,
+      "partialUpdate": {
+        "path": "WICG repo",
+        "lines": "patching-explainer"
+      },
+      "coreside": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 4,
+      "technicalComplexity": 8,
+      "securityRisk": 2,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Reference only; not adopted into webview",
+      "implementationPhase": "\u2014",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "Browser proposal; Coreside uses trusted ops",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-DICTATION",
+      "name": "Voice dictation self-mod",
+      "category": "capability",
+      "description": "Wikipedia+voice in README",
+      "status": "deferred_consumer_scope",
+      "userValue": 6,
+      "partialUpdate": {
+        "path": "README.md",
+        "lines": "voice"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/packs.rs",
+        "lines": "dictation"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 6,
+      "technicalComplexity": 6,
+      "securityRisk": 4,
+      "performanceRisk": 5,
+      "dataMigrationImpact": "low",
+      "recommendedAction": "Extension point; follow-up",
+      "implementationPhase": "26",
+      "testsRequired": [
+        "unit",
+        "integration"
+      ],
+      "reason": "Not in supplied video transcript",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-PARSE",
+      "name": "UpdateStreamParser incremental parse",
+      "category": "streaming",
+      "description": "parseDelimitedUpdate",
+      "status": "implemented_differently",
+      "partialUpdate": {
+        "path": "src/index.ts",
+        "lines": "3428-3520"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/streaming.rs",
+        "lines": "1-100"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 8,
+      "technicalComplexity": 6,
+      "securityRisk": 3,
+      "recommendedAction": "NDJSON frames",
+      "implementationPhase": "11",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-FORM-ROUTE",
+      "name": "POST c/:chatId/form",
+      "category": "routing",
+      "description": "Hidden iframe form target",
+      "status": "rejected_security",
+      "partialUpdate": {
+        "path": "src/index.ts",
+        "lines": "form route"
+      },
+      "coreside": {
+        "path": "src/lib/actions.ts",
+        "lines": "submitToAgent"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 7,
+      "technicalComplexity": 4,
+      "securityRisk": 8,
+      "recommendedAction": "In-process events only",
+      "implementationPhase": "12",
+      "reason": "No iframe navigation",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-PROMPT-ROUTE",
+      "name": "Prompt submission route",
+      "category": "routing",
+      "description": "canonical chat paths",
+      "status": "implemented_differently",
+      "partialUpdate": {
+        "path": "src/index.ts",
+        "lines": "1862-1931"
+      },
+      "coreside": {
+        "path": "src/stores/app-store.ts",
+        "lines": "sendMessage"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 5,
+      "technicalComplexity": 3,
+      "securityRisk": 2,
+      "recommendedAction": "Tauri send_message",
+      "implementationPhase": "\u2014",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-CLIENT-SECRET",
+      "name": "Client secret tokens",
+      "category": "multiuser",
+      "description": "CLIENT_SECRET replacement",
+      "status": "deferred_collaboration_scope",
+      "partialUpdate": {
+        "path": "src/index.ts",
+        "lines": "154-156"
+      },
+      "coreside": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 4,
+      "technicalComplexity": 5,
+      "securityRisk": 7,
+      "recommendedAction": "Defer",
+      "implementationPhase": "39",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-CLIENT-COLOR",
+      "name": "User-specific colors",
+      "category": "multiuser",
+      "description": "data-client-id styling",
+      "status": "deferred_collaboration_scope",
+      "partialUpdate": {
+        "path": "src/initialPrompt.md",
+        "lines": "78"
+      },
+      "coreside": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 3,
+      "technicalComplexity": 2,
+      "securityRisk": 1,
+      "recommendedAction": "Defer",
+      "implementationPhase": "39",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-CLEAR-HIST",
+      "name": "Clear history debug action",
+      "category": "debug",
+      "description": "clear history",
+      "status": "partially_implemented",
+      "partialUpdate": {
+        "path": "src/debug.ts",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "src/commands",
+        "lines": "clear_conversations"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 4,
+      "technicalComplexity": 2,
+      "securityRisk": 2,
+      "recommendedAction": "Existing clear chats",
+      "implementationPhase": "18",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-DO",
+      "name": "Cloudflare Durable Object",
+      "category": "runtime",
+      "description": "PartialUpdate DO class",
+      "status": "rejected_product_direction",
+      "partialUpdate": {
+        "path": "src/index.ts",
+        "lines": "177"
+      },
+      "coreside": {
+        "path": "src-tauri",
+        "lines": "local SQLite"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 2,
+      "technicalComplexity": 8,
+      "securityRisk": 3,
+      "recommendedAction": "Local-first Tauri",
+      "implementationPhase": "\u2014",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-D1",
+      "name": "Cloudflare D1 auth DB",
+      "category": "auth",
+      "description": "migrations better_auth",
+      "status": "deferred_enterprise_scope",
+      "partialUpdate": {
+        "path": "migrations/0001_better_auth.sql",
+        "lines": "1"
+      },
+      "coreside": {
+        "path": "src-tauri/migrations",
+        "lines": "SQLite"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 2,
+      "technicalComplexity": 5,
+      "securityRisk": 2,
+      "recommendedAction": "Defer",
+      "implementationPhase": "41",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-GATEWAY",
+      "name": "Cloudflare AI Gateway",
+      "category": "providers",
+      "description": "gateway chat",
+      "status": "rejected_product_direction",
+      "partialUpdate": {
+        "path": "src/env.ts",
+        "lines": "1-38"
+      },
+      "coreside": {
+        "path": "src-tauri/src/ai",
+        "lines": "provider trait"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 3,
+      "technicalComplexity": 4,
+      "securityRisk": 2,
+      "recommendedAction": "Provider-neutral BYOK",
+      "implementationPhase": "\u2014",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-SCOPED-CSS",
+      "name": "Scoped style markers",
+      "category": "generative",
+      "description": "message/N/style",
+      "status": "safe_adaptation_required",
+      "partialUpdate": {
+        "path": "src/initialPrompt.md",
+        "lines": "185-199"
+      },
+      "coreside": {
+        "path": "src/styles",
+        "lines": "design tokens"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 6,
+      "technicalComplexity": 4,
+      "securityRisk": 5,
+      "recommendedAction": "No arbitrary CSS; tokens only",
+      "implementationPhase": "15",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-DISMOUNT",
+      "name": "MutationObserver cleanup",
+      "category": "lifecycle",
+      "description": "script dismount",
+      "status": "safe_adaptation_required",
+      "partialUpdate": {
+        "path": "src/initialPrompt.md",
+        "lines": "272"
+      },
+      "coreside": {
+        "path": "src/components/tool-renderer",
+        "lines": "React unmount"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 7,
+      "technicalComplexity": 5,
+      "securityRisk": 6,
+      "recommendedAction": "React lifecycle; no model scripts",
+      "implementationPhase": "\u2014",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-FULLWIDTH",
+      "name": "message-full-width class",
+      "category": "ux",
+      "description": "Full width bubbles",
+      "status": "implemented_differently",
+      "partialUpdate": {
+        "path": "src/initialPrompt.md",
+        "lines": "165"
+      },
+      "coreside": {
+        "path": "src/components/chat/InlineSurface.tsx",
+        "lines": "fullWidth"
+      },
+      "videoTimestamp": "",
+      "consumerValue": 6,
+      "technicalComplexity": 2,
+      "securityRisk": 1,
+      "recommendedAction": "Inline surface full-width toggle",
+      "implementationPhase": "10",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "PU-JSON-PATH",
+      "name": "JSON client props path updates",
+      "category": "protocol",
+      "description": "type json path",
+      "status": "implemented_differently",
+      "partialUpdate": {
+        "path": "spec.md",
+        "lines": "56-61"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/operations.rs",
+        "lines": "state.set"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 7,
+      "technicalComplexity": 4,
+      "securityRisk": 3,
+      "recommendedAction": "state.* operations",
+      "implementationPhase": "12",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "CS-TXN",
+      "name": "Cross-surface transactions",
+      "category": "coreside",
+      "description": "app_transactions",
+      "status": "missing_high_value",
+      "partialUpdate": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/transactions.rs",
+        "lines": "1"
+      },
+      "videoTimestamp": "",
+      "consumerValue": 10,
+      "technicalComplexity": 5,
+      "securityRisk": 3,
+      "recommendedAction": "Implement now",
+      "implementationPhase": "17",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "CS-LAYOUT",
+      "name": "Workspace layout model",
+      "category": "coreside",
+      "description": "workspace_layouts",
+      "status": "partially_implemented",
+      "partialUpdate": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "src-tauri/migrations/012_runtime_v2.sql",
+        "lines": "workspace_layouts"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 8,
+      "technicalComplexity": 6,
+      "securityRisk": 3,
+      "recommendedAction": "Table + ops; UI follow-up",
+      "implementationPhase": "15",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "CS-INSPECTOR",
+      "name": "Developer inspector UI",
+      "category": "coreside",
+      "description": "diagnostics table",
+      "status": "partially_implemented",
+      "partialUpdate": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/mod.rs",
+        "lines": "store_diagnostics"
+      },
+      "videoTimestamp": null,
+      "consumerValue": 7,
+      "technicalComplexity": 4,
+      "securityRisk": 6,
+      "recommendedAction": "API ready; Settings Developer Mode UI next",
+      "implementationPhase": "18",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "CS-EVENT-LOOP",
+      "name": "Event loop protection",
+      "category": "safety",
+      "description": "rate/suspend",
+      "status": "implemented_equivalent",
+      "partialUpdate": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "src-tauri/src/runtime_v2/events.rs",
+        "lines": "1"
+      },
+      "videoTimestamp": "",
+      "consumerValue": 9,
+      "technicalComplexity": 4,
+      "securityRisk": 2,
+      "recommendedAction": "Implement now",
+      "implementationPhase": "12",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    },
+    {
+      "id": "CS-V1-COMPAT",
+      "name": "Schema v1 compatibility",
+      "category": "coreside",
+      "description": "tool_change still works",
+      "status": "implemented_equivalent",
+      "partialUpdate": {
+        "path": "\u2014",
+        "lines": "\u2014"
+      },
+      "coreside": {
+        "path": "src-tauri/src/ai/response_parser.rs",
+        "lines": "1"
+      },
+      "videoTimestamp": "",
+      "consumerValue": 10,
+      "technicalComplexity": 3,
+      "securityRisk": 1,
+      "recommendedAction": "Preserve",
+      "implementationPhase": "7",
+      "reason": "",
+      "accessDate": "2026-07-18"
+    }
+  ]
+}

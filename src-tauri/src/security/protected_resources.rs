@@ -66,6 +66,34 @@ pub const PROTECTED_IDS: &[&str] = &[
     "core.wallpaper.renderer",
     "core.agent.tool_loop",
     "core.navigation.chat_router",
+    "core.application_kernel",
+    "core.application_manifest.schema",
+    "core.change_compiler",
+    "core.change_impact",
+    "core.permission_engine",
+    "core.policy_engine",
+    "core.generated_data.compiler",
+    "core.generated_data.migrations",
+    "core.application_testing",
+    "core.visual_verification",
+    "core.recovery_mode",
+    "core.last_known_good",
+    "core.multiwindow_sync",
+    "core.conflict_resolution",
+    "core.performance_limits",
+    "core.package_validator",
+    "core.package_trust",
+    "core.enterprise_policy_hook",
+    "core.lifecycle_manager",
+    "core.garbage_collection",
+    "core.preservation.engine",
+    "core.patch.scheduler",
+    "core.drafts.engine",
+    "core.app_routes.engine",
+    "core.context.ledger",
+    "core.provider.conformance",
+    "core.continuity.engine",
+    "core.manual_edit.provenance",
 ];
 
 /// Returns `true` if `id` is an exact protected resource or starts with `core.`.
@@ -156,5 +184,12 @@ mod tests {
         assert!(ids.contains(&"core.wallpaper"));
         assert!(ids.contains(&"core.agent.tool_loop"));
         assert!(ids.contains(&"core.navigation.chat_router"));
+        assert!(ids.contains(&"core.application_kernel"));
+        assert!(ids.contains(&"core.recovery_mode"));
+        assert!(ids.contains(&"core.package_validator"));
+        assert!(ids.contains(&"core.enterprise_policy_hook"));
+        assert!(ids.contains(&"core.preservation.engine"));
+        assert!(ids.contains(&"core.patch.scheduler"));
+        assert!(ids.contains(&"core.continuity.engine"));
     }
 }

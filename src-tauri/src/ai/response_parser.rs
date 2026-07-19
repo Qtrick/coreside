@@ -26,9 +26,9 @@ pub fn parse_agent_response(raw: &str) -> Result<ParsedAgentResponse, String> {
     match serde_json::from_str::<AgentResponsePayload>(json_str) {
         Ok(mut payload) => {
             let mut warnings = Vec::new();
-            if payload.schema_version != SCHEMA_VERSION {
+            if payload.schema_version != SCHEMA_VERSION && payload.schema_version != "2" {
                 warnings.push(format!(
-                    "Unexpected schemaVersion '{}', expected '{}'",
+                    "Unexpected schemaVersion '{}', expected '{}' or '2'",
                     payload.schema_version, SCHEMA_VERSION
                 ));
                 payload.schema_version = SCHEMA_VERSION.to_string();
@@ -113,6 +113,10 @@ pub fn parse_agent_response(raw: &str) -> Result<ParsedAgentResponse, String> {
                         "recoveredFromParseError": true,
                         "error": primary_err.to_string(),
                     })),
+                    operations: None,
+                    silent: None,
+                    turn_id: None,
+                    assistant_messages: None,
                 },
                 recovered: true,
                 parse_warnings: vec![format!("Recovered plain text after parse error: {primary_err}")],
@@ -205,6 +209,10 @@ fn try_recover_from_value(value: &Value) -> Option<ParsedAgentResponse> {
             tool_calls: None,
             citations: None,
             diagnostics: Some(serde_json::json!({ "recoveredFromPartialJson": true })),
+            operations: None,
+            silent: None,
+            turn_id: None,
+            assistant_messages: None,
         },
         recovered: true,
         parse_warnings: vec!["Recovered assistantMessage from partial JSON".into()],
@@ -345,6 +353,10 @@ mod tests {
             tool_calls: None,
             citations: None,
             diagnostics: None,
+            operations: None,
+            silent: None,
+            turn_id: None,
+            assistant_messages: None,
         };
         assert!(payload.validate().is_err());
     }
@@ -371,6 +383,10 @@ mod tests {
             tool_calls: None,
             citations: None,
             diagnostics: None,
+            operations: None,
+            silent: None,
+            turn_id: None,
+            assistant_messages: None,
         };
         let err = payload.validate().unwrap_err();
         assert!(err.contains("Protected core resource"), "{err}");
@@ -416,6 +432,10 @@ mod tests {
             tool_calls: None,
             citations: None,
             diagnostics: None,
+            operations: None,
+            silent: None,
+            turn_id: None,
+            assistant_messages: None,
         };
         assert!(payload.validate().is_err());
     }

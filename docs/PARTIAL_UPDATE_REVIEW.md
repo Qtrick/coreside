@@ -4,73 +4,50 @@ This document records how Coreside studied and selectively adapted ideas from **
 
 Reference extract (not committed): `.reference/partial-update/partialupdate-main/`
 
-## 1. Ideas adopted
+For the exhaustive 2026-07-18 audit, see:
+
+- `docs/PARTIAL_UPDATE_EXHAUSTIVE_AUDIT.md`
+- `docs/PARTIAL_UPDATE_FILE_ANALYSIS.md`
+- `docs/PARTIAL_UPDATE_VIDEO_ANALYSIS.md`
+- `docs/PARTIAL_UPDATE_FEATURE_MATRIX.md`
+- `docs/PARTIAL_UPDATE_ADOPTION_DECISIONS.md`
+- `docs/GENERATIVE_INTERFACE_RUNTIME_V2.md`
+- `docs/GENERATIVE_UI_SECURITY_MODEL.md`
+- `reports/partial-update-feature-matrix.json`
+
+## 1. Ideas adopted (Runtime V2)
 
 | Concept | How Coreside uses it |
 | --- | --- |
-| AI can produce interactive UI changes, not only Markdown | Agent may return a structured `tool_change` that Coreside renders with trusted components |
-| Forms / controls can send structured events back to the agent | Declarative `submitToAgent` actions emit `tool_interaction` events with field values |
-| Stable instance identifiers for generated surfaces | Every tool and component has a stable `id` that survives edits |
-| Interfaces can be modified across turns | Active tool context is sent with later messages; updates replace the same tool id |
-| Clear response protocol | Versioned JSON schema (`schemaVersion: "1"`) instead of free-form scraping |
-| Provider logic separated from UI | Rust `AiProvider` trait; React never talks to Gemini directly |
-| Targeted updates instead of blind full rebuilds | Tool changes target a known tool id; version history + undo |
-| Inspectable / debuggable agent turns | Dev diagnostics: provider, model, prompt version, parse warnings |
-| Protect users from runaway request loops | Action-engine loop limits; no model-generated scripts that can auto-submit |
+| AI produces interactive UI changes, not only Markdown | Schema v1 `tool_change` + schema v2 `operations[]` |
+| Forms / controls send structured events back | `submitToAgent` + rich form pack |
+| Stable instance identifiers | `instance_id` on every surface |
+| Interfaces modified across turns | Surface revisions + patches |
+| Clear response protocol | Versioned JSON (`"1"` and `"2"`) |
+| Provider logic separated from UI | Rust `AiProvider` trait |
+| Targeted updates instead of blind full rebuilds | `component.update_props` + revision checks |
+| Inspectable agent turns | Developer diagnostics (redacted) |
+| Protect users from runaway loops | EventBus limits + action depth + queue |
 
 ## 2. Ideas adapted
 
 | Partial Update idea | Coreside adaptation |
 | --- | --- |
-| Delimiter-based multi-message protocol with HTML bodies | Replaced with a single validated JSON agent response |
-| Path-like template markers (`/chat/append-message`, `/app/...`) | Replaced with declarative component trees and a component registry |
-| Hidden iframe form submission | Replaced with in-process action dispatch + optional `submitToAgent` |
-| Debug view of LLM message history | Lightweight diagnostics on agent turns (no Cloudflare debug page) |
-| Model selection / env-driven provider choice | Provider-neutral `AI_*` env vars with Gemini as first adapter |
+| Delimiter multi-message HTML protocol | Validated JSON operations + NDJSON stream frames |
+| Path markers (`/app/...`) | Stable surface/component IDs |
+| Hidden iframe form submission | In-process action dispatch |
+| CDN libraries | Bundled capability packs |
+| Fork pages | Local chat branches + read-only snapshots |
+| DO WebSocket multiuser | Deferred; `audience` extension point only |
 
 ## 3. Ideas rejected
 
-- Cloudflare Workers as the required local runtime
-- Durable Objects and hibernatable WebSockets
-- Cloudflare D1
-- Better Auth / multiuser chat / OAuth identity
-- Cloudflare AI Gateway as a requirement
-- Direct insertion of unrestricted model-generated HTML, CSS, or JavaScript
-- Arbitrary third-party CDN loading (Tailwind, d3, CodeMirror, etc. injected by the model)
-- Full-page rewriting by the model
-- Cloudflare-specific deployment requirements
+- Unrestricted model-generated HTML / CSS / JavaScript
+- Arbitrary CDN injection
+- Cloudflare Workers / Durable Objects / D1 as required runtime
+- Production multiuser networking and cloud auth for consumer parity
+- Full protected-chrome redesign by the model
 
-## 4. Why unrestricted HTML / CSS / JS / CDN injection is not copied
+## 4. Code copied
 
-Partial Update demonstrates a powerful generative-UI idea: the model returns HTML that the page applies via declarative partial updates. That approach also inherits serious consumer risks:
-
-1. **Script execution** — model output (or a prompt-injection attacker) can run arbitrary JavaScript in the host page.
-2. **Cost amplification** — clientside loops can spam inference or network requests (called out in Partial Update’s own README).
-3. **Supply-chain / CDN trust** — loading arbitrary remote libraries expands the attack surface.
-4. **Core integrity** — unrestricted DOM rewrites can break the host application chrome and persistence guarantees.
-5. **Desktop trust boundary** — Coreside is a local desktop app with a Rust core holding API keys; untrusted script in the webview is unacceptable for the MVP security model.
-
-## 5. How Coreside’s structured component system is safer
-
-Coreside keeps a **trusted component registry** in TypeScript. The agent may only select and configure known types (`counter`, `quiz`, `checklist`, …). Rust validates structured responses before persistence. The action engine only allows a closed set of local mutations. No model-authored JavaScript is executed. Unsupported types fail closed with a fallback, without corrupting the last good tool version.
-
-## 6. Code copied or substantially adapted
-
-**No Partial Update source files were copied into the Coreside application tree.**
-
-What was used:
-
-- Conceptual study of `README.md`, `spec.md`, `src/initialPrompt.md`, `src/getPrompt.ts`, `src/env.ts`, `src/index.ts` (protocol and architecture), `package.json`, `wrangler.jsonc`, and auth-related modules (to understand what to avoid).
-- The MIT license text for attribution (see below).
-
-No HTML templates, Durable Object logic, auth routes, or delimiter parsers were ported.
-
-## 7. Licensing and attribution
-
-Partial Update is MIT-licensed:
-
-> Copyright (c) 2026 Phil Holden
-
-Because Coreside studied the project conceptually and did not copy substantial source code, a dedicated `THIRD_PARTY_NOTICES.md` is not required for Partial Update source. Attribution of inspiration is documented here and in the root `README.md`.
-
-If future work copies Partial Update code verbatim, that notice file must be added and copyright headers preserved.
+**No Partial Update source files were copied into the Coreside application tree.** Concepts only. MIT attribution is recorded in `THIRD_PARTY_NOTICES.md`.

@@ -11,6 +11,7 @@ export type ToolRuntimeContextValue = {
   state: ToolState;
   runActions: (actions: ActionDefinition[], componentId?: string) => void;
   setValue: (key: string, value: unknown) => void;
+  setValueOptimistic: (key: string, value: unknown) => void;
   getValue: <T = unknown>(key: string, fallback?: T) => T;
 };
 

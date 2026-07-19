@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { shouldShowActionLog } from "@/lib/action-log";
 import { MessageBubble } from "./MessageBubble";
@@ -18,6 +18,8 @@ export function MessageList() {
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const restoredFor = useRef<string | null>(null);
+  const [showNewUpdates, setShowNewUpdates] = useState(false);
+  const prevMessageCount = useRef(messages.length);
 
   useEffect(() => {
     const el = listRef.current;
@@ -25,6 +27,9 @@ export function MessageList() {
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
       stickToBottom.current = distance < 80;
+      if (stickToBottom.current) {
+        setShowNewUpdates(false);
+      }
       if (activeConversationId) {
         setChatScrollTop(activeConversationId, el.scrollTop);
       }
@@ -46,10 +51,19 @@ export function MessageList() {
   }, [activeConversationId, chatViewState, messagesLoading]);
 
   useEffect(() => {
-    if (stickToBottom.current) {
+    if (messages.length > prevMessageCount.current && !stickToBottom.current) {
+      setShowNewUpdates(true);
+    } else if (stickToBottom.current) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }
+    prevMessageCount.current = messages.length;
   }, [messages, sending, agentActions, streamingText]);
+
+  const jumpToLatest = () => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    setShowNewUpdates(false);
+    stickToBottom.current = true;
+  };
 
   if (messagesLoading) {
     return (
@@ -106,6 +120,11 @@ export function MessageList() {
 
   return (
     <div className="message-list" ref={listRef} aria-live="polite">
+      {showNewUpdates ? (
+        <button type="button" className="new-updates-chip" onClick={jumpToLatest}>
+          New updates
+        </button>
+      ) : null}
       {messages.map((message) => (
         <MessageBubble key={message.id} message={message} />
       ))}

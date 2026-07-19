@@ -34,11 +34,28 @@ import type {
   Project,
   UpdateProjectInput,
 } from "@/types/project";
+import type { SurfaceDraftConflict } from "@/types/runtime-v2";
 
 export type PendingToolChange = {
   conversationId: string;
   messageId: string;
   toolChange: ToolChange;
+};
+
+export type PendingKernelProposal = {
+  conversationId: string;
+  messageId: string;
+  proposalId: string;
+  summary: string;
+  impactSummary: string;
+  risk: string;
+  operations: unknown[];
+};
+
+export type AppConflict = {
+  message: string;
+  conflicts: string[];
+  conversationId?: string | null;
 };
 
 type AppStore = {
@@ -97,6 +114,9 @@ type AppStore = {
   toolVersionsLoading: boolean;
 
   pendingToolChange: PendingToolChange | null;
+  pendingKernelProposal: PendingKernelProposal | null;
+  appConflict: AppConflict | null;
+  surfaceDraftConflict: SurfaceDraftConflict | null;
   sending: boolean;
   sendError: string | null;
   agentActions: string[];
@@ -176,6 +196,15 @@ type AppStore = {
   editAndResendMessage: (messageId: string, content: string) => Promise<void>;
   applyPendingToolChange: () => Promise<void>;
   discardPendingToolChange: () => Promise<void>;
+  applyPendingKernelProposal: () => Promise<void>;
+  discardPendingKernelProposal: () => Promise<void>;
+  clearAppConflict: () => void;
+  setSurfaceDraftConflict: (conflict: SurfaceDraftConflict | null) => void;
+  clearSurfaceDraftConflict: () => void;
+  resolveSurfaceDraftConflict: (
+    action: "keep" | "apply" | "cancel",
+  ) => Promise<void>;
+  reloadActiveSurfaces: () => Promise<void>;
 
   refreshAiStatus: () => Promise<void>;
   testConnection: () => Promise<void>;
@@ -184,6 +213,35 @@ type AppStore = {
 
   loadToolWindow: (toolId: string) => Promise<void>;
 };
+
+let agentTurnSyncAttached = false;
+
+function attachAgentTurnSyncListener(
+  get: () => {
+    reloadActiveSurfaces: () => Promise<void>;
+  },
+  set: (partial: {
+    appConflict: AppConflict | null;
+  }) => void,
+) {
+  if (agentTurnSyncAttached) return;
+  agentTurnSyncAttached = true;
+  void listenAgentTurn((event) => {
+    if (event.kind === "conflict") {
+      set({
+        appConflict: {
+          message: event.message,
+          conflicts: event.conflicts,
+          conversationId: event.conversationId ?? null,
+        },
+      });
+      return;
+    }
+    if (event.kind === "sync") {
+      void get().reloadActiveSurfaces();
+    }
+  });
+}
 
 function resolveTheme(theme: ThemePreference): "light" | "dark" {
   if (theme === "system") {
@@ -432,6 +490,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toolVersionsLoading: false,
 
   pendingToolChange: null,
+  pendingKernelProposal: null,
+  appConflict: null,
+  surfaceDraftConflict: null,
   sending: false,
   sendError: null,
   agentActions: [],
@@ -483,6 +544,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
         tools,
         projects,
       });
+
+      attachAgentTurnSyncListener(get, set);
 
       if (conversations.length > 0) {
         await get().navigateToChat(conversations[0].id);
@@ -588,28 +651,63 @@ export const useAppStore = create<AppStore>((set, get) => ({
       try {
         const messages = await api.getMessages(trimmed);
         let pending: PendingToolChange | null = null;
+        let kernelProposal: PendingKernelProposal | null = null;
         for (let i = messages.length - 1; i >= 0; i -= 1) {
           const meta = messages[i].metadata as
             | {
                 toolChange?: ToolChange;
                 pending?: boolean;
                 toolChangeStatus?: string;
+                runtimeV2?: {
+                  proposalId?: string;
+                  risk?: string;
+                  impactSummary?: string;
+                  summary?: string;
+                  operations?: unknown[];
+                  status?: string;
+                };
+                kernelProposalStatus?: string;
               }
             | null
             | undefined;
           const isPending =
             !!meta?.toolChange &&
             (meta.toolChangeStatus === "pending" || meta.pending === true);
-          if (isPending && meta?.toolChange) {
+          if (isPending && meta?.toolChange && !pending) {
             pending = {
               conversationId: trimmed,
               messageId: messages[i].id,
               toolChange: meta.toolChange,
             };
-            break;
+          }
+          const rv = meta?.runtimeV2;
+          if (
+            !kernelProposal &&
+            rv?.proposalId &&
+            Array.isArray(rv.operations) &&
+            rv.operations.length > 0 &&
+            rv.status !== "discarded" &&
+            rv.status !== "applied" &&
+            meta?.kernelProposalStatus !== "discarded" &&
+            meta?.kernelProposalStatus !== "applied"
+          ) {
+            kernelProposal = {
+              conversationId: trimmed,
+              messageId: messages[i].id,
+              proposalId: rv.proposalId,
+              summary: rv.summary ?? "Proposed application change",
+              impactSummary: rv.impactSummary ?? "",
+              risk: rv.risk ?? "strong",
+              operations: rv.operations,
+            };
           }
         }
-        set({ messages, messagesLoading: false, pendingToolChange: pending });
+        set({
+          messages,
+          messagesLoading: false,
+          pendingToolChange: pending,
+          pendingKernelProposal: kernelProposal,
+        });
       } catch (error) {
         set({
           messages: [],
@@ -1139,9 +1237,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   updateToolState: async (state, persist = true) => {
     const id = get().activeToolId;
+    const previous = get().toolState;
     set({ toolState: state });
     if (persist && id) {
-      await api.saveToolState(id, state);
+      try {
+        await api.saveToolState(id, state);
+      } catch {
+        set({ toolState: previous });
+      }
     }
   },
 
@@ -1210,6 +1313,29 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     const activeConversationId = conversationId;
     const stopListen = await listenAgentTurn((event) => {
+      if (event.kind === "conflict") {
+        set({
+          appConflict: {
+            message: event.message,
+            conflicts: event.conflicts,
+            conversationId: event.conversationId,
+          },
+        });
+        return;
+      }
+      if (event.kind === "sync") {
+        void get().reloadActiveSurfaces();
+        return;
+      }
+      if (event.kind === "operation") {
+        set((state) => ({
+          agentActions: [
+            ...state.agentActions,
+            `Operation ${event.status}: ${event.operationId.slice(0, 8)}`,
+          ].slice(-8),
+        }));
+        return;
+      }
       if (event.conversationId !== activeConversationId) return;
       if (event.kind === "action") {
         set((state) => ({
@@ -1253,6 +1379,56 @@ export const useAppStore = create<AppStore>((set, get) => ({
             }
           : null;
 
+      let kernelProposal: PendingKernelProposal | null = null;
+      const rv = result.runtimeV2 as
+        | {
+            proposalId?: string;
+            risk?: string;
+            impactSummary?: string;
+            summary?: string;
+            operations?: unknown[];
+            status?: string;
+            error?: string;
+          }
+        | null
+        | undefined;
+      if (
+        rv?.proposalId &&
+        Array.isArray(rv.operations) &&
+        rv.operations.length > 0 &&
+        rv.status !== "discarded" &&
+        rv.status !== "applied"
+      ) {
+        kernelProposal = {
+          conversationId,
+          messageId: result.messageId,
+          proposalId: rv.proposalId,
+          summary: rv.summary ?? "Proposed application change",
+          impactSummary: rv.impactSummary ?? "",
+          risk: rv.risk ?? "strong",
+          operations: rv.operations,
+        };
+      }
+
+      if (result.queued) {
+        set((state) => ({
+          sending: false,
+          agentActions: ["Message queued"],
+          streamingText: null,
+          sendError: null,
+          messages: state.messages.map((m) =>
+            m.id === optimistic.id
+              ? {
+                  ...m,
+                  status: "ok" as const,
+                  content: `${m.content}\n\n(Queued — will send when the current reply finishes.)`,
+                }
+              : m,
+          ),
+        }));
+        return;
+      }
+
       let themePatch: Partial<{
         theme: ThemePreference;
         resolvedTheme: "light" | "dark";
@@ -1276,8 +1452,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
         messages,
         sending: false,
         pendingToolChange: pending,
+        pendingKernelProposal: kernelProposal,
         agentActions: [],
         streamingText: null,
+        sendError: rv?.error ? String(rv.error) : null,
         ...themePatch,
       });
     } catch (error) {
@@ -1430,6 +1608,158 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
   },
 
+  applyPendingKernelProposal: async () => {
+    const pending = get().pendingKernelProposal;
+    if (!pending || pending.operations.length === 0) return;
+    try {
+      const result = await api.kernelApplyChange({
+        summary: pending.summary,
+        operations: pending.operations,
+        silent: false,
+        sourceType: "user",
+        requireApproval: false,
+        approvalGranted: true,
+        conversationId: pending.conversationId,
+        projectId: null,
+        turnId: null,
+        provider: null,
+        model: null,
+      });
+      const apply = result.apply as { conflicts?: string[] } | undefined;
+      if (apply?.conflicts && apply.conflicts.length > 0) {
+        set({
+          appConflict: {
+            message:
+              "This change conflicts with another window or newer revision.",
+            conflicts: apply.conflicts,
+            conversationId: pending.conversationId,
+          },
+        });
+        return;
+      }
+      try {
+        await api.setKernelProposalStatus(pending.messageId, "applied");
+      } catch {
+        // best-effort status stamp
+      }
+      set({
+        pendingKernelProposal: null,
+        messages: get().messages.map((m) =>
+          m.id === pending.messageId
+            ? {
+                ...m,
+                metadata: {
+                  ...(m.metadata ?? {}),
+                  kernelProposalStatus: "applied",
+                  runtimeV2: {
+                    ...((m.metadata as { runtimeV2?: Record<string, unknown> } | null)
+                      ?.runtimeV2 ?? {}),
+                    status: "applied",
+                  },
+                },
+              }
+            : m,
+        ),
+      });
+      const messages = await api.getMessages(pending.conversationId);
+      set({ messages });
+      await get().reloadActiveSurfaces();
+    } catch (error) {
+      set({
+        sendError:
+          error instanceof TauriCommandError || error instanceof Error
+            ? error.message
+            : "Failed to apply proposed change",
+      });
+    }
+  },
+
+  discardPendingKernelProposal: async () => {
+    const pending = get().pendingKernelProposal;
+    if (!pending) return;
+    try {
+      await api.setKernelProposalStatus(pending.messageId, "discarded");
+    } catch {
+      try {
+        await api.discardKernelProposal(pending.messageId);
+      } catch {
+        // best-effort
+      }
+    }
+    set({
+      pendingKernelProposal: null,
+      messages: get().messages.map((m) =>
+        m.id === pending.messageId
+          ? {
+              ...m,
+              metadata: {
+                ...(m.metadata ?? {}),
+                kernelProposalStatus: "discarded",
+                runtimeV2: {
+                  ...((m.metadata as { runtimeV2?: Record<string, unknown> } | null)
+                    ?.runtimeV2 ?? {}),
+                  status: "discarded",
+                },
+              },
+            }
+          : m,
+      ),
+    });
+  },
+
+  clearAppConflict: () => set({ appConflict: null }),
+
+  setSurfaceDraftConflict: (conflict) => set({ surfaceDraftConflict: conflict }),
+  clearSurfaceDraftConflict: () => set({ surfaceDraftConflict: null }),
+  resolveSurfaceDraftConflict: async (action) => {
+    const conflict = get().surfaceDraftConflict;
+    if (!conflict) return;
+    if (action === "cancel") {
+      set({ surfaceDraftConflict: null });
+      return;
+    }
+    try {
+      if (action === "keep") {
+        await api.saveDraft({
+          surfaceId: conflict.surfaceId,
+          componentId: conflict.componentId,
+          windowId: conflict.windowId,
+          baseRevision: conflict.storedRevision,
+          draft: conflict.userDraft,
+          formId: conflict.formId ?? null,
+          force: true,
+        });
+      } else {
+        await api.saveDraft({
+          surfaceId: conflict.surfaceId,
+          componentId: conflict.componentId,
+          windowId: conflict.windowId,
+          baseRevision: conflict.requestedRevision,
+          draft: conflict.agentDraft ?? {},
+          formId: conflict.formId ?? null,
+          force: true,
+        });
+      }
+      set({ surfaceDraftConflict: null });
+    } catch (error) {
+      set({
+        sendError:
+          error instanceof Error ? error.message : "Failed to resolve draft conflict",
+      });
+    }
+  },
+
+  reloadActiveSurfaces: async () => {
+    const toolId = get().activeToolId;
+    if (toolId) {
+      try {
+        await get().selectTool(toolId);
+      } catch {
+        // ignore
+      }
+    }
+  },
+
   refreshAiStatus: async () => {
     const aiStatus = await api.getAiStatus();
     set({ aiStatus });
@@ -1495,5 +1825,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       toolState: state ?? {},
       sidebarCollapsed: true,
     });
+    attachAgentTurnSyncListener(get, set);
   },
 }));
