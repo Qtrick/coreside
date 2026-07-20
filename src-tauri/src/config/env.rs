@@ -30,6 +30,29 @@ pub const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 pub const DEFAULT_OPENROUTER_MODEL: &str = "google/gemini-2.5-flash";
 pub const DEFAULT_OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 
+/// Publishable Supabase client config for hosted AI (never service-role).
+pub fn supabase_publishable_config() -> Option<(String, String)> {
+    let url = read_env_any(&["SUPABASE_URL", "VITE_SUPABASE_URL"])?;
+    let key = read_env_any(&[
+        "SUPABASE_PUBLISHABLE_KEY",
+        "SUPABASE_ANON_KEY",
+        "VITE_SUPABASE_PUBLISHABLE_KEY",
+    ])?;
+    Some((url, key))
+}
+
+fn read_env_any(keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Ok(value) = env::var(key) {
+            let trimmed = strip_env_quotes(value.trim());
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub provider: String,
@@ -66,16 +89,81 @@ impl AppConfig {
         source: &str,
         active_connection_id: Option<String>,
     ) -> PublicAiStatus {
+        self.public_ai_status_with_presentation(
+            status,
+            message,
+            source,
+            active_connection_id,
+            None,
+        )
+    }
+
+    pub fn public_ai_status_with_presentation(
+        &self,
+        status: &str,
+        message: Option<String>,
+        source: &str,
+        active_connection_id: Option<String>,
+        presentation: Option<crate::ai::AiAccessPresentation>,
+    ) -> PublicAiStatus {
+        let disclosure = presentation.as_ref().map(|p| p.disclosure.clone());
+        let show_provider = disclosure
+            .as_ref()
+            .map(|d| d.show_provider_identity)
+            .unwrap_or(true);
+        let show_model = disclosure
+            .as_ref()
+            .map(|d| d.show_model_identity)
+            .unwrap_or(true);
+        let show_cred = disclosure
+            .as_ref()
+            .map(|d| d.show_credential_source)
+            .unwrap_or(true);
+        let show_dev = disclosure
+            .as_ref()
+            .map(|d| d.allow_developer_details)
+            .unwrap_or(false);
+
         PublicAiStatus {
-            provider: self.provider.clone(),
-            model: self.model.clone(),
+            provider: if show_provider {
+                self.provider.clone()
+            } else {
+                String::new()
+            },
+            model: if show_model {
+                self.model.clone()
+            } else {
+                String::new()
+            },
             key_detected: self.has_api_key(),
             status: status.to_string(),
-            message,
-            base_url: self.base_url.clone(),
-            env_path: self.env_path.clone(),
+            message: if show_cred || status != "ready" {
+                message
+            } else {
+                None
+            },
+            base_url: if show_provider {
+                self.base_url.clone()
+            } else {
+                String::new()
+            },
+            env_path: if show_dev {
+                self.env_path.clone()
+            } else {
+                None
+            },
             source: source.to_string(),
             active_connection_id,
+            access_mode: presentation
+                .as_ref()
+                .map(|p| p.access_mode.as_str().to_string()),
+            consumer_display_name: presentation
+                .as_ref()
+                .map(|p| p.consumer_display_name.clone()),
+            user_facing_status: presentation
+                .as_ref()
+                .map(|p| p.user_facing_status.clone()),
+            disclosure,
         }
     }
 }
@@ -96,6 +184,14 @@ pub struct PublicAiStatus {
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_connection_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consumer_display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_facing_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disclosure: Option<crate::ai::DisclosurePolicy>,
 }
 
 /// Load `.env` from project root (walk up from cwd, or parent of `CARGO_MANIFEST_DIR`), then build config.
@@ -330,7 +426,8 @@ mod tests {
         let json = serde_json::to_string(&status).unwrap();
         assert!(!json.contains("secret-key"));
         assert!(status.key_detected);
-        assert_eq!(status.env_path.as_deref(), Some("/tmp/.env"));
+        // Without a presentation policy, env_path is omitted (not a consumer surface).
+        assert!(status.env_path.is_none());
     }
 
     #[test]

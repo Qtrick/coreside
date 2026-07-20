@@ -171,8 +171,17 @@ pub fn validate_definition_components(definition: &Value) -> Result<(), String> 
 }
 
 fn validate_component_value(component: &Value) -> Result<(), String> {
-    if let Some(component_type) = component.get("type").and_then(|v| v.as_str()) {
+    let component_type = component
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if !component_type.is_empty() {
         validate_component_type_allowed(component_type)?;
+        validate_labeled_props(
+            component_type,
+            component.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
+            component.get("props"),
+        )?;
     }
     if let Some(children) = component.get("children").and_then(|v| v.as_array()) {
         for child in children {
@@ -186,10 +195,81 @@ fn validate_component_value(component: &Value) -> Result<(), String> {
 pub fn validate_tool_components(components: &[crate::ai::ToolComponent]) -> Result<(), String> {
     for component in components {
         validate_component_type_allowed(&component.component_type)?;
+        validate_labeled_props(
+            &component.component_type,
+            &component.id,
+            component.props.as_ref(),
+        )?;
         if let Some(children) = &component.children {
             validate_tool_components(children)?;
         }
     }
+    Ok(())
+}
+
+fn validate_labeled_props(
+    component_type: &str,
+    component_id: &str,
+    props: Option<&Value>,
+) -> Result<(), String> {
+    const NEEDS_LABEL: &[&str] = &[
+        "textInput",
+        "textArea",
+        "numberInput",
+        "select",
+        "checkbox",
+        "dateInput",
+        "button",
+    ];
+    // Renderer defaults — treat as invalid agent output (screenshot: "Text" / "Button").
+    const PLACEHOLDER_LABELS: &[&str] = &[
+        "text",
+        "button",
+        "notes",
+        "number",
+        "select",
+        "checkbox",
+        "date",
+        "label",
+        "input",
+        "untitled",
+        "field",
+    ];
+
+    if NEEDS_LABEL.contains(&component_type) {
+        let label = props
+            .and_then(|p| p.get("label"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let Some(label) = label else {
+            return Err(format!(
+                "{component_type} '{component_id}' requires non-empty props.label"
+            ));
+        };
+        if PLACEHOLDER_LABELS
+            .iter()
+            .any(|g| label.eq_ignore_ascii_case(g))
+        {
+            return Err(format!(
+                "{component_type} '{component_id}' has placeholder label '{label}' — use a specific label for the tool"
+            ));
+        }
+    }
+
+    if matches!(component_type, "heading" | "text") {
+        let content = props
+            .and_then(|p| p.get("text").or_else(|| p.get("children")))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        if content.is_none() {
+            return Err(format!(
+                "{component_type} '{component_id}' requires non-empty props.text"
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -230,5 +310,33 @@ mod tests {
         for p in bundled_packs() {
             assert!(!p.permissions.iter().any(|x| x.contains("cdn") || x.contains("network")));
         }
+    }
+
+    #[test]
+    fn rejects_placeholder_text_and_button_labels() {
+        use crate::ai::ToolComponent;
+        let stub = vec![
+            ToolComponent {
+                id: "a".into(),
+                component_type: "textInput".into(),
+                props: None,
+                children: None,
+            },
+            ToolComponent {
+                id: "b".into(),
+                component_type: "button".into(),
+                props: Some(serde_json::json!({ "label": "Button" })),
+                children: None,
+            },
+        ];
+        assert!(validate_tool_components(&stub).is_err());
+
+        let ok = vec![ToolComponent {
+            id: "c".into(),
+            component_type: "textInput".into(),
+            props: Some(serde_json::json!({ "label": "Next task" })),
+            children: None,
+        }];
+        assert!(validate_tool_components(&ok).is_ok());
     }
 }

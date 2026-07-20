@@ -40,34 +40,56 @@ pub fn get_ai_status(state: State<'_, AppState>) -> PublicAiStatus {
         let db = state.db.lock();
         resolve_credentials(&db, None)
     };
+    let developer_mode = {
+        let db = state.db.lock();
+        db::get_settings(&db)
+            .ok()
+            .and_then(|s| s.get("developerMode").cloned())
+            .map(|v| v == "true" || v == "1" || v.eq_ignore_ascii_case("yes"))
+            .unwrap_or(false)
+    };
+    let hosted_connected = {
+        let db = state.db.lock();
+        crate::credentials::adapter_connected(&db)
+    };
 
-    let (status, message) = if resolved.has_api_key() {
-        let msg = match resolved.source.as_str() {
-            "connection" => Some("Connected with a secure provider credential.".to_string()),
-            "env" => Some("Using development environment credential.".to_string()),
-            _ => None,
+    let has_key = resolved.has_api_key();
+    let presentation = crate::ai::resolve_access_presentation(
+        &resolved.source,
+        &resolved.provider,
+        has_key || resolved.provider.eq_ignore_ascii_case("mock"),
+        hosted_connected,
+        developer_mode,
+        false,
+    );
+
+    let (status, message) = if presentation.available {
+        let msg = if presentation.disclosure.show_credential_source {
+            match resolved.source.as_str() {
+                "connection" => Some("Connected with a secure provider credential.".to_string()),
+                "env" => Some("Development environment credential (Developer Mode).".to_string()),
+                _ => None,
+            }
+        } else {
+            None
         };
         ("ready", msg)
-    } else if resolved.provider.eq_ignore_ascii_case("mock") {
-        (
-            "ready",
-            Some("Using mock AI provider (no API key required).".to_string()),
-        )
     } else {
         (
             "missing_key",
             Some(
-                "Connect an AI provider in Settings to chat. Your key stays on this device."
+                "Connect your own AI provider or configure local AI in Settings."
                     .to_string(),
             ),
         )
     };
 
-    resolved.to_app_config().public_ai_status_with_source(
+    resolved.to_app_config().public_ai_status_with_presentation(
         status,
         message,
         &resolved.source,
         resolved.active_connection_id.clone(),
+        Some(presentation),
     )
 }
 
@@ -77,6 +99,26 @@ pub fn get_model_catalog(state: State<'_, AppState>) -> Result<ModelCatalog, Com
         let db = state.db.lock();
         resolve_credentials(&db, None)
     };
+    let developer_mode = {
+        let db = state.db.lock();
+        db::get_settings(&db)
+            .ok()
+            .and_then(|s| s.get("developerMode").cloned())
+            .map(|v| v == "true" || v == "1" || v.eq_ignore_ascii_case("yes"))
+            .unwrap_or(false)
+    };
+    let hosted_connected = {
+        let db = state.db.lock();
+        crate::credentials::adapter_connected(&db)
+    };
+    let presentation = crate::ai::resolve_access_presentation(
+        &resolved.source,
+        &resolved.provider,
+        resolved.has_api_key() || resolved.provider.eq_ignore_ascii_case("mock"),
+        hosted_connected,
+        developer_mode,
+        false,
+    );
     let selected = {
         let db = state.db.lock();
         db::get_settings(&db)?
@@ -84,6 +126,10 @@ pub fn get_model_catalog(state: State<'_, AppState>) -> Result<ModelCatalog, Com
             .cloned()
             .unwrap_or_else(|| "auto".to_string())
     };
+    if !presentation.disclosure.show_provider_catalog {
+        // Consumer-safe stub — no upstream model slugs.
+        return Ok(crate::ai::auto_only_catalog(&selected));
+    }
     Ok(model_catalog(&resolved.to_app_config(), &selected))
 }
 
@@ -106,7 +152,33 @@ pub async fn test_ai_connection(
     let mut health = provider.health_check(cancel).await.map_err(|e| {
         CommandError::sanitized(e.code(), e, key.as_deref())
     })?;
-    let provider_name = crate::ai::AiProvider::display_name(provider.as_ref());
-    health.message = format!("{provider_name} — {}", health.message);
+    let developer_mode = {
+        let db = state.db.lock();
+        db::get_settings(&db)
+            .ok()
+            .and_then(|s| s.get("developerMode").cloned())
+            .map(|v| v == "true" || v == "1" || v.eq_ignore_ascii_case("yes"))
+            .unwrap_or(false)
+    };
+    let hosted_connected = {
+        let db = state.db.lock();
+        crate::credentials::adapter_connected(&db)
+    };
+    let presentation = crate::ai::resolve_access_presentation(
+        &resolved.source,
+        &resolved.provider,
+        resolved.has_api_key() || resolved.provider.eq_ignore_ascii_case("mock"),
+        hosted_connected,
+        developer_mode,
+        false,
+    );
+    if presentation.disclosure.show_provider_identity {
+        let provider_name = crate::ai::AiProvider::display_name(provider.as_ref());
+        health.message = format!("{provider_name} — {}", health.message);
+    } else {
+        // Consumer-safe: no upstream provider or model-count leakage.
+        health.message = "Connection succeeded.".into();
+        health.models.clear();
+    }
     Ok(health)
 }

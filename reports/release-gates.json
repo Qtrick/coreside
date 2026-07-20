@@ -1,0 +1,53 @@
+{
+  "product": "Coreside",
+  "version": "0.1.0",
+  "assessedAt": "2026-07-19",
+  "consumerLaunchReady": false,
+  "publicBetaReady": false,
+  "internalAlphaReady": true,
+  "hostedAiPrivateAlphaReady": false,
+  "gates": [
+    {
+      "id": "typecheck-ts6",
+      "command": "npm run typecheck",
+      "status": "pass",
+      "notes": "TypeScript 6.0.3",
+      "verifiedAt": "2026-07-19"
+    },
+    {
+      "id": "vitest",
+      "command": "npm test",
+      "status": "pass",
+      "notes": "71 tests",
+      "verifiedAt": "2026-07-19"
+    },
+    {
+      "id": "rust-lib",
+      "command": "cargo test --lib",
+      "status": "pass",
+      "notes": "208 passed",
+      "verifiedAt": "2026-07-19"
+    },
+    {
+      "id": "lint",
+      "command": "npm run lint",
+      "status": "pass",
+      "notes": "5 warnings",
+      "verifiedAt": "2026-07-19"
+    },
+    {
+      "id": "mcp-no-literal-token",
+      "status": "pass",
+      "notes": "Active Cursor mcp uses OAuth URL; repo ignores mcp.json"
+    },
+    {
+      "id": "remote-hosted-ai-e2e",
+      "status": "fail",
+      "notes": "Migration/deploy/live chat not verified"
+    },
+    {
+      "id": "packaged-build",
+      "status": "pending"
+    }
+  ]
+}

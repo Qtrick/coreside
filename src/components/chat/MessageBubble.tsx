@@ -39,6 +39,9 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
   const retryLastFailed = useAppStore((s) => s.retryLastFailed);
   const editAndResendMessage = useAppStore((s) => s.editAndResendMessage);
   const sending = useAppStore((s) => s.sending);
+  const showModelIdentity = Boolean(
+    useAppStore((s) => s.aiStatus?.disclosure?.showModelIdentity),
+  );
   const isUser = message.role === "user";
   const isError = message.status === "error";
   const [editing, setEditing] = useState(false);
@@ -82,7 +85,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
   };
 
   const responseModel = (() => {
-    if (isUser) return null;
+    if (isUser || !showModelIdentity) return null;
     const meta = message.metadata;
     if (!meta || typeof meta !== "object") return null;
     const diagnostics = (meta as Record<string, unknown>).diagnostics;

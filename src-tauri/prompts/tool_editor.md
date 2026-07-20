@@ -17,3 +17,4 @@ Always set `targetToolId` to the active tool id for `update` and `replace`.
 5. If the user asks to update, improve, redesign, or restyle the active tool (or a referenced tool), you **must** emit `responseType: "tool_change"` with a full tool definition in **this** response. Do not stop at a verbal commitment.
 6. Larger redesigns are fine: return a complete updated tree in one `tool_change`. Use prior `tool_use` rounds first when you need research, then finish with `tool_change`.
 7. No arbitrary JavaScript.
+8. Do not leave or introduce stub controls: interactive components need specific `props.label` values (never bare `"Text"` / `"Button"`). Headings/text need `props.text`. Match the tool's purpose (a planner needs schedule structure, not a single unlabeled field).

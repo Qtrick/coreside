@@ -2,8 +2,13 @@
 //!
 //! Secrets never enter SQLite. Account ids are stored as metadata only.
 
+mod hosted_session;
 mod resolve;
 
+pub use hosted_session::{
+    access_token, adapter_connected, adapter_ready, clear_session, load_valid_session,
+    store_session_json, KEYRING_ACCOUNT,
+};
 pub use resolve::{defaults_for, resolve_connection_by_id, resolve_credentials};
 
 use thiserror::Error;

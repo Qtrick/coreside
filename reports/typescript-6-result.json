@@ -1,0 +1,15 @@
+{
+  "product": "Coreside",
+  "assessedAt": "2026-07-19",
+  "previousDeclared": "~5.8.3",
+  "previousResolvedBaseline": "5.8.3",
+  "newDeclared": "~6.0.3",
+  "newResolved": "6.0.3",
+  "typecheck": {
+    "exitCode": 0,
+    "durationSeconds": 5.11,
+    "note": "Wall time includes npm script overhead; compare carefully to 5.8 baseline ~1.95s"
+  },
+  "typescript7": false,
+  "ignoreDeprecations": false
+}

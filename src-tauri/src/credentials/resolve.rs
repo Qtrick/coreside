@@ -154,7 +154,20 @@ where
         }
     }
 
-    // 3–4. .env fallback, else none
+    // 3. Hosted session beats .env when the adapter is effective (parity with access_mode).
+    if credentials::adapter_connected(db) {
+        return ResolvedCredentials {
+            provider: "coreside_hosted".into(),
+            api_key: None,
+            model: "auto".into(),
+            base_url: String::new(),
+            source: "none".into(),
+            active_connection_id: None,
+            env_path: None,
+        };
+    }
+
+    // 4–5. .env fallback, else none
     let env = load_env();
     let source = if env.has_api_key() {
         "env"

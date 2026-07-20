@@ -99,6 +99,7 @@ type AppStore = {
   actionLogMode: ActionLogMode;
   preferredModel: string;
   dockIcon: DockIconPreference;
+  developerMode: boolean;
   modelCatalog: ModelCatalog | null;
 
   conversations: Conversation[];
@@ -171,6 +172,7 @@ type AppStore = {
   closeProviderSetup: () => void;
   setPreferredModel: (modelId: string) => Promise<void>;
   setDockIcon: (preference: DockIconPreference) => Promise<void>;
+  setDeveloperMode: (enabled: boolean) => Promise<void>;
   refreshModelCatalog: () => Promise<void>;
 
   refreshConversations: () => Promise<void>;
@@ -475,6 +477,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   actionLogMode: "off" as const,
   preferredModel: "auto",
   dockIcon: "auto",
+  developerMode: false,
   modelCatalog: null,
 
   conversations: [],
@@ -502,16 +505,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   bootstrap: async () => {
     try {
-      const [appInfo, aiStatus, settings, conversations, tools, modelCatalog, projects] =
+      const [appInfo, aiStatus, settings, conversations, tools, projects] =
         await Promise.all([
           api.getAppInfo(),
           api.getAiStatus(),
           api.getSettings(),
           api.listConversations(),
           api.listTools(),
-          api.getModelCatalog(),
           api.listProjects(),
         ]);
+
+      // Lazy catalog: only fetch when disclosure allows provider model listing.
+      const modelCatalog = aiStatus.disclosure?.showProviderCatalog
+        ? await api.getModelCatalog()
+        : null;
 
       const theme = settings.theme ?? "system";
       const resolved = resolveTheme(theme);
@@ -528,8 +535,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         wallpaper,
         globalWallpaperJson: settings.wallpaperJson ?? null,
         sidebarCollapsed: settings.sidebarCollapsed ?? false,
-        preferredModel: settings.preferredModel ?? modelCatalog.selected ?? "auto",
+        preferredModel: settings.preferredModel ?? modelCatalog?.selected ?? "auto",
         dockIcon: settings.dockIcon ?? "auto",
+        developerMode: Boolean(settings.developerMode),
         actionLogEnabled: Boolean(settings.actionLogEnabled) || settings.actionLogMode === "always" || settings.actionLogMode === "intelligent",
         actionLogMode:
           settings.actionLogMode === "always" ||
@@ -1117,7 +1125,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const next = modelId.trim() || "auto";
     set({ preferredModel: next });
     const settings = await api.setSetting("preferredModel", next);
-    const catalog = await api.getModelCatalog();
+    const allowCatalog = Boolean(get().aiStatus?.disclosure?.showProviderCatalog);
+    const catalog = allowCatalog ? await api.getModelCatalog() : null;
     set({
       preferredModel: settings.preferredModel ?? next,
       modelCatalog: catalog,
@@ -1139,7 +1148,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
   },
 
+  setDeveloperMode: async (enabled) => {
+    set({ developerMode: enabled });
+    await api.setSetting("developerMode", enabled);
+    await get().refreshAiStatus();
+  },
+
   refreshModelCatalog: async () => {
+    if (!get().aiStatus?.disclosure?.showProviderCatalog) {
+      set({ modelCatalog: null });
+      return;
+    }
     const catalog = await api.getModelCatalog();
     set({
       modelCatalog: catalog,
@@ -1763,6 +1782,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   refreshAiStatus: async () => {
     const aiStatus = await api.getAiStatus();
     set({ aiStatus });
+    await get().refreshModelCatalog();
   },
 
   testConnection: async () => {

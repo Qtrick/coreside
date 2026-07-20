@@ -1,0 +1,64 @@
+{
+  "product": "Coreside",
+  "version": "0.1.0",
+  "assessedAt": "2026-07-19",
+  "policy": "Do not chase global 100%. Critical modules need high confidence.",
+  "criticalModules": [
+    {
+      "id": "ai-access-mode",
+      "path": "src-tauri/src/ai/access_mode.rs",
+      "automated": "cargo test --lib ai::access_mode (5)",
+      "status": "covered"
+    },
+    {
+      "id": "credential-resolution",
+      "path": "src-tauri/src/credentials/",
+      "automated": "partial via ai_cmds + env tests",
+      "status": "partial"
+    },
+    {
+      "id": "disclosure-ui",
+      "path": "src/components/settings/AiProviderSettings.tsx",
+      "automated": "src/lib/ai-access-disclosure.test.ts",
+      "status": "partial",
+      "gap": "No RTL component test for Settings card"
+    },
+    {
+      "id": "protected-resources",
+      "path": "src-tauri/src/security/protected_resources.rs",
+      "automated": "cargo lib tests",
+      "status": "covered"
+    },
+    {
+      "id": "search-safety",
+      "path": "src-tauri/src/search/safety.rs",
+      "automated": "cargo lib tests",
+      "status": "covered"
+    },
+    {
+      "id": "exports-redaction",
+      "path": "src-tauri/src/exports/",
+      "automated": "export unit tests",
+      "status": "partial"
+    },
+    {
+      "id": "migrations",
+      "path": "src-tauri/migrations/",
+      "automated": "none fixture-based yet",
+      "status": "gap"
+    },
+    {
+      "id": "e2e-desktop",
+      "path": "n/a",
+      "automated": "none",
+      "status": "gap"
+    }
+  ],
+  "suiteSnapshot": {
+    "vitest": { "passed": 66, "failed": 0 },
+    "rustLib": { "passed": 205, "failed": 0 }
+  },
+  "lineCoverage": null,
+  "branchCoverage": null,
+  "notes": "Coverage percentages not collected this cycle — do not invent."
+}

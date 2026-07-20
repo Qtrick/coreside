@@ -1,5 +1,7 @@
 //! AI layer: providers, prompts, and response parsing.
 
+mod access_mode;
+mod hosted_provider;
 mod capability_registry;
 mod tool_loop;
 mod anthropic;
@@ -14,6 +16,10 @@ mod provider;
 mod response_parser;
 mod response_schema;
 mod settings_change;
+
+pub use access_mode::{
+    resolve_access_presentation, AiAccessPresentation, DisclosurePolicy,
+};
 
 pub use auto::chat_with_auto;
 pub use errors::AiError;
@@ -58,6 +64,12 @@ pub fn create_provider_with_model(
 
     if provider == "mock" {
         return Ok(Arc::new(MockAiProvider::new()));
+    }
+
+    if !config.has_api_key() {
+        if let Some(hosted) = hosted_provider::try_from_session()? {
+            return Ok(hosted);
+        }
     }
 
     let key = config
@@ -245,5 +257,27 @@ pub fn model_catalog(config: &AppConfig, selected: &str) -> ModelCatalog {
         selected,
         auto_resolves_to: config.model.clone(),
         options,
+    }
+}
+
+/// Catalog stub when disclosure forbids provider model listing (no upstream slugs).
+pub fn auto_only_catalog(selected: &str) -> ModelCatalog {
+    let selected = {
+        let trimmed = selected.trim();
+        if trimmed.is_empty() {
+            "auto".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    };
+    ModelCatalog {
+        provider: String::new(),
+        selected,
+        auto_resolves_to: "auto".into(),
+        options: vec![ModelOption {
+            id: "auto".into(),
+            label: "Auto".into(),
+            description: Some("Picks the best available model automatically".into()),
+        }],
     }
 }

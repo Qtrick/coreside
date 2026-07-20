@@ -1,0 +1,26 @@
+{
+  "product": "Coreside",
+  "version": "0.1.0",
+  "generatedAt": "2026-07-19",
+  "features": [
+    { "id": "chat", "status": "implemented" },
+    { "id": "projects", "status": "implemented" },
+    { "id": "tools", "status": "implemented" },
+    { "id": "kernel", "status": "partial" },
+    { "id": "search", "status": "partial" },
+    { "id": "media", "status": "implemented" },
+    { "id": "wallpapers", "status": "partial" },
+    { "id": "automations", "status": "implemented" },
+    { "id": "exports", "status": "implemented" },
+    { "id": "ai-access-modes", "status": "partial" },
+    { "id": "recovery", "status": "partial" },
+    { "id": "multiwindow", "status": "partial" },
+    { "id": "providers", "status": "implemented" },
+    { "id": "action-log", "status": "implemented" },
+    { "id": "settings", "status": "implemented" },
+    { "id": "runtime-v2", "status": "implemented" },
+    { "id": "continuity", "status": "implemented" },
+    { "id": "mentions", "status": "implemented" },
+    { "id": "branding", "status": "implemented" }
+  ]
+}

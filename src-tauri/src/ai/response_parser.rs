@@ -454,7 +454,13 @@ mod tests {
                     "name": "X",
                     "description": "",
                     "layout": "stack",
-                    "components": []
+                    "components": [
+                        {
+                            "id": "x-heading",
+                            "type": "heading",
+                            "props": { "text": "X" }
+                        }
+                    ]
                 },
                 "changeSummary": "create"
             }

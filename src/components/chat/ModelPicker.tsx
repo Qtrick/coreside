@@ -9,8 +9,26 @@ export function ModelPicker() {
 
   const needsSetup =
     aiStatus?.status === "missing_key" || aiStatus?.status === "unconfigured";
+  const showModelIdentity = Boolean(aiStatus?.disclosure?.showModelIdentity);
+  const allowModelSelection = aiStatus?.disclosure?.allowModelSelection !== false;
 
-  if (!modelCatalog) return null;
+  const staticAutoPicker = (
+    <div className="model-picker">
+      <span className="model-picker-select" aria-label="AI model">
+        Auto
+      </span>
+    </div>
+  );
+
+  // Hosted / development-supplied access: keep Auto without exposing raw slugs.
+  if (!showModelIdentity || !allowModelSelection) {
+    return staticAutoPicker;
+  }
+
+  // Catalog may still be loading after BYOK connect or Developer Mode toggle.
+  if (!modelCatalog) {
+    return staticAutoPicker;
+  }
 
   const selected = preferredModel || modelCatalog.selected || "auto";
   const options = modelCatalog.options.some((option) => option.id === selected)

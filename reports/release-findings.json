@@ -1,0 +1,65 @@
+{
+  "product": "Coreside",
+  "version": "0.1.0",
+  "assessedAt": "2026-07-19",
+  "P0": [
+    {
+      "id": "remote-supabase-migrate-deploy",
+      "title": "Hosted schema + Edge Functions not applied/verified on a live Supabase project this session",
+      "severity": "P0",
+      "status": "open",
+      "notes": "MCP tools require project_id; agent could not apply_migration remotely. Local SQL + function source exist in repo."
+    },
+    {
+      "id": "vite-supabase-build-env",
+      "title": "Desktop build lacks configured VITE_SUPABASE_* for hosted AI",
+      "severity": "P0",
+      "status": "open",
+      "notes": ".env.example documents keys; developer .env had no VITE_SUPABASE_* set when inspected"
+    }
+  ],
+  "P1": [
+    {
+      "id": "hosted-jwt-refresh",
+      "title": "No silent refresh of hosted Auth session",
+      "severity": "P1",
+      "status": "open"
+    },
+    {
+      "id": "desktop-ai-disclosure-retest",
+      "title": "Real Tauri Settings disclosure / hosted sign-in not screenshot-verified",
+      "severity": "P1",
+      "status": "open"
+    },
+    {
+      "id": "pat-rotation-user-action",
+      "title": "If a Supabase PAT was previously embedded in mcp.json, user must rotate it",
+      "severity": "P1",
+      "status": "open",
+      "notes": "Active ~/.cursor/mcp.json uses OAuth URL without token arg; rotation not performed by agent"
+    }
+  ],
+  "fixed": [
+    {
+      "id": "hosted-env-beats-session",
+      "title": "Hosted session lost to .env credential resolve",
+      "severity": "P0",
+      "status": "fixed",
+      "fixedAt": "2026-07-19",
+      "evidence": ["src-tauri/src/credentials/resolve.rs"]
+    },
+    {
+      "id": "typescript-6",
+      "title": "Migrated to TypeScript 6.0.3",
+      "severity": "P2",
+      "status": "fixed",
+      "evidence": ["package.json", "reports/typescript-6-result.json"]
+    },
+    {
+      "id": "mcp-gitignore-example",
+      "title": "MCP secrets ignored + OAuth example",
+      "severity": "P1",
+      "status": "fixed"
+    }
+  ]
+}

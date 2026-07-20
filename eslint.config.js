@@ -11,6 +11,7 @@ export default tseslint.config(
       "src-tauri",
       ".reference",
       "node_modules",
+      "supabase/functions/**",
       "services/crawl4ai/.venv/**",
       "services/crawl4ai/.crawler-data/**",
     ],

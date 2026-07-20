@@ -284,6 +284,14 @@ impl AgentResponsePayload {
                 {
                     return Err("targetToolId required for update/replace".into());
                 }
+                if matches!(tc.action, ToolAction::Create) && tool.components.is_empty() {
+                    return Err(
+                        "tool.components must not be empty when creating a tool".into(),
+                    );
+                }
+                if !tool.components.is_empty() {
+                    crate::runtime_v2::packs::validate_tool_components(&tool.components)?;
+                }
             }
             ResponseType::SettingsChange => {
                 let sc = self.settings_change.as_ref().ok_or_else(|| {

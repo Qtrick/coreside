@@ -134,6 +134,30 @@ export const AiStatusSchema = z.object({
   /** `connection` | `env` | `none` */
   source: z.enum(["connection", "env", "none"]).optional().default("none"),
   activeConnectionId: z.string().optional().nullable(),
+  accessMode: z
+    .enum([
+      "coreside_hosted",
+      "user_byok",
+      "user_local",
+      "developer_environment",
+      "unavailable",
+    ])
+    .optional(),
+  consumerDisplayName: z.string().optional().nullable(),
+  userFacingStatus: z.string().optional().nullable(),
+  disclosure: z
+    .object({
+      showProviderIdentity: z.boolean(),
+      showModelIdentity: z.boolean(),
+      showCredentialSource: z.boolean(),
+      showProviderCatalog: z.boolean(),
+      allowModelSelection: z.boolean(),
+      allowProviderManagement: z.boolean(),
+      allowConnectionTest: z.boolean(),
+      allowDeveloperDetails: z.boolean(),
+    })
+    .optional()
+    .nullable(),
 });
 
 export type AiStatus = z.infer<typeof AiStatusSchema>;
@@ -179,6 +203,8 @@ export const AppSettingsSchema = z.object({
     .optional()
     .default("off"),
   safeSearch: z.enum(["strict", "standard", "off"]).optional().default("standard"),
+  /** Base Setting — technical AI / routing details. Default off. */
+  developerMode: z.boolean().optional().default(false),
 });
 
 export type AppSettings = z.infer<typeof AppSettingsSchema>;

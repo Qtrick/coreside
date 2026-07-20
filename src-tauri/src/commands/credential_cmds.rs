@@ -428,3 +428,51 @@ impl From<credentials::CredentialError> for CommandError {
         Self::new("credential_store", sanitize_error(&value.to_string(), None))
     }
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedAuthStatus {
+    pub signed_in: bool,
+    pub adapter_ready: bool,
+    pub user_id: Option<String>,
+    pub expires_at: Option<f64>,
+    pub configured: bool,
+}
+
+/// Persist Supabase Auth session JSON in OS keyring (never SQLite / localStorage).
+#[tauri::command]
+pub fn store_hosted_auth_session(session_json: String) -> Result<HostedAuthStatus, CommandError> {
+    credentials::store_session_json(&session_json)?;
+    Ok(hosted_auth_status_inner())
+}
+
+#[tauri::command]
+pub fn clear_hosted_auth_session() -> Result<HostedAuthStatus, CommandError> {
+    credentials::clear_session()?;
+    Ok(hosted_auth_status_inner())
+}
+
+#[tauri::command]
+pub fn get_hosted_auth_status() -> HostedAuthStatus {
+    hosted_auth_status_inner()
+}
+
+fn hosted_auth_status_inner() -> HostedAuthStatus {
+    let configured = crate::config::supabase_publishable_config().is_some();
+    match credentials::load_valid_session(None) {
+        Some(session) => HostedAuthStatus {
+            signed_in: true,
+            adapter_ready: configured,
+            user_id: Some(session.user_id),
+            expires_at: Some(session.expires_at),
+            configured,
+        },
+        None => HostedAuthStatus {
+            signed_in: false,
+            adapter_ready: false,
+            user_id: None,
+            expires_at: None,
+            configured,
+        },
+    }
+}

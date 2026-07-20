@@ -1,0 +1,17 @@
+{
+  "product": "Coreside",
+  "assessedAt": "2026-07-19",
+  "typescriptResolved": "5.8.3",
+  "typescriptDeclared": "~5.8.3",
+  "node": "v24.17.0",
+  "npm": "11.13.0",
+  "typecheck": {
+    "exitCode": 0,
+    "durationSeconds": 1.95
+  },
+  "vitest": {
+    "passed": 66,
+    "failed": 0,
+    "note": "from prior run same session"
+  }
+}

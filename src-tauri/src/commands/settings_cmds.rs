@@ -51,6 +51,8 @@ pub struct AppSettings {
     pub action_log_mode: String,
     /// Base Setting: safe search level for local research.
     pub safe_search: String,
+    /// Base Setting: Developer Mode (technical AI details). Default off.
+    pub developer_mode: bool,
 }
 
 const DEFAULT_ACCENT_PRIMARY_LIGHT: &str = "#2f8f63";
@@ -235,6 +237,14 @@ fn settings_from_map(map: &std::collections::HashMap<String, String>) -> AppSett
             .map(|s| s.trim().to_lowercase())
             .filter(|s| matches!(s.as_str(), "strict" | "standard" | "off"))
             .unwrap_or_else(|| "standard".to_string()),
+        developer_mode: map
+            .get("developerMode")
+            .or_else(|| map.get("developer_mode"))
+            .map(|v| {
+                let lower = v.trim().to_lowercase();
+                lower == "true" || lower == "1" || lower == "yes"
+            })
+            .unwrap_or(false),
     }
 }
 

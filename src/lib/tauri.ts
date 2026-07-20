@@ -296,6 +296,7 @@ const mockDb = {
     actionLogEnabled: false as boolean,
     actionLogMode: "off" as "off" | "always" | "intelligent",
     safeSearch: "standard" as SafeSearchLevel,
+    developerMode: false as boolean,
   } satisfies AppSettings,
   aiConfigured: false,
   providerConnections: [] as ProviderConnection[],
@@ -347,23 +348,82 @@ async function mockInvoke<T>(
           "An AI-native personal software environment that begins as a chatbot and builds tools inside itself.",
       } satisfies AppInfo as T;
 
-    case "get_ai_status":
+    case "get_ai_status": {
+      const hasByok = mockDb.providerConnections.some((c) => c.isActive && c.hasKey);
+      const configured = mockDb.aiConfigured;
+      if (hasByok) {
+        const active = mockDb.providerConnections.find((c) => c.isActive)!;
+        return {
+          provider: active.provider,
+          model: active.modelDefault || "auto",
+          keyDetected: true,
+          status: "ready",
+          message: "Connected with a secure provider credential.",
+          source: "connection",
+          activeConnectionId: active.id,
+          accessMode: "user_byok",
+          consumerDisplayName: "AI Providers",
+          userFacingStatus: "Connected",
+          disclosure: {
+            showProviderIdentity: true,
+            showModelIdentity: true,
+            showCredentialSource: true,
+            showProviderCatalog: true,
+            allowModelSelection: true,
+            allowProviderManagement: true,
+            allowConnectionTest: true,
+            allowDeveloperDetails: Boolean(mockDb.settings.developerMode),
+          },
+        } satisfies AiStatus as T;
+      }
+      if (configured) {
+        const dev = Boolean(mockDb.settings.developerMode);
+        return {
+          provider: dev ? "gemini" : "",
+          model: dev ? "gemini-3.5-flash" : "",
+          keyDetected: true,
+          status: "ready",
+          message: null,
+          source: "env",
+          activeConnectionId: null,
+          accessMode: "developer_environment",
+          consumerDisplayName: "AI Access",
+          userFacingStatus: "Ready",
+          disclosure: {
+            showProviderIdentity: dev,
+            showModelIdentity: dev,
+            showCredentialSource: dev,
+            showProviderCatalog: dev,
+            allowModelSelection: true,
+            allowProviderManagement: true,
+            allowConnectionTest: dev,
+            allowDeveloperDetails: dev,
+          },
+        } satisfies AiStatus as T;
+      }
       return {
-        provider: "gemini",
-        model: "gemini-3.5-flash",
-        keyDetected: mockDb.aiConfigured,
-        status: mockDb.aiConfigured ? "ready" : "missing_key",
-        message: mockDb.aiConfigured
-          ? "Ready"
-          : "Connect a provider with your own API key to start chatting.",
-        source: mockDb.aiConfigured
-          ? mockDb.providerConnections.some((c) => c.isActive)
-            ? "connection"
-            : "env"
-          : "none",
-        activeConnectionId:
-          mockDb.providerConnections.find((c) => c.isActive)?.id ?? null,
+        provider: "",
+        model: "",
+        keyDetected: false,
+        status: "missing_key",
+        message: "Connect your own AI provider or configure local AI in Settings.",
+        source: "none",
+        activeConnectionId: null,
+        accessMode: "unavailable",
+        consumerDisplayName: "AI Access",
+        userFacingStatus: "Unavailable",
+        disclosure: {
+          showProviderIdentity: false,
+          showModelIdentity: false,
+          showCredentialSource: false,
+          showProviderCatalog: false,
+          allowModelSelection: false,
+          allowProviderManagement: true,
+          allowConnectionTest: false,
+          allowDeveloperDetails: false,
+        },
       } satisfies AiStatus as T;
+    }
 
     case "list_provider_connections":
       return mockDb.providerConnections as T;
@@ -411,6 +471,17 @@ async function mockInvoke<T>(
           supportsBaseUrl: true,
         },
       ] satisfies ProviderHint[] as T;
+
+    case "store_hosted_auth_session":
+    case "clear_hosted_auth_session":
+    case "get_hosted_auth_status":
+      return {
+        signedIn: false,
+        adapterReady: false,
+        userId: null,
+        expiresAt: null,
+        configured: false,
+      } as T;
 
     case "upsert_provider_connection": {
       const input = (args?.input ?? args) as UpsertProviderConnectionInput;
@@ -1443,6 +1514,9 @@ async function mockInvoke<T>(
           mockDb.settings.safeSearch = level;
         }
       }
+      if (key === "developerMode" && typeof value === "boolean") {
+        mockDb.settings.developerMode = value;
+      }
       return { ...mockDb.settings } as T;
     }
 
@@ -2102,6 +2176,7 @@ export function __resetMockDb(): void {
     actionLogEnabled: false,
     actionLogMode: "off",
     safeSearch: "standard" as SafeSearchLevel,
+    developerMode: false,
   };
   mockDb.aiConfigured = false;
   mockDb.providerConnections = [];
@@ -2134,6 +2209,30 @@ export const api = {
       connectionId: connectionId ?? null,
     }),
   providerKeyHints: () => invoke<ProviderHint[]>("provider_key_hints"),
+  storeHostedAuthSession: (sessionJson: string) =>
+    invoke<{
+      signedIn: boolean;
+      adapterReady: boolean;
+      userId?: string | null;
+      expiresAt?: number | null;
+      configured: boolean;
+    }>("store_hosted_auth_session", { sessionJson }),
+  clearHostedAuthSession: () =>
+    invoke<{
+      signedIn: boolean;
+      adapterReady: boolean;
+      userId?: string | null;
+      expiresAt?: number | null;
+      configured: boolean;
+    }>("clear_hosted_auth_session"),
+  getHostedAuthStatus: () =>
+    invoke<{
+      signedIn: boolean;
+      adapterReady: boolean;
+      userId?: string | null;
+      expiresAt?: number | null;
+      configured: boolean;
+    }>("get_hosted_auth_status"),
   listConversations: () => invoke<Conversation[]>("list_conversations"),
   createConversation: () => invoke<Conversation>("create_conversation"),
   deleteConversation: (conversationId: string) =>

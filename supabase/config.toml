@@ -1,0 +1,30 @@
+# Minimal local Supabase config for Coreside hosted AI development.
+project_id = "coreside-dev"
+
+[api]
+enabled = true
+port = 54321
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:1422"
+additional_redirect_urls = ["http://localhost:1422", "tauri://localhost"]
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+
+# CLI 2.x: [functions] is a map of per-function settings (not enabled = bool).
+[functions.ai-gateway]
+verify_jwt = true
+
+[functions.search-gateway]
+verify_jwt = true

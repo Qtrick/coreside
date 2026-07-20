@@ -1,0 +1,24 @@
+{
+  "product": "Coreside",
+  "version": "0.1.0",
+  "assessedAt": "2026-07-19",
+  "source": "docs/USER_JOURNEY_MATRIX.md + disclosure Tests A–J",
+  "journeys": [
+    { "id": "A", "name": "Hosted mode hides provider details", "status": "pending", "blocker": "No hosted adapter" },
+    { "id": "B", "name": "BYOK exposes user-owned provider", "status": "pending", "automatedPartial": "access_mode byok_shows_provider" },
+    { "id": "C", "name": "Local provider", "status": "pending" },
+    { "id": "D", "name": "Dev env Developer Mode off", "status": "partial", "automatedPartial": "env_hides_provider_when_developer_mode_off + Settings UI", "desktopEvidence": false },
+    { "id": "E", "name": "Dev env Developer Mode on", "status": "partial", "automatedPartial": "env_developer_mode_reveals" },
+    { "id": "F", "name": "No AI access", "status": "partial", "automatedPartial": "unavailable_when_no_key" },
+    { "id": "G", "name": "No contradictory state", "status": "partial", "notes": "Settings no longer shows No saved providers under env Ready" },
+    { "id": "H", "name": "Lazy model catalog", "status": "partial", "automatedPartial": "bootstrap skips catalog when showProviderCatalog false" },
+    { "id": "I", "name": "Error privacy", "status": "pending" },
+    { "id": "J", "name": "Export privacy", "status": "pending" },
+    { "id": "K", "name": "Secondary window", "status": "pending" },
+    { "id": "L", "name": "ZIP package export/import", "status": "pending" },
+    { "id": "M", "name": "Legacy JSON package", "status": "pending" },
+    { "id": "N", "name": "EventBus", "status": "pending" },
+    { "id": "O", "name": "NDJSON harvest", "status": "pending" },
+    { "id": "P", "name": "Recovery Mode", "status": "pending" }
+  ]
+}
