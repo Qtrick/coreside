@@ -1353,13 +1353,17 @@ fn map_automation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Automation> {
         consecutive_failures: row.get(15)?,
         created_at: row.get(16)?,
         updated_at: row.get(17)?,
+        application_id: row.get(18)?,
+        waiting_approval: row.get::<_, i64>(19)? == 1,
+        permission_ready: row.get::<_, i64>(20)? == 1,
     })
 }
 
 const AUTOMATION_COLS: &str = "id, workspace_id, owner_tool_id, name, enabled,
     trigger_type, trigger_json, action_type, action_json, requires_ai,
     provider_connection_id, missed_run_policy, next_run_at, last_run_at,
-    last_status, consecutive_failures, created_at, updated_at";
+    last_status, consecutive_failures, created_at, updated_at,
+    application_id, waiting_approval, permission_ready";
 
 pub fn list_automations(db: &Database) -> DbResult<Vec<Automation>> {
     let mut stmt = db.conn().prepare(&format!(
@@ -1414,8 +1418,9 @@ pub fn upsert_automation(db: &mut Database, automation: &Automation) -> DbResult
         "INSERT INTO automations (
             id, workspace_id, owner_tool_id, name, enabled, trigger_type, trigger_json,
             action_type, action_json, requires_ai, provider_connection_id, missed_run_policy,
-            next_run_at, last_run_at, last_status, consecutive_failures, created_at, updated_at
-         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
+            next_run_at, last_run_at, last_status, consecutive_failures, created_at, updated_at,
+            application_id, waiting_approval, permission_ready
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)
          ON CONFLICT(id) DO UPDATE SET
             name=excluded.name, enabled=excluded.enabled, trigger_type=excluded.trigger_type,
             trigger_json=excluded.trigger_json, action_type=excluded.action_type,
@@ -1423,7 +1428,8 @@ pub fn upsert_automation(db: &mut Database, automation: &Automation) -> DbResult
             provider_connection_id=excluded.provider_connection_id,
             missed_run_policy=excluded.missed_run_policy, next_run_at=excluded.next_run_at,
             last_run_at=excluded.last_run_at, last_status=excluded.last_status,
-            consecutive_failures=excluded.consecutive_failures, updated_at=excluded.updated_at",
+            consecutive_failures=excluded.consecutive_failures, updated_at=excluded.updated_at,
+            application_id=excluded.application_id",
         params![
             automation.id,
             automation.workspace_id,
@@ -1443,6 +1449,9 @@ pub fn upsert_automation(db: &mut Database, automation: &Automation) -> DbResult
             automation.consecutive_failures,
             automation.created_at,
             automation.updated_at,
+            automation.application_id,
+            if automation.waiting_approval { 1 } else { 0 },
+            if automation.permission_ready { 1 } else { 0 },
         ],
     )?;
     get_automation(db, &automation.id)
@@ -1475,6 +1484,41 @@ pub fn update_automation_schedule(
         return Err(DbError::NotFound(format!("automation {id}")));
     }
     Ok(())
+}
+
+/// Record whether an application-bound automation is parked on an approval and
+/// whether it still has the authority it needs.
+pub fn set_automation_runtime_flags(
+    db: &mut Database,
+    id: &str,
+    waiting_approval: bool,
+    permission_ready: bool,
+) -> DbResult<()> {
+    db.conn().execute(
+        "UPDATE automations SET waiting_approval = ?2, permission_ready = ?3, updated_at = ?4
+         WHERE id = ?1",
+        params![
+            id,
+            if waiting_approval { 1 } else { 0 },
+            if permission_ready { 1 } else { 0 },
+            now_rfc3339()
+        ],
+    )?;
+    Ok(())
+}
+
+/// Clear waiting-approval flags for automations bound to an application after
+/// the user decides a parked away request.
+pub fn clear_automation_waiting_for_application(
+    db: &mut Database,
+    application_id: &str,
+) -> DbResult<u64> {
+    let n = db.conn().execute(
+        "UPDATE automations SET waiting_approval = 0, updated_at = ?2
+         WHERE application_id = ?1 AND waiting_approval = 1",
+        params![application_id, now_rfc3339()],
+    )?;
+    Ok(n as u64)
 }
 
 pub fn delete_automation(db: &mut Database, id: &str) -> DbResult<()> {

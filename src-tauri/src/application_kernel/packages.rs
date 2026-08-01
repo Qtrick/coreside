@@ -10,7 +10,7 @@ use rusqlite::params;
 
 use super::errors::KernelError;
 use super::manifest::{get_manifest, upsert_manifest, validate_manifest, ApplicationManifest};
-use super::permissions::{grant_permission, validate_declared_permissions};
+use super::permissions::validate_declared_permissions;
 use super::policy::{evaluate_policy, PolicyAction};
 use super::ChangeRequest;
 
@@ -35,6 +35,47 @@ pub struct AppPackage {
     /// Future signed-package extension point
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<Value>,
+    /// Authority-shaped keys found in the imported JSON and discarded.
+    /// Never serialized: an exported package must not carry authority at all.
+    #[serde(skip)]
+    pub stripped_authority: Vec<String>,
+}
+
+/// Keys a package must never be able to bring with it. A package declares what
+/// an application wants; only the user can grant it.
+const AUTHORITY_KEYS: &[&str] = &[
+    "permissionGrants",
+    "permission_grants",
+    "grantedPermissions",
+    "granted_permissions",
+    "runtimeGrants",
+    "runtime_grants",
+    "actionGrants",
+    "action_grants",
+    "approvals",
+    "grants",
+    "policyOverrides",
+    "policy_overrides",
+    "trusted",
+];
+
+fn strip_authority_keys(raw: &Value) -> Vec<String> {
+    let Some(obj) = raw.as_object() else {
+        return vec![];
+    };
+    let mut found: Vec<String> = AUTHORITY_KEYS
+        .iter()
+        .filter(|key| obj.contains_key(**key))
+        .map(|key| (*key).to_string())
+        .collect();
+    if obj
+        .get("trustState")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| s == "signed")
+    {
+        found.push("trustState=signed".into());
+    }
+    found
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +180,7 @@ pub fn export_package(db: &Database, application_id: &str) -> Result<AppPackage,
         tests,
         media_refs: vec![],
         signature: None,
+        stripped_authority: vec![],
     })
 }
 
@@ -195,8 +237,16 @@ fn parse_package_json(bytes: &[u8]) -> Result<AppPackage, KernelError> {
         .map_err(|_| KernelError::PackageInvalid("package must be UTF-8 JSON".into()))?;
     reject_credential_shaped(text)?;
     reject_malicious_paths(text)?;
-    let pkg: AppPackage =
+    let raw: Value =
         serde_json::from_slice(bytes).map_err(|e| KernelError::PackageInvalid(e.to_string()))?;
+    let stripped = strip_authority_keys(&raw);
+    let mut pkg: AppPackage =
+        serde_json::from_value(raw).map_err(|e| KernelError::PackageInvalid(e.to_string()))?;
+    // Trust is never self-declared by the imported file.
+    if pkg.trust_state == "signed" {
+        pkg.trust_state = "untrusted".into();
+    }
+    pkg.stripped_authority = stripped;
     if pkg.format != PACKAGE_FORMAT {
         return Err(KernelError::PackageInvalid("unknown package format".into()));
     }
@@ -282,6 +332,26 @@ pub fn preview_package(pkg: &AppPackage) -> PackagePreview {
     if pkg.signature.is_none() {
         warnings.push("No organization signature present (consumer package).".into());
     }
+    if !pkg.manifest.permissions.is_empty() {
+        warnings.push(format!(
+            "This application requests {} permission(s). Importing does not grant them; \
+             you decide afterwards in Settings.",
+            pkg.manifest.permissions.len()
+        ));
+    }
+    if !pkg.manifest.application_action_access.is_empty() {
+        warnings.push(format!(
+            "This application declares {} registered action(s). Each one still asks \
+             for your confirmation the first time it runs.",
+            pkg.manifest.application_action_access.len()
+        ));
+    }
+    if !pkg.stripped_authority.is_empty() {
+        warnings.push(format!(
+            "Removed authority the package tried to bring with it: {}.",
+            pkg.stripped_authority.join(", ")
+        ));
+    }
     PackagePreview {
         name: pkg.manifest.name.clone(),
         application_id: pkg.manifest.application_id.clone(),
@@ -332,16 +402,9 @@ pub fn import_package(
         pkg.manifest.application_id = format!("app-{}", Uuid::new_v4());
         pkg.manifest.instance_id = format!("instance-{}", Uuid::new_v4());
     }
+    // Importing declares intent; it never grants authority. Permissions and
+    // remembered action grants stay with the user, who grants them afterwards.
     upsert_manifest(db, pkg.manifest.clone()).map_err(KernelError::Db)?;
-    for perm in &pkg.manifest.permissions {
-        let _ = grant_permission(
-            db,
-            &pkg.manifest.application_id,
-            perm,
-            json!({ "scope": "application" }),
-            "package_import",
-        );
-    }
     for model in &pkg.data_models {
         if let Ok(def) = serde_json::from_value::<super::data::DataModelDefinition>(model.clone()) {
             let _ = super::data::upsert_model(db, &pkg.manifest.application_id, def);
@@ -400,12 +463,16 @@ mod tests {
                 conversation_id: None,
                 organization_id: None,
                 ownership: None,
+                application_action_access: vec![],
+                surface_action_access: Default::default(),
+                component_action_access: Default::default(),
             },
             data_models: vec![],
             records: vec![],
             tests: vec![],
             media_refs: vec![],
             signature: None,
+            stripped_authority: vec![],
         }
     }
 
@@ -443,5 +510,59 @@ mod tests {
         pkg.manifest.description = "api_key=secret".into();
         let bytes = package_to_bytes(&pkg).unwrap();
         assert!(validate_package_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn strips_authority_and_self_declared_trust() {
+        let mut raw = serde_json::to_value(sample_pkg()).unwrap();
+        let obj = raw.as_object_mut().unwrap();
+        obj.insert("trustState".into(), json!("signed"));
+        obj.insert("grantedPermissions".into(), json!(["local_data.write"]));
+        obj.insert("runtimeGrants".into(), json!([{ "action": "local_data.write" }]));
+        let bytes = serde_json::to_vec(&raw).unwrap();
+
+        let pkg = validate_package_bytes(&bytes).unwrap();
+        assert_eq!(pkg.trust_state, "untrusted");
+        assert!(pkg.stripped_authority.contains(&"grantedPermissions".to_string()));
+        assert!(pkg.stripped_authority.contains(&"runtimeGrants".to_string()));
+
+        let preview = preview_package(&pkg);
+        assert!(preview
+            .warnings
+            .iter()
+            .any(|w| w.contains("Removed authority")));
+    }
+
+    #[test]
+    fn import_does_not_grant_permissions() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("pkg.db")).unwrap();
+        let mut pkg = sample_pkg();
+        pkg.manifest.permissions = vec!["local_data.read".into(), "local_data.write".into()];
+        let bytes = package_to_bytes(&pkg).unwrap();
+
+        let imported = import_package(&mut db, &bytes, true, false).unwrap();
+        for permission in &imported.permissions {
+            assert!(
+                !crate::application_kernel::permissions::has_permission(
+                    &db,
+                    &imported.application_id,
+                    permission
+                )
+                .unwrap(),
+                "import must not grant {permission}"
+            );
+        }
+    }
+
+    #[test]
+    fn preview_warns_that_permissions_are_only_requested() {
+        let mut pkg = sample_pkg();
+        pkg.manifest.permissions = vec!["local_data.read".into()];
+        let preview = preview_package(&pkg);
+        assert!(preview
+            .warnings
+            .iter()
+            .any(|w| w.contains("does not grant them")));
     }
 }

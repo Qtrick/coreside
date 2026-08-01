@@ -9,7 +9,7 @@ import type { ActionDefinition, ToolState } from "@/types/tool";
 export type ToolRuntimeContextValue = {
   toolId: string;
   state: ToolState;
-  runActions: (actions: ActionDefinition[], componentId?: string) => void;
+  runActions: (actions: ActionDefinition[], componentId?: string) => void | Promise<void>;
   setValue: (key: string, value: unknown) => void;
   setValueOptimistic: (key: string, value: unknown) => void;
   getValue: <T = unknown>(key: string, fallback?: T) => T;

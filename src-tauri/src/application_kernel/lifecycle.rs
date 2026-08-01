@@ -133,6 +133,141 @@ pub fn interrupt_active_jobs(db: &mut Database) -> DbResult<u64> {
     Ok(n as u64)
 }
 
+/// Turn an application off or back on. Disabling also revokes remembered
+/// runtime action grants so a re-enabled application starts by asking again.
+pub fn set_application_enabled(
+    db: &mut Database,
+    application_id: &str,
+    enabled: bool,
+) -> DbResult<()> {
+    crate::security::assert_not_protected(application_id)
+        .map_err(crate::db::DbError::Invalid)?;
+    let n = db.conn().execute(
+        "UPDATE application_manifests SET
+            disabled = ?2,
+            lifecycle_state = CASE WHEN ?2 = 1 THEN 'disabled' ELSE 'active' END,
+            updated_at = ?3
+         WHERE application_id = ?1",
+        params![application_id, if enabled { 0 } else { 1 }, now_rfc3339()],
+    )?;
+    if n == 0 {
+        return Err(crate::db::DbError::NotFound(format!(
+            "application {application_id}"
+        )));
+    }
+    if !enabled {
+        let _ = super::registered_actions::grants::revoke_grants_for_application(
+            db,
+            application_id,
+        )?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildFailure {
+    pub id: String,
+    pub application_id: String,
+    pub safe_message: String,
+    pub retryable: bool,
+    pub request_ref: Option<String>,
+    pub created_at: String,
+}
+
+/// Record why a build failed, using a user-safe message only.
+pub fn record_build_failure(
+    db: &mut Database,
+    application_id: &str,
+    message: &str,
+    retryable: bool,
+    request_ref: Option<&str>,
+) -> DbResult<BuildFailure> {
+    let id = format!("buildfail-{}", Uuid::new_v4());
+    let safe: String = crate::security::sanitize_error(message, None)
+        .chars()
+        .take(300)
+        .collect();
+    db.conn().execute(
+        "INSERT INTO application_build_failures (
+            id, application_id, safe_message, retryable, request_ref, created_at
+         ) VALUES (?1,?2,?3,?4,?5,?6)",
+        params![
+            id,
+            application_id,
+            safe,
+            if retryable { 1 } else { 0 },
+            request_ref,
+            now_rfc3339()
+        ],
+    )?;
+    Ok(BuildFailure {
+        id,
+        application_id: application_id.into(),
+        safe_message: safe,
+        retryable,
+        request_ref: request_ref.map(|s| s.to_string()),
+        created_at: now_rfc3339(),
+    })
+}
+
+pub fn clear_build_failures(db: &mut Database, application_id: &str) -> DbResult<u64> {
+    let n = db.conn().execute(
+        "UPDATE application_build_failures SET cleared_at = ?2
+         WHERE application_id = ?1 AND cleared_at IS NULL",
+        params![application_id, now_rfc3339()],
+    )?;
+    Ok(n as u64)
+}
+
+pub fn list_build_failures(db: &Database, application_id: &str) -> DbResult<Vec<BuildFailure>> {
+    let mut stmt = db.conn().prepare(
+        "SELECT id, application_id, safe_message, retryable, request_ref, created_at
+         FROM application_build_failures
+         WHERE application_id = ?1 AND cleared_at IS NULL
+         ORDER BY created_at DESC LIMIT 20",
+    )?;
+    let rows = stmt.query_map([application_id], |row| {
+        Ok(BuildFailure {
+            id: row.get(0)?,
+            application_id: row.get(1)?,
+            safe_message: row.get(2)?,
+            retryable: row.get::<_, i64>(3)? != 0,
+            request_ref: row.get(4)?,
+            created_at: row.get(5)?,
+        })
+    })?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplicationVersion {
+    pub version: i64,
+    pub validation_status: String,
+    pub test_status: String,
+    pub is_known_good: bool,
+    pub created_at: String,
+}
+
+pub fn list_versions(db: &Database, application_id: &str) -> DbResult<Vec<ApplicationVersion>> {
+    let mut stmt = db.conn().prepare(
+        "SELECT version, validation_status, test_status, is_known_good, created_at
+         FROM application_manifest_versions
+         WHERE application_id = ?1 ORDER BY version DESC LIMIT 100",
+    )?;
+    let rows = stmt.query_map([application_id], |row| {
+        Ok(ApplicationVersion {
+            version: row.get(0)?,
+            validation_status: row.get(1)?,
+            test_status: row.get(2)?,
+            is_known_good: row.get::<_, i64>(3)? != 0,
+            created_at: row.get(4)?,
+        })
+    })?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
 pub fn update_job_progress(
     db: &mut Database,
     id: &str,

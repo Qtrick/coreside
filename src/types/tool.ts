@@ -122,6 +122,13 @@ export const ActionSchema = z.discriminatedUnion("type", [
     includeFields: z.array(z.string()).optional(),
     componentId: z.string().optional(),
   }),
+  z.object({
+    type: z.literal("invokeRegisteredAction"),
+    actionName: z.string().min(1),
+    input: z.record(z.unknown()).optional(),
+    inputFromState: z.record(z.string()).optional(),
+    componentId: z.string().optional(),
+  }),
 ]);
 
 export type ActionDefinition = z.infer<typeof ActionSchema>;

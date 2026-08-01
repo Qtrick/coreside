@@ -386,6 +386,13 @@ export function InlineSurfaceCard({
             state={state}
             onStateChange={(next) => setState(next)}
             onPersistState={persistState}
+            applicationId={surface.toolId ?? tool.id}
+            surfaceId={surface.id}
+            conversationId={conversationId}
+            projectId={activeProjectId}
+            onPendingApproval={() => {
+              window.dispatchEvent(new Event("coreside:pending-approval"));
+            }}
             onSubmitToAgent={(payload) => {
               const summary = `Surface form submitted (${payload.eventName})`;
               void api.appendContextLedger({

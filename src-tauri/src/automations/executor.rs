@@ -1,8 +1,16 @@
+use serde_json::json;
+
 use super::models::{Automation, AutomationAction};
+use crate::application_kernel::registered_actions::{
+    execute_registered_action_trusted, ActionOutcome,
+};
 use crate::db::{self, Database, DbResult};
 use crate::security::is_protected;
 
 pub fn execute_automation(db: &mut Database, automation: &Automation) -> DbResult<String> {
+    if let Some(application_id) = automation.application_id.clone() {
+        return execute_application_bound(db, automation, application_id);
+    }
     match &automation.action {
         AutomationAction::CycleWorkspaceBackgrounds {
             workspace_id,
@@ -65,5 +73,66 @@ pub fn execute_automation(db: &mut Database, automation: &Automation) -> DbResul
         AutomationAction::AiPrompt { .. } => Err(db::DbError::Invalid(
             "AI-backed automations require an active provider and explicit confirmation; deferred execution is not available without a provider".into(),
         )),
+    }
+}
+
+/// Application-bound automations never touch application state directly. They
+/// go through the registered action gateway with `presence: away`, which means
+/// they only proceed on remembered, application-bound authority and otherwise
+/// park for the user.
+fn execute_application_bound(
+    db: &mut Database,
+    automation: &Automation,
+    application_id: String,
+) -> DbResult<String> {
+    let (action_name, input) = match &automation.action {
+        AutomationAction::SetToolStateValue {
+            tool_id,
+            path,
+            value,
+        } => {
+            if tool_id != &application_id {
+                return Err(db::DbError::Invalid(
+                    "automation targets a different application".into(),
+                ));
+            }
+            ("tool_state.set", json!({ "key": path, "value": value }))
+        }
+        _ => {
+            return Err(db::DbError::Invalid(
+                "this automation action is not available for application-bound automations".into(),
+            ))
+        }
+    };
+
+    let run_id = format!("automation-run-{}", uuid::Uuid::new_v4());
+    let outcome = execute_registered_action_trusted(
+        db,
+        Some(application_id),
+        &automation.id,
+        &run_id,
+        action_name,
+        &input,
+    );
+
+    match outcome {
+        ActionOutcome::Ok { .. } => {
+            db::set_automation_runtime_flags(db, &automation.id, false, true)?;
+            Ok(format!("Ran {action_name} while you were away"))
+        }
+        // Parking is the designed outcome for an away change without remembered
+        // authority, so it is not counted as a failure.
+        ActionOutcome::PendingApproval { .. } => {
+            db::set_automation_runtime_flags(db, &automation.id, true, true)?;
+            Ok("Waiting for your approval before making this change".into())
+        }
+        ActionOutcome::Blocked { reason, .. } => {
+            db::set_automation_runtime_flags(db, &automation.id, false, false)?;
+            Err(db::DbError::Invalid(reason))
+        }
+        ActionOutcome::Error { message, .. } => {
+            db::set_automation_runtime_flags(db, &automation.id, false, true)?;
+            Err(db::DbError::Invalid(message))
+        }
     }
 }

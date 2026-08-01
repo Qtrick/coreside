@@ -1,6 +1,8 @@
 import { Component, useCallback, useMemo, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
 import { applyActions } from "@/lib/actions";
+import { api } from "@/lib/tauri";
+import type { ActionOutcome } from "@/types/application-kernel";
 import type { ActionDefinition, ToolComponent, ToolDefinition, ToolState } from "@/types/tool";
 import { ToolRuntimeProvider } from "./context";
 import { resolveComponent } from "./registry";
@@ -10,12 +12,17 @@ type ToolRendererProps = {
   state: ToolState;
   onStateChange: (state: ToolState) => void;
   onPersistState?: (state: ToolState) => Promise<void>;
+  applicationId?: string | null;
+  surfaceId?: string | null;
+  conversationId?: string | null;
+  projectId?: string | null;
   onSubmitToAgent?: (payload: {
     toolId: string;
     eventName: string;
     componentId?: string;
     values: Record<string, unknown>;
   }) => void;
+  onPendingApproval?: (outcome: Extract<ActionOutcome, { status: "pendingApproval" }>) => void;
 };
 
 class ToolErrorBoundary extends Component<
@@ -61,6 +68,14 @@ function collectTargets(components: ToolComponent[], into = new Set<string>()) {
         if ("target" in action && typeof action.target === "string") {
           into.add(action.target);
         }
+        if (
+          action.type === "invokeRegisteredAction" &&
+          action.inputFromState
+        ) {
+          for (const stateKey of Object.values(action.inputFromState)) {
+            if (stateKey.trim()) into.add(stateKey);
+          }
+        }
       }
     }
     if (component.children) collectTargets(component.children, into);
@@ -84,7 +99,12 @@ export function ToolRenderer({
   state,
   onStateChange,
   onPersistState,
+  applicationId,
+  surfaceId,
+  conversationId,
+  projectId,
   onSubmitToAgent,
+  onPendingApproval,
 }: ToolRendererProps) {
   const allowedTargets = useMemo(
     () => collectTargets(tool.components ?? []),
@@ -92,17 +112,37 @@ export function ToolRenderer({
   );
 
   const runActions = useCallback(
-    (actions: ActionDefinition[], componentId?: string) => {
-      const normalized = actions.map((action) =>
-        action.type === "submitToAgent"
-          ? { ...action, componentId: action.componentId ?? componentId }
-          : action,
-      );
+    async (actions: ActionDefinition[], componentId?: string) => {
+      const normalized = actions.map((action) => {
+        if (action.type === "submitToAgent") {
+          return { ...action, componentId: action.componentId ?? componentId };
+        }
+        if (action.type === "invokeRegisteredAction") {
+          return { ...action, componentId: action.componentId ?? componentId };
+        }
+        return action;
+      });
       const result = applyActions(normalized, {
         state,
         toolId: tool.id,
         allowedTargets,
         onSubmitToAgent,
+        onInvokeRegisteredAction: async (payload) => {
+          const outcome = await api.kernelInvokeRegisteredAction({
+            actionName: payload.actionName,
+            input: payload.input,
+            applicationId: applicationId ?? tool.id,
+            surfaceId: surfaceId ?? tool.id,
+            componentId: payload.componentId ?? componentId ?? null,
+            conversationId: conversationId ?? null,
+            projectId: projectId ?? null,
+          });
+          if (outcome.status === "pendingApproval") {
+            onPendingApproval?.(outcome);
+          } else if (outcome.status === "error" || outcome.status === "blocked") {
+            console.warn("Registered action failed", outcome);
+          }
+        },
       });
       if (result.changedKeys.length > 0) {
         onStateChange(result.state);
@@ -110,8 +150,22 @@ export function ToolRenderer({
       if (result.errors.length > 0) {
         console.warn("Tool action errors", result.errors);
       }
+      if (result.pendingTasks.length > 0) {
+        await Promise.all(result.pendingTasks);
+      }
     },
-    [allowedTargets, onStateChange, onSubmitToAgent, state, tool.id],
+    [
+      allowedTargets,
+      applicationId,
+      conversationId,
+      onPendingApproval,
+      onStateChange,
+      onSubmitToAgent,
+      projectId,
+      state,
+      surfaceId,
+      tool.id,
+    ],
   );
 
   const setValue = useCallback(

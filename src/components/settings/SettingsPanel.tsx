@@ -6,6 +6,7 @@ import { CoresideLogo } from "@/components/branding/CoresideLogo";
 import { AgentBehaviorSettings } from "@/components/settings/AgentBehaviorSettings";
 import { AiProviderSettings } from "@/components/settings/AiProviderSettings";
 import { RecoverySettings } from "@/components/settings/RecoverySettings";
+import { RuntimePermissionsSettings } from "@/components/applications/RuntimePermissionsSettings";
 import { WallpaperSettings } from "@/components/settings/WallpaperSettings";
 import { api } from "@/lib/tauri";
 import type { DockIconPreference, ThemePreference } from "@/types/agent";
@@ -253,6 +254,8 @@ export function SettingsPanel() {
           </section>
 
           <RecoverySettings />
+
+          <RuntimePermissionsSettings />
 
           <section className="settings-section" aria-labelledby="about-heading">
             <h3 id="about-heading">About</h3>

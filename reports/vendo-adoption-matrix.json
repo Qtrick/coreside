@@ -1,0 +1,78 @@
+{
+  "product": "Coreside",
+  "reference": "Vendo (.reference/vendo/vendo-main)",
+  "license": "Apache-2.0",
+  "adaptationMode": "conceptual_reimplementation",
+  "vendoCodeCopied": false,
+  "assessedAt": "2026-08-01",
+  "nomenclature": {
+    "vendoTool": "Executable API action / ToolDescriptor",
+    "coresideTool": "User-created personal application",
+    "coresideRegisteredAction": "Executable privileged capability (ActionDescriptor)"
+  },
+  "decisions": [
+    {
+      "vendo": "packages/guard",
+      "decision": "ALREADY_EXISTS",
+      "coreside": "application_kernel/registered_actions/gateway.rs",
+      "notes": "Single choke point with policy/grants/approvals/breakers/audit"
+    },
+    {
+      "vendo": "descriptor hashing",
+      "decision": "ALREADY_EXISTS",
+      "coreside": "descriptor.rs + canonical.rs",
+      "notes": "Preimage includes permissionCategory; excludes title/description"
+    },
+    {
+      "vendo": "approvals one-time consume",
+      "decision": "ALREADY_EXISTS",
+      "coreside": "approvals.rs + runtime_approval_claims + frozen input_json"
+    },
+    {
+      "vendo": "grants scope/duration",
+      "decision": "ALREADY_EXISTS",
+      "coreside": "grants.rs"
+    },
+    {
+      "vendo": "present vs away",
+      "decision": "ALREADY_EXISTS",
+      "coreside": "context.rs Presence/Venue + automation executor"
+    },
+    {
+      "vendo": "AppDocument lifecycle",
+      "decision": "ADAPT_NOW",
+      "coreside": "ApplicationManifest + lifecycle + versions",
+      "notes": "No parallel app table"
+    },
+    {
+      "vendo": "automations grant capture",
+      "decision": "ADAPT_NOW",
+      "coreside": "application_id + waiting_approval + standing grants"
+    },
+    {
+      "vendo": "doctor / conformance",
+      "decision": "ADAPT_NOW",
+      "coreside": "scripts/coreside-doctor.mjs"
+    },
+    {
+      "vendo": "packages/actions host API sync",
+      "decision": "REJECT",
+      "reason": "SaaS host OpenAPI/server-action extraction not relevant to desktop"
+    },
+    {
+      "vendo": "MCP door / Composio / OAuth federation",
+      "decision": "REJECT",
+      "reason": "Out of consumer local-first scope"
+    },
+    {
+      "vendo": "e2b / Modal sandboxes / arbitrary React",
+      "decision": "REJECT",
+      "reason": "Declarative trusted components only"
+    },
+    {
+      "vendo": "cloud org admin / marketplace",
+      "decision": "DEFER",
+      "reason": "Enterprise vision only"
+    }
+  ]
+}

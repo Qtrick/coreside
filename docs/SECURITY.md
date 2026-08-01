@@ -18,6 +18,17 @@
 - Automations cannot run shell/JS or target protected resources; they run only while Coreside is open.
 - Exports strip credentials and require a user-chosen save path.
 
+## Generated application runtime
+
+- Privileged generated side effects pass through one Rust gateway (`execute_registered_action`).
+- Generated UI cannot call arbitrary Tauri commands or forge actor/venue/presence/session.
+- Runtime action risk (`read` / `write` / `destructive`) is separate from kernel operation risk.
+- Approvals are user-only, TTL 15 minutes, CAS one-time consume; frozen input re-executes on decide.
+- Destructive/critical actions cannot receive standing grants; away writes need app-bound standing grants.
+- Import packages carry structure, not authority (`docs/APPLICATION_IMPORT_AUTHORITY.md`).
+- Audit ledger is always persisted for safety; Action Log Off does not erase integrity events.
+- See `docs/GENERATED_APPLICATION_RUNTIME.md` and `docs/REGISTERED_ACTIONS.md`.
+
 ## Why AI calls occur in Rust
 
 The webview is an untrusted UI surface. Keeping provider credentials and HTTP in Rust prevents exposure via DevTools, frontend bundles, or XSS-style generative UI attacks.

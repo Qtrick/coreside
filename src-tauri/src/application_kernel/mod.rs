@@ -17,6 +17,7 @@ pub mod permissions;
 pub mod policy;
 pub mod provenance;
 pub mod recovery;
+pub mod registered_actions;
 pub mod testing;
 
 use serde::{Deserialize, Serialize};
@@ -278,6 +279,16 @@ pub fn capability_catalog() -> Value {
         })).collect::<Vec<_>>(),
         "permissions": permissions::ALLOWED_PERMISSIONS,
         "forbiddenPermissions": FORBIDDEN_PERMISSIONS,
+        "registeredActions": registered_actions::catalog_json(),
+        "registeredActionLimits": {
+            "maxCallsPerApplicationPerMinute":
+                registered_actions::breakers::MAX_CALLS_PER_APPLICATION_PER_MINUTE,
+            "maxWritesPerRun": registered_actions::breakers::MAX_WRITES_PER_RUN,
+            "maxActionDepth": registered_actions::breakers::MAX_ACTION_DEPTH,
+            "maxInputBytes": registered_actions::breakers::MAX_INPUT_BYTES,
+            "maxOutputBytes": registered_actions::breakers::MAX_OUTPUT_BYTES,
+            "approvalTtlMinutes": registered_actions::approvals::APPROVAL_TTL_MINUTES,
+        },
         "operationFamilies": [
             "surface", "component", "state", "setting", "layout",
             "event", "subscription", "chat", "automation", "wallpaper",
@@ -359,5 +370,22 @@ mod tests {
         assert!(forbidden
             .iter()
             .any(|p| p.as_str() == Some("unrestricted.shell")));
+    }
+
+    #[test]
+    fn catalog_lists_registered_actions_with_risk() {
+        let c = capability_catalog();
+        let actions = c
+            .get("registeredActions")
+            .and_then(|v| v.as_array())
+            .expect("registeredActions array");
+        assert!(!actions.is_empty());
+        for action in actions {
+            assert!(action.get("name").and_then(|v| v.as_str()).is_some());
+            let risk = action.get("risk").and_then(|v| v.as_str()).unwrap();
+            assert!(matches!(risk, "read" | "write" | "destructive"));
+            assert!(action.get("descriptorHash").is_some());
+        }
+        assert!(c.get("registeredActionLimits").is_some());
     }
 }

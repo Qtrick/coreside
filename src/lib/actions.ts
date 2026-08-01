@@ -12,6 +12,12 @@ export type ActionEngineOptions = {
     componentId?: string;
     values: Record<string, unknown>;
   }) => void;
+  onInvokeRegisteredAction?: (payload: {
+    toolId: string;
+    actionName: string;
+    input: Record<string, unknown>;
+    componentId?: string;
+  }) => void | Promise<void>;
   depth?: number;
 };
 
@@ -19,6 +25,7 @@ export type ActionEngineResult = {
   state: ToolState;
   errors: string[];
   changedKeys: string[];
+  pendingTasks: Promise<void>[];
 };
 
 function cloneState(state: ToolState): ToolState {
@@ -60,6 +67,7 @@ export function applyAction(
   const depth = options.depth ?? 0;
   const errors: string[] = [];
   const changedKeys: string[] = [];
+  const pendingTasks: Promise<void>[] = [];
   const state = cloneState(options.state);
 
   if (depth > MAX_ACTION_DEPTH) {
@@ -67,6 +75,7 @@ export function applyAction(
       state,
       errors: ["Action loop protection triggered — too many nested actions"],
       changedKeys,
+      pendingTasks,
     };
   }
 
@@ -192,13 +201,39 @@ export function applyAction(
       }
       break;
     }
+    case "invokeRegisteredAction": {
+      if (!options.onInvokeRegisteredAction) {
+        errors.push("invokeRegisteredAction is not available in this context");
+        break;
+      }
+      {
+        const input: Record<string, unknown> = { ...(action.input ?? {}) };
+        for (const [key, stateKey] of Object.entries(action.inputFromState ?? {})) {
+          if (!isAllowed(stateKey, options.allowedTargets)) {
+            errors.push(`Field "${stateKey}" is outside the current tool scope`);
+            continue;
+          }
+          input[key] = state[stateKey];
+        }
+        const task = options.onInvokeRegisteredAction({
+          toolId: options.toolId,
+          actionName: action.actionName,
+          input,
+          componentId: action.componentId,
+        });
+        if (task instanceof Promise) {
+          pendingTasks.push(task);
+        }
+      }
+      break;
+    }
     default: {
       const _exhaustive: never = action;
       errors.push(`Unsupported action: ${JSON.stringify(_exhaustive)}`);
     }
   }
 
-  return { state, errors, changedKeys };
+  return { state, errors, changedKeys, pendingTasks };
 }
 
 export function applyActions(
@@ -208,6 +243,7 @@ export function applyActions(
   let state = cloneState(options.state);
   const errors: string[] = [];
   const changedKeys: string[] = [];
+  const pendingTasks: Promise<void>[] = [];
   let depth = options.depth ?? 0;
 
   for (const action of actions) {
@@ -224,9 +260,15 @@ export function applyActions(
     state = result.state;
     errors.push(...result.errors);
     changedKeys.push(...result.changedKeys);
+    pendingTasks.push(...result.pendingTasks);
   }
 
-  return { state, errors, changedKeys: [...new Set(changedKeys)] };
+  return {
+    state,
+    errors,
+    changedKeys: [...new Set(changedKeys)],
+    pendingTasks,
+  };
 }
 
 export { MAX_ACTION_DEPTH };

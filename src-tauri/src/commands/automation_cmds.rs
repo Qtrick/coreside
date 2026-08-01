@@ -25,6 +25,9 @@ pub struct UpsertAutomationInput {
     pub missed_run_policy: Option<MissedRunPolicy>,
     pub owner_tool_id: Option<String>,
     pub workspace_id: Option<String>,
+    /// Bind this automation to a generated application so its privileged work
+    /// runs through the registered action gateway.
+    pub application_id: Option<String>,
 }
 
 #[tauri::command]
@@ -58,6 +61,10 @@ pub fn upsert_automation(
             .workspace_id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string()),
         owner_tool_id: input.owner_tool_id,
+        application_id: input
+            .application_id
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| existing.as_ref().and_then(|e| e.application_id.clone())),
         name: input.name.trim().to_string(),
         enabled: input.enabled.unwrap_or(true),
         trigger: input.trigger,
@@ -72,6 +79,8 @@ pub fn upsert_automation(
             .as_ref()
             .map(|e| e.consecutive_failures)
             .unwrap_or(0),
+        waiting_approval: existing.as_ref().is_some_and(|e| e.waiting_approval),
+        permission_ready: existing.as_ref().map(|e| e.permission_ready).unwrap_or(true),
         created_at: existing
             .as_ref()
             .map(|e| e.created_at.clone())

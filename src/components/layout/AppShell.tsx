@@ -17,6 +17,7 @@ import { AddChatsToProjectDialog } from "@/components/projects/AddChatsToProject
 import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
 import { RenameConversationDialog } from "@/components/projects/RenameConversationDialog";
 import { CommandPalette } from "@/components/CommandPalette";
+import { PendingApprovalsHost } from "@/components/applications/PendingApprovalsHost";
 import { useAppStore } from "@/stores/app-store";
 import { useEffect, useState } from "react";
 
@@ -254,6 +255,7 @@ export function AppShell() {
         }
       />
       <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
+      <PendingApprovalsHost />
     </div>
   );
 }

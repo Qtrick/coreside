@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 14 forward migrations (001–014; no 015+)
+**Count:** 15 forward migrations (001–015; includes `015_registered_actions.sql`)
 
 ## Inventory
 

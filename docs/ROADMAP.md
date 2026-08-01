@@ -7,15 +7,18 @@
 - Web Research via local Crawl4AI sidecar (web/image/video discovery), citations, SSRF-safe page fetch
 - Media Library + live wallpapers with local assets
 - Bounded agent `tool_use` loop with approval for media imports
+- Generated-application runtime: registered actions, approvals/grants, audit ledger, doctor, CI (Vendo-inspired, Coreside-native)
 
 ## Next recommended development
 
 - Full interactive A–AB / AD manual acceptance on a real Tauri build (`docs/MANUAL_ACCEPTANCE_A_AB.md`)
+- Richer declarative components under the same registered-action boundary (still no arbitrary JS)
+- Retire legacy `kernel_*_record` dual path in favor of gateway-only data access
 - Deeper caret/selection preservation instrumentation
 - Local provider conformance benchmark runs (record real measurements only)
 - Project file uploads and multimodal project context
 - Better semantic retrieval / optional local embeddings
-- Voice / Wasm sandbox / enterprise connectors (only after acceptance passes)
+- Isolated execution / Wasm experiments only after acceptance (never unrestricted generated React)
 
 ## Later custom tools and games
 

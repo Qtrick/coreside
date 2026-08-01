@@ -1,7 +1,7 @@
 # Test Strategy
 
 **Product:** Coreside v0.1.0  
-**Last updated:** 2026-07-19
+**Last updated:** 2026-08-01
 
 ## Layer overview
 
@@ -11,11 +11,15 @@
 ├─────────────────────────────────────────────────────────┤
 │  E2E WebDriver (future)                [NOT STARTED]    │
 ├─────────────────────────────────────────────────────────┤
-│  Vitest component/unit (jsdom)         [66 tests, green] │
+│  Offline doctor                        [npm run doctor] │
 ├─────────────────────────────────────────────────────────┤
-│  Rust lib / integration (cargo test)   [204 pass, 1 fail]│
+│  Vitest component/unit (jsdom)         [CI gated]       │
+├─────────────────────────────────────────────────────────┤
+│  Rust lib / integration (cargo test)   [CI gated]       │
 └─────────────────────────────────────────────────────────┘
 ```
+
+Registered-action coverage lives under `application_kernel::registered_actions` (policy, grants, approvals, breakers, gateway journeys) plus Vitest for `invokeRegisteredAction` and ApprovalCard.
 
 ## Layer 1 — Rust unit / integration
 

@@ -27,7 +27,9 @@ AI provider adapter  ·  SQLite  ·  Web Research sidecar (Crawl4AI stdio)  ·  
 | Response parse + schema validate | Rust (frontend may re-validate for UX) |
 | Persistence | Rust / SQLite |
 | Component rendering | TypeScript |
-| Action engine | TypeScript |
+| Local declarative action engine | TypeScript (`setValue`, …) |
+| Privileged registered actions | Rust gateway (`registered_actions/`) |
+| Approvals / grants / audit | Rust + React UI |
 | Theme application | TypeScript (preference persisted via Rust) |
 
 ## Frontend structure

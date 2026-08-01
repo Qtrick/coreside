@@ -52,6 +52,20 @@ import type {
   MediaAssetUsage,
 } from "@/types/media";
 import type {
+  ActionOutcome,
+  ApprovalDecisionResult,
+  ApprovalRequest,
+  ApplicationVersion,
+  AuditEvent,
+  BuildFailure,
+  ClientActionRequest,
+  ManifestRecord,
+  RecoveryState,
+  RememberDuration,
+  RememberScope,
+  RuntimeGrant,
+} from "@/types/application-kernel";
+import type {
   ToolDefinition,
   ToolState,
   ToolSummary,
@@ -306,6 +320,11 @@ const mockDb = {
   routeState: new Map<string, import("@/types/runtime-v2").RouteState>(),
   continuity: new Map<string, import("@/types/runtime-v2").ContinuitySnapshot>(),
   contextLedger: [] as import("@/types/runtime-v2").ContextLedgerEntry[],
+  kernelManifests: [] as ManifestRecord[],
+  kernelPendingApprovals: [] as ApprovalRequest[],
+  kernelRuntimeGrants: [] as RuntimeGrant[],
+  kernelAuditEvents: [] as AuditEvent[],
+  kernelBuildFailures: [] as BuildFailure[],
   searchSessions: [] as Array<{
     id: string;
     conversationId?: string | null;
@@ -2131,6 +2150,200 @@ async function mockInvoke<T>(
       return row as T;
     }
 
+    case "kernel_list_registered_actions":
+      return { actions: [] } as T;
+
+    case "kernel_invoke_registered_action": {
+      const request = (args?.request ?? args) as ClientActionRequest;
+      return {
+        status: "ok",
+        data: { action: request.actionName },
+      } satisfies ActionOutcome as T;
+    }
+
+    case "kernel_list_pending_approvals":
+      return mockDb.kernelPendingApprovals.filter(
+        (a) => a.status === "pending",
+      ) as T;
+
+    case "kernel_decide_approval": {
+      const approvalId = String(args?.approvalId ?? "");
+      const approve = Boolean(args?.approve);
+      const index = mockDb.kernelPendingApprovals.findIndex(
+        (a) => a.id === approvalId,
+      );
+      if (index < 0) {
+        throw new TauriCommandError("Approval not found", "not_found");
+      }
+      const approval = {
+        ...mockDb.kernelPendingApprovals[index],
+        status: approve ? "approved" : "denied",
+        decidedAt: now(),
+      };
+      mockDb.kernelPendingApprovals[index] = approval;
+      return { approval, grant: null } satisfies ApprovalDecisionResult as T;
+    }
+
+    case "kernel_list_runtime_grants": {
+      const applicationId = args?.applicationId as string | undefined;
+      return mockDb.kernelRuntimeGrants.filter(
+        (g) =>
+          g.status === "active" &&
+          (!applicationId || g.applicationId === applicationId),
+      ) as T;
+    }
+
+    case "kernel_revoke_runtime_grant": {
+      const grantId = String(args?.grantId ?? "");
+      mockDb.kernelRuntimeGrants = mockDb.kernelRuntimeGrants.map((g) =>
+        g.id === grantId ? { ...g, status: "revoked", revokedAt: now() } : g,
+      );
+      return undefined as T;
+    }
+
+    case "kernel_list_audit_events":
+      return mockDb.kernelAuditEvents.slice(0, Number(args?.limit ?? 100)) as T;
+
+    case "kernel_clear_audit_events":
+      mockDb.kernelAuditEvents = [];
+      return 0 as T;
+
+    case "kernel_set_application_lifecycle": {
+      const applicationId = String(args?.applicationId ?? "");
+      const enabled = Boolean(args?.enabled);
+      const record = mockDb.kernelManifests.find(
+        (m) => m.applicationId === applicationId,
+      );
+      if (!record) {
+        throw new TauriCommandError("Application not found", "not_found");
+      }
+      const updated: ManifestRecord = {
+        ...record,
+        disabled: !enabled,
+        lifecycleState: enabled ? "active" : "disabled",
+        updatedAt: now(),
+      };
+      mockDb.kernelManifests = mockDb.kernelManifests.map((m) =>
+        m.applicationId === applicationId ? updated : m,
+      );
+      return updated as T;
+    }
+
+    case "kernel_record_build_failure": {
+      const applicationId = String(args?.applicationId ?? "");
+      const message = String(args?.message ?? "Build failed");
+      const row: BuildFailure = {
+        id: crypto.randomUUID(),
+        applicationId,
+        safeMessage: message,
+        retryable: args?.retryable !== false,
+        requestRef:
+          typeof args?.requestRef === "string" ? args.requestRef : null,
+        createdAt: now(),
+      };
+      mockDb.kernelBuildFailures.unshift(row);
+      return row as T;
+    }
+
+    case "kernel_clear_build_failure": {
+      const applicationId = String(args?.applicationId ?? "");
+      const before = mockDb.kernelBuildFailures.length;
+      mockDb.kernelBuildFailures = mockDb.kernelBuildFailures.filter(
+        (f) => f.applicationId !== applicationId,
+      );
+      return (before - mockDb.kernelBuildFailures.length) as T;
+    }
+
+    case "kernel_list_build_failures": {
+      const applicationId = String(args?.applicationId ?? "");
+      return mockDb.kernelBuildFailures.filter(
+        (f) => f.applicationId === applicationId,
+      ) as T;
+    }
+
+    case "kernel_list_application_versions":
+      return [] as ApplicationVersion[] as T;
+
+    case "kernel_list_manifests":
+      return mockDb.kernelManifests as T;
+
+    case "kernel_get_manifest": {
+      const applicationId = String(args?.applicationId ?? "");
+      const record = mockDb.kernelManifests.find(
+        (m) => m.applicationId === applicationId,
+      );
+      if (!record) {
+        throw new TauriCommandError("Application not found", "not_found");
+      }
+      return record as T;
+    }
+
+    case "kernel_get_recovery_state":
+      return {
+        recoveryMode: false,
+        disableUserSurfaces: false,
+        disableCustomLayouts: false,
+        disableCapabilityPacks: false,
+        uncleanShutdown: false,
+        lastFailure: null,
+        updatedAt: now(),
+      } satisfies RecoveryState as T;
+
+    case "kernel_restore_last_known_good": {
+      const applicationId = String(args?.applicationId ?? "");
+      const record = mockDb.kernelManifests.find(
+        (m) => m.applicationId === applicationId,
+      );
+      if (!record) {
+        throw new TauriCommandError("Application not found", "not_found");
+      }
+      const updated: ManifestRecord = {
+        ...record,
+        disabled: false,
+        lifecycleState: "restored",
+        healthState: "healthy",
+        updatedAt: now(),
+      };
+      mockDb.kernelManifests = mockDb.kernelManifests.map((m) =>
+        m.applicationId === applicationId ? updated : m,
+      );
+      return updated as T;
+    }
+
+    case "kernel_application_summary": {
+      const applicationId = String(args?.applicationId ?? "");
+      const record = mockDb.kernelManifests.find(
+        (m) => m.applicationId === applicationId,
+      );
+      if (!record) {
+        throw new TauriCommandError("Application not found", "not_found");
+      }
+      return {
+        applicationId,
+        name: record.manifest.name,
+        version: record.currentVersion,
+        lastKnownGood: record.lastKnownGoodVersion,
+        health: record.healthState,
+        lifecycle: record.lifecycleState,
+        permissions: record.manifest.permissions ?? [],
+        recordCount: 0,
+      } as T;
+    }
+
+    case "kernel_set_recovery_mode":
+    case "kernel_set_recovery_flags":
+    case "kernel_clear_recovery":
+    case "kernel_enter_safe_startup":
+      return {
+        recoveryMode: false,
+        disableUserSurfaces: false,
+        disableCustomLayouts: false,
+        disableCapabilityPacks: false,
+        uncleanShutdown: false,
+        lastFailure: null,
+        updatedAt: now(),
+      } satisfies RecoveryState as T;
+
     default:
       throw new TauriCommandError(`Unknown command: ${command}`);
   }
@@ -2186,6 +2399,11 @@ export function __resetMockDb(): void {
   mockDb.routeState.clear();
   mockDb.continuity.clear();
   mockDb.contextLedger = [];
+  mockDb.kernelManifests = [];
+  mockDb.kernelPendingApprovals = [];
+  mockDb.kernelRuntimeGrants = [];
+  mockDb.kernelAuditEvents = [];
+  mockDb.kernelBuildFailures = [];
 }
 
 export const api = {
@@ -2860,4 +3078,60 @@ export const api = {
   kernelGarbageCollect: () => invoke<number>("kernel_garbage_collect"),
   kernelVisualChecks: (width: number) =>
     invoke<Record<string, unknown>>("kernel_visual_checks", { width }),
+
+  kernelListRegisteredActions: () =>
+    invoke<Record<string, unknown>>("kernel_list_registered_actions"),
+  kernelInvokeRegisteredAction: (request: ClientActionRequest) =>
+    invoke<ActionOutcome>("kernel_invoke_registered_action", { request }),
+  kernelListPendingApprovals: () =>
+    invoke<ApprovalRequest[]>("kernel_list_pending_approvals"),
+  kernelDecideApproval: (
+    approvalId: string,
+    approve: boolean,
+    rememberScope?: RememberScope | null,
+    rememberDuration?: RememberDuration | null,
+  ) =>
+    invoke<ApprovalDecisionResult>("kernel_decide_approval", {
+      approvalId,
+      approve,
+      rememberScope: rememberScope ?? null,
+      rememberDuration: rememberDuration ?? null,
+    }),
+  kernelListRuntimeGrants: (applicationId?: string | null) =>
+    invoke<RuntimeGrant[]>("kernel_list_runtime_grants", {
+      applicationId: applicationId ?? null,
+    }),
+  kernelRevokeRuntimeGrant: (grantId: string) =>
+    invoke<void>("kernel_revoke_runtime_grant", { grantId }),
+  kernelListAuditEvents: (applicationId?: string | null, limit?: number) =>
+    invoke<AuditEvent[]>("kernel_list_audit_events", {
+      applicationId: applicationId ?? null,
+      limit: limit ?? null,
+    }),
+  kernelClearAuditEvents: () => invoke<number>("kernel_clear_audit_events"),
+  kernelSetApplicationLifecycle: (applicationId: string, enabled: boolean) =>
+    invoke<ManifestRecord>("kernel_set_application_lifecycle", {
+      applicationId,
+      enabled,
+    }),
+  kernelRecordBuildFailure: (
+    applicationId: string,
+    message: string,
+    retryable?: boolean,
+    requestRef?: string | null,
+  ) =>
+    invoke<BuildFailure>("kernel_record_build_failure", {
+      applicationId,
+      message,
+      retryable: retryable ?? null,
+      requestRef: requestRef ?? null,
+    }),
+  kernelClearBuildFailure: (applicationId: string) =>
+    invoke<number>("kernel_clear_build_failure", { applicationId }),
+  kernelListBuildFailures: (applicationId: string) =>
+    invoke<BuildFailure[]>("kernel_list_build_failures", { applicationId }),
+  kernelListApplicationVersions: (applicationId: string) =>
+    invoke<ApplicationVersion[]>("kernel_list_application_versions", {
+      applicationId,
+    }),
 };

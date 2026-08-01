@@ -1,7 +1,7 @@
 # Feature Inventory
 
 **Product:** Coreside v0.1.0  
-**Last updated:** 2026-07-19  
+**Last updated:** 2026-08-01  
 **Legend:** **implemented** = shipped in repo with persistence/UI; **partial** = present but incomplete or dev-only paths.
 
 Status is evidence-based from source layout, migrations, and `README.md` — not a micro-feature census.
@@ -11,14 +11,15 @@ Status is evidence-based from source layout, migrations, and `README.md` — not
 | `chat` | Chat, streaming, cancel, drafts, scroll preservation | **implemented** | `src/components/chat/`, `runtime_v2` queue/streaming, migration 001 |
 | `projects` | Projects, membership, FTS context, isolation | **implemented** | `src/components/projects/`, migration 006, `projects/retrieval.rs` |
 | `tools` | Personal tools / surfaces, inline + canvas, versions | **implemented** | `runtime_v2/patch.rs`, migration 012, tool renderer |
-| `kernel` | Application Kernel (manifest, packages, compiler, policy) | **partial** | migration 013, `application_kernel/`; recovery UI hiding incomplete |
+| `kernel` | Application Kernel (manifest, packages, compiler, policy) | **implemented** | migrations 013–015, `application_kernel/` |
+| `registered-actions` | Gateway, grants, approvals, audit, UI | **implemented** | migration 015, `registered_actions/`, `src/components/applications/` |
 | `search` | Exa discovery, budgets, Crawl4AI crawl, citations | **partial** | `exa/`, `crawler/`, migrations 009–010; requires optional keys + sidecar setup |
 | `media` | Media Library, validation, thumbnails, import approval | **implemented** | `src/components/media/`, migrations 007–008 |
 | `wallpapers` | Templates, live assets, readability overlays | **partial** | migrations 005/010, `wallpapers/`, `readability/`; not every wallpaper type may be seeded |
-| `automations` | Scheduled automations, pause/cancel, run history | **implemented** | migration 005, `automations/`, `docs/AUTOMATIONS.md` |
+| `automations` | Scheduled automations, pause/cancel, app-bound away grants | **implemented** | migrations 005/015, `automations/`, `docs/APPLICATION_AUTOMATION_SECURITY.md` |
 | `exports` | Tool / package export, redaction | **implemented** | `exports/`, `docs/EXPORTS.md`, Rust export tests |
 | `ai-access-modes` | BYOK, local, developer_environment, hosted, unavailable | **partial** | `ai/access_mode.rs`; **hosted adapter not built** (`hosted_connected: false`) |
-| `recovery` | Recovery Mode, safe startup, LKG restore | **partial** | `application_kernel/recovery.rs`, migration 013; surface hiding not fully wired |
+| `recovery` | Recovery Mode, safe startup, LKG restore, execution block | **implemented** | recovery.rs + gateway `generated_execution_allowed`; ToolCanvas blocks unavailable apps |
 | `multiwindow` | Secondary native tool windows | **partial** | Tauri window commands, `docs/MULTIWINDOW_CONCURRENCY.md`; manual K journey pending |
 
 ## Cross-cutting systems

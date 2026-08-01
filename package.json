@@ -19,7 +19,7 @@
     "test:watch": "vitest",
     "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
-    "verify": "npm run typecheck && npm run lint && npm run test && npm run check:rust && npm run test:rust && npm run build:web",
+    "verify": "npm run typecheck && npm run lint && npm run test && npm run doctor && npm run check:rust && npm run test:rust && npm run build:web",
     "audit:partial-update": "node -e \"const fs=require('fs'); const m=JSON.parse(fs.readFileSync('reports/partial-update-feature-matrix.json','utf8')); if(!m.count) process.exit(1); console.log('features',m.count);\"",
     "audit:partial-update-final-gaps": "node -e \"const fs=require('fs'); const a=JSON.parse(fs.readFileSync('reports/partial-update-final-gap-audit.json','utf8')); if(!a.systems?.length) process.exit(1); console.log('gap systems',a.systems.length);\"",
     "test:preservation": "vitest run src/lib/preservation.test.ts",
@@ -55,7 +55,9 @@
     "crawl4ai:test": "node scripts/crawl4ai-test.mjs",
     "crawl4ai:clean": "node scripts/crawl4ai-clean.mjs",
     "crawl4ai:stats": "node scripts/crawl4ai-stats.mjs stats",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "doctor": "node scripts/coreside-doctor.mjs",
+    "test:registered-actions": "cargo test --manifest-path src-tauri/Cargo.toml --lib application_kernel::registered_actions"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",

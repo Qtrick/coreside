@@ -1,7 +1,7 @@
 # Known Issues
 
 **Product:** Coreside v0.1.0  
-**Last updated:** 2026-07-19
+**Last updated:** 2026-08-01
 
 Tracked gaps affecting release assurance. Not an exhaustive bug list.
 
@@ -11,10 +11,20 @@ Tracked gaps affecting release assurance. Not an exhaustive bug list.
 | --- | --- | --- |
 | Full E2E / WebDriver not configured | High (for beta) | **Open** — no `tauri-driver`, no green E2E suite |
 | Manual A–AB / journeys K–P not recorded | High (for beta) | **Open** — see `docs/MANUAL_RELEASE_CHECKLIST.md` |
-| No CI workflows | Medium | **Open** — `.github/` absent |
-| Migration fixture testing | Medium | **Open** — see `docs/MIGRATION_ASSURANCE.md` |
+| No CI workflows | Medium | **Fixed** — `.github/workflows/ci.yml` + `npm run doctor` |
+| Migration fixture testing | Medium | **Open** — see `docs/MIGRATION_ASSURANCE.md` (015 added; fixture corpus still thin) |
 | Packaged-build clean-profile smoke | High (for beta) | **Open** — not executed this cycle |
 | Performance baselines | Medium | **Open** — not measured |
+
+## Generated application runtime (2026-08-01)
+
+| Issue | Severity | Status |
+| --- | --- | --- |
+| Legacy `kernel_*_record` IPC beside gateway | P2 | **Open** — permission-gated; full retirement deferred |
+| Handler output size checked after write | P2 | **Open** — blocked outcome; no automatic rollback |
+| Agent chat path inventing registered-action calls | P2 | **Deferred** — UI/automation invoke only |
+| Multi-window approval race manual QA | P1 evidence | **Open** — unit CAS covered; desktop not re-shot |
+| InlineSurface registered-action wiring | P2 | **Open** — ToolCanvas wired; inline promote path may lag |
 
 ## Automated test status (2026-07-19)
 

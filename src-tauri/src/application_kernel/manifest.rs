@@ -1,5 +1,7 @@
 //! Declarative Application Manifest — versioned, validated, recoverable.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -53,6 +55,18 @@ pub struct ApplicationManifest {
     pub organization_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ownership: Option<Value>,
+    /// Registered actions this application may call at all.
+    #[serde(default)]
+    pub application_action_access: Vec<String>,
+    /// Per-surface narrowing, keyed by surface id. Must be a subset of
+    /// `application_action_access`.
+    #[serde(default)]
+    pub surface_action_access: HashMap<String, Vec<String>>,
+    /// Per-component narrowing, keyed by component id. Must be a subset of the
+    /// owning surface's list where one is declared, otherwise of the
+    /// application list.
+    #[serde(default)]
+    pub component_action_access: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -148,6 +162,46 @@ pub fn validate_manifest(m: &ApplicationManifest) -> Result<(), String> {
     for cap in &m.capabilities {
         if cap.starts_with("cdn.") || cap.contains("://") {
             return Err(format!("invalid capability pack id: {cap}"));
+        }
+    }
+    validate_action_access(m)?;
+    Ok(())
+}
+
+/// Declared action access must reference real actions, must be covered by the
+/// declared permissions, and must narrow rather than widen: every surface and
+/// component entry has to be a subset of the application list. Component ⊆
+/// surface is enforced at call time by the gateway, which requires both the
+/// surface and the component list to allow the action.
+fn validate_action_access(m: &ApplicationManifest) -> Result<(), String> {
+    use crate::application_kernel::registered_actions::descriptor::find_action;
+
+    for name in &m.application_action_access {
+        let descriptor = find_action(name)
+            .ok_or_else(|| format!("unknown registered action: {name}"))?;
+        if !m.permissions.iter().any(|p| p == &descriptor.permission_category) {
+            return Err(format!(
+                "action {name} needs the {} permission to be declared",
+                descriptor.permission_category
+            ));
+        }
+    }
+    for (surface_id, actions) in &m.surface_action_access {
+        for name in actions {
+            if !m.application_action_access.contains(name) {
+                return Err(format!(
+                    "surface {surface_id} declares {name}, which the application does not declare"
+                ));
+            }
+        }
+    }
+    for (component_id, actions) in &m.component_action_access {
+        for name in actions {
+            if !m.application_action_access.contains(name) {
+                return Err(format!(
+                    "component {component_id} declares {name}, which the application does not declare"
+                ));
+            }
         }
     }
     Ok(())
@@ -262,6 +316,9 @@ pub fn get_manifest(db: &Database, application_id: &str) -> DbResult<ManifestRec
                         conversation_id: None,
                         organization_id: None,
                         ownership: None,
+                        application_action_access: vec![],
+                        surface_action_access: HashMap::new(),
+                        component_action_access: HashMap::new(),
                     });
                 Ok(ManifestRecord {
                     id: row.get(0)?,
@@ -407,6 +464,11 @@ pub fn ensure_manifest_for_tool(
     if get_manifest(db, tool_id).is_ok() {
         return get_manifest(db, tool_id);
     }
+    let permissions = vec!["local_data.read".into()];
+    let application_action_access =
+        super::registered_actions::descriptor::default_action_access_for_permissions(
+            &permissions,
+        );
     let m = ApplicationManifest {
         schema_version: "1".into(),
         application_id: tool_id.into(),
@@ -423,7 +485,7 @@ pub fn ensure_manifest_for_tool(
         data_models: vec![],
         settings: vec![],
         capabilities: vec!["coreside.core".into()],
-        permissions: vec!["local_data.read".into()],
+        permissions,
         events: vec![],
         tests: vec![],
         search_keywords: vec![tool_name.into()],
@@ -433,6 +495,9 @@ pub fn ensure_manifest_for_tool(
         conversation_id: None,
         organization_id: None,
         ownership: None,
+        application_action_access,
+        surface_action_access: HashMap::new(),
+        component_action_access: HashMap::new(),
     };
     upsert_manifest(db, m)
 }
@@ -468,6 +533,9 @@ mod tests {
             conversation_id: None,
             organization_id: None,
             ownership: None,
+            application_action_access: vec![],
+            surface_action_access: HashMap::new(),
+            component_action_access: HashMap::new(),
         }
     }
 
@@ -505,6 +573,62 @@ mod tests {
     fn rejects_secret_shaped() {
         let mut m = sample();
         m.description = "api_key=sk-test".into();
+        assert!(validate_manifest(&m).is_err());
+    }
+
+    #[test]
+    fn accepts_declared_actions_backed_by_permissions() {
+        let mut m = sample();
+        m.application_action_access = vec!["local_data.query".into(), "local_data.write".into()];
+        m.surface_action_access
+            .insert("surface-1".into(), vec!["local_data.query".into()]);
+        m.component_action_access
+            .insert("component-1".into(), vec!["local_data.query".into()]);
+        assert!(validate_manifest(&m).is_ok());
+    }
+
+    #[test]
+    fn ensure_manifest_declares_actions_for_default_permissions() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("m.db")).unwrap();
+        let record = ensure_manifest_for_tool(&mut db, "tool-1", "Notes", "surface-tool-1").unwrap();
+        assert!(record
+            .manifest
+            .application_action_access
+            .contains(&"local_data.query".to_string()));
+        assert!(!record.manifest.application_action_access.is_empty());
+    }
+
+    #[test]
+    fn rejects_unknown_action() {
+        let mut m = sample();
+        m.application_action_access = vec!["shell.exec".into()];
+        assert!(validate_manifest(&m).is_err());
+    }
+
+    #[test]
+    fn rejects_action_without_matching_permission() {
+        let mut m = sample();
+        // `media.read` requires the media.read permission, which is not declared.
+        m.application_action_access = vec!["media.read".into()];
+        assert!(validate_manifest(&m).is_err());
+    }
+
+    #[test]
+    fn rejects_surface_widening_beyond_application() {
+        let mut m = sample();
+        m.application_action_access = vec!["local_data.query".into()];
+        m.surface_action_access
+            .insert("surface-1".into(), vec!["local_data.write".into()]);
+        assert!(validate_manifest(&m).is_err());
+    }
+
+    #[test]
+    fn rejects_component_widening_beyond_application() {
+        let mut m = sample();
+        m.application_action_access = vec!["local_data.query".into()];
+        m.component_action_access
+            .insert("component-1".into(), vec!["local_data.write".into()]);
         assert!(validate_manifest(&m).is_err());
     }
 }

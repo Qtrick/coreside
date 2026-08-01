@@ -1,5 +1,6 @@
-import { Download, ExternalLink, History, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Download, ExternalLink, History, Info, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ApplicationDetailsPanel } from "@/components/applications/ApplicationDetailsPanel";
 import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
 import { AppRouteShell } from "@/components/tool-renderer/AppRouteShell";
 import { CustomizeMode } from "@/components/tool-canvas/CustomizeMode";
@@ -13,8 +14,51 @@ import {
   restoreScrollSnapshot,
 } from "@/lib/preservation";
 import { surfaceIdForTool } from "@/lib/surface-ops";
-import type { ApplicationManifest } from "@/types/application-kernel";
+import type {
+  ActionOutcome,
+  ManifestRecord,
+  RecoveryState,
+} from "@/types/application-kernel";
 import { useAppStore } from "@/stores/app-store";
+
+function isApplicationUnavailable(
+  record: ManifestRecord | null,
+  recovery: RecoveryState | null,
+): { blocked: boolean; message: string } {
+  if (recovery?.disableUserSurfaces) {
+    return {
+      blocked: true,
+      message:
+        "User-created surfaces are temporarily disabled while Coreside is in recovery mode.",
+    };
+  }
+  if (!record) {
+    return { blocked: false, message: "" };
+  }
+  if (record.disabled) {
+    return {
+      blocked: true,
+      message: "This application is turned off.",
+    };
+  }
+  if (
+    record.lifecycleState === "suspended" ||
+    record.lifecycleState === "failed" ||
+    record.lifecycleState === "disabled"
+  ) {
+    return {
+      blocked: true,
+      message: `This application is ${record.lifecycleState}.`,
+    };
+  }
+  if (record.healthState === "failed" || record.healthState === "suspended") {
+    return {
+      blocked: true,
+      message: `This application is not healthy (${record.healthState}).`,
+    };
+  }
+  return { blocked: false, message: "" };
+}
 
 export function ToolCanvas() {
   const {
@@ -29,7 +73,24 @@ export function ToolCanvas() {
     activeConversationId,
     activeProjectId,
   } = useAppStore();
-  const [manifest, setManifest] = useState<ApplicationManifest | null>(null);
+  const [manifestRecord, setManifestRecord] = useState<ManifestRecord | null>(null);
+  const [recovery, setRecovery] = useState<RecoveryState | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
+  const applicationId = useMemo(() => {
+    if (!activeTool) return null;
+    return manifestRecord?.applicationId ?? activeTool.id;
+  }, [activeTool, manifestRecord?.applicationId]);
+
+  const surfaceId = useMemo(
+    () => (activeTool ? surfaceIdForTool(activeTool.id) : null),
+    [activeTool],
+  );
+
+  const availability = useMemo(
+    () => isApplicationUnavailable(manifestRecord, recovery),
+    [manifestRecord, recovery],
+  );
 
   const onStateChange = useCallback(
     (state: Record<string, unknown>) => {
@@ -47,22 +108,24 @@ export function ToolCanvas() {
 
   useEffect(() => {
     if (!activeTool) {
-      setManifest(null);
+      setManifestRecord(null);
+      setRecovery(null);
       return;
     }
-    const surfaceId = surfaceIdForTool(activeTool.id);
+    const sid = surfaceIdForTool(activeTool.id);
     void api
-      .kernelGetManifest(surfaceId)
-      .then((rec) => setManifest(rec.manifest ?? null))
+      .kernelGetManifest(sid)
+      .then((rec) => setManifestRecord(rec))
       .catch(() =>
         api
           .kernelGetManifest(activeTool.id)
-          .then((rec) => setManifest(rec.manifest ?? null))
-          .catch(() => setManifest(null)),
+          .then((rec) => setManifestRecord(rec))
+          .catch(() => setManifestRecord(null)),
       );
+    void api.kernelGetRecoveryState().then(setRecovery).catch(() => setRecovery(null));
 
     void api
-      .getContinuity(surfaceId, "tool_canvas")
+      .getContinuity(sid, "tool_canvas")
       .then((c) => {
         const root = document.querySelector<HTMLElement>(
           `.tool-canvas-body[data-tool-id="${activeTool.id}"]`,
@@ -90,14 +153,14 @@ export function ToolCanvas() {
       if (!root) return;
       void api
         .saveContinuity({
-          surfaceId,
+          surfaceId: sid,
           windowId: "tool_canvas",
           focus: captureFocusSnapshot(root),
           scroll: captureScrollSnapshot(root),
           media: captureMediaSnapshot(root),
           suspensionState: "suspended",
         })
-        .catch(() => api.suspendSurface(surfaceId, "tool_canvas"));
+        .catch(() => api.suspendSurface(sid, "tool_canvas"));
     };
   }, [activeTool]);
 
@@ -129,6 +192,21 @@ export function ToolCanvas() {
     [activeConversationId, activeProjectId, sendMessage],
   );
 
+  const onPendingApproval = useCallback(
+    (_outcome: Extract<ActionOutcome, { status: "pendingApproval" }>) => {
+      // Single host in AppShell owns approval cards; wake it immediately.
+      window.dispatchEvent(new Event("coreside:pending-approval"));
+    },
+    [],
+  );
+
+  const restoreApplication = async () => {
+    if (!applicationId) return;
+    await api.kernelRestoreLastKnownGood(applicationId);
+    const rec = await api.kernelGetManifest(applicationId).catch(() => null);
+    setManifestRecord(rec);
+  };
+
   if (!activeTool) {
     return (
       <section className="tool-canvas" aria-label="Tool canvas">
@@ -139,6 +217,8 @@ export function ToolCanvas() {
       </section>
     );
   }
+
+  const manifest = manifestRecord?.manifest ?? null;
 
   return (
     <section className="tool-canvas" aria-label={`${activeTool.name} canvas`}>
@@ -151,6 +231,15 @@ export function ToolCanvas() {
           </div>
         </div>
         <div className="tool-header-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setDetailsOpen(true)}
+            aria-label="Application details"
+          >
+            <Info size={16} aria-hidden />
+            Details
+          </button>
           <CustomizeMode
             surfaceId={surfaceIdForTool(activeTool.id)}
             conversationId={activeConversationId}
@@ -198,7 +287,28 @@ export function ToolCanvas() {
         </div>
       </header>
       <div className="tool-canvas-body" data-tool-id={activeTool.id}>
-        {manifest?.routes && manifest.routes.length > 0 ? (
+        {availability.blocked ? (
+          <div className="empty-state tool-canvas-blocked">
+            <h3>Application unavailable</h3>
+            <p>{availability.message}</p>
+            <div className="button-row">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void restoreApplication()}
+              >
+                Restore last known good
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setDetailsOpen(true)}
+              >
+                Details
+              </button>
+            </div>
+          </div>
+        ) : manifest?.routes && manifest.routes.length > 0 ? (
           <AppRouteShell
             applicationId={manifest.applicationId || activeTool.id}
             manifest={manifest}
@@ -209,6 +319,10 @@ export function ToolCanvas() {
             state={toolState}
             onStateChange={onStateChange}
             onSubmitToAgent={onSubmitToAgent}
+            surfaceId={surfaceId}
+            conversationId={activeConversationId}
+            projectId={activeProjectId}
+            onPendingApproval={onPendingApproval}
           />
         ) : (
           <ToolRenderer
@@ -216,10 +330,24 @@ export function ToolCanvas() {
             state={toolState}
             onStateChange={onStateChange}
             onPersistState={onPersistState}
+            applicationId={applicationId}
+            surfaceId={surfaceId}
+            conversationId={activeConversationId}
+            projectId={activeProjectId}
             onSubmitToAgent={onSubmitToAgent}
+            onPendingApproval={onPendingApproval}
           />
         )}
       </div>
+
+      {applicationId ? (
+        <ApplicationDetailsPanel
+          applicationId={applicationId}
+          open={detailsOpen}
+          fallbackName={activeTool.name}
+          onClose={() => setDetailsOpen(false)}
+        />
+      ) : null}
     </section>
   );
 }

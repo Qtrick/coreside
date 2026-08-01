@@ -6,6 +6,9 @@ type Automation = {
   name: string;
   enabled: boolean;
   requiresAi: boolean;
+  applicationId?: string | null;
+  waitingApproval?: boolean;
+  permissionReady?: boolean;
   nextRunAt?: string | null;
   lastRunAt?: string | null;
   lastStatus?: string | null;
@@ -28,6 +31,9 @@ export function AutomationsPanel({ onBack }: { onBack: () => void }) {
           name: String(row.name ?? "Automation"),
           enabled: Boolean(row.enabled),
           requiresAi: Boolean(row.requiresAi),
+          applicationId: (row.applicationId as string | null | undefined) ?? null,
+          waitingApproval: Boolean(row.waitingApproval),
+          permissionReady: Boolean(row.permissionReady),
           nextRunAt: (row.nextRunAt as string | null | undefined) ?? null,
           lastRunAt: (row.lastRunAt as string | null | undefined) ?? null,
           lastStatus: (row.lastStatus as string | null | undefined) ?? null,
@@ -85,9 +91,16 @@ export function AutomationsPanel({ onBack }: { onBack: () => void }) {
                     {row.requiresAi ? (
                       <span className="provider-active-tag">Uses AI credits</span>
                     ) : null}
+                    {row.waitingApproval ? (
+                      <span className="provider-active-tag">Waiting approval</span>
+                    ) : null}
+                    {!row.permissionReady && row.applicationId ? (
+                      <span className="provider-active-tag">Not ready</span>
+                    ) : null}
                   </strong>
                   <p className="muted">
                     {row.trigger.type}
+                    {row.applicationId ? ` · app ${row.applicationId}` : ""}
                     {row.trigger.intervalMinutes
                       ? ` · every ${row.trigger.intervalMinutes} min`
                       : ""}

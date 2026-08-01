@@ -10,6 +10,11 @@ pub struct Automation {
     pub id: String,
     pub workspace_id: String,
     pub owner_tool_id: Option<String>,
+    /// Set when the automation acts on a generated application. Application-bound
+    /// automations run their privileged work through the registered action
+    /// gateway with `presence: away`.
+    #[serde(default)]
+    pub application_id: Option<String>,
     pub name: String,
     pub enabled: bool,
     pub trigger: AutomationTrigger,
@@ -21,8 +26,18 @@ pub struct Automation {
     pub last_run_at: Option<String>,
     pub last_status: Option<String>,
     pub consecutive_failures: i64,
+    /// True when the last away run parked on a pending approval.
+    #[serde(default)]
+    pub waiting_approval: bool,
+    /// False when the last away run was refused for missing authority.
+    #[serde(default = "default_true")]
+    pub permission_ready: bool,
     pub created_at: String,
     pub updated_at: String,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

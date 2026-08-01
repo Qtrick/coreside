@@ -1,0 +1,43 @@
+{
+  "suite": "application_kernel::registered_actions",
+  "recordedAt": "2026-08-01",
+  "commands": [
+    {
+      "command": "npm run typecheck",
+      "result": "pass"
+    },
+    {
+      "command": "npm run lint",
+      "result": "pass",
+      "notes": "5 pre-existing warnings, 0 errors"
+    },
+    {
+      "command": "npm test",
+      "result": "pass",
+      "tests": 78
+    },
+    {
+      "command": "npm run doctor",
+      "result": "pass",
+      "checks": 47
+    },
+    {
+      "command": "npm run check:rust",
+      "result": "pass"
+    },
+    {
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib application_kernel::registered_actions",
+      "result": "pass",
+      "tests": 68
+    },
+    {
+      "command": "npm run build:web",
+      "result": "pass"
+    }
+  ],
+  "reviewer": {
+    "passes": 3,
+    "remainingP0": 0,
+    "remainingP1": 0
+  }
+}

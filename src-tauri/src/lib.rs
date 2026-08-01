@@ -243,6 +243,19 @@ pub fn run() {
             commands::kernel_set_policy_override,
             commands::kernel_clear_policy_override,
             commands::kernel_unified_search,
+            commands::kernel_list_registered_actions,
+            commands::kernel_invoke_registered_action,
+            commands::kernel_list_pending_approvals,
+            commands::kernel_decide_approval,
+            commands::kernel_list_runtime_grants,
+            commands::kernel_revoke_runtime_grant,
+            commands::kernel_list_audit_events,
+            commands::kernel_clear_audit_events,
+            commands::kernel_set_application_lifecycle,
+            commands::kernel_record_build_failure,
+            commands::kernel_clear_build_failure,
+            commands::kernel_list_build_failures,
+            commands::kernel_list_application_versions,
         ])
         .setup(move |app| {
             branding::apply_display_name();

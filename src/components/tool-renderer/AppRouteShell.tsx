@@ -6,7 +6,7 @@ import {
   canNavigateForward,
   isRouteNavigationNoOp,
 } from "@/lib/route-navigation";
-import type { ApplicationManifest } from "@/types/application-kernel";
+import type { ActionOutcome, ApplicationManifest } from "@/types/application-kernel";
 import type { RouteState } from "@/types/runtime-v2";
 import type { ToolDefinition, ToolState } from "@/types/tool";
 import { ToolRenderer } from "./ToolRenderer";
@@ -17,12 +17,16 @@ type AppRouteShellProps = {
   surfacesById?: Record<string, ToolDefinition>;
   state: ToolState;
   onStateChange: (state: ToolState) => void;
+  surfaceId?: string | null;
+  conversationId?: string | null;
+  projectId?: string | null;
   onSubmitToAgent?: (payload: {
     toolId: string;
     eventName: string;
     componentId?: string;
     values: Record<string, unknown>;
   }) => void;
+  onPendingApproval?: (outcome: Extract<ActionOutcome, { status: "pendingApproval" }>) => void;
 };
 
 export function AppRouteShell({
@@ -31,7 +35,11 @@ export function AppRouteShell({
   surfacesById = {},
   state,
   onStateChange,
+  surfaceId,
+  conversationId,
+  projectId,
   onSubmitToAgent,
+  onPendingApproval,
 }: AppRouteShellProps) {
   const routes = useMemo(() => manifest?.routes ?? [], [manifest?.routes]);
   const [routeState, setRouteState] = useState<RouteState | null>(null);
@@ -185,6 +193,11 @@ export function AppRouteShell({
           state={state}
           onStateChange={onStateChange}
           onSubmitToAgent={onSubmitToAgent}
+          applicationId={applicationId}
+          surfaceId={surfaceId ?? activeTool.id}
+          conversationId={conversationId}
+          projectId={projectId}
+          onPendingApproval={onPendingApproval}
         />
       ) : (
         <div className="empty-state">

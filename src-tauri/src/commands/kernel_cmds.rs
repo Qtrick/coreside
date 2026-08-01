@@ -12,7 +12,9 @@ use crate::application_kernel::data::{
     create_record, query_records, upsert_model, DataModelDefinition,
 };
 use crate::application_kernel::lifecycle::{
-    create_job, garbage_collect, get_job, interrupt_active_jobs, JobRecord,
+    clear_build_failures, create_job, garbage_collect, get_job, interrupt_active_jobs,
+    list_build_failures, list_versions, record_build_failure, set_application_enabled,
+    ApplicationVersion, BuildFailure, JobRecord,
 };
 use crate::application_kernel::manifest::{
     ensure_manifest_for_tool, get_manifest, list_manifests, mark_last_known_good,
@@ -29,6 +31,15 @@ use crate::application_kernel::policy::{clear_policy_override, set_policy_overri
 use crate::application_kernel::recovery::{
     clear_recovery, enter_safe_startup, get_recovery_state, set_flags, set_recovery_mode,
     RecoveryState,
+};
+use crate::application_kernel::registered_actions::approvals::{
+    self, ApprovalDecisionResult, ApprovalRequest, RememberChoice,
+};
+use crate::application_kernel::registered_actions::audit::{self, AuditEvent};
+use crate::application_kernel::registered_actions::grants::{self, GrantDuration, GrantScope};
+use crate::application_kernel::registered_actions::{
+    self, execute_registered_action, ActionOutcome, ActionRunContext, ClientActionRequest,
+    RuntimeGrant, Venue,
 };
 use crate::application_kernel::testing::{run_test, upsert_test, visual_checks_summary, DeclarativeTest};
 use crate::application_kernel::{
@@ -134,6 +145,10 @@ pub fn kernel_create_record(
     data: Value,
 ) -> Result<String, CommandError> {
     let mut db = state.db.lock();
+    // Legacy direct-data IPC: still require the same permission the gateway
+    // would check. Prefer `kernel_invoke_registered_action` for app surfaces.
+    crate::application_kernel::permissions::assert_can_write_data(&db, &application_id)
+        .map_err(CommandError::from)?;
     create_record(&mut db, &application_id, &model_id, data).map_err(CommandError::from)
 }
 
@@ -145,6 +160,18 @@ pub fn kernel_query_records(
     limit: Option<usize>,
 ) -> Result<Vec<Value>, CommandError> {
     let db = state.db.lock();
+    if !crate::application_kernel::permissions::has_permission(
+        &db,
+        &application_id,
+        "local_data.read",
+    )
+    .unwrap_or(false)
+    {
+        return Err(CommandError::new(
+            "permission_denied",
+            "local_data.read required",
+        ));
+    }
     query_records(&db, &application_id, &model_id, limit.unwrap_or(100)).map_err(CommandError::from)
 }
 
@@ -381,6 +408,199 @@ pub fn kernel_clear_policy_override(
 ) -> Result<(), CommandError> {
     let mut db = state.db.lock();
     clear_policy_override(&mut db, &key).map_err(CommandError::from)
+}
+
+// ---------------------------------------------------------------------------
+// Registered action runtime
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn kernel_list_registered_actions() -> Value {
+    registered_actions::catalog_json()
+}
+
+/// Invoke a registered action. The trusted context is built here: the client
+/// cannot choose the actor, the venue's authority, the presence, or the session.
+/// `presence` is always `present` over IPC — away runs only exist inside the
+/// automation executor.
+#[tauri::command]
+pub fn kernel_invoke_registered_action(
+    state: State<'_, AppState>,
+    request: ClientActionRequest,
+) -> Result<ActionOutcome, CommandError> {
+    let venue = if request.application_id.is_some() {
+        Venue::Application
+    } else {
+        Venue::Chat
+    };
+    let ctx = ActionRunContext::from_client(&request, venue);
+    let mut db = state.db.lock();
+    Ok(execute_registered_action(
+        &mut db,
+        &ctx,
+        &request.action_name,
+        &request.input,
+        request.approval_id.as_deref(),
+    ))
+}
+
+#[tauri::command]
+pub fn kernel_list_pending_approvals(
+    state: State<'_, AppState>,
+) -> Result<Vec<ApprovalRequest>, CommandError> {
+    let mut db = state.db.lock();
+    approvals::list_pending(&mut db).map_err(CommandError::from)
+}
+
+/// Approve or deny. Only reachable from the user interface, so the actor is
+/// always `user`; the agent has no command that decides approvals.
+#[tauri::command]
+pub fn kernel_decide_approval(
+    state: State<'_, AppState>,
+    approval_id: String,
+    approve: bool,
+    remember_scope: Option<String>,
+    remember_duration: Option<String>,
+) -> Result<ApprovalDecisionResult, CommandError> {
+    let remember = match (remember_scope, remember_duration) {
+        (Some(scope), Some(duration)) => {
+            let scope = GrantScope::parse(&scope)
+                .ok_or_else(|| CommandError::new("invalid", "unknown grant scope"))?;
+            let duration = GrantDuration::parse(&duration)
+                .ok_or_else(|| CommandError::new("invalid", "unknown grant duration"))?;
+            Some(RememberChoice { scope, duration })
+        }
+        _ => None,
+    };
+    let mut db = state.db.lock();
+    let mut result =
+        approvals::decide(&mut db, &approval_id, approve, remember, "user").map_err(CommandError::from)?;
+    // Exactly-once execution: after a user approval, re-run the frozen call through
+    // the gateway so the action is not left hanging until a second click.
+    if approve {
+        let input = approvals::frozen_input(&db, &approval_id).map_err(CommandError::from)?;
+        let venue = if result.approval.application_id.is_some() {
+            Venue::Application
+        } else {
+            Venue::Chat
+        };
+        let req = ClientActionRequest {
+            action_name: result.approval.action_name.clone(),
+            input,
+            application_id: result.approval.application_id.clone(),
+            surface_id: result.approval.surface_id.clone(),
+            component_id: result.approval.component_id.clone(),
+            conversation_id: None,
+            project_id: None,
+            approval_id: Some(approval_id),
+        };
+        let ctx = ActionRunContext::from_client(&req, venue);
+        result.outcome = Some(execute_registered_action(
+            &mut db,
+            &ctx,
+            &req.action_name,
+            &req.input,
+            req.approval_id.as_deref(),
+        ));
+        if result.approval.presence == "away" {
+            if let Some(app_id) = result.approval.application_id.as_deref() {
+                let _ = crate::db::clear_automation_waiting_for_application(&mut db, app_id);
+            }
+        }
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn kernel_list_runtime_grants(
+    state: State<'_, AppState>,
+    application_id: Option<String>,
+) -> Result<Vec<RuntimeGrant>, CommandError> {
+    let db = state.db.lock();
+    grants::list_grants(&db, application_id.as_deref()).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn kernel_revoke_runtime_grant(
+    state: State<'_, AppState>,
+    grant_id: String,
+) -> Result<(), CommandError> {
+    let mut db = state.db.lock();
+    grants::revoke_grant(&mut db, &grant_id).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn kernel_list_audit_events(
+    state: State<'_, AppState>,
+    application_id: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<AuditEvent>, CommandError> {
+    let db = state.db.lock();
+    audit::list_events(&db, application_id.as_deref(), limit.unwrap_or(100))
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn kernel_clear_audit_events(state: State<'_, AppState>) -> Result<u64, CommandError> {
+    let mut db = state.db.lock();
+    audit::clear_events(&mut db).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn kernel_set_application_lifecycle(
+    state: State<'_, AppState>,
+    application_id: String,
+    enabled: bool,
+) -> Result<ManifestRecord, CommandError> {
+    let mut db = state.db.lock();
+    set_application_enabled(&mut db, &application_id, enabled).map_err(CommandError::from)?;
+    get_manifest(&db, &application_id).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn kernel_record_build_failure(
+    state: State<'_, AppState>,
+    application_id: String,
+    message: String,
+    retryable: Option<bool>,
+    request_ref: Option<String>,
+) -> Result<BuildFailure, CommandError> {
+    let mut db = state.db.lock();
+    record_build_failure(
+        &mut db,
+        &application_id,
+        &message,
+        retryable.unwrap_or(true),
+        request_ref.as_deref(),
+    )
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn kernel_clear_build_failure(
+    state: State<'_, AppState>,
+    application_id: String,
+) -> Result<u64, CommandError> {
+    let mut db = state.db.lock();
+    clear_build_failures(&mut db, &application_id).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn kernel_list_build_failures(
+    state: State<'_, AppState>,
+    application_id: String,
+) -> Result<Vec<BuildFailure>, CommandError> {
+    let db = state.db.lock();
+    list_build_failures(&db, &application_id).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn kernel_list_application_versions(
+    state: State<'_, AppState>,
+    application_id: String,
+) -> Result<Vec<ApplicationVersion>, CommandError> {
+    let db = state.db.lock();
+    list_versions(&db, &application_id).map_err(CommandError::from)
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -23,6 +23,7 @@ const MIGRATION_011: &str = include_str!("../../migrations/011_action_log_mode.s
 const MIGRATION_012: &str = include_str!("../../migrations/012_runtime_v2.sql");
 const MIGRATION_013: &str = include_str!("../../migrations/013_application_kernel.sql");
 const MIGRATION_014: &str = include_str!("../../migrations/014_continuity_scheduler.sql");
+const MIGRATION_015: &str = include_str!("../../migrations/015_registered_actions.sql");
 
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -101,6 +102,7 @@ impl Database {
         self.apply_migration("012_runtime_v2", MIGRATION_012)?;
         self.apply_migration("013_application_kernel", MIGRATION_013)?;
         self.apply_migration("014_continuity_scheduler", MIGRATION_014)?;
+        self.apply_migration("015_registered_actions", MIGRATION_015)?;
 
         Ok(())
     }

@@ -100,6 +100,11 @@ pub fn revoke_permission(
          WHERE application_id = ?1 AND permission = ?2",
         params![application_id, permission, now_rfc3339()],
     )?;
+    // Remembered runtime grants must not outlive the permission that backed them.
+    let _ = crate::application_kernel::registered_actions::grants::revoke_grants_for_application(
+        db,
+        application_id,
+    )?;
     Ok(())
 }
 

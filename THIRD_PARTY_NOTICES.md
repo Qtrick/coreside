@@ -73,3 +73,32 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Vendo (conceptual inspiration)
+
+- **Project:** [Vendo](https://github.com/vendo-ai/vendo)
+- **License:** Apache License 2.0
+- **Copyright:** Copyright 2026 Vendo
+- **NOTICE:** Vendo distributes a NOTICE file identifying Vendo and an OpenUI MIT subcomponent used in Vendo’s sandbox bundle. Coreside does **not** redistribute that sandbox bundle.
+- **Use in Coreside:** Architectural inspiration for the generated-application consent model — descriptor hashing, remembered grants, single-use approvals, presence-aware policy, and a single execution choke point. **No Vendo TypeScript packages were copied** into the Coreside application tree; the runtime is a Coreside-native Rust + React implementation.
+- **Reference extract (not a production dependency):** `.reference/vendo/`
+- **Docs:** `docs/VENDO_REFERENCE_AND_ADOPTION_AUDIT.md`
+
+```
+Vendo
+Copyright 2026 Vendo
+
+This product includes software developed at Vendo (https://vendo.run).
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreement to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```
+
