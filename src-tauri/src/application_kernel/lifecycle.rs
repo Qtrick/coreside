@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::db::{now_rfc3339, Database, DbResult};
+use crate::db::{now_rfc3339, Database, DbError, DbResult};
 use rusqlite::params;
 
 pub const LIFECYCLE_STATES: &[&str] = &[
@@ -140,8 +140,7 @@ pub fn set_application_enabled(
     application_id: &str,
     enabled: bool,
 ) -> DbResult<()> {
-    crate::security::assert_not_protected(application_id)
-        .map_err(crate::db::DbError::Invalid)?;
+    crate::security::assert_not_protected(application_id).map_err(crate::db::DbError::Invalid)?;
     let n = db.conn().execute(
         "UPDATE application_manifests SET
             disabled = ?2,
@@ -156,10 +155,8 @@ pub fn set_application_enabled(
         )));
     }
     if !enabled {
-        let _ = super::registered_actions::grants::revoke_grants_for_application(
-            db,
-            application_id,
-        )?;
+        let _ =
+            super::registered_actions::grants::revoke_grants_for_application(db, application_id)?;
     }
     Ok(())
 }
@@ -201,6 +198,21 @@ pub fn record_build_failure(
             now_rfc3339()
         ],
     )?;
+    // A non-retryable failure is the crash signal that drives the documented
+    // "three strikes and the application is suspended" recovery path. Without
+    // this, `crash_count` never leaves zero and safe startup can never suspend
+    // a repeatedly failing application.
+    //
+    // Tool renderers may report with a tool id that is not yet a kernel
+    // application; keep the failure row and skip the strike rather than
+    // failing the whole IPC call.
+    if !retryable {
+        match crate::application_kernel::manifest::record_crash(db, application_id) {
+            Ok(_) => {}
+            Err(DbError::NotFound(_)) => {}
+            Err(err) => return Err(err),
+        }
+    }
     Ok(BuildFailure {
         id,
         application_id: application_id.into(),
@@ -281,4 +293,30 @@ pub fn update_job_progress(
         params![id, status, progress, stage, now_rfc3339()],
     )?;
     get_job(db, id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use tempfile::tempdir;
+
+    #[test]
+    fn non_retryable_failure_without_manifest_still_records() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("orphan.db")).unwrap();
+        let failure = record_build_failure(
+            &mut db,
+            "tool-without-manifest",
+            "Error: render blew up",
+            false,
+            Some("tool-without-manifest"),
+        )
+        .expect("failure row must succeed even without a kernel app");
+        assert!(!failure.retryable);
+        assert_eq!(
+            list_build_failures(&db, "tool-without-manifest").unwrap().len(),
+            1
+        );
+    }
 }

@@ -9,7 +9,10 @@ fn snippet_bound(content: &str, max_chars: usize) -> String {
     if collapsed.chars().count() <= max_chars {
         collapsed
     } else {
-        let truncated: String = collapsed.chars().take(max_chars.saturating_sub(1)).collect();
+        let truncated: String = collapsed
+            .chars()
+            .take(max_chars.saturating_sub(1))
+            .collect();
         format!("{truncated}…")
     }
 }
@@ -65,9 +68,9 @@ pub fn rebuild_project_index(db: &Database, project_id: &str) -> DbResult<u64> {
         [project_id],
     )?;
 
-    let mut stmt = db.conn().prepare(
-        "SELECT id FROM conversations WHERE project_id = ?1 ORDER BY updated_at DESC",
-    )?;
+    let mut stmt = db
+        .conn()
+        .prepare("SELECT id FROM conversations WHERE project_id = ?1 ORDER BY updated_at DESC")?;
     let conversation_ids: Vec<String> = stmt
         .query_map([project_id], |row| row.get(0))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -119,8 +122,10 @@ mod tests {
         )
         .unwrap();
 
-        let c1 = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat A", Some(&p1.id)).unwrap();
-        let c2 = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat B", Some(&p2.id)).unwrap();
+        let c1 =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat A", Some(&p1.id)).unwrap();
+        let c2 =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat B", Some(&p2.id)).unwrap();
 
         let m1 = insert_message(&mut db, &c1.id, "user", "alpha secret keyword", None).unwrap();
         let _m2 = insert_message(&mut db, &c2.id, "user", "alpha secret keyword", None).unwrap();

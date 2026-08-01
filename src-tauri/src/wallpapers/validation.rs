@@ -16,8 +16,8 @@ fn css_injection_re() -> &'static Regex {
 }
 
 pub fn validate_wallpaper_config(raw: &str) -> Result<WallpaperConfig, String> {
-    let config: WallpaperConfig = serde_json::from_str(raw)
-        .map_err(|e| format!("wallpaper JSON invalid: {e}"))?;
+    let config: WallpaperConfig =
+        serde_json::from_str(raw).map_err(|e| format!("wallpaper JSON invalid: {e}"))?;
 
     if config.schema_version != WALLPAPER_SCHEMA_VERSION {
         return Err(format!(
@@ -31,18 +31,21 @@ pub fn validate_wallpaper_config(raw: &str) -> Result<WallpaperConfig, String> {
 }
 
 fn validate_fields(config: &WallpaperConfig) -> Result<(), String> {
-    for color in [&config.color, &config.secondary_color, &config.reduced_motion_fallback] {
-        if let Some(c) = color {
-            if css_injection_re().is_match(c) || remote_url_re().is_match(c) {
-                return Err("raw CSS or remote URLs are not allowed in wallpaper fields".into());
-            }
+    for c in [
+        &config.color,
+        &config.secondary_color,
+        &config.reduced_motion_fallback,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if css_injection_re().is_match(c) || remote_url_re().is_match(c) {
+            return Err("raw CSS or remote URLs are not allowed in wallpaper fields".into());
         }
     }
 
     match config.wallpaper_type {
-        WallpaperType::ImageCover
-        | WallpaperType::VideoLoop
-        | WallpaperType::AnimatedImage => {
+        WallpaperType::ImageCover | WallpaperType::VideoLoop | WallpaperType::AnimatedImage => {
             let id = config
                 .asset_id
                 .as_deref()
@@ -64,10 +67,8 @@ fn validate_fields(config: &WallpaperConfig) -> Result<(), String> {
                 }
             }
         }
-        WallpaperType::CanvasPreset => {
-            if config.preset.as_deref().unwrap_or("").trim().is_empty() {
-                return Err("canvas preset requires preset name".into());
-            }
+        WallpaperType::CanvasPreset if config.preset.as_deref().unwrap_or("").trim().is_empty() => {
+            return Err("canvas preset requires preset name".into());
         }
         _ => {}
     }

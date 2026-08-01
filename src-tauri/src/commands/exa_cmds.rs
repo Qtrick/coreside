@@ -14,10 +14,7 @@ use crate::state::AppState;
 
 fn map_exa_err(e: crate::exa::ExaError) -> CommandError {
     let key = resolve_exa_credentials().api_key;
-    CommandError::new(
-        e.code(),
-        sanitize_error(&e.to_string(), key.as_deref()),
-    )
+    CommandError::new(e.code(), sanitize_error(&e.to_string(), key.as_deref()))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -45,7 +42,9 @@ pub struct ConfigureExaInput {
 }
 
 #[tauri::command]
-pub fn configure_exa_connection(input: ConfigureExaInput) -> Result<ExaConnectionView, CommandError> {
+pub fn configure_exa_connection(
+    input: ConfigureExaInput,
+) -> Result<ExaConnectionView, CommandError> {
     store_exa_api_key(&input.api_key).map_err(map_exa_err)?;
     get_exa_connection()
 }
@@ -68,7 +67,7 @@ pub fn get_exa_usage(
     month_key: Option<String>,
 ) -> Result<UsageSummary, CommandError> {
     let db = state.db.lock();
-    usage_summary(&db, month_key.as_deref()).map_err(|e| CommandError::new("db", e.to_string()))
+    usage_summary(&db, month_key.as_deref()).map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -77,7 +76,7 @@ pub fn list_exa_usage(
     limit: Option<usize>,
 ) -> Result<Vec<UsageEntry>, CommandError> {
     let db = state.db.lock();
-    list_recent_usage(&db, limit.unwrap_or(50)).map_err(|e| CommandError::new("db", e.to_string()))
+    list_recent_usage(&db, limit.unwrap_or(50)).map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -120,7 +119,7 @@ pub fn set_exa_budget(
     if cfg.critical_percent > cfg.hard_percent {
         cfg.critical_percent = cfg.hard_percent;
     }
-    save_budget_config(&mut db, &cfg).map_err(|e| CommandError::new("db", e.to_string()))?;
+    save_budget_config(&mut db, &cfg).map_err(CommandError::from)?;
     Ok(budget_status(&db))
 }
 
@@ -165,6 +164,6 @@ pub fn set_search_profile(
 ) -> Result<SearchProfileView, CommandError> {
     let profile = SearchProfile::parse(&input.profile);
     let mut db = state.db.lock();
-    save_search_profile(&mut db, profile).map_err(|e| CommandError::new("db", e.to_string()))?;
+    save_search_profile(&mut db, profile).map_err(CommandError::from)?;
     Ok(SearchProfileView::from(profile))
 }

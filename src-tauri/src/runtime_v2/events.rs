@@ -6,12 +6,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use super::limits::{
-    EVENT_COOLDOWN_MS, MAX_EVENT_DEPTH, MAX_EVENTS_PER_SURFACE_PER_MINUTE,
-    MAX_IDENTICAL_EVENTS_PER_INTERVAL, MAX_SUBSCRIPTIONS_PER_SURFACE,
+    EVENT_COOLDOWN_MS, EVENT_SUSPENSION_SECS, MAX_EVENTS_PER_SURFACE_PER_MINUTE, MAX_EVENT_DEPTH,
+    MAX_IDEMPOTENCY_KEYS, MAX_IDENTICAL_EVENTS_PER_INTERVAL, MAX_SUBSCRIPTIONS_PER_SURFACE,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub struct EventRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_id: Option<String>,
@@ -75,23 +76,31 @@ impl std::fmt::Display for EventBusError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct SurfaceRateState {
     timestamps: VecDeque<Instant>,
     identical: HashMap<String, VecDeque<Instant>>,
     last_dispatch: Option<Instant>,
     loop_strikes: u32,
-    suspended: bool,
+    suspended_until: Option<Instant>,
 }
 
-impl Default for SurfaceRateState {
-    fn default() -> Self {
-        Self {
-            timestamps: VecDeque::new(),
-            identical: HashMap::new(),
-            last_dispatch: None,
-            loop_strikes: 0,
-            suspended: false,
+impl SurfaceRateState {
+    fn suspend(&mut self, now: Instant) {
+        self.suspended_until = Some(now + Duration::from_secs(EVENT_SUSPENSION_SECS));
+    }
+
+    /// Clears an expired suspension and reports whether the surface is still held.
+    fn is_suspended(&mut self, now: Instant) -> bool {
+        match self.suspended_until {
+            Some(until) if now < until => true,
+            Some(_) => {
+                self.suspended_until = None;
+                self.loop_strikes = 0;
+                self.identical.clear();
+                false
+            }
+            None => false,
         }
     }
 }
@@ -101,6 +110,7 @@ pub struct EventBus {
     subscriptions: HashMap<String, Subscription>,
     by_owner: HashMap<String, Vec<String>>,
     seen_idempotency: HashSet<String>,
+    idempotency_order: VecDeque<String>,
     rates: HashMap<String, SurfaceRateState>,
 }
 
@@ -167,10 +177,8 @@ impl EventBus {
         };
         for row in rows.flatten() {
             let (id, owner, types_s, source_s, target_s, enabled) = row;
-            let event_types: Vec<String> =
-                serde_json::from_str(&types_s).unwrap_or_default();
-            let source_filter: EventRef =
-                serde_json::from_str(&source_s).unwrap_or_default();
+            let event_types: Vec<String> = serde_json::from_str(&types_s).unwrap_or_default();
+            let source_filter: EventRef = serde_json::from_str(&source_s).unwrap_or_default();
             let target: EventRef = serde_json::from_str(&target_s).unwrap_or_default();
             let _ = bus.add_subscription(Subscription {
                 id,
@@ -184,10 +192,35 @@ impl EventBus {
         bus
     }
 
+    /// Clear a loop suspension early, e.g. after the user repairs the surface.
     pub fn unsuspend(&mut self, surface_id: &str) {
         if let Some(st) = self.rates.get_mut(surface_id) {
-            st.suspended = false;
+            st.suspended_until = None;
             st.loop_strikes = 0;
+            st.identical.clear();
+        }
+    }
+
+    fn remember_idempotency(&mut self, key: &str) -> bool {
+        if !self.seen_idempotency.insert(key.to_string()) {
+            return false;
+        }
+        self.idempotency_order.push_back(key.to_string());
+        while self.idempotency_order.len() > MAX_IDEMPOTENCY_KEYS {
+            if let Some(oldest) = self.idempotency_order.pop_front() {
+                self.seen_idempotency.remove(&oldest);
+            }
+        }
+        true
+    }
+
+    /// Release a key claimed by a dispatch that then failed, so the caller can
+    /// retry the same event once the rate limit or suspension clears.
+    fn forget_idempotency(&mut self, key: &str) {
+        if self.seen_idempotency.remove(key) {
+            if let Some(pos) = self.idempotency_order.iter().rposition(|k| k == key) {
+                self.idempotency_order.remove(pos);
+            }
         }
     }
 
@@ -200,10 +233,22 @@ impl EventBus {
             return Err(EventBusError::DepthExceeded);
         }
         if let Some(key) = &event.idempotency_key {
-            if !self.seen_idempotency.insert(key.clone()) {
+            if !self.remember_idempotency(key) {
                 return Err(EventBusError::Duplicate);
             }
         }
+        let result = self.dispatch_checked(event);
+        // A claimed key must not outlive a dispatch that never delivered the
+        // event, or the retry after a rate limit would look like a duplicate.
+        if result.is_err() {
+            if let Some(key) = &event.idempotency_key {
+                self.forget_idempotency(key);
+            }
+        }
+        result
+    }
+
+    fn dispatch_checked(&mut self, event: &SurfaceEvent) -> Result<Vec<String>, EventBusError> {
         // Cross-project guard
         if let (Some(sp), Some(tp)) = (
             event.source.project_id.as_ref(),
@@ -219,18 +264,18 @@ impl EventBus {
             .surface_id
             .clone()
             .unwrap_or_else(|| "global".into());
+        let now = Instant::now();
         let st = self.rates.entry(surface_key.clone()).or_default();
-        if st.suspended {
+        if st.is_suspended(now) {
             return Err(EventBusError::Suspended {
                 surface_id: surface_key,
             });
         }
-        let now = Instant::now();
         if let Some(last) = st.last_dispatch {
             if now.duration_since(last) < Duration::from_millis(EVENT_COOLDOWN_MS) {
                 st.loop_strikes += 1;
                 if st.loop_strikes >= 5 {
-                    st.suspended = true;
+                    st.suspend(now);
                     return Err(EventBusError::LoopDetected);
                 }
                 return Err(EventBusError::RateLimited);
@@ -260,7 +305,7 @@ impl EventBus {
         if bucket.len() >= MAX_IDENTICAL_EVENTS_PER_INTERVAL {
             st.loop_strikes += 1;
             if st.loop_strikes >= 3 {
-                st.suspended = true;
+                st.suspend(now);
                 return Err(EventBusError::LoopDetected);
             }
             return Err(EventBusError::RateLimited);
@@ -272,7 +317,8 @@ impl EventBus {
             if !sub.enabled {
                 continue;
             }
-            if !sub.event_types.is_empty() && !sub.event_types.iter().any(|t| t == &event.event_type)
+            if !sub.event_types.is_empty()
+                && !sub.event_types.iter().any(|t| t == &event.event_type)
             {
                 continue;
             }
@@ -305,16 +351,83 @@ mod tests {
         assert!(bus.dispatch(&ev, 0).is_ok());
         assert_eq!(bus.dispatch(&ev, 0).unwrap_err(), EventBusError::Duplicate);
     }
-}
 
-impl Default for EventRef {
-    fn default() -> Self {
-        Self {
-            surface_id: None,
-            tool_id: None,
-            conversation_id: None,
-            project_id: None,
-            component_id: None,
+    #[test]
+    fn a_failed_dispatch_releases_its_idempotency_key() {
+        let mut bus = EventBus::new();
+        let ev = SurfaceEvent {
+            id: "e1".into(),
+            event_type: "form_submitted".into(),
+            scope: "surface".into(),
+            source: EventRef {
+                surface_id: Some("s1".into()),
+                project_id: Some("p1".into()),
+                ..Default::default()
+            },
+            target: EventRef {
+                project_id: Some("p2".into()),
+                ..Default::default()
+            },
+            payload: json!({ "a": 1 }),
+            idempotency_key: Some("k1".into()),
+        };
+        assert_eq!(
+            bus.dispatch(&ev, 0).unwrap_err(),
+            EventBusError::CrossProjectDenied
+        );
+        assert!(
+            bus.seen_idempotency.is_empty(),
+            "a rejected event must not burn its key"
+        );
+
+        // The same key now succeeds once the event is addressed correctly.
+        let mut fixed = ev.clone();
+        fixed.target.project_id = Some("p1".into());
+        assert!(bus.dispatch(&fixed, 0).is_ok());
+        assert_eq!(
+            bus.dispatch(&fixed, 0).unwrap_err(),
+            EventBusError::Duplicate
+        );
+    }
+
+    #[test]
+    fn loop_suspension_expires_so_the_surface_can_recover() {
+        let mut st = SurfaceRateState::default();
+        let now = Instant::now();
+        st.loop_strikes = 5;
+        st.suspend(now);
+        assert!(st.is_suspended(now), "suspension holds while it is fresh");
+
+        let after = now + Duration::from_secs(EVENT_SUSPENSION_SECS + 1);
+        assert!(
+            !st.is_suspended(after),
+            "suspension must release when quiet"
+        );
+        assert_eq!(st.loop_strikes, 0, "strikes reset on recovery");
+    }
+
+    #[test]
+    fn explicit_unsuspend_clears_a_live_suspension() {
+        let mut bus = EventBus::new();
+        let now = Instant::now();
+        bus.rates.entry("s1".to_string()).or_default().suspend(now);
+        assert!(bus.rates.get_mut("s1").unwrap().is_suspended(now));
+
+        bus.unsuspend("s1");
+        assert!(!bus.rates.get_mut("s1").unwrap().is_suspended(now));
+    }
+
+    #[test]
+    fn idempotency_memory_stays_bounded() {
+        let mut bus = EventBus::new();
+        for i in 0..(MAX_IDEMPOTENCY_KEYS + 500) {
+            assert!(bus.remember_idempotency(&format!("k{i}")));
         }
+        assert_eq!(bus.seen_idempotency.len(), MAX_IDEMPOTENCY_KEYS);
+        assert_eq!(bus.idempotency_order.len(), MAX_IDEMPOTENCY_KEYS);
+        // The oldest keys were evicted, so they no longer register as duplicates.
+        assert!(bus.remember_idempotency("k0"));
+        // Recent keys are still deduplicated.
+        assert!(!bus.remember_idempotency(&format!("k{}", MAX_IDEMPOTENCY_KEYS + 499)));
     }
 }

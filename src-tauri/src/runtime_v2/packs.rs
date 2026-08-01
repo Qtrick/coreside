@@ -48,11 +48,34 @@ pub fn bundled_packs() -> Vec<CapabilityPackMeta> {
             "Core Components",
             "1.0.0",
             &[
-                "container", "row", "column", "card", "tabs", "divider", "spacer",
-                "heading", "text", "badge", "image", "emptyState", "textInput",
-                "textArea", "numberInput", "select", "checkbox", "dateInput", "list",
-                "checklist", "table", "counter", "progress", "stat", "button",
-                "buttonGroup", "quiz", "clock",
+                "container",
+                "row",
+                "column",
+                "card",
+                "tabs",
+                "divider",
+                "spacer",
+                "heading",
+                "text",
+                "badge",
+                "image",
+                "emptyState",
+                "textInput",
+                "textArea",
+                "numberInput",
+                "select",
+                "checkbox",
+                "dateInput",
+                "list",
+                "checklist",
+                "table",
+                "counter",
+                "progress",
+                "stat",
+                "button",
+                "buttonGroup",
+                "quiz",
+                "clock",
             ],
             "Built-in layout, form, and feedback components.",
             &["render", "local_state"],
@@ -62,9 +85,19 @@ pub fn bundled_packs() -> Vec<CapabilityPackMeta> {
             "Rich Forms",
             "1.0.0",
             &[
-                "form", "fieldGroup", "radioGroup", "slider", "switch", "colorInput",
-                "timeInput", "dateTimeInput", "filePicker", "mediaPicker",
-                "submitButton", "resetButton", "validationMessage",
+                "form",
+                "fieldGroup",
+                "radioGroup",
+                "slider",
+                "switch",
+                "colorInput",
+                "timeInput",
+                "dateTimeInput",
+                "filePicker",
+                "mediaPicker",
+                "submitButton",
+                "resetButton",
+                "validationMessage",
             ],
             "Trusted structured forms with validation and submitToAgent.",
             &["render", "local_state", "submit_to_agent"],
@@ -73,7 +106,16 @@ pub fn bundled_packs() -> Vec<CapabilityPackMeta> {
             "coreside.svg",
             "SVG Scenes",
             "1.0.0",
-            &["svgScene", "svgRect", "svgCircle", "svgEllipse", "svgLine", "svgPath", "svgText", "svgGroup"],
+            &[
+                "svgScene",
+                "svgRect",
+                "svgCircle",
+                "svgEllipse",
+                "svgLine",
+                "svgPath",
+                "svgText",
+                "svgGroup",
+            ],
             "Declarative SVG without script or foreignObject.",
             &["render", "pointer_events"],
         ),
@@ -81,7 +123,14 @@ pub fn bundled_packs() -> Vec<CapabilityPackMeta> {
             "coreside.charts",
             "Charts",
             "1.0.0",
-            &["chartLine", "chartBar", "chartPie", "chartDonut", "chartArea", "chartScatter"],
+            &[
+                "chartLine",
+                "chartBar",
+                "chartPie",
+                "chartDonut",
+                "chartArea",
+                "chartScatter",
+            ],
             "Bundled chart components with accessible data tables. No CDN.",
             &["render"],
         ),
@@ -171,10 +220,7 @@ pub fn validate_definition_components(definition: &Value) -> Result<(), String> 
 }
 
 fn validate_component_value(component: &Value) -> Result<(), String> {
-    let component_type = component
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let component_type = component.get("type").and_then(|v| v.as_str()).unwrap_or("");
     if !component_type.is_empty() {
         validate_component_type_allowed(component_type)?;
         validate_labeled_props(
@@ -223,17 +269,8 @@ fn validate_labeled_props(
     ];
     // Renderer defaults — treat as invalid agent output (screenshot: "Text" / "Button").
     const PLACEHOLDER_LABELS: &[&str] = &[
-        "text",
-        "button",
-        "notes",
-        "number",
-        "select",
-        "checkbox",
-        "date",
-        "label",
-        "input",
-        "untitled",
-        "field",
+        "text", "button", "notes", "number", "select", "checkbox", "date", "label", "input",
+        "untitled", "field",
     ];
 
     if NEEDS_LABEL.contains(&component_type) {
@@ -308,7 +345,10 @@ mod tests {
     #[test]
     fn no_cdn_permissions() {
         for p in bundled_packs() {
-            assert!(!p.permissions.iter().any(|x| x.contains("cdn") || x.contains("network")));
+            assert!(!p
+                .permissions
+                .iter()
+                .any(|x| x.contains("cdn") || x.contains("network")));
         }
     }
 

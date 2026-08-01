@@ -211,10 +211,16 @@ pub async fn test_connection() -> Result<String, ExaError> {
         contents: super::models::ExaContentsRequest { highlights: true },
     };
     let _ = search_http(&api_key, &request).await?;
-    Ok(format!("Exa Search OK (credential source: {})", source.as_str()))
+    Ok(format!(
+        "Exa Search OK (credential source: {})",
+        source.as_str()
+    ))
 }
 
-async fn search_http(api_key: &str, request: &ExaSearchRequest) -> Result<ExaSearchResponse, ExaError> {
+async fn search_http(
+    api_key: &str,
+    request: &ExaSearchRequest,
+) -> Result<ExaSearchResponse, ExaError> {
     let client = http_client()?;
     let mut attempt = 0u32;
     loop {
@@ -248,9 +254,8 @@ async fn search_http(api_key: &str, request: &ExaSearchRequest) -> Result<ExaSea
                     // Never retry 401/402/403/422.
                     return Err(ExaError::from_status(status, &body));
                 }
-                return serde_json::from_str(&body).map_err(|e| {
-                    ExaError::Other(format!("failed to parse Exa response: {e}"))
-                });
+                return serde_json::from_str(&body)
+                    .map_err(|e| ExaError::Other(format!("failed to parse Exa response: {e}")));
             }
         }
     }

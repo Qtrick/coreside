@@ -1,13 +1,12 @@
 //! AI layer: providers, prompts, and response parsing.
 
 mod access_mode;
-mod hosted_provider;
-mod capability_registry;
-mod tool_loop;
 mod anthropic;
 mod auto;
+mod capability_registry;
 mod errors;
 mod gemini;
+mod hosted_provider;
 mod mock;
 mod openai;
 mod openrouter;
@@ -16,35 +15,30 @@ mod provider;
 mod response_parser;
 mod response_schema;
 mod settings_change;
+mod tool_loop;
 
-pub use access_mode::{
-    resolve_access_presentation, AiAccessPresentation, DisclosurePolicy,
-};
+pub use access_mode::{resolve_access_presentation, AiAccessPresentation, DisclosurePolicy};
 
+pub use anthropic::AnthropicProvider;
 pub use auto::chat_with_auto;
+pub use capability_registry::{AgentCapability, ToolCallRequest, ToolCallResult};
 pub use errors::AiError;
 pub use gemini::GeminiProvider;
 pub use mock::MockAiProvider;
 pub use openai::OpenAiProvider;
-pub use anthropic::AnthropicProvider;
 pub use openrouter::OpenRouterProvider;
-pub use prompt_builder::{
-    build_agent_prompt_with_references, PROMPT_VERSION,
-};
-pub use capability_registry::{
-    AgentCapability, ToolCallRequest, ToolCallResult,
-};
-pub use tool_loop::{project_context_for_prompt, ToolLoop, ToolLoopContext};
+pub use prompt_builder::{build_agent_prompt_with_references, PROMPT_VERSION};
 pub use provider::{AgentMessage, AgentRequest, AiProvider, ProviderHealth};
 pub use response_parser::{parse_agent_response, ParsedAgentResponse};
 pub use response_schema::{
-    layout_type_string, ResponseType, SourceCitation, ToolAction, ToolChangePayload,
-    ToolComponent, ToolDefinition,
+    layout_type_string, ResponseType, SourceCitation, ToolAction, ToolChangePayload, ToolComponent,
+    ToolDefinition,
 };
 pub use settings_change::{
     is_allowed_setting_key, normalize_hex_or_none, normalize_setting_kv, parse_wallpaper_setting,
     SettingsChangePayload, WallpaperConfig,
 };
+pub use tool_loop::{project_context_for_prompt, ToolLoop, ToolLoopContext};
 
 use crate::config::AppConfig;
 use std::sync::Arc;

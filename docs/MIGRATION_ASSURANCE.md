@@ -22,36 +22,46 @@
 | 012 | `012_runtime_v2.sql` | Runtime V2: surfaces, transactions, events, branches, queue |
 | 013 | `013_application_kernel.sql` | Application Kernel: manifests, packages, permissions, recovery |
 | 014 | `014_continuity_scheduler.sql` | Preservation, drafts, patch scheduler, routes, context ledger |
+| 015 | `015_registered_actions.sql` | Registered-action runtime: approvals, grants, audit events, build failures |
 
 ## What is verified
 
 | Check | Status |
 | --- | --- |
-| Migrations apply on fresh install | **Implicit** — app boots in dev with empty DB |
-| Idempotent statements where noted | **Partial** — e.g. 012 lazy tool→surface wrap |
-| Rust DB module tests | **Partial** | `src-tauri/src/db/mod.rs` has tests |
+| Migrations apply on fresh install | **Verified** — `db::migration_fixtures::fresh_database_reaches_latest_migration` |
+| Upgrade from 006 with seeded user data | **Verified** — projects, chats, messages, tools survive |
+| Upgrade from 011 with automations | **Verified** |
+| Upgrade from 012 / 013 / 014 | **Verified** — manifests, failed apps, approvals tables |
+| Idempotent re-open at latest | **Verified** |
+| Foreign-key integrity after upgrade | **Verified** — `PRAGMA foreign_key_check` |
+| Contiguous migration numbering | **Verified** + doctor `docs.migration_inventory_complete` |
 | Forward-only policy | **Yes** — no down migrations |
+
+Run: `npm run test:migrations`
 
 ## What is NOT verified
 
 | Gap | Status |
 | --- | --- |
-| Fixture DB at 001 → upgrade to 014 | **Pending** |
-| Large production-like data volume | **Not tested** |
+| Large production-like data volume (10k+ messages) | **Not tested** |
 | Cross-version export/import after upgrade | **Pending** (manual L/M) |
-| Migration failure recovery | **Not documented** |
+| Migration failure mid-script recovery UX | **Partial** — DDL+bookkeeping is transactional; user-facing recovery messaging not documented |
 
-## Recommended fixture testing (future)
+## Fixture approach
 
-1. Commit anonymized SQLite snapshots at milestones (006, 012, 013).
-2. CI job: copy fixture → run migration runner → assert schema version + row counts.
-3. Record results in `reports/release-gates.json` under `migration_fixtures`.
+Fixtures are built programmatically (no committed user databases):
+
+1. `Database::open_path_through(path, "NNN_name")` freezes schema at that migration.
+2. Anonymized rows are inserted (biology project, study tool, automations, manifests, approvals).
+3. `Database::open_path(path)` applies the remaining migrations.
+4. Assertions cover migration list, foreign keys, and repository reads.
 
 ## Related docs
 
 - `docs/GENERATED_DATA_MIGRATIONS.md` — generated app data migrations (kernel layer)
 - `src-tauri/src/db/mod.rs` — migration application code
+- `src-tauri/src/db/migration_fixtures.rs` — upgrade fixture tests
 
 ## Honest assessment
 
-Migrations exist and ship with the app. **Upgrade assurance from real user databases is not yet automated.**
+Forward migrations are fixture-tested for the common upgrade stops (006, 011–015) and fresh installs. Large-volume and export-after-upgrade assurance remain open.

@@ -8,9 +8,7 @@ use crate::application_kernel::compiler::{compile, ChangeIntent, CompiledChange}
 use crate::application_kernel::context::{
     application_summary, data_model_summary, recent_transactions_summary,
 };
-use crate::application_kernel::data::{
-    create_record, query_records, upsert_model, DataModelDefinition,
-};
+use crate::application_kernel::data::{upsert_model, DataModelDefinition};
 use crate::application_kernel::lifecycle::{
     clear_build_failures, create_job, garbage_collect, get_job, interrupt_active_jobs,
     list_build_failures, list_versions, record_build_failure, set_application_enabled,
@@ -41,10 +39,10 @@ use crate::application_kernel::registered_actions::{
     self, execute_registered_action, ActionOutcome, ActionRunContext, ClientActionRequest,
     RuntimeGrant, Venue,
 };
-use crate::application_kernel::testing::{run_test, upsert_test, visual_checks_summary, DeclarativeTest};
-use crate::application_kernel::{
-    apply_change, capability_catalog, ChangeRequest, ChangeResult,
+use crate::application_kernel::testing::{
+    run_test, upsert_test, visual_checks_summary, DeclarativeTest,
 };
+use crate::application_kernel::{apply_change, capability_catalog, ChangeRequest, ChangeResult};
 use crate::commands::CommandError;
 use crate::state::AppState;
 
@@ -137,43 +135,11 @@ pub fn kernel_upsert_data_model(
     upsert_model(&mut db, &application_id, model).map_err(CommandError::from)
 }
 
-#[tauri::command]
-pub fn kernel_create_record(
-    state: State<'_, AppState>,
-    application_id: String,
-    model_id: String,
-    data: Value,
-) -> Result<String, CommandError> {
-    let mut db = state.db.lock();
-    // Legacy direct-data IPC: still require the same permission the gateway
-    // would check. Prefer `kernel_invoke_registered_action` for app surfaces.
-    crate::application_kernel::permissions::assert_can_write_data(&db, &application_id)
-        .map_err(CommandError::from)?;
-    create_record(&mut db, &application_id, &model_id, data).map_err(CommandError::from)
-}
-
-#[tauri::command]
-pub fn kernel_query_records(
-    state: State<'_, AppState>,
-    application_id: String,
-    model_id: String,
-    limit: Option<usize>,
-) -> Result<Vec<Value>, CommandError> {
-    let db = state.db.lock();
-    if !crate::application_kernel::permissions::has_permission(
-        &db,
-        &application_id,
-        "local_data.read",
-    )
-    .unwrap_or(false)
-    {
-        return Err(CommandError::new(
-            "permission_denied",
-            "local_data.read required",
-        ));
-    }
-    query_records(&db, &application_id, &model_id, limit.unwrap_or(100)).map_err(CommandError::from)
-}
+// Generated-application record reads and writes have exactly one public IPC
+// path: `kernel_invoke_registered_action` (`local_data.query` / `local_data.write`
+// / `local_data.delete`). The former `kernel_create_record` and
+// `kernel_query_records` commands were retired because they skipped the
+// gateway's audit ledger, circuit breakers, and output bounds.
 
 #[tauri::command]
 pub fn kernel_grant_permission(
@@ -239,9 +205,7 @@ pub fn kernel_enter_safe_startup(
 }
 
 #[tauri::command]
-pub fn kernel_clear_recovery(
-    state: State<'_, AppState>,
-) -> Result<RecoveryState, CommandError> {
+pub fn kernel_clear_recovery(state: State<'_, AppState>) -> Result<RecoveryState, CommandError> {
     let mut db = state.db.lock();
     clear_recovery(&mut db).map_err(CommandError::from)
 }
@@ -325,7 +289,8 @@ pub fn kernel_recent_transactions(
     limit: Option<usize>,
 ) -> Result<Value, CommandError> {
     let db = state.db.lock();
-    recent_transactions_summary(&db, &application_id, limit.unwrap_or(10)).map_err(CommandError::from)
+    recent_transactions_summary(&db, &application_id, limit.unwrap_or(10))
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -377,10 +342,7 @@ pub fn kernel_create_job(
 }
 
 #[tauri::command]
-pub fn kernel_get_job(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<JobRecord, CommandError> {
+pub fn kernel_get_job(state: State<'_, AppState>, id: String) -> Result<JobRecord, CommandError> {
     let db = state.db.lock();
     get_job(&db, &id).map_err(CommandError::from)
 }
@@ -414,6 +376,15 @@ pub fn kernel_clear_policy_override(
 // Registered action runtime
 // ---------------------------------------------------------------------------
 
+/// Approval and grant state is shared by every window. Emitting on change lets
+/// each window refresh on demand instead of polling on a timer.
+pub const APPROVALS_CHANGED_EVENT: &str = "runtime-approvals-changed";
+
+fn notify_approvals_changed(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+    let _ = app.emit(APPROVALS_CHANGED_EVENT, ());
+}
+
 #[tauri::command]
 pub fn kernel_list_registered_actions() -> Value {
     registered_actions::catalog_json()
@@ -425,6 +396,7 @@ pub fn kernel_list_registered_actions() -> Value {
 /// automation executor.
 #[tauri::command]
 pub fn kernel_invoke_registered_action(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     request: ClientActionRequest,
 ) -> Result<ActionOutcome, CommandError> {
@@ -434,14 +406,20 @@ pub fn kernel_invoke_registered_action(
         Venue::Chat
     };
     let ctx = ActionRunContext::from_client(&request, venue);
-    let mut db = state.db.lock();
-    Ok(execute_registered_action(
-        &mut db,
-        &ctx,
-        &request.action_name,
-        &request.input,
-        request.approval_id.as_deref(),
-    ))
+    let outcome = {
+        let mut db = state.db.lock();
+        execute_registered_action(
+            &mut db,
+            &ctx,
+            &request.action_name,
+            &request.input,
+            request.approval_id.as_deref(),
+        )
+    };
+    if matches!(outcome, ActionOutcome::PendingApproval { .. }) {
+        notify_approvals_changed(&app);
+    }
+    Ok(outcome)
 }
 
 #[tauri::command]
@@ -456,6 +434,7 @@ pub fn kernel_list_pending_approvals(
 /// always `user`; the agent has no command that decides approvals.
 #[tauri::command]
 pub fn kernel_decide_approval(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     approval_id: String,
     approve: bool,
@@ -473,8 +452,8 @@ pub fn kernel_decide_approval(
         _ => None,
     };
     let mut db = state.db.lock();
-    let mut result =
-        approvals::decide(&mut db, &approval_id, approve, remember, "user").map_err(CommandError::from)?;
+    let mut result = approvals::decide(&mut db, &approval_id, approve, remember, "user")
+        .map_err(CommandError::from)?;
     // Exactly-once execution: after a user approval, re-run the frozen call through
     // the gateway so the action is not left hanging until a second click.
     if approve {
@@ -508,6 +487,8 @@ pub fn kernel_decide_approval(
             }
         }
     }
+    drop(db);
+    notify_approvals_changed(&app);
     Ok(result)
 }
 
@@ -522,11 +503,17 @@ pub fn kernel_list_runtime_grants(
 
 #[tauri::command]
 pub fn kernel_revoke_runtime_grant(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     grant_id: String,
 ) -> Result<(), CommandError> {
-    let mut db = state.db.lock();
-    grants::revoke_grant(&mut db, &grant_id).map_err(CommandError::from)
+    {
+        let mut db = state.db.lock();
+        grants::revoke_grant(&mut db, &grant_id).map_err(CommandError::from)?;
+    }
+    // A revoked grant stops authorizing calls in every open window immediately.
+    notify_approvals_changed(&app);
+    Ok(())
 }
 
 #[tauri::command]

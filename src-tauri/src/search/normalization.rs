@@ -5,9 +5,7 @@ use super::models::{ImageSearchResult, VideoSearchResult, WebSearchResult};
 
 fn script_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"(?is)<script[^>]*>.*?</script>").expect("script regex")
-    })
+    RE.get_or_init(|| Regex::new(r"(?is)<script[^>]*>.*?</script>").expect("script regex"))
 }
 
 fn style_re() -> &'static Regex {

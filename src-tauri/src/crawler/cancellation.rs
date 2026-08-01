@@ -13,10 +13,7 @@ pub async fn cancel_request(
         return Err(CrawlerError::Invalid("targetRequestId is required".into()));
     }
     let payload = supervisor
-        .send_command(
-            "cancel",
-            json!({ "targetRequestId": trimmed }),
-        )
+        .send_command("cancel", json!({ "targetRequestId": trimmed }))
         .await?;
     Ok(payload
         .get("cancelled")

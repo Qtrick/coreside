@@ -324,7 +324,12 @@ pub fn action_names() -> Vec<&'static str> {
 }
 
 pub fn catalog_json() -> Value {
-    Value::Array(BUNDLED_ACTIONS.iter().map(|d| d.to_catalog_json()).collect())
+    Value::Array(
+        BUNDLED_ACTIONS
+            .iter()
+            .map(|d| d.to_catalog_json())
+            .collect(),
+    )
 }
 
 #[cfg(test)]

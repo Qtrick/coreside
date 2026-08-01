@@ -21,11 +21,7 @@ pub const ALLOWED_IMAGE_MIMES: &[&str] = &[
     "image/avif",
 ];
 
-pub const ALLOWED_VIDEO_MIMES: &[&str] = &[
-    "video/mp4",
-    "video/webm",
-    "video/quicktime",
-];
+pub const ALLOWED_VIDEO_MIMES: &[&str] = &["video/mp4", "video/webm", "video/quicktime"];
 
 pub fn max_bytes_for_category(category: &str) -> usize {
     match category {

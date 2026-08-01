@@ -164,8 +164,7 @@ pub async fn chat_with_auto(
         }
     }
 
-    Err(last_err
-        .unwrap_or_else(|| AiError::Provider("Auto could not find a working model".into())))
+    Err(last_err.unwrap_or_else(|| AiError::Provider("Auto could not find a working model".into())))
 }
 
 async fn chat_with_rate_limit_retry(
@@ -229,9 +228,8 @@ mod tests {
 
     #[test]
     fn rate_limit_detection_avoids_generate_false_positive() {
-        let generate_err = AiError::Provider(
-            "Gemini HTTP 400: generateContent failed: INVALID_ARGUMENT".into(),
-        );
+        let generate_err =
+            AiError::Provider("Gemini HTTP 400: generateContent failed: INVALID_ARGUMENT".into());
         assert!(!is_rate_limited(&generate_err));
         // Provider errors remain retryable for Auto fallback — just not via the rate-limit path.
         assert!(is_retryable_model_error(&generate_err));

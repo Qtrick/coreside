@@ -57,6 +57,9 @@ mod tests {
 
     #[test]
     fn different_values_differ() {
-        assert_ne!(hash_value(&json!({ "a": 1 })), hash_value(&json!({ "a": 2 })));
+        assert_ne!(
+            hash_value(&json!({ "a": 1 })),
+            hash_value(&json!({ "a": 2 }))
+        );
     }
 }

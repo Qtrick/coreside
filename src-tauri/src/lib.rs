@@ -1,19 +1,19 @@
 //! Coreside Tauri library entrypoint.
 
 mod ai;
+mod application_kernel;
 mod automations;
 mod branding;
 mod commands;
 mod config;
-mod credentials;
 mod crawler;
+mod credentials;
 mod db;
 mod exa;
 mod exports;
 mod media;
 mod projects;
 mod research;
-mod application_kernel;
 mod runtime_v2;
 mod search;
 mod security;
@@ -101,6 +101,7 @@ pub fn run() {
             commands::clear_conversations,
             commands::clear_tools,
             commands::open_tool_window,
+            commands::open_external_url,
             commands::list_automations,
             commands::upsert_automation,
             commands::set_automation_enabled,
@@ -216,8 +217,6 @@ pub fn run() {
             commands::kernel_restore_last_known_good,
             commands::kernel_mark_last_known_good,
             commands::kernel_upsert_data_model,
-            commands::kernel_create_record,
-            commands::kernel_query_records,
             commands::kernel_grant_permission,
             commands::kernel_revoke_permission,
             commands::kernel_list_permissions,
@@ -272,22 +271,20 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building Coreside")
-        .run(|app, event| {
-            match event {
-                tauri::RunEvent::Ready => {
-                    branding::apply_display_name();
-                }
-                tauri::RunEvent::Exit => {
-                    if let Some(state) = app.try_state::<AppState>() {
-                        state.cancel_all();
-                        let crawler = state.crawler.clone();
-                        tauri::async_runtime::block_on(async move {
-                            let _ = crawler.shutdown().await;
-                        });
-                    }
-                }
-                _ => {}
+        .run(|app, event| match event {
+            tauri::RunEvent::Ready => {
+                branding::apply_display_name();
             }
+            tauri::RunEvent::Exit => {
+                if let Some(state) = app.try_state::<AppState>() {
+                    state.cancel_all();
+                    let crawler = state.crawler.clone();
+                    tauri::async_runtime::block_on(async move {
+                        let _ = crawler.shutdown().await;
+                    });
+                }
+            }
+            _ => {}
         });
 }
 
@@ -296,8 +293,5 @@ fn init_tracing(default_level: &str) {
         .or_else(|_| EnvFilter::try_new(default_level))
         .unwrap_or_else(|_| EnvFilter::new("info"));
 
-    let _ = fmt()
-        .with_env_filter(filter)
-        .with_target(true)
-        .try_init();
+    let _ = fmt().with_env_filter(filter).with_target(true).try_init();
 }

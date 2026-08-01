@@ -7,10 +7,8 @@ pub fn sanitize_filename(name: &str) -> String {
     for ch in name.chars() {
         if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
             out.push(ch.to_ascii_lowercase());
-        } else if ch.is_whitespace() {
-            if !out.ends_with('-') {
-                out.push('-');
-            }
+        } else if ch.is_whitespace() && !out.ends_with('-') {
+            out.push('-');
         }
     }
     let trimmed = out.trim_matches('-').to_string();
@@ -63,9 +61,7 @@ pub fn strip_secrets_from_value(value: &Value) -> Value {
             }
             Value::Object(out)
         }
-        Value::Array(items) => {
-            Value::Array(items.iter().map(strip_secrets_from_value).collect())
-        }
+        Value::Array(items) => Value::Array(items.iter().map(strip_secrets_from_value).collect()),
         other => other.clone(),
     }
 }
@@ -74,11 +70,7 @@ pub fn strip_secrets_from_tool(def: &Value) -> Value {
     strip_secrets_from_value(def)
 }
 
-pub fn coreside_tool_package(
-    tool: &Value,
-    state: Option<&Value>,
-    app_version: &str,
-) -> Value {
+pub fn coreside_tool_package(tool: &Value, state: Option<&Value>, app_version: &str) -> Value {
     let safe_state = state
         .map(strip_secrets_from_value)
         .unwrap_or_else(|| json!({}));
@@ -93,7 +85,7 @@ pub fn coreside_tool_package(
 }
 
 pub fn standalone_html_for_clock(tool_name: &str, props: &Value) -> String {
-    let title = tool_name.replace('<', "").replace('>', "");
+    let title = tool_name.replace(['<', '>'], "");
     let show_seconds = props
         .get("showSeconds")
         .and_then(|v| v.as_bool())
@@ -184,7 +176,9 @@ pub fn assert_no_secrets(blob: &str) -> Result<(), String> {
         "private_key",
     ] {
         if lower.contains(needle) {
-            return Err(format!("Export contains forbidden secret pattern: {needle}"));
+            return Err(format!(
+                "Export contains forbidden secret pattern: {needle}"
+            ));
         }
     }
     Ok(())
@@ -195,7 +189,9 @@ pub fn assert_no_credential_tokens(blob: &str) -> Result<(), String> {
     let lower = blob.to_lowercase();
     for needle in ["sk-ant-", "sk-or-v1-", "sk-proj-", "aizasy"] {
         if lower.contains(needle) {
-            return Err(format!("Export contains forbidden secret pattern: {needle}"));
+            return Err(format!(
+                "Export contains forbidden secret pattern: {needle}"
+            ));
         }
     }
     Ok(())
@@ -205,13 +201,7 @@ pub fn assert_no_credential_tokens(blob: &str) -> Result<(), String> {
 pub fn redact_secret_patterns(text: &str) -> String {
     let mut out = text.to_string();
     // Order longer prefixes first where relevant.
-    for pattern in [
-        "sk-ant-",
-        "sk-or-v1-",
-        "sk-proj-",
-        "AIzaSy",
-        "aizasy",
-    ] {
+    for pattern in ["sk-ant-", "sk-or-v1-", "sk-proj-", "AIzaSy", "aizasy"] {
         out = redact_token_runs(&out, pattern);
     }
     out

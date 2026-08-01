@@ -182,7 +182,10 @@ fn run(
     };
     if let Some(record) = manifest.as_ref() {
         if record.disabled || record.lifecycle_state == "suspended" {
-            return ActionOutcome::blocked("application_disabled", "This application is turned off.");
+            return ActionOutcome::blocked(
+                "application_disabled",
+                "This application is turned off.",
+            );
         }
     }
     let declared = match manifest.as_ref() {
@@ -220,7 +223,9 @@ fn run(
         match trip {
             Ok(Some(trip)) => return ActionOutcome::blocked(trip.code(), trip.reason()),
             Ok(None) => {}
-            Err(_) => return ActionOutcome::error("storage_error", "Local storage is unavailable."),
+            Err(_) => {
+                return ActionOutcome::error("storage_error", "Local storage is unavailable.")
+            }
         }
     }
 
@@ -242,7 +247,9 @@ fn run(
                     "That approval no longer applies to this action.",
                 )
             }
-            Err(_) => return ActionOutcome::error("storage_error", "Local storage is unavailable."),
+            Err(_) => {
+                return ActionOutcome::error("storage_error", "Local storage is unavailable.")
+            }
         }
     }
 
@@ -250,7 +257,9 @@ fn run(
     if !authorized {
         let grant = match grants::match_grant(db, ctx, descriptor, &hash) {
             Ok(g) => g,
-            Err(_) => return ActionOutcome::error("storage_error", "Local storage is unavailable."),
+            Err(_) => {
+                return ActionOutcome::error("storage_error", "Local storage is unavailable.")
+            }
         };
         let facts = PolicyFacts {
             declared: true,
@@ -292,17 +301,56 @@ fn run(
         return ActionOutcome::blocked(trip.code(), trip.reason());
     };
 
-    match handlers::dispatch(db, ctx, descriptor, input) {
+    // 7. Execute inside a savepoint. A handler error or an oversized result must
+    //    not leave a partially committed mutation behind.
+    match in_savepoint(db, |db| {
+        let data = handlers::dispatch(db, ctx, descriptor, input)
+            .map_err(|err| ActionOutcome::error(&err.code, err.message))?;
+        match breakers::check_output_size(&data) {
+            Some(trip) => Err(ActionOutcome::blocked(trip.code(), trip.reason())),
+            None => Ok(data),
+        }
+    }) {
         Ok(data) => {
-            if let Some(trip) = breakers::check_output_size(&data) {
-                return ActionOutcome::blocked(trip.code(), trip.reason());
-            }
+            // Once-grants burn only after the mutation is durably committed.
             if let Some(grant) = used_grant.as_ref() {
                 let _ = grants::consume_once_grant(db, grant);
             }
             ActionOutcome::Ok { data }
         }
-        Err(err) => ActionOutcome::error(&err.code, err.message),
+        Err(failure) => failure,
+    }
+}
+
+/// Run `body` inside a SQLite savepoint, rolling back everything it wrote when
+/// it returns an unsuccessful outcome.
+fn in_savepoint<T>(
+    db: &mut Database,
+    body: impl FnOnce(&mut Database) -> Result<T, ActionOutcome>,
+) -> Result<T, ActionOutcome> {
+    if db
+        .conn()
+        .execute_batch("SAVEPOINT registered_action")
+        .is_err()
+    {
+        return Err(ActionOutcome::error(
+            "storage_error",
+            "Local storage is unavailable.",
+        ));
+    }
+    match body(db) {
+        Ok(value) => {
+            let _ = db
+                .conn()
+                .execute_batch("RELEASE SAVEPOINT registered_action");
+            Ok(value)
+        }
+        Err(failure) => {
+            let _ = db.conn().execute_batch(
+                "ROLLBACK TO SAVEPOINT registered_action; RELEASE SAVEPOINT registered_action",
+            );
+            Err(failure)
+        }
     }
 }
 
@@ -320,7 +368,10 @@ fn action_declared(record: &ManifestRecord, ctx: &ActionRunContext, action: &str
             .iter()
             .any(|a| a == action)
     } else {
-        manifest.application_action_access.iter().any(|a| a == action)
+        manifest
+            .application_action_access
+            .iter()
+            .any(|a| a == action)
     };
     if !app_allows {
         return false;
@@ -373,7 +424,9 @@ mod tests {
     use crate::application_kernel::data::{upsert_model, DataField, DataModelDefinition};
     use crate::application_kernel::registered_actions::approvals::RememberChoice;
     use crate::application_kernel::registered_actions::grants::{GrantDuration, GrantScope};
-    use crate::application_kernel::registered_actions::testing::{app_ctx, seed_application, test_db};
+    use crate::application_kernel::registered_actions::testing::{
+        app_ctx, seed_application, test_db,
+    };
     use crate::db::Database;
     use serde_json::json;
 
@@ -448,13 +501,23 @@ mod tests {
         };
 
         approvals::decide(&mut db, &approval_id, true, None, "user").unwrap();
-        let second =
-            execute_registered_action(&mut db, &ctx, "local_data.write", &input, Some(&approval_id));
+        let second = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &input,
+            Some(&approval_id),
+        );
         assert!(second.is_ok(), "{}", outcome_code(&second));
 
         // The same approval cannot authorize a second write.
-        let third =
-            execute_registered_action(&mut db, &ctx, "local_data.write", &input, Some(&approval_id));
+        let third = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &input,
+            Some(&approval_id),
+        );
         assert_eq!(outcome_code(&third), "blocked:approval_invalid");
     }
 
@@ -497,18 +560,16 @@ mod tests {
         let (mut db, _dir) = test_db();
         seed(&mut db);
         let ctx = app_ctx(APP);
-        assert!(
-            grants::mint_grant(
-                &mut db,
-                &ctx,
-                find_action("local_data.delete").unwrap(),
-                GrantScope::Action,
-                GrantDuration::Session,
-                None,
-                "user",
-            )
-            .is_err()
-        );
+        assert!(grants::mint_grant(
+            &mut db,
+            &ctx,
+            find_action("local_data.delete").unwrap(),
+            GrantScope::Action,
+            GrantDuration::Session,
+            None,
+            "user",
+        )
+        .is_err());
         let outcome = execute_registered_action(
             &mut db,
             &ctx,
@@ -600,8 +661,13 @@ mod tests {
         approvals::decide(&mut db, &approval_id, true, None, "user").unwrap();
         crate::application_kernel::permissions::revoke_permission(&mut db, APP, "local_data.write")
             .unwrap();
-        let second =
-            execute_registered_action(&mut db, &ctx, "local_data.write", &input, Some(&approval_id));
+        let second = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &input,
+            Some(&approval_id),
+        );
         assert_eq!(outcome_code(&second), "blocked:policy_blocked");
     }
 
@@ -748,13 +814,8 @@ mod tests {
         );
         assert_eq!(outcome_code(&unknown_app), "blocked:unknown_application");
 
-        let unknown_action = execute_registered_action(
-            &mut db,
-            &app_ctx(APP),
-            "shell.exec",
-            &json!({}),
-            None,
-        );
+        let unknown_action =
+            execute_registered_action(&mut db, &app_ctx(APP), "shell.exec", &json!({}), None);
         assert_eq!(outcome_code(&unknown_action), "error:unknown_action");
     }
 
@@ -858,5 +919,84 @@ mod tests {
         );
         assert!(matches!(outcome, ActionOutcome::Ok { ref data }
             if data.get("count").and_then(|v| v.as_u64()) == Some(0)));
+    }
+
+    fn note_count(db: &Database) -> usize {
+        crate::application_kernel::data::query_records(db, APP, "note", 500)
+            .unwrap()
+            .len()
+    }
+
+    #[test]
+    fn failed_execution_rolls_back_its_writes() {
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        let before = note_count(&db);
+
+        // A handler that writes and then fails must leave nothing behind: this
+        // is the guarantee that protects an oversized-output block from
+        // committing a partial mutation.
+        let outcome: Result<(), ActionOutcome> = in_savepoint(&mut db, |db| {
+            crate::application_kernel::data::create_record(
+                db,
+                APP,
+                "note",
+                json!({ "title": "half-written" }),
+            )
+            .unwrap();
+            Err(ActionOutcome::blocked(
+                "output_too_large",
+                "result too large",
+            ))
+        });
+
+        assert!(matches!(outcome, Err(ActionOutcome::Blocked { .. })));
+        assert_eq!(note_count(&db), before, "rolled-back write still committed");
+    }
+
+    #[test]
+    fn successful_execution_commits_its_writes() {
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        let before = note_count(&db);
+        let outcome: Result<(), ActionOutcome> = in_savepoint(&mut db, |db| {
+            crate::application_kernel::data::create_record(
+                db,
+                APP,
+                "note",
+                json!({ "title": "k" }),
+            )
+            .unwrap();
+            Ok(())
+        });
+        assert!(outcome.is_ok());
+        assert_eq!(note_count(&db), before + 1);
+    }
+
+    #[test]
+    fn oversized_output_is_blocked_and_leaves_no_write() {
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        // Fill the model with enough data that a query exceeds the output bound.
+        let filler = "x".repeat(2048);
+        for _ in 0..64 {
+            crate::application_kernel::data::create_record(
+                &mut db,
+                APP,
+                "note",
+                json!({ "title": filler }),
+            )
+            .unwrap();
+        }
+        let before = note_count(&db);
+        let outcome = execute_registered_action(
+            &mut db,
+            &app_ctx(APP),
+            "local_data.query",
+            &json!({ "modelId": "note", "limit": 500 }),
+            None,
+        );
+        assert_eq!(outcome_code(&outcome), "blocked:output_too_large");
+        assert_eq!(note_count(&db), before);
     }
 }

@@ -7,8 +7,8 @@ use super::CommandError;
 use crate::db::{self, create_conversation, Conversation, DEFAULT_WORKSPACE_ID};
 use crate::projects::{
     archive_project, assign_conversation_to_project, create_project, delete_project,
-    deterministic_fallback_summary, duplicate_conversation, export_project_json,
-    get_project, list_project_conversations, list_projects, list_unassigned_conversations,
+    deterministic_fallback_summary, duplicate_conversation, export_project_json, get_project,
+    list_project_conversations, list_projects, list_unassigned_conversations,
     move_conversations_to_project, rebuild_project_index, remove_conversation_from_project,
     rename_conversation, restore_project, search_project_context, set_project_summary,
     set_project_wallpaper, touch_last_opened, update_project, CreateProjectInput,
@@ -65,7 +65,10 @@ pub fn list_projects_cmd(
 }
 
 #[tauri::command]
-pub fn get_project_cmd(state: State<'_, AppState>, project_id: String) -> Result<Project, CommandError> {
+pub fn get_project_cmd(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<Project, CommandError> {
     let db = state.db.lock();
     Ok(get_project(&db, project_id.trim())?)
 }
@@ -158,7 +161,10 @@ pub fn remove_chat_from_project(
     conversation_id: String,
 ) -> Result<Conversation, CommandError> {
     let mut db = state.db.lock();
-    Ok(remove_conversation_from_project(&mut db, conversation_id.trim())?)
+    Ok(remove_conversation_from_project(
+        &mut db,
+        conversation_id.trim(),
+    )?)
 }
 
 #[tauri::command]
@@ -176,10 +182,7 @@ pub fn list_unassigned_conversations_cmd(
     workspace_id: Option<String>,
 ) -> Result<Vec<Conversation>, CommandError> {
     let db = state.db.lock();
-    Ok(list_unassigned_conversations(
-        &db,
-        workspace_id.as_deref(),
-    )?)
+    Ok(list_unassigned_conversations(&db, workspace_id.as_deref())?)
 }
 
 #[tauri::command]
@@ -222,7 +225,11 @@ pub fn rename_conversation_cmd(
     title: String,
 ) -> Result<Conversation, CommandError> {
     let mut db = state.db.lock();
-    Ok(rename_conversation(&mut db, conversation_id.trim(), &title)?)
+    Ok(rename_conversation(
+        &mut db,
+        conversation_id.trim(),
+        &title,
+    )?)
 }
 
 #[tauri::command]

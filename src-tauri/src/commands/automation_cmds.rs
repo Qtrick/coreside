@@ -80,7 +80,10 @@ pub fn upsert_automation(
             .map(|e| e.consecutive_failures)
             .unwrap_or(0),
         waiting_approval: existing.as_ref().is_some_and(|e| e.waiting_approval),
-        permission_ready: existing.as_ref().map(|e| e.permission_ready).unwrap_or(true),
+        permission_ready: existing
+            .as_ref()
+            .map(|e| e.permission_ready)
+            .unwrap_or(true),
         created_at: existing
             .as_ref()
             .map(|e| e.created_at.clone())
@@ -162,7 +165,10 @@ pub fn upsert_workspace_background(
     input: UpsertBackgroundInput,
 ) -> Result<db::WorkspaceBackground, CommandError> {
     let kind = input.kind.trim().to_lowercase();
-    if !matches!(kind.as_str(), "solid" | "linear" | "radial" | "image" | "pattern") {
+    if !matches!(
+        kind.as_str(),
+        "solid" | "linear" | "radial" | "image" | "pattern"
+    ) {
         return Err(CommandError::new(
             "invalid",
             "Background kind must be solid, linear, radial, image, or pattern",

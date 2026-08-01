@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { ConflictBanner } from "@/components/chat/ConflictBanner";
 import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
@@ -21,10 +21,27 @@ function ToolWindowView({ toolId }: { toolId: string }) {
   const loadToolWindow = useAppStore((s) => s.loadToolWindow);
   const updateToolState = useAppStore((s) => s.updateToolState);
   const bootError = useAppStore((s) => s.bootError);
+  const [applicationId, setApplicationId] = useState<string | null>(null);
 
   useEffect(() => {
     void loadToolWindow(toolId);
   }, [loadToolWindow, toolId]);
+
+  // Crash reporting must use a real kernel application id, never the tool id.
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .kernelGetManifest(toolId)
+      .then((record) => {
+        if (!cancelled) setApplicationId(record.applicationId);
+      })
+      .catch(() => {
+        if (!cancelled) setApplicationId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [toolId]);
 
   if (bootError) {
     return (
@@ -71,6 +88,7 @@ function ToolWindowView({ toolId }: { toolId: string }) {
       <ToolRenderer
         tool={activeTool}
         state={toolState}
+        applicationId={applicationId}
         onStateChange={(state) => {
           void updateToolState(state, true);
         }}

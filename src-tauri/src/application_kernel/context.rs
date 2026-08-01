@@ -4,8 +4,8 @@ use serde_json::{json, Value};
 
 use crate::db::{Database, DbResult};
 
-use super::manifest::get_manifest;
 use super::data::{get_model, query_records};
+use super::manifest::get_manifest;
 
 pub fn application_summary(db: &Database, application_id: &str) -> DbResult<Value> {
     let m = get_manifest(db, application_id)?;
@@ -51,7 +51,11 @@ pub fn data_model_summary(db: &Database, application_id: &str, model_id: &str) -
     }))
 }
 
-pub fn recent_transactions_summary(db: &Database, application_id: &str, limit: usize) -> DbResult<Value> {
+pub fn recent_transactions_summary(
+    db: &Database,
+    application_id: &str,
+    limit: usize,
+) -> DbResult<Value> {
     // Provenance joined lightly
     let mut stmt = db.conn().prepare(
         "SELECT transaction_id, validation_status, test_status, created_at

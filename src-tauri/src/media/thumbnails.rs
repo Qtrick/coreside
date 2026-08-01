@@ -77,8 +77,9 @@ mod tests {
     use image::{ImageBuffer, Rgb};
 
     fn tiny_png() -> Vec<u8> {
-        let img: ImageBuffer<Rgb<u8>, Vec<u8>> =
-            ImageBuffer::from_fn(400, 200, |x, y| Rgb([(x % 255) as u8, (y % 255) as u8, 120]));
+        let img: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_fn(400, 200, |x, y| {
+            Rgb([(x % 255) as u8, (y % 255) as u8, 120])
+        });
         let mut bytes = Vec::new();
         DynamicImage::ImageRgb8(img)
             .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)

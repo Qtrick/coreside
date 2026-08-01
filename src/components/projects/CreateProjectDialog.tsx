@@ -59,7 +59,7 @@ export function CreateProjectDialog({
   };
 
   return (
-    <ModalPortal>
+    <ModalPortal onClose={() => !busy && onClose()}>
       <div className="provider-modal-root" role="presentation">
         <button
           type="button"

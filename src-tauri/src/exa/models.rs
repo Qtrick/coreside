@@ -83,9 +83,7 @@ where
     let value = Option::<serde_json::Value>::deserialize(deserializer)?;
     Ok(match value {
         None | Some(serde_json::Value::Null) => None,
-        Some(serde_json::Value::Number(n)) => Some(ExaCostDollars {
-            total: n.as_f64(),
-        }),
+        Some(serde_json::Value::Number(n)) => Some(ExaCostDollars { total: n.as_f64() }),
         Some(serde_json::Value::String(s)) => Some(ExaCostDollars {
             total: s.trim().parse().ok(),
         }),

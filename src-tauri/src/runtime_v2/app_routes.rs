@@ -38,7 +38,7 @@ pub fn get_route_state(
                     history_json, history_index, updated_at
              FROM application_route_state WHERE application_id = ?1 AND window_id = ?2",
             params![application_id, window_id],
-            |row| parse_route_row(row),
+            parse_route_row,
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
@@ -173,24 +173,12 @@ mod tests {
     #[test]
     fn route_no_op_when_same() {
         let mut db = test_db();
-        set_route_state(
-            &mut db,
-            "app-1",
-            "main",
-            Some("home"),
-            &json!({}),
-            &[],
-            0,
-        )
-        .unwrap();
+        set_route_state(&mut db, "app-1", "main", Some("home"), &json!({}), &[], 0).unwrap();
         let result = navigate_route(&mut db, "app-1", "main", "home", &json!({}), true).unwrap();
         assert!(!result.changed);
         let result2 =
             navigate_route(&mut db, "app-1", "main", "settings", &json!({}), true).unwrap();
         assert!(result2.changed);
-        assert_eq!(
-            result2.state.current_route_id.as_deref(),
-            Some("settings")
-        );
+        assert_eq!(result2.state.current_route_id.as_deref(), Some("settings"));
     }
 }

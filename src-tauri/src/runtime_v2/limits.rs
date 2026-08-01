@@ -22,6 +22,13 @@ pub const MAX_SNAPSHOTS_PER_CONVERSATION: usize = 50;
 pub const MAX_DIAGNOSTICS_RETENTION: usize = 100;
 pub const MAX_REPLAY_OPS_LOADED: usize = 500;
 pub const EVENT_COOLDOWN_MS: u64 = 250;
+/// How long a surface stays suspended after the loop breaker trips. The breaker
+/// stops a runaway loop; it is not a security boundary, so it must release once
+/// the surface goes quiet or the tool would stay dead until the app restarts.
+pub const EVENT_SUSPENSION_SECS: u64 = 60;
+/// Idempotency keys retained in memory. The bus lives for the whole process, so
+/// this set is bounded to keep long sessions from growing without limit.
+pub const MAX_IDEMPOTENCY_KEYS: usize = 5_000;
 pub const MAX_MANIFEST_JSON_BYTES: usize = 256_000;
 pub const MAX_GENERATED_RECORDS_PER_QUERY: usize = 500;
 pub const MAX_ANIMATED_COMPONENTS: usize = 8;

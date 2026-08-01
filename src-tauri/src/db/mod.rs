@@ -1,5 +1,7 @@
 //! SQLite database access for Coreside.
 
+#[cfg(test)]
+mod migration_fixtures;
 mod repositories;
 
 pub use repositories::*;
@@ -9,21 +11,73 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OptionalExtension};
 use thiserror::Error;
 
-const MIGRATION_001: &str = include_str!("../../migrations/001_initial.sql");
-const MIGRATION_002: &str = include_str!("../../migrations/002_added_settings.sql");
-const MIGRATION_003: &str = include_str!("../../migrations/003_provider_connections.sql");
-const MIGRATION_004: &str = include_str!("../../migrations/004_action_log.sql");
-const MIGRATION_005: &str = include_str!("../../migrations/005_automations.sql");
-const MIGRATION_006: &str = include_str!("../../migrations/006_projects.sql");
-const MIGRATION_007: &str = include_str!("../../migrations/007_media_search.sql");
-const MIGRATION_008: &str = include_str!("../../migrations/008_media_thumbnails.sql");
-const MIGRATION_009: &str = include_str!("../../migrations/009_crawler.sql");
-const MIGRATION_010: &str = include_str!("../../migrations/010_exa_wallpapers.sql");
-const MIGRATION_011: &str = include_str!("../../migrations/011_action_log_mode.sql");
-const MIGRATION_012: &str = include_str!("../../migrations/012_runtime_v2.sql");
-const MIGRATION_013: &str = include_str!("../../migrations/013_application_kernel.sql");
-const MIGRATION_014: &str = include_str!("../../migrations/014_continuity_scheduler.sql");
-const MIGRATION_015: &str = include_str!("../../migrations/015_registered_actions.sql");
+/// Ordered forward migrations. The name is what `_migrations.name` records;
+/// the SQL is the exact file shipped under `src-tauri/migrations/`.
+pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "001_initial",
+        include_str!("../../migrations/001_initial.sql"),
+    ),
+    (
+        "002_added_settings",
+        include_str!("../../migrations/002_added_settings.sql"),
+    ),
+    (
+        "003_provider_connections",
+        include_str!("../../migrations/003_provider_connections.sql"),
+    ),
+    (
+        "004_action_log",
+        include_str!("../../migrations/004_action_log.sql"),
+    ),
+    (
+        "005_automations",
+        include_str!("../../migrations/005_automations.sql"),
+    ),
+    (
+        "006_projects",
+        include_str!("../../migrations/006_projects.sql"),
+    ),
+    (
+        "007_media_search",
+        include_str!("../../migrations/007_media_search.sql"),
+    ),
+    (
+        "008_media_thumbnails",
+        include_str!("../../migrations/008_media_thumbnails.sql"),
+    ),
+    (
+        "009_crawler",
+        include_str!("../../migrations/009_crawler.sql"),
+    ),
+    (
+        "010_exa_wallpapers",
+        include_str!("../../migrations/010_exa_wallpapers.sql"),
+    ),
+    (
+        "011_action_log_mode",
+        include_str!("../../migrations/011_action_log_mode.sql"),
+    ),
+    (
+        "012_runtime_v2",
+        include_str!("../../migrations/012_runtime_v2.sql"),
+    ),
+    (
+        "013_application_kernel",
+        include_str!("../../migrations/013_application_kernel.sql"),
+    ),
+    (
+        "014_continuity_scheduler",
+        include_str!("../../migrations/014_continuity_scheduler.sql"),
+    ),
+    (
+        "015_registered_actions",
+        include_str!("../../migrations/015_registered_actions.sql"),
+    ),
+];
+
+/// Latest migration name after a fully upgraded database.
+pub const LATEST_MIGRATION: &str = "015_registered_actions";
 
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -53,21 +107,34 @@ impl Database {
 
     /// Open DB at an explicit path (tests / overrides).
     pub fn open_path(path: &Path) -> DbResult<Self> {
+        Self::open_path_through(path, LATEST_MIGRATION)
+    }
+
+    /// Open a database and apply migrations only through `through` (inclusive).
+    /// Used by upgrade-fixture tests to simulate a user database frozen at an
+    /// older schema before the remaining migrations run.
+    pub fn open_path_through(path: &Path, through: &str) -> DbResult<Self> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                DbError::Invalid(format!("Failed to create DB directory: {e}"))
-            })?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| DbError::Invalid(format!("Failed to create DB directory: {e}")))?;
         }
 
         let conn = Connection::open(path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
+        // busy_timeout: a second Coreside process (or an external inspector) on
+        // the same file must retry rather than fail the first write it attempts.
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA busy_timeout = 5000;",
+        )?;
         let db = Self {
             conn,
             path: path.to_path_buf(),
         };
         tracing::debug!(db_path = %db.path().display(), "opened Coreside database");
         let mut db = db;
-        db.migrate()?;
+        db.migrate_through(through)?;
         Ok(db)
     }
 
@@ -80,6 +147,16 @@ impl Database {
     }
 
     fn migrate(&mut self) -> DbResult<()> {
+        self.migrate_through(LATEST_MIGRATION)
+    }
+
+    fn migrate_through(&mut self, through: &str) -> DbResult<()> {
+        if !MIGRATIONS.iter().any(|(name, _)| *name == through) {
+            return Err(DbError::Invalid(format!(
+                "unknown migration stop point: {through}"
+            )));
+        }
+
         self.conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS _migrations (
                 id INTEGER PRIMARY KEY,
@@ -88,23 +165,22 @@ impl Database {
             );",
         )?;
 
-        self.apply_migration("001_initial", MIGRATION_001)?;
-        self.apply_migration("002_added_settings", MIGRATION_002)?;
-        self.apply_migration("003_provider_connections", MIGRATION_003)?;
-        self.apply_migration("004_action_log", MIGRATION_004)?;
-        self.apply_migration("005_automations", MIGRATION_005)?;
-        self.apply_migration("006_projects", MIGRATION_006)?;
-        self.apply_migration("007_media_search", MIGRATION_007)?;
-        self.apply_migration("008_media_thumbnails", MIGRATION_008)?;
-        self.apply_migration("009_crawler", MIGRATION_009)?;
-        self.apply_migration("010_exa_wallpapers", MIGRATION_010)?;
-        self.apply_migration("011_action_log_mode", MIGRATION_011)?;
-        self.apply_migration("012_runtime_v2", MIGRATION_012)?;
-        self.apply_migration("013_application_kernel", MIGRATION_013)?;
-        self.apply_migration("014_continuity_scheduler", MIGRATION_014)?;
-        self.apply_migration("015_registered_actions", MIGRATION_015)?;
-
+        for (name, sql) in MIGRATIONS {
+            self.apply_migration(name, sql)?;
+            if *name == through {
+                break;
+            }
+        }
         Ok(())
+    }
+
+    /// Names of migrations recorded in `_migrations`, oldest first.
+    pub fn applied_migrations(&self) -> DbResult<Vec<String>> {
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT name FROM _migrations ORDER BY id ASC")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
     }
 
     fn apply_migration(&self, name: &str, sql: &str) -> DbResult<()> {
@@ -214,19 +290,51 @@ mod tests {
         let mut db = Database::open_path(&path).unwrap();
 
         let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Hello", None).unwrap();
-        let msg = insert_message(
-            &mut db,
-            &conv.id,
-            "user",
-            "hi there",
-            None,
-        )
-        .unwrap();
+        let msg = insert_message(&mut db, &conv.id, "user", "hi there", None).unwrap();
 
         let messages = get_messages(&db, &conv.id).unwrap();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].id, msg.id);
         assert_eq!(messages[0].content, "hi there");
+    }
+
+    #[test]
+    fn recent_messages_are_bounded_and_oldest_first() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("recent.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Long", None).unwrap();
+        for i in 0..25 {
+            insert_message(&mut db, &conv.id, "user", &format!("m{i}"), None).unwrap();
+        }
+
+        let recent = get_recent_messages(&db, &conv.id, 5).unwrap();
+        assert_eq!(recent.len(), 5);
+        // Newest five, still presented oldest-first for prompt assembly.
+        let contents: Vec<_> = recent.iter().map(|m| m.content.as_str()).collect();
+        assert_eq!(contents, vec!["m20", "m21", "m22", "m23", "m24"]);
+
+        // A limit above the row count returns everything, unchanged.
+        assert_eq!(get_recent_messages(&db, &conv.id, 500).unwrap().len(), 25);
+        assert_eq!(
+            get_recent_messages(&db, &conv.id, 500).unwrap()[0].content,
+            "m0"
+        );
+    }
+
+    #[test]
+    fn busy_timeout_and_foreign_keys_are_configured() {
+        let dir = tempdir().unwrap();
+        let db = Database::open_path(&dir.path().join("pragma.db")).unwrap();
+        let busy: i64 = db
+            .conn()
+            .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
+            .unwrap();
+        assert!(busy >= 5000, "busy_timeout not set: {busy}");
+        let fk: i64 = db
+            .conn()
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(fk, 1);
     }
 
     #[test]
@@ -341,7 +449,8 @@ mod tests {
 
     #[test]
     fn provider_connections_schema_has_no_api_key_column() {
-        let migration = include_str!("../../migrations/003_provider_connections.sql").to_lowercase();
+        let migration =
+            include_str!("../../migrations/003_provider_connections.sql").to_lowercase();
         assert!(
             !migration.contains("api_key"),
             "migration must not define an api_key column"

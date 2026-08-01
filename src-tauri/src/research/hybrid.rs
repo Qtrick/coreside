@@ -19,9 +19,7 @@ use crate::search::{
     SearchRequest, VideoSearchResponse, VideoSearchResult, WebSearchResponse, WebSearchResult,
 };
 
-use super::discovery::{
-    classify_discovery_seed, DiscoverySeed, NEEDS_EXA_OR_SEED_MESSAGE,
-};
+use super::discovery::{classify_discovery_seed, DiscoverySeed, NEEDS_EXA_OR_SEED_MESSAGE};
 use super::provider::Crawl4aiSearchProvider;
 use super::ranking::rank_web_candidates;
 
@@ -252,9 +250,7 @@ impl HybridSearchProvider {
         let domains_ref = include_domains.as_deref();
 
         // Cache hits skip budget and do not attribute spend.
-        let outcome = if let Some(cached) =
-            peek_cached_search(&req.query, profile, domains_ref)
-        {
+        let outcome = if let Some(cached) = peek_cached_search(&req.query, profile, domains_ref) {
             cached
         } else {
             let estimated = estimate_search_cost(profile.search_type(), num);
@@ -304,10 +300,7 @@ impl HybridSearchProvider {
     }
 }
 
-fn map_exa_results(
-    results: &[crate::exa::ExaResult],
-    limit: usize,
-) -> Vec<WebSearchResult> {
+fn map_exa_results(results: &[crate::exa::ExaResult], limit: usize) -> Vec<WebSearchResult> {
     let mut out = Vec::new();
     for (i, r) in results.iter().take(limit).enumerate() {
         let Ok(safe_url) = validate_public_http_url(&r.url) else {
@@ -377,7 +370,9 @@ mod tests {
     #[test]
     fn notice_mentions_exa_or_url() {
         assert!(NEEDS_EXA_OR_SEED_MESSAGE.contains("Exa"));
-        assert!(NEEDS_EXA_OR_SEED_MESSAGE.contains("URL") || NEEDS_EXA_OR_SEED_MESSAGE.contains("url"));
+        assert!(
+            NEEDS_EXA_OR_SEED_MESSAGE.contains("URL") || NEEDS_EXA_OR_SEED_MESSAGE.contains("url")
+        );
     }
 
     #[test]

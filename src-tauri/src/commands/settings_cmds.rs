@@ -148,11 +148,7 @@ fn settings_from_map(map: &std::collections::HashMap<String, String>) -> AppSett
             "background_light",
             DEFAULT_BACKGROUND_LIGHT,
         ),
-        background_dark: color(
-            "backgroundDark",
-            "background_dark",
-            DEFAULT_BACKGROUND_DARK,
-        ),
+        background_dark: color("backgroundDark", "background_dark", DEFAULT_BACKGROUND_DARK),
         surface_light: color("surfaceLight", "surface_light", DEFAULT_SURFACE_LIGHT),
         surface_dark: color("surfaceDark", "surface_dark", DEFAULT_SURFACE_DARK),
         surface_muted_light: color(
@@ -311,8 +307,8 @@ pub fn set_setting(
             "Secrets cannot be stored via settings; use secure provider credentials.",
         ));
     }
-    let stored = normalize_setting_kv(&key, &stored)
-        .map_err(|e| CommandError::new("invalid", e))?;
+    let stored =
+        normalize_setting_kv(&key, &stored).map_err(|e| CommandError::new("invalid", e))?;
     let mut db = state.db.lock();
     db::set_setting(&mut db, &key, &stored)?;
     // Keep Action Log boolean + mode keys in sync for older readers.
@@ -343,10 +339,7 @@ pub fn list_added_settings(
     owner_tool_id: Option<String>,
 ) -> Result<Vec<AddedSettingRecord>, CommandError> {
     let db = state.db.lock();
-    Ok(db::list_added_settings(
-        &db,
-        owner_tool_id.as_deref(),
-    )?)
+    Ok(db::list_added_settings(&db, owner_tool_id.as_deref())?)
 }
 
 #[tauri::command]
@@ -359,17 +352,16 @@ pub fn upsert_added_setting(
 }
 
 #[tauri::command]
-pub fn delete_added_setting(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), CommandError> {
+pub fn delete_added_setting(state: State<'_, AppState>, id: String) -> Result<(), CommandError> {
     let mut db = state.db.lock();
     Ok(db::delete_added_setting(&mut db, &id)?)
 }
 
 /// Rejects any protected / `core.*` ids. Used before applying tool or resource changes.
 #[tauri::command]
-pub fn validate_change_targets(ids: Vec<String>) -> Result<ValidateChangeTargetsResult, CommandError> {
+pub fn validate_change_targets(
+    ids: Vec<String>,
+) -> Result<ValidateChangeTargetsResult, CommandError> {
     let mut rejected = Vec::new();
     for id in &ids {
         if is_protected(id) {
@@ -399,10 +391,7 @@ pub fn set_dock_icon(
 
 /// Back-compat: OS appearance with preference treated as `auto`.
 #[tauri::command]
-pub fn set_dock_icon_for_os_appearance(
-    app: AppHandle,
-    is_dark: bool,
-) -> Result<(), CommandError> {
+pub fn set_dock_icon_for_os_appearance(app: AppHandle, is_dark: bool) -> Result<(), CommandError> {
     branding::set_dock_icon_for_os_appearance(&app, is_dark)
         .map_err(|e| CommandError::new("dock_icon", e))
 }

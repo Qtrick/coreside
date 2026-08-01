@@ -7,9 +7,7 @@ use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
 use super::errors::AiError;
-use super::provider::{
-    AgentRequest, AgentResponse, AiProvider, ProviderHealth, UsageMetadata,
-};
+use super::provider::{AgentRequest, AgentResponse, AiProvider, ProviderHealth, UsageMetadata};
 use super::response_schema::SCHEMA_VERSION;
 use crate::security::redact_secrets;
 
@@ -37,10 +35,7 @@ impl GeminiProvider {
     }
 
     fn generate_url(&self) -> String {
-        format!(
-            "{}/models/{}:generateContent",
-            self.base_url, self.model
-        )
+        format!("{}/models/{}:generateContent", self.base_url, self.model)
     }
 
     fn list_models_url(&self) -> String {
@@ -270,7 +265,10 @@ impl GeminiProvider {
             AiError::Parse(format!(
                 "Invalid Gemini JSON: {} — {}",
                 e,
-                redact_secrets(&text.chars().take(200).collect::<String>(), Some(&self.api_key))
+                redact_secrets(
+                    &text.chars().take(200).collect::<String>(),
+                    Some(&self.api_key)
+                )
             ))
         })
     }
@@ -413,7 +411,10 @@ impl AiProvider for GeminiProvider {
 
         let _ = SCHEMA_VERSION;
 
-        let payload = match self.send_generate(body.clone(), request.cancel.clone()).await {
+        let payload = match self
+            .send_generate(body.clone(), request.cancel.clone())
+            .await
+        {
             Ok(payload) => payload,
             Err(err) => {
                 let msg = err.to_string().to_lowercase();

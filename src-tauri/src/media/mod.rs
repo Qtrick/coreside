@@ -14,9 +14,8 @@ pub use download::download_and_validate;
 pub use errors::MediaError;
 pub use models::{ImportMediaInput, MediaAsset};
 pub use repository::{
-    delete_media_asset, find_by_hash, find_media_asset_usages, get_media_asset,
-    insert_media_asset, list_media_assets, media_readable_in_scope, touch_media_used,
-    MediaAssetUsage,
+    delete_media_asset, find_by_hash, find_media_asset_usages, get_media_asset, insert_media_asset,
+    list_media_assets, media_readable_in_scope, touch_media_used, MediaAssetUsage,
 };
 pub use storage::resolve_asset_file_path;
 
@@ -31,11 +30,12 @@ pub async fn import_media_asset(
         return Err(MediaError::Invalid("url is required".into()));
     }
 
-    let (bytes, hash, meta) =
-        download_and_validate(url, input.category.as_deref()).await?;
+    let (bytes, hash, meta) = download_and_validate(url, input.category.as_deref()).await?;
     let meta = enrich_metadata(meta, &bytes)?;
 
-    if let Some(existing) = find_by_hash(db, &hash).map_err(|e| MediaError::Database(e.to_string()))? {
+    if let Some(existing) =
+        find_by_hash(db, &hash).map_err(|e| MediaError::Database(e.to_string()))?
+    {
         return Ok(existing);
     }
 

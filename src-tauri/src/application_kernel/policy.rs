@@ -48,12 +48,15 @@ pub fn evaluate_policy(
     let message = match decision.as_str() {
         "deny" => format!("Local policy denies {key}"),
         "require_user_approval" => format!("Local policy requires approval for {key}"),
-        "require_admin_approval" => format!("Enterprise policy would require admin approval for {key}"),
+        "require_admin_approval" => {
+            format!("Enterprise policy would require admin approval for {key}")
+        }
         "disable_export" => "Export is disabled by policy".into(),
         other => format!("Policy decision: {other}"),
     };
     // Map disable_export to deny for export
-    let decision = if decision == "disable_export" && matches!(action, PolicyAction::ExportPackage) {
+    let decision = if decision == "disable_export" && matches!(action, PolicyAction::ExportPackage)
+    {
         "deny".into()
     } else {
         decision

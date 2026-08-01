@@ -1,25 +1,11 @@
 import { useState } from "react";
 import type { MessageSearchResults, SourceCitation } from "@/types/search";
-import { MessageSearchResultsSchema, SourceCitationSchema } from "@/types/search";
 import { SourceList } from "@/components/search/SourceList";
 import { WebResultCard } from "@/components/search/WebResultCard";
 import { ImageResultCard } from "@/components/search/ImageResultCard";
 import { VideoResultCard } from "@/components/search/VideoResultCard";
 import { api } from "@/lib/tauri";
 import type { ImportMediaInput } from "@/types/media";
-
-function parseCitations(raw: unknown): SourceCitation[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item) => SourceCitationSchema.safeParse(item))
-    .filter((r) => r.success)
-    .map((r) => r.data);
-}
-
-function parseSearchResults(raw: unknown): MessageSearchResults | null {
-  const parsed = MessageSearchResultsSchema.safeParse(raw);
-  return parsed.success ? parsed.data : null;
-}
 
 function PendingMediaImports({
   items,
@@ -152,16 +138,4 @@ export function SearchResults({
       {citeList.length > 0 ? <SourceList citations={citeList} /> : null}
     </div>
   );
-}
-
-export function searchDataFromMetadata(
-  metadata: Record<string, unknown> | null | undefined,
-): { citations: SourceCitation[]; searchResults: MessageSearchResults | null } {
-  if (!metadata) {
-    return { citations: [], searchResults: null };
-  }
-  return {
-    citations: parseCitations(metadata.citations),
-    searchResults: parseSearchResults(metadata.searchResults),
-  };
 }

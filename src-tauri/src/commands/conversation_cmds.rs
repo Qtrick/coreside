@@ -12,10 +12,7 @@ pub fn list_conversations(
     workspace_id: Option<String>,
 ) -> Result<Vec<Conversation>, CommandError> {
     let db = state.db.lock();
-    Ok(db::list_conversations(
-        &db,
-        workspace_id.as_deref(),
-    )?)
+    Ok(db::list_conversations(&db, workspace_id.as_deref())?)
 }
 
 #[tauri::command]

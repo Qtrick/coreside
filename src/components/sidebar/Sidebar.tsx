@@ -15,11 +15,12 @@ import {
 import { CoresideLogo } from "@/components/branding/CoresideLogo";
 import { ChatContextMenu } from "@/components/context-menu/ChatContextMenu";
 import { ProjectContextMenu } from "@/components/context-menu/ProjectContextMenu";
-import { useContextMenuTrigger } from "@/components/context-menu/ContextMenu";
+import { useContextMenuTrigger } from "@/components/context-menu/use-context-menu";
 import { ProjectList } from "@/components/projects/ProjectList";
 import { isCurrentChat } from "@/lib/navigation";
 import type { Project } from "@/types/project";
 import type { Conversation } from "@/types/messages";
+import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/stores/app-store";
 
 const ICON_EXPANDED = 16;
@@ -27,6 +28,8 @@ const ICON_COLLAPSED = 22;
 const LOGO_SIZE = 28;
 
 export function Sidebar() {
+  // Shallow-compared selector: the sidebar stays mounted during chat
+  // streaming, so a full-store subscription would re-render it per token.
   const {
     sidebarCollapsed,
     toggleSidebar,
@@ -60,7 +63,42 @@ export function Sidebar() {
     archiveProject,
     restoreProject,
     resolvedTheme,
-  } = useAppStore();
+  } = useAppStore(
+    useShallow((s) => ({
+      sidebarCollapsed: s.sidebarCollapsed,
+      toggleSidebar: s.toggleSidebar,
+      view: s.view,
+      conversations: s.conversations,
+      activeConversationId: s.activeConversationId,
+      navigateToChat: s.navigateToChat,
+      createConversation: s.createConversation,
+      tools: s.tools,
+      activeToolId: s.activeToolId,
+      selectTool: s.selectTool,
+      navigateToSettings: s.navigateToSettings,
+      navigateToAutomations: s.navigateToAutomations,
+      navigateToMedia: s.navigateToMedia,
+      navigateToProjects: s.navigateToProjects,
+      navigateToProject: s.navigateToProject,
+      projects: s.projects,
+      projectsExpanded: s.projectsExpanded,
+      setProjectsExpanded: s.setProjectsExpanded,
+      activeProjectId: s.activeProjectId,
+      setCreateProjectDialogOpen: s.setCreateProjectDialogOpen,
+      setEditProjectDialogOpen: s.setEditProjectDialogOpen,
+      setAddChatsDialogOpen: s.setAddChatsDialogOpen,
+      setDeleteProjectDialogOpen: s.setDeleteProjectDialogOpen,
+      setRenameConversationDialogOpen: s.setRenameConversationDialogOpen,
+      createChatInProject: s.createChatInProject,
+      assignChats: s.assignChats,
+      removeChatFromProject: s.removeChatFromProject,
+      duplicateConversation: s.duplicateConversation,
+      deleteConversation: s.deleteConversation,
+      archiveProject: s.archiveProject,
+      restoreProject: s.restoreProject,
+      resolvedTheme: s.resolvedTheme,
+    })),
+  );
 
   const iconSize = sidebarCollapsed ? ICON_COLLAPSED : ICON_EXPANDED;
   const chatMenu = useContextMenuTrigger();

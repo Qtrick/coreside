@@ -36,13 +36,11 @@ pub struct StageAttachmentInput {
 }
 
 fn attachments_root() -> Result<PathBuf, CommandError> {
-    let base = data_dir().ok_or_else(|| {
-        CommandError::new("storage", "App data directory unavailable")
-    })?;
+    let base =
+        data_dir().ok_or_else(|| CommandError::new("storage", "App data directory unavailable"))?;
     let root = base.join("Coreside").join("chat-attachments");
-    std::fs::create_dir_all(&root).map_err(|e| {
-        CommandError::new("storage", sanitize_error(&e.to_string(), None))
-    })?;
+    std::fs::create_dir_all(&root)
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
     Ok(root)
 }
 
@@ -82,7 +80,9 @@ fn mime_allowed(mime: &str) -> bool {
 }
 
 #[tauri::command]
-pub fn stage_chat_attachment(input: StageAttachmentInput) -> Result<StagedAttachment, CommandError> {
+pub fn stage_chat_attachment(
+    input: StageAttachmentInput,
+) -> Result<StagedAttachment, CommandError> {
     let mime = input.mime_type.trim().to_ascii_lowercase();
     if !mime_allowed(&mime) {
         return Err(CommandError::new(
@@ -91,9 +91,9 @@ pub fn stage_chat_attachment(input: StageAttachmentInput) -> Result<StagedAttach
         ));
     }
 
-    let bytes = B64.decode(input.data_base64.trim()).map_err(|_| {
-        CommandError::new("invalid", "Attachment data is not valid base64")
-    })?;
+    let bytes = B64
+        .decode(input.data_base64.trim())
+        .map_err(|_| CommandError::new("invalid", "Attachment data is not valid base64"))?;
     if bytes.is_empty() {
         return Err(CommandError::new("invalid", "Attachment is empty"));
     }
@@ -123,9 +123,8 @@ pub fn stage_chat_attachment(input: StageAttachmentInput) -> Result<StagedAttach
     let safe_name = sanitize_filename(&input.name);
     let local_filename = format!("{id}_{safe_name}");
     let path = attachments_root()?.join(&local_filename);
-    std::fs::write(&path, &bytes).map_err(|e| {
-        CommandError::new("storage", sanitize_error(&e.to_string(), None))
-    })?;
+    std::fs::write(&path, &bytes)
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
 
     Ok(StagedAttachment {
         id,
@@ -137,9 +136,7 @@ pub fn stage_chat_attachment(input: StageAttachmentInput) -> Result<StagedAttach
 }
 
 #[tauri::command]
-pub fn get_chat_attachment_src(
-    local_filename: String,
-) -> Result<String, CommandError> {
+pub fn get_chat_attachment_src(local_filename: String) -> Result<String, CommandError> {
     let name = Path::new(local_filename.trim())
         .file_name()
         .and_then(|n| n.to_str())
@@ -151,14 +148,17 @@ pub fn get_chat_attachment_src(
     if !path.exists() {
         return Err(CommandError::new("not_found", "Attachment not found"));
     }
-    let canonical = path.canonicalize().map_err(|e| {
-        CommandError::new("storage", sanitize_error(&e.to_string(), None))
-    })?;
-    let root = attachments_root()?.canonicalize().map_err(|e| {
-        CommandError::new("storage", sanitize_error(&e.to_string(), None))
-    })?;
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+    let root = attachments_root()?
+        .canonicalize()
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
     if !canonical.starts_with(&root) {
-        return Err(CommandError::new("invalid", "Path outside attachments directory"));
+        return Err(CommandError::new(
+            "invalid",
+            "Path outside attachments directory",
+        ));
     }
     Ok(canonical.to_string_lossy().into_owned())
 }

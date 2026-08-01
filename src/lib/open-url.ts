@@ -1,13 +1,12 @@
-import { open } from "@tauri-apps/plugin-shell";
+import { api } from "@/lib/tauri";
 
+/**
+ * Open an external http(s) URL via the trusted Rust command.
+ * Frontend must not call the shell plugin or window.open for untrusted URLs —
+ * SSRF and scheme checks live in Rust.
+ */
 export async function openExternalUrl(url: string): Promise<void> {
   const trimmed = url.trim();
-  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-    return;
-  }
-  try {
-    await open(trimmed);
-  } catch {
-    window.open(trimmed, "_blank", "noopener,noreferrer");
-  }
+  if (!trimmed) return;
+  await api.openExternalUrl(trimmed);
 }

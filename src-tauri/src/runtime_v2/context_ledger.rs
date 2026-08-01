@@ -76,12 +76,10 @@ pub fn get_ledger_entry(db: &Database, id: &str) -> DbResult<ContextLedgerEntry>
                     payload_json, summary, expiration_class, created_at
              FROM context_ledger_entries WHERE id = ?1",
             [id],
-            |row| parse_ledger_row(row),
+            parse_ledger_row,
         )
         .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => {
-                DbError::NotFound(format!("ledger entry {id}"))
-            }
+            rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(format!("ledger entry {id}")),
             other => DbError::Sqlite(other),
         })
 }

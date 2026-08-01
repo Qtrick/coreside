@@ -99,8 +99,8 @@ pub fn validate_record(def: &DataModelDefinition, data: &Value) -> Result<(), St
                 "boolean" if !v.is_boolean() => {
                     return Err(format!("{} must be boolean", f.field_id));
                 }
-                "text" | "long_text" | "date" | "time" | "date_time" | "duration"
-                | "reference" | "media_ref" | "surface_ref" | "tool_ref"
+                "text" | "long_text" | "date" | "time" | "date_time" | "duration" | "reference"
+                | "media_ref" | "surface_ref" | "tool_ref"
                     if !v.is_string() && !v.is_null() =>
                 {
                     return Err(format!("{} must be string", f.field_id));
@@ -333,7 +333,12 @@ pub fn apply_migration(
                 }
             }
             // Rewrite records
-            let records = query_records(db, application_id, model_id, MAX_GENERATED_RECORDS_PER_QUERY)?;
+            let records = query_records(
+                db,
+                application_id,
+                model_id,
+                MAX_GENERATED_RECORDS_PER_QUERY,
+            )?;
             for mut rec in records {
                 if let Some(obj) = rec.as_object_mut() {
                     if let Some(v) = obj.remove(old) {
@@ -400,12 +405,27 @@ pub fn apply_migration(
     // Apply defaults to existing records for add_field
     if migration.migration_type == "add_field" {
         if let (Some(fid), Some(default)) = (&migration.field_id, &migration.default) {
-            let records = query_records(db, application_id, model_id, MAX_GENERATED_RECORDS_PER_QUERY)?;
+            let records = query_records(
+                db,
+                application_id,
+                model_id,
+                MAX_GENERATED_RECORDS_PER_QUERY,
+            )?;
             for mut rec in records {
                 if let Some(obj) = rec.as_object_mut() {
                     if !obj.contains_key(fid) {
+                        // A record without `_id` cannot be rewritten; skip it
+                        // rather than panicking part-way through a migration.
+                        let Some(id) = obj.get("_id").and_then(|v| v.as_str()).map(str::to_string)
+                        else {
+                            tracing::warn!(
+                                application_id,
+                                model_id,
+                                "skipped add_field backfill for a record with no id"
+                            );
+                            continue;
+                        };
                         obj.insert(fid.clone(), default.clone());
-                        let id = obj.get("_id").and_then(|v| v.as_str()).unwrap().to_string();
                         obj.remove("_id");
                         obj.remove("_version");
                         obj.remove("_createdAt");

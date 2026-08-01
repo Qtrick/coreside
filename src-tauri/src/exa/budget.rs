@@ -102,7 +102,11 @@ pub fn save_budget_config(db: &mut Database, cfg: &BudgetConfig) -> DbResult<()>
         .unwrap_or_default();
     set_setting(db, SETTING_MONTHLY_BUDGET, &budget)?;
     set_setting(db, SETTING_SOFT_PERCENT, &format!("{}", cfg.soft_percent))?;
-    set_setting(db, SETTING_CRITICAL_PERCENT, &format!("{}", cfg.critical_percent))?;
+    set_setting(
+        db,
+        SETTING_CRITICAL_PERCENT,
+        &format!("{}", cfg.critical_percent),
+    )?;
     set_setting(db, SETTING_HARD_PERCENT, &format!("{}", cfg.hard_percent))?;
     Ok(())
 }
@@ -128,13 +132,9 @@ pub fn budget_status(db: &Database) -> BudgetStatus {
     let month_key = month_key_now();
     let spent = sum_month_actual_cost(db, &month_key).unwrap_or(0.0);
     let threshold = classify_threshold(spent, &cfg);
-    let percent_used = cfg.monthly_budget_usd.map(|b| {
-        if b <= 0.0 {
-            0.0
-        } else {
-            (spent / b) * 100.0
-        }
-    });
+    let percent_used = cfg
+        .monthly_budget_usd
+        .map(|b| if b <= 0.0 { 0.0 } else { (spent / b) * 100.0 });
     let remaining = cfg.monthly_budget_usd.map(|b| (b - spent).max(0.0));
     BudgetStatus {
         month_key,

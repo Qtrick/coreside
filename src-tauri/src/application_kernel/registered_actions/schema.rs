@@ -20,9 +20,9 @@ fn validate_node(schema: &Value, value: &Value, path: &str) -> Result<(), String
         || schema.get("properties").is_some()
         || schema.get("required").is_some()
     {
-        let obj = value.as_object().ok_or_else(|| {
-            format!("{path}: expected an object")
-        })?;
+        let obj = value
+            .as_object()
+            .ok_or_else(|| format!("{path}: expected an object"))?;
 
         if let Some(required) = schema.get("required").and_then(|r| r.as_array()) {
             for key in required {

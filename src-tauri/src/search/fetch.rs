@@ -4,7 +4,6 @@ use std::time::Duration;
 use reqwest::Client;
 use tokio::time::timeout;
 
-
 use super::errors::SearchError;
 use super::models::FetchedWebPage;
 use super::normalization::{bound_text, extract_text_from_html};
@@ -46,10 +45,7 @@ pub fn resolve_search_env_key() -> Option<String> {
 }
 
 pub fn has_search_key(provider: &str) -> bool {
-    resolve_search_api_key(provider)
-        .ok()
-        .flatten()
-        .is_some()
+    resolve_search_api_key(provider).ok().flatten().is_some()
 }
 
 pub fn set_search_secret(account: &str, secret: &str) -> Result<(), SearchError> {
@@ -111,16 +107,11 @@ pub async fn fetch_web_page(client: &Client, raw_url: &str) -> Result<FetchedWeb
         return Err(SearchError::RateLimited);
     }
     if !response.status().is_success() {
-        return Err(SearchError::Fetch(format!(
-            "HTTP {}",
-            response.status()
-        )));
+        return Err(SearchError::Fetch(format!("HTTP {}", response.status())));
     }
 
     let final_url = response.url().to_string();
-    if let Err(e) = validate_public_http_url(&final_url) {
-        return Err(e);
-    }
+    validate_public_http_url(&final_url)?;
 
     let content_type = response
         .headers()
@@ -150,11 +141,7 @@ pub async fn fetch_web_page(client: &Client, raw_url: &str) -> Result<FetchedWeb
         bound_text(body.trim(), MAX_EXTRACTED_TEXT_CHARS)
     };
 
-    let title = if is_html {
-        extract_title(&body)
-    } else {
-        None
-    };
+    let title = if is_html { extract_title(&body) } else { None };
 
     Ok(FetchedWebPage {
         url: raw_url.trim().to_string(),
@@ -189,15 +176,9 @@ mod tests {
     fn env_key_resolution_order() {
         std::env::set_var("BRAVE_SEARCH_API_KEY", "brave-test");
         std::env::set_var("SEARCH_API_KEY", "generic");
-        assert_eq!(
-            resolve_search_env_key().as_deref(),
-            Some("brave-test")
-        );
+        assert_eq!(resolve_search_env_key().as_deref(), Some("brave-test"));
         std::env::remove_var("BRAVE_SEARCH_API_KEY");
-        assert_eq!(
-            resolve_search_env_key().as_deref(),
-            Some("generic")
-        );
+        assert_eq!(resolve_search_env_key().as_deref(), Some("generic"));
         std::env::remove_var("SEARCH_API_KEY");
     }
 }

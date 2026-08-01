@@ -107,7 +107,10 @@ impl AnthropicProvider {
             AiError::Parse(format!(
                 "Invalid Anthropic JSON: {} — {}",
                 e,
-                redact_secrets(&text.chars().take(200).collect::<String>(), Some(&self.api_key))
+                redact_secrets(
+                    &text.chars().take(200).collect::<String>(),
+                    Some(&self.api_key)
+                )
             ))
         })
     }
@@ -163,10 +166,14 @@ impl AiProvider for AnthropicProvider {
     }
 
     async fn health_check(&self, cancel: CancellationToken) -> Result<ProviderHealth, AiError> {
-        let body = Self::build_body("Reply with ok.", &[AgentMessage {
-            role: "user".into(),
-            content: "ping".into(),
-        }], &self.model);
+        let body = Self::build_body(
+            "Reply with ok.",
+            &[AgentMessage {
+                role: "user".into(),
+                content: "ping".into(),
+            }],
+            &self.model,
+        );
         // Use a tiny max_tokens override for health.
         let mut body = body;
         if let Some(obj) = body.as_object_mut() {
@@ -185,11 +192,7 @@ impl AiProvider for AnthropicProvider {
             return Err(AiError::Cancelled);
         }
         let _ = SCHEMA_VERSION;
-        let body = Self::build_body(
-            &request.system_prompt,
-            &request.messages,
-            &self.model,
-        );
+        let body = Self::build_body(&request.system_prompt, &request.messages, &self.model);
         let payload = self.post_messages(body, request.cancel.clone()).await?;
         let raw_text = Self::extract_text(&payload)?;
         let usage = Self::extract_usage(&payload);

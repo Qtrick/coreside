@@ -1,6 +1,6 @@
 import { Folder, FolderPlus } from "lucide-react";
 import type { Project } from "@/types/project";
-import { projectIconClass } from "./ProjectList";
+import { projectIconClass } from "./project-icon";
 
 type ProjectsListPageProps = {
   projects: Project[];

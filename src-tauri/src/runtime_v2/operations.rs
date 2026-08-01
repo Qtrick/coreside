@@ -6,10 +6,10 @@ use serde_json::{json, Value};
 use super::limits::{
     MAX_DEFINITION_JSON_BYTES, MAX_OPERATIONS_PER_TURN, MAX_TRANSACTION_GROUPS_PER_TURN,
 };
-use crate::ai::{ToolChangePayload, ToolDefinition};
 use crate::ai::SettingsChangePayload;
-use crate::ai::ToolCallRequest;
 use crate::ai::SourceCitation;
+use crate::ai::ToolCallRequest;
+use crate::ai::{ToolChangePayload, ToolDefinition};
 
 pub const SCHEMA_VERSION_V2: &str = "2";
 
@@ -276,16 +276,21 @@ impl AgentResponseV2 {
         validate_operations(&self.operations)?;
 
         let has_visible = !self.visible_assistant_text().trim().is_empty();
-        let silent = self.silent.unwrap_or(false)
-            || (!has_visible && !self.operations.is_empty());
+        let silent = self.silent.unwrap_or(false) || (!has_visible && !self.operations.is_empty());
         if !silent
             && !has_visible
             && self.operations.is_empty()
             && self.tool_change.is_none()
             && self.settings_change.is_none()
-            && self.tool_calls.as_ref().map(|c| c.is_empty()).unwrap_or(true)
+            && self
+                .tool_calls
+                .as_ref()
+                .map(|c| c.is_empty())
+                .unwrap_or(true)
         {
-            return Err("response must include a message, operations, or tool/settings change".into());
+            return Err(
+                "response must include a message, operations, or tool/settings change".into(),
+            );
         }
         Ok(())
     }

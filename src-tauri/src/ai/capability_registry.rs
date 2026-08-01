@@ -191,7 +191,9 @@ pub fn validate_tool_call(req: &ToolCallRequest) -> Result<AgentCapability, Stri
         AgentCapability::ProjectContextSearch => {
             require_str(&req.arguments, "query")?;
         }
-        AgentCapability::WebSearch | AgentCapability::ImageSearch | AgentCapability::VideoSearch => {
+        AgentCapability::WebSearch
+        | AgentCapability::ImageSearch
+        | AgentCapability::VideoSearch => {
             require_str(&req.arguments, "query")?;
         }
         AgentCapability::FetchWebPage => {
@@ -222,13 +224,10 @@ pub fn validate_tool_output(cap: AgentCapability, output: &Value) -> Result<(), 
     if !output.is_object() && !output.is_array() && !output.is_string() && !output.is_null() {
         return Err("tool output must be JSON object, array, string, or null".into());
     }
-    match cap {
-        AgentCapability::ImportMediaAsset => {
-            if output.get("pendingApproval").and_then(|v| v.as_bool()) != Some(true) {
-                return Err("import_media_asset output must set pendingApproval=true".into());
-            }
-        }
-        _ => {}
+    if cap == AgentCapability::ImportMediaAsset
+        && output.get("pendingApproval").and_then(|v| v.as_bool()) != Some(true)
+    {
+        return Err("import_media_asset output must set pendingApproval=true".into());
     }
     Ok(())
 }

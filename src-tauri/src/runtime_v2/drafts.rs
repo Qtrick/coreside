@@ -51,7 +51,8 @@ pub fn get_draft(
                     form_id: row.get(3)?,
                     window_id: row.get(4)?,
                     base_revision: row.get(5)?,
-                    draft: serde_json::from_str(&draft_json).unwrap_or(Value::Object(Default::default())),
+                    draft: serde_json::from_str(&draft_json)
+                        .unwrap_or(Value::Object(Default::default())),
                     persistence_policy: row.get(7)?,
                     updated_at: row.get(8)?,
                     created_at: row.get(9)?,
@@ -73,8 +74,8 @@ pub fn save_draft(
     persistence_policy: Option<&str>,
     force: bool,
 ) -> Result<SurfaceDraft, DraftConflict> {
-    if let Some(existing) = get_draft(db, surface_id, component_id, window_id)
-        .map_err(|_| DraftConflict {
+    if let Some(existing) =
+        get_draft(db, surface_id, component_id, window_id).map_err(|_| DraftConflict {
             stored_revision: -1,
             requested_revision: base_revision,
         })?

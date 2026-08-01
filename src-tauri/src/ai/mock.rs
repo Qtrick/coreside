@@ -5,9 +5,7 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 use super::errors::AiError;
-use super::provider::{
-    AgentRequest, AgentResponse, AiProvider, ProviderHealth, UsageMetadata,
-};
+use super::provider::{AgentRequest, AgentResponse, AiProvider, ProviderHealth, UsageMetadata};
 use super::response_schema::SCHEMA_VERSION;
 
 pub struct MockAiProvider;
@@ -150,7 +148,10 @@ impl MockAiProvider {
             .to_string();
         }
 
-        if lower.contains("progress") || lower.contains("encourag") || lower.contains("goal message") {
+        if lower.contains("progress")
+            || lower.contains("encourag")
+            || lower.contains("goal message")
+        {
             return json!({
                 "schemaVersion": SCHEMA_VERSION,
                 "assistantMessage": "I updated your water tracker with a progress cue and a goal celebration message.",
@@ -290,8 +291,8 @@ impl AiProvider for MockAiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::{parse_agent_response, AgentMessage};
     use crate::ai::response_schema::ResponseType;
+    use crate::ai::{parse_agent_response, AgentMessage};
 
     #[tokio::test]
     async fn water_fixture_parses_as_tool_change() {
@@ -309,9 +310,19 @@ mod tests {
             .unwrap();
         let parsed = parse_agent_response(&response.raw_text).unwrap();
         assert_eq!(parsed.payload.response_type, ResponseType::ToolChange);
-        let tool = parsed.payload.tool_change.as_ref().unwrap().tool.as_ref().unwrap();
+        let tool = parsed
+            .payload
+            .tool_change
+            .as_ref()
+            .unwrap()
+            .tool
+            .as_ref()
+            .unwrap();
         assert_eq!(tool.id, "tool-water-tracker");
-        assert!(tool.components.iter().any(|c| c.component_type == "counter"));
+        assert!(tool
+            .components
+            .iter()
+            .any(|c| c.component_type == "counter"));
     }
 
     #[tokio::test]
@@ -329,9 +340,22 @@ mod tests {
             .await
             .unwrap();
         let parsed = parse_agent_response(&response.raw_text).unwrap();
-        let tool = parsed.payload.tool_change.as_ref().unwrap().tool.as_ref().unwrap();
-        let quiz = tool.components.iter().find(|c| c.component_type == "quiz").unwrap();
-        let questions = quiz.props.as_ref().unwrap()["questions"].as_array().unwrap();
+        let tool = parsed
+            .payload
+            .tool_change
+            .as_ref()
+            .unwrap()
+            .tool
+            .as_ref()
+            .unwrap();
+        let quiz = tool
+            .components
+            .iter()
+            .find(|c| c.component_type == "quiz")
+            .unwrap();
+        let questions = quiz.props.as_ref().unwrap()["questions"]
+            .as_array()
+            .unwrap();
         assert_eq!(questions.len(), 3);
     }
 }

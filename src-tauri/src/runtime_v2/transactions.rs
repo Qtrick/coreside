@@ -153,10 +153,10 @@ pub fn apply_transaction_with_bus(
     for op in &txn.operations {
         if let Some(sid) = op.target.surface_id.as_ref() {
             if let Ok(s) = get_surface(db, sid) {
-                previous
-                    .as_object_mut()
-                    .unwrap()
-                    .insert(sid.clone(), json!({ "revision": s.current_revision, "definition": s.definition }));
+                previous.as_object_mut().unwrap().insert(
+                    sid.clone(),
+                    json!({ "revision": s.current_revision, "definition": s.definition }),
+                );
             }
         }
     }
@@ -186,7 +186,9 @@ pub fn apply_transaction_with_bus(
 
     if failed {
         db.conn()
-            .execute_batch("ROLLBACK TO SAVEPOINT runtime_v2_apply; RELEASE SAVEPOINT runtime_v2_apply")
+            .execute_batch(
+                "ROLLBACK TO SAVEPOINT runtime_v2_apply; RELEASE SAVEPOINT runtime_v2_apply",
+            )
             .map_err(DbError::Sqlite)?;
         surfaces.clear();
         db.conn().execute(
@@ -205,7 +207,12 @@ pub fn apply_transaction_with_bus(
     db.conn().execute(
         "UPDATE app_transactions SET status = 'applied', applied_at = ?1,
          previous_snapshot_json = ?2, result_snapshot_json = ?3 WHERE id = ?4",
-        params![now, previous.to_string(), result.to_string(), transaction_id],
+        params![
+            now,
+            previous.to_string(),
+            result.to_string(),
+            transaction_id
+        ],
     )?;
     db.conn()
         .execute_batch("RELEASE SAVEPOINT runtime_v2_apply")
@@ -252,7 +259,10 @@ fn apply_one(
                 db,
                 conversation_id,
                 op.target.message_id.as_deref(),
-                op.target.project_id.as_deref().or(txn.project_id.as_deref()),
+                op.target
+                    .project_id
+                    .as_deref()
+                    .or(txn.project_id.as_deref()),
                 name,
                 &definition,
                 &packs,
@@ -260,9 +270,14 @@ fn apply_one(
             .map_err(|e| e.to_string())?;
             Ok(Some(s))
         }
-        "chat.inline_surface_update" | "component.update_props" | "component.insert"
-        | "component.remove" | "component.replace" | "component.move"
-        | "component.update_children" | "component.update_visibility"
+        "chat.inline_surface_update"
+        | "component.update_props"
+        | "component.insert"
+        | "component.remove"
+        | "component.replace"
+        | "component.move"
+        | "component.update_children"
+        | "component.update_visibility"
         | "component.update_actions" => {
             let sid = op
                 .target
@@ -289,7 +304,10 @@ fn apply_one(
                 )
                 .map_err(|e| e.to_string())?;
                 if let Some(obj) = def_value.as_object_mut() {
-                    obj.insert("components".into(), serde_json::to_value(&components).unwrap());
+                    obj.insert(
+                        "components".into(),
+                        serde_json::to_value(&components).unwrap(),
+                    );
                 }
             } else if let Some(definition) = op.payload.get("definition") {
                 def_value = definition.clone();
@@ -318,15 +336,13 @@ fn apply_one(
             crate::security::assert_not_protected(&tool.id)?;
             super::packs::validate_tool_components(&tool.components)?;
             let workspace = "ws-personal-default";
-            let action = op
-                .payload
-                .get("action")
-                .and_then(|v| v.as_str())
-                .unwrap_or(if op.op_type == "surface.create" {
+            let action = op.payload.get("action").and_then(|v| v.as_str()).unwrap_or(
+                if op.op_type == "surface.create" {
                     "create"
                 } else {
                     "replace"
-                });
+                },
+            );
             let target = op
                 .payload
                 .get("targetToolId")
@@ -369,23 +385,59 @@ fn apply_one(
                 .surface_id
                 .as_deref()
                 .ok_or_else(|| "surfaceId required".to_string())?;
-            let state = op.payload.get("state").cloned().unwrap_or(op.payload.clone());
+            let state = op
+                .payload
+                .get("state")
+                .cloned()
+                .unwrap_or(op.payload.clone());
             super::surfaces::save_surface_state(db, sid, &state).map_err(|e| e.to_string())?;
             Ok(Some(get_surface(db, sid).map_err(|e| e.to_string())?))
         }
-        "chat.status" | "chat.notification" | "setting.create" | "setting.update"
-        | "setting.delete" | "layout.update" | "layout.add_panel" | "layout.move_panel"
-        | "layout.resize_panel" | "layout.remove_panel" | "layout.set_visibility"
-        | "wallpaper.apply" | "wallpaper.create" | "wallpaper.delete" | "automation.create"
-        | "automation.update" | "automation.pause" | "automation.resume" | "export.prepare"
-        | "project.panel_create" | "project.panel_update" | "chat.branch_create"
-        | "surface.update_metadata" | "surface.move" | "surface.duplicate"
-        | "surface.archive" | "surface.restore" | "surface.delete"
-        | "chat.inline_surface_remove" | "state.reset" | "state.delete_key"
-        | "route.navigate" | "manifest.upsert" | "manifest.disable"
-        | "manifest.restore_last_known_good" | "data.model_upsert" | "data.record_create"
-        | "data.record_update" | "data.record_delete" | "data.migrate" | "permission.request"
-        | "test.upsert" | "test.run" | "package.export" | "package.import" => {
+        "chat.status"
+        | "chat.notification"
+        | "setting.create"
+        | "setting.update"
+        | "setting.delete"
+        | "layout.update"
+        | "layout.add_panel"
+        | "layout.move_panel"
+        | "layout.resize_panel"
+        | "layout.remove_panel"
+        | "layout.set_visibility"
+        | "wallpaper.apply"
+        | "wallpaper.create"
+        | "wallpaper.delete"
+        | "automation.create"
+        | "automation.update"
+        | "automation.pause"
+        | "automation.resume"
+        | "export.prepare"
+        | "project.panel_create"
+        | "project.panel_update"
+        | "chat.branch_create"
+        | "surface.update_metadata"
+        | "surface.move"
+        | "surface.duplicate"
+        | "surface.archive"
+        | "surface.restore"
+        | "surface.delete"
+        | "chat.inline_surface_remove"
+        | "state.reset"
+        | "state.delete_key"
+        | "route.navigate"
+        | "manifest.upsert"
+        | "manifest.disable"
+        | "manifest.restore_last_known_good"
+        | "data.model_upsert"
+        | "data.record_create"
+        | "data.record_update"
+        | "data.record_delete"
+        | "data.migrate"
+        | "permission.request"
+        | "test.upsert"
+        | "test.run"
+        | "package.export"
+        | "package.import" => {
             // Handled by Application Kernel or recorded for replay.
             Ok(None)
         }
@@ -425,7 +477,8 @@ fn apply_one(
                 enabled: true,
             };
             if let Some(bus) = bus {
-                bus.add_subscription(sub.clone()).map_err(|e| e.to_string())?;
+                bus.add_subscription(sub.clone())
+                    .map_err(|e| e.to_string())?;
             }
             db.conn()
                 .execute(
@@ -530,7 +583,9 @@ fn apply_one(
 pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<AppTransactionRecord> {
     let txn = get_transaction(db, transaction_id)?;
     if txn.status != "applied" {
-        return Err(DbError::Invalid("only applied transactions can be undone".into()));
+        return Err(DbError::Invalid(
+            "only applied transactions can be undone".into(),
+        ));
     }
     let prev_json: Option<String> = db
         .conn()
@@ -544,13 +599,7 @@ pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<App
         if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&prev) {
             for (sid, snap) in map {
                 if let Some(def) = snap.get("definition") {
-                    let _ = update_surface_definition(
-                        db,
-                        &sid,
-                        def,
-                        "undo transaction",
-                        None,
-                    );
+                    let _ = update_surface_definition(db, &sid, def, "undo transaction", None);
                 }
             }
         }

@@ -124,7 +124,11 @@ pub fn activate_next(db: &mut Database, conversation_id: &str) -> DbResult<Optio
 
 pub fn complete(db: &mut Database, id: &str, error: Option<&str>) -> DbResult<QueueItem> {
     let now = now_rfc3339();
-    let status = if error.is_some() { "failed" } else { "completed" };
+    let status = if error.is_some() {
+        "failed"
+    } else {
+        "completed"
+    };
     db.conn().execute(
         "UPDATE agent_request_queue SET status = ?1, finished_at = ?2, error_message = ?3 WHERE id = ?4",
         params![status, now, error, id],

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::db::{now_rfc3339, Database, DbError, DbResult};
+use crate::db::{now_rfc3339, Database, DbError};
 use rusqlite::params;
 
 use super::errors::KernelError;
@@ -120,9 +120,7 @@ pub fn export_package(db: &Database, application_id: &str) -> Result<AppPackage,
     {
         let mut stmt = db
             .conn()
-            .prepare(
-                "SELECT definition_json FROM generated_data_models WHERE application_id = ?1",
-            )
+            .prepare("SELECT definition_json FROM generated_data_models WHERE application_id = ?1")
             .map_err(|e| KernelError::Db(DbError::Sqlite(e)))?;
         let rows = stmt
             .query_map([application_id], |row| row.get::<_, String>(0))
@@ -185,7 +183,8 @@ pub fn export_package(db: &Database, application_id: &str) -> Result<AppPackage,
 }
 
 pub fn package_to_bytes(pkg: &AppPackage) -> Result<Vec<u8>, KernelError> {
-    let json = serde_json::to_vec_pretty(pkg).map_err(|e| KernelError::Validation(e.to_string()))?;
+    let json =
+        serde_json::to_vec_pretty(pkg).map_err(|e| KernelError::Validation(e.to_string()))?;
     let mut cursor = std::io::Cursor::new(Vec::new());
     {
         use std::io::Write;
@@ -219,7 +218,9 @@ fn reject_credential_shaped(s: &str) -> Result<(), KernelError> {
 
 fn reject_malicious_paths(s: &str) -> Result<(), KernelError> {
     if s.contains("..") || s.contains("file://") || s.contains("/users/") || s.contains("\\\\") {
-        return Err(KernelError::PackageInvalid("path traversal rejected".into()));
+        return Err(KernelError::PackageInvalid(
+            "path traversal rejected".into(),
+        ));
     }
     let lower = s.to_lowercase();
     if lower.contains("<script")
@@ -227,7 +228,9 @@ fn reject_malicious_paths(s: &str) -> Result<(), KernelError> {
         || lower.contains(".exe")
         || lower.contains("#!/")
     {
-        return Err(KernelError::PackageInvalid("executable content rejected".into()));
+        return Err(KernelError::PackageInvalid(
+            "executable content rejected".into(),
+        ));
     }
     Ok(())
 }
@@ -251,7 +254,8 @@ fn parse_package_json(bytes: &[u8]) -> Result<AppPackage, KernelError> {
         return Err(KernelError::PackageInvalid("unknown package format".into()));
     }
     validate_manifest(&pkg.manifest).map_err(KernelError::PackageInvalid)?;
-    validate_declared_permissions(&pkg.manifest.permissions).map_err(KernelError::PackageInvalid)?;
+    validate_declared_permissions(&pkg.manifest.permissions)
+        .map_err(KernelError::PackageInvalid)?;
     for media in &pkg.media_refs {
         reject_malicious_paths(media)?;
     }
@@ -274,7 +278,9 @@ fn validate_zip_package(bytes: &[u8]) -> Result<AppPackage, KernelError> {
     let mut archive =
         zip::ZipArchive::new(cursor).map_err(|e| KernelError::PackageInvalid(e.to_string()))?;
     if archive.len() > 64 {
-        return Err(KernelError::PackageInvalid("too many archive entries".into()));
+        return Err(KernelError::PackageInvalid(
+            "too many archive entries".into(),
+        ));
     }
     let mut manifest_bytes = None;
     for i in 0..archive.len() {
@@ -283,7 +289,9 @@ fn validate_zip_package(bytes: &[u8]) -> Result<AppPackage, KernelError> {
             .map_err(|e| KernelError::PackageInvalid(e.to_string()))?;
         let name = file.name().to_string();
         if name.contains("..") || name.starts_with('/') || name.contains('\\') {
-            return Err(KernelError::PackageInvalid("path traversal rejected".into()));
+            return Err(KernelError::PackageInvalid(
+                "path traversal rejected".into(),
+            ));
         }
         let lower = name.to_lowercase();
         if lower.ends_with(".exe")
@@ -292,7 +300,9 @@ fn validate_zip_package(bytes: &[u8]) -> Result<AppPackage, KernelError> {
             || lower.ends_with(".wasm")
             || lower.ends_with(".dylib")
         {
-            return Err(KernelError::PackageInvalid("executable content rejected".into()));
+            return Err(KernelError::PackageInvalid(
+                "executable content rejected".into(),
+            ));
         }
         if name == "manifest.json" || name.ends_with("/manifest.json") {
             let mut buf = Vec::new();
@@ -315,7 +325,9 @@ pub fn validate_package_bytes(bytes: &[u8]) -> Result<AppPackage, KernelError> {
     }
     // Reject non-ZIP executables
     if bytes.starts_with(b"\x7fELF") || bytes.starts_with(b"MZ") {
-        return Err(KernelError::PackageInvalid("executable packages rejected".into()));
+        return Err(KernelError::PackageInvalid(
+            "executable packages rejected".into(),
+        ));
     }
     if bytes.starts_with(b"PK") {
         return validate_zip_package(bytes);
@@ -518,13 +530,20 @@ mod tests {
         let obj = raw.as_object_mut().unwrap();
         obj.insert("trustState".into(), json!("signed"));
         obj.insert("grantedPermissions".into(), json!(["local_data.write"]));
-        obj.insert("runtimeGrants".into(), json!([{ "action": "local_data.write" }]));
+        obj.insert(
+            "runtimeGrants".into(),
+            json!([{ "action": "local_data.write" }]),
+        );
         let bytes = serde_json::to_vec(&raw).unwrap();
 
         let pkg = validate_package_bytes(&bytes).unwrap();
         assert_eq!(pkg.trust_state, "untrusted");
-        assert!(pkg.stripped_authority.contains(&"grantedPermissions".to_string()));
-        assert!(pkg.stripped_authority.contains(&"runtimeGrants".to_string()));
+        assert!(pkg
+            .stripped_authority
+            .contains(&"grantedPermissions".to_string()));
+        assert!(pkg
+            .stripped_authority
+            .contains(&"runtimeGrants".to_string()));
 
         let preview = preview_package(&pkg);
         assert!(preview

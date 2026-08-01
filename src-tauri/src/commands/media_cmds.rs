@@ -21,8 +21,7 @@ pub fn list_media_assets_cmd(
     limit: Option<usize>,
 ) -> Result<Vec<MediaAsset>, CommandError> {
     let db = state.db.lock();
-    list_media_assets(&db, project_id.as_deref(), limit.unwrap_or(50))
-        .map_err(|e| CommandError::new("db", e.to_string()))
+    list_media_assets(&db, project_id.as_deref(), limit.unwrap_or(50)).map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -48,17 +47,13 @@ pub async fn import_media_asset_cmd(
     state: State<'_, AppState>,
     input: ImportMediaInput,
 ) -> Result<MediaAsset, CommandError> {
-    let (bytes, hash, meta) = crate::media::download_and_validate(
-        input.url.trim(),
-        input.category.as_deref(),
-    )
-    .await
-    .map_err(map_media_err)?;
+    let (bytes, hash, meta) =
+        crate::media::download_and_validate(input.url.trim(), input.category.as_deref())
+            .await
+            .map_err(map_media_err)?;
 
     let mut db = state.db.lock();
-    if let Some(existing) =
-        crate::media::find_by_hash(&db, &hash).map_err(|e| CommandError::new("db", e.to_string()))?
-    {
+    if let Some(existing) = crate::media::find_by_hash(&db, &hash).map_err(CommandError::from)? {
         return Ok(existing);
     }
 
@@ -110,7 +105,7 @@ pub fn media_asset_usage_cmd(
     asset_id: String,
 ) -> Result<Vec<MediaAssetUsage>, CommandError> {
     let db = state.db.lock();
-    find_media_asset_usages(&db, &asset_id).map_err(|e| CommandError::new("db", e.to_string()))
+    find_media_asset_usages(&db, &asset_id).map_err(CommandError::from)
 }
 
 #[tauri::command]

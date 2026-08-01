@@ -2,9 +2,7 @@
 
 use serde_json::Value;
 
-use super::response_schema::{
-    AgentResponsePayload, ResponseType, SCHEMA_VERSION,
-};
+use super::response_schema::{AgentResponsePayload, ResponseType, SCHEMA_VERSION};
 
 #[derive(Debug, Clone)]
 pub struct ParsedAgentResponse {
@@ -119,7 +117,9 @@ pub fn parse_agent_response(raw: &str) -> Result<ParsedAgentResponse, String> {
                     assistant_messages: None,
                 },
                 recovered: true,
-                parse_warnings: vec![format!("Recovered plain text after parse error: {primary_err}")],
+                parse_warnings: vec![format!(
+                    "Recovered plain text after parse error: {primary_err}"
+                )],
             };
             Ok(recovered)
         }
@@ -300,7 +300,10 @@ mod tests {
         assert!(parsed.recovered);
         assert_eq!(parsed.payload.response_type, ResponseType::Message);
         assert!(parsed.payload.tool_change.is_none());
-        assert!(parsed.payload.assistant_message.contains("schedule planner"));
+        assert!(parsed
+            .payload
+            .assistant_message
+            .contains("schedule planner"));
     }
 
     #[test]
@@ -308,7 +311,10 @@ mod tests {
         let raw = "Sure, I can help with that.";
         let parsed = parse_agent_response(raw).unwrap();
         assert!(parsed.recovered);
-        assert_eq!(parsed.payload.assistant_message, "Sure, I can help with that.");
+        assert_eq!(
+            parsed.payload.assistant_message,
+            "Sure, I can help with that."
+        );
         assert_eq!(parsed.payload.response_type, ResponseType::Message);
     }
 

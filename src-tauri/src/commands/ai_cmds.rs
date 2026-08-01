@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 use super::CommandError;
 use crate::ai::{create_provider, model_catalog, ModelCatalog};
 use crate::config::PublicAiStatus;
-use crate::credentials::resolve_credentials;
+use crate::credentials::{read_credential_sources, resolve_from_sources};
 use crate::db;
 use crate::state::AppState;
 
@@ -36,10 +36,13 @@ pub fn get_app_info() -> AppInfo {
 #[tauri::command]
 pub fn get_ai_status(state: State<'_, AppState>) -> PublicAiStatus {
     let _ = state.reload_config();
-    let resolved = {
+    // Read the database half under the lock, then release it: the keychain
+    // lookup inside `resolve_from_sources` is a blocking OS call.
+    let sources = {
         let db = state.db.lock();
-        resolve_credentials(&db, None)
+        read_credential_sources(&db, None)
     };
+    let resolved = resolve_from_sources(&sources);
     let developer_mode = {
         let db = state.db.lock();
         db::get_settings(&db)
@@ -77,10 +80,7 @@ pub fn get_ai_status(state: State<'_, AppState>) -> PublicAiStatus {
     } else {
         (
             "missing_key",
-            Some(
-                "Connect your own AI provider or configure local AI in Settings."
-                    .to_string(),
-            ),
+            Some("Connect your own AI provider or configure local AI in Settings.".to_string()),
         )
     };
 
@@ -95,10 +95,13 @@ pub fn get_ai_status(state: State<'_, AppState>) -> PublicAiStatus {
 
 #[tauri::command]
 pub fn get_model_catalog(state: State<'_, AppState>) -> Result<ModelCatalog, CommandError> {
-    let resolved = {
+    // Read the database half under the lock, then release it: the keychain
+    // lookup inside `resolve_from_sources` is a blocking OS call.
+    let sources = {
         let db = state.db.lock();
-        resolve_credentials(&db, None)
+        read_credential_sources(&db, None)
     };
+    let resolved = resolve_from_sources(&sources);
     let developer_mode = {
         let db = state.db.lock();
         db::get_settings(&db)
@@ -137,21 +140,24 @@ pub fn get_model_catalog(state: State<'_, AppState>) -> Result<ModelCatalog, Com
 pub async fn test_ai_connection(
     state: State<'_, AppState>,
 ) -> Result<crate::ai::ProviderHealth, CommandError> {
-    let resolved = {
+    // Read the database half under the lock, then release it: the keychain
+    // lookup inside `resolve_from_sources` is a blocking OS call.
+    let sources = {
         let db = state.db.lock();
-        resolve_credentials(&db, None)
+        read_credential_sources(&db, None)
     };
+    let resolved = resolve_from_sources(&sources);
     let key = resolved.api_key.clone();
     let config = resolved.to_app_config();
 
-    let provider = create_provider(&config).map_err(|e| {
-        CommandError::sanitized(e.code(), e, key.as_deref())
-    })?;
+    let provider = create_provider(&config)
+        .map_err(|e| CommandError::sanitized(e.code(), e, key.as_deref()))?;
 
     let cancel = CancellationToken::new();
-    let mut health = provider.health_check(cancel).await.map_err(|e| {
-        CommandError::sanitized(e.code(), e, key.as_deref())
-    })?;
+    let mut health = provider
+        .health_check(cancel)
+        .await
+        .map_err(|e| CommandError::sanitized(e.code(), e, key.as_deref()))?;
     let developer_mode = {
         let db = state.db.lock();
         db::get_settings(&db)

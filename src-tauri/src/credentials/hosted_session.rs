@@ -77,9 +77,8 @@ pub fn adapter_connected(db: &crate::db::Database) -> bool {
 }
 
 pub fn store_session_json(json: &str) -> Result<(), CredentialError> {
-    let session = parse_session(json).ok_or_else(|| {
-        CredentialError::Other("Invalid hosted auth session JSON".into())
-    })?;
+    let session = parse_session(json)
+        .ok_or_else(|| CredentialError::Other("Invalid hosted auth session JSON".into()))?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as f64)
@@ -108,7 +107,8 @@ mod tests {
 
     #[test]
     fn parses_camel_case_session() {
-        let raw = r#"{"accessToken":"tok","refreshToken":"ref","expiresAt":9999999999999,"userId":"u1"}"#;
+        let raw =
+            r#"{"accessToken":"tok","refreshToken":"ref","expiresAt":9999999999999,"userId":"u1"}"#;
         let s = parse_session(raw).unwrap();
         assert_eq!(s.access_token, "tok");
         assert!(session_valid(&s, 1.0));

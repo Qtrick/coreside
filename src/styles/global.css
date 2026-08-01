@@ -1506,6 +1506,28 @@ img {
   background: var(--surface-muted);
 }
 
+/* Interaction failures inside a generated surface. Bounded height so a long
+   sanitized message cannot push the tool off screen. */
+.tr-action-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-muted);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  max-height: 6rem;
+  overflow-y: auto;
+}
+
+.tr-action-error span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
 .loading-dots {
   display: inline-flex;
   gap: 4px;

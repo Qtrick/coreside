@@ -4,9 +4,7 @@ use serde::Deserialize;
 use tauri::State;
 
 use super::CommandError;
-use crate::crawler::{
-    detect_installation, CacheStatsView, CrawlerStatusView, ResourceProfile,
-};
+use crate::crawler::{detect_installation, CacheStatsView, CrawlerStatusView, ResourceProfile};
 use crate::security::sanitize_error;
 use crate::state::AppState;
 
@@ -98,7 +96,7 @@ pub async fn set_web_research_resource_profile(
                    updated_at = excluded.updated_at",
                 [profile.as_str()],
             )
-            .map_err(|e| CommandError::new("db", e.to_string()))?;
+            .map_err(|e| CommandError::from(crate::db::DbError::from(e)))?;
     }
     Ok(profile.as_str().to_string())
 }

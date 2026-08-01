@@ -1,7 +1,7 @@
 //! Provider-neutral web search entrypoints.
 
+pub use super::models::{SafeSearchLevel, WebSearchResponse};
 pub use super::registry::SearchRegistry;
-pub use super::models::{WebSearchResponse, SafeSearchLevel};
 
 use super::errors::SearchError;
 

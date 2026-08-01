@@ -275,7 +275,7 @@ pub fn get_scheduled_patch(db: &Database, id: &str) -> DbResult<ScheduledPatch> 
                     created_at, applied_at, failed_at
              FROM patch_scheduler_items WHERE id = ?1",
             [id],
-            |row| parse_patch_row(row),
+            parse_patch_row,
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
@@ -353,7 +353,13 @@ pub fn detect_dependency_cycle(ops: &[AppOperation]) -> Option<Vec<String>> {
     }
 
     for op in ops {
-        if let Some(cycle) = dfs(op.id.as_str(), &graph, &mut visiting, &mut visited, &mut path) {
+        if let Some(cycle) = dfs(
+            op.id.as_str(),
+            &graph,
+            &mut visiting,
+            &mut visited,
+            &mut path,
+        ) {
             return Some(cycle);
         }
     }
@@ -411,9 +417,7 @@ pub fn flush_scheduler(
     source_type: &str,
     approval_granted: bool,
 ) -> DbResult<Vec<ChangeResult>> {
-    let mut query = String::from(
-        "SELECT id FROM patch_scheduler_items WHERE status = 'queued'",
-    );
+    let mut query = String::from("SELECT id FROM patch_scheduler_items WHERE status = 'queued'");
     if conversation_id.is_some() {
         query.push_str(" AND conversation_id = ?1");
     }
@@ -501,14 +505,11 @@ pub fn schedule_and_apply(
     }
 
     let superseded = if req.priority == PatchPriority::ActiveTurnPreview {
-        let surface_id = req
-            .surface_id
-            .as_deref()
-            .or_else(|| {
-                req.operations
-                    .first()
-                    .and_then(|o| o.target.surface_id.as_deref())
-            });
+        let surface_id = req.surface_id.as_deref().or_else(|| {
+            req.operations
+                .first()
+                .and_then(|o| o.target.surface_id.as_deref())
+        });
         // ponytail: supersession happens during schedule_patches per op
         let _ = surface_id;
         Vec::new()
@@ -517,8 +518,7 @@ pub fn schedule_and_apply(
     };
 
     let scheduled = schedule_patches(db, &req)?;
-    let order = topological_order(&req.operations)
-        .map_err(DbError::Invalid)?;
+    let order = topological_order(&req.operations).map_err(DbError::Invalid)?;
 
     let mut applied = Vec::new();
     let now = now_rfc3339();
@@ -567,14 +567,20 @@ pub fn schedule_and_apply(
                  transaction_id = ?2 WHERE id = ?3",
                 params![
                     now,
-                    change_result.apply.as_ref().map(|a| a.transaction.id.as_str()),
+                    change_result
+                        .apply
+                        .as_ref()
+                        .map(|a| a.transaction.id.as_str()),
                     patch.id
                 ],
             )?;
             if source_type == "user" || source_type == "direct_manipulation" {
                 let _ = record_manual_edit_provenance(
                     db,
-                    change_result.apply.as_ref().map(|a| a.transaction.id.as_str()),
+                    change_result
+                        .apply
+                        .as_ref()
+                        .map(|a| a.transaction.id.as_str()),
                     patch.surface_id.as_deref(),
                     &source_type,
                     "patch_apply",
@@ -666,10 +672,7 @@ mod tests {
 
     #[test]
     fn topological_order_respects_deps() {
-        let ops = vec![
-            simple_op("a", vec![]),
-            simple_op("b", vec!["a".into()]),
-        ];
+        let ops = vec![simple_op("a", vec![]), simple_op("b", vec!["a".into()])];
         let order = topological_order(&ops).unwrap();
         assert_eq!(order, vec![0, 1]);
     }

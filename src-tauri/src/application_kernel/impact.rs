@@ -27,19 +27,17 @@ pub fn summarize_operations(db: &Database, operations: &[AppOperation]) -> Strin
         }
         if t.contains("delete") || t == "data.migrate" {
             destructive += 1;
-            if t == "data.migrate" {
-                if op
+            if t == "data.migrate"
+                && op
                     .payload
                     .get("migration")
                     .and_then(|m| m.get("migrationType"))
                     .and_then(|v| v.as_str())
                     == Some("remove_field")
-                {
-                    warnings.push(
-                        "Removing a field may permanently remove values from existing records."
-                            .into(),
-                    );
-                }
+            {
+                warnings.push(
+                    "Removing a field may permanently remove values from existing records.".into(),
+                );
             }
         }
         if let Some(app) = op.target.application_id.as_deref() {

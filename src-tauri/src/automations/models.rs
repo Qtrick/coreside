@@ -94,15 +94,11 @@ pub enum AutomationAction {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum MissedRunPolicy {
+    #[default]
     RunOnce,
     Skip,
-}
-
-impl Default for MissedRunPolicy {
-    fn default() -> Self {
-        Self::RunOnce
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,6 +125,31 @@ pub fn parse_hhmm(time: &str) -> Option<NaiveTime> {
     NaiveTime::from_hms_opt(hour, minute, 0)
 }
 
+/// Resolve a local wall-clock date+time across DST boundaries.
+///
+/// `and_local_timezone(..).single()` returns `None` twice a year: once for the
+/// "spring forward" gap where the wall-clock time never happens, and once for
+/// the "fall back" hour that happens twice. Returning `None` there used to make
+/// `compute_next_after` yield no next run, which permanently orphaned the
+/// automation. Ambiguous times take the earlier instant; gap times step forward
+/// in 15-minute increments until the clock is valid again.
+fn resolve_local(day: chrono::NaiveDate, time: NaiveTime) -> Option<DateTime<Local>> {
+    use chrono::offset::LocalResult;
+    for step in 0..12 {
+        let naive = day.and_time(time) + Duration::minutes(15 * step);
+        match naive.and_local_timezone(Local) {
+            LocalResult::Single(t) => return Some(t),
+            LocalResult::Ambiguous(earliest, _) => return Some(earliest),
+            LocalResult::None => continue,
+        }
+    }
+    None
+}
+
+/// Scheduling always uses the host machine's local timezone. The `timezone`
+/// field on a trigger is persisted for future use and is deliberately not read
+/// here: honouring arbitrary IANA zones would require a timezone database
+/// dependency that Coreside does not currently ship.
 pub fn compute_next_after(
     trigger: &AutomationTrigger,
     from: DateTime<Utc>,
@@ -145,14 +166,12 @@ pub fn compute_next_after(
         }
         AutomationTrigger::Daily { time, .. } => {
             let t = parse_hhmm(time)?;
-            let mut candidate = local
-                .date_naive()
-                .and_time(t)
-                .and_local_timezone(Local)
-                .single()?;
-            if candidate <= local {
-                candidate += Duration::days(1);
-            }
+            let today = resolve_local(local.date_naive(), t)?;
+            let candidate = if today > local {
+                today
+            } else {
+                resolve_local(local.date_naive() + Duration::days(1), t)?
+            };
             Some(candidate.with_timezone(&Utc))
         }
         AutomationTrigger::Weekly { weekday, time, .. } => {
@@ -169,12 +188,10 @@ pub fn compute_next_after(
             let mut day = local.date_naive();
             for _ in 0..8 {
                 if day.weekday() == target {
-                    let candidate = day
-                        .and_time(t)
-                        .and_local_timezone(Local)
-                        .single()?;
-                    if candidate > local {
-                        return Some(candidate.with_timezone(&Utc));
+                    if let Some(candidate) = resolve_local(day, t) {
+                        if candidate > local {
+                            return Some(candidate.with_timezone(&Utc));
+                        }
                     }
                 }
                 day += Duration::days(1);
@@ -200,5 +217,58 @@ mod tests {
         )
         .unwrap();
         assert!(next > now);
+    }
+
+    #[test]
+    fn daily_always_produces_a_next_run() {
+        // Sweep a full year of local dates so DST transitions in the host
+        // timezone cannot produce a `None` that would orphan the automation.
+        let start = Utc::now();
+        for day in 0..366 {
+            let from = start + Duration::days(day);
+            for time in ["00:30", "02:30", "03:30", "13:00", "23:45"] {
+                let next = compute_next_after(
+                    &AutomationTrigger::Daily {
+                        time: time.into(),
+                        timezone: None,
+                    },
+                    from,
+                );
+                assert!(next.is_some(), "no next run for {time} from {from}");
+                assert!(next.unwrap() > from);
+            }
+        }
+    }
+
+    #[test]
+    fn weekly_always_produces_a_next_run() {
+        let start = Utc::now();
+        for day in 0..60 {
+            let from = start + Duration::days(day);
+            for weekday in 0..7 {
+                let next = compute_next_after(
+                    &AutomationTrigger::Weekly {
+                        weekday,
+                        time: "02:30".into(),
+                        timezone: None,
+                    },
+                    from,
+                );
+                assert!(next.is_some(), "no next run for weekday {weekday}");
+                assert!(next.unwrap() > from);
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_time_has_no_next_run() {
+        assert!(compute_next_after(
+            &AutomationTrigger::Daily {
+                time: "not-a-time".into(),
+                timezone: None,
+            },
+            Utc::now(),
+        )
+        .is_none());
     }
 }

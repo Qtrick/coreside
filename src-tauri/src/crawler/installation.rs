@@ -21,7 +21,10 @@ pub fn resolve_sidecar_python() -> PathBuf {
     let service_root = resolve_service_root();
     #[cfg(windows)]
     {
-        service_root.join(".venv").join("Scripts").join("python.exe")
+        service_root
+            .join(".venv")
+            .join("Scripts")
+            .join("python.exe")
     }
     #[cfg(not(windows))]
     {

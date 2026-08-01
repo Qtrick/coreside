@@ -1,11 +1,7 @@
 import { Folder } from "lucide-react";
 import type { Project } from "@/types/project";
 import type { Conversation } from "@/types/messages";
-
-export function projectIconClass(iconKey?: string | null): string {
-  const key = iconKey?.trim() || "folder";
-  return `project-icon project-icon-${key}`;
-}
+import { projectIconClass } from "./project-icon";
 
 type ProjectListItemProps = {
   project: Project;

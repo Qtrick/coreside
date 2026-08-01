@@ -4,14 +4,12 @@ use rusqlite::params;
 use uuid::Uuid;
 
 use crate::db::{
-    get_conversation, get_messages, map_conversation_row, Conversation, Database, DbError,
-    DbResult, now_rfc3339, DEFAULT_WORKSPACE_ID,
+    get_conversation, get_messages, map_conversation_row, now_rfc3339, Conversation, Database,
+    DbError, DbResult, DEFAULT_WORKSPACE_ID,
 };
 
 use super::indexing::{index_message, remove_conversation_from_index};
-use super::models::{
-    CreateProjectInput, DeleteProjectMode, Project, UpdateProjectInput,
-};
+use super::models::{CreateProjectInput, DeleteProjectMode, Project, UpdateProjectInput};
 use super::validation::{validate_create_input, validate_update_fields};
 
 fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
@@ -39,9 +37,7 @@ const PROJECT_COLUMNS: &str =
 
 pub fn list_projects(db: &Database, include_archived: bool) -> DbResult<Vec<Project>> {
     let sql = if include_archived {
-        format!(
-            "SELECT {PROJECT_COLUMNS} FROM projects ORDER BY pinned DESC, updated_at DESC"
-        )
+        format!("SELECT {PROJECT_COLUMNS} FROM projects ORDER BY pinned DESC, updated_at DESC")
     } else {
         format!(
             "SELECT {PROJECT_COLUMNS} FROM projects WHERE archived = 0 ORDER BY pinned DESC, updated_at DESC"
@@ -97,8 +93,14 @@ pub fn update_project(
     let existing = get_project(db, id)?;
     validate_update_fields(
         input.name.as_deref(),
-        input.description.as_deref().or(existing.description.as_deref()),
-        input.instructions.as_deref().or(existing.instructions.as_deref()),
+        input
+            .description
+            .as_deref()
+            .or(existing.description.as_deref()),
+        input
+            .instructions
+            .as_deref()
+            .or(existing.instructions.as_deref()),
         input.icon_key.as_deref().or(existing.icon_key.as_deref()),
     )
     .map_err(DbError::Invalid)?;
@@ -416,7 +418,7 @@ pub fn set_project_wallpaper(
 ) -> DbResult<Project> {
     let _ = get_project(db, project_id)?;
     if let Some(raw) = wallpaper_json {
-        crate::wallpapers::validate_wallpaper_config(raw).map_err(|e| DbError::Invalid(e))?;
+        crate::wallpapers::validate_wallpaper_config(raw).map_err(DbError::Invalid)?;
     }
     let now = now_rfc3339();
     db.conn().execute(
@@ -508,13 +510,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut db = Database::open_path(&dir.path().join("keep.db")).unwrap();
         let project = create_project(&mut db, &sample_input("Keep")).unwrap();
-        let conv = create_conversation(
-            &mut db,
-            DEFAULT_WORKSPACE_ID,
-            "Chat",
-            Some(&project.id),
-        )
-        .unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", Some(&project.id)).unwrap();
         insert_message(&mut db, &conv.id, "user", "keep me", None).unwrap();
         delete_project(&mut db, &project.id, DeleteProjectMode::KeepChats).unwrap();
         let reloaded = get_conversation(&db, &conv.id).unwrap();
@@ -532,10 +529,7 @@ mod tests {
 
     #[test]
     fn delete_project_mode_defaults_to_keep_chats() {
-        assert_eq!(
-            DeleteProjectMode::default(),
-            DeleteProjectMode::KeepChats
-        );
+        assert_eq!(DeleteProjectMode::default(), DeleteProjectMode::KeepChats);
         let parsed: DeleteProjectMode =
             serde_json::from_value(serde_json::json!("keepChats")).unwrap();
         assert_eq!(parsed, DeleteProjectMode::KeepChats);
@@ -546,13 +540,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut db = Database::open_path(&dir.path().join("del.db")).unwrap();
         let project = create_project(&mut db, &sample_input("Gone")).unwrap();
-        let conv = create_conversation(
-            &mut db,
-            DEFAULT_WORKSPACE_ID,
-            "Chat",
-            Some(&project.id),
-        )
-        .unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", Some(&project.id)).unwrap();
         insert_message(&mut db, &conv.id, "user", "hello", None).unwrap();
         delete_project(&mut db, &project.id, DeleteProjectMode::DeleteChats).unwrap();
         assert!(get_conversation(&db, &conv.id).is_err());

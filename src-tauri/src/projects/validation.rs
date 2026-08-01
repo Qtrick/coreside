@@ -23,7 +23,9 @@ pub fn validate_project_name(name: &str) -> Result<(), String> {
         return Err("Project name is required".into());
     }
     if len > MAX_NAME_LEN {
-        return Err(format!("Project name must be at most {MAX_NAME_LEN} characters"));
+        return Err(format!(
+            "Project name must be at most {MAX_NAME_LEN} characters"
+        ));
     }
     let lower = trimmed.to_ascii_lowercase();
     if RESERVED_NAMES.iter().any(|r| *r == lower) {
@@ -65,7 +67,7 @@ pub fn validate_icon_key(icon_key: Option<&str>) -> Result<(), String> {
             if trimmed.is_empty() {
                 return Ok(());
             }
-            if ICON_KEYS.iter().any(|k| *k == trimmed) {
+            if ICON_KEYS.contains(&trimmed) {
                 Ok(())
             } else {
                 Err(format!("Invalid icon key: {trimmed}"))

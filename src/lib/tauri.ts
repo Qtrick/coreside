@@ -123,6 +123,18 @@ export async function listenAgentTurn(
   };
 }
 
+/**
+ * Approval / grant state changed somewhere in the trusted core. Every window
+ * subscribes so a decision, revocation, or away-parked request is reflected
+ * everywhere without polling.
+ */
+export async function listenApprovalsChanged(
+  handler: () => void,
+): Promise<() => void> {
+  if (!isTauriRuntime()) return () => undefined;
+  return listen("runtime-approvals-changed", () => handler());
+}
+
 export class TauriCommandError extends Error {
   readonly code?: string;
 
@@ -1623,6 +1635,51 @@ async function mockInvoke<T>(
       }
       return undefined as T;
 
+    case "open_external_url": {
+      const raw = String(args?.url ?? "").trim();
+      // Web preview only — production always opens via the Rust command.
+      // Still apply static host blocks so the mock cannot open private targets.
+      let parsed: URL;
+      try {
+        parsed = new URL(raw);
+      } catch {
+        throw Object.assign(new Error("That link cannot be opened safely."), {
+          code: "invalid_url",
+        });
+      }
+      const scheme = parsed.protocol.toLowerCase();
+      const host = parsed.hostname.toLowerCase();
+      const blockedHost =
+        !host ||
+        !!parsed.username ||
+        !!parsed.password ||
+        (scheme !== "http:" && scheme !== "https:") ||
+        host === "localhost" ||
+        host === "127.0.0.1" ||
+        host === "0.0.0.0" ||
+        host === "::1" ||
+        host === "[::1]" ||
+        host === "metadata.google.internal" ||
+        host === "metadata.goog" ||
+        host.endsWith(".localhost") ||
+        host.endsWith(".local") ||
+        host.endsWith(".internal") ||
+        /^(10|127)\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+        /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
+        /^169\.254\.\d{1,3}\.\d{1,3}$/.test(host) ||
+        /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(host) ||
+        /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}$/.test(host);
+      if (blockedHost) {
+        throw Object.assign(new Error("That link cannot be opened safely."), {
+          code: "invalid_url",
+        });
+      }
+      if (typeof window !== "undefined") {
+        window.open(raw, "_blank", "noopener,noreferrer");
+      }
+      return undefined as T;
+    }
+
     case "list_automations":
       return [] as T;
     case "delete_automation":
@@ -2544,6 +2601,7 @@ export const api = {
   clearTools: () => invoke<void>("clear_tools"),
   openToolWindow: (toolId: string) =>
     invoke<void>("open_tool_window", { toolId }),
+  openExternalUrl: (url: string) => invoke<void>("open_external_url", { url }),
   listAutomations: () => invoke<Record<string, unknown>[]>("list_automations"),
   upsertAutomation: (input: unknown) =>
     invoke<Record<string, unknown>>("upsert_automation", { input }),

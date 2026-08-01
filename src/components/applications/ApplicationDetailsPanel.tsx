@@ -81,7 +81,7 @@ export function ApplicationDetailsPanel({
   const actionAccess = record?.manifest.applicationActionAccess ?? [];
 
   return (
-    <ModalPortal>
+    <ModalPortal onClose={onClose}>
       <div className="provider-modal-root approval-details-root">
         <button
           type="button"

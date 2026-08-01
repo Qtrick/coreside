@@ -357,7 +357,16 @@ mod tests {
         let (mut db, _dir) = test_db();
         let d = find_action("local_data.write").unwrap();
         let c = ctx(Some("app-1"));
-        mint_grant(&mut db, &c, d, GrantScope::Action, GrantDuration::Session, None, "user").unwrap();
+        mint_grant(
+            &mut db,
+            &c,
+            d,
+            GrantScope::Action,
+            GrantDuration::Session,
+            None,
+            "user",
+        )
+        .unwrap();
         assert!(match_grant(&db, &c, d, "hash-a").unwrap().is_some());
         assert!(match_grant(&db, &c, d, "hash-b").unwrap().is_some());
     }
@@ -395,7 +404,9 @@ mod tests {
             "user",
         )
         .unwrap();
-        assert!(match_grant(&db, &ctx(Some("app-2")), d, "h").unwrap().is_none());
+        assert!(match_grant(&db, &ctx(Some("app-2")), d, "h")
+            .unwrap()
+            .is_none());
         assert!(match_grant(&db, &ctx(None), d, "h").unwrap().is_none());
     }
 
@@ -422,7 +433,11 @@ mod tests {
     fn destructive_cannot_be_remembered() {
         let (mut db, _dir) = test_db();
         let d = find_action("local_data.delete").unwrap();
-        for duration in [GrantDuration::Session, GrantDuration::Standing, GrantDuration::Once] {
+        for duration in [
+            GrantDuration::Session,
+            GrantDuration::Standing,
+            GrantDuration::Once,
+        ] {
             let err = mint_grant(
                 &mut db,
                 &ctx(Some("app-1")),
@@ -463,8 +478,16 @@ mod tests {
         let d = find_action("local_data.write").unwrap();
         let present = ctx(Some("app-1"));
         // A session action-scope grant is enough while present, not while away.
-        mint_grant(&mut db, &present, d, GrantScope::Action, GrantDuration::Session, None, "user")
-            .unwrap();
+        mint_grant(
+            &mut db,
+            &present,
+            d,
+            GrantScope::Action,
+            GrantDuration::Session,
+            None,
+            "user",
+        )
+        .unwrap();
         let mut away = ctx(Some("app-1"));
         away.presence = Presence::Away;
         assert!(match_grant(&db, &present, d, "h").unwrap().is_some());
@@ -488,8 +511,16 @@ mod tests {
         let (mut db, _dir) = test_db();
         let d = find_action("local_data.write").unwrap();
         let c = ctx(Some("app-1"));
-        let g = mint_grant(&mut db, &c, d, GrantScope::Action, GrantDuration::Session, None, "user")
-            .unwrap();
+        let g = mint_grant(
+            &mut db,
+            &c,
+            d,
+            GrantScope::Action,
+            GrantDuration::Session,
+            None,
+            "user",
+        )
+        .unwrap();
         revoke_grant(&mut db, &g.id).unwrap();
         assert!(match_grant(&db, &c, d, "h").unwrap().is_none());
     }

@@ -57,7 +57,7 @@ pub fn get_continuity(
                     suspension_state, updated_at
              FROM surface_continuity WHERE surface_id = ?1 AND window_id = ?2",
             params![surface_id, window_id],
-            |row| parse_continuity_row(row),
+            parse_continuity_row,
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => {

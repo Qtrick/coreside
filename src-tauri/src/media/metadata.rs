@@ -121,10 +121,8 @@ fn parse_webp_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
             let b2 = bytes[23];
             let b3 = bytes[24];
             let w = (u32::from(b0) | (u32::from(b1 & 0x3F) << 8)) + 1;
-            let h = ((u32::from(b1) >> 6)
-                | (u32::from(b2) << 2)
-                | (u32::from(b3 & 0x0F) << 10))
-                + 1;
+            let h =
+                ((u32::from(b1) >> 6) | (u32::from(b2) << 2) | (u32::from(b3 & 0x0F) << 10)) + 1;
             Some((w, h))
         }
         _ => None,
@@ -163,7 +161,17 @@ fn parse_jpeg_sof(bytes: &[u8]) -> Option<(u32, u32)> {
         // SOF0–SOF3, SOF5–SOF7, SOF9–SOF11, SOF13–SOF15
         let is_sof = matches!(
             marker,
-            0xC0 | 0xC1 | 0xC2 | 0xC3 | 0xC5 | 0xC6 | 0xC7 | 0xC9 | 0xCA | 0xCB | 0xCD | 0xCE
+            0xC0 | 0xC1
+                | 0xC2
+                | 0xC3
+                | 0xC5
+                | 0xC6
+                | 0xC7
+                | 0xC9
+                | 0xCA
+                | 0xCB
+                | 0xCD
+                | 0xCE
                 | 0xCF
         );
         if is_sof && len >= 7 {
@@ -191,8 +199,8 @@ fn parse_mp4_metadata(bytes: &[u8]) -> Option<(Option<u32>, Option<u32>, Option<
         }
         if let Some(tkhd) = track.tkhd.as_ref() {
             // tkhd width/height are 16.16 fixed point
-            let w = (tkhd.width >> 16) as u32;
-            let h = (tkhd.height >> 16) as u32;
+            let w = tkhd.width >> 16;
+            let h = tkhd.height >> 16;
             if w > 0 && h > 0 {
                 width = Some(w);
                 height = Some(h);
@@ -200,16 +208,12 @@ fn parse_mp4_metadata(bytes: &[u8]) -> Option<(Option<u32>, Option<u32>, Option<
         }
         if let (Some(timescale), Some(duration)) = (track.timescale, track.duration) {
             if timescale.0 > 0 {
-                let ms = (duration.0 as u128)
-                    .saturating_mul(1000)
-                    / timescale.0 as u128;
+                let ms = (duration.0 as u128).saturating_mul(1000) / timescale.0 as u128;
                 duration_ms = Some(ms.min(i64::MAX as u128) as i64);
             }
         } else if let (Some(media_scale), Some(tkhd)) = (context.timescale, track.tkhd.as_ref()) {
             if media_scale.0 > 0 && tkhd.duration > 0 && tkhd.duration != u64::MAX {
-                let ms = (tkhd.duration as u128)
-                    .saturating_mul(1000)
-                    / media_scale.0 as u128;
+                let ms = (tkhd.duration as u128).saturating_mul(1000) / media_scale.0 as u128;
                 duration_ms = Some(ms.min(i64::MAX as u128) as i64);
             }
         }

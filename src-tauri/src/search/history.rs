@@ -139,7 +139,11 @@ fn insert_web_result(db: &Database, session_id: &str, result: &WebSearchResult) 
     Ok(())
 }
 
-fn insert_image_result(db: &Database, session_id: &str, result: &ImageSearchResult) -> DbResult<()> {
+fn insert_image_result(
+    db: &Database,
+    session_id: &str,
+    result: &ImageSearchResult,
+) -> DbResult<()> {
     let result_id = Uuid::new_v4().to_string();
     let metadata = serde_json::json!({
         "rank": result.rank,
@@ -171,7 +175,11 @@ fn insert_image_result(db: &Database, session_id: &str, result: &ImageSearchResu
     Ok(())
 }
 
-fn insert_video_result(db: &Database, session_id: &str, result: &VideoSearchResult) -> DbResult<()> {
+fn insert_video_result(
+    db: &Database,
+    session_id: &str,
+    result: &VideoSearchResult,
+) -> DbResult<()> {
     let result_id = Uuid::new_v4().to_string();
     let metadata = serde_json::json!({
         "rank": result.rank,

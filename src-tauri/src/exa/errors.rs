@@ -80,9 +80,7 @@ impl From<ExaError> for SearchError {
             ExaError::LocalBudgetReached => {
                 SearchError::Provider("local Exa budget reached".into())
             }
-            ExaError::CreditsExhausted => {
-                SearchError::Provider("Exa credits exhausted".into())
-            }
+            ExaError::CreditsExhausted => SearchError::Provider("Exa credits exhausted".into()),
             ExaError::InvalidApiKey => SearchError::Credential("invalid Exa API key".into()),
             other => SearchError::Provider(other.to_string()),
         }
@@ -97,9 +95,15 @@ mod tests {
     fn maps_http_status_codes() {
         assert_eq!(ExaError::from_status(401, "").code(), "invalid_api_key");
         assert_eq!(ExaError::from_status(402, "").code(), "credits_exhausted");
-        assert_eq!(ExaError::from_status(403, "").code(), "insufficient_permission");
+        assert_eq!(
+            ExaError::from_status(403, "").code(),
+            "insufficient_permission"
+        );
         assert_eq!(ExaError::from_status(422, "bad").code(), "invalid_request");
         assert_eq!(ExaError::from_status(429, "").code(), "rate_limited");
-        assert_eq!(ExaError::from_status(503, "down").code(), "provider_unavailable");
+        assert_eq!(
+            ExaError::from_status(503, "down").code(),
+            "provider_unavailable"
+        );
     }
 }

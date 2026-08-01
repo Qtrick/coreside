@@ -1,7 +1,7 @@
 use sha2::{Digest, Sha256};
 
 use super::errors::MediaError;
-use super::limits::{ALLOWED_IMAGE_MIMES, ALLOWED_VIDEO_MIMES, max_bytes_for_category};
+use super::limits::{max_bytes_for_category, ALLOWED_IMAGE_MIMES, ALLOWED_VIDEO_MIMES};
 use super::models::MediaMetadata;
 
 const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
@@ -26,10 +26,7 @@ pub fn detect_mime(bytes: &[u8]) -> Option<&'static str> {
         Some("image/jpeg")
     } else if bytes.starts_with(GIF_MAGIC) {
         Some("image/gif")
-    } else if bytes.len() >= 12
-        && bytes.starts_with(WEBP_MAGIC)
-        && &bytes[8..12] == WEBP_FMT
-    {
+    } else if bytes.len() >= 12 && bytes.starts_with(WEBP_MAGIC) && &bytes[8..12] == WEBP_FMT {
         Some("image/webp")
     } else if bytes.len() >= 12 && bytes[4..8] == *MP4_FTYP {
         let brand = &bytes[8..12];
@@ -57,7 +54,10 @@ pub fn is_rejected_payload(bytes: &[u8]) -> bool {
         || lower.contains("<?php")
 }
 
-pub fn validate_bytes(bytes: &[u8], category_hint: Option<&str>) -> Result<MediaMetadata, MediaError> {
+pub fn validate_bytes(
+    bytes: &[u8],
+    category_hint: Option<&str>,
+) -> Result<MediaMetadata, MediaError> {
     if bytes.is_empty() {
         return Err(MediaError::Invalid("empty payload".into()));
     }

@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::operations::{AppOperation, AgentResponseV2};
+use super::operations::{AgentResponseV2, AppOperation};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -26,7 +26,10 @@ pub enum StreamEvent {
     #[serde(rename = "operation.validated")]
     OperationValidated { operation_id: String },
     #[serde(rename = "operation.rejected")]
-    OperationRejected { operation_id: String, reason: String },
+    OperationRejected {
+        operation_id: String,
+        reason: String,
+    },
     #[serde(rename = "preview.updated")]
     PreviewUpdated { operations: Vec<AppOperation> },
     #[serde(rename = "transaction.ready")]
@@ -81,7 +84,10 @@ impl NdjsonFrameParser {
     fn parse_line(&mut self, line: &str) -> Result<StreamEvent, String> {
         // Incomplete JSON should not reach here as a full line, but guard anyway.
         if !line.starts_with('{') || !line.ends_with('}') {
-            return Err(format!("incomplete or invalid frame: {}", truncate(line, 80)));
+            return Err(format!(
+                "incomplete or invalid frame: {}",
+                truncate(line, 80)
+            ));
         }
         let value: Value =
             serde_json::from_str(line).map_err(|e| format!("malformed frame: {e}"))?;

@@ -1,6 +1,6 @@
 import { Folder } from "lucide-react";
 import type { Project } from "@/types/project";
-import { projectIconClass } from "@/components/projects/ProjectList";
+import { projectIconClass } from "@/components/projects/project-icon";
 
 type ProjectIndicatorProps = {
   project: Project;

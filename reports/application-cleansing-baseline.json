@@ -1,0 +1,104 @@
+{
+  "report": "application-cleansing-baseline",
+  "generatedAt": "2026-08-01",
+  "commit": "4b5fb1a288b5180860fe1e4fb984defdf296f036",
+  "environment": {
+    "os": "macOS 26.5.2",
+    "arch": "arm64",
+    "node": "v24.17.0",
+    "npm": "11.18.0",
+    "rustc": "1.96.1",
+    "cargo": "1.96.1",
+    "python": "3.14.2"
+  },
+  "inventory": {
+    "frontendSourceFiles": 115,
+    "rustSourceFiles": 160,
+    "sqliteMigrations": 15,
+    "latestMigration": "015_registered_actions.sql",
+    "registeredTauriCommands": 196
+  },
+  "gates": [
+    { "command": "npm run typecheck", "status": "pass", "exitCode": 0 },
+    { "command": "npm run lint", "status": "pass", "exitCode": 0, "errors": 0, "warnings": 0 },
+    { "command": "npm test", "status": "pass", "exitCode": 0, "testFiles": 14, "tests": 78, "failed": 0 },
+    { "command": "npm run doctor", "status": "pass", "exitCode": 0, "checks": 47, "failed": 0 },
+    { "command": "cargo test --manifest-path src-tauri/Cargo.toml", "status": "pass", "exitCode": 0, "tests": 301, "failed": 0 },
+    { "command": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check", "status": "pass", "exitCode": 0 },
+    {
+      "command": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features",
+      "status": "pass-with-warnings",
+      "exitCode": 0,
+      "note": "Remaining warnings are predominantly dead-code items tracked as incomplete features in docs/KNOWN_ISSUES.md"
+    }
+  ],
+  "notExecuted": [
+    {
+      "gate": "npm run build",
+      "reason": "packaged Tauri build not attempted this pass",
+      "classification": "blocked-by-environment",
+      "humanCommand": "npm run build"
+    },
+    {
+      "gate": "clean-profile GUI smoke test",
+      "reason": "no interactive desktop session available to the agent",
+      "classification": "blocked-by-environment",
+      "humanCommand": "launch the packaged app against an empty application-support directory"
+    },
+    {
+      "gate": "multi-window approval race",
+      "reason": "requires two live desktop windows",
+      "classification": "manual-verification-required",
+      "humanCommand": "see docs/MANUAL_RELEASE_CHECKLIST.md Journey F"
+    },
+    {
+      "gate": "windows/linux compile evidence",
+      "reason": "macOS-only host",
+      "classification": "blocked-by-environment",
+      "humanCommand": "cargo check --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc"
+    },
+    {
+      "gate": "desktop E2E",
+      "reason": "no harness exists in the repository",
+      "classification": "not-implemented",
+      "humanCommand": null
+    },
+    {
+      "gate": "performance baseline",
+      "reason": "not measured this pass",
+      "classification": "deferred",
+      "humanCommand": null
+    }
+  ],
+  "defectsFixed": {
+    "p0": 4,
+    "p1": 17,
+    "p2": 4,
+    "byArea": {
+      "registeredActionGateway": ["output-size checked after commit", "legacy kernel_*_record IPC bypass"],
+      "concurrency": ["keychain read under database mutex", "no sqlite busy_timeout"],
+      "queries": ["unbounded get_recent_messages"],
+      "errorContracts": ["raw sqlite text reached the frontend"],
+      "robustness": ["panic on generated record missing _id", "DST gap orphaned automations"],
+      "eventBus": ["permanent loop suspension", "unbounded idempotency set", "idempotency key burned on failed dispatch"],
+      "recovery": ["record_crash had no caller so crash_count never advanced"],
+      "frontendState": ["stale conversation overwrite in sendMessage", "stale overwrite after settings await", "stale tool selection"],
+      "frontendErrors": ["silent registered-action failures", "silent tool-canvas header failures", "silent optimistic persistence failures"],
+      "accessibility": ["no modal focus trap or restore", "focus stolen from topmost dialog on nested close"],
+      "deadUi": ["disabled inline-surface Archive button", "fake PNG export"],
+      "performance": ["4s approval polling", "full-store zustand subscriptions"]
+    }
+  },
+  "remainingRisks": [
+    { "id": "multi-window-approval-evidence", "severity": "P1-evidence", "classification": "manual-verification-required" },
+    { "id": "packaged-build-not-run", "severity": "P1-evidence", "classification": "blocked-by-environment" },
+    { "id": "no-desktop-e2e", "severity": "P1-evidence", "classification": "not-implemented" },
+    { "id": "no-performance-baseline", "severity": "P2", "classification": "deferred" },
+    { "id": "thin-migration-fixtures", "severity": "P2", "classification": "deferred" },
+    { "id": "windows-linux-unverified", "severity": "P2", "classification": "blocked-by-environment" },
+    { "id": "surface-delete-is-a-no-op", "severity": "P2", "classification": "incomplete-feature" },
+    { "id": "snapshot-and-branch-growth-unbounded", "severity": "P2", "classification": "incomplete-feature" },
+    { "id": "preservation-rust-layer-unused", "severity": "P2", "classification": "incomplete-feature" },
+    { "id": "dependency-aware-delete-unwired", "severity": "P2", "classification": "incomplete-feature" }
+  ]
+}

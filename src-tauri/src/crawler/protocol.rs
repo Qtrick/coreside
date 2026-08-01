@@ -39,7 +39,7 @@ pub fn validate_version(envelope: &ProtocolEnvelope) -> Result<(), CrawlerError>
 }
 
 pub fn is_terminal_event(event_type: &str) -> bool {
-    TERMINAL_EVENT_TYPES.iter().any(|t| *t == event_type)
+    TERMINAL_EVENT_TYPES.contains(&event_type)
 }
 
 /// Ensure a terminal event belongs to the expected request id.
@@ -81,7 +81,8 @@ mod tests {
 
     #[test]
     fn parse_valid_completed_event() {
-        let line = r#"{"protocolVersion":"1","requestId":"r1","type":"completed","payload":{"ok":true}}"#;
+        let line =
+            r#"{"protocolVersion":"1","requestId":"r1","type":"completed","payload":{"ok":true}}"#;
         let env = parse_event_line(line).unwrap().unwrap();
         assert_eq!(env.protocol_version, "1");
         assert_eq!(env.request_id.as_deref(), Some("r1"));

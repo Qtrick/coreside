@@ -9,7 +9,9 @@ mod summaries;
 mod validation;
 
 pub use export::export_project_json;
-pub use indexing::{index_message_for_conversation, rebuild_project_index, remove_conversation_from_index};
+pub use indexing::{
+    index_message_for_conversation, rebuild_project_index, remove_conversation_from_index,
+};
 pub use models::{
     CreateProjectInput, DeleteProjectMode, Project, ProjectContextHit, ProjectContextSettings,
     UpdateProjectInput,
@@ -21,9 +23,7 @@ pub use repository::{
     rename_conversation, restore_project, set_project_wallpaper, touch_last_opened, update_project,
 };
 pub use retrieval::search_project_context;
-pub use summaries::{
-    deterministic_fallback_summary, set_project_summary,
-};
+pub use summaries::{deterministic_fallback_summary, set_project_summary};
 
 use crate::db::{get_setting, Database, DbResult};
 

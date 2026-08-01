@@ -105,15 +105,13 @@ pub fn is_protected(id: &str) -> bool {
     if trimmed.starts_with("core.") {
         return true;
     }
-    PROTECTED_IDS.iter().any(|p| *p == trimmed)
+    PROTECTED_IDS.contains(&trimmed)
 }
 
 /// Err when `id` is protected; Ok otherwise.
 pub fn assert_not_protected(id: &str) -> Result<(), String> {
     if is_protected(id) {
-        Err(format!(
-            "Protected core resource cannot be modified: {id}"
-        ))
+        Err(format!("Protected core resource cannot be modified: {id}"))
     } else {
         Ok(())
     }

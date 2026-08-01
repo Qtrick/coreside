@@ -66,10 +66,17 @@ pub fn spawn_scheduler(app: AppHandle, handle: Arc<SchedulerHandle>) {
                 let handle_clone = handle.clone();
                 let id = automation.id.clone();
                 tauri::async_runtime::spawn_blocking(move || {
+                    let parked_before = pending_approval_total(&app_clone);
                     if let Some(state) = app_clone.try_state::<AppState>() {
                         run_one(&state, &id);
                     }
                     handle_clone.end(&id);
+                    // An away run that parks an approval must reach open windows
+                    // without waiting for a focus event.
+                    if pending_approval_total(&app_clone) != parked_before {
+                        use tauri::Emitter;
+                        let _ = app_clone.emit(crate::commands::APPROVALS_CHANGED_EVENT, ());
+                    }
                 });
             }
         }
@@ -100,6 +107,15 @@ fn catch_up_missed(db: &mut Database, handle: &SchedulerHandle) -> Result<(), db
         }
     }
     Ok(())
+}
+
+fn pending_approval_total(app: &AppHandle) -> i64 {
+    app.try_state::<AppState>()
+        .and_then(|state| {
+            let db = state.db.lock();
+            crate::application_kernel::registered_actions::gateway::pending_approval_count(&db).ok()
+        })
+        .unwrap_or(-1)
 }
 
 fn run_one(state: &AppState, automation_id: &str) {
@@ -141,7 +157,17 @@ fn run_one_db(db: &mut Database, automation_id: &str) -> Result<(), db::DbError>
         summary.as_deref(),
         err_cat.as_deref(),
     )?;
+    // A trigger that cannot produce a next run (corrupt time string) would leave
+    // `next_run_at` NULL forever, silently orphaning the automation. Disable it
+    // instead so the user can see and repair it.
     let next = compute_next_after(&automation.trigger, Utc::now()).map(|d| d.to_rfc3339());
+    let schedulable = next.is_some();
+    if !schedulable {
+        tracing::warn!(
+            automation_id,
+            "automation trigger has no next run; disabling"
+        );
+    }
     db::update_automation_schedule(
         db,
         automation_id,
@@ -149,7 +175,7 @@ fn run_one_db(db: &mut Database, automation_id: &str) -> Result<(), db::DbError>
         Some(&completed),
         Some(status),
         failures,
-        enabled && automation.enabled,
+        schedulable && enabled && automation.enabled,
     )?;
     Ok(())
 }

@@ -6,10 +6,12 @@ mod hosted_session;
 mod resolve;
 
 pub use hosted_session::{
-    access_token, adapter_connected, adapter_ready, clear_session, load_valid_session,
-    store_session_json, KEYRING_ACCOUNT,
+    access_token, adapter_connected, clear_session, load_valid_session, store_session_json,
 };
-pub use resolve::{defaults_for, resolve_connection_by_id, resolve_credentials};
+pub use resolve::{
+    defaults_for, read_connection, read_credential_sources, resolve_connection_secret,
+    resolve_from_sources, CredentialSources,
+};
 
 use thiserror::Error;
 

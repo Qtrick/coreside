@@ -1,0 +1,749 @@
+{
+  "generatedAt": "2026-08-01",
+  "commit": "4b5fb1a288b5180860fe1e4fb984defdf296f036",
+  "sourceBriefAreas": 50,
+  "areaCount": 50,
+  "statusCounts": {
+    "PARTIAL": 15,
+    "FIXED": 14,
+    "VERIFIED_HEALTHY": 5,
+    "DEFERRED": 11,
+    "MANUAL_VERIFICATION_REQUIRED": 2,
+    "OPTIMIZED": 1,
+    "BLOCKED": 2
+  },
+  "areas": [
+    {
+      "id": "startup",
+      "name": "Application startup and shutdown",
+      "status": "PARTIAL",
+      "relevantFiles": [
+        "src-tauri/src/lib.rs",
+        "src-tauri/src/main.rs",
+        "src/main.tsx",
+        "src/components/layout/AppShell.tsx"
+      ],
+      "bugsFound": [
+        "Setup interrupts active application jobs after unclean restart (intentional)"
+      ],
+      "actionTaken": "Inspected lib.rs setup/run hooks; job interrupt on boot confirmed",
+      "remainingVerification": "Clean-profile packaged launch not executed this phase"
+    },
+    {
+      "id": "database",
+      "name": "Database initialization",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src-tauri/src/db/mod.rs",
+        "src-tauri/src/state.rs"
+      ],
+      "bugsFound": [
+        "Missing busy_timeout caused immediate writer failures (R7)",
+        "Raw SQLite errors reached the frontend (R5)"
+      ],
+      "actionTaken": "PRAGMA busy_timeout=5000, synchronous=NORMAL; sanitized CommandError mapping",
+      "remainingVerification": null
+    },
+    {
+      "id": "migrations",
+      "name": "Migrations",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src-tauri/migrations/001_initial.sql",
+        "src-tauri/migrations/015_registered_actions.sql",
+        "docs/MIGRATION_ASSURANCE.md"
+      ],
+      "bugsFound": [
+        "Fixture corpus thin for realistic upgrade paths"
+      ],
+      "actionTaken": "migration_fixtures: fresh + 006/011/012/013/014/015 upgrades",
+      "remainingVerification": "Expand upgrade fixtures per docs/MIGRATION_ASSURANCE.md"
+    },
+    {
+      "id": "bootstrap",
+      "name": "Application bootstrap",
+      "status": "VERIFIED_HEALTHY",
+      "relevantFiles": [
+        "src/stores/app-store.ts",
+        "src/lib/tauri.ts",
+        "src-tauri/src/lib.rs"
+      ],
+      "bugsFound": [],
+      "actionTaken": "Bootstrap path present; doctor frontend.api_bindings pass recorded in audit",
+      "remainingVerification": null
+    },
+    {
+      "id": "chat",
+      "name": "Chat",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src/stores/app-store.ts",
+        "src/components/chat/MessageBubble.tsx",
+        "src/components/chat/MessageList.tsx",
+        "src-tauri/src/commands/message_cmds.rs",
+        "src-tauri/src/commands/conversation_cmds.rs"
+      ],
+      "bugsFound": [
+        "Stale conversation overwrite after chat switch (F1)",
+        "Settings-change branch reopened race (F3)"
+      ],
+      "actionTaken": "Re-check activeConversationId before conversation-scoped set",
+      "remainingVerification": "Desktop retest of rapid chat switching recommended"
+    },
+    {
+      "id": "streaming",
+      "name": "Streaming",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src-tauri/src/runtime_v2/streaming.rs",
+        "src-tauri/src/commands/message_cmds.rs",
+        "src/stores/app-store.ts"
+      ],
+      "bugsFound": [
+        "Full-store zustand subscriptions re-rendered on every token (F13)"
+      ],
+      "actionTaken": "useShallow selectors on Sidebar/SettingsPanel/ToolCanvas; chat race guards",
+      "remainingVerification": null
+    },
+    {
+      "id": "cancellation",
+      "name": "Cancellation",
+      "status": "PARTIAL",
+      "relevantFiles": [
+        "src-tauri/src/commands/message_cmds.rs",
+        "src-tauri/src/crawler/cancellation.rs"
+      ],
+      "bugsFound": [
+        "crawler::cancel_request exists but unused (KNOWN_ISSUES dead code)"
+      ],
+      "actionTaken": "Chat cancel_request remains registered and frontend-wrapped; crawler cancel deferred",
+      "remainingVerification": "Wire or document crawler in-flight cancel"
+    },
+    {
+      "id": "queueing",
+      "name": "Queueing",
+      "status": "PARTIAL",
+      "relevantFiles": [
+        "src-tauri/src/runtime_v2/queue.rs",
+        "src-tauri/src/commands/runtime_v2_cmds.rs",
+        "src/lib/tauri.ts"
+      ],
+      "bugsFound": [
+        "enqueue_agent_turn_cmd / activate_next_queue_cmd / complete_queue_item_cmd / recover_agent_queue_cmd registered but uninvoked from frontend"
+      ],
+      "actionTaken": "Inventory flagged as REVIEW; list/cancel/remove wrappers exist",
+      "remainingVerification": "Decide product surface for agent turn queue or INTERNAL_ONLY"
+    },
+    {
+      "id": "message-retry",
+      "name": "Message retry and edit/resend",
+      "status": "DEFERRED",
+      "relevantFiles": [
+        "src-tauri/src/commands/conversation_cmds.rs",
+        "src-tauri/src/commands/message_cmds.rs",
+        "src/components/chat/MessageBubble.tsx"
+      ],
+      "bugsFound": [],
+      "actionTaken": "Not deeply audited this phase beyond delete_messages_from path",
+      "remainingVerification": "Manual journey for edit/resend UX"
+    },
+    {
+      "id": "chat-attachments",
+      "name": "Chat attachments",
+      "status": "DEFERRED",
+      "relevantFiles": [
+        "src-tauri/src/commands/attachment_cmds.rs",
+        "src/lib/tauri.ts"
+      ],
+      "bugsFound": [],
+      "actionTaken": "Commands registered and wrapped; not exhaustively audited",
+      "remainingVerification": "Validate staging, size limits, and src serving"
+    },
+    {
+      "id": "ai-provider-selection",
+      "name": "AI provider selection",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src-tauri/src/commands/ai_cmds.rs",
+        "src-tauri/src/commands/credential_cmds.rs",
+        "src/components/settings/SettingsPanel.tsx"
+      ],
+      "bugsFound": [
+        "Env credentials branded as Coreside AI (KNOWN_ISSUES — fixed)"
+      ],
+      "actionTaken": "Consumer label AI Access / Ready; catalog gating for showModelIdentity",
+      "remainingVerification": "Real Tauri screenshot retest of Settings card (open evidence)"
+    },
+    {
+      "id": "provider-credentials",
+      "name": "Provider credentials",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src-tauri/src/credentials/mod.rs",
+        "src-tauri/src/credentials/resolve.rs",
+        "src-tauri/src/commands/credential_cmds.rs"
+      ],
+      "bugsFound": [
+        "Keychain reads while DB mutex held (R3)"
+      ],
+      "actionTaken": "Split read_credential_sources vs resolve_from_sources; keys stay in OS keyring service coreside.provider",
+      "remainingVerification": null
+    },
+    {
+      "id": "hosted-auth",
+      "name": "Hosted authentication scaffolding",
+      "status": "PARTIAL",
+      "relevantFiles": [
+        "src-tauri/src/credentials/hosted_session.rs",
+        "src-tauri/src/commands/credential_cmds.rs"
+      ],
+      "bugsFound": [
+        "Hosted adapter not built; hosted_connected:false by design"
+      ],
+      "actionTaken": "Keyring session store/clear/status commands present; UI scaffolding only",
+      "remainingVerification": "Do not claim Coreside AI connected until hosted backend exists"
+    },
+    {
+      "id": "model-disclosure",
+      "name": "Model disclosure",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src/components/chat/MessageBubble.tsx",
+        "src/components/settings/SettingsPanel.tsx",
+        "src-tauri/src/commands/ai_cmds.rs"
+      ],
+      "bugsFound": [
+        "Model attribution under env mode; OpenRouter slug leak (KNOWN_ISSUES — fixed)"
+      ],
+      "actionTaken": "Gated on showModelIdentity / disclosure policy",
+      "remainingVerification": "Desktop Settings card screenshot retest"
+    },
+    {
+      "id": "projects",
+      "name": "Projects",
+      "status": "DEFERRED",
+      "relevantFiles": [
+        "src-tauri/src/projects/",
+        "src-tauri/src/commands/project_cmds.rs",
+        "src/components/projects/"
+      ],
+      "bugsFound": [],
+      "actionTaken": "Not modified this cleansing pass; CRUD commands wrapped in tauri.ts",
+      "remainingVerification": "Isolation and membership journeys"
+    },
+    {
+      "id": "project-context",
+      "name": "Project context retrieval",
+      "status": "DEFERRED",
+      "relevantFiles": [
+        "src-tauri/src/projects/indexing.rs",
+        "src-tauri/src/projects/summaries.rs",
+        "src-tauri/src/commands/project_cmds.rs"
+      ],
+      "bugsFound": [
+        "set_chat_summary unused — per-chat summaries never written (KNOWN_ISSUES)"
+      ],
+      "actionTaken": "Noted dead-code gap; left in place as incomplete feature evidence",
+      "remainingVerification": "Wire chat summary writer or remove API"
+    },
+    {
+      "id": "search-citations",
+      "name": "Search and citations",
+      "status": "DEFERRED",
+      "relevantFiles": [
+        "src-tauri/src/search/",
+        "src-tauri/src/commands/search_cmds.rs",
+        "src/components/search/"
+      ],
+      "bugsFound": [
+        "web_search_cmd / image_search_cmd / video_search_cmd / fetch_web_page_cmd registered but no production api wrapper"
+      ],
+      "actionTaken": "Inventory REVIEW; search UI uses other paths — needs confirmation",
+      "remainingVerification": "Trace actual search invoke path from UI"
+    },
+    {
+      "id": "exa",
+      "name": "Exa integration",
+      "status": "DEFERRED",
+      "relevantFiles": [
+        "src-tauri/src/exa/",
+        "src-tauri/src/commands/exa_cmds.rs"
+      ],
+      "bugsFound": [
+        "list_exa_usage mocked but uninvoked from production api"
+      ],
+      "actionTaken": "Connection/budget/profile commands wrapped; usage list REVIEW",
+      "remainingVerification": "Budget enforcement desktop smoke with real key"
+    },
+    {
+      "id": "crawler",
+      "name": "Crawl4AI sidecar",
+      "status": "DEFERRED",
+      "relevantFiles": [
+        "src-tauri/src/crawler/",
+        "src-tauri/src/commands/crawler_cmds.rs"
+      ],
+      "bugsFound": [
+        "In-flight crawl cancel unused"
+      ],
+      "actionTaken": "Status/install/cache commands present; not exhaustively audited",
+      "remainingVerification": "Sidecar install and crawl health on clean machine"
+    },
+    {
+      "id": "media",
+      "name": "Media Library",
+      "status": "DEFERRED",
+      "relevantFiles": [
+        "src-tauri/src/media/",
+        "src-tauri/src/commands/media_cmds.rs",
+        "src/components/media/"
+      ],
+      "bugsFound": [],
+      "actionTaken": "Not modified this pass per audit section 3",
+      "remainingVerification": "Import validation and asset protocol scope"
+    },
+    {
+      "id": "wallpapers",
+      "name": "Wallpaper system",
+      "status": "DEFERRED",
+      "relevantFiles": [
+        "src/components/wallpaper/",
+        "src/lib/wallpaper.ts",
+        "src/types/wallpaper.ts",
+        "src-tauri/src/wallpapers/"
+      ],
+      "bugsFound": [
+        "trusted_presets Rust duplicate of CANVAS_PRESETS (KNOWN_ISSUES)"
+      ],
+      "actionTaken": "Not exhaustively audited; readability enforcement not retested this phase",
+      "remainingVerification": "Readability contrast checks under live/moving wallpapers"
+    },
+    {
+      "id": "settings",
+      "name": "Settings",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src/components/settings/SettingsPanel.tsx",
+        "src-tauri/src/commands/settings_cmds.rs"
+      ],
+      "bugsFound": [
+        "Full-store subscription (F13)"
+      ],
+      "actionTaken": "useShallow; protected setting rejection helpers retained",
+      "remainingVerification": "Desktop Settings AI Access card screenshot"
+    },
+    {
+      "id": "added-settings",
+      "name": "Added Settings",
+      "status": "DEFERRED",
+      "relevantFiles": [
+        "src-tauri/src/commands/settings_cmds.rs",
+        "src-tauri/migrations/002_added_settings.sql"
+      ],
+      "bugsFound": [],
+      "actionTaken": "CRUD commands wrapped; not deeply audited",
+      "remainingVerification": "Agent-created added settings round-trip"
+    },
+    {
+      "id": "action-log",
+      "name": "Action Log",
+      "status": "VERIFIED_HEALTHY",
+      "relevantFiles": [
+        "src/components/action-log/ActionLog.tsx",
+        "src/lib/action-log.ts",
+        "src-tauri/migrations/004_action_log.sql",
+        "src-tauri/migrations/011_action_log_mode.sql"
+      ],
+      "bugsFound": [],
+      "actionTaken": "Off-by-default mode present; frontend module and tests exist",
+      "remainingVerification": null
+    },
+    {
+      "id": "automations",
+      "name": "Automations",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src-tauri/src/automations/scheduler.rs",
+        "src-tauri/src/automations/models.rs",
+        "src-tauri/src/commands/automation_cmds.rs"
+      ],
+      "bugsFound": [
+        "DST gap could orphan next-run (R8)"
+      ],
+      "actionTaken": "resolve_local handles gaps; uncomputable next-run disables automation",
+      "remainingVerification": null
+    },
+    {
+      "id": "personal-tools",
+      "name": "Personal tools",
+      "status": "PARTIAL",
+      "relevantFiles": [
+        "src-tauri/src/commands/tool_cmds.rs",
+        "src/components/tool-canvas/ToolCanvas.tsx",
+        "src/components/tool-renderer/ToolRenderer.tsx"
+      ],
+      "bugsFound": [
+        "Silent header action failures (F4)",
+        "selectTool stale race (F5)",
+        "Stub tools quality (KNOWN_ISSUES mitigated)"
+      ],
+      "actionTaken": "Error banners and active-ID guard; preservation still frontend-only",
+      "remainingVerification": "Complex tool rebuild quality remains model-dependent"
+    },
+    {
+      "id": "inline-surfaces",
+      "name": "Inline surfaces",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src/components/chat/InlineSurface.tsx",
+        "src-tauri/src/commands/runtime_v2_cmds.rs"
+      ],
+      "bugsFound": [
+        "Stale surface closure (F6)",
+        "Dead Archive button (F10)",
+        "Missing registered-action wiring (KNOWN_ISSUES — fixed)"
+      ],
+      "actionTaken": "latestSurfaceRef; Archive removed; doctor ui.inline_pending_approval",
+      "remainingVerification": null
+    },
+    {
+      "id": "tool-renderer",
+      "name": "Tool renderer",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src/components/tool-renderer/ToolRenderer.tsx",
+        "src/components/tool-renderer/AppRouteShell.tsx"
+      ],
+      "bugsFound": [
+        "Registered-action failures only console.warn (F2)",
+        "Optimistic persistence swallowed errors (F9)"
+      ],
+      "actionTaken": "Dismissible role=alert banner for action and persistence failures",
+      "remainingVerification": null
+    },
+    {
+      "id": "application-kernel",
+      "name": "Application Kernel",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src-tauri/src/application_kernel/",
+        "src-tauri/src/commands/kernel_cmds.rs",
+        "src-tauri/migrations/013_application_kernel.sql"
+      ],
+      "bugsFound": [
+        "Legacy kernel_*_record IPC bypass (R2)",
+        "Missing _id panic in generated-data migration (R6)"
+      ],
+      "actionTaken": "Removed dual IPC path; skip records without _id; gateway is choke point",
+      "remainingVerification": "Several kernel_* commands still REVIEW (jobs/tests/policy)"
+    },
+    {
+      "id": "runtime-v2",
+      "name": "Runtime V2",
+      "status": "PARTIAL",
+      "relevantFiles": [
+        "src-tauri/src/runtime_v2/",
+        "src-tauri/src/commands/runtime_v2_cmds.rs",
+        "src-tauri/migrations/012_runtime_v2.sql"
+      ],
+      "bugsFound": [
+        "surface.delete accepted but no-op",
+        "MAX_SNAPSHOTS_PER_CONVERSATION / MAX_BRANCH_DEPTH unenforced",
+        "Event-bus permanent suspension / unbounded idempotency (R9-R11 — fixed)"
+      ],
+      "actionTaken": "Event-bus fixes landed; ceilings and surface.delete remain incomplete features",
+      "remainingVerification": "Enforce documented performance limits"
+    },
+    {
+      "id": "registered-actions",
+      "name": "Registered actions",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src-tauri/src/application_kernel/registered_actions/",
+        "src-tauri/migrations/015_registered_actions.sql"
+      ],
+      "bugsFound": [
+        "Output-size breaker after commit (R1)",
+        "Legacy data IPC bypass (R2)"
+      ],
+      "actionTaken": "Savepoint rollback; single choke kernel_invoke_registered_action; doctor gateway.single_choke",
+      "remainingVerification": null
+    },
+    {
+      "id": "approvals",
+      "name": "Approvals",
+      "status": "PARTIAL",
+      "relevantFiles": [
+        "src-tauri/src/application_kernel/registered_actions/approvals.rs",
+        "src/components/applications/PendingApprovalsHost.tsx"
+      ],
+      "bugsFound": [
+        "4s polling woke every window (F12)",
+        "Multi-window exactly-once not desktop-verified"
+      ],
+      "actionTaken": "runtime-approvals-changed events; CAS unit-tested",
+      "remainingVerification": "MANUAL_VERIFICATION_REQUIRED Journey F multi-window race"
+    },
+    {
+      "id": "grants",
+      "name": "Grants",
+      "status": "PARTIAL",
+      "relevantFiles": [
+        "src-tauri/src/application_kernel/registered_actions/grants.rs",
+        "src-tauri/src/commands/kernel_cmds.rs"
+      ],
+      "bugsFound": [
+        "Once-grant burn timing tied to durable commit (fixed with R1)"
+      ],
+      "actionTaken": "Once-consumption unit-tested with gateway savepoint",
+      "remainingVerification": "Desktop multi-window grant revoke race"
+    },
+    {
+      "id": "audit-ledger",
+      "name": "Audit ledger",
+      "status": "VERIFIED_HEALTHY",
+      "relevantFiles": [
+        "src-tauri/src/application_kernel/registered_actions/gateway.rs",
+        "src-tauri/src/commands/kernel_cmds.rs"
+      ],
+      "bugsFound": [
+        "list_action_events_for_request unused (audit note)"
+      ],
+      "actionTaken": "Events persist through gateway; list/clear IPC present",
+      "remainingVerification": null
+    },
+    {
+      "id": "recovery-mode",
+      "name": "Recovery Mode",
+      "status": "PARTIAL",
+      "relevantFiles": [
+        "src-tauri/src/application_kernel/recovery.rs",
+        "docs/RECOVERY_MODE.md",
+        "src-tauri/src/commands/kernel_cmds.rs"
+      ],
+      "bugsFound": [
+        "record_crash had no caller so crash_count stayed 0 (R12)"
+      ],
+      "actionTaken": "Non-retryable build failure records crash; safe startup / LKG restore work",
+      "remainingVerification": "UI reporter for render failures still missing"
+    },
+    {
+      "id": "export-import",
+      "name": "Export and import",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src/components/export/ExportDialog.tsx",
+        "src-tauri/src/exports/mod.rs",
+        "src-tauri/src/commands/export_cmds.rs",
+        "src-tauri/src/application_kernel/packages.rs"
+      ],
+      "bugsFound": [
+        "Fake PNG Snapshot export (F11)"
+      ],
+      "actionTaken": "Removed placeholder format; doctor packages.authority_stripped",
+      "remainingVerification": null
+    },
+    {
+      "id": "secondary-windows",
+      "name": "Native secondary windows",
+      "status": "MANUAL_VERIFICATION_REQUIRED",
+      "relevantFiles": [
+        "src-tauri/src/windows/mod.rs",
+        "src-tauri/capabilities/default.json",
+        "src-tauri/src/commands/tool_cmds.rs"
+      ],
+      "bugsFound": [
+        "tool-* shell:allow-open — FIXED"
+      ],
+      "actionTaken": "Inspected open_tool_window; capability scope documented, not changed",
+      "remainingVerification": "Open tool window + approval host behavior on desktop"
+    },
+    {
+      "id": "navigation",
+      "name": "Navigation",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src/stores/app-store.ts",
+        "src/components/sidebar/Sidebar.tsx",
+        "src-tauri/src/runtime_v2/app_routes.rs"
+      ],
+      "bugsFound": [
+        "Stale chat navigation overwrite (F1)"
+      ],
+      "actionTaken": "navigateToChat re-checks active conversation",
+      "remainingVerification": null
+    },
+    {
+      "id": "command-palette",
+      "name": "Command palette",
+      "status": "DEFERRED",
+      "relevantFiles": [
+        "src/components/CommandPalette.tsx",
+        "src/components/layout/AppShell.tsx"
+      ],
+      "bugsFound": [],
+      "actionTaken": "Protected palette exists with unified search; not deeply audited",
+      "remainingVerification": "Keyboard shortcut and focus trap manual check"
+    },
+    {
+      "id": "zustand",
+      "name": "Zustand state",
+      "status": "OPTIMIZED",
+      "relevantFiles": [
+        "src/stores/app-store.ts",
+        "src/components/sidebar/Sidebar.tsx",
+        "src/components/settings/SettingsPanel.tsx",
+        "src/components/tool-canvas/ToolCanvas.tsx"
+      ],
+      "bugsFound": [
+        "Whole-store subscriptions during streaming (F13)"
+      ],
+      "actionTaken": "Converted hot paths to useShallow selectors",
+      "remainingVerification": null
+    },
+    {
+      "id": "tauri-ipc",
+      "name": "Tauri IPC",
+      "status": "PARTIAL",
+      "relevantFiles": [
+        "src-tauri/src/lib.rs",
+        "src/lib/tauri.ts",
+        "reports/tauri-command-inventory.json"
+      ],
+      "bugsFound": [
+        "196 registered; 25 uninvoked; 58 registered without mock case"
+      ],
+      "actionTaken": "Evidence inventory written; no command deletions",
+      "remainingVerification": "Disposition REVIEW commands deliberately"
+    },
+    {
+      "id": "tauri-capabilities",
+      "name": "Tauri capabilities",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src-tauri/capabilities/default.json"
+      ],
+      "bugsFound": [
+        "tool-* shell:allow-open — FIXED"
+      ],
+      "actionTaken": "Split tool-window.json without shell:allow-open; doctor capabilities.tool_window_no_shell",
+      "remainingVerification": "Consider splitting tool-window capability without shell"
+    },
+    {
+      "id": "external-links",
+      "name": "External-link handling",
+      "status": "FIXED",
+      "relevantFiles": [
+        "src/lib/open-url.ts",
+        "src-tauri/src/application_kernel/registered_actions/handlers.rs",
+        "src-tauri/src/search/safety.rs"
+      ],
+      "bugsFound": [
+        "openExternalUrl SSRF gap — FIXED",
+        "registered external_link.open validates but ToolRenderer does not auto-open result"
+      ],
+      "actionTaken": "openExternalUrl → Rust open_external_url + validate_public_http_url",
+      "remainingVerification": "Align open-url.ts with validate_external_url / safety.rs"
+    },
+    {
+      "id": "csp",
+      "name": "CSP",
+      "status": "PARTIAL",
+      "relevantFiles": [
+        "src-tauri/tauri.conf.json"
+      ],
+      "bugsFound": [
+        "img-src allows arbitrary https:; style-src includes unsafe-inline"
+      ],
+      "actionTaken": "Inspected CSP string; connect-src limited to self/ipc",
+      "remainingVerification": "Decide whether remote img-src can be narrowed"
+    },
+    {
+      "id": "packaging",
+      "name": "Packaging",
+      "status": "BLOCKED",
+      "relevantFiles": [
+        "src-tauri/tauri.conf.json",
+        "package.json",
+        "docs/APPLICATION_CLEANSING_AUDIT.md"
+      ],
+      "bugsFound": [],
+      "actionTaken": "npm run build not executed this environment",
+      "remainingVerification": "Human must run npm run build and clean-profile smoke"
+    },
+    {
+      "id": "ci",
+      "name": "CI",
+      "status": "VERIFIED_HEALTHY",
+      "relevantFiles": [
+        ".github/workflows/ci.yml",
+        "scripts/coreside-doctor.mjs"
+      ],
+      "bugsFound": [
+        "KNOWN_ISSUES previously said no CI — fixed"
+      ],
+      "actionTaken": "Workflow present; doctor integrated per audit",
+      "remainingVerification": "Confirm CI green on remote for current HEAD"
+    },
+    {
+      "id": "doctor",
+      "name": "Doctor",
+      "status": "VERIFIED_HEALTHY",
+      "relevantFiles": [
+        "scripts/coreside-doctor.mjs",
+        "package.json"
+      ],
+      "bugsFound": [],
+      "actionTaken": "Audit recorded 47/47 checks pass at commit 4b5fb1a",
+      "remainingVerification": null
+    },
+    {
+      "id": "documentation",
+      "name": "Documentation",
+      "status": "PARTIAL",
+      "relevantFiles": [
+        "docs/APPLICATION_CLEANSING_AUDIT.md",
+        "docs/KNOWN_ISSUES.md",
+        "docs/RECOVERY_MODE.md",
+        "docs/MIGRATION_ASSURANCE.md"
+      ],
+      "bugsFound": [
+        "PERFORMANCE_BASELINE.md missing"
+      ],
+      "actionTaken": "Cleansing audit and known issues updated this phase",
+      "remainingVerification": "Add performance baseline doc when measured"
+    },
+    {
+      "id": "machine-reports",
+      "name": "Machine-readable reports",
+      "status": "PARTIAL",
+      "relevantFiles": [
+        "reports/application-cleansing-baseline.json",
+        "reports/tauri-command-inventory.json",
+        "reports/application-subsystem-matrix.json",
+        "reports/security-findings.json"
+      ],
+      "bugsFound": [],
+      "actionTaken": "Writing cleansing inventories this task",
+      "remainingVerification": "Keep reports commit-pinned"
+    },
+    {
+      "id": "cross-platform",
+      "name": "Cross-platform support",
+      "status": "BLOCKED",
+      "relevantFiles": [
+        "src-tauri/tauri.conf.json",
+        ".github/workflows/ci.yml",
+        "docs/KNOWN_ISSUES.md"
+      ],
+      "bugsFound": [
+        "Windows/Linux release verification open; macOS-only host evidence"
+      ],
+      "actionTaken": "Do not claim Windows/Linux support",
+      "remainingVerification": "CI matrix cargo check --target x86_64-pc-windows-msvc"
+    }
+  ],
+  "notes": [
+    "SEC-CAP-001 fixed: tool-window capability without shell; SEC-URL-001 fixed: open_external_url"
+  ]
+}

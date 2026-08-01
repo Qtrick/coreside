@@ -7,8 +7,8 @@ use uuid::Uuid;
 use crate::runtime_v2::operations::{AppOperation, OperationTarget};
 use crate::runtime_v2::packs::validate_component_type_allowed;
 
-use super::COMPILER_VERSION;
 use super::errors::KernelError;
+use super::COMPILER_VERSION;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "intent", rename_all = "camelCase")]
@@ -79,8 +79,7 @@ pub fn compile(intent: ChangeIntent) -> Result<CompiledChange, KernelError> {
             value_type,
             default,
         } => {
-            crate::security::assert_not_protected(&setting_id)
-                .map_err(KernelError::Protected)?;
+            crate::security::assert_not_protected(&setting_id).map_err(KernelError::Protected)?;
             let op = new_op(
                 "setting.create",
                 OperationTarget {
@@ -103,8 +102,7 @@ pub fn compile(intent: ChangeIntent) -> Result<CompiledChange, KernelError> {
             })
         }
         ChangeIntent::UpsertManifest { manifest } => {
-            super::manifest::validate_manifest(&manifest)
-                .map_err(KernelError::Validation)?;
+            super::manifest::validate_manifest(&manifest).map_err(KernelError::Validation)?;
             let name = manifest.name.clone();
             let op = new_op(
                 "manifest.upsert",
@@ -112,7 +110,8 @@ pub fn compile(intent: ChangeIntent) -> Result<CompiledChange, KernelError> {
                     application_id: Some(manifest.application_id.clone()),
                     ..Default::default()
                 },
-                serde_json::to_value(&manifest).map_err(|e| KernelError::Validation(e.to_string()))?,
+                serde_json::to_value(&manifest)
+                    .map_err(|e| KernelError::Validation(e.to_string()))?,
             );
             Ok(CompiledChange {
                 compiler_version: COMPILER_VERSION.into(),

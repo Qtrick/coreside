@@ -1,0 +1,36 @@
+{
+  "generatedAt": "2026-08-01",
+  "environment": {
+    "os": "macOS 26.5.2",
+    "arch": "arm64",
+    "node": "v24.17.0"
+  },
+  "webBundle": {
+    "command": "npm run build:web",
+    "jsBytesApprox": 741500,
+    "jsGzipBytesApprox": 209070,
+    "cssBytesApprox": 55510,
+    "cssGzipBytesApprox": 9910,
+    "note": "Main chunk >500kB; tauri.ts is a concentration point"
+  },
+  "gates": {
+    "vitestTests": 78,
+    "rustTestsApprox": 311,
+    "migrationFixtureTests": 10,
+    "doctorChecks": 52
+  },
+  "optimizationsRecorded": [
+    "approvals-event-driven",
+    "zustand-shallow-selectors",
+    "sql-limited-recent-messages",
+    "bounded-event-idempotency",
+    "snapshot-pruning",
+    "branch-depth-limit"
+  ],
+  "notMeasured": [
+    "coldStartupMs",
+    "packagedAppBytes",
+    "liveWallpaperIdleCpu",
+    "conversationSwitchMs"
+  ]
+}

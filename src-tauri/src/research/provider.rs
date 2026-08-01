@@ -9,9 +9,9 @@ use uuid::Uuid;
 use crate::crawler::{to_search_error, CrawlerSupervisor};
 use crate::search::{
     bound_text, normalize_image_results, normalize_video_results, normalize_web_results,
-    validate_public_http_url, FetchedWebPage, ImageSearchResponse, ImageSearchResult,
-    SearchError, SearchProvider, SearchRequest, VideoSearchResponse, VideoSearchResult,
-    WebSearchResponse, WebSearchResult,
+    validate_public_http_url, FetchedWebPage, ImageSearchResponse, ImageSearchResult, SearchError,
+    SearchProvider, SearchRequest, VideoSearchResponse, VideoSearchResult, WebSearchResponse,
+    WebSearchResult,
 };
 
 use super::discovery::{classify_discovery_seed, DiscoverySeed, NEEDS_SEED_MESSAGE};

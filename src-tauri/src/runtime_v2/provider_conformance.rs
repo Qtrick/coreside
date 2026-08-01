@@ -122,7 +122,7 @@ pub fn get_provider_profile(
                     last_tested_at, benchmark_json, created_at, updated_at
              FROM provider_conformance WHERE provider_id = ?1 AND model_id = ?2",
             params![provider_id, model_id],
-            |row| parse_conformance_row(row),
+            parse_conformance_row,
         )
         .ok();
 
@@ -142,7 +142,15 @@ pub fn get_provider_profile(
             profile = excluded.profile,
             capabilities_json = excluded.capabilities_json,
             updated_at = excluded.updated_at",
-        params![id, provider_id, model_id, profile.as_str(), caps_json, now, now],
+        params![
+            id,
+            provider_id,
+            model_id,
+            profile.as_str(),
+            caps_json,
+            now,
+            now
+        ],
     )?;
     db.conn()
         .query_row(
@@ -150,7 +158,7 @@ pub fn get_provider_profile(
                     last_tested_at, benchmark_json, created_at, updated_at
              FROM provider_conformance WHERE provider_id = ?1 AND model_id = ?2",
             params![provider_id, model_id],
-            |row| parse_conformance_row(row),
+            parse_conformance_row,
         )
         .map_err(crate::db::DbError::Sqlite)
 }

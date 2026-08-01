@@ -40,9 +40,7 @@ pub fn find_by_hash(db: &Database, hash: &str) -> DbResult<Option<MediaAsset>> {
     let mut stmt = db.conn().prepare(&format!(
         "SELECT {SELECT_COLS} FROM media_assets WHERE content_hash = ?1 LIMIT 1"
     ))?;
-    let asset = stmt
-        .query_row(params![hash], row_to_asset)
-        .optional()?;
+    let asset = stmt.query_row(params![hash], row_to_asset).optional()?;
     Ok(asset)
 }
 
@@ -106,7 +104,9 @@ pub fn insert_media_asset(
     meta: &super::models::MediaMetadata,
     hash: &str,
 ) -> Result<MediaAsset, MediaError> {
-    if let Some(existing) = find_by_hash(db, hash).map_err(|e| MediaError::Database(e.to_string()))? {
+    if let Some(existing) =
+        find_by_hash(db, hash).map_err(|e| MediaError::Database(e.to_string()))?
+    {
         return Ok(existing);
     }
 
@@ -240,12 +240,10 @@ fn wallpaper_references_asset(wallpaper_json: &str, asset_id: &str) -> bool {
 
 pub fn touch_media_used(db: &Database, id: &str) -> DbResult<()> {
     let now = chrono::Utc::now().to_rfc3339();
-    let n = db
-        .conn()
-        .execute(
-            "UPDATE media_assets SET last_used_at = ?1 WHERE id = ?2",
-            params![now, id],
-        )?;
+    let n = db.conn().execute(
+        "UPDATE media_assets SET last_used_at = ?1 WHERE id = ?2",
+        params![now, id],
+    )?;
     if n == 0 {
         return Err(DbError::NotFound(id.to_string()));
     }

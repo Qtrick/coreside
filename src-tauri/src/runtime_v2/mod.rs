@@ -50,6 +50,8 @@ pub use packs::{
     validate_definition_components,
 };
 #[allow(unused_imports)]
+pub use patch::{apply_component_op, check_revision, PatchConflict};
+#[allow(unused_imports)]
 pub use patch_scheduler::{
     detect_dependency_cycle, flush_scheduler, get_scheduled_patch, preview_rate_limit_hz,
     record_manual_edit_provenance, schedule_and_apply, schedule_patches, topological_order,
@@ -63,11 +65,9 @@ pub use preservation::{
 };
 #[allow(unused_imports)]
 pub use provider_conformance::{
-    get_provider_profile, select_application_profile, seed_provider_profiles,
+    get_provider_profile, seed_provider_profiles, select_application_profile,
     ProviderConformanceRecord, ProviderProfile,
 };
-#[allow(unused_imports)]
-pub use patch::{apply_component_op, check_revision, PatchConflict};
 #[allow(unused_imports)]
 pub use queue::{
     activate_next, cancel as cancel_queue_item, complete as complete_queue_item, enqueue,

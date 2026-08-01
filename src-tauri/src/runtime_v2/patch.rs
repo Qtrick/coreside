@@ -2,7 +2,7 @@
 
 use serde_json::{json, Map, Value};
 
-use super::limits::{MAX_COMPONENT_TREE_DEPTH, MAX_COMPONENTS_PER_SURFACE};
+use super::limits::{MAX_COMPONENTS_PER_SURFACE, MAX_COMPONENT_TREE_DEPTH};
 use crate::ai::ToolComponent;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,7 +24,9 @@ impl std::fmt::Display for PatchConflict {
             Self::MissingComponent { component_id } => {
                 write!(f, "component not found: {component_id}")
             }
-            Self::DuplicateId { component_id } => write!(f, "duplicate component id: {component_id}"),
+            Self::DuplicateId { component_id } => {
+                write!(f, "duplicate component id: {component_id}")
+            }
             Self::DepthExceeded => write!(f, "component tree depth exceeded"),
             Self::ComponentLimitExceeded => write!(f, "component count exceeded"),
             Self::InvalidPayload(m) => write!(f, "invalid patch payload: {m}"),
@@ -34,7 +36,7 @@ impl std::fmt::Display for PatchConflict {
 
 pub type PatchResult<T> = Result<T, PatchConflict>;
 
-fn walk_mut<'a, F>(nodes: &'a mut [ToolComponent], f: &mut F) -> bool
+fn walk_mut<F>(nodes: &mut [ToolComponent], f: &mut F) -> bool
 where
     F: FnMut(&mut ToolComponent) -> bool,
 {
@@ -90,7 +92,10 @@ fn max_depth(nodes: &[ToolComponent], depth: usize) -> usize {
     max
 }
 
-fn collect_ids(nodes: &[ToolComponent], ids: &mut std::collections::HashSet<String>) -> Result<(), PatchConflict> {
+fn collect_ids(
+    nodes: &[ToolComponent],
+    ids: &mut std::collections::HashSet<String>,
+) -> Result<(), PatchConflict> {
     for c in nodes {
         if !ids.insert(c.id.clone()) {
             return Err(PatchConflict::DuplicateId {
@@ -133,12 +138,13 @@ pub fn update_props(
     component_id: &str,
     props_patch: &Value,
 ) -> PatchResult<()> {
-    let node = find_mut(components, component_id).ok_or_else(|| PatchConflict::MissingComponent {
-        component_id: component_id.into(),
-    })?;
-    let patch_obj = props_patch.as_object().ok_or_else(|| {
-        PatchConflict::InvalidPayload("props patch must be an object".into())
-    })?;
+    let node =
+        find_mut(components, component_id).ok_or_else(|| PatchConflict::MissingComponent {
+            component_id: component_id.into(),
+        })?;
+    let patch_obj = props_patch
+        .as_object()
+        .ok_or_else(|| PatchConflict::InvalidPayload("props patch must be an object".into()))?;
     let mut current = match node.props.take() {
         Some(Value::Object(m)) => m,
         Some(_) | None => Map::new(),
@@ -150,7 +156,10 @@ pub fn update_props(
     Ok(())
 }
 
-pub fn remove_component(components: &mut Vec<ToolComponent>, component_id: &str) -> PatchResult<()> {
+pub fn remove_component(
+    components: &mut Vec<ToolComponent>,
+    component_id: &str,
+) -> PatchResult<()> {
     if let Some(idx) = components.iter().position(|c| c.id == component_id) {
         components.remove(idx);
         return Ok(());
@@ -186,9 +195,10 @@ pub fn insert_component(
             components.insert(i, component);
         }
         Some(pid) => {
-            let parent = find_mut(components, pid).ok_or_else(|| PatchConflict::MissingComponent {
-                component_id: pid.into(),
-            })?;
+            let parent =
+                find_mut(components, pid).ok_or_else(|| PatchConflict::MissingComponent {
+                    component_id: pid.into(),
+                })?;
             let children = parent.children.get_or_insert_with(Vec::new);
             let i = index.unwrap_or(children.len()).min(children.len());
             children.insert(i, component);
@@ -203,9 +213,10 @@ pub fn replace_component(
     component_id: &str,
     replacement: ToolComponent,
 ) -> PatchResult<()> {
-    let node = find_mut(components, component_id).ok_or_else(|| PatchConflict::MissingComponent {
-        component_id: component_id.into(),
-    })?;
+    let node =
+        find_mut(components, component_id).ok_or_else(|| PatchConflict::MissingComponent {
+            component_id: component_id.into(),
+        })?;
     if replacement.id != component_id && replacement.id != node.id {
         // Allow same id only to avoid collisions.
         return Err(PatchConflict::InvalidPayload(
@@ -221,9 +232,10 @@ pub fn update_children(
     component_id: &str,
     children: Vec<ToolComponent>,
 ) -> PatchResult<()> {
-    let node = find_mut(components, component_id).ok_or_else(|| PatchConflict::MissingComponent {
-        component_id: component_id.into(),
-    })?;
+    let node =
+        find_mut(components, component_id).ok_or_else(|| PatchConflict::MissingComponent {
+            component_id: component_id.into(),
+        })?;
     node.children = Some(children);
     Ok(())
 }
@@ -241,9 +253,8 @@ pub fn apply_component_op(
     check_revision(base_revision, current_revision)?;
     match op_type {
         "component.update_props" => {
-            let id = component_id.ok_or_else(|| {
-                PatchConflict::InvalidPayload("componentId required".into())
-            })?;
+            let id = component_id
+                .ok_or_else(|| PatchConflict::InvalidPayload("componentId required".into()))?;
             let props_patch = payload
                 .get("props")
                 .cloned()
@@ -251,9 +262,8 @@ pub fn apply_component_op(
             update_props(components, id, &props_patch)?;
         }
         "component.remove" => {
-            let id = component_id.ok_or_else(|| {
-                PatchConflict::InvalidPayload("componentId required".into())
-            })?;
+            let id = component_id
+                .ok_or_else(|| PatchConflict::InvalidPayload("componentId required".into()))?;
             remove_component(components, id)?;
         }
         "component.insert" => {
@@ -264,15 +274,17 @@ pub fn apply_component_op(
                     .unwrap_or_else(|| payload.clone()),
             )
             .map_err(|e| PatchConflict::InvalidPayload(e.to_string()))?;
-            let index = payload.get("index").and_then(|v| v.as_u64()).map(|u| u as usize);
+            let index = payload
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .map(|u| u as usize);
             super::packs::validate_tool_components(std::slice::from_ref(&comp))
                 .map_err(PatchConflict::InvalidPayload)?;
             insert_component(components, parent_id, comp, index)?;
         }
         "component.replace" => {
-            let id = component_id.ok_or_else(|| {
-                PatchConflict::InvalidPayload("componentId required".into())
-            })?;
+            let id = component_id
+                .ok_or_else(|| PatchConflict::InvalidPayload("componentId required".into()))?;
             let comp: ToolComponent = serde_json::from_value(
                 payload
                     .get("component")
@@ -285,9 +297,8 @@ pub fn apply_component_op(
             replace_component(components, id, comp)?;
         }
         "component.update_children" => {
-            let id = component_id.ok_or_else(|| {
-                PatchConflict::InvalidPayload("componentId required".into())
-            })?;
+            let id = component_id
+                .ok_or_else(|| PatchConflict::InvalidPayload("componentId required".into()))?;
             let children: Vec<ToolComponent> = serde_json::from_value(
                 payload
                     .get("children")
@@ -300,9 +311,8 @@ pub fn apply_component_op(
             update_children(components, id, children)?;
         }
         "component.update_visibility" => {
-            let id = component_id.ok_or_else(|| {
-                PatchConflict::InvalidPayload("componentId required".into())
-            })?;
+            let id = component_id
+                .ok_or_else(|| PatchConflict::InvalidPayload("componentId required".into()))?;
             let visible = payload
                 .get("visible")
                 .and_then(|v| v.as_bool())
@@ -311,16 +321,14 @@ pub fn apply_component_op(
         }
         "component.update_actions" => {
             // Actions live in frontend ToolComponent; store under props._actions when present.
-            let id = component_id.ok_or_else(|| {
-                PatchConflict::InvalidPayload("componentId required".into())
-            })?;
+            let id = component_id
+                .ok_or_else(|| PatchConflict::InvalidPayload("componentId required".into()))?;
             let actions = payload.get("actions").cloned().unwrap_or(json!([]));
             update_props(components, id, &json!({ "_actions": actions }))?;
         }
         "component.move" => {
-            let id = component_id.ok_or_else(|| {
-                PatchConflict::InvalidPayload("componentId required".into())
-            })?;
+            let id = component_id
+                .ok_or_else(|| PatchConflict::InvalidPayload("componentId required".into()))?;
             let node = {
                 fn extract(nodes: &mut Vec<ToolComponent>, id: &str) -> Option<ToolComponent> {
                     if let Some(i) = nodes.iter().position(|c| c.id == id) {
@@ -340,7 +348,10 @@ pub fn apply_component_op(
             let node = node.ok_or_else(|| PatchConflict::MissingComponent {
                 component_id: id.into(),
             })?;
-            let index = payload.get("index").and_then(|v| v.as_u64()).map(|u| u as usize);
+            let index = payload
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .map(|u| u as usize);
             insert_component(components, parent_id, node, index)?;
         }
         other => {

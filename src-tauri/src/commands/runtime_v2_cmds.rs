@@ -5,9 +5,10 @@ use serde_json::Value;
 use tauri::State;
 
 use super::CommandError;
+use crate::runtime_v2::packs::CapabilityPackMeta as PackMeta;
 use crate::runtime_v2::{
-    self, activate_next, append_ledger_entry, branch_from_message,
-    bundled_packs, cancel_queue_item, complete_queue_item, create_inline_surface, create_snapshot,
+    self, activate_next, append_ledger_entry, branch_from_message, bundled_packs,
+    cancel_queue_item, complete_queue_item, create_inline_surface, create_snapshot,
     delete_snapshot, enqueue, flush_scheduler, get_continuity, get_draft, get_provider_profile,
     get_route_state, get_snapshot, get_surface, get_surface_state, get_transaction, list_branches,
     list_diagnostics, list_inline_surfaces, list_ledger_entries, list_queue, list_transactions,
@@ -15,11 +16,10 @@ use crate::runtime_v2::{
     save_draft, save_surface_state, schedule_and_apply, schedule_patches, set_route_state,
     store_diagnostics, suspend_surface, undo_transaction, update_surface_definition,
     AgentResponseV2, AppOperation, AppTransactionRecord, ApplyResult, ChatBranchRecord,
-    ContinuitySnapshot, ContextLedgerEntry, NavigateResult, PatchPriority, ProviderConformanceRecord,
-    QueueItem, RouteState, ScheduleRequest, ScheduledPatch,
+    ContextLedgerEntry, ContinuitySnapshot, NavigateResult, PatchPriority,
+    ProviderConformanceRecord, QueueItem, RouteState, ScheduleRequest, ScheduledPatch,
     SnapshotRecord, SurfaceDraft, SurfaceRecord, SuspensionState,
 };
-use crate::runtime_v2::packs::CapabilityPackMeta as PackMeta;
 use crate::state::AppState;
 
 #[tauri::command]
@@ -656,11 +656,7 @@ pub fn complete_queue_item_cmd(
     error: Option<String>,
 ) -> Result<QueueItem, CommandError> {
     let mut db = state.db.lock();
-    Ok(complete_queue_item(
-        &mut db,
-        &item_id,
-        error.as_deref(),
-    )?)
+    Ok(complete_queue_item(&mut db, &item_id, error.as_deref())?)
 }
 
 #[tauri::command]

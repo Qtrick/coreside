@@ -46,36 +46,12 @@ export function ExportDialog({
     setError(null);
     setMessage(null);
     try {
-      if (active.id === "png") {
-        const root = document.querySelector(".tool-canvas-body, .tool-window");
-        if (!root) throw new Error("Nothing to capture");
-        // Minimal PNG via canvas draw of text fallback when html-to-image unavailable.
-        const canvas = document.createElement("canvas");
-        canvas.width = 1200;
-        canvas.height = 800;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) throw new Error("Canvas unavailable");
-        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--surface") || "#1c201c";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--text-primary") || "#eef2ec";
-        ctx.font = "48px sans-serif";
-        ctx.fillText(toolName || "Coreside tool", 64, 120);
-        ctx.font = "24px sans-serif";
-        ctx.fillText("PNG snapshot exported from Coreside", 64, 180);
-        const dataUrl = canvas.toDataURL("image/png");
-        const a = document.createElement("a");
-        a.href = dataUrl;
-        a.download = destination.endsWith(".png") ? destination : `${destination}.png`;
-        a.click();
-        setMessage("PNG downloaded");
-      } else {
-        const result = await api.exportTool({
-          toolId,
-          format: active.id,
-          destinationPath: destination,
-        });
-        setMessage(`${result.message}: ${result.path}`);
-      }
+      const result = await api.exportTool({
+        toolId,
+        format: active.id,
+        destinationPath: destination,
+      });
+      setMessage(`${result.message}: ${result.path}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Export failed");
     } finally {
@@ -84,7 +60,7 @@ export function ExportDialog({
   };
 
   return (
-    <ModalPortal>
+    <ModalPortal onClose={onClose}>
       <div className="provider-modal-root" role="presentation">
       <button
         type="button"

@@ -74,11 +74,7 @@ impl AppConfig {
     }
 
     /// Safe snapshot for IPC (no secrets).
-    pub fn public_ai_status(
-        &self,
-        status: &str,
-        message: Option<String>,
-    ) -> PublicAiStatus {
+    pub fn public_ai_status(&self, status: &str, message: Option<String>) -> PublicAiStatus {
         self.public_ai_status_with_source(status, message, "env", None)
     }
 
@@ -89,13 +85,7 @@ impl AppConfig {
         source: &str,
         active_connection_id: Option<String>,
     ) -> PublicAiStatus {
-        self.public_ai_status_with_presentation(
-            status,
-            message,
-            source,
-            active_connection_id,
-            None,
-        )
+        self.public_ai_status_with_presentation(status, message, source, active_connection_id, None)
     }
 
     pub fn public_ai_status_with_presentation(
@@ -160,9 +150,7 @@ impl AppConfig {
             consumer_display_name: presentation
                 .as_ref()
                 .map(|p| p.consumer_display_name.clone()),
-            user_facing_status: presentation
-                .as_ref()
-                .map(|p| p.user_facing_status.clone()),
+            user_facing_status: presentation.as_ref().map(|p| p.user_facing_status.clone()),
             disclosure,
         }
     }

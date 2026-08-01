@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Archive,
   ChevronsDownUp,
   ChevronsUpDown,
   ExternalLink,
@@ -96,9 +95,16 @@ export function InlineSurfaceCard({
   const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [a11yWarn, setA11yWarn] = useState<string | null>(null);
+  // Real kernel application id for crash strikes — never invent from toolId.
+  const [kernelApplicationId, setKernelApplicationId] = useState<string | null>(
+    null,
+  );
   const rootRef = useRef<HTMLElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const previousToolRef = useRef<ToolDefinition | null>(null);
+  // Hydration is keyed on `surface.id`, but its async body must record the
+  // newest definition, not the one captured when the effect first ran.
+  const latestSurfaceRef = useRef(surface);
   const sendMessage = useAppStore((s) => s.sendMessage);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const setSurfaceDraftConflict = useAppStore((s) => s.setSurfaceDraftConflict);
@@ -138,7 +144,7 @@ export function InlineSurfaceCard({
         if (cancelled) return;
         setState(savedState ?? {});
         setHydrated(true);
-        previousToolRef.current = asToolDefinition(surface);
+        previousToolRef.current = asToolDefinition(latestSurfaceRef.current);
         if (continuity && bodyRef.current) {
           restoreScrollSnapshot(
             bodyRef.current,
@@ -160,7 +166,7 @@ export function InlineSurfaceCard({
         if (!cancelled) {
           setState({});
           setHydrated(true);
-          previousToolRef.current = asToolDefinition(surface);
+          previousToolRef.current = asToolDefinition(latestSurfaceRef.current);
         }
       }
     })();
@@ -168,6 +174,24 @@ export function InlineSurfaceCard({
       cancelled = true;
     };
   }, [surface.id]);
+
+  const tool = asToolDefinition(surface);
+  const manifestLookupId = surface.toolId?.trim() || tool.id;
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .kernelGetManifest(manifestLookupId)
+      .then((record) => {
+        if (!cancelled) setKernelApplicationId(record.applicationId);
+      })
+      .catch(() => {
+        if (!cancelled) setKernelApplicationId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [manifestLookupId]);
 
   const suspend = useCallback(async () => {
     const root = bodyRef.current ?? rootRef.current;
@@ -220,8 +244,6 @@ export function InlineSurfaceCard({
     });
     return () => window.cancelAnimationFrame(frame);
   }, [surface, state, collapsed, fullWidth]);
-
-  const tool = asToolDefinition(surface);
 
   const persistState = useCallback(
     async (next: ToolState) => {
@@ -315,6 +337,7 @@ export function InlineSurfaceCard({
             className="btn btn-ghost"
             aria-expanded={!collapsed}
             onClick={() => setCollapsed((c) => !c)}
+            aria-label={collapsed ? "Expand surface" : "Collapse surface"}
             title={collapsed ? "Expand" : "Collapse"}
           >
             {collapsed ? <ChevronsUpDown size={16} /> : <ChevronsDownUp size={16} />}
@@ -323,6 +346,7 @@ export function InlineSurfaceCard({
             type="button"
             className="btn btn-ghost"
             onClick={() => setFullWidth((f) => !f)}
+            aria-label="Toggle full width"
             title="Full width"
           >
             <Maximize2 size={16} />
@@ -331,6 +355,7 @@ export function InlineSurfaceCard({
             type="button"
             className="btn btn-ghost"
             onClick={() => void promote()}
+            aria-label="Promote to Personal Tool"
             title="Promote to Personal Tool"
           >
             <PackagePlus size={16} />
@@ -340,19 +365,12 @@ export function InlineSurfaceCard({
               type="button"
               className="btn btn-ghost"
               onClick={() => void openWindow()}
+              aria-label="Open surface in a new window"
               title="Open in window"
             >
               <ExternalLink size={16} />
             </button>
           ) : null}
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled
-            title="Archive"
-          >
-            <Archive size={16} />
-          </button>
         </div>
       </header>
       <DraftConflictBanner />
@@ -386,7 +404,9 @@ export function InlineSurfaceCard({
             state={state}
             onStateChange={(next) => setState(next)}
             onPersistState={persistState}
-            applicationId={surface.toolId ?? tool.id}
+            // Prefer a real kernel application id when present; never invent one
+            // solely so render failures can advance crash_count for legacy tools.
+            applicationId={kernelApplicationId}
             surfaceId={surface.id}
             conversationId={conversationId}
             projectId={activeProjectId}

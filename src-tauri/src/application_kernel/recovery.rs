@@ -124,7 +124,10 @@ pub fn set_flags(
 }
 
 /// Agent must not disable Recovery Mode via operations.
-pub fn assert_agent_cannot_disable_recovery(op_type: &str, payload: &serde_json::Value) -> Result<(), String> {
+pub fn assert_agent_cannot_disable_recovery(
+    op_type: &str,
+    payload: &serde_json::Value,
+) -> Result<(), String> {
     if op_type.contains("recovery") {
         return Err("Recovery Mode is protected".into());
     }

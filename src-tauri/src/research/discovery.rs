@@ -66,11 +66,10 @@ fn looks_like_bare_domain(raw: &str) -> bool {
     if parts.len() < 2 {
         return false;
     }
-    parts.iter().all(|p| {
-        !p.is_empty()
-            && p.chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-')
-    }) && parts.last().map(|t| t.len() >= 2).unwrap_or(false)
+    parts
+        .iter()
+        .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        && parts.last().map(|t| t.len() >= 2).unwrap_or(false)
 }
 
 fn normalize_domain(raw: &str) -> String {

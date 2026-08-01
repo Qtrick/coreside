@@ -2,7 +2,7 @@
 
 use rusqlite::{params, OptionalExtension};
 
-use crate::db::{get_conversation, Database, DbError, DbResult, now_rfc3339};
+use crate::db::{get_conversation, now_rfc3339, Database, DbError, DbResult};
 
 use super::repository::list_project_conversations;
 
@@ -51,11 +51,7 @@ pub fn get_project_summary(db: &Database, project_id: &str) -> DbResult<Option<S
     super::repository::get_project(db, project_id).map(|p| p.summary)
 }
 
-pub fn set_project_summary(
-    db: &mut Database,
-    project_id: &str,
-    summary: &str,
-) -> DbResult<String> {
+pub fn set_project_summary(db: &mut Database, project_id: &str, summary: &str) -> DbResult<String> {
     let now = now_rfc3339();
     let n = db.conn().execute(
         "UPDATE projects SET summary = ?1, summary_updated_at = ?2, updated_at = ?3 WHERE id = ?4",
@@ -72,7 +68,10 @@ fn snippet(text: &str, max_chars: usize) -> String {
     if collapsed.chars().count() <= max_chars {
         collapsed
     } else {
-        let truncated: String = collapsed.chars().take(max_chars.saturating_sub(1)).collect();
+        let truncated: String = collapsed
+            .chars()
+            .take(max_chars.saturating_sub(1))
+            .collect();
         format!("{truncated}…")
     }
 }
@@ -87,7 +86,11 @@ pub fn deterministic_fallback_summary(db: &Database, project_id: &str) -> DbResu
     let mut parts = Vec::new();
     for conv in conversations.iter().take(8) {
         if let Ok(Some(chat_summary)) = get_chat_summary(db, &conv.id) {
-            parts.push(format!("{}: {}", conv.title, snippet(&chat_summary.summary, 120)));
+            parts.push(format!(
+                "{}: {}",
+                conv.title,
+                snippet(&chat_summary.summary, 120)
+            ));
             continue;
         }
         let recent = crate::db::get_recent_messages(db, &conv.id, 2)?;
@@ -126,13 +129,9 @@ mod tests {
             },
         )
         .unwrap();
-        let conv = create_conversation(
-            &mut db,
-            DEFAULT_WORKSPACE_ID,
-            "Planning",
-            Some(&project.id),
-        )
-        .unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Planning", Some(&project.id))
+                .unwrap();
         insert_message(&mut db, &conv.id, "user", "Ship the feature", None).unwrap();
 
         let summary = deterministic_fallback_summary(&db, &project.id).unwrap();

@@ -61,21 +61,36 @@ function isApplicationUnavailable(
 }
 
 export function ToolCanvas() {
-  const {
-    activeTool,
-    toolState,
-    updateToolState,
-    closeToolCanvas,
-    openToolWindow,
-    undoTool,
-    sendMessage,
-    openExportDialog,
-    activeConversationId,
-    activeProjectId,
-  } = useAppStore();
+  // Selectors, not the whole store: this canvas stays mounted while chat
+  // streams, and a full-store subscription re-renders the tool on every token.
+  const activeTool = useAppStore((s) => s.activeTool);
+  const toolState = useAppStore((s) => s.toolState);
+  const updateToolState = useAppStore((s) => s.updateToolState);
+  const closeToolCanvas = useAppStore((s) => s.closeToolCanvas);
+  const openToolWindow = useAppStore((s) => s.openToolWindow);
+  const undoTool = useAppStore((s) => s.undoTool);
+  const sendMessage = useAppStore((s) => s.sendMessage);
+  const openExportDialog = useAppStore((s) => s.openExportDialog);
+  const activeConversationId = useAppStore((s) => s.activeConversationId);
+  const activeProjectId = useAppStore((s) => s.activeProjectId);
   const [manifestRecord, setManifestRecord] = useState<ManifestRecord | null>(null);
   const [recovery, setRecovery] = useState<RecoveryState | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [canvasError, setCanvasError] = useState<string | null>(null);
+
+  const runHeaderAction = useCallback(
+    async (label: string, run: () => Promise<unknown>) => {
+      setCanvasError(null);
+      try {
+        await run();
+      } catch (error) {
+        setCanvasError(
+          error instanceof Error ? error.message : `${label} failed.`,
+        );
+      }
+    },
+    [],
+  );
 
   const applicationId = useMemo(() => {
     if (!activeTool) return null;
@@ -261,7 +276,9 @@ export function ToolCanvas() {
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => void openToolWindow()}
+            onClick={() =>
+              void runHeaderAction("Opening the tool window", openToolWindow)
+            }
             aria-label="Open tool in new window"
           >
             <ExternalLink size={16} aria-hidden />
@@ -270,7 +287,7 @@ export function ToolCanvas() {
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => void undoTool()}
+            onClick={() => void runHeaderAction("Undo", undoTool)}
             aria-label="Undo last tool change"
           >
             <History size={16} aria-hidden />
@@ -286,6 +303,19 @@ export function ToolCanvas() {
           </button>
         </div>
       </header>
+      {canvasError ? (
+        <div className="tr-action-error" role="alert">
+          <span>{canvasError}</span>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => setCanvasError(null)}
+            aria-label="Dismiss error"
+          >
+            <X size={14} aria-hidden />
+          </button>
+        </div>
+      ) : null}
       <div className="tool-canvas-body" data-tool-id={activeTool.id}>
         {availability.blocked ? (
           <div className="empty-state tool-canvas-blocked">
@@ -295,7 +325,9 @@ export function ToolCanvas() {
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={() => void restoreApplication()}
+                onClick={() =>
+                  void runHeaderAction("Restore", restoreApplication)
+                }
               >
                 Restore last known good
               </button>
@@ -330,7 +362,8 @@ export function ToolCanvas() {
             state={toolState}
             onStateChange={onStateChange}
             onPersistState={onPersistState}
-            applicationId={applicationId}
+            // Only a real manifest id — never invent one for legacy tools.
+            applicationId={manifestRecord?.applicationId ?? null}
             surfaceId={surfaceId}
             conversationId={activeConversationId}
             projectId={activeProjectId}

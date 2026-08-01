@@ -32,10 +32,8 @@ pub fn assert_runtime_ready() -> Result<RuntimeHealth, CrawlerError> {
     if health.ready {
         Ok(health)
     } else {
-        Err(CrawlerError::NeedsSetup(
-            health
-                .detail
-                .unwrap_or_else(|| "Local research engine is not installed".into()),
-        ))
+        Err(CrawlerError::NeedsSetup(health.detail.unwrap_or_else(
+            || "Local research engine is not installed".into(),
+        )))
     }
 }

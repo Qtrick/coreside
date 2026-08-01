@@ -1,23 +1,15 @@
 //! Allowlisted appearance preference changes (theme, colors, backgrounds, live wallpapers).
 
+use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use once_cell::sync::Lazy;
 
-static HEX_COLOR: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$").expect("hex color regex")
-});
+static HEX_COLOR: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$").expect("hex color regex"));
 
 /// Allowed live wallpaper kinds (declarative presets — no arbitrary code).
-pub const WALLPAPER_KINDS: &[&str] = &[
-    "none",
-    "matrix",
-    "aurora",
-    "particles",
-    "rain",
-    "pulse",
-];
+pub const WALLPAPER_KINDS: &[&str] = &["none", "matrix", "aurora", "particles", "rain", "pulse"];
 
 /// Allowed KV keys the agent may set.
 pub const ALLOWED_SETTING_KEYS: &[&str] = &[
@@ -116,11 +108,7 @@ impl WallpaperConfig {
         self.validate()?;
         Ok(Self {
             kind: self.kind.trim().to_lowercase(),
-            color: self
-                .color
-                .as_ref()
-                .map(|c| normalize_hex(c))
-                .transpose()?,
+            color: self.color.as_ref().map(|c| normalize_hex(c)).transpose()?,
             secondary_color: self
                 .secondary_color
                 .as_ref()
@@ -286,7 +274,9 @@ fn validate_color_pair(name: &str, colors: Option<&ColorVariants>) -> Result<(),
 fn normalize_hex(raw: &str) -> Result<String, String> {
     let s = raw.trim();
     if !HEX_COLOR.is_match(s) {
-        return Err(format!("invalid hex color '{raw}' (expected #RGB or #RRGGBB)"));
+        return Err(format!(
+            "invalid hex color '{raw}' (expected #RGB or #RRGGBB)"
+        ));
     }
     if s.len() == 4 {
         // #abc → #aabbcc
@@ -311,8 +301,8 @@ pub fn parse_wallpaper_setting_strict(raw: &str) -> Result<WallpaperConfig, Stri
     if trimmed.is_empty() {
         return Ok(WallpaperConfig::default());
     }
-    let parsed: WallpaperConfig = serde_json::from_str(trimmed)
-        .map_err(|e| format!("wallpaper must be JSON: {e}"))?;
+    let parsed: WallpaperConfig =
+        serde_json::from_str(trimmed).map_err(|e| format!("wallpaper must be JSON: {e}"))?;
     parsed.normalized()
 }
 
@@ -369,11 +359,7 @@ pub fn normalize_setting_kv(key: &str, value: &str) -> Result<String, String> {
                 "always" | "on" | "true" | "1" | "yes" => "always",
                 "intelligent" | "auto" | "smart" => "intelligent",
                 "off" | "false" | "0" | "no" => "off",
-                _ => {
-                    return Err(
-                        "actionLogMode must be off, always, or intelligent".into(),
-                    )
-                }
+                _ => return Err("actionLogMode must be off, always, or intelligent".into()),
             };
             Ok(mode.into())
         }
@@ -582,11 +568,7 @@ mod tests {
 
     #[test]
     fn normalize_setting_kv_rejects_bad_wallpaper_and_hex() {
-        assert!(normalize_setting_kv(
-            "wallpaper",
-            r#"{"kind":"shadertoy"}"#
-        )
-        .is_err());
+        assert!(normalize_setting_kv("wallpaper", r#"{"kind":"shadertoy"}"#).is_err());
         assert!(normalize_setting_kv("accentPrimaryLight", "red").is_err());
         assert_eq!(
             normalize_setting_kv("accentPrimaryLight", "#ABC").unwrap(),

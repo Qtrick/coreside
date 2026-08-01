@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ModalPortal } from "@/components/ui/ModalPortal";
 import { ApprovalCard } from "@/components/applications/ApprovalCard";
-import { api } from "@/lib/tauri";
+import { api, listenApprovalsChanged } from "@/lib/tauri";
 import type { ApprovalRequest, ManifestRecord } from "@/types/application-kernel";
 
 export function PendingApprovalsHost() {
@@ -29,14 +29,22 @@ export function PendingApprovalsHost() {
     void reload();
     const onFocus = () => void reload();
     const onPending = () => void reload();
-    // Away-parked approvals arrive without a focus event; poll lightly.
-    const timer = window.setInterval(() => void reload(), 4_000);
+    // The trusted core emits whenever approvals, grants, or away-parked
+    // requests change, so no timer is needed. Focus stays as a cheap catch-up
+    // for anything that changed while this window was not listening.
+    let stop: (() => void) | null = null;
+    let disposed = false;
+    void listenApprovalsChanged(() => void reload()).then((unlisten) => {
+      if (disposed) unlisten();
+      else stop = unlisten;
+    });
     window.addEventListener("focus", onFocus);
     window.addEventListener("coreside:pending-approval", onPending);
     return () => {
+      disposed = true;
+      stop?.();
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("coreside:pending-approval", onPending);
-      window.clearInterval(timer);
     };
   }, [reload]);
 

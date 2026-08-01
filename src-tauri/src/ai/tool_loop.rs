@@ -10,8 +10,7 @@ use crate::db::Database;
 use crate::media::{get_media_asset, media_readable_in_scope, ImportMediaInput};
 use crate::projects::{get_project, load_project_context_settings, search_project_context};
 use crate::search::{
-    build_http_client, fetch_web_page, image_search, video_search, web_search,
-    SearchRegistry,
+    build_http_client, fetch_web_page, image_search, video_search, web_search, SearchRegistry,
 };
 use crate::state::AppState;
 
@@ -76,11 +75,7 @@ impl ToolLoop {
                 break;
             }
 
-            let result = timeout(
-                STEP_TIMEOUT,
-                self.execute_one(state, ctx, &call, cancel),
-            )
-            .await;
+            let result = timeout(STEP_TIMEOUT, self.execute_one(state, ctx, &call, cancel)).await;
 
             match result {
                 Ok(Ok(r)) => results.push(r),
@@ -226,7 +221,7 @@ impl ToolLoop {
                     .map_err(|e| e.to_string())?;
                     if !media_readable_in_scope(&asset, ctx.project_id.as_deref()) {
                         return Err(
-                            "media asset is not readable in the active project scope".into(),
+                            "media asset is not readable in the active project scope".into()
                         );
                     }
                     // Omit local_filename — agents only need library metadata.
@@ -276,9 +271,7 @@ impl ToolLoop {
         };
 
         validate_tool_output(cap, &output)?;
-        let pending = output
-            .get("pendingApproval")
-            .and_then(|v| v.as_bool());
+        let pending = output.get("pendingApproval").and_then(|v| v.as_bool());
 
         Ok(ToolCallResult {
             capability: cap.as_str().to_string(),
@@ -302,17 +295,11 @@ pub fn project_context_for_prompt(
     }
 
     let project = get_project(db, project_id).map_err(|e| e.to_string())?;
-    let hits = search_project_context(db, project_id, user_query, 6)
-        .unwrap_or_default();
+    let hits = search_project_context(db, project_id, user_query, 6).unwrap_or_default();
 
     let snippets: Vec<String> = hits
         .iter()
-        .map(|h| {
-            format!(
-                "[{}] {}: {}",
-                h.conversation_title, h.role, h.snippet
-            )
-        })
+        .map(|h| format!("[{}] {}: {}", h.conversation_title, h.role, h.snippet))
         .collect();
 
     Ok(Some(super::prompt_builder::ProjectPromptContext {
@@ -369,13 +356,11 @@ mod tests {
         let results = loop_.run(&state, &ctx, calls, &cancel).await;
         assert_eq!(results.len(), 1);
         assert!(!results[0].ok);
-        assert!(
-            results[0]
-                .error
-                .as_deref()
-                .unwrap_or("")
-                .contains("research engine")
-        );
+        assert!(results[0]
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .contains("research engine"));
     }
 
     #[tokio::test]
@@ -458,12 +443,10 @@ mod tests {
         let results = loop_.run(&state, &ctx, calls, &cancel).await;
         assert_eq!(results.len(), 1);
         assert!(!results[0].ok);
-        assert!(
-            results[0]
-                .error
-                .as_deref()
-                .unwrap_or("")
-                .contains("not readable")
-        );
+        assert!(results[0]
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .contains("not readable"));
     }
 }

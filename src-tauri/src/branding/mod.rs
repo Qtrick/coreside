@@ -86,16 +86,11 @@ fn resolve_dock_icon_path(app: &AppHandle, variant: &str) -> Result<PathBuf, Str
 }
 
 /// Apply a dock icon by preference (`auto` | `dark` | `light`) and current OS appearance.
-pub fn set_dock_icon(
-    app: &AppHandle,
-    preference: &str,
-    os_is_dark: bool,
-) -> Result<(), String> {
+pub fn set_dock_icon(app: &AppHandle, preference: &str, os_is_dark: bool) -> Result<(), String> {
     let variant = resolve_dock_variant(preference, os_is_dark);
     let path = resolve_dock_icon_path(app, variant)?;
-    let bytes = std::fs::read(&path).map_err(|e| {
-        format!("Failed to read dock icon {}: {e}", path.display())
-    })?;
+    let bytes = std::fs::read(&path)
+        .map_err(|e| format!("Failed to read dock icon {}: {e}", path.display()))?;
 
     #[cfg(target_os = "macos")]
     {
@@ -107,13 +102,17 @@ pub fn set_dock_icon(
             path = %path.display(),
             "Updated macOS dock icon"
         );
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         let _ = bytes;
-        tracing::debug!(preference, variant, "set_dock_icon is a no-op on this platform");
+        tracing::debug!(
+            preference,
+            variant,
+            "set_dock_icon is a no-op on this platform"
+        );
         Ok(())
     }
 }
@@ -153,14 +152,12 @@ fn set_macos_application_icon(png_bytes: &[u8]) -> Result<(), String> {
     use objc2_app_kit::{NSApplication, NSImage};
     use objc2_foundation::NSData;
 
-    let mtm = MainThreadMarker::new().ok_or_else(|| {
-        "set_dock_icon must run on the main thread".to_string()
-    })?;
+    let mtm = MainThreadMarker::new()
+        .ok_or_else(|| "set_dock_icon must run on the main thread".to_string())?;
 
     let data = NSData::with_bytes(png_bytes);
-    let image = NSImage::initWithData(NSImage::alloc(), &data).ok_or_else(|| {
-        "Failed to create NSImage from dock PNG bytes".to_string()
-    })?;
+    let image = NSImage::initWithData(NSImage::alloc(), &data)
+        .ok_or_else(|| "Failed to create NSImage from dock PNG bytes".to_string())?;
 
     let app = NSApplication::sharedApplication(mtm);
     // SAFETY: AppKit setApplicationIconImage; called on main thread with a live NSImage.

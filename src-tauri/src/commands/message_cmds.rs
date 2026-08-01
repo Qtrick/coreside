@@ -57,11 +57,7 @@ fn action_label_for_capability(cap: &str) -> &'static str {
 fn merge_tool_results_into_metadata(meta: &mut SearchTurnMetadata, results: &[ToolCallResult]) {
     use crate::search::{ImageSearchResponse, VideoSearchResponse, WebSearchResponse};
 
-    let mut search_map = meta
-        .search_results
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
+    let mut search_map = meta.search_results.as_object().cloned().unwrap_or_default();
     let mut pending_imports = Vec::new();
 
     for result in results {
@@ -70,8 +66,7 @@ fn merge_tool_results_into_metadata(meta: &mut SearchTurnMetadata, results: &[To
         }
         match AgentCapability::parse(&result.capability) {
             Some(AgentCapability::WebSearch) => {
-                if let Ok(resp) =
-                    serde_json::from_value::<WebSearchResponse>(result.output.clone())
+                if let Ok(resp) = serde_json::from_value::<WebSearchResponse>(result.output.clone())
                 {
                     for r in &resp.results {
                         meta.citations.push(SourceCitation {
@@ -123,25 +118,20 @@ fn merge_tool_results_into_metadata(meta: &mut SearchTurnMetadata, results: &[To
                     }
                 }
             }
-            Some(AgentCapability::ImportMediaAsset) => {
+            Some(AgentCapability::ImportMediaAsset)
                 // Never auto-import: only surface proposed imports for explicit user approval.
-                if result.pending_approval == Some(true) {
+                if result.pending_approval == Some(true) => {
                     if let Some(proposed) = result.output.get("proposedImport") {
                         pending_imports.push(proposed.clone());
                     }
                 }
-            }
             _ => {}
         }
     }
 
     meta.search_results = json!(search_map);
     if !pending_imports.is_empty() {
-        search_map = meta
-            .search_results
-            .as_object()
-            .cloned()
-            .unwrap_or_default();
+        search_map = meta.search_results.as_object().cloned().unwrap_or_default();
         search_map.insert("pendingMediaImports".into(), json!(pending_imports));
         meta.search_results = json!(search_map);
     }
@@ -346,7 +336,10 @@ pub async fn send_message(
     let mut content = content.trim().to_string();
     let attachments = attachments.unwrap_or_default();
     if content.is_empty() && attachments.is_empty() {
-        return Err(CommandError::new("invalid", "Message content cannot be empty"));
+        return Err(CommandError::new(
+            "invalid",
+            "Message content cannot be empty",
+        ));
     }
     if attachments.len() > crate::commands::attachment_cmds::MAX_ATTACHMENTS_PER_MESSAGE {
         return Err(CommandError::new("invalid", "Too many attachments"));
@@ -375,8 +368,8 @@ pub async fn send_message(
         );
         return Ok(SendMessageResult {
             message_id: String::new(),
-            assistant_message: "Your message was queued. It will run when the current reply finishes."
-                .into(),
+            assistant_message:
+                "Your message was queued. It will run when the current reply finishes.".into(),
             response_type: ResponseType::Message,
             tool_change: None,
             settings_change: None,
@@ -389,10 +382,12 @@ pub async fn send_message(
     }
 
     let _ = state.reload_config();
-    let config = {
+    // Keychain lookups must not run under the database lock.
+    let credential_sources = {
         let db = state.db.lock();
-        crate::credentials::resolve_credentials(&db, None).to_app_config()
+        crate::credentials::read_credential_sources(&db, None)
     };
+    let config = crate::credentials::resolve_from_sources(&credential_sources).to_app_config();
     let api_key = config.api_key.clone();
     let api_key_ref = api_key.as_deref();
 
@@ -521,7 +516,14 @@ pub async fn send_message(
         };
 
         let request_key = conversation_id.clone();
-        (user_message, history, active_tool, referenced_tools, request_key, project_id)
+        (
+            user_message,
+            history,
+            active_tool,
+            referenced_tools,
+            request_key,
+            project_id,
+        )
     };
 
     if let Some(rows) = mentions.as_ref() {
@@ -686,8 +688,8 @@ pub async fn send_message(
         api_key_ref,
     );
 
-    let mut parsed: ParsedAgentResponse =
-        parse_agent_response(&resolved.response.raw_text).map_err(|e| {
+    let mut parsed: ParsedAgentResponse = parse_agent_response(&resolved.response.raw_text)
+        .map_err(|e| {
             state.take_request(&request_key);
             tracing::warn!(error = %sanitize_for_log(&e, api_key_ref), "send_message parse failed");
             let message = sanitize_error(&e, api_key_ref);
@@ -717,11 +719,7 @@ pub async fn send_message(
             break;
         }
 
-        let tool_calls = parsed
-            .payload
-            .tool_calls
-            .clone()
-            .unwrap_or_default();
+        let tool_calls = parsed.payload.tool_calls.clone().unwrap_or_default();
 
         for call in &tool_calls {
             record_action(
@@ -946,9 +944,9 @@ pub async fn send_message(
             "change_applied",
             api_key_ref,
         );
-        let pairs = sc.to_kv_pairs().map_err(|e| {
-            CommandError::sanitized("validation", e, api_key_ref)
-        })?;
+        let pairs = sc
+            .to_kv_pairs()
+            .map_err(|e| CommandError::sanitized("validation", e, api_key_ref))?;
         {
             let mut db = state.db.lock();
             for (key, value) in &pairs {
@@ -956,9 +954,7 @@ pub async fn send_message(
                 if !is_allowed_setting_key(key) {
                     return Err(CommandError::new(
                         "forbidden",
-                        format!(
-                            "Agent cannot change Base Setting '{key}' via settings_change"
-                        ),
+                        format!("Agent cannot change Base Setting '{key}' via settings_change"),
                     ));
                 }
                 // Defense in depth: re-normalize allowlisted appearance KVs before persist.
@@ -987,14 +983,18 @@ pub async fn send_message(
         let mut operations_from_payload: Option<Vec<crate::runtime_v2::AppOperation>> = None;
         if let Some(ops_val) = &parsed.payload.operations {
             if !ops_val.is_empty() {
-                if let Ok(ops) = serde_json::from_value::<Vec<crate::runtime_v2::AppOperation>>(
-                    json!(ops_val),
-                ) {
+                if let Ok(ops) =
+                    serde_json::from_value::<Vec<crate::runtime_v2::AppOperation>>(json!(ops_val))
+                {
                     operations_from_payload = Some(ops);
                 }
             }
         }
-        if operations_from_payload.as_ref().map(|o| o.is_empty()).unwrap_or(true) {
+        if operations_from_payload
+            .as_ref()
+            .map(|o| o.is_empty())
+            .unwrap_or(true)
+        {
             let mut parser = crate::runtime_v2::NdjsonFrameParser::new();
             for ev in parser.push(&resolved.response.raw_text) {
                 if let Ok(crate::runtime_v2::StreamEvent::OperationFrameCompleted { operation }) =
@@ -1207,11 +1207,7 @@ pub async fn send_message(
                     let _ = db.conn().execute(
                         "UPDATE surfaces SET message_id = ?1
                          WHERE id = ?2 AND conversation_id = ?3 AND message_id IS NULL",
-                        rusqlite::params![
-                            assistant_message.id,
-                            surface_id,
-                            conversation_id
-                        ],
+                        rusqlite::params![assistant_message.id, surface_id, conversation_id],
                     );
                 }
             }
@@ -1255,10 +1251,7 @@ pub fn set_kernel_proposal_status(
         if let Some(rv) = obj.get_mut("runtimeV2").and_then(|v| v.as_object_mut()) {
             rv.insert("status".into(), json!(normalized));
         }
-        obj.insert(
-            "kernelProposalStatus".into(),
-            json!(normalized),
-        );
+        obj.insert("kernelProposalStatus".into(), json!(normalized));
     }
     db::update_message_metadata(&mut db, &message_id, &meta)?;
     msg.metadata = Some(meta);

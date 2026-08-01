@@ -1,7 +1,7 @@
 import { Folder, Image, MessageSquarePlus, Wallpaper } from "lucide-react";
 import type { Project } from "@/types/project";
 import type { Conversation } from "@/types/messages";
-import { projectIconClass } from "./ProjectList";
+import { projectIconClass } from "./project-icon";
 import { useAppStore } from "@/stores/app-store";
 
 type ProjectPageProps = {

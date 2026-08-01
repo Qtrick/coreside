@@ -65,7 +65,10 @@ mod tests {
     #[test]
     fn parses_known_profiles() {
         assert_eq!(ResourceProfile::parse("eco"), ResourceProfile::Eco);
-        assert_eq!(ResourceProfile::parse("PERFORMANCE"), ResourceProfile::Performance);
+        assert_eq!(
+            ResourceProfile::parse("PERFORMANCE"),
+            ResourceProfile::Performance
+        );
         assert_eq!(ResourceProfile::parse("nope"), ResourceProfile::Balanced);
     }
 }

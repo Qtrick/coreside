@@ -88,7 +88,9 @@ impl OpenAiProvider {
     }
 
     async fn post_chat(&self, body: Value, cancel: CancellationToken) -> Result<Value, AiError> {
-        let request = self.auth_headers(self.client.post(self.chat_url())).json(&body);
+        let request = self
+            .auth_headers(self.client.post(self.chat_url()))
+            .json(&body);
         let response = tokio::select! {
             _ = cancel.cancelled() => return Err(AiError::Cancelled),
             result = request.send() => {
@@ -124,7 +126,10 @@ impl OpenAiProvider {
                 "Invalid {} JSON: {} — {}",
                 self.display_name,
                 e,
-                redact_secrets(&text.chars().take(200).collect::<String>(), Some(&self.api_key))
+                redact_secrets(
+                    &text.chars().take(200).collect::<String>(),
+                    Some(&self.api_key)
+                )
             ))
         })
     }
@@ -187,7 +192,9 @@ impl AiProvider for OpenAiProvider {
                     .and_then(|m| m.as_array())
                     .map(|arr| {
                         arr.iter()
-                            .filter_map(|m| m.get("id").and_then(|n| n.as_str()).map(str::to_string))
+                            .filter_map(|m| {
+                                m.get("id").and_then(|n| n.as_str()).map(str::to_string)
+                            })
                             .take(40)
                             .collect::<Vec<_>>()
                     })

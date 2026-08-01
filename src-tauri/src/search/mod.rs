@@ -29,7 +29,9 @@ pub use models::{
     FetchedWebPage, ImageSearchResponse, ImageSearchResult, SafeSearchLevel, VideoSearchResponse,
     VideoSearchResult, WebSearchResponse, WebSearchResult,
 };
-pub use normalization::{bound_text, normalize_image_results, normalize_video_results, normalize_web_results};
+pub use normalization::{
+    bound_text, normalize_image_results, normalize_video_results, normalize_web_results,
+};
 pub use provider::{SearchProvider, SearchRequest};
 pub use registry::SearchRegistry;
 pub use safety::validate_public_http_url;

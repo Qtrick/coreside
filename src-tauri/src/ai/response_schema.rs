@@ -218,15 +218,17 @@ impl AgentResponsePayload {
             .unwrap_or(false);
 
         if has_ops {
-            let ops: Vec<crate::runtime_v2::AppOperation> = serde_json::from_value(
-                Value::Array(self.operations.clone().unwrap_or_default()),
-            )
-            .map_err(|e| format!("invalid operations: {e}"))?;
+            let ops: Vec<crate::runtime_v2::AppOperation> =
+                serde_json::from_value(Value::Array(self.operations.clone().unwrap_or_default()))
+                    .map_err(|e| format!("invalid operations: {e}"))?;
             crate::runtime_v2::validate_operations(&ops)?;
         }
 
         if self.assistant_message.trim().is_empty()
-            && !matches!(self.response_type, ResponseType::Noop | ResponseType::ToolUse)
+            && !matches!(
+                self.response_type,
+                ResponseType::Noop | ResponseType::ToolUse
+            )
             && !has_ops
             && !silent
             && !has_v2_visible
@@ -255,10 +257,9 @@ impl AgentResponsePayload {
                 }
             }
             ResponseType::ToolChange => {
-                let tc = self
-                    .tool_change
-                    .as_ref()
-                    .ok_or_else(|| "toolChange required for responseType tool_change".to_string())?;
+                let tc = self.tool_change.as_ref().ok_or_else(|| {
+                    "toolChange required for responseType tool_change".to_string()
+                })?;
                 let tool = tc
                     .tool
                     .as_ref()
@@ -285,9 +286,7 @@ impl AgentResponsePayload {
                     return Err("targetToolId required for update/replace".into());
                 }
                 if matches!(tc.action, ToolAction::Create) && tool.components.is_empty() {
-                    return Err(
-                        "tool.components must not be empty when creating a tool".into(),
-                    );
+                    return Err("tool.components must not be empty when creating a tool".into());
                 }
                 if !tool.components.is_empty() {
                     crate::runtime_v2::packs::validate_tool_components(&tool.components)?;

@@ -287,7 +287,9 @@ pub fn promote_inline_to_tool(
 ) -> DbResult<SurfaceRecord> {
     let surface = get_surface(db, surface_id)?;
     if surface.placement != "chat_inline" {
-        return Err(DbError::Invalid("only inline surfaces can be promoted".into()));
+        return Err(DbError::Invalid(
+            "only inline surfaces can be promoted".into(),
+        ));
     }
     let mut tool: ToolDefinition = serde_json::from_value(surface.definition.clone())
         .map_err(|e| DbError::Invalid(e.to_string()))?;
@@ -316,7 +318,9 @@ pub fn promote_inline_to_tool(
 pub fn get_surface_state(db: &Database, surface_id: &str) -> DbResult<Value> {
     let _: String = db
         .conn()
-        .query_row("SELECT id FROM surfaces WHERE id = ?1", [surface_id], |r| r.get(0))
+        .query_row("SELECT id FROM surfaces WHERE id = ?1", [surface_id], |r| {
+            r.get(0)
+        })
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
                 DbError::NotFound(format!("surface {surface_id}"))
@@ -340,7 +344,9 @@ pub fn get_surface_state(db: &Database, surface_id: &str) -> DbResult<Value> {
 pub fn save_surface_state(db: &mut Database, surface_id: &str, state: &Value) -> DbResult<()> {
     let _: String = db
         .conn()
-        .query_row("SELECT id FROM surfaces WHERE id = ?1", [surface_id], |r| r.get(0))
+        .query_row("SELECT id FROM surfaces WHERE id = ?1", [surface_id], |r| {
+            r.get(0)
+        })
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
                 DbError::NotFound(format!("surface {surface_id}"))

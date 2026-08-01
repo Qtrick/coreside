@@ -11,6 +11,7 @@ import { WallpaperSettings } from "@/components/settings/WallpaperSettings";
 import { api } from "@/lib/tauri";
 import type { DockIconPreference, ThemePreference } from "@/types/agent";
 import type { AddedSetting } from "@/types/settings";
+import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/stores/app-store";
 
 export function SettingsPanel() {
@@ -24,7 +25,19 @@ export function SettingsPanel() {
     clearConversations,
     clearTools,
     navigateToChat,
-  } = useAppStore();
+  } = useAppStore(
+    useShallow((s) => ({
+      appInfo: s.appInfo,
+      theme: s.theme,
+      setTheme: s.setTheme,
+      dockIcon: s.dockIcon,
+      setDockIcon: s.setDockIcon,
+      resolvedTheme: s.resolvedTheme,
+      clearConversations: s.clearConversations,
+      clearTools: s.clearTools,
+      navigateToChat: s.navigateToChat,
+    })),
+  );
 
   const [confirmClearChats, setConfirmClearChats] = useState(false);
   const [confirmClearTools, setConfirmClearTools] = useState(false);

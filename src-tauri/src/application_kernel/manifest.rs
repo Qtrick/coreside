@@ -125,7 +125,10 @@ pub fn validate_manifest(m: &ApplicationManifest) -> Result<(), String> {
         return Err("name is required".into());
     }
     if m.schema_version != "1" {
-        return Err(format!("unsupported manifest schemaVersion: {}", m.schema_version));
+        return Err(format!(
+            "unsupported manifest schemaVersion: {}",
+            m.schema_version
+        ));
     }
     // Reject secrets / paths / executable blobs
     let raw = serde_json::to_string(m).map_err(|e| e.to_string())?;
@@ -177,9 +180,13 @@ fn validate_action_access(m: &ApplicationManifest) -> Result<(), String> {
     use crate::application_kernel::registered_actions::descriptor::find_action;
 
     for name in &m.application_action_access {
-        let descriptor = find_action(name)
-            .ok_or_else(|| format!("unknown registered action: {name}"))?;
-        if !m.permissions.iter().any(|p| p == &descriptor.permission_category) {
+        let descriptor =
+            find_action(name).ok_or_else(|| format!("unknown registered action: {name}"))?;
+        if !m
+            .permissions
+            .iter()
+            .any(|p| p == &descriptor.permission_category)
+        {
             return Err(format!(
                 "action {name} needs the {} permission to be declared",
                 descriptor.permission_category
@@ -348,9 +355,9 @@ pub fn get_manifest(db: &Database, application_id: &str) -> DbResult<ManifestRec
 }
 
 pub fn list_manifests(db: &Database) -> DbResult<Vec<ManifestRecord>> {
-    let mut stmt = db.conn().prepare(
-        "SELECT application_id FROM application_manifests ORDER BY updated_at DESC",
-    )?;
+    let mut stmt = db
+        .conn()
+        .prepare("SELECT application_id FROM application_manifests ORDER BY updated_at DESC")?;
     let ids: Vec<String> = stmt
         .query_map([], |row| row.get(0))?
         .filter_map(|r| r.ok())
@@ -381,7 +388,10 @@ pub fn mark_last_known_good(db: &mut Database, application_id: &str) -> DbResult
     Ok(())
 }
 
-pub fn restore_last_known_good(db: &mut Database, application_id: &str) -> DbResult<ManifestRecord> {
+pub fn restore_last_known_good(
+    db: &mut Database,
+    application_id: &str,
+) -> DbResult<ManifestRecord> {
     let rec = get_manifest(db, application_id)?;
     let lkg = rec
         .last_known_good_version
@@ -407,7 +417,7 @@ pub fn restore_last_known_good(db: &mut Database, application_id: &str) -> DbRes
 
 pub fn record_crash(db: &mut Database, application_id: &str) -> DbResult<ManifestRecord> {
     let now = now_rfc3339();
-    db.conn().execute(
+    let updated = db.conn().execute(
         "UPDATE application_manifests SET
             crash_count = crash_count + 1,
             lifecycle_state = CASE WHEN crash_count + 1 >= 3 THEN 'suspended' ELSE lifecycle_state END,
@@ -416,6 +426,9 @@ pub fn record_crash(db: &mut Database, application_id: &str) -> DbResult<Manifes
          WHERE application_id = ?1",
         params![application_id, now],
     )?;
+    if updated == 0 {
+        return Err(DbError::NotFound(format!("application {application_id}")));
+    }
     get_manifest(db, application_id)
 }
 
@@ -466,9 +479,7 @@ pub fn ensure_manifest_for_tool(
     }
     let permissions = vec!["local_data.read".into()];
     let application_action_access =
-        super::registered_actions::descriptor::default_action_access_for_permissions(
-            &permissions,
-        );
+        super::registered_actions::descriptor::default_action_access_for_permissions(&permissions);
     let m = ApplicationManifest {
         schema_version: "1".into(),
         application_id: tool_id.into(),
@@ -591,12 +602,54 @@ mod tests {
     fn ensure_manifest_declares_actions_for_default_permissions() {
         let dir = tempfile::tempdir().unwrap();
         let mut db = crate::db::Database::open_path(&dir.path().join("m.db")).unwrap();
-        let record = ensure_manifest_for_tool(&mut db, "tool-1", "Notes", "surface-tool-1").unwrap();
+        let record =
+            ensure_manifest_for_tool(&mut db, "tool-1", "Notes", "surface-tool-1").unwrap();
         assert!(record
             .manifest
             .application_action_access
             .contains(&"local_data.query".to_string()));
         assert!(!record.manifest.application_action_access.is_empty());
+    }
+
+    #[test]
+    fn non_retryable_build_failures_suspend_after_three_strikes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("crash.db")).unwrap();
+        let app_id = ensure_manifest_for_tool(&mut db, "tool-crash", "Notes", "surface-tool-crash")
+            .unwrap()
+            .application_id;
+        mark_last_known_good(&mut db, &app_id).unwrap();
+
+        // Retryable failures are transient and must not count as crashes.
+        crate::application_kernel::lifecycle::record_build_failure(
+            &mut db, &app_id, "flaky", true, None,
+        )
+        .unwrap();
+        assert_eq!(get_manifest(&db, &app_id).unwrap().crash_count, 0);
+
+        for _ in 0..2 {
+            crate::application_kernel::lifecycle::record_build_failure(
+                &mut db, &app_id, "broken", false, None,
+            )
+            .unwrap();
+        }
+        let two = get_manifest(&db, &app_id).unwrap();
+        assert_eq!(two.crash_count, 2);
+        assert_ne!(two.lifecycle_state, "suspended");
+
+        crate::application_kernel::lifecycle::record_build_failure(
+            &mut db, &app_id, "broken", false, None,
+        )
+        .unwrap();
+        let three = get_manifest(&db, &app_id).unwrap();
+        assert_eq!(three.crash_count, 3);
+        assert_eq!(three.lifecycle_state, "suspended");
+        assert_eq!(three.health_state, "suspended");
+
+        // Restoring the last known good version clears the strike count.
+        let restored = restore_last_known_good(&mut db, &app_id).unwrap();
+        assert_eq!(restored.crash_count, 0);
+        assert_ne!(restored.lifecycle_state, "suspended");
     }
 
     #[test]

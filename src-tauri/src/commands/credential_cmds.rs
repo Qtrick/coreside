@@ -12,7 +12,7 @@ use uuid::Uuid;
 use super::CommandError;
 use crate::ai::{create_provider, AiProvider};
 use crate::config::AppConfig;
-use crate::credentials::{self, defaults_for, resolve_connection_by_id, resolve_credentials};
+use crate::credentials::{self, defaults_for};
 use crate::db::{self, ProviderConnection};
 use crate::security::sanitize_error;
 use crate::state::AppState;
@@ -109,13 +109,13 @@ fn build_probe_config(
 
 async fn health_check_key(config: &AppConfig) -> Result<(), CommandError> {
     let key = config.api_key.clone();
-    let provider = create_provider(config).map_err(|e| {
-        CommandError::sanitized(e.code(), e, key.as_deref())
-    })?;
+    let provider = create_provider(config)
+        .map_err(|e| CommandError::sanitized(e.code(), e, key.as_deref()))?;
     let cancel = CancellationToken::new();
-    provider.health_check(cancel).await.map_err(|e| {
-        CommandError::sanitized(e.code(), e, key.as_deref())
-    })?;
+    provider
+        .health_check(cancel)
+        .await
+        .map_err(|e| CommandError::sanitized(e.code(), e, key.as_deref()))?;
     Ok(())
 }
 
@@ -123,8 +123,11 @@ async fn health_check_key(config: &AppConfig) -> Result<(), CommandError> {
 pub fn list_provider_connections(
     state: State<'_, AppState>,
 ) -> Result<Vec<ProviderConnectionView>, CommandError> {
-    let db = state.db.lock();
-    let rows = db::list_provider_connections(&db)?;
+    // `to_view` probes the keychain per row; release the lock before that loop.
+    let rows = {
+        let db = state.db.lock();
+        db::list_provider_connections(&db)?
+    };
     Ok(rows.into_iter().map(to_view).collect())
 }
 
@@ -198,7 +201,9 @@ pub async fn upsert_provider_connection(
         let probe = build_probe_config(
             &provider,
             key,
-            base_url.as_deref().or(existing.as_ref().and_then(|e| e.base_url.as_deref())),
+            base_url
+                .as_deref()
+                .or(existing.as_ref().and_then(|e| e.base_url.as_deref())),
             model_default
                 .as_deref()
                 .or(existing.as_ref().and_then(|e| e.model_default.as_deref())),
@@ -212,9 +217,8 @@ pub async fn upsert_provider_connection(
                 ),
             ));
         }
-        credentials::set_secret(&keyring_account, key).map_err(|e| {
-            CommandError::sanitized("credential_store", e, Some(key.as_str()))
-        })?;
+        credentials::set_secret(&keyring_account, key)
+            .map_err(|e| CommandError::sanitized("credential_store", e, Some(key.as_str())))?;
         last_status = Some("connected".into());
         last_tested_at = Some(now.clone());
     } else if existing.is_none() {
@@ -290,9 +294,8 @@ pub fn delete_provider_connection(
         let mut db = state.db.lock();
         db::delete_provider_connection(&mut db, id)?;
     }
-    credentials::delete_secret(&account).map_err(|e| {
-        CommandError::new("credential_store", sanitize_error(&e.to_string(), None))
-    })?;
+    credentials::delete_secret(&account)
+        .map_err(|e| CommandError::new("credential_store", sanitize_error(&e.to_string(), None)))?;
     Ok(())
 }
 
@@ -323,21 +326,30 @@ pub async fn test_provider_connection(
 
     // When testing a specific connection, resolve it directly so an active
     // connection does not shadow the target (needed for test-before-activate).
-    let resolved = {
+    // Row reads happen under the lock; the keychain lookup happens after it.
+    enum Lookup {
+        One(Box<db::ProviderConnection>),
+        Effective(Box<credentials::CredentialSources>),
+    }
+    let lookup = {
         let db = state.db.lock();
-        if let Some(ref id) = explicit_id {
-            resolve_connection_by_id(&db, id).map_err(|e| {
-                CommandError::new("not_found", sanitize_error(&e, None))
-            })?
-        } else {
-            resolve_credentials(&db, None)
+        match explicit_id {
+            Some(ref id) => Lookup::One(Box::new(
+                credentials::read_connection(&db, id)
+                    .map_err(|e| CommandError::new("not_found", sanitize_error(&e, None)))?,
+            )),
+            None => Lookup::Effective(Box::new(credentials::read_credential_sources(&db, None))),
         }
+    };
+    let resolved = match lookup {
+        Lookup::One(conn) => credentials::resolve_connection_secret(&conn)
+            .map_err(|e| CommandError::new("not_found", sanitize_error(&e, None)))?,
+        Lookup::Effective(sources) => credentials::resolve_from_sources(&sources),
     };
     let key = resolved.api_key.clone();
     let config = resolved.to_app_config();
-    let provider = create_provider(&config).map_err(|e| {
-        CommandError::sanitized(e.code(), e, key.as_deref())
-    })?;
+    let provider = create_provider(&config)
+        .map_err(|e| CommandError::sanitized(e.code(), e, key.as_deref()))?;
     let cancel = CancellationToken::new();
     let health = provider.health_check(cancel).await;
 

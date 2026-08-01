@@ -119,7 +119,10 @@ pub fn ensure_default_workspace(db: &Database) -> DbResult<String> {
 
 // ── Conversations ───────────────────────────────────────────────────────────
 
-pub fn list_conversations(db: &Database, workspace_id: Option<&str>) -> DbResult<Vec<Conversation>> {
+pub fn list_conversations(
+    db: &Database,
+    workspace_id: Option<&str>,
+) -> DbResult<Vec<Conversation>> {
     let ws = workspace_id.unwrap_or(DEFAULT_WORKSPACE_ID);
     let mut stmt = db.conn().prepare(
         "SELECT id, workspace_id, title, project_id, pinned, archived, created_at, updated_at
@@ -266,32 +269,44 @@ pub fn get_messages(db: &Database, conversation_id: &str) -> DbResult<Vec<Messag
          FROM messages WHERE conversation_id = ?1
          ORDER BY created_at ASC, rowid ASC",
     )?;
-    let rows = stmt.query_map([conversation_id], |row| {
-        let meta: Option<String> = row.get(4)?;
-        Ok(Message {
-            id: row.get(0)?,
-            conversation_id: row.get(1)?,
-            role: row.get(2)?,
-            content: row.get(3)?,
-            metadata: meta
-                .as_deref()
-                .and_then(|s| serde_json::from_str(s).ok()),
-            created_at: row.get(5)?,
-        })
-    })?;
+    let rows = stmt.query_map([conversation_id], map_message_row)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
+fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Message> {
+    let meta: Option<String> = row.get(4)?;
+    Ok(Message {
+        id: row.get(0)?,
+        conversation_id: row.get(1)?,
+        role: row.get(2)?,
+        content: row.get(3)?,
+        metadata: meta.as_deref().and_then(|s| serde_json::from_str(s).ok()),
+        created_at: row.get(5)?,
+    })
+}
+
+/// The newest `limit` messages, returned oldest-first.
+///
+/// Bounded in SQL: chat turns must not re-read and deserialize an entire
+/// conversation just to keep the last few messages.
 pub fn get_recent_messages(
     db: &Database,
     conversation_id: &str,
     limit: usize,
 ) -> DbResult<Vec<Message>> {
-    let mut all = get_messages(db, conversation_id)?;
-    if all.len() > limit {
-        all = all.split_off(all.len() - limit);
-    }
-    Ok(all)
+    let mut stmt = db.conn().prepare(
+        "SELECT id, conversation_id, role, content, metadata, created_at
+         FROM messages WHERE conversation_id = ?1
+         ORDER BY created_at DESC, rowid DESC
+         LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(
+        rusqlite::params![conversation_id, limit as i64],
+        map_message_row,
+    )?;
+    let mut newest_first = rows.collect::<Result<Vec<_>, _>>()?;
+    newest_first.reverse();
+    Ok(newest_first)
 }
 
 pub fn insert_message(
@@ -684,7 +699,9 @@ pub fn save_tool_state(
     // Ensure tool exists
     let _: String = db
         .conn()
-        .query_row("SELECT id FROM tools WHERE id = ?1", [tool_id], |r| r.get(0))
+        .query_row("SELECT id FROM tools WHERE id = ?1", [tool_id], |r| {
+            r.get(0)
+        })
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(format!("tool {tool_id}")),
             other => DbError::Sqlite(other),
@@ -823,12 +840,7 @@ pub fn upsert_added_setting(
     let current_value = input
         .current_value
         .clone()
-        .unwrap_or_else(|| {
-            input
-                .default_value
-                .clone()
-                .unwrap_or(Value::Null)
-        })
+        .unwrap_or_else(|| input.default_value.clone().unwrap_or(Value::Null))
         .to_string();
     let constraints = input
         .constraints
@@ -959,7 +971,8 @@ fn map_provider_connection(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider
     })
 }
 
-const PROVIDER_CONNECTION_COLS: &str = "id, provider, label, base_url, model_default, keyring_account,
+const PROVIDER_CONNECTION_COLS: &str =
+    "id, provider, label, base_url, model_default, keyring_account,
     is_active, last_status, last_tested_at, created_at, updated_at";
 
 pub fn list_provider_connections(db: &Database) -> DbResult<Vec<ProviderConnection>> {
@@ -1035,10 +1048,7 @@ pub fn upsert_provider_connection(
     get_provider_connection(db, &connection.id)
 }
 
-pub fn set_active_provider_connection(
-    db: &mut Database,
-    id: &str,
-) -> DbResult<ProviderConnection> {
+pub fn set_active_provider_connection(db: &mut Database, id: &str) -> DbResult<ProviderConnection> {
     // Ensure the target exists before mutating.
     let _ = get_provider_connection(db, id)?;
     db.with_transaction(|conn| {
@@ -1186,7 +1196,7 @@ pub fn action_events_are_substantive(events: &[serde_json::Value]) -> bool {
             .or_else(|| obj.get("event_type"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        if SUBSTANTIVE.iter().any(|s| *s == ty) {
+        if SUBSTANTIVE.contains(&ty) {
             return true;
         }
         // Labels that indicate real work when type is generic.
@@ -1323,18 +1333,16 @@ fn parse_missed_policy(raw: &str) -> MissedRunPolicy {
 fn map_automation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Automation> {
     let trigger_json: String = row.get(6)?;
     let action_json: String = row.get(8)?;
-    let trigger: AutomationTrigger = serde_json::from_str(&trigger_json).unwrap_or(
-        AutomationTrigger::Interval {
+    let trigger: AutomationTrigger =
+        serde_json::from_str(&trigger_json).unwrap_or(AutomationTrigger::Interval {
             interval_minutes: 60,
             timezone: None,
-        },
-    );
-    let action: AutomationAction = serde_json::from_str(&action_json).unwrap_or(
-        AutomationAction::SetWorkspaceBackground {
+        });
+    let action: AutomationAction =
+        serde_json::from_str(&action_json).unwrap_or(AutomationAction::SetWorkspaceBackground {
             workspace_id: DEFAULT_WORKSPACE_ID.into(),
             preset_id: String::new(),
-        },
-    );
+        });
     let policy: String = row.get(11)?;
     Ok(Automation {
         id: row.get(0)?,
@@ -1672,7 +1680,10 @@ mod action_log_mode_tests {
 
     #[test]
     fn parses_modes() {
-        assert_eq!(ActionLogMode::parse("intelligent"), ActionLogMode::Intelligent);
+        assert_eq!(
+            ActionLogMode::parse("intelligent"),
+            ActionLogMode::Intelligent
+        );
         assert_eq!(ActionLogMode::parse("always"), ActionLogMode::Always);
         assert_eq!(ActionLogMode::parse("false"), ActionLogMode::Off);
     }
@@ -1701,4 +1712,3 @@ mod action_log_mode_tests {
         ));
     }
 }
-

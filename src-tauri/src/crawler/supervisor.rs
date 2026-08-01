@@ -21,8 +21,8 @@ use super::installation::{
 };
 use super::models::{CrawlerStatusView, ProtocolRequest};
 use super::protocol::{
-    encode_request, is_terminal_event, matches_request_id, parse_event_line, terminal_payload_result,
-    validate_version,
+    encode_request, is_terminal_event, matches_request_id, parse_event_line,
+    terminal_payload_result, validate_version,
 };
 use super::resources::ResourceProfile;
 
@@ -92,10 +92,7 @@ impl CrawlerSupervisor {
         CrawlerStatusView {
             installation: report.state,
             running: self.is_running(),
-            python_path: report
-                .python_path
-                .as_ref()
-                .map(|p| p.display().to_string()),
+            python_path: report.python_path.as_ref().map(|p| p.display().to_string()),
             reason: report.reason,
             resource_profile: profile.as_str().to_string(),
             sidecar_version: None,
@@ -190,7 +187,12 @@ impl CrawlerSupervisor {
         self.spawn_stderr_reader(stderr);
         self.spawn_exit_watcher();
 
-        match timeout(HANDSHAKE_TIMEOUT, self.send_command_inner("health", json!({}))).await {
+        match timeout(
+            HANDSHAKE_TIMEOUT,
+            self.send_command_inner("health", json!({})),
+        )
+        .await
+        {
             Ok(Ok(_)) => {
                 self.inner.lock().await.restart_attempts = 0;
                 Ok(())

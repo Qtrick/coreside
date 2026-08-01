@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
 use super::errors::SearchError;
-use super::models::{
-    ImageSearchResult, VideoSearchResult, WebSearchResult,
-};
+use super::models::{ImageSearchResult, VideoSearchResult, WebSearchResult};
 use super::normalization::{
     normalize_image_results, normalize_video_results, normalize_web_results,
 };

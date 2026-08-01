@@ -710,6 +710,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
             };
           }
         }
+        // The user may have navigated again while this load was in flight.
+        // A late response must never overwrite the chat now on screen.
+        if (get().activeConversationId !== trimmed) return;
         set({
           messages,
           messagesLoading: false,
@@ -717,6 +720,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           pendingKernelProposal: kernelProposal,
         });
       } catch (error) {
+        if (get().activeConversationId !== trimmed) return;
         set({
           messages: [],
           messagesLoading: false,
@@ -1220,13 +1224,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (conversationId) {
       get().setChatActiveToolId(conversationId, id);
     }
-    set({ view: { kind: "chat", conversationId: conversationId ?? null } });
+    set({
+      view: { kind: "chat", conversationId: conversationId ?? null },
+      activeToolId: id,
+    });
     const [tool, state] = await Promise.all([
       api.getTool(id),
       api.getToolState(id),
     ]);
+    // Selecting another tool, or closing the canvas, wins over a late load.
+    if (get().activeToolId !== id) return;
     set({
-      activeToolId: id,
       activeTool: tool,
       toolState: state ?? {},
     });
@@ -1429,6 +1437,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
         };
       }
 
+      // Everything below writes conversation-scoped state (messages, pending
+      // proposals, errors). Those fields describe whichever chat is on screen,
+      // so a turn that finished after the user navigated away may only clear
+      // the turn-scoped indicators.
+      const stillActive = get().activeConversationId === conversationId;
+      if (!stillActive) {
+        set({ sending: false, agentActions: [], streamingText: null });
+        return;
+      }
+
       if (result.queued) {
         set((state) => ({
           sending: false,
@@ -1467,6 +1485,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
         };
       }
 
+      // Loading settings is a second await, so the user may have navigated away
+      // in the meantime. Appearance is global and still applies; the
+      // conversation-scoped fields must not overwrite whichever chat is now open.
+      if (get().activeConversationId !== conversationId) {
+        set({
+          sending: false,
+          agentActions: [],
+          streamingText: null,
+          ...themePatch,
+        });
+        return;
+      }
+
       set({
         messages,
         sending: false,
@@ -1482,6 +1513,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
         error instanceof TauriCommandError || error instanceof Error
           ? error.message
           : "Failed to send message";
+      if (get().activeConversationId !== conversationId) {
+        set({ sending: false, agentActions: [], streamingText: null });
+        return;
+      }
       set((state) => ({
         sending: false,
         sendError: message,

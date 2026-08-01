@@ -108,13 +108,8 @@ mod tests {
             Some(r#"{"schemaVersion":"1","type":"image-cover","assetId":"local-asset-1"}"#),
         )
         .unwrap();
-        let conv = create_conversation(
-            &mut db,
-            DEFAULT_WORKSPACE_ID,
-            "Chat",
-            Some(&project.id),
-        )
-        .unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", Some(&project.id)).unwrap();
         insert_message(
             &mut db,
             &conv.id,

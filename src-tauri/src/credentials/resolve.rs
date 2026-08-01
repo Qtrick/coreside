@@ -96,41 +96,65 @@ fn from_connection(conn: &ProviderConnection) -> Result<ResolvedCredentials, Str
     from_connection_with_secret(conn, credentials::get_secret)
 }
 
-/// Resolve a specific connection by id (for test-before-activate). Does not prefer active.
-pub fn resolve_connection_by_id(
-    db: &Database,
-    connection_id: &str,
-) -> Result<ResolvedCredentials, String> {
+/// The database half of credential resolution.
+///
+/// Read this while the database lock is held, release the lock, then call
+/// [`resolve_from_sources`]. Keychain lookups are blocking OS calls (they can
+/// prompt, or hang when no Secret Service is running) and must never run while
+/// the single shared SQLite connection is locked.
+#[derive(Debug, Clone, Default)]
+pub struct CredentialSources {
+    active: Option<ProviderConnection>,
+    explicit: Option<ProviderConnection>,
+    hosted_adapter_connected: bool,
+}
+
+pub fn read_credential_sources(db: &Database, connection_id: Option<&str>) -> CredentialSources {
+    CredentialSources {
+        active: db::get_active_provider_connection(db).ok().flatten(),
+        explicit: connection_id
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .and_then(|id| db::get_provider_connection(db, id).ok()),
+        hosted_adapter_connected: credentials::adapter_connected(db),
+    }
+}
+
+/// Look up one connection row for test-before-activate. Pair with
+/// [`resolve_connection_secret`] after dropping the database lock.
+pub fn read_connection(db: &Database, connection_id: &str) -> Result<ProviderConnection, String> {
     let id = connection_id.trim();
     if id.is_empty() {
         return Err("connectionId is required".into());
     }
-    let conn = db::get_provider_connection(db, id).map_err(|e| e.to_string())?;
-    from_connection(&conn)
+    db::get_provider_connection(db, id).map_err(|e| e.to_string())
 }
 
-/// Resolve credentials for chat / status.
+/// Resolve a specific connection's secret. Must run with no database lock held.
+pub fn resolve_connection_secret(conn: &ProviderConnection) -> Result<ResolvedCredentials, String> {
+    from_connection(conn)
+}
+
+/// Resolve credentials for chat / status. Must run with no database lock held.
 ///
 /// Precedence:
 /// 1. Active secure connection (`is_active=1`)
-/// 2. Explicit `connection_id` (when no active secret is available)
-/// 3. `.env`
-/// 4. none
-pub fn resolve_credentials(
-    db: &Database,
-    connection_id: Option<&str>,
-) -> ResolvedCredentials {
-    resolve_credentials_with(
-        db,
-        connection_id,
-        |account| credentials::get_secret(account),
-        config::load_config,
-    )
+/// 2. Explicit connection (when no active secret is available)
+/// 3. Hosted adapter
+/// 4. `.env`
+/// 5. none
+pub fn resolve_from_sources(sources: &CredentialSources) -> ResolvedCredentials {
+    resolve_from_sources_with(sources, credentials::get_secret, config::load_config)
 }
 
-fn resolve_credentials_with<F, E>(
-    db: &Database,
-    connection_id: Option<&str>,
+/// Convenience for callers that are not holding the database lock (tests, and
+/// paths where the lock is already scoped away).
+pub fn resolve_credentials(db: &Database, connection_id: Option<&str>) -> ResolvedCredentials {
+    resolve_from_sources(&read_credential_sources(db, connection_id))
+}
+
+fn resolve_from_sources_with<F, E>(
+    sources: &CredentialSources,
     get_secret: F,
     load_env: E,
 ) -> ResolvedCredentials
@@ -139,23 +163,21 @@ where
     E: FnOnce() -> AppConfig,
 {
     // 1. Active secure connection
-    if let Ok(Some(conn)) = db::get_active_provider_connection(db) {
-        if let Ok(resolved) = from_connection_with_secret(&conn, &get_secret) {
+    if let Some(conn) = sources.active.as_ref() {
+        if let Ok(resolved) = from_connection_with_secret(conn, &get_secret) {
             return resolved;
         }
     }
 
     // 2. Explicit connection id (only when active is missing/unusable)
-    if let Some(id) = connection_id.map(str::trim).filter(|s| !s.is_empty()) {
-        if let Ok(conn) = db::get_provider_connection(db, id) {
-            if let Ok(resolved) = from_connection_with_secret(&conn, &get_secret) {
-                return resolved;
-            }
+    if let Some(conn) = sources.explicit.as_ref() {
+        if let Ok(resolved) = from_connection_with_secret(conn, &get_secret) {
+            return resolved;
         }
     }
 
     // 3. Hosted session beats .env when the adapter is effective (parity with access_mode).
-    if credentials::adapter_connected(db) {
+    if sources.hosted_adapter_connected {
         return ResolvedCredentials {
             provider: "coreside_hosted".into(),
             api_key: None,
@@ -169,11 +191,7 @@ where
 
     // 4–5. .env fallback, else none
     let env = load_env();
-    let source = if env.has_api_key() {
-        "env"
-    } else {
-        "none"
-    };
+    let source = if env.has_api_key() { "env" } else { "none" };
     ResolvedCredentials {
         provider: env.provider,
         api_key: env.api_key,
@@ -222,8 +240,14 @@ mod tests {
         db::set_active_provider_connection(&mut db, "active-1").unwrap();
 
         let secrets = HashMap::from([
-            (account_for_connection("active-1"), "sk-active-key".to_string()),
-            (account_for_connection("other-1"), "sk-other-key".to_string()),
+            (
+                account_for_connection("active-1"),
+                "sk-active-key".to_string(),
+            ),
+            (
+                account_for_connection("other-1"),
+                "sk-other-key".to_string(),
+            ),
         ]);
         let env_cfg = AppConfig {
             provider: "gemini".into(),
@@ -234,9 +258,8 @@ mod tests {
             env_path: None,
         };
 
-        let resolved = resolve_credentials_with(
-            &db,
-            Some("other-1"),
+        let resolved = resolve_from_sources_with(
+            &read_credential_sources(&db, Some("other-1")),
             |account| {
                 secrets
                     .get(account)
@@ -272,9 +295,8 @@ mod tests {
             env_path: None,
         };
 
-        let resolved = resolve_credentials_with(
-            &db,
-            Some("only-1"),
+        let resolved = resolve_from_sources_with(
+            &read_credential_sources(&db, Some("only-1")),
             |account| {
                 secrets
                     .lock()
@@ -305,9 +327,8 @@ mod tests {
             env_path: Some("/tmp/.env".into()),
         };
 
-        let resolved = resolve_credentials_with(
-            &db,
-            None,
+        let resolved = resolve_from_sources_with(
+            &read_credential_sources(&db, None),
             |_| Err(CredentialError::NotFound),
             || env_cfg.clone(),
         );
@@ -331,9 +352,8 @@ mod tests {
             env_path: None,
         };
 
-        let resolved = resolve_credentials_with(
-            &db,
-            Some("missing"),
+        let resolved = resolve_from_sources_with(
+            &read_credential_sources(&db, Some("missing")),
             |_| Err(CredentialError::NotFound),
             || env_cfg.clone(),
         );

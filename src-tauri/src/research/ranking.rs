@@ -5,7 +5,11 @@ use serde_json::Value;
 use crate::search::{normalize_web_results, validate_public_http_url, WebSearchResult};
 
 /// Convert sidecar discovery candidates into ranked web search results.
-pub fn rank_web_candidates(candidates: &[Value], query: &str, limit: usize) -> Vec<WebSearchResult> {
+pub fn rank_web_candidates(
+    candidates: &[Value],
+    query: &str,
+    limit: usize,
+) -> Vec<WebSearchResult> {
     let q = query.trim().to_lowercase();
     let terms: Vec<&str> = q.split_whitespace().filter(|t| t.len() > 2).collect();
 
@@ -35,10 +39,7 @@ pub fn rank_web_candidates(candidates: &[Value], query: &str, limit: usize) -> V
             .and_then(|v| v.as_str())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
-        let base = c
-            .get("score")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.5);
+        let base = c.get("score").and_then(|v| v.as_f64()).unwrap_or(0.5);
         let hay = format!(
             "{} {} {}",
             title.to_lowercase(),
@@ -67,7 +68,11 @@ pub fn rank_web_candidates(candidates: &[Value], query: &str, limit: usize) -> V
     }
 
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    let results: Vec<_> = scored.into_iter().take(limit.max(1)).map(|(_, r)| r).collect();
+    let results: Vec<_> = scored
+        .into_iter()
+        .take(limit.max(1))
+        .map(|(_, r)| r)
+        .collect();
     normalize_web_results(results)
 }
 

@@ -68,10 +68,10 @@ pub fn dispatch(
     }
 }
 
-fn application_id<'a>(ctx: &'a ActionRunContext) -> Result<&'a str, ActionError> {
-    ctx.application_id.as_deref().ok_or_else(|| {
-        ActionError::new("invalid_context", "this action requires an application")
-    })
+fn application_id(ctx: &ActionRunContext) -> Result<&str, ActionError> {
+    ctx.application_id
+        .as_deref()
+        .ok_or_else(|| ActionError::new("invalid_context", "this action requires an application"))
 }
 
 fn str_field<'a>(input: &'a Value, key: &str) -> Result<&'a str, ActionError> {
@@ -233,49 +233,11 @@ fn external_link_open(input: &Value) -> HandlerResult {
 }
 
 pub fn validate_external_url(raw: &str) -> Result<String, ActionError> {
-    if raw.len() > 2_000 {
-        return Err(ActionError::invalid("URL is too long"));
-    }
-    let parsed = url::Url::parse(raw).map_err(|_| ActionError::invalid("URL is not valid"))?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err(ActionError::invalid("only http and https links are allowed"));
-    }
-    if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err(ActionError::invalid("URLs must not embed credentials"));
-    }
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| ActionError::invalid("URL must have a host"))?
-        .to_ascii_lowercase();
-    if is_private_host(&host) {
-        return Err(ActionError::invalid("local and private addresses are blocked"));
-    }
-    Ok(parsed.to_string())
-}
-
-fn is_private_host(host: &str) -> bool {
-    if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") {
-        return true;
-    }
-    // url::Url::host_str() may keep IPv6 brackets (`[::1]`); strip them before parse.
-    let bare = host
-        .strip_prefix('[')
-        .and_then(|h| h.strip_suffix(']'))
-        .unwrap_or(host);
-    if let Ok(addr) = bare.parse::<std::net::IpAddr>() {
-        return match addr {
-            std::net::IpAddr::V4(v4) => {
-                v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
-            }
-            std::net::IpAddr::V6(v6) => {
-                v6.is_loopback()
-                    || v6.is_unspecified()
-                    || (v6.segments()[0] & 0xfe00) == 0xfc00
-                    || (v6.segments()[0] & 0xffc0) == 0xfe80
-            }
-        };
-    }
-    false
+    // Reuse the SSRF suite used by search/media so registered-action link
+    // opens cannot reach private networks, even via DNS rebinding.
+    crate::search::validate_public_http_url(raw)
+        .map(|url| url.to_string())
+        .map_err(|err| ActionError::invalid(err.to_string()))
 }
 
 fn export_prepare(db: &mut Database, ctx: &ActionRunContext, input: &Value) -> HandlerResult {
@@ -361,9 +323,10 @@ fn automation_propose(ctx: &ActionRunContext, input: &Value) -> HandlerResult {
 }
 
 fn agent_submit_event(db: &mut Database, ctx: &ActionRunContext, input: &Value) -> HandlerResult {
-    let conversation_id = ctx.conversation_id.as_deref().ok_or_else(|| {
-        ActionError::new("invalid_context", "this action requires an open chat")
-    })?;
+    let conversation_id = ctx
+        .conversation_id
+        .as_deref()
+        .ok_or_else(|| ActionError::new("invalid_context", "this action requires an open chat"))?;
     let summary = str_field(input, "summary")?;
     if summary.chars().count() > 500 {
         return Err(ActionError::invalid("summary is too long"));
@@ -389,8 +352,10 @@ mod tests {
 
     #[test]
     fn external_urls_are_validated() {
-        assert!(validate_external_url("https://example.com/docs").is_ok());
-        assert!(validate_external_url("http://example.com").is_ok());
+        // Literal public IPs avoid DNS in unit tests; hostnames are covered by
+        // search::safety tests that exercise resolve_public_host.
+        assert!(validate_external_url("https://1.1.1.1/docs").is_ok());
+        assert!(validate_external_url("http://8.8.8.8").is_ok());
         assert!(validate_external_url("file:///etc/passwd").is_err());
         assert!(validate_external_url("javascript:alert(1)").is_err());
         assert!(validate_external_url("https://localhost/admin").is_err());
@@ -399,5 +364,6 @@ mod tests {
         assert!(validate_external_url("https://[::1]/admin").is_err());
         assert!(validate_external_url("https://user:pass@example.com").is_err());
         assert!(validate_external_url("not a url").is_err());
+        assert!(validate_external_url("http://metadata.google.internal/").is_err());
     }
 }

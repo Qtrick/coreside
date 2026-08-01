@@ -4,7 +4,9 @@
 use std::env;
 
 use super::errors::ExaError;
-use crate::search::{get_search_secret, search_keyring_account, set_search_secret, delete_search_secret};
+use crate::search::{
+    delete_search_secret, get_search_secret, search_keyring_account, set_search_secret,
+};
 
 pub const EXA_PROVIDER: &str = "exa";
 pub const EXA_ENV_KEY: &str = "EXA_API_KEY";
@@ -93,7 +95,8 @@ pub fn require_exa_api_key() -> Result<(String, ExaCredentialSource), ExaError> 
 }
 
 pub fn store_exa_api_key(secret: &str) -> Result<(), ExaError> {
-    set_search_secret(&exa_keyring_account(), secret).map_err(|e| ExaError::Credential(e.to_string()))
+    set_search_secret(&exa_keyring_account(), secret)
+        .map_err(|e| ExaError::Credential(e.to_string()))
 }
 
 pub fn delete_exa_api_key() -> Result<(), ExaError> {

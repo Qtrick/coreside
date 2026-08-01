@@ -73,11 +73,7 @@ impl HostedAiProvider {
         out
     }
 
-    async fn post_gateway(
-        &self,
-        body: Value,
-        cancel: CancellationToken,
-    ) -> Result<Value, AiError> {
+    async fn post_gateway(&self, body: Value, cancel: CancellationToken) -> Result<Value, AiError> {
         let request = self
             .client
             .post(&self.gateway_url)
@@ -112,11 +108,7 @@ impl HostedAiProvider {
         if !status.is_success() {
             let consumer = serde_json::from_str::<Value>(&text)
                 .ok()
-                .and_then(|v| {
-                    v.get("error")
-                        .and_then(|e| e.as_str())
-                        .map(str::to_string)
-                })
+                .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
                 .unwrap_or_else(|| "Coreside AI request failed".into());
             return Err(AiError::Provider(consumer));
         }

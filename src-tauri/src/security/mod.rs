@@ -6,8 +6,8 @@ pub use protected_resources::{
     assert_not_protected, is_protected, list_protected_ids, PROTECTED_IDS,
 };
 
-use regex::Regex;
 use once_cell::sync::Lazy;
+use regex::Regex;
 
 static KEY_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
     vec![

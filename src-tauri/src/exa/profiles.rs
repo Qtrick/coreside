@@ -117,7 +117,10 @@ mod tests {
         assert_eq!(SearchProfile::Balanced.max_crawl_pages(), 3);
         assert_eq!(SearchProfile::Thorough.num_results(), 8);
         assert_eq!(SearchProfile::Thorough.max_crawl_pages(), 5);
-        assert_eq!(SearchProfile::Thorough.thorough_deep_type(), Some("deep-lite"));
+        assert_eq!(
+            SearchProfile::Thorough.thorough_deep_type(),
+            Some("deep-lite")
+        );
     }
 
     #[test]

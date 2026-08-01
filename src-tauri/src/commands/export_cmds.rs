@@ -80,7 +80,8 @@ pub fn export_tool(
 
     let (bytes, final_path) = match format.as_str() {
         "coreside-tool" | "json" => {
-            let package = coreside_tool_package(&cleaned, Some(&cleaned_state), env!("CARGO_PKG_VERSION"));
+            let package =
+                coreside_tool_package(&cleaned, Some(&cleaned_state), env!("CARGO_PKG_VERSION"));
             let text = serde_json::to_string_pretty(&package)
                 .map_err(|e| CommandError::new("serialize", e.to_string()))?;
             assert_no_secrets(&text).map_err(|e| CommandError::new("security", e))?;
@@ -132,9 +133,8 @@ pub fn export_tool(
     if let Some(parent) = final_path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    fs::write(&final_path, &bytes).map_err(|e| {
-        CommandError::new("io", format!("Could not write export: {e}"))
-    })?;
+    fs::write(&final_path, &bytes)
+        .map_err(|e| CommandError::new("io", format!("Could not write export: {e}")))?;
     if !final_path.exists() {
         return Err(CommandError::new("io", "Export file was not created"));
     }
@@ -165,7 +165,10 @@ pub fn export_tool(
 }
 
 #[tauri::command]
-pub fn list_export_formats(tool_id: String, state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, CommandError> {
+pub fn list_export_formats(
+    tool_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, CommandError> {
     let db = state.db.lock();
     let tool = db::get_tool(&db, tool_id.trim())?;
     let mut def = tool.definition;
@@ -191,13 +194,9 @@ pub fn list_export_formats(tool_id: String, state: State<'_, AppState>) -> Resul
             "available": true,
             "description": "Definition and safe state for backup or re-import."
         }),
-        serde_json::json!({
-            "id": "png",
-            "label": "PNG Snapshot",
-            "extension": "png",
-            "available": true,
-            "description": "Image of the current tool view (captured in the app)."
-        }),
+        // No PNG entry: Coreside has no real DOM-to-image capture, and the
+        // previous implementation produced a blank placeholder image while
+        // reporting success.
     ];
     formats.push(serde_json::json!({
         "id": "html",

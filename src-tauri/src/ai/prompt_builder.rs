@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use super::response_schema::ToolDefinition;
 use super::capability_registry::capability_schemas;
+use super::response_schema::ToolDefinition;
 use crate::exa::has_exa_key;
 use crate::research::research_capability_notice;
 
@@ -83,25 +83,18 @@ pub fn build_agent_prompt_with_references(
         parts.push(prompts.tool_editor);
         parts.push("## Explicitly referenced tools (JSON)".to_string());
         parts.push(
-            serde_json::to_string_pretty(referenced_tools)
-                .unwrap_or_else(|_| "[]".to_string()),
+            serde_json::to_string_pretty(referenced_tools).unwrap_or_else(|_| "[]".to_string()),
         );
         if let Some(tool) = active_tool {
             if !referenced_tools.iter().any(|t| t.id == tool.id) {
                 parts.push("## Active tool (JSON)".to_string());
-                parts.push(
-                    serde_json::to_string_pretty(tool)
-                        .unwrap_or_else(|_| "{}".to_string()),
-                );
+                parts.push(serde_json::to_string_pretty(tool).unwrap_or_else(|_| "{}".to_string()));
             }
         }
     } else if let Some(tool) = active_tool {
         parts.push(prompts.tool_editor);
         parts.push("## Active tool (JSON)".to_string());
-        parts.push(
-            serde_json::to_string_pretty(tool)
-                .unwrap_or_else(|_| "{}".to_string()),
-        );
+        parts.push(serde_json::to_string_pretty(tool).unwrap_or_else(|_| "{}".to_string()));
     } else {
         parts.push(prompts.tool_builder);
     }
@@ -129,8 +122,7 @@ pub fn build_agent_prompt_with_references(
 
     parts.push("## Agent tool capabilities (tool_use)".to_string());
     parts.push(
-        serde_json::to_string_pretty(&capability_schemas())
-            .unwrap_or_else(|_| "[]".to_string()),
+        serde_json::to_string_pretty(&capability_schemas()).unwrap_or_else(|_| "[]".to_string()),
     );
     parts.push(format!(
         "## Web research capability\n{}",

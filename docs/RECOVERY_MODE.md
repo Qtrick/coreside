@@ -29,6 +29,18 @@ Singleton row: `recovery_state` id `local`.
 
 `manifest::record_crash` increments `crash_count`. At ≥ 3, lifecycle/health become `suspended`. Restore LKG clears crash count. Settings Recovery UI can restore LKG per application.
 
+The crash signal comes from `lifecycle::record_build_failure` when the failure is
+reported as **non-retryable**: a transient failure is recorded for display but
+does not count as a strike. That reaches the trusted core through the
+`kernel_record_build_failure` IPC command.
+
+`ToolErrorBoundary` in `src/components/tool-renderer/ToolRenderer.tsx` reports
+non-retryable failures through `kernel_record_build_failure` (deduped per
+application + tool version). Callers should pass a real kernel `applicationId`
+(as `ToolCanvas` does); missing manifests record the failure row without
+advancing `crash_count`. Covered by
+`manifest::tests::non_retryable_build_failures_suspend_after_three_strikes`.
+
 ## Agent boundary
 
 `assert_agent_cannot_disable_recovery` is enforced from `apply_change` via `assert_ops_not_protected` — ops mentioning recovery or payloads setting `recoveryMode: false` / `disableRecovery: true` are rejected.

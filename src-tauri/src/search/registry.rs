@@ -20,10 +20,7 @@ impl SearchRegistry {
     }
 
     /// Default production provider: Exa (when configured) + Crawl4AI hybrid.
-    pub fn default_local(
-        supervisor: Arc<CrawlerSupervisor>,
-        db: Arc<Mutex<Database>>,
-    ) -> Self {
+    pub fn default_local(supervisor: Arc<CrawlerSupervisor>, db: Arc<Mutex<Database>>) -> Self {
         Self::from_provider(Arc::new(HybridSearchProvider::new(supervisor, db)))
     }
 
@@ -104,7 +101,10 @@ impl SearchRegistry {
         count: usize,
         safe_search: SafeSearchLevel,
     ) -> Result<WebSearchResponse, SearchError> {
-        let domain = domain.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+        let domain = domain
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
         let query = query.trim().to_string();
         if query.is_empty() && domain.is_none() {
             return Err(SearchError::Invalid("query or domain is required".into()));

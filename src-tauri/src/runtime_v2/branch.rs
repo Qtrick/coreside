@@ -49,6 +49,17 @@ pub fn branch_from_message(
     branch_name: &str,
     workspace_id: &str,
 ) -> DbResult<(ChatBranchRecord, Vec<SurfaceRecord>)> {
+    let existing = list_branches(db, source_conversation_id)?;
+    // Depth is approximated by the number of branches already taken from this
+    // conversation. A true tree depth would require walking parent links; this
+    // ceiling still prevents unbounded branching from one chat.
+    if existing.len() >= super::limits::MAX_BRANCH_DEPTH {
+        return Err(DbError::Invalid(format!(
+            "branch limit reached ({})",
+            super::limits::MAX_BRANCH_DEPTH
+        )));
+    }
+
     let messages = crate::db::get_messages(db, source_conversation_id)?;
     let cut = messages
         .iter()
@@ -62,12 +73,7 @@ pub fn branch_from_message(
         format!("{branch_name} (branch)")
     };
     let project_id = conversation_project_id(db, source_conversation_id);
-    let new_conv = crate::db::create_conversation(
-        db,
-        workspace_id,
-        &title,
-        project_id.as_deref(),
-    )?;
+    let new_conv = crate::db::create_conversation(db, workspace_id, &title, project_id.as_deref())?;
 
     for m in kept {
         crate::db::insert_message(db, &new_conv.id, &m.role, &m.content, m.metadata.as_ref())?;
@@ -126,6 +132,8 @@ pub fn create_snapshot(
     project_id: Option<&str>,
     description: &str,
 ) -> DbResult<SnapshotRecord> {
+    // Build the payload before mutating retention so a read failure cannot
+    // delete older snapshots without saving a replacement.
     let messages = crate::db::get_messages(db, conversation_id)?;
     let surfaces = list_inline_surfaces(db, conversation_id)?;
     let txns = super::transactions::list_transactions(db, conversation_id, 100)?;
@@ -155,18 +163,44 @@ pub fn create_snapshot(
     });
     let id = format!("snap-{}", Uuid::new_v4());
     let now = now_rfc3339();
-    db.conn().execute(
-        "INSERT INTO conversation_snapshots (id, conversation_id, project_id, description, read_only_payload_json, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![
-            id,
-            conversation_id,
-            project_id,
-            description,
-            payload.to_string(),
-            now
-        ],
-    )?;
+    let payload_json = payload.to_string();
+    let max = super::limits::MAX_SNAPSHOTS_PER_CONVERSATION as i64;
+
+    // Insert first, then prune overflow in the same transaction so a failed
+    // insert never drops retained snapshots.
+    db.with_transaction(|conn| {
+        conn.execute(
+            "INSERT INTO conversation_snapshots (id, conversation_id, project_id, description, read_only_payload_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                id,
+                conversation_id,
+                project_id,
+                description,
+                payload_json,
+                now
+            ],
+        )?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM conversation_snapshots WHERE conversation_id = ?1",
+            [conversation_id],
+            |r| r.get(0),
+        )?;
+        if count > max {
+            let overflow = count - max;
+            conn.execute(
+                "DELETE FROM conversation_snapshots WHERE id IN (
+                    SELECT id FROM conversation_snapshots
+                    WHERE conversation_id = ?1
+                    ORDER BY created_at ASC
+                    LIMIT ?2
+                 )",
+                params![conversation_id, overflow],
+            )?;
+        }
+        Ok(())
+    })?;
+
     Ok(SnapshotRecord {
         id,
         conversation_id: conversation_id.into(),
@@ -211,7 +245,10 @@ pub fn delete_snapshot(db: &mut Database, id: &str) -> DbResult<()> {
     Ok(())
 }
 
-pub fn list_branches(db: &Database, source_conversation_id: &str) -> DbResult<Vec<ChatBranchRecord>> {
+pub fn list_branches(
+    db: &Database,
+    source_conversation_id: &str,
+) -> DbResult<Vec<ChatBranchRecord>> {
     let mut stmt = db.conn().prepare(
         "SELECT id, source_conversation_id, source_message_id, new_conversation_id, branch_name, created_at
          FROM chat_branches WHERE source_conversation_id = ?1 ORDER BY created_at DESC",
@@ -227,4 +264,73 @@ pub fn list_branches(db: &Database, source_conversation_id: &str) -> DbResult<Ve
         })
     })?;
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{create_conversation, Database, DEFAULT_WORKSPACE_ID};
+    use tempfile::tempdir;
+
+    #[test]
+    fn snapshot_pruning_keeps_newest_within_limit() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("snap.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Snap", None).unwrap();
+        let limit = super::super::limits::MAX_SNAPSHOTS_PER_CONVERSATION;
+
+        let mut ids = Vec::new();
+        for i in 0..(limit + 3) {
+            let snap = create_snapshot(&mut db, &conv.id, None, &format!("s{i}")).unwrap();
+            ids.push(snap.id);
+        }
+
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM conversation_snapshots WHERE conversation_id = ?1",
+                [&conv.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count as usize, limit);
+
+        // Oldest three must be gone; newest must remain.
+        for old in &ids[..3] {
+            assert!(get_snapshot(&db, old).is_err());
+        }
+        assert!(get_snapshot(&db, ids.last().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn branch_limit_rejects_unbounded_fanout() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("branch.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Root", None).unwrap();
+        let msg = crate::db::insert_message(&mut db, &conv.id, "user", "hi", None).unwrap();
+
+        for i in 0..super::super::limits::MAX_BRANCH_DEPTH {
+            branch_from_message(
+                &mut db,
+                &conv.id,
+                &msg.id,
+                &format!("b{i}"),
+                DEFAULT_WORKSPACE_ID,
+            )
+            .unwrap();
+        }
+
+        let err = branch_from_message(
+            &mut db,
+            &conv.id,
+            &msg.id,
+            "overflow",
+            DEFAULT_WORKSPACE_ID,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("branch limit"),
+            "expected branch limit error, got {err}"
+        );
+    }
 }

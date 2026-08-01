@@ -217,15 +217,24 @@ mod tests {
     fn repeated_failures_suspend_then_recover() {
         let (mut db, _dir) = test_db();
         for _ in 0..FAILURE_SUSPENSION_THRESHOLD {
-            insert_audit_row(&mut db, "app-1", "local_data.write", "error", "write", "run-1");
+            insert_audit_row(
+                &mut db,
+                "app-1",
+                "local_data.write",
+                "error",
+                "write",
+                "run-1",
+            );
         }
         assert_eq!(
             check_failure_suspension(&db, Some("app-1"), "local_data.write").unwrap(),
             Some(BreakerTrip::Suspended)
         );
         insert_audit_row(&mut db, "app-1", "local_data.write", "ok", "write", "run-1");
-        assert!(check_failure_suspension(&db, Some("app-1"), "local_data.write")
-            .unwrap()
-            .is_none());
+        assert!(
+            check_failure_suspension(&db, Some("app-1"), "local_data.write")
+                .unwrap()
+                .is_none()
+        );
     }
 }

@@ -55,11 +55,7 @@ pub struct VerificationResult {
     pub test_results: Vec<Value>,
 }
 
-pub fn upsert_test(
-    db: &mut Database,
-    application_id: &str,
-    test: DeclarativeTest,
-) -> DbResult<()> {
+pub fn upsert_test(db: &mut Database, application_id: &str, test: DeclarativeTest) -> DbResult<()> {
     validate_test(&test).map_err(DbError::Invalid)?;
     let id = format!("gtest-{}", Uuid::new_v4());
     db.conn().execute(
@@ -83,13 +79,8 @@ pub fn validate_test(test: &DeclarativeTest) -> Result<(), String> {
     }
     for a in &test.actions {
         match a.action.as_str() {
-            "render_surface"
-            | "find_component"
-            | "click"
-            | "enter_value"
-            | "submit_form"
-            | "navigate_route"
-            | "create_record" => {}
+            "render_surface" | "find_component" | "click" | "enter_value" | "submit_form"
+            | "navigate_route" | "create_record" => {}
             other => return Err(format!("untrusted test action: {other}")),
         }
     }

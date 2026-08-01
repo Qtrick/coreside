@@ -1,0 +1,125 @@
+{
+  "generatedAt": "2026-08-01",
+  "commit": "4b5fb1a288b5180860fe1e4fb984defdf296f036",
+  "scope": [
+    "src-tauri/capabilities/default.json",
+    "src-tauri/tauri.conf.json CSP",
+    "src-tauri/src/search/safety.rs",
+    "registered action URL handlers",
+    "credential storage paths",
+    "tool window shell permissions"
+  ],
+  "p0Count": 0,
+  "p1Count": 0,
+  "p2Count": 2,
+  "p3Count": 3,
+  "findings": [
+    {
+      "id": "SEC-CAP-001",
+      "severity": "P1",
+      "title": "tool-* windows inherit shell:allow-open",
+      "evidence": [
+        "src-tauri/capabilities/default.json windows: [main, tool-*] permissions include shell:allow-open",
+        "src-tauri/src/windows/mod.rs creates labels tool-{id} with same app webview"
+      ],
+      "detail": "Secondary tool windows share the default capability that allows the shell open plugin. They load the protected React app (not arbitrary HTML), so this is not generated-code shell exec, but tool windows can invoke the same shell.open path as main.",
+      "fixable": true,
+      "suggestedChange": "Split capabilities: keep shell:allow-open on main only; grant tool-* core window permissions without shell:allow-open unless a dedicated open bridge is required.",
+      "fixed": true,
+      "resolution": "Split capabilities: tool-window.json has no shell; open_external_url is the bridge."
+    },
+    {
+      "id": "SEC-URL-001",
+      "severity": "P1",
+      "title": "Frontend openExternalUrl lacks private-host SSRF/open guards",
+      "evidence": [
+        "src/lib/open-url.ts only requires http:// or https:// prefix before plugin-shell open",
+        "src-tauri/src/application_kernel/registered_actions/handlers.rs validate_external_url blocks localhost/private IPs",
+        "src-tauri/src/search/safety.rs validate_public_http_url also DNS-resolves and fail-closes"
+      ],
+      "detail": "Search result cards call openExternalUrl with result URLs. A crafted http(s) link to 127.0.0.1, localhost, or link-local addresses is not blocked on the frontend path, unlike registered-action and crawl/fetch validators.",
+      "fixable": true,
+      "suggestedChange": "Reuse or port validate_external_url rules into open-url.ts (scheme, no credentials, block private/localhost hosts) before calling shell open.",
+      "fixed": true,
+      "resolution": "openExternalUrl invokes open_external_url which runs validate_public_http_url before shell open."
+    },
+    {
+      "id": "SEC-URL-002",
+      "severity": "P2",
+      "title": "external_link.open host checks do not DNS-resolve",
+      "evidence": [
+        "handlers.rs is_private_host checks literal IPs and localhost suffixes only",
+        "search/safety.rs resolve_public_host performs DNS and rejects private resolutions"
+      ],
+      "detail": "A hostname that resolves to a private IP could pass external_link.open validation. Impact is reduced because the handler returns a validated URL and does not fetch, and ToolRenderer does not currently auto-open the result via shell.",
+      "fixable": true,
+      "suggestedChange": "Optionally align validate_external_url with validate_public_http_url DNS fail-closed behavior when opening is wired.",
+      "fixed": true,
+      "resolution": "validate_external_url now delegates to validate_public_http_url (DNS fail-closed)."
+    },
+    {
+      "id": "SEC-CSP-001",
+      "severity": "P2",
+      "title": "CSP img-src allows arbitrary https:",
+      "evidence": [
+        "src-tauri/tauri.conf.json app.security.csp img-src includes https:"
+      ],
+      "detail": "Remote images can load from any https origin (likely for search/media previews). Increases tracking surface relative to an allowlist. script-src remains 'self'; connect-src is limited to self/ipc.",
+      "fixable": false,
+      "suggestedChange": "If product allows, narrow img-src to asset:/data: plus known CDNs, or proxy images through validated asset protocol.",
+      "fixed": false
+    },
+    {
+      "id": "SEC-CSP-002",
+      "severity": "P3",
+      "title": "CSP style-src includes unsafe-inline",
+      "evidence": [
+        "src-tauri/tauri.conf.json style-src 'self' 'unsafe-inline' https://fonts.googleapis.com"
+      ],
+      "detail": "Common for React inline styles; raises XSS impact if HTML injection ever occurs. script-src does not include unsafe-inline/unsafe-eval.",
+      "fixable": false,
+      "suggestedChange": "Long-term migrate to nonces/hashes if inline styles can be eliminated.",
+      "fixed": false
+    },
+    {
+      "id": "SEC-CRED-001",
+      "severity": "P3",
+      "title": "Credential storage path verified (positive control)",
+      "evidence": [
+        "src-tauri/src/credentials/mod.rs SERVICE=coreside.provider; account_for_connection coreside:{id}",
+        "Secrets never enter SQLite per module docs; resolve.rs split fixes mutex stall (R3)"
+      ],
+      "detail": "BYOK keys use OS keyring. Hosted session uses separate keyring path. No plaintext SQLite secret store found in credentials module.",
+      "fixable": false,
+      "suggestedChange": null,
+      "fixed": false
+    },
+    {
+      "id": "SEC-IPC-001",
+      "severity": "P2",
+      "title": "High-risk kernel commands registered without frontend wrappers",
+      "evidence": [
+        "reports/tauri-command-inventory.json uninvokedRegistered includes kernel_mark_last_known_good, kernel_export_package_bytes, kernel_set_policy_override, kernel_clear_policy_override"
+      ],
+      "detail": "These remain callable via raw invoke from any webview that shares default capabilities. Absence of an api wrapper reduces accidental UI use but does not remove the IPC surface.",
+      "fixable": false,
+      "suggestedChange": "Either add intentional UI + tests, or gate with stronger capability/ACL if Tauri versioning allows per-command permissions.",
+      "fixed": false
+    },
+    {
+      "id": "SEC-ACT-001",
+      "severity": "P3",
+      "title": "Registered actions cannot reach unrestricted filesystem/shell.exec",
+      "evidence": [
+        "doctor checks permissions.no_unrestricted_fs / filesystem.unrestricted (audit 47/47)",
+        "gateway tests exercise shell.exec as blocked path in gateway.rs"
+      ],
+      "detail": "Positive control from cleansing phase: bundled actions are permission-bounded; unrestricted shell/fs categories are rejected by policy.",
+      "fixable": false,
+      "suggestedChange": null,
+      "fixed": false
+    }
+  ],
+  "productionCodeChanged": false,
+  "note": "P1 findings SEC-CAP-001 and SEC-URL-001 were fixed in the cleansing implementation pass after the initial report-only review."
+}

@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::db::{Database, DbResult};
+use crate::db::Database;
 use crate::runtime_v2::operations::{validate_operations, AppOperation};
 use crate::runtime_v2::transactions::{create_transaction, ApplyResult};
 use crate::security::assert_not_protected;
@@ -222,19 +222,11 @@ pub fn apply_change(
     data::apply_kernel_operations(db, &req.operations).map_err(KernelError::Db)?;
     manifest::apply_manifest_operations(db, &req.operations).map_err(KernelError::Db)?;
 
-    let apply =
-        crate::runtime_v2::transactions::apply_transaction_with_bus(db, &txn.id, bus)
-            .map_err(KernelError::Db)?;
+    let apply = crate::runtime_v2::transactions::apply_transaction_with_bus(db, &txn.id, bus)
+        .map_err(KernelError::Db)?;
 
-    record_provenance(
-        db,
-        &txn.id,
-        &req,
-        "applied",
-        Some("passed"),
-        None,
-    )
-    .map_err(KernelError::Db)?;
+    record_provenance(db, &txn.id, &req, "applied", Some("passed"), None)
+        .map_err(KernelError::Db)?;
 
     let verification = testing::verify_after_change(db, &req.operations).ok();
 
@@ -362,7 +354,9 @@ mod tests {
         let c = capability_catalog();
         let perms = c.get("permissions").and_then(|v| v.as_array()).unwrap();
         assert!(perms.iter().any(|p| p.as_str() == Some("local_data.write")));
-        assert!(!perms.iter().any(|p| p.as_str() == Some("unrestricted.shell")));
+        assert!(!perms
+            .iter()
+            .any(|p| p.as_str() == Some("unrestricted.shell")));
         let forbidden = c
             .get("forbiddenPermissions")
             .and_then(|v| v.as_array())

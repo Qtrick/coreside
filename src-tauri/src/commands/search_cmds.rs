@@ -8,9 +8,7 @@ use crate::crawler::{detect_installation, InstallationState};
 use crate::exa::{has_exa_key, resolve_exa_credentials};
 use crate::projects::load_project_context_settings;
 use crate::research::Crawl4aiSearchProvider;
-use crate::search::{
-    image_search, video_search, web_search, SafeSearchLevel, SearchRegistry,
-};
+use crate::search::{image_search, video_search, web_search, SafeSearchLevel, SearchRegistry};
 use crate::security::sanitize_error;
 use crate::state::AppState;
 
@@ -53,15 +51,13 @@ async fn resolve_registry(state: &AppState) -> Result<SearchRegistry, CommandErr
 }
 
 #[tauri::command]
-pub fn get_search_connection(state: State<'_, AppState>) -> Result<SearchConnectionView, CommandError> {
+pub fn get_search_connection(
+    state: State<'_, AppState>,
+) -> Result<SearchConnectionView, CommandError> {
     let report = detect_installation();
     let _ = state;
     let exa = resolve_exa_credentials();
-    let provider = if exa.has_key() {
-        "hybrid"
-    } else {
-        "crawl4ai"
-    };
+    let provider = if exa.has_key() { "hybrid" } else { "crawl4ai" };
     let source = if exa.has_key() {
         exa.source.as_str().to_string()
     } else {
@@ -257,7 +253,7 @@ pub fn list_search_sessions_cmd(
         input.search_type.as_deref(),
         input.limit.unwrap_or(50),
     )
-    .map_err(|e| CommandError::new("db", e.to_string()))
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -266,8 +262,7 @@ pub fn get_search_session_cmd(
     session_id: String,
 ) -> Result<crate::search::SearchSessionDetail, CommandError> {
     let db = state.db.lock();
-    crate::search::get_search_session(&db, session_id.trim())
-        .map_err(|e| CommandError::new("db", e.to_string()))
+    crate::search::get_search_session(&db, session_id.trim()).map_err(CommandError::from)
 }
 
 #[derive(Debug, Deserialize)]
@@ -292,7 +287,7 @@ pub fn clear_search_history_cmd(
         input.conversation_id.as_deref(),
         input.project_id.as_deref(),
     )
-    .map_err(|e| CommandError::new("db", e.to_string()))
+    .map_err(CommandError::from)
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,9 +1,7 @@
 use async_trait::async_trait;
 
 use super::errors::SearchError;
-use super::models::{
-    ImageSearchResponse, SafeSearchLevel, VideoSearchResponse, WebSearchResponse,
-};
+use super::models::{ImageSearchResponse, SafeSearchLevel, VideoSearchResponse, WebSearchResponse};
 
 #[derive(Debug, Clone)]
 pub struct SearchRequest {

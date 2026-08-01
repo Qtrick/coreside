@@ -1,0 +1,1643 @@
+{
+  "generatedAt": "2026-08-01",
+  "commit": "4b5fb1a288b5180860fe1e4fb984defdf296f036",
+  "registeredCount": 197,
+  "invokedFromFrontendCount": 145,
+  "mockedCount": 139,
+  "uninvokedRegistered": [
+    "list_automations",
+    "upsert_automation",
+    "set_automation_enabled",
+    "list_automation_runs",
+    "list_workspace_backgrounds",
+    "upsert_workspace_background",
+    "list_export_formats",
+    "list_exa_usage",
+    "web_search_cmd",
+    "image_search_cmd",
+    "video_search_cmd",
+    "fetch_web_page_cmd",
+    "cleanup_crawler_cache",
+    "list_capability_packs",
+    "flush_patch_scheduler_cmd",
+    "apply_operations_cmd",
+    "validate_agent_response_v2",
+    "undo_transaction_cmd",
+    "list_transactions_cmd",
+    "get_transaction_cmd",
+    "list_branches_cmd",
+    "create_snapshot_cmd",
+    "get_snapshot_cmd",
+    "enqueue_agent_turn_cmd",
+    "list_agent_queue_cmd",
+    "cancel_queue_item_cmd",
+    "activate_next_queue_cmd",
+    "complete_queue_item_cmd",
+    "recover_agent_queue_cmd",
+    "runtime_v2_limits",
+    "kernel_capability_catalog",
+    "kernel_apply_change",
+    "kernel_compile_intent",
+    "kernel_ensure_tool_manifest",
+    "kernel_mark_last_known_good",
+    "kernel_upsert_data_model",
+    "kernel_grant_permission",
+    "kernel_list_permissions",
+    "kernel_export_package",
+    "kernel_export_package_bytes",
+    "kernel_application_summary",
+    "kernel_data_model_summary",
+    "kernel_recent_transactions",
+    "kernel_upsert_test",
+    "kernel_run_test",
+    "kernel_visual_checks",
+    "kernel_create_job",
+    "kernel_get_job",
+    "kernel_interrupt_jobs",
+    "kernel_set_policy_override",
+    "kernel_clear_policy_override",
+    "kernel_list_registered_actions"
+  ],
+  "notes": [
+    "open_external_url added after initial inventory; tool windows no longer share shell:allow-open",
+    "Uninvoked commands marked REVIEW — do not delete without proving unused by Rust-only callers"
+  ],
+  "commands": [
+    {
+      "name": "get_app_info",
+      "rustModule": "commands/ai_cmds.rs",
+      "frontendCaller": "api.getAppInfo",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_ai_status",
+      "rustModule": "commands/ai_cmds.rs",
+      "frontendCaller": "api.getAiStatus",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_model_catalog",
+      "rustModule": "commands/ai_cmds.rs",
+      "frontendCaller": "api.getModelCatalog",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "test_ai_connection",
+      "rustModule": "commands/ai_cmds.rs",
+      "frontendCaller": "api.testAiConnection",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_provider_connections",
+      "rustModule": "commands/credential_cmds.rs",
+      "frontendCaller": "api.listProviderConnections",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "upsert_provider_connection",
+      "rustModule": "commands/credential_cmds.rs",
+      "frontendCaller": "api.upsertProviderConnection",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "delete_provider_connection",
+      "rustModule": "commands/credential_cmds.rs",
+      "frontendCaller": "api.deleteProviderConnection",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "set_active_provider_connection",
+      "rustModule": "commands/credential_cmds.rs",
+      "frontendCaller": "api.setActiveProviderConnection",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "test_provider_connection",
+      "rustModule": "commands/credential_cmds.rs",
+      "frontendCaller": "api.testProviderConnection",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "provider_key_hints",
+      "rustModule": "commands/credential_cmds.rs",
+      "frontendCaller": "api.providerKeyHints",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "store_hosted_auth_session",
+      "rustModule": "commands/credential_cmds.rs",
+      "frontendCaller": "api.storeHostedAuthSession",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "clear_hosted_auth_session",
+      "rustModule": "commands/credential_cmds.rs",
+      "frontendCaller": "api.clearHostedAuthSession",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_hosted_auth_status",
+      "rustModule": "commands/credential_cmds.rs",
+      "frontendCaller": "api.getHostedAuthStatus",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_conversations",
+      "rustModule": "commands/conversation_cmds.rs",
+      "frontendCaller": "api.listConversations",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "create_conversation",
+      "rustModule": "commands/conversation_cmds.rs",
+      "frontendCaller": "api.createConversation",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "delete_conversation",
+      "rustModule": "commands/conversation_cmds.rs",
+      "frontendCaller": "api.deleteConversation",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_messages",
+      "rustModule": "commands/conversation_cmds.rs",
+      "frontendCaller": "api.getMessages",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "delete_messages_from",
+      "rustModule": "commands/conversation_cmds.rs",
+      "frontendCaller": "api.deleteMessagesFrom",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "send_message",
+      "rustModule": "commands/message_cmds.rs",
+      "frontendCaller": "api.sendMessage",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "cancel_request",
+      "rustModule": "commands/message_cmds.rs",
+      "frontendCaller": "api.cancelRequest",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "stage_chat_attachment",
+      "rustModule": "commands/attachment_cmds.rs",
+      "frontendCaller": "api.stageChatAttachment",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_chat_attachment_src",
+      "rustModule": "commands/attachment_cmds.rs",
+      "frontendCaller": "api.getChatAttachmentSrc",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "discard_tool_change",
+      "rustModule": "commands/message_cmds.rs",
+      "frontendCaller": "api.discardToolChange",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "discard_kernel_proposal",
+      "rustModule": "commands/message_cmds.rs",
+      "frontendCaller": "api.discardKernelProposal",
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "set_kernel_proposal_status",
+      "rustModule": "commands/message_cmds.rs",
+      "frontendCaller": "api.setKernelProposalStatus",
+      "mocked": false,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "apply_tool_change",
+      "rustModule": "commands/tool_cmds.rs",
+      "frontendCaller": "(invoked)",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_tools",
+      "rustModule": "commands/tool_cmds.rs",
+      "frontendCaller": "(invoked)",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_tool",
+      "rustModule": "commands/tool_cmds.rs",
+      "frontendCaller": "(invoked)",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_tool_versions",
+      "rustModule": "commands/tool_cmds.rs",
+      "frontendCaller": "api.getToolVersions",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "undo_tool_change",
+      "rustModule": "commands/tool_cmds.rs",
+      "frontendCaller": "(invoked)",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "save_tool_state",
+      "rustModule": "commands/tool_cmds.rs",
+      "frontendCaller": "api.saveToolState",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_tool_state",
+      "rustModule": "commands/tool_cmds.rs",
+      "frontendCaller": "api.getToolState",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_settings",
+      "rustModule": "commands/settings_cmds.rs",
+      "frontendCaller": "api.getSettings",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "set_setting",
+      "rustModule": "commands/settings_cmds.rs",
+      "frontendCaller": "api.setSetting",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_added_settings",
+      "rustModule": "commands/settings_cmds.rs",
+      "frontendCaller": "api.listAddedSettings",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "upsert_added_setting",
+      "rustModule": "commands/settings_cmds.rs",
+      "frontendCaller": "api.upsertAddedSetting",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "delete_added_setting",
+      "rustModule": "commands/settings_cmds.rs",
+      "frontendCaller": "api.deleteAddedSetting",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "validate_change_targets",
+      "rustModule": "commands/settings_cmds.rs",
+      "frontendCaller": "api.validateChangeTargets",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "set_dock_icon",
+      "rustModule": "commands/settings_cmds.rs",
+      "frontendCaller": "api.setDockIcon",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "set_dock_icon_for_os_appearance",
+      "rustModule": "commands/settings_cmds.rs",
+      "frontendCaller": "api.setDockIconForOsAppearance",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "clear_conversations",
+      "rustModule": "commands/conversation_cmds.rs",
+      "frontendCaller": "api.clearConversations",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "clear_tools",
+      "rustModule": "commands/tool_cmds.rs",
+      "frontendCaller": "api.clearTools",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "open_tool_window",
+      "rustModule": "commands/tool_cmds.rs",
+      "frontendCaller": "api.openToolWindow",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "open_external_url",
+      "rustModule": "commands/link_cmds.rs",
+      "frontendCaller": "api.openExternalUrl",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_automations",
+      "rustModule": "commands/automation_cmds.rs",
+      "frontendCaller": null,
+      "mocked": true,
+      "risk": "low",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "upsert_automation",
+      "rustModule": "commands/automation_cmds.rs",
+      "frontendCaller": null,
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "set_automation_enabled",
+      "rustModule": "commands/automation_cmds.rs",
+      "frontendCaller": null,
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "delete_automation",
+      "rustModule": "commands/automation_cmds.rs",
+      "frontendCaller": "api.deleteAutomation",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_automation_runs",
+      "rustModule": "commands/automation_cmds.rs",
+      "frontendCaller": null,
+      "mocked": true,
+      "risk": "low",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "run_automation_now",
+      "rustModule": "commands/automation_cmds.rs",
+      "frontendCaller": "api.runAutomationNow",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_workspace_backgrounds",
+      "rustModule": "commands/automation_cmds.rs",
+      "frontendCaller": null,
+      "mocked": true,
+      "risk": "low",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "upsert_workspace_background",
+      "rustModule": "commands/automation_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "export_tool",
+      "rustModule": "commands/export_cmds.rs",
+      "frontendCaller": "api.exportTool",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_export_formats",
+      "rustModule": "commands/export_cmds.rs",
+      "frontendCaller": null,
+      "mocked": true,
+      "risk": "high",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "list_projects_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.listProjects",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_project_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.getProject",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "create_project_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.createProject",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "update_project_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.updateProject",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "archive_project_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.archiveProject",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "restore_project_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.restoreProject",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "delete_project_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.deleteProject",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "create_conversation_in_project",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.createConversationInProject",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "assign_chats_to_project",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.assignChatsToProject",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "assign_conversation_to_project_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.assignConversationToProject",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "remove_chat_from_project",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.removeChatFromProject",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_project_conversations_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.listProjectConversations",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_unassigned_conversations_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.listUnassignedConversations",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "search_project_context_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.searchProjectContext",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "refresh_project_summary",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.refreshProjectSummary",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "rebuild_project_index_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.rebuildProjectIndex",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "rename_conversation_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.renameConversation",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "duplicate_conversation_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.duplicateConversation",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "export_project",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.exportProject",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "set_project_wallpaper_cmd",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.setProjectWallpaper",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "touch_project_opened",
+      "rustModule": "commands/project_cmds.rs",
+      "frontendCaller": "api.touchProjectOpened",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_search_connection",
+      "rustModule": "commands/search_cmds.rs",
+      "frontendCaller": "api.getSearchConnection",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "configure_search_connection",
+      "rustModule": "commands/search_cmds.rs",
+      "frontendCaller": "api.configureSearchConnection",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "delete_search_connection",
+      "rustModule": "commands/search_cmds.rs",
+      "frontendCaller": "api.deleteSearchConnection",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "test_search_connection",
+      "rustModule": "commands/search_cmds.rs",
+      "frontendCaller": "api.testSearchConnection",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_exa_connection",
+      "rustModule": "commands/exa_cmds.rs",
+      "frontendCaller": "api.getExaConnection",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "configure_exa_connection",
+      "rustModule": "commands/exa_cmds.rs",
+      "frontendCaller": "api.configureExaConnection",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "delete_exa_connection",
+      "rustModule": "commands/exa_cmds.rs",
+      "frontendCaller": "api.deleteExaConnection",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "test_exa_connection",
+      "rustModule": "commands/exa_cmds.rs",
+      "frontendCaller": "api.testExaConnection",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_exa_usage",
+      "rustModule": "commands/exa_cmds.rs",
+      "frontendCaller": "api.getExaUsage",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_exa_usage",
+      "rustModule": "commands/exa_cmds.rs",
+      "frontendCaller": null,
+      "mocked": true,
+      "risk": "low",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "get_exa_budget",
+      "rustModule": "commands/exa_cmds.rs",
+      "frontendCaller": "api.getExaBudget",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "set_exa_budget",
+      "rustModule": "commands/exa_cmds.rs",
+      "frontendCaller": "api.setExaBudget",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_search_profile",
+      "rustModule": "commands/exa_cmds.rs",
+      "frontendCaller": "api.getSearchProfile",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "set_search_profile",
+      "rustModule": "commands/exa_cmds.rs",
+      "frontendCaller": "api.setSearchProfile",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "web_search_cmd",
+      "rustModule": "commands/search_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "image_search_cmd",
+      "rustModule": "commands/search_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "video_search_cmd",
+      "rustModule": "commands/search_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "fetch_web_page_cmd",
+      "rustModule": "commands/search_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "list_search_sessions_cmd",
+      "rustModule": "commands/search_cmds.rs",
+      "frontendCaller": "api.listSearchSessions",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_search_session_cmd",
+      "rustModule": "commands/search_cmds.rs",
+      "frontendCaller": "api.getSearchSession",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "clear_search_history_cmd",
+      "rustModule": "commands/search_cmds.rs",
+      "frontendCaller": "api.clearSearchHistory",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_crawler_status",
+      "rustModule": "commands/crawler_cmds.rs",
+      "frontendCaller": "api.getCrawlerStatus",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_crawler_installation",
+      "rustModule": "commands/crawler_cmds.rs",
+      "frontendCaller": "api.getCrawlerInstallation",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "cleanup_crawler_cache",
+      "rustModule": "commands/crawler_cmds.rs",
+      "frontendCaller": null,
+      "mocked": true,
+      "risk": "high",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "get_crawler_cache_stats",
+      "rustModule": "commands/crawler_cmds.rs",
+      "frontendCaller": "api.getCrawlerCacheStats",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "set_web_research_resource_profile",
+      "rustModule": "commands/crawler_cmds.rs",
+      "frontendCaller": "api.setWebResearchResourceProfile",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_media_assets_cmd",
+      "rustModule": "commands/media_cmds.rs",
+      "frontendCaller": "api.listMediaAssets",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_media_asset_cmd",
+      "rustModule": "commands/media_cmds.rs",
+      "frontendCaller": "api.getMediaAsset",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "delete_media_asset_cmd",
+      "rustModule": "commands/media_cmds.rs",
+      "frontendCaller": "api.deleteMediaAsset",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "import_media_asset_cmd",
+      "rustModule": "commands/media_cmds.rs",
+      "frontendCaller": "api.importMediaAsset",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "touch_media_asset_cmd",
+      "rustModule": "commands/media_cmds.rs",
+      "frontendCaller": "api.touchMediaAsset",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_media_asset_src_cmd",
+      "rustModule": "commands/media_cmds.rs",
+      "frontendCaller": "api.getMediaAssetSrc",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_media_asset_thumb_src_cmd",
+      "rustModule": "commands/media_cmds.rs",
+      "frontendCaller": "api.getMediaAssetThumbSrc",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "media_asset_usage_cmd",
+      "rustModule": "commands/media_cmds.rs",
+      "frontendCaller": "api.mediaAssetUsage",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_capability_packs",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "low",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "list_conversation_surfaces",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.listConversationSurfaces",
+      "mocked": false,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_surface_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.getSurface",
+      "mocked": false,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "create_inline_surface_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.createInlineSurface",
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "update_surface_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.updateSurface",
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "promote_surface_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.promoteSurface",
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "save_surface_state_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.saveSurfaceState",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_surface_state_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.getSurfaceState",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_draft_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.getDraft",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "save_draft_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.saveDraft",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "schedule_patches_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "(invoked)",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "flush_patch_scheduler_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "get_route_state_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.getRouteState",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "set_route_state_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.setRouteState",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "navigate_route_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.navigateRoute",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "append_context_ledger_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.appendContextLedger",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_context_ledger_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.listContextLedger",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_provider_profile_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.getProviderProfile",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "get_continuity_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.getContinuity",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "save_continuity_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.saveContinuity",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "suspend_surface_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.suspendSurface",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "apply_operations_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "validate_agent_response_v2",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "undo_transaction_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "list_transactions_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "low",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "get_transaction_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "low",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "branch_conversation_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.branchConversation",
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_branches_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "low",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "create_snapshot_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "get_snapshot_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "low",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "delete_snapshot_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.deleteSnapshot",
+      "mocked": false,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "enqueue_agent_turn_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "list_agent_queue_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "low",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "cancel_queue_item_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "remove_queue_item_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.removeQueueItem",
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "activate_next_queue_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "complete_queue_item_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "recover_agent_queue_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "store_diagnostics_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.storeDiagnostics",
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "list_diagnostics_cmd",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": "api.listDiagnostics",
+      "mocked": false,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "runtime_v2_limits",
+      "rustModule": "commands/runtime_v2_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_capability_catalog",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "low",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_apply_change",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_compile_intent",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_list_manifests",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelListManifests",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_get_manifest",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelGetManifest",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_ensure_tool_manifest",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_restore_last_known_good",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelRestoreLastKnownGood",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_mark_last_known_good",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_upsert_data_model",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_grant_permission",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "high",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_revoke_permission",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelRevokePermission",
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_list_permissions",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "low",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_get_recovery_state",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelGetRecoveryState",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_set_recovery_mode",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelSetRecoveryMode",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_enter_safe_startup",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelEnterSafeStartup",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_clear_recovery",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelClearRecovery",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_set_recovery_flags",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelSetRecoveryFlags",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_export_package",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "high",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_export_package_bytes",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "high",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_preview_package",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelPreviewPackage",
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_import_package",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelImportPackage",
+      "mocked": false,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_application_summary",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_data_model_summary",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_recent_transactions",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_upsert_test",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_run_test",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_visual_checks",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_garbage_collect",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelGarbageCollect",
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_create_job",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_get_job",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "low",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_interrupt_jobs",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_set_policy_override",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_clear_policy_override",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": false,
+      "risk": "high",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_unified_search",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelUnifiedSearch",
+      "mocked": false,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_list_registered_actions",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": null,
+      "mocked": true,
+      "risk": "low",
+      "disposition": "REVIEW"
+    },
+    {
+      "name": "kernel_invoke_registered_action",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelInvokeRegisteredAction",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_list_pending_approvals",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelListPendingApprovals",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_decide_approval",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelDecideApproval",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_list_runtime_grants",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelListRuntimeGrants",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_revoke_runtime_grant",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelRevokeRuntimeGrant",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_list_audit_events",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelListAuditEvents",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_clear_audit_events",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelClearAuditEvents",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_set_application_lifecycle",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelSetApplicationLifecycle",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_record_build_failure",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelRecordBuildFailure",
+      "mocked": true,
+      "risk": "medium",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_clear_build_failure",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelClearBuildFailure",
+      "mocked": true,
+      "risk": "high",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_list_build_failures",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelListBuildFailures",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    },
+    {
+      "name": "kernel_list_application_versions",
+      "rustModule": "commands/kernel_cmds.rs",
+      "frontendCaller": "api.kernelListApplicationVersions",
+      "mocked": true,
+      "risk": "low",
+      "disposition": "KEEP"
+    }
+  ]
+}

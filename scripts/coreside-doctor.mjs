@@ -85,8 +85,10 @@ check(
 const dbMod = read("src-tauri/src/db/mod.rs");
 check(
   "db.applies_015",
-  dbMod.includes("015_registered_actions") && dbMod.includes("MIGRATION_015"),
-  "db/mod.rs applies 015_registered_actions",
+  dbMod.includes("015_registered_actions") &&
+    dbMod.includes("LATEST_MIGRATION") &&
+    dbMod.includes("MIGRATIONS"),
+  "db/mod.rs applies 015_registered_actions via the ordered MIGRATIONS list",
 );
 
 // --- Registered action registry ---
@@ -315,6 +317,78 @@ check(
     !packagesRs.includes("grant_permission(") &&
     !packagesRs.includes("mint_grant("),
   "import strips authority keys and never grants/mints authority",
+);
+
+// --- Contract drift: frontend IPC wrappers vs registered Rust commands ---
+const bridge = read("src/lib/tauri.ts");
+const registeredCommands = new Set(
+  [...libRs.matchAll(/commands::([a-z0-9_]+)/g)].map((m) => m[1]),
+);
+const invokedCommands = new Set(
+  [...bridge.matchAll(/invoke(?:<[^>]*>)?\(\s*"([a-z0-9_]+)"/g)].map((m) => m[1]),
+);
+const unregisteredInvokes = [...invokedCommands].filter(
+  (c) => !registeredCommands.has(c),
+);
+check(
+  "contracts.invoke_is_registered",
+  unregisteredInvokes.length === 0,
+  unregisteredInvokes.length === 0
+    ? `all ${invokedCommands.size} invoked commands are registered in lib.rs`
+    : `invoked but never registered: ${unregisteredInvokes.join(", ")}`,
+);
+
+// A mock case with no production command would let tests pass against behaviour
+// the desktop build cannot perform.
+const mockedCommands = new Set(
+  [...bridge.matchAll(/case\s+"([a-z0-9_]+)":/g)].map((m) => m[1]),
+);
+const ghostMocks = [...mockedCommands].filter((c) => !registeredCommands.has(c));
+check(
+  "contracts.mock_has_production_command",
+  ghostMocks.length === 0,
+  ghostMocks.length === 0
+    ? `all ${mockedCommands.size} mocked commands exist in production`
+    : `mocked with no registered command: ${ghostMocks.join(", ")}`,
+);
+
+// --- Documentation drift: migration inventory matches the migration files ---
+// Match the inventory table rows only. A passing mention in prose is not an
+// inventory entry, which is exactly how 015 went missing from the table while
+// the count line above it already said fifteen.
+const inventoryRows = read("docs/MIGRATION_ASSURANCE.md")
+  .split("\n")
+  .filter((line) => /^\|\s*\d{3}\s*\|/.test(line))
+  .join("\n");
+const undocumentedMigrations = migrations.filter(
+  (file) => !inventoryRows.includes(file),
+);
+check(
+  "docs.migration_inventory_complete",
+  undocumentedMigrations.length === 0,
+  undocumentedMigrations.length === 0
+    ? `all ${migrations.length} migrations listed in docs/MIGRATION_ASSURANCE.md`
+    : `missing from the inventory table: ${undocumentedMigrations.join(", ")}`,
+);
+
+// --- Tool windows must not receive shell:allow-open ---
+const toolCaps = exists("src-tauri/capabilities/tool-window.json")
+  ? read("src-tauri/capabilities/tool-window.json")
+  : "";
+const mainCaps = read("src-tauri/capabilities/default.json");
+check(
+  "capabilities.tool_window_no_shell",
+  toolCaps.includes('"tool-*"') &&
+    !toolCaps.includes("shell:allow-open") &&
+    !mainCaps.includes('"tool-*"'),
+  "tool-* windows use a separate capability without shell:allow-open",
+);
+check(
+  "commands.open_external_url",
+  libRs.includes("open_external_url") &&
+    bridge.includes("open_external_url") &&
+    bridge.includes("openExternalUrl"),
+  "external links open through the validated Rust command",
 );
 
 const failed = checks.filter((c) => !c.ok);

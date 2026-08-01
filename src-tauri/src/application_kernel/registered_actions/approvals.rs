@@ -46,11 +46,7 @@ pub struct ApprovalRequest {
 }
 
 /// Identity of one concrete call: application + action + authority + input.
-pub fn call_hash(
-    ctx: &ActionRunContext,
-    descriptor: &ActionDescriptor,
-    input: &Value,
-) -> String {
+pub fn call_hash(ctx: &ActionRunContext, descriptor: &ActionDescriptor, input: &Value) -> String {
     hash_value(&serde_json::json!({
         "applicationId": ctx.application_id,
         "action": descriptor.name,
@@ -275,12 +271,7 @@ pub fn decide(
                 } else {
                     None
                 };
-                prepared_grant = Some((
-                    descriptor,
-                    choice.scope,
-                    choice.duration,
-                    input_hash,
-                ));
+                prepared_grant = Some((descriptor, choice.scope, choice.duration, input_hash));
             }
         }
     }

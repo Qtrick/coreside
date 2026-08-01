@@ -9,16 +9,12 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { ActionLog } from "@/components/action-log/ActionLog";
-import {
-  ChangeProposalCard,
-  kernelProposalFromMetadata,
-} from "@/components/chat/ChangeProposalCard";
+import { kernelProposalFromMetadata } from "@/components/chat/proposal-metadata";
+import { searchDataFromMetadata } from "@/components/search/search-metadata";
+import { ChangeProposalCard } from "@/components/chat/ChangeProposalCard";
 import { InlineSurfacesForMessage } from "@/components/chat/InlineSurface";
 import { MessageAttachments } from "@/components/chat/MessageAttachments";
-import {
-  SearchResults,
-  searchDataFromMetadata,
-} from "@/components/search/SearchResults";
+import { SearchResults } from "@/components/search/SearchResults";
 import type { ChatMessage } from "@/types/messages";
 import { useAppStore } from "@/stores/app-store";
 

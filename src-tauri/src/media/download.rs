@@ -9,20 +9,21 @@ use super::validation::{content_hash, validate_bytes};
 
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 
-pub async fn download_url(client: &Client, url: &str, category_hint: Option<&str>) -> Result<Vec<u8>, MediaError> {
+pub async fn download_url(
+    client: &Client,
+    url: &str,
+    category_hint: Option<&str>,
+) -> Result<Vec<u8>, MediaError> {
     validate_public_http_url(url).map_err(|e| MediaError::SsrfBlocked(e.to_string()))?;
 
     let max_bytes = category_hint
         .map(max_bytes_for_category)
         .unwrap_or(MAX_FETCH_BYTES);
 
-    let response = timeout(
-        DOWNLOAD_TIMEOUT,
-        client.get(url).send(),
-    )
-    .await
-    .map_err(|_| MediaError::Download("timeout".into()))?
-    .map_err(|e| MediaError::Download(e.to_string()))?;
+    let response = timeout(DOWNLOAD_TIMEOUT, client.get(url).send())
+        .await
+        .map_err(|_| MediaError::Download("timeout".into()))?
+        .map_err(|e| MediaError::Download(e.to_string()))?;
 
     if !response.status().is_success() {
         return Err(MediaError::Download(format!("HTTP {}", response.status())));
