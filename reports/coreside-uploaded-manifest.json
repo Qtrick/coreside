@@ -1,0 +1,72 @@
+{
+  "product": "Coreside",
+  "accessDate": "2026-08-01",
+  "generatedAt": "2026-08-02T03:44:48.000Z",
+  "archive": {
+    "fileName": "Coreside Chat AI.zip",
+    "sha256": "044e7910633d0abb3c278ed79bf64f3436433bf574f5991119455f827d2ad2c1",
+    "approxBytes": 2759857,
+    "note": "Hash from .reference/hashes/archives-2026-08-01.sha256; zip may live outside repo"
+  },
+  "extract": {
+    "path": ".reference/coreside-uploaded-2026-08-01",
+    "gitignored": true,
+    "topLevelEntries": [
+      "coreside-main"
+    ],
+    "innerRoot": "coreside-main",
+    "innerTopLevelSample": [
+      ".env.example",
+      ".github",
+      ".gitignore",
+      ".mcp.json.example",
+      "README.md",
+      "THIRD_PARTY_NOTICES.md",
+      "docs",
+      "e2e",
+      "eslint.config.js",
+      "index.html",
+      "package-lock.json",
+      "package.json",
+      "public",
+      "reports",
+      "scripts",
+      "services",
+      "src",
+      "src-tauri",
+      "supabase",
+      "tests",
+      "tsconfig.json",
+      "vite.config.ts"
+    ]
+  },
+  "counts": {
+    "files": 619,
+    "directories": 97,
+    "note": "Counts from extracted tree on access date; placeholder-quality for CI without extract"
+  },
+  "extensionCounts": {
+    ".rs": 166,
+    ".md": 112,
+    ".ts": 83,
+    ".tsx": 69,
+    ".png": 60,
+    ".json": 40,
+    ".py": 29,
+    ".sql": 17,
+    ".mjs": 13,
+    "(none)": 9,
+    ".example": 3,
+    ".toml": 3,
+    ".yml": 3,
+    ".lock": 2,
+    ".css": 2,
+    ".xml": 2,
+    ".html": 1,
+    ".js": 1,
+    ".sh": 1,
+    ".plist": 1,
+    ".icns": 1,
+    ".ico": 1
+  }
+}

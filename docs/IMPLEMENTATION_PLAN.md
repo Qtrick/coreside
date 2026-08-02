@@ -1,3 +1,44 @@
+# Implementation Plan — Coreside Beta Overhaul
+
+**Product:** Coreside  
+**Status:** Research / docs foundation; **beta not ready**  
+**Last updated:** 2026-08-01  
+**Access date:** 2026-08-01
+
+Research: [BETA_OVERHAUL_RESEARCH.md](./BETA_OVERHAUL_RESEARCH.md) · [SURFACE_COMPOSITING_MODEL.md](./SURFACE_COMPOSITING_MODEL.md) · [WALLPAPER_ASSURANCE.md](./WALLPAPER_ASSURANCE.md) · [SETTINGS_INFORMATION_ARCHITECTURE.md](./SETTINGS_INFORMATION_ARCHITECTURE.md) · [SECURITY_VERIFICATION_STANDARD.md](./SECURITY_VERIFICATION_STANDARD.md) · [AGENT_SECURITY_MODEL.md](./AGENT_SECURITY_MODEL.md)  
+Reports: `reports/coreside-uploaded-manifest.json` · `reports/vendo-uploaded-manifest.json` · `reports/background-rule-inventory.json` · `reports/wallpaper-compositing.json` · `reports/consumer-polish-findings.json`
+
+## Beta overhaul goals
+
+1. Wallpaper visibly composites through protected chrome (nested opaque `--surface` eliminated or excepted).
+2. Normative surface depth / alpha model (0/20/40/60%, no parent opacity).
+3. Consumer settings IA (General → About + Added Settings) without developer jargon in primary labels.
+4. ASVS L2–style security verification evidence—**no false certification claims**.
+5. Agent Run / Ask / Block choke points documented and test-backed.
+
+## Beta overhaul phases
+
+| Phase | Scope | Exit criteria |
+| --- | --- | --- |
+| 0 | Docs + archive manifests + inventories | This section + research docs + JSON reports committed |
+| 1 | Wallpaper nested-opacity fix + remaining `--surface` migration | Visual proof pack; `wallpaper-compositing.json` verified; P0 nested occlusion closed |
+| 2 | Settings IA navigation (consumer categories) | Primary nav matches proposed IA; Wallpapers stay Added → Templates |
+| 3 | Security verification evidence refresh | Assurance doc + findings JSON honest; open P0s fixed or waived |
+| 4 | Agent security regression suite | Policy/gateway/injection boundary tests green |
+| 5 | Beta readiness gate | Packaged smoke + desktop E2E matrix for overhaul explicitly recorded—**not claimed until run** |
+
+## Explicit non-claims
+
+- Public beta **not ready** as of this plan update.
+- Do not invent that full E2E or packaged smoke for the overhaul has passed.
+- Not ASVS/WCAG certified.
+
+## Rollback
+
+Feature-flag transparency UI and settings nav independently. Prefer solid overlays if compositing regresses readability. Never leave schema wallpaper store accepting legacy `{kind:"none"}`.
+
+---
+
 # Implementation Plan — Adaptive Viewport, Wallpaper Compositing, and Consumer Polish
 
 **Product:** Coreside  

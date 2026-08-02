@@ -67,13 +67,17 @@ export function computeInterfaceTransparencyTokens(
   }
 
   const effective = Math.max(0, pref - boost);
+  // t is transparency fraction (0–0.6). Mapping tuned for monotonic wallpaper
+  // visibility: 40% must show more than 20%, 60% more than 40%.
   const t = effective / 100;
-  const panelAlpha = clamp01(1 - t * 0.85);
-  const sidebarAlpha = clamp01(panelAlpha - 0.04);
-  const cardAlpha = clamp01(Math.max(0.82, panelAlpha + 0.12));
-  const controlAlpha = clamp01(Math.max(0.88, panelAlpha + 0.16));
-  const headerAlpha = clamp01(Math.max(0.86, panelAlpha + 0.1));
-  const modalAlpha = clamp01(Math.max(0.94, panelAlpha + 0.2));
+  const panelAlpha = clamp01(1 - t * 0.9);
+  // Keep Solid (0%) fully opaque — do not subtract from a 1.0 panel alpha.
+  const sidebarAlpha =
+    panelAlpha >= 1 ? 1 : clamp01(panelAlpha - 0.04);
+  const cardAlpha = clamp01(Math.max(0.7, panelAlpha + 0.18));
+  const controlAlpha = clamp01(Math.max(0.82, panelAlpha + 0.28));
+  const headerAlpha = clamp01(Math.max(0.78, panelAlpha + 0.14));
+  const modalAlpha = clamp01(Math.max(0.92, panelAlpha + 0.42));
   const scrimAlpha = clamp01(boost / 100 + (effective > 40 ? 0.08 : 0));
 
   return {
@@ -116,6 +120,27 @@ export function applyInterfaceTransparencyCssVars(
   root.style.setProperty(
     "--core-sidebar-overlay",
     `color-mix(in srgb, var(--surface) ${Math.round(tokens.sidebarAlpha * 100)}%, transparent)`,
+  );
+  // Nested surfaces must use these — opaque var(--surface) defeats panel translucency.
+  root.style.setProperty(
+    "--core-card-overlay",
+    `color-mix(in srgb, var(--surface) ${Math.round(tokens.cardAlpha * 100)}%, transparent)`,
+  );
+  root.style.setProperty(
+    "--core-muted-overlay",
+    `color-mix(in srgb, var(--surface-muted) ${Math.round(tokens.cardAlpha * 100)}%, transparent)`,
+  );
+  root.style.setProperty(
+    "--core-control-overlay",
+    `color-mix(in srgb, var(--surface) ${Math.round(tokens.controlAlpha * 100)}%, transparent)`,
+  );
+  root.style.setProperty(
+    "--core-header-overlay",
+    `color-mix(in srgb, var(--surface) ${Math.round(tokens.headerAlpha * 100)}%, transparent)`,
+  );
+  root.style.setProperty(
+    "--core-modal-overlay",
+    `color-mix(in srgb, var(--surface) ${Math.round(tokens.modalAlpha * 100)}%, transparent)`,
   );
 }
 

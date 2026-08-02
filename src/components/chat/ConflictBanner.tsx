@@ -16,7 +16,7 @@ export function ConflictBanner() {
         padding: "0.75rem 1rem",
         borderRadius: 10,
         border: "1px solid var(--border)",
-        background: "var(--surface-muted, var(--surface))",
+        background: "var(--core-muted-overlay, var(--surface-muted, var(--surface)))",
       }}
     >
       <strong>Update conflict</strong>

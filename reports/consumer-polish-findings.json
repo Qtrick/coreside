@@ -1,12 +1,32 @@
 {
-  "generatedAt": "2026-08-01T21:26:00.000Z",
-  "phase": "adaptive-viewport-wallpaper-polish",
+  "generatedAt": "2026-08-02T03:43:00.000Z",
+  "accessDate": "2026-08-01",
+  "phase": "beta-overhaul",
+  "betaReady": false,
+  "notes": [
+    "Beta not ready: visual proof pack and remaining nested --surface migration still open.",
+    "Do not claim full E2E/packaged smoke for the overhaul passed."
+  ],
   "findings": [
     {
       "id": "wallpaper-schemaversion-none",
       "severity": "P0",
       "status": "fixed",
       "summary": "None wallpaper posted legacy {kind:none} as wallpaperJson; now clears via empty string + Rust normalize."
+    },
+    {
+      "id": "wallpaper-nested-opaque-surface",
+      "severity": "P0",
+      "status": "fixed",
+      "summary": "Nested opaque var(--surface) inside translucent panels hid wallpapers; high-traffic chrome (.settings-section, .message-bubble, .btn-secondary) migrated to --core-*-overlay tokens. Residual nested tint risks tracked in reports/background-rule-inventory.json; visual proof still required.",
+      "docs": [
+        "docs/WALLPAPER_ASSURANCE.md",
+        "docs/SURFACE_COMPOSITING_MODEL.md"
+      ],
+      "reports": [
+        "reports/wallpaper-compositing.json",
+        "reports/background-rule-inventory.json"
+      ]
     },
     {
       "id": "tool-header-overflow",
@@ -24,7 +44,7 @@
       "id": "wallpaper-occlusion",
       "severity": "P1",
       "status": "fixed",
-      "summary": "Interface transparency setting 0–60% with tokenized panel alphas; body wash only when no wallpaper."
+      "summary": "Interface transparency setting 0–60% with tokenized panel alphas; body wash only when no wallpaper. Superseded residual work tracked under wallpaper-nested-opaque-surface."
     },
     {
       "id": "project-context-alert",
@@ -37,6 +57,12 @@
       "severity": "P2",
       "status": "open",
       "summary": "Ask-first expand prompt may reappear when switching tools in the same session."
+    },
+    {
+      "id": "remaining-surface-tint-occlusion",
+      "severity": "P1",
+      "status": "open",
+      "summary": "Additional color-mix(... var(--surface)) rules can still occlude wallpaper when nested in translucent panels; see background-rule-inventory.json."
     }
   ]
 }

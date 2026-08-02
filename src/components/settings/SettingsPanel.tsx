@@ -89,7 +89,8 @@ export function SettingsPanel() {
         <div>
           <h1>Settings</h1>
           <p className="panel-subtitle" style={{ margin: 0 }}>
-            Base Settings are product-owned. Added Settings come from your tools.
+            Coreside settings control the app itself. Tool settings are added by
+            the tools you create.
           </p>
         </div>
         <button
@@ -109,22 +110,20 @@ export function SettingsPanel() {
         <div className="settings-group" aria-labelledby="base-settings-heading">
           <div className="settings-group-header">
             <h2 id="base-settings-heading" className="settings-group-title">
-              Base Settings
+              Coreside settings
             </h2>
             <p className="settings-group-desc">
-              Branding logos and Base Settings structure stay protected. Theme,
-              accents, backgrounds, borders, and text colors can be changed here
-              or by asking the agent. Wallpaper templates live under Added
-              Settings.
+              These settings control Coreside itself — appearance, AI access,
+              privacy, and recovery. Tool settings appear separately under Added
+              Settings when a tool creates them. Wallpapers live under Templates.
             </p>
           </div>
 
           <section className="settings-section" aria-labelledby="appearance-heading">
             <h3 id="appearance-heading">Appearance</h3>
             <p>
-              Choose how Coreside looks inside the app window. Ask the agent for
-              theme, accents, backgrounds, or borders. Wallpaper presets are
-              under Templates in Added Settings.
+              Choose how Coreside looks. For wallpapers and how much they show
+              through panels, open Templates in Added Settings below.
             </p>
             <div className="theme-options" role="group" aria-label="Theme">
               {themes.map((option) => (
@@ -350,8 +349,8 @@ export function SettingsPanel() {
               Added Settings
             </h2>
             <p className="settings-group-desc">
-              Product template settings and preferences created for your personal
-              tools.
+              Wallpapers and preferences created by your personal tools. These
+              do not replace Coreside’s own settings above.
             </p>
           </div>
 

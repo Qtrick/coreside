@@ -1,0 +1,40 @@
+{
+  "product": "Coreside",
+  "accessDate": "2026-08-01",
+  "generatedAt": "2026-08-02T03:44:49.000Z",
+  "rootCause": {
+    "id": "nested-opaque-surface",
+    "summary": "Translucent panels were covered by nested opaque var(--surface) / tint-onto-surface fills",
+    "primaryFiles": [
+      "src/lib/interface-transparency.ts",
+      "src/styles/tokens.css",
+      "src/styles/global.css"
+    ]
+  },
+  "fixPath": [
+    "Emit --core-*-overlay tokens from interface transparency",
+    "Migrate nested chrome to overlays (settings-section, message-bubble, btn-secondary done)",
+    "Inventory and migrate remaining nested occlusion risks",
+    "Capture visual proof at 0/20/40/60% and None"
+  ],
+  "noneBehavior": {
+    "clearsSchemaWallpaperJson": true,
+    "neverPersistLegacyKindNoneAsSchema": true,
+    "solidSurfacesWhenInactive": true,
+    "transparencyPreferencePersists": true
+  },
+  "status": {
+    "schemaNoneP0": "fixed",
+    "interfaceTransparencySetting": "implemented",
+    "nestedHighTrafficMigrations": "partial",
+    "remainingSurfaceRisk": "open",
+    "visualProof": "not_done",
+    "betaReady": false
+  },
+  "docs": [
+    "docs/WALLPAPER_ASSURANCE.md",
+    "docs/SURFACE_COMPOSITING_MODEL.md",
+    "docs/WALLPAPER_COMPOSITING_RESEARCH.md"
+  ],
+  "inventory": "reports/background-rule-inventory.json"
+}

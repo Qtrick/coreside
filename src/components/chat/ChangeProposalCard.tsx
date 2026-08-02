@@ -93,7 +93,7 @@ export function ChangeProposalCard({
         borderRadius: 12,
         padding: "0.85rem 1rem",
         margin: "0.75rem 0",
-        background: "var(--surface-muted, var(--surface))",
+        background: "var(--core-muted-overlay, var(--surface-muted, var(--surface)))",
       }}
     >
       <p style={{ margin: 0 }}>

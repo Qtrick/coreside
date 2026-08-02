@@ -25,11 +25,44 @@ describe("interface transparency", () => {
     const solid = computeInterfaceTransparencyTokens(0, {
       wallpaperActive: true,
     });
+    const balanced = computeInterfaceTransparencyTokens(20, {
+      wallpaperActive: true,
+    });
     const immersive = computeInterfaceTransparencyTokens(40, {
       wallpaperActive: true,
     });
+    const max = computeInterfaceTransparencyTokens(60, {
+      wallpaperActive: true,
+    });
     expect(immersive.panelAlpha).toBeLessThan(solid.panelAlpha);
+    expect(immersive.panelAlpha).toBeLessThan(balanced.panelAlpha);
+    expect(max.panelAlpha).toBeLessThan(immersive.panelAlpha);
     expect(immersive.cardAlpha).toBeGreaterThan(immersive.panelAlpha);
-    expect(immersive.modalAlpha).toBeGreaterThanOrEqual(0.94);
+    expect(immersive.controlAlpha).toBeGreaterThanOrEqual(immersive.cardAlpha);
+    expect(immersive.modalAlpha).toBeGreaterThanOrEqual(0.92);
+    // Nested cards must also become more translucent as the slider rises.
+    expect(max.cardAlpha).toBeLessThan(balanced.cardAlpha);
+  });
+
+  it("keeps nested surface alphas strictly above panel alpha when translucent", () => {
+    const tokens = computeInterfaceTransparencyTokens(60, {
+      wallpaperActive: true,
+    });
+    expect(tokens.cardAlpha).toBeGreaterThan(tokens.panelAlpha);
+    expect(tokens.controlAlpha).toBeGreaterThan(tokens.panelAlpha);
+    expect(tokens.modalAlpha).toBeGreaterThan(tokens.cardAlpha);
+    expect(tokens.cardAlpha).toBeGreaterThanOrEqual(0.7);
+    expect(tokens.panelAlpha).toBeLessThanOrEqual(0.55);
+  });
+
+  it("keeps Solid (0%) fully opaque including sidebar", () => {
+    const solid = computeInterfaceTransparencyTokens(0, {
+      wallpaperActive: true,
+    });
+    expect(solid.panelAlpha).toBe(1);
+    expect(solid.sidebarAlpha).toBe(1);
+    expect(solid.cardAlpha).toBe(1);
+    expect(solid.controlAlpha).toBe(1);
+    expect(solid.modalAlpha).toBe(1);
   });
 });

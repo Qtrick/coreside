@@ -17,6 +17,14 @@ pub fn open_tool_window(
     width: Option<f64>,
     height: Option<f64>,
 ) -> Result<(), CommandError> {
+    let tool_id = tool_id.trim();
+    if !is_safe_tool_window_id(tool_id) {
+        return Err(CommandError::new(
+            "invalid",
+            "toolId must be a non-empty ascii id (letters, digits, -, _; max 128 chars).",
+        ));
+    }
+
     let label = format!("tool-{tool_id}");
 
     if let Some(existing) = app.get_webview_window(&label) {
@@ -28,10 +36,10 @@ pub fn open_tool_window(
     let state = app.state::<AppState>();
     let tool_name = {
         let db = state.db.lock();
-        match db::get_tool(&db, tool_id) {
-            Ok(t) => t.name,
-            Err(_) => tool_id.to_string(),
-        }
+        // Refuse opening windows for unknown tools — prevents label/URL probing.
+        db::get_tool(&db, tool_id)
+            .map(|tool| tool.name)
+            .map_err(CommandError::from)?
     };
 
     let (w, h) = orchestrator::clamp_tool_window_size(app, width, height)?;
@@ -49,6 +57,15 @@ pub fn open_tool_window(
     Ok(())
 }
 
+/// Window labels are `tool-{id}` and must match the `tool-*` capability pattern.
+fn is_safe_tool_window_id(tool_id: &str) -> bool {
+    !tool_id.is_empty()
+        && tool_id.len() <= 128
+        && tool_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 pub fn inspect(app: &AppHandle) -> Result<OrchestratorInspect, CommandError> {
     orchestrator::inspect(app)
 }
@@ -61,6 +78,13 @@ pub fn expand(
     direction: ExpandDirection,
     reduced_motion: bool,
 ) -> Result<ExpansionDecision, CommandError> {
+    let tool_id = tool_id.trim().to_string();
+    if !is_safe_tool_window_id(&tool_id) {
+        return Err(CommandError::new(
+            "invalid",
+            "toolId must be a non-empty ascii id (letters, digits, -, _; max 128 chars).",
+        ));
+    }
     orchestrator::expand(
         app,
         tool_id,
@@ -77,4 +101,22 @@ pub fn restore(app: &AppHandle, reduced_motion: bool) -> Result<ExpansionDecisio
 
 pub fn cancel_animation() -> Result<(), CommandError> {
     orchestrator::cancel_animation()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_safe_tool_window_id;
+
+    #[test]
+    fn tool_window_ids_reject_path_and_empty() {
+        assert!(is_safe_tool_window_id("tool-abc-123"));
+        assert!(is_safe_tool_window_id("a_b"));
+        assert!(is_safe_tool_window_id("a"));
+        assert!(!is_safe_tool_window_id(""));
+        assert!(!is_safe_tool_window_id("../etc"));
+        assert!(!is_safe_tool_window_id("tool/id"));
+        assert!(!is_safe_tool_window_id("tool id"));
+        assert!(!is_safe_tool_window_id("tool%2eid"));
+        assert!(!is_safe_tool_window_id(&"x".repeat(129)));
+    }
 }

@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import type { WallpaperKind } from "@/types/agent";
 import {
   buildCanvasPresetProposal,
+  CANVAS_PRESETS,
+  parseWallpaperJson,
   schemaWallpaperToJson,
 } from "@/types/wallpaper";
-import { CANVAS_PRESETS } from "@/types/wallpaper";
 import { activeCanvasPresetId } from "@/lib/wallpaper";
 import { consumerErrorMessage } from "@/lib/consumer-errors";
 import {
@@ -40,7 +41,15 @@ export function WallpaperSettings() {
     globalWallpaperJson,
     globalWallpaper: wallpaper,
   });
-  const wallpaperActive = activeId !== "none";
+  // Transparency applies whenever any wallpaper layer is active — not only canvas presets.
+  // (activeCanvasPresetId maps static-color → "none" for preset selection UX.)
+  const wallpaperActive = useMemo(() => {
+    if (globalWallpaperJson?.trim()) {
+      const parsed = parseWallpaperJson(globalWallpaperJson);
+      if (parsed.format !== "none") return true;
+    }
+    return Boolean(wallpaper.kind && wallpaper.kind !== "none");
+  }, [globalWallpaperJson, wallpaper]);
 
   const filteredPresets = useMemo(() => {
     const q = query.trim().toLowerCase();

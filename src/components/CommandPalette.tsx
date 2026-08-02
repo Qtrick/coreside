@@ -122,10 +122,11 @@ export function CommandPalette({
       <div
         style={{
           width: "min(520px, 92vw)",
-          background: "var(--surface-elevated, var(--surface))",
+          background: "var(--core-modal-overlay, var(--surface))",
           borderRadius: 12,
           border: "1px solid var(--border)",
           padding: "0.75rem",
+          backdropFilter: "blur(16px)",
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -140,7 +141,7 @@ export function CommandPalette({
             padding: "0.65rem 0.75rem",
             borderRadius: 8,
             border: "1px solid var(--border)",
-            background: "var(--surface)",
+            background: "var(--core-control-overlay, var(--surface))",
             color: "var(--fg)",
           }}
         />

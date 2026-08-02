@@ -50,6 +50,11 @@
   --core-readable-scrim-alpha: 0;
   --core-content-overlay: color-mix(in srgb, var(--surface) 83%, transparent);
   --core-sidebar-overlay: color-mix(in srgb, var(--surface) 79%, transparent);
+  --core-card-overlay: color-mix(in srgb, var(--surface) 92%, transparent);
+  --core-muted-overlay: color-mix(in srgb, var(--surface-muted) 92%, transparent);
+  --core-control-overlay: color-mix(in srgb, var(--surface) 94%, transparent);
+  --core-header-overlay: color-mix(in srgb, var(--surface) 90%, transparent);
+  --core-modal-overlay: color-mix(in srgb, var(--surface) 96%, transparent);
 }
 
 html[data-theme="dark"] {
@@ -70,4 +75,9 @@ html[data-theme="dark"] {
 
   --core-content-overlay: color-mix(in srgb, var(--surface) 83%, transparent);
   --core-sidebar-overlay: color-mix(in srgb, var(--surface) 79%, transparent);
+  --core-card-overlay: color-mix(in srgb, var(--surface) 92%, transparent);
+  --core-muted-overlay: color-mix(in srgb, var(--surface-muted) 92%, transparent);
+  --core-control-overlay: color-mix(in srgb, var(--surface) 94%, transparent);
+  --core-header-overlay: color-mix(in srgb, var(--surface) 90%, transparent);
+  --core-modal-overlay: color-mix(in srgb, var(--surface) 96%, transparent);
 }

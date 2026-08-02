@@ -1,0 +1,259 @@
+{
+  "product": "Coreside",
+  "accessDate": "2026-08-01",
+  "generatedAt": "2026-08-02T03:44:49.000Z",
+  "purpose": "Classify remaining var(--surface) risk for wallpaper compositing",
+  "migratedByReviewer": [
+    {
+      "selector": ".settings-section",
+      "from": "opaque/near-opaque surface",
+      "to": "var(--core-card-overlay)",
+      "status": "migrated",
+      "note": "Reviewer migration 2026-08-01"
+    },
+    {
+      "selector": ".message-bubble",
+      "from": "opaque surface / mix",
+      "to": "var(--core-card-overlay)",
+      "status": "migrated",
+      "note": "Reviewer migration 2026-08-01"
+    },
+    {
+      "selector": ".btn-secondary",
+      "from": "opaque surface",
+      "to": "var(--core-control-overlay)",
+      "status": "migrated",
+      "note": "Reviewer migration 2026-08-01"
+    }
+  ],
+  "tokenPipeline": {
+    "file": "src/styles/tokens.css",
+    "classification": "token_definition",
+    "risk": "none",
+    "note": "--core-*-overlay definitions correctly mix var(--surface) with transparent"
+  },
+  "intentionalOpaqueCandidates": [
+    {
+      "file": "src/styles/global.css",
+      "line": 2106,
+      "selectors": ".settings-toggle-thumb",
+      "classification": "intentional_opaque_exception",
+      "risk": "low_if_exception",
+      "recommendation": "Keep solid knob for contrast over translucent track"
+    }
+  ],
+  "summary": {
+    "intentionalOpaqueCandidates": 1,
+    "nestedOcclusionRiskRules": 21,
+    "tsxSurfaceReferences": 4,
+    "opaqueVarSurfaceBackgroundCount": 1,
+    "betaReady": false
+  },
+  "nestedOcclusionRisk": [
+    {
+      "file": "src/styles/global.css",
+      "line": 435,
+      "selectors": ".sidebar-nav button.active",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 470,
+      "selectors": ".sidebar-settings-btn.active",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1051,
+      "selectors": ".setup-banner",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1063,
+      "selectors": ".setup-banner-icon",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1086,
+      "selectors": ".tool-change-preview",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1368,
+      "selectors": ".theme-options button[aria-pressed=\"true\"], .theme-options button[aria-checked=\"true\"]",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1406,
+      "selectors": ".dock-icon-option[aria-pressed=\"true\"]",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1441,
+      "selectors": ".status-pill.ready",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1446,
+      "selectors": ".status-pill.warn",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1451,
+      "selectors": ".status-pill.error",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1511,
+      "selectors": ".tr-tablist button[aria-selected=\"true\"]",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1549,
+      "selectors": ".tr-badge.accent",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1681,
+      "selectors": ".tr-quiz-choices button.correct",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1891,
+      "selectors": ".provider-picker-item:hover",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2052,
+      "selectors": ".provider-active-tag",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2091,
+      "selectors": ".settings-toggle[aria-checked=\"true\"]",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2152,
+      "selectors": ".mention-menu-item:hover, .mention-menu-item.active",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2273,
+      "selectors": ".provider-picker-item.active",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2418,
+      "selectors": ".sidebar-nav-btn:hover, .sidebar-nav-btn.active",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2454,
+      "selectors": ".project-icon",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2934,
+      "selectors": ".media-details-warning",
+      "classification": "nested_occlusion_risk",
+      "risk": "medium",
+      "recommendation": "Prefer color-mix onto --core-card-overlay / --core-control-overlay when inside translucent panels"
+    }
+  ],
+  "nestedOcclusionRiskTruncated": false,
+  "nestedOcclusionRiskTotal": 21,
+  "tsxReferences": [
+    {
+      "file": "src/components/CommandPalette.tsx",
+      "line": 125,
+      "snippet": "background: \"var(--core-modal-overlay, var(--surface))\",",
+      "classification": "fallback_chain",
+      "risk": "low"
+    },
+    {
+      "file": "src/components/CommandPalette.tsx",
+      "line": 144,
+      "snippet": "background: \"var(--core-control-overlay, var(--surface))\",",
+      "classification": "fallback_chain",
+      "risk": "low"
+    },
+    {
+      "file": "src/components/chat/ChangeProposalCard.tsx",
+      "line": 96,
+      "snippet": "background: \"var(--core-muted-overlay, var(--surface-muted, var(--surface)))\",",
+      "classification": "fallback_chain",
+      "risk": "low"
+    },
+    {
+      "file": "src/components/chat/ConflictBanner.tsx",
+      "line": 19,
+      "snippet": "background: \"var(--core-muted-overlay, var(--surface-muted, var(--surface)))\",",
+      "classification": "fallback_chain",
+      "risk": "low"
+    }
+  ],
+  "notes": [
+    "Parent element opacity must not be used for panel translucency",
+    "Opaque var(--surface) on nested chrome defeats --core-panel-alpha",
+    "Visual proof still required before wallpaper assurance is beta-complete"
+  ]
+}
