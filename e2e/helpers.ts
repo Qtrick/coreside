@@ -195,7 +195,53 @@ export async function denyPendingApprovalIfPresent(timeout = 8_000) {
   });
 }
 
+/** Category nav label required before a settings h3/h4 is mounted (Settings IA). */
+const SETTINGS_HEADING_CATEGORY: Record<string, string> = {
+  Recovery: "Advanced",
+  "App permissions": "Advanced",
+};
+
+/** Click a Settings sidebar category by its visible label. */
+export async function openSettingsCategory(label: string) {
+  await browser.execute((catLabel) => {
+    const items = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(".settings-nav-item"),
+    );
+    const match = items.find((el) => {
+      const lab = el.querySelector(".settings-nav-item-label");
+      return lab?.textContent?.trim() === catLabel;
+    });
+    match?.click();
+  }, label);
+  await browser.waitUntil(
+    async () => {
+      const title = await $(".settings-group-title");
+      return title.isExisting() && (await title.getText()) === label;
+    },
+    {
+      timeout: 10_000,
+      timeoutMsg: `Settings category “${label}” did not become active`,
+    },
+  );
+}
+
 export async function scrollSettingsToHeading(heading: string) {
+  const category = SETTINGS_HEADING_CATEGORY[heading];
+  if (category) {
+    await openSettingsCategory(category);
+  }
+  await browser.waitUntil(
+    async () =>
+      browser.execute((text) => {
+        return Array.from(document.querySelectorAll("h3, h4")).some(
+          (el) => el.textContent?.trim() === text,
+        );
+      }, heading),
+    {
+      timeout: 10_000,
+      timeoutMsg: `Settings heading “${heading}” not found (open the owning category first)`,
+    },
+  );
   await browser.execute((text) => {
     const headings = Array.from(document.querySelectorAll("h3, h4"));
     const match = headings.find((el) => el.textContent?.trim() === text);

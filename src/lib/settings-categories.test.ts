@@ -37,6 +37,9 @@ describe("settings categories", () => {
     expect(matchSettingsSearch("backup")[0]?.categoryId).toBe("data");
     expect(matchSettingsSearch("wallpaper")[0]?.categoryId).toBe("added");
     expect(matchSettingsSearch("recovery")[0]?.categoryId).toBe("advanced");
+    expect(matchSettingsSearch("App permissions")[0]?.categoryId).toBe(
+      "advanced",
+    );
   });
 
   it("returns no hits for blank queries and scores token matches", () => {

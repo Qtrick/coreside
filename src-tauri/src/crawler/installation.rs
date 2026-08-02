@@ -56,7 +56,7 @@ pub fn resolve_crawler_data_root() -> PathBuf {
         }
     }
     if let Some(base) = dirs::data_dir() {
-        return base.join("coreside").join("crawler");
+        return crate::db::product_data_dir(&base).join("crawler");
     }
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     if let Some(repo_root) = manifest_dir.parent() {

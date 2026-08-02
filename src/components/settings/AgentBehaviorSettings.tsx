@@ -60,6 +60,7 @@ export function AgentBehaviorSettings() {
   }, [bootstrapped]);
 
   const onSelect = async (next: ActionLogMode) => {
+    const previous = mode;
     setSaving(true);
     setError(null);
     setMode(next);
@@ -81,7 +82,7 @@ export function AgentBehaviorSettings() {
           ),
         );
       } catch {
-        /* keep optimistic value */
+        setMode(previous);
       }
     } finally {
       setSaving(false);

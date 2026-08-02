@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use dirs::data_dir;
 
 use super::errors::MediaError;
+use crate::db::product_data_dir;
 
 pub fn media_root() -> Result<PathBuf, MediaError> {
     let base = data_dir().ok_or_else(|| MediaError::Storage("app data dir unavailable".into()))?;
-    Ok(base.join("Coreside").join("media"))
+    Ok(product_data_dir(&base).join("media"))
 }
 
 pub fn ensure_media_root() -> Result<PathBuf, MediaError> {

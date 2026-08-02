@@ -15,7 +15,7 @@
     "test:ai-access": "vitest run src/lib/ai-access-disclosure.test.ts && cargo test --manifest-path src-tauri/Cargo.toml --lib ai::access_mode",
     "test:hosted-auth": "vitest run src/lib/hosted",
     "test:typescript-6": "tsc --version && npm run typecheck",
-    "assurance:report": "node -e \"console.log('See docs/RELEASE_READINESS.md')\"",
+    "assurance:report": "npm run release:evidence:quick",
     "test:watch": "vitest",
     "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
@@ -77,6 +77,10 @@
     "test:wallpaper-compositing": "vitest run src/lib/interface-transparency.test.ts src/lib/wallpaper-compositing.test.ts",
     "test:window-orchestrator": "cargo test --manifest-path src-tauri/Cargo.toml --lib windows::orchestrator",
     "test:settings": "vitest run src/lib/settings-categories.test.ts",
+    "test:prompt-injection": "vitest run src/lib/agent-context-trust.test.ts",
+    "test:database-integrity": "cargo test --manifest-path src-tauri/Cargo.toml --lib health::",
+    "test:backup": "cargo test --manifest-path src-tauri/Cargo.toml --lib backup::",
+    "test:database-bootstrap": "cargo test --manifest-path src-tauri/Cargo.toml --lib bootstrap::",
     "test:consumer-polish": "npm run test:layout-overflow && npm run test:wallpaper-reset && npm run test:wallpaper-compositing && npm run test:responsive-layout && npm run test:settings"
   },
   "dependencies": {

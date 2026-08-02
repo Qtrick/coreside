@@ -117,6 +117,31 @@ export type WindowExpansionDecision =
 
 export const api = {
   getAppInfo: () => invoke<AppInfo>("get_app_info"),
+  getBootstrapStatus: () => invoke<import("@/types/bootstrap").BootstrapStatus>("get_bootstrap_status"),
+  retryOpenDatabase: () =>
+    invoke<import("@/types/bootstrap").BootstrapStatus>("retry_open_database"),
+  getStorageSummary: () =>
+    invoke<{
+      chatCount: number;
+      toolCount: number;
+      projectCount: number;
+      databaseBytes: number | null;
+      profileReady: boolean;
+    }>("get_storage_summary"),
+  getDatabaseHealth: () =>
+    invoke<{
+      status: string;
+      quickCheck: string;
+      foreignKeyCheck: string;
+      schemaVersion: string | null;
+      byteSize: number | null;
+    }>("get_database_health"),
+  createProfileBackup: () =>
+    invoke<{
+      path: string;
+      byteSize: number;
+      schemaVersion: string | null;
+    }>("create_profile_backup"),
   getAiStatus: () => invoke<AiStatus>("get_ai_status"),
   getModelCatalog: () => invoke<ModelCatalog>("get_model_catalog"),
   testAiConnection: () =>

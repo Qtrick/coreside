@@ -207,6 +207,37 @@ export async function mockInvoke<T>(
           "An AI-native personal software environment that begins as a chatbot and builds tools inside itself.",
       } satisfies AppInfo as T;
 
+    case "get_bootstrap_status":
+      return { status: "ready" } as T;
+
+    case "retry_open_database":
+      return { status: "ready" } as T;
+
+    case "get_storage_summary":
+      return {
+        chatCount: mockDb.conversations.length,
+        toolCount: mockDb.tools.length,
+        projectCount: mockDb.projects?.length ?? 0,
+        databaseBytes: 4096,
+        profileReady: true,
+      } as T;
+
+    case "get_database_health":
+      return {
+        status: "healthy",
+        quickCheck: "ok",
+        foreignKeyCheck: "ok",
+        schemaVersion: "015_registered_actions",
+        byteSize: 4096,
+      } as T;
+
+    case "create_profile_backup":
+      return {
+        path: "coreside-profile-mock.db",
+        byteSize: 4096,
+        schemaVersion: "015_registered_actions",
+      } as T;
+
     case "get_ai_status": {
       const hasByok = mockDb.providerConnections.some((c) => c.isActive && c.hasKey);
       const configured = mockDb.aiConfigured;

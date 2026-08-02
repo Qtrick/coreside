@@ -21,6 +21,7 @@ pub fn create_conversation(
     title: Option<String>,
     workspace_id: Option<String>,
 ) -> Result<Conversation, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     let ws = workspace_id.unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
     let _ = db::ensure_default_workspace(&db)?;
@@ -35,6 +36,7 @@ pub fn delete_conversation(
     state: State<'_, AppState>,
     conversation_id: String,
 ) -> Result<(), CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(db::delete_conversation(&mut db, &conversation_id)?)
 }
@@ -54,12 +56,14 @@ pub fn delete_messages_from(
     state: State<'_, AppState>,
     message_id: String,
 ) -> Result<u64, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(db::delete_messages_from(&mut db, &message_id)?)
 }
 
 #[tauri::command]
 pub fn clear_conversations(state: State<'_, AppState>) -> Result<u64, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(db::clear_conversations(&mut db)?)
 }

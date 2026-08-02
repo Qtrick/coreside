@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-02T04:45:00Z",
+  "publicBeta": "not_ready",
+  "flows": [
+    {
+      "id": "local_chat",
+      "trigger": "send message",
+      "destination": "local sqlite",
+      "external": false,
+      "userControl": "Data & Storage clear conversations"
+    },
+    {
+      "id": "byok_provider",
+      "trigger": "send message with BYOK",
+      "destination": "user-selected provider",
+      "external": true,
+      "credentialSource": "os_keychain",
+      "userControl": "AI Access"
+    },
+    {
+      "id": "hosted_coreside_ai",
+      "trigger": "send message when hosted mode active",
+      "destination": "Coreside hosted gateway",
+      "external": true,
+      "availability": "separate_hosted_track"
+    },
+    {
+      "id": "exa_search",
+      "trigger": "web research",
+      "destination": "Exa",
+      "external": true,
+      "credentialSource": "os_keychain_or_env_dev"
+    },
+    {
+      "id": "crawl4ai",
+      "trigger": "selected page crawl",
+      "destination": "local crawler sidecar",
+      "external": false
+    },
+    {
+      "id": "profile_backup",
+      "trigger": "Back up now",
+      "destination": "local backups directory",
+      "external": false,
+      "includesSecrets": false
+    },
+    {
+      "id": "product_analytics",
+      "trigger": "n/a",
+      "destination": "none",
+      "external": false,
+      "availability": "unavailable_no_fake_toggle"
+    },
+    {
+      "id": "crash_reporting",
+      "trigger": "n/a",
+      "destination": "none",
+      "external": false,
+      "availability": "unavailable_no_fake_toggle"
+    }
+  ]
+}

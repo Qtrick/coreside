@@ -61,6 +61,7 @@ export type AppConflict = {
 type AppStore = {
   bootstrapped: boolean;
   bootError: string | null;
+  bootstrapStatus: import("@/types/bootstrap").BootstrapStatus | null;
   appInfo: AppInfo | null;
   aiStatus: AiStatus | null;
   theme: ThemePreference;
@@ -452,6 +453,7 @@ function appearanceFromSettings(settings: Partial<AppearancePalette>): Appearanc
 export const useAppStore = create<AppStore>((set, get) => ({
   bootstrapped: false,
   bootError: null,
+  bootstrapStatus: null,
   appInfo: null,
   aiStatus: null,
   theme: "system",
@@ -524,6 +526,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   bootstrap: async () => {
     try {
+      const bootstrapStatus = await api.getBootstrapStatus();
+      if (bootstrapStatus.status === "recoveryRequired") {
+        set({
+          bootstrapped: true,
+          bootError: null,
+          bootstrapStatus,
+          appInfo: await api.getAppInfo().catch(() => null),
+        });
+        return;
+      }
+
       const [appInfo, aiStatus, settings, conversations, tools, projects] =
         await Promise.all([
           api.getAppInfo(),
@@ -546,6 +559,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({
         bootstrapped: true,
         bootError: null,
+        bootstrapStatus: { status: "ready" },
         appInfo,
         aiStatus,
         theme,
@@ -1966,26 +1980,47 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   loadToolWindow: async (toolId) => {
-    const [tool, state, settings, appInfo] = await Promise.all([
-      api.getTool(toolId),
-      api.getToolState(toolId),
-      api.getSettings(),
-      api.getAppInfo(),
-    ]);
-    const theme = settings.theme ?? "system";
-    set({
-      bootstrapped: true,
-      appInfo,
-      theme,
-      resolvedTheme: resolveTheme(theme),
-      appearance: appearanceFromSettings(settings),
-      wallpaper: wallpaperFromSettings(settings),
-      globalWallpaperJson: settings.wallpaperJson ?? null,
-      activeToolId: toolId,
-      activeTool: tool,
-      toolState: state ?? {},
-      sidebarCollapsed: true,
-    });
-    attachAgentTurnSyncListener(get, set);
+    try {
+      const bootstrapStatus = await api.getBootstrapStatus();
+      if (bootstrapStatus.status === "recoveryRequired") {
+        set({
+          bootstrapped: true,
+          bootError: null,
+          bootstrapStatus,
+          appInfo: await api.getAppInfo().catch(() => null),
+        });
+        return;
+      }
+
+      const [tool, state, settings, appInfo] = await Promise.all([
+        api.getTool(toolId),
+        api.getToolState(toolId),
+        api.getSettings(),
+        api.getAppInfo(),
+      ]);
+      const theme = settings.theme ?? "system";
+      set({
+        bootstrapped: true,
+        bootError: null,
+        bootstrapStatus: { status: "ready" },
+        appInfo,
+        theme,
+        resolvedTheme: resolveTheme(theme),
+        appearance: appearanceFromSettings(settings),
+        wallpaper: wallpaperFromSettings(settings),
+        globalWallpaperJson: settings.wallpaperJson ?? null,
+        activeToolId: toolId,
+        activeTool: tool,
+        toolState: state ?? {},
+        sidebarCollapsed: true,
+      });
+      attachAgentTurnSyncListener(get, set);
+    } catch (error) {
+      set({
+        bootstrapped: true,
+        bootError:
+          error instanceof Error ? error.message : "Failed to open tool window",
+      });
+    }
   },
 }));

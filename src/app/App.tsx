@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { ConflictBanner } from "@/components/chat/ConflictBanner";
 import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
+import { BootstrapRecoveryScreen } from "@/components/recovery/BootstrapRecoveryScreen";
 import { api, isWebPreview } from "@/lib/tauri";
 import { applyAppearanceCssVars, useAppStore } from "@/stores/app-store";
 
@@ -36,6 +37,7 @@ function applyThemeToDocument(theme: "light" | "dark") {
 
 function ToolWindowView({ toolId }: { toolId: string }) {
   const bootstrapped = useAppStore((s) => s.bootstrapped);
+  const bootstrapStatus = useAppStore((s) => s.bootstrapStatus);
   const activeTool = useAppStore((s) => s.activeTool);
   const toolState = useAppStore((s) => s.toolState);
   const loadToolWindow = useAppStore((s) => s.loadToolWindow);
@@ -62,6 +64,10 @@ function ToolWindowView({ toolId }: { toolId: string }) {
       cancelled = true;
     };
   }, [toolId]);
+
+  if (bootstrapStatus?.status === "recoveryRequired") {
+    return <BootstrapRecoveryScreen status={bootstrapStatus} />;
+  }
 
   if (bootError) {
     return (
@@ -121,6 +127,7 @@ export function App() {
   const bootstrap = useAppStore((s) => s.bootstrap);
   const bootstrapped = useAppStore((s) => s.bootstrapped);
   const bootError = useAppStore((s) => s.bootError);
+  const bootstrapStatus = useAppStore((s) => s.bootstrapStatus);
   const theme = useAppStore((s) => s.theme);
   const resolvedTheme = useAppStore((s) => s.resolvedTheme);
   const appearance = useAppStore((s) => s.appearance);
@@ -200,6 +207,10 @@ export function App() {
         <p>{bootError}</p>
       </div>
     );
+  }
+
+  if (bootstrapStatus?.status === "recoveryRequired") {
+    return <BootstrapRecoveryScreen status={bootstrapStatus} />;
   }
 
   return (

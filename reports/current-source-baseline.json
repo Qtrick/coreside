@@ -1,0 +1,80 @@
+{
+  "product": "Coreside",
+  "accessDate": "2026-08-02",
+  "generatedAt": "2026-08-02T04:34:00.000Z",
+  "publicBeta": "NOT_READY",
+  "activeRepository": {
+    "path": "/Users/qunyingfan/Coreside",
+    "branch": "main",
+    "commit": "57f80bcb74de4107760350ad887df5d4ea246a3d",
+    "dirty": true,
+    "dirtyFiles": [
+      "e2e/helpers.ts",
+      "package.json",
+      "scripts/release-evidence.mjs",
+      "src-tauri/src/commands/attachment_cmds.rs",
+      "src-tauri/src/crawler/installation.rs",
+      "src-tauri/src/db/mod.rs",
+      "src-tauri/src/media/storage.rs",
+      "src/components/settings/AgentBehaviorSettings.tsx",
+      "src/components/settings/SettingsPanel.tsx",
+      "src/lib/settings-categories.test.ts",
+      "src/lib/settings-categories.ts"
+    ],
+    "dirtyNote": "Uncommitted review fixes: Settings IA tweaks, product_data_dir casing, release-evidence honesty, assurance:report wiring"
+  },
+  "archive": {
+    "observedNames": ["Coreside Chat AI.zip", "Chat AI.zip"],
+    "pathObserved": "/Users/qunyingfan/Downloads/Coreside Chat AI.zip",
+    "sha256": "d8fe0c3110e8fd9809962d61bb05a594b6cf821c109ce0d4c305aeec3152b36b",
+    "matchesTaskNote": "Matches Chat AI(4) hash from task",
+    "approxBytes": 2794666
+  },
+  "extract": {
+    "path": ".reference/coreside-uploaded-2026-08-02/coreside-main",
+    "gitignored": true,
+    "innerCommit": "57f80bcb74de4107760350ad887df5d4ea246a3d"
+  },
+  "lockfileHashes": {
+    "package-lock.json": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+    "src-tauri/Cargo.lock": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+    "note": "Active and extract lockfile SHA-256 values match"
+  },
+  "counts": {
+    "note": "Approx match archive ↔ active for primary trees; Rust .rs count differs (active local growth / dirty worktree)",
+    "active": {
+      "srcFiles": 144,
+      "rustRsFiles": 179,
+      "migrationsSql": 15,
+      "e2eSpecs": 10
+    },
+    "extract": {
+      "srcFiles": 144,
+      "rustRsFiles": 166,
+      "migrationsSql": 15,
+      "e2eSpecs": 10
+    },
+    "taskApprox": {
+      "srcFiles": 144,
+      "rustRsFiles": 165,
+      "migrationsSql": 15,
+      "e2eSpecs": 10
+    }
+  },
+  "scope": {
+    "wallpaperRedesign": "OUT_OF_SCOPE",
+    "blockerClosureDocs": true
+  },
+  "p0Open": [
+    {
+      "id": "BOOTSTRAP-DB-PANIC",
+      "summary": "Database::open_default failure panics in src-tauri/src/lib.rs during startup",
+      "path": "src-tauri/src/lib.rs"
+    }
+  ],
+  "reviewFixesPresentUncommitted": [
+    "release-evidence: passed_partial no longer maps to passed",
+    "assurance:report no longer placeholder (npm run release:evidence:quick)",
+    "product_data_dir prefers canonical coreside then legacy Coreside"
+  ]
+}

@@ -139,6 +139,7 @@ pub fn get_tool_state(
 
 #[tauri::command]
 pub fn clear_tools(state: State<'_, AppState>) -> Result<u64, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(db::clear_tools(&mut db)?)
 }

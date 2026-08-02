@@ -195,8 +195,8 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchEntry[] = [
   {
     id: "runtime-permissions",
     categoryId: "advanced",
-    label: "Application permissions",
-    keywords: ["grants", "revoke", "runtime"],
+    label: "App permissions",
+    keywords: ["grants", "revoke", "runtime", "application permissions"],
   },
   {
     id: "version",

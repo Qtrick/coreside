@@ -1,9 +1,14 @@
 //! SQLite database access for Coreside.
 
+pub mod bootstrap;
+pub mod backup;
+pub mod health;
 #[cfg(test)]
 mod migration_fixtures;
 mod repositories;
 
+pub use bootstrap::{open_profile_or_shell, BootstrapStatus};
+pub use health::DatabaseHealthReport;
 pub use repositories::*;
 
 use std::path::{Path, PathBuf};
@@ -227,7 +232,7 @@ fn default_db_path() -> DbResult<PathBuf> {
 
     // Prefer the platform application data directory.
     if let Some(base) = dirs::data_dir() {
-        let candidate = base.join("coreside").join("coreside.db");
+        let candidate = product_data_dir(&base).join("coreside.db");
         if let Some(parent) = candidate.parent() {
             if std::fs::create_dir_all(parent).is_ok() {
                 return Ok(candidate);
@@ -235,18 +240,25 @@ fn default_db_path() -> DbResult<PathBuf> {
         }
     }
 
-    // Fall back to a project-local data directory so the app still launches
-    // when the system data dir is unavailable.
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    if let Some(root) = manifest_dir.parent() {
-        let local = root.join(".coreside").join("coreside.db");
-        if let Some(parent) = local.parent() {
-            if std::fs::create_dir_all(parent).is_ok() {
-                tracing::warn!(
-                    path = %local.display(),
-                    "using project-local database path"
-                );
-                return Ok(local);
+    // Repository-relative fallback is development / explicit-test only.
+    // Packaged builds must not silently write into the source tree.
+    let allow_repo = cfg!(debug_assertions)
+        || std::env::var("CORESIDE_ALLOW_REPO_DB")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+    if allow_repo {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        if let Some(root) = manifest_dir.parent() {
+            let local = root.join(".coreside").join("coreside.db");
+            if let Some(parent) = local.parent() {
+                if std::fs::create_dir_all(parent).is_ok() {
+                    tracing::warn!(
+                        path = %local.display(),
+                        "using project-local database path (development override)"
+                    );
+                    return Ok(local);
+                }
             }
         }
     }
@@ -254,6 +266,34 @@ fn default_db_path() -> DbResult<PathBuf> {
     Err(DbError::Invalid(
         "Could not create a writable directory for the Coreside database".into(),
     ))
+}
+
+/// Best-effort path for diagnostics when open fails (does not create dirs).
+pub(crate) fn default_db_path_for_diagnostics() -> DbResult<PathBuf> {
+    if let Ok(override_path) = std::env::var("CORESIDE_DB_PATH") {
+        let trimmed = override_path.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
+    if let Some(base) = dirs::data_dir() {
+        return Ok(product_data_dir(&base).join("coreside.db"));
+    }
+    Err(DbError::Invalid("No application data directory".into()))
+}
+
+/// Canonical OS app-data product folder (`coreside`). Reuses legacy `Coreside`
+/// when that folder already exists so media/attachments/db stay co-located.
+pub fn product_data_dir(base: &Path) -> PathBuf {
+    let canonical = base.join("coreside");
+    if canonical.exists() {
+        return canonical;
+    }
+    let legacy = base.join("Coreside");
+    if legacy.exists() {
+        return legacy;
+    }
+    canonical
 }
 
 pub fn now_rfc3339() -> String {
@@ -335,6 +375,26 @@ mod tests {
             .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
             .unwrap();
         assert_eq!(fk, 1);
+    }
+
+    #[test]
+    fn product_data_dir_prefers_canonical_then_legacy() {
+        let dir = tempdir().unwrap();
+        let base = dir.path();
+        assert_eq!(product_data_dir(base), base.join("coreside"));
+
+        std::fs::create_dir_all(base.join("Coreside")).unwrap();
+        let resolved = product_data_dir(base);
+        // Case-insensitive volumes treat coreside/Coreside as one folder; either
+        // PathBuf is fine as long as it points at that directory.
+        let resolved_canon = std::fs::canonicalize(&resolved).unwrap();
+        let legacy_canon = std::fs::canonicalize(base.join("Coreside")).unwrap();
+        assert_eq!(resolved_canon, legacy_canon);
+
+        // Fresh tree with only the canonical name.
+        let dir2 = tempdir().unwrap();
+        std::fs::create_dir_all(dir2.path().join("coreside")).unwrap();
+        assert_eq!(product_data_dir(dir2.path()), dir2.path().join("coreside"));
     }
 
     #[test]

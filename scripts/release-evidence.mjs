@@ -155,8 +155,14 @@ const gates = [];
 function add(gate) {
   gates.push(gate);
   const mark =
-    gate.status === "passed" ? "PASS" : gate.status === "failed" ? "FAIL" : gate.status.toUpperCase();
-  console.log(`[evidence] ${mark} ${gate.id} (${gate.durationMs}ms)`);
+    gate.status === "passed"
+      ? "PASS"
+      : gate.status === "failed"
+        ? "FAIL"
+        : gate.status === "passed_partial"
+          ? "PARTIAL"
+          : gate.status.toUpperCase();
+  console.log(`[evidence] ${mark} ${gate.id} (${gate.durationMs ?? "—"}ms)`);
 }
 
 // Always-run light gates
@@ -207,7 +213,7 @@ if (!quick) {
   }
 
   const e2eReport = readJsonSafe("reports/e2e-results.json");
-  if (e2eReport?.status === "passed" || e2eReport?.status === "passed_partial") {
+  if (e2eReport?.status === "passed") {
     gates.push({
       id: "desktop-e2e",
       command: e2eReport.command || "npm run e2e",
@@ -217,6 +223,19 @@ if (!quick) {
         fromReport: "reports/e2e-results.json",
         journeys: e2eReport.journeys ?? null,
         note: "Consumed e2e-results.json written by the E2E runner",
+      },
+    });
+  } else if (e2eReport?.status === "passed_partial") {
+    // Honest: partial journeys (7/10) must not inflate a full "passed" gate.
+    gates.push({
+      id: "desktop-e2e",
+      command: e2eReport.command || "npm run e2e",
+      status: "passed_partial",
+      exitCode: 0,
+      summary: {
+        fromReport: "reports/e2e-results.json",
+        journeys: e2eReport.journeys ?? null,
+        note: "E2E finished with intentional passed_partial coverage — not a full pass",
       },
     });
   } else {
@@ -252,6 +271,10 @@ const localByokVerdict = (() => {
   if (failed.length > 0) return "gates_failed";
   // Quick mode only runs doctor + inventories — do not claim full offline green.
   if (quick) return "quick_partial_full_suite_not_run";
+  // Honest: passed_partial (e.g. E2E 7/10) is not a full green offline suite.
+  if (gates.some((g) => g.status === "passed_partial")) {
+    return "gates_partial_pending_packaging_e2e";
+  }
   return "gates_green_pending_packaging_e2e";
 })();
 
@@ -282,6 +305,7 @@ const evidence = {
   gates,
   tallies: {
     passed: gates.filter((g) => g.status === "passed").length,
+    passedPartial: gates.filter((g) => g.status === "passed_partial").length,
     failed: gates.filter((g) => g.status === "failed" || g.status === "blocked")
       .length,
     manualVerificationRequired: gates.filter(

@@ -44,19 +44,16 @@ pub fn run() {
         "Coreside starting"
     );
 
-    let mut database = db::Database::open_default().unwrap_or_else(|e| {
-        tracing::error!(error = %e, "Failed to open database");
-        panic!("Failed to open database: {e}");
-    });
-
-    {
+    let (database, bootstrap) = db::open_profile_or_shell();
+    if bootstrap.is_ready() {
         let _ = db::ensure_default_workspace(&database);
+        #[cfg(feature = "e2e")]
+        e2e_support::maybe_seed(&mut database);
+    } else {
+        tracing::warn!(?bootstrap, "starting Coreside in recovery-required mode");
     }
 
-    #[cfg(feature = "e2e")]
-    e2e_support::maybe_seed(&mut database);
-
-    let app_state = AppState::new(config, database);
+    let app_state = AppState::new_with_bootstrap(config, database, bootstrap);
     let scheduler_handle = Arc::new(SchedulerHandle::default());
 
     let builder = tauri::Builder::default().plugin(tauri_plugin_shell::init());
@@ -73,6 +70,11 @@ pub fn run() {
         .manage(scheduler_handle.clone())
         .invoke_handler(tauri::generate_handler![
             commands::get_app_info,
+            commands::get_bootstrap_status,
+            commands::retry_open_database,
+            commands::get_database_health,
+            commands::create_profile_backup,
+            commands::get_storage_summary,
             commands::get_ai_status,
             commands::get_model_catalog,
             commands::test_ai_connection,

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::CommandError;
+use crate::db::product_data_dir;
 use crate::security::sanitize_error;
 
 /// Max bytes per attached file (12 MiB).
@@ -38,7 +39,7 @@ pub struct StageAttachmentInput {
 fn attachments_root() -> Result<PathBuf, CommandError> {
     let base =
         data_dir().ok_or_else(|| CommandError::new("storage", "App data directory unavailable"))?;
-    let root = base.join("Coreside").join("chat-attachments");
+    let root = product_data_dir(&base).join("chat-attachments");
     std::fs::create_dir_all(&root)
         .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
     Ok(root)

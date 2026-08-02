@@ -333,6 +333,7 @@ pub async fn send_message(
     mentions: Option<Vec<ToolMentionInput>>,
     attachments: Option<Vec<ChatAttachmentInput>>,
 ) -> Result<SendMessageResult, CommandError> {
+    state.require_profile()?;
     let mut content = content.trim().to_string();
     let attachments = attachments.unwrap_or_default();
     if content.is_empty() && attachments.is_empty() {

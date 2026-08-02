@@ -13,7 +13,7 @@ import {
 } from "../helpers.js";
 
 describe("Journey 10 — secondary tool window lifecycle", () => {
-  it("opens, focuses, restores state, and keeps main stable after close path", async () => {
+  it("opens, closes the native secondary window, and reopens cleanly", async () => {
     requireExistingSeed("Journey 10");
 
     await waitForAppReady();
@@ -46,23 +46,22 @@ describe("Journey 10 — secondary tool window lifecycle", () => {
       },
     );
 
-    // Close via main-window canvas close (authoritative UI path). Secondary
-    // window may remain until OS close; assert main remains stable.
+    // Close the native secondary window (not merely the main Tool Canvas).
+    await browser.closeWindow();
     await switchTauriWindow("main");
-    await closeToolCanvas();
 
     await browser.waitUntil(
-      async () => !(await $(`.tool-canvas-body[data-tool-id="${E2E_TOOL_ID}"]`).isExisting()),
+      async () => !(await listTauriWindows()).includes(label),
       {
-        timeout: 10_000,
-        timeoutMsg: "Main tool canvas did not close",
+        timeout: 20_000,
+        timeoutMsg: `Secondary window ${label} remained after closeWindow`,
       },
     );
 
     const sidebar = await $('[aria-label="New chat"]');
     await expect(sidebar).toExist();
 
-    // Re-open canvas and secondary window path again.
+    // Re-open secondary window and confirm a single label returns.
     await openPersonalTool();
     await waitForToolCanvas(E2E_TOOL_ID);
     await openToolInWindow();
@@ -72,7 +71,9 @@ describe("Journey 10 — secondary tool window lifecycle", () => {
     });
 
     const windows = await listTauriWindows();
+    expect(windows.filter((w) => w === label).length).toBe(1);
     expect(windows).toContain("main");
-    expect(windows).toContain(label);
+
+    await closeToolCanvas();
   });
 });

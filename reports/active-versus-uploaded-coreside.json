@@ -1,0 +1,41 @@
+{
+  "product": "Coreside",
+  "accessDate": "2026-08-02",
+  "generatedAt": "2026-08-02T04:34:00.000Z",
+  "publicBeta": "NOT_READY",
+  "summary": "Archive extract ≈ coreside-main snapshot at the same commit as active HEAD. Active worktree may be ahead via uncommitted Settings IA + review fixes.",
+  "archive": {
+    "path": "/Users/qunyingfan/Downloads/Coreside Chat AI.zip",
+    "sha256": "d8fe0c3110e8fd9809962d61bb05a594b6cf821c109ce0d4c305aeec3152b36b",
+    "extract": ".reference/coreside-uploaded-2026-08-02/coreside-main"
+  },
+  "active": {
+    "path": "/Users/qunyingfan/Coreside",
+    "branch": "main",
+    "commit": "57f80bcb74de4107760350ad887df5d4ea246a3d",
+    "dirty": true
+  },
+  "relationship": {
+    "commitMatch": true,
+    "lockfilesMatch": true,
+    "srcTreeCountMatch": true,
+    "rustRsCountMatch": false,
+    "activeMayBeAhead": true,
+    "aheadReason": "Dirty review fixes on Settings IA, product_data_dir, release-evidence honesty, assurance:report; active has more .rs files counted than extract (179 vs 166)"
+  },
+  "dirtyFiles": [
+    "e2e/helpers.ts",
+    "package.json",
+    "scripts/release-evidence.mjs",
+    "src-tauri/src/commands/attachment_cmds.rs",
+    "src-tauri/src/crawler/installation.rs",
+    "src-tauri/src/db/mod.rs",
+    "src-tauri/src/media/storage.rs",
+    "src/components/settings/AgentBehaviorSettings.tsx",
+    "src/components/settings/SettingsPanel.tsx",
+    "src/lib/settings-categories.test.ts",
+    "src/lib/settings-categories.ts"
+  ],
+  "outOfScope": ["wallpaper redesign / wallpaper runtime code"],
+  "verdict": "Use extract as continuity baseline; treat dirty active tree as candidate blocker-closure patch set, not as a clean release snapshot."
+}

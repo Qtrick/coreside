@@ -113,6 +113,22 @@ export function SettingsPanel() {
   const [confirmClearTools, setConfirmClearTools] = useState(false);
   const [addedSettings, setAddedSettings] = useState<AddedSetting[]>([]);
   const [addedLoading, setAddedLoading] = useState(true);
+  const [storageSummary, setStorageSummary] = useState<{
+    chatCount: number;
+    toolCount: number;
+    projectCount: number;
+    databaseBytes: number | null;
+    profileReady: boolean;
+  } | null>(null);
+  const [storageLoading, setStorageLoading] = useState(false);
+  const [dbHealth, setDbHealth] = useState<{
+    status: string;
+    quickCheck: string;
+    foreignKeyCheck: string;
+    schemaVersion: string | null;
+  } | null>(null);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupMessage, setBackupMessage] = useState<string | null>(null);
   const searchInputId = useId();
   const searchResultsId = useId();
   const navId = useId();
@@ -140,6 +156,26 @@ export function SettingsPanel() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (category !== "data" && category !== "privacy") return;
+    let cancelled = false;
+    setStorageLoading(true);
+    void api
+      .getStorageSummary()
+      .then((summary) => {
+        if (!cancelled) setStorageSummary(summary);
+      })
+      .catch(() => {
+        if (!cancelled) setStorageSummary(null);
+      })
+      .finally(() => {
+        if (!cancelled) setStorageLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [category]);
 
   const searchHits = useMemo(
     () => matchSettingsSearch(searchQuery),
@@ -238,6 +274,10 @@ export function SettingsPanel() {
                 }
               }}
               autoComplete="off"
+              aria-controls={
+                searchHits.length > 0 ? searchResultsId : undefined
+              }
+              aria-expanded={searchHits.length > 0}
             />
             {searchHits.length > 0 ? (
               <ul
@@ -472,124 +512,243 @@ export function SettingsPanel() {
           {category === "search" ? <SearchSettingsSection /> : null}
 
           {category === "privacy" ? (
-            <section
-              className="settings-section"
-              aria-labelledby="privacy-heading"
-            >
-              <h3 id="privacy-heading">Privacy &amp; Security</h3>
-              <p>
-                Chats, tools, and most research caches stay on this computer.
-                Provider keys use the operating system credential store when
-                available. Coreside does not upload your chats for analytics by
-                default.
-              </p>
-              <ul className="settings-plain-list">
-                <li>Hosted AI (when enabled) only sends what that mode requires.</li>
-                <li>BYOK keys never appear in tool state or exports.</li>
-                <li>Action Log stores sanitized steps only when you enable it.</li>
-              </ul>
-              <div className="button-row">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => selectCategory("advanced")}
-                >
-                  Manage application permissions
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => selectCategory("search")}
-                >
-                  Research cache controls
-                </button>
-              </div>
-            </section>
+            <div className="settings-group">
+              <section
+                className="settings-section"
+                aria-labelledby="privacy-heading"
+              >
+                <h3 id="privacy-heading">Your data</h3>
+                <p>
+                  Chats, tools, and most research caches stay on this computer.
+                  Provider keys use the operating system credential store when
+                  available.
+                </p>
+                <ul className="settings-plain-list">
+                  <li>
+                    AI Access mode:{" "}
+                    {aiStatus?.accessMode === "coreside_hosted"
+                      ? "Coreside AI may send conversation content needed for replies."
+                      : aiStatus?.accessMode === "user_byok"
+                        ? "Your provider receives messages you send while BYOK is active."
+                        : aiStatus?.accessMode === "user_local"
+                          ? "Local AI keeps model traffic on this machine when configured."
+                          : "No AI provider is connected."}
+                  </li>
+                  <li>
+                    Product analytics and automatic crash upload are not enabled
+                    in this build. Local diagnostic export remains available.
+                  </li>
+                  <li>Action Log stores sanitized steps only when you enable it.</li>
+                </ul>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => selectCategory("ai-access")}
+                  >
+                    Open AI Access
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => selectCategory("search")}
+                  >
+                    Research cache controls
+                  </button>
+                </div>
+              </section>
+              <RuntimePermissionsSettings />
+              <section className="settings-section" aria-labelledby="security-status-heading">
+                <h3 id="security-status-heading">Security status</h3>
+                <ul className="settings-plain-list">
+                  <li>Credentials: protected by OS secure storage when available</li>
+                  <li>
+                    Database:{" "}
+                    {storageLoading
+                      ? "Checking…"
+                      : storageSummary == null
+                        ? "Status unavailable"
+                        : storageSummary.profileReady
+                          ? "Profile available"
+                          : "Recovery may be required"}
+                  </li>
+                  <li>Update verification: follow the release channel for signed builds</li>
+                </ul>
+              </section>
+            </div>
           ) : null}
 
           {category === "data" ? (
-            <section className="settings-section" aria-labelledby="data-heading">
-              <h3 id="data-heading">Data &amp; Storage</h3>
-              <p>
-                Conversations, tools, and tool state are stored locally on this
-                computer. Clearing data cannot be undone from this screen.
-              </p>
-              <div className="button-row">
-                {!confirmClearChats ? (
+            <div className="settings-group">
+              <section className="settings-section" aria-labelledby="storage-overview-heading">
+                <h3 id="storage-overview-heading">Storage overview</h3>
+                {storageLoading ? (
+                  <p className="muted">Loading storage summary…</p>
+                ) : storageSummary ? (
+                  <ul className="settings-plain-list">
+                    <li>{storageSummary.chatCount} chats</li>
+                    <li>{storageSummary.projectCount} projects</li>
+                    <li>{storageSummary.toolCount} tools</li>
+                    <li>
+                      Database size:{" "}
+                      {storageSummary.databaseBytes != null
+                        ? `${(storageSummary.databaseBytes / (1024 * 1024)).toFixed(2)} MB`
+                        : "—"}
+                    </li>
+                  </ul>
+                ) : (
+                  <p className="muted">Could not load storage summary.</p>
+                )}
+              </section>
+
+              <section className="settings-section" aria-labelledby="backup-heading">
+                <h3 id="backup-heading">Backup</h3>
+                <p>
+                  Create a consistent local database snapshot. Backups can contain
+                  private chats and tool data. Provider keys are not included.
+                </p>
+                <div className="button-row">
                   <button
                     type="button"
-                    className="btn btn-danger"
-                    onClick={() => setConfirmClearChats(true)}
+                    className="btn btn-primary"
+                    disabled={backupBusy}
+                    onClick={() => {
+                      setBackupBusy(true);
+                      setBackupMessage(null);
+                      void api
+                        .createProfileBackup()
+                        .then((result) => {
+                          setBackupMessage(
+                            `Backup saved as ${result.path} (${(result.byteSize / 1024).toFixed(0)} KB).`,
+                          );
+                        })
+                        .catch((err: unknown) => {
+                          setBackupMessage(
+                            err instanceof Error
+                              ? err.message
+                              : "Backup failed.",
+                          );
+                        })
+                        .finally(() => setBackupBusy(false));
+                    }}
                   >
-                    <Trash2 size={16} aria-hidden />
-                    Clear conversations
+                    {backupBusy ? "Backing up…" : "Back up now"}
                   </button>
-                ) : (
-                  <>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      void api
+                        .getDatabaseHealth()
+                        .then((report) => setDbHealth(report))
+                        .catch((err: unknown) => {
+                          setBackupMessage(
+                            err instanceof Error
+                              ? err.message
+                              : "Health check failed.",
+                          );
+                        });
+                    }}
+                  >
+                    Check database
+                  </button>
+                </div>
+                {backupMessage ? (
+                  <p className="muted" role="status">
+                    {backupMessage}
+                  </p>
+                ) : null}
+                {dbHealth ? (
+                  <p className="muted" role="status">
+                    Health: {dbHealth.status} · quick_check={dbHealth.quickCheck} ·
+                    foreign_keys={dbHealth.foreignKeyCheck}
+                    {dbHealth.schemaVersion
+                      ? ` · schema ${dbHealth.schemaVersion}`
+                      : ""}
+                  </p>
+                ) : null}
+              </section>
+
+              <section className="settings-section" aria-labelledby="data-heading">
+                <h3 id="data-heading">Delete local data</h3>
+                <p>
+                  Clearing data cannot be undone from this screen. Create a backup
+                  first when possible.
+                </p>
+                <div className="button-row">
+                  {!confirmClearChats ? (
                     <button
                       type="button"
                       className="btn btn-danger"
-                      onClick={() => {
-                        void clearConversations();
-                        setConfirmClearChats(false);
-                      }}
+                      onClick={() => setConfirmClearChats(true)}
                     >
-                      Confirm clear chats
+                      <Trash2 size={16} aria-hidden />
+                      Clear conversations
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => setConfirmClearChats(false)}
-                    >
-                      Cancel
-                    </button>
-                  </>
-                )}
-              </div>
-              <div className="button-row" style={{ marginTop: "0.75rem" }}>
-                {!confirmClearTools ? (
-                  <button
-                    type="button"
-                    className="btn btn-danger"
-                    onClick={() => setConfirmClearTools(true)}
-                  >
-                    <Trash2 size={16} aria-hidden />
-                    Clear tools
-                  </button>
-                ) : (
-                  <>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        onClick={() => {
+                          void clearConversations();
+                          setConfirmClearChats(false);
+                        }}
+                      >
+                        Confirm clear chats
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => setConfirmClearChats(false)}
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  )}
+                </div>
+                <div className="button-row" style={{ marginTop: "0.75rem" }}>
+                  {!confirmClearTools ? (
                     <button
                       type="button"
                       className="btn btn-danger"
-                      onClick={() => {
-                        void clearTools();
-                        setConfirmClearTools(false);
-                      }}
+                      onClick={() => setConfirmClearTools(true)}
                     >
-                      Confirm clear tools
+                      <Trash2 size={16} aria-hidden />
+                      Clear tools
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => setConfirmClearTools(false)}
-                    >
-                      Cancel
-                    </button>
-                  </>
-                )}
-              </div>
-              <p className="muted" style={{ marginTop: "1rem" }}>
-                Full backup and restore for public beta is tracked separately;
-                Recovery Mode can restore last working tool versions.
-              </p>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => selectCategory("advanced")}
-              >
-                Open Recovery
-              </button>
-            </section>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        onClick={() => {
+                          void clearTools();
+                          setConfirmClearTools(false);
+                        }}
+                      >
+                        Confirm clear tools
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => setConfirmClearTools(false)}
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ marginTop: "0.75rem" }}
+                  onClick={() => selectCategory("advanced")}
+                >
+                  Open Recovery
+                </button>
+              </section>
+            </div>
           ) : null}
 
           {category === "accessibility" ? (
