@@ -23,6 +23,10 @@ export function activeCanvasPresetId(input: {
   if (globalWallpaperJson?.trim()) {
     const parsed = parseWallpaperJson(globalWallpaperJson);
     if (parsed.format === "schema") {
+      // Solid-color schema wallpapers are the schema equivalent of preset "None".
+      if (parsed.config.type === "static-color") {
+        return "none";
+      }
       if (parsed.config.type === "floating-particles") {
         return "particles";
       }

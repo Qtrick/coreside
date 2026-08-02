@@ -22,6 +22,8 @@ export function SettingsPanel() {
     dockIcon,
     setDockIcon,
     resolvedTheme,
+    adaptiveWindowSizing,
+    setAdaptiveWindowSizing,
     clearConversations,
     clearTools,
     navigateToChat,
@@ -33,6 +35,8 @@ export function SettingsPanel() {
       dockIcon: s.dockIcon,
       setDockIcon: s.setDockIcon,
       resolvedTheme: s.resolvedTheme,
+      adaptiveWindowSizing: s.adaptiveWindowSizing,
+      setAdaptiveWindowSizing: s.setAdaptiveWindowSizing,
       clearConversations: s.clearConversations,
       clearTools: s.clearTools,
       navigateToChat: s.navigateToChat,
@@ -135,6 +139,58 @@ export function SettingsPanel() {
                 </button>
               ))}
             </div>
+
+            <h4 className="settings-subheading" id="adaptive-window-heading">
+              Adaptive window sizing
+            </h4>
+            <p>
+              Coreside may smoothly expand the current window when a tool needs
+              more usable room, while remaining inside the current monitor.
+            </p>
+            <div
+              className="theme-options"
+              role="group"
+              aria-labelledby="adaptive-window-heading"
+            >
+              {(
+                [
+                  {
+                    id: "smart" as const,
+                    label: "Smart",
+                    hint: "Expand automatically when needed",
+                  },
+                  {
+                    id: "ask" as const,
+                    label: "Ask first",
+                    hint: "Confirm before expanding",
+                  },
+                  {
+                    id: "off" as const,
+                    label: "Off",
+                    hint: "Never change the native window size",
+                  },
+                ] as const
+              ).map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className="btn btn-secondary"
+                  aria-pressed={adaptiveWindowSizing === option.id}
+                  title={option.hint}
+                  onClick={() => void setAdaptiveWindowSizing(option.id)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ marginTop: "0.5rem" }}
+              onClick={() => void setAdaptiveWindowSizing("smart")}
+            >
+              Reset window behavior
+            </button>
 
             <h4 className="settings-subheading" id="dock-icon-heading">
               Dock icon

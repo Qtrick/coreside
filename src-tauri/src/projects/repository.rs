@@ -417,13 +417,23 @@ pub fn set_project_wallpaper(
     wallpaper_json: Option<&str>,
 ) -> DbResult<Project> {
     let _ = get_project(db, project_id)?;
-    if let Some(raw) = wallpaper_json {
-        crate::wallpapers::validate_wallpaper_config(raw).map_err(DbError::Invalid)?;
-    }
+    // Empty / legacy `{kind:"none"}` clear to NULL — never persist none as schema JSON.
+    let stored: Option<String> = match wallpaper_json {
+        None => None,
+        Some(raw) => {
+            let normalized = crate::ai::normalize_setting_kv("wallpaperJson", raw)
+                .map_err(DbError::Invalid)?;
+            if normalized.is_empty() {
+                None
+            } else {
+                Some(normalized)
+            }
+        }
+    };
     let now = now_rfc3339();
     db.conn().execute(
         "UPDATE projects SET wallpaper_json = ?1, updated_at = ?2 WHERE id = ?3",
-        params![wallpaper_json, now, project_id],
+        params![stored, now, project_id],
     )?;
     get_project(db, project_id)
 }

@@ -1,4 +1,5 @@
 import {
+  closeToolCanvas,
   denyPendingApprovalIfPresent,
   E2E_TOOL_ID,
   listTauriWindows,
@@ -11,8 +12,8 @@ import {
   waitForToolCanvas,
 } from "../helpers.js";
 
-describe("Journey 10 — secondary tool window (partial: open + switch)", () => {
-  it("opens the seeded tool in a secondary window and can switch WebDriver context", async () => {
+describe("Journey 10 — secondary tool window lifecycle", () => {
+  it("opens, focuses, restores state, and keeps main stable after close path", async () => {
     requireExistingSeed("Journey 10");
 
     await waitForAppReady();
@@ -45,12 +46,33 @@ describe("Journey 10 — secondary tool window (partial: open + switch)", () => 
       },
     );
 
+    // Close via main-window canvas close (authoritative UI path). Secondary
+    // window may remain until OS close; assert main remains stable.
     await switchTauriWindow("main");
+    await closeToolCanvas();
+
+    await browser.waitUntil(
+      async () => !(await $(`.tool-canvas-body[data-tool-id="${E2E_TOOL_ID}"]`).isExisting()),
+      {
+        timeout: 10_000,
+        timeoutMsg: "Main tool canvas did not close",
+      },
+    );
+
+    const sidebar = await $('[aria-label="New chat"]');
+    await expect(sidebar).toExist();
+
+    // Re-open canvas and secondary window path again.
+    await openPersonalTool();
+    await waitForToolCanvas(E2E_TOOL_ID);
+    await openToolInWindow();
+    await browser.waitUntil(async () => (await listTauriWindows()).includes(label), {
+      timeout: 20_000,
+      timeoutMsg: `Secondary window ${label} did not reappear`,
+    });
 
     const windows = await listTauriWindows();
     expect(windows).toContain("main");
     expect(windows).toContain(label);
-    // Partial: open + switch asserted. Close is not asserted — embedded WebDriver
-    // cannot reliably invoke getCurrentWebviewWindow().close() from the guest.
   });
 });

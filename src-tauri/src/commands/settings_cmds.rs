@@ -45,6 +45,12 @@ pub struct AppSettings {
     pub wallpaper: WallpaperConfig,
     /// Schema wallpaper JSON for media / gradient backgrounds (validated).
     pub wallpaper_json: Option<String>,
+    /// Interface transparency percent (0–60). Default 20.
+    pub interface_transparency: u8,
+    /// Adaptive window sizing: `smart` | `ask` | `off`.
+    pub adaptive_window_sizing: String,
+    /// Preferred chat/tool split ratio (0.28–0.72).
+    pub chat_tool_split_ratio: f64,
     /// Base Setting: show sanitized agent Action Log (default off).
     pub action_log_enabled: bool,
     /// Base Setting: `off` | `always` | `intelligent`.
@@ -192,6 +198,24 @@ fn settings_from_map(map: &std::collections::HashMap<String, String>) -> AppSett
             .or_else(|| map.get("wallpaper_json"))
             .cloned()
             .filter(|s| !s.trim().is_empty()),
+        interface_transparency: map
+            .get("interfaceTransparency")
+            .or_else(|| map.get("interface_transparency"))
+            .and_then(|s| s.trim().parse::<u8>().ok())
+            .map(|n| n.min(60))
+            .unwrap_or(20),
+        adaptive_window_sizing: map
+            .get("adaptiveWindowSizing")
+            .or_else(|| map.get("adaptive_window_sizing"))
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| matches!(s.as_str(), "smart" | "ask" | "off"))
+            .unwrap_or_else(|| "smart".to_string()),
+        chat_tool_split_ratio: map
+            .get("chatToolSplitRatio")
+            .or_else(|| map.get("chat_tool_split_ratio"))
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .map(|n| n.clamp(0.28, 0.72))
+            .unwrap_or(0.5),
         action_log_enabled: {
             let mode = db::ActionLogMode::parse(
                 map.get("actionLogMode")

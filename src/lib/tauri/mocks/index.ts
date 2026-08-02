@@ -144,6 +144,9 @@ const mockDb = {
     textSecondaryDark: "#a6afa3",
     wallpaper: { ...DEFAULT_WALLPAPER } as WallpaperConfig,
     wallpaperJson: null as string | null,
+    interfaceTransparency: 20,
+    adaptiveWindowSizing: "smart" as "smart" | "ask" | "off",
+    chatToolSplitRatio: 0.5,
     actionLogEnabled: false as boolean,
     actionLogMode: "off" as "off" | "always" | "intelligent",
     safeSearch: "standard" as SafeSearchLevel,
@@ -1349,8 +1352,53 @@ export async function mockInvoke<T>(
         mockDb.settings.wallpaper = sanitizeMockWallpaper(value);
       }
       if (key === "wallpaperJson") {
-        mockDb.settings.wallpaperJson =
-          typeof value === "string" && value.trim() ? value : null;
+        const raw =
+          typeof value === "string"
+            ? value.trim()
+            : value == null
+              ? ""
+              : String(value).trim();
+        // Mirror Rust clear path: empty or legacy `{kind:"none"}` → null.
+        let legacyNone = false;
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as {
+              kind?: unknown;
+              schemaVersion?: unknown;
+              type?: unknown;
+            };
+            legacyNone =
+              parsed &&
+              typeof parsed === "object" &&
+              parsed.kind === "none" &&
+              parsed.schemaVersion == null &&
+              parsed.type == null;
+          } catch {
+            legacyNone = false;
+          }
+        }
+        mockDb.settings.wallpaperJson = raw && !legacyNone ? raw : null;
+      }
+      if (key === "interfaceTransparency") {
+        const n = typeof value === "number" ? value : Number(value);
+        if (Number.isFinite(n)) {
+          mockDb.settings.interfaceTransparency = Math.min(
+            60,
+            Math.max(0, Math.round(n)),
+          );
+        }
+      }
+      if (key === "adaptiveWindowSizing" && typeof value === "string") {
+        const mode = value.trim().toLowerCase();
+        if (mode === "smart" || mode === "ask" || mode === "off") {
+          mockDb.settings.adaptiveWindowSizing = mode;
+        }
+      }
+      if (key === "chatToolSplitRatio") {
+        const n = typeof value === "number" ? value : Number(value);
+        if (Number.isFinite(n)) {
+          mockDb.settings.chatToolSplitRatio = Math.min(0.72, Math.max(0.28, n));
+        }
       }
       if (key === "actionLogEnabled" && typeof value === "boolean") {
         mockDb.settings.actionLogEnabled = value;
@@ -1458,6 +1506,39 @@ export async function mockInvoke<T>(
         const toolId = String(args?.toolId ?? "");
         window.open(`/#/tool/${toolId}`, `coreside-tool-${toolId}`);
       }
+      return undefined as T;
+
+    case "window_orchestrator_inspect":
+      return {
+        bounds: { x: 0, y: 0, width: 1280, height: 800 },
+        maximized: false,
+        fullscreen: false,
+        minimized: false,
+        scaleFactor: 1,
+        animating: false,
+        restoreEligible: false,
+        workArea: { x: 0, y: 0, width: 1440, height: 900 },
+        canExpand: true,
+      } as T;
+
+    case "window_orchestrator_expand":
+      return {
+        decision: "no_op",
+        reason: "web_preview",
+        toolId: args?.toolId ?? null,
+        from: { x: 0, y: 0, width: 1280, height: 800 },
+        restoreEligible: false,
+      } as T;
+
+    case "window_orchestrator_restore":
+      return {
+        decision: "no_op",
+        reason: "web_preview",
+        from: { x: 0, y: 0, width: 1280, height: 800 },
+        restoreEligible: false,
+      } as T;
+
+    case "window_orchestrator_cancel":
       return undefined as T;
 
     case "open_external_url": {
@@ -2276,6 +2357,9 @@ export function __resetMockDb(): void {
     textSecondaryDark: "#a6afa3",
     wallpaper: { ...DEFAULT_WALLPAPER },
     wallpaperJson: null,
+    interfaceTransparency: 20,
+    adaptiveWindowSizing: "smart",
+    chatToolSplitRatio: 0.5,
     actionLogEnabled: false,
     actionLogMode: "off",
     safeSearch: "standard" as SafeSearchLevel,

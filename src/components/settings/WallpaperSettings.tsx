@@ -1,13 +1,18 @@
 import { useMemo, useState } from "react";
 import type { WallpaperKind } from "@/types/agent";
-import { DEFAULT_WALLPAPER } from "@/types/agent";
 import {
   buildCanvasPresetProposal,
-  legacyWallpaperToJson,
   schemaWallpaperToJson,
 } from "@/types/wallpaper";
 import { CANVAS_PRESETS } from "@/types/wallpaper";
 import { activeCanvasPresetId } from "@/lib/wallpaper";
+import { consumerErrorMessage } from "@/lib/consumer-errors";
+import {
+  INTERFACE_TRANSPARENCY_MAX,
+  INTERFACE_TRANSPARENCY_MIN,
+  INTERFACE_TRANSPARENCY_PRESETS,
+  INTERFACE_TRANSPARENCY_STEP,
+} from "@/lib/interface-transparency";
 import { useAppStore } from "@/stores/app-store";
 
 const LIVE_PRESET_IDS = new Set<WallpaperKind>([
@@ -22,15 +27,20 @@ export function WallpaperSettings() {
   const wallpaper = useAppStore((s) => s.wallpaper);
   const globalWallpaperJson = useAppStore((s) => s.globalWallpaperJson);
   const applyWorkspaceWallpaper = useAppStore((s) => s.applyWorkspaceWallpaper);
+  const interfaceTransparency = useAppStore((s) => s.interfaceTransparency);
+  const setInterfaceTransparency = useAppStore((s) => s.setInterfaceTransparency);
+  const developerMode = useAppStore((s) => s.developerMode);
   const navigateToMedia = useAppStore((s) => s.navigateToMedia);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [techDetail, setTechDetail] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
   const activeId = activeCanvasPresetId({
     globalWallpaperJson,
     globalWallpaper: wallpaper,
   });
+  const wallpaperActive = activeId !== "none";
 
   const filteredPresets = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -48,19 +58,27 @@ export function WallpaperSettings() {
   const applyPreset = async (preset: WallpaperKind) => {
     setBusy(true);
     setError(null);
+    setTechDetail(null);
     try {
       if (preset === "none") {
-        await applyWorkspaceWallpaper(legacyWallpaperToJson(DEFAULT_WALLPAPER));
+        // Clear schema + legacy stores. Do not POST `{ kind: "none" }` as
+        // wallpaperJson — Rust validate_wallpaper_config requires schemaVersion.
+        await applyWorkspaceWallpaper("");
         return;
       }
       const proposal = buildCanvasPresetProposal(preset);
       if ("kind" in proposal) {
-        await applyWorkspaceWallpaper(legacyWallpaperToJson(proposal));
-      } else {
-        await applyWorkspaceWallpaper(schemaWallpaperToJson(proposal));
+        await applyWorkspaceWallpaper("");
+        return;
       }
+      await applyWorkspaceWallpaper(schemaWallpaperToJson(proposal));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update wallpaper");
+      const { message, technical } = consumerErrorMessage(
+        err,
+        "Coreside could not apply that wallpaper. The previous appearance was restored.",
+      );
+      setError(message);
+      setTechDetail(technical);
     } finally {
       setBusy(false);
     }
@@ -129,9 +147,76 @@ export function WallpaperSettings() {
         </button>
       </div>
 
+      <div
+        className="interface-transparency-control"
+        aria-labelledby="interface-transparency-heading"
+      >
+        <h4 className="settings-subheading" id="interface-transparency-heading">
+          Interface transparency
+        </h4>
+        <p>
+          Controls how much of the active wallpaper shows through Coreside’s
+          panels. Readability protection may strengthen individual surfaces when
+          needed.
+          {!wallpaperActive
+            ? " Has no visual effect while None is active."
+            : null}
+        </p>
+        <label>
+          <span className="sr-only">Interface transparency percent</span>
+          <input
+            type="range"
+            min={INTERFACE_TRANSPARENCY_MIN}
+            max={INTERFACE_TRANSPARENCY_MAX}
+            step={INTERFACE_TRANSPARENCY_STEP}
+            value={interfaceTransparency}
+            aria-valuemin={INTERFACE_TRANSPARENCY_MIN}
+            aria-valuemax={INTERFACE_TRANSPARENCY_MAX}
+            aria-valuenow={interfaceTransparency}
+            aria-valuetext={`${interfaceTransparency} percent`}
+            disabled={busy}
+            onChange={(e) =>
+              void setInterfaceTransparency(Number(e.target.value))
+            }
+          />
+        </label>
+        <div className="button-row">
+          <output aria-live="polite">{interfaceTransparency}%</output>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={busy || interfaceTransparency === 20}
+            onClick={() => void setInterfaceTransparency(20)}
+          >
+            Reset
+          </button>
+        </div>
+        <div
+          className="transparency-presets"
+          role="group"
+          aria-label="Transparency presets"
+        >
+          {INTERFACE_TRANSPARENCY_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className="btn btn-secondary"
+              aria-pressed={interfaceTransparency === preset.value}
+              disabled={busy}
+              onClick={() => void setInterfaceTransparency(preset.value)}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {error ? (
         <p className="form-error" role="alert">
           {error}
+          {developerMode && techDetail ? (
+            <span className="muted"> — {techDetail}</span>
+          ) : null}
         </p>
       ) : null}
     </section>

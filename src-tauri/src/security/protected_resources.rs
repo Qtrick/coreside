@@ -94,6 +94,13 @@ pub const PROTECTED_IDS: &[&str] = &[
     "core.provider.conformance",
     "core.continuity.engine",
     "core.manual_edit.provenance",
+    "core.window_orchestrator",
+    "core.window_bounds_policy",
+    "core.adaptive_window_sizing",
+    "core.window_animation",
+    "core.monitor_bounds",
+    "core.viewport_contract",
+    "core.layout_modes",
 ];
 
 /// Returns `true` if `id` is an exact protected resource or starts with `core.`.
@@ -189,5 +196,7 @@ mod tests {
         assert!(ids.contains(&"core.preservation.engine"));
         assert!(ids.contains(&"core.patch.scheduler"));
         assert!(ids.contains(&"core.continuity.engine"));
+        assert!(ids.contains(&"core.window_orchestrator"));
+        assert!(ids.contains(&"core.adaptive_window_sizing"));
     }
 }

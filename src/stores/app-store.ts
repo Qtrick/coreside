@@ -68,6 +68,11 @@ type AppStore = {
   appearance: AppearancePalette;
   wallpaper: WallpaperConfig;
   globalWallpaperJson: string | null;
+  interfaceTransparency: number;
+  adaptiveWindowSizing: "smart" | "ask" | "off";
+  chatToolSplitRatio: number;
+  layoutMode: "wide" | "standard" | "compact";
+  windowExpandStatus: string | null;
   sidebarCollapsed: boolean;
   view: AppView;
   chatViewState: Record<string, ChatViewState>;
@@ -137,6 +142,12 @@ type AppStore = {
   navigateToAutomations: () => void;
   applyWorkspaceWallpaper: (wallpaperJson: string) => Promise<void>;
   applyProjectWallpaper: (projectId: string, wallpaperJson: string) => Promise<void>;
+  setInterfaceTransparency: (value: number) => Promise<void>;
+  setAdaptiveWindowSizing: (mode: "smart" | "ask" | "off") => Promise<void>;
+  setChatToolSplitRatio: (ratio: number) => Promise<void>;
+  setLayoutMode: (mode: "wide" | "standard" | "compact") => void;
+  clearWindowExpandStatus: () => void;
+  maybeExpandForTool: (toolId: string) => Promise<void>;
   setChatDraft: (conversationId: string, draft: string) => void;
   setChatScrollTop: (conversationId: string, scrollTop: number) => void;
   setChatActiveToolId: (conversationId: string, toolId: string | null) => void;
@@ -446,6 +457,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
   appearance: { ...DEFAULT_APPEARANCE },
   wallpaper: { ...DEFAULT_WALLPAPER },
   globalWallpaperJson: null,
+  interfaceTransparency: 20,
+  adaptiveWindowSizing: "smart",
+  chatToolSplitRatio: 0.5,
+  layoutMode: "wide",
+  windowExpandStatus: null,
   sidebarCollapsed: false,
   view: { ...DEFAULT_CHAT_VIEW },
   chatViewState: {},
@@ -534,6 +550,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
         appearance,
         wallpaper,
         globalWallpaperJson: settings.wallpaperJson ?? null,
+        interfaceTransparency:
+          typeof settings.interfaceTransparency === "number"
+            ? Math.min(60, Math.max(0, Math.round(settings.interfaceTransparency)))
+            : 20,
+        adaptiveWindowSizing:
+          settings.adaptiveWindowSizing === "ask" ||
+          settings.adaptiveWindowSizing === "off" ||
+          settings.adaptiveWindowSizing === "smart"
+            ? settings.adaptiveWindowSizing
+            : "smart",
+        chatToolSplitRatio:
+          typeof settings.chatToolSplitRatio === "number"
+            ? Math.min(0.72, Math.max(0.28, settings.chatToolSplitRatio))
+            : 0.5,
         sidebarCollapsed: settings.sidebarCollapsed ?? false,
         preferredModel: settings.preferredModel ?? modelCatalog?.selected ?? "auto",
         dockIcon: settings.dockIcon ?? "auto",
@@ -783,20 +813,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   applyWorkspaceWallpaper: async (wallpaperJson) => {
     const trimmed = wallpaperJson.trim();
+    const parsed = trimmed
+      ? parseWallpaperJson(trimmed)
+      : ({ format: "none" } as const);
     let settings;
-    if (!trimmed) {
+    // Clear path: empty string OR legacy `{ kind: "none" }` — never send the
+    // latter as wallpaperJson (Rust schema requires schemaVersion).
+    if (parsed.format === "none") {
       settings = await api.setSetting("wallpaperJson", "");
-      const legacy = await api.setSetting("wallpaper", DEFAULT_WALLPAPER);
-      settings = legacy;
+      settings = await api.setSetting("wallpaper", DEFAULT_WALLPAPER);
+    } else if (parsed.format === "legacy") {
+      settings = await api.setSetting("wallpaper", parsed.config);
+      settings = await api.setSetting("wallpaperJson", "");
     } else {
-      const parsed = parseWallpaperJson(trimmed);
-      if (parsed.format === "legacy") {
-        settings = await api.setSetting("wallpaper", parsed.config);
-        settings = await api.setSetting("wallpaperJson", "");
-      } else {
-        settings = await api.setSetting("wallpaperJson", trimmed);
-        settings = await api.setSetting("wallpaper", DEFAULT_WALLPAPER);
-      }
+      settings = await api.setSetting("wallpaperJson", trimmed);
+      settings = await api.setSetting("wallpaper", DEFAULT_WALLPAPER);
     }
     set({
       wallpaper: wallpaperFromSettings(settings),
@@ -811,6 +842,60 @@ export const useAppStore = create<AppStore>((set, get) => ({
       activeProject:
         state.activeProject?.id === project.id ? project : state.activeProject,
     }));
+  },
+
+  setInterfaceTransparency: async (value) => {
+    const next = Math.min(60, Math.max(0, Math.round(value)));
+    set({ interfaceTransparency: next });
+    await api.setSetting("interfaceTransparency", next);
+  },
+
+  setAdaptiveWindowSizing: async (mode) => {
+    set({ adaptiveWindowSizing: mode });
+    await api.setSetting("adaptiveWindowSizing", mode);
+  },
+
+  setChatToolSplitRatio: async (ratio) => {
+    const next = Math.min(0.72, Math.max(0.28, ratio));
+    set({ chatToolSplitRatio: next });
+    await api.setSetting("chatToolSplitRatio", next);
+  },
+
+  setLayoutMode: (mode) => {
+    if (get().layoutMode === mode) return;
+    set({ layoutMode: mode });
+  },
+
+  clearWindowExpandStatus: () => set({ windowExpandStatus: null }),
+
+  maybeExpandForTool: async (toolId) => {
+    const mode = get().adaptiveWindowSizing;
+    if (mode === "off") return;
+    const reducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (mode === "ask") {
+      set({
+        windowExpandStatus: `ask:${toolId}`,
+      });
+      return;
+    }
+    try {
+      const decision = await api.windowOrchestratorExpand({
+        toolId,
+        minUsefulWidth: 520,
+        minUsefulHeight: 420,
+        direction: "right",
+        reducedMotion,
+      });
+      if (decision.decision === "expand") {
+        set({
+          windowExpandStatus: `Expanded the window to fit the tool.`,
+        });
+      }
+    } catch {
+      // Non-blocking — tools still reflow / use compact mode.
+    }
   },
 
   setCreateProjectDialogOpen: (open) =>
@@ -1238,6 +1323,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       activeTool: tool,
       toolState: state ?? {},
     });
+    void get().maybeExpandForTool(id);
   },
 
   closeToolCanvas: () => {
@@ -1246,12 +1332,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
       get().setChatActiveToolId(conversationId, null);
     }
     set({ activeToolId: null, activeTool: null, toolState: {} });
+    const reducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    void api.windowOrchestratorRestore(reducedMotion).catch(() => undefined);
   },
 
   openToolWindow: async () => {
     const id = get().activeToolId;
     if (!id) return;
-    await api.openToolWindow(id);
+    await api.openToolWindow(id, { width: 820, height: 680 });
   },
 
   undoTool: async () => {

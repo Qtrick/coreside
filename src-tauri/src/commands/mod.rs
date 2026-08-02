@@ -17,6 +17,7 @@ mod runtime_v2_cmds;
 mod search_cmds;
 mod settings_cmds;
 mod tool_cmds;
+mod window_cmds;
 
 pub use ai_cmds::*;
 pub use attachment_cmds::*;
@@ -35,6 +36,7 @@ pub use runtime_v2_cmds::*;
 pub use search_cmds::*;
 pub use settings_cmds::*;
 pub use tool_cmds::*;
+pub use window_cmds::*;
 
 use serde::Serialize;
 

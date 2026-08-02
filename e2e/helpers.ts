@@ -110,7 +110,9 @@ export async function waitForToolCanvas(toolId = E2E_TOOL_ID) {
 }
 
 export async function closeToolCanvas() {
-  const close = await $('[aria-label="Close tool canvas"]');
+  const close = await $(
+    '[aria-label="Close tool canvas"], [aria-label="Back to chat"]',
+  );
   await close.waitForClickable({ timeout: 10_000 });
   await close.click();
   await browser.waitUntil(

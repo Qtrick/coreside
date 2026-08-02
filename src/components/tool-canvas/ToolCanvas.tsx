@@ -1,10 +1,11 @@
-import { Download, ExternalLink, History, Info, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApplicationDetailsPanel } from "@/components/applications/ApplicationDetailsPanel";
 import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
 import { AppRouteShell } from "@/components/tool-renderer/AppRouteShell";
-import { CustomizeMode } from "@/components/tool-canvas/CustomizeMode";
+import { ToolHeaderActions } from "@/components/tool-canvas/ToolHeaderActions";
 import { api } from "@/lib/tauri";
+import { consumerErrorMessage } from "@/lib/consumer-errors";
 import {
   captureFocusSnapshot,
   captureMediaSnapshot,
@@ -73,10 +74,17 @@ export function ToolCanvas() {
   const openExportDialog = useAppStore((s) => s.openExportDialog);
   const activeConversationId = useAppStore((s) => s.activeConversationId);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
+  const layoutMode = useAppStore((s) => s.layoutMode);
+  const adaptiveWindowSizing = useAppStore((s) => s.adaptiveWindowSizing);
+  const windowExpandStatus = useAppStore((s) => s.windowExpandStatus);
+  const clearWindowExpandStatus = useAppStore((s) => s.clearWindowExpandStatus);
+  const setAdaptiveWindowSizing = useAppStore((s) => s.setAdaptiveWindowSizing);
+  const developerMode = useAppStore((s) => s.developerMode);
   const [manifestRecord, setManifestRecord] = useState<ManifestRecord | null>(null);
   const [recovery, setRecovery] = useState<RecoveryState | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [canvasError, setCanvasError] = useState<string | null>(null);
+  const [headerWidth, setHeaderWidth] = useState(0);
 
   const runHeaderAction = useCallback(
     async (label: string, run: () => Promise<unknown>) => {
@@ -84,13 +92,28 @@ export function ToolCanvas() {
       try {
         await run();
       } catch (error) {
+        const { message, technical } = consumerErrorMessage(
+          error,
+          `${label} failed.`,
+        );
         setCanvasError(
-          error instanceof Error ? error.message : `${label} failed.`,
+          developerMode && technical && technical !== message
+            ? `${message} (${technical})`
+            : message,
         );
       }
     },
-    [],
+    [developerMode],
   );
+
+  const headerDensity =
+    headerWidth > 0 && headerWidth < 360
+      ? "menu"
+      : headerWidth > 0 && headerWidth < 560
+        ? "icons"
+        : layoutMode === "compact"
+          ? "icons"
+          : "full";
 
   const applicationId = useMemo(() => {
     if (!activeTool) return null;
@@ -120,6 +143,22 @@ export function ToolCanvas() {
     },
     [updateToolState],
   );
+
+  useEffect(() => {
+    const header = document.querySelector<HTMLElement>(".tool-canvas-header");
+    if (!header || typeof ResizeObserver === "undefined") return;
+    let frame = 0;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setHeaderWidth(w));
+    });
+    ro.observe(header);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+    };
+  }, [activeTool?.id]);
 
   useEffect(() => {
     if (!activeTool) {
@@ -241,68 +280,106 @@ export function ToolCanvas() {
         <div>
           <h2>{activeTool.name}</h2>
           <div className="tool-meta">
-            <span>{activeTool.description || "Personal tool"}</span>
+            <span title={activeTool.description || "Personal tool"}>
+              {activeTool.description || "Personal tool"}
+            </span>
             <span>v{activeTool.version ?? 1}</span>
           </div>
         </div>
-        <div className="tool-header-actions">
+        <ToolHeaderActions
+          tool={activeTool}
+          conversationId={activeConversationId}
+          density={headerDensity}
+          closeLabel={
+            layoutMode === "compact" ? "Back to chat" : "Close tool canvas"
+          }
+          onDetails={() => setDetailsOpen(true)}
+          onExport={() => openExportDialog(activeTool.id, activeTool.name)}
+          onOpen={() =>
+            void runHeaderAction("Opening the tool window", openToolWindow)
+          }
+          onUndo={() => void runHeaderAction("Undo", undoTool)}
+          onClose={closeToolCanvas}
+          onCustomizeApplied={() => {
+            void useAppStore.getState().selectTool(activeTool.id);
+          }}
+        />
+      </header>
+      {windowExpandStatus?.startsWith("ask:") ? (
+        <div className="window-fit-prompt" role="status">
+          <span>{activeTool.name} works best with more room.</span>
           <button
             type="button"
-            className="btn btn-secondary"
-            onClick={() => setDetailsOpen(true)}
-            aria-label="Application details"
-          >
-            <Info size={16} aria-hidden />
-            Details
-          </button>
-          <CustomizeMode
-            surfaceId={surfaceIdForTool(activeTool.id)}
-            conversationId={activeConversationId}
-            tool={activeTool}
-            baseRevision={activeTool.version ?? 1}
-            onApplied={() => {
-              void useAppStore.getState().selectTool(activeTool.id);
+            className="btn btn-primary"
+            onClick={() => {
+              const reducedMotion = window.matchMedia(
+                "(prefers-reduced-motion: reduce)",
+              ).matches;
+              void api
+                .windowOrchestratorExpand({
+                  toolId: activeTool.id,
+                  minUsefulWidth: 520,
+                  minUsefulHeight: 420,
+                  direction: "right",
+                  reducedMotion,
+                })
+                .then(() =>
+                  useAppStore.setState({
+                    windowExpandStatus: "Expanded the window to fit the tool.",
+                  }),
+                )
+                .catch(() => clearWindowExpandStatus());
             }}
-          />
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => openExportDialog(activeTool.id, activeTool.name)}
-            aria-label="Export tool"
           >
-            <Download size={16} aria-hidden />
-            Export
+            Expand
           </button>
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() =>
-              void runHeaderAction("Opening the tool window", openToolWindow)
-            }
-            aria-label="Open tool in new window"
+            onClick={() => void openToolWindow()}
           >
-            <ExternalLink size={16} aria-hidden />
-            Open
+            Open in new window
           </button>
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => void runHeaderAction("Undo", undoTool)}
-            aria-label="Undo last tool change"
+            onClick={clearWindowExpandStatus}
           >
-            <History size={16} aria-hidden />
-            Undo
+            Keep current size
           </button>
+          {adaptiveWindowSizing === "ask" ? (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => {
+                void setAdaptiveWindowSizing("smart");
+                clearWindowExpandStatus();
+                void useAppStore.getState().maybeExpandForTool(activeTool.id);
+              }}
+            >
+              Always expand automatically
+            </button>
+          ) : null}
+        </div>
+      ) : windowExpandStatus ? (
+        <div className="window-fit-status" role="status">
+          {windowExpandStatus}
           <button
             type="button"
-            className="icon-btn"
-            onClick={closeToolCanvas}
-            aria-label="Close tool canvas"
+            className="text-btn"
+            onClick={() => {
+              const reducedMotion = window.matchMedia(
+                "(prefers-reduced-motion: reduce)",
+              ).matches;
+              void api
+                .windowOrchestratorRestore(reducedMotion)
+                .finally(clearWindowExpandStatus);
+            }}
           >
-            <X size={18} />
+            Restore previous size
           </button>
         </div>
-      </header>
+      ) : null}
       {canvasError ? (
         <div className="tr-action-error" role="alert">
           <span>{canvasError}</span>

@@ -144,6 +144,11 @@ pub fn clear_tools(state: State<'_, AppState>) -> Result<u64, CommandError> {
 }
 
 #[tauri::command]
-pub fn open_tool_window(app: AppHandle, tool_id: String) -> Result<(), CommandError> {
-    windows::open_tool_window(&app, &tool_id)
+pub fn open_tool_window(
+    app: AppHandle,
+    tool_id: String,
+    width: Option<f64>,
+    height: Option<f64>,
+) -> Result<(), CommandError> {
+    windows::open_tool_window(&app, &tool_id, width, height)
 }

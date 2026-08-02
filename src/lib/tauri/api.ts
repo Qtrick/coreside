@@ -62,6 +62,59 @@ import type { ToolDefinition, ToolState, ToolSummary, ToolVersion } from "@/type
 import { invoke } from "./invoke";
 import { isToolRecord, toToolDefinition, toToolSummary, type ToolRecord } from "./tools";
 
+export type WindowExpandDirection =
+  | "right"
+  | "left"
+  | "down"
+  | "up"
+  | "balanced"
+  | "automatic";
+
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface WindowOrchestratorInspect {
+  bounds: WindowBounds;
+  maximized: boolean;
+  fullscreen: boolean;
+  minimized: boolean;
+  scaleFactor: number;
+  animating: boolean;
+  restoreEligible: boolean;
+  workArea: WindowBounds;
+  canExpand: boolean;
+}
+
+export type WindowExpansionDecision =
+  | {
+      decision: "expand";
+      reason: string;
+      toolId: string;
+      from: WindowBounds;
+      to: WindowBounds;
+      direction: string;
+      restoreEligible: boolean;
+    }
+  | {
+      decision: "no_op";
+      reason: string;
+      toolId?: string | null;
+      from: WindowBounds;
+      restoreEligible: boolean;
+    }
+  | {
+      decision: "cannot_satisfy";
+      reason: string;
+      toolId?: string | null;
+      from: WindowBounds;
+      bestEffort?: WindowBounds | null;
+      restoreEligible: boolean;
+    };
+
 export const api = {
   getAppInfo: () => invoke<AppInfo>("get_app_info"),
   getAiStatus: () => invoke<AiStatus>("get_ai_status"),
@@ -198,8 +251,33 @@ export const api = {
     invoke<void>("set_dock_icon_for_os_appearance", { isDark }),
   clearConversations: () => invoke<void>("clear_conversations"),
   clearTools: () => invoke<void>("clear_tools"),
-  openToolWindow: (toolId: string) =>
-    invoke<void>("open_tool_window", { toolId }),
+  openToolWindow: (toolId: string, size?: { width?: number; height?: number }) =>
+    invoke<void>("open_tool_window", {
+      toolId,
+      width: size?.width,
+      height: size?.height,
+    }),
+  windowOrchestratorInspect: () =>
+    invoke<WindowOrchestratorInspect>("window_orchestrator_inspect"),
+  windowOrchestratorExpand: (args: {
+    toolId: string;
+    minUsefulWidth: number;
+    minUsefulHeight: number;
+    direction?: WindowExpandDirection;
+    reducedMotion?: boolean;
+  }) =>
+    invoke<WindowExpansionDecision>("window_orchestrator_expand", {
+      toolId: args.toolId,
+      minUsefulWidth: args.minUsefulWidth,
+      minUsefulHeight: args.minUsefulHeight,
+      direction: args.direction,
+      reducedMotion: args.reducedMotion,
+    }),
+  windowOrchestratorRestore: (reducedMotion?: boolean) =>
+    invoke<WindowExpansionDecision>("window_orchestrator_restore", {
+      reducedMotion,
+    }),
+  windowOrchestratorCancel: () => invoke<void>("window_orchestrator_cancel"),
   openExternalUrl: (url: string) => invoke<void>("open_external_url", { url }),
   listAutomations: () => invoke<Record<string, unknown>[]>("list_automations"),
   upsertAutomation: (input: unknown) =>

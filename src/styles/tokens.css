@@ -38,8 +38,18 @@
   --core-text-secondary: var(--text-secondary);
   --core-border: var(--border);
   --core-accent: var(--accent-primary);
-  --core-content-overlay: color-mix(in srgb, var(--surface) 90%, transparent);
-  --core-sidebar-overlay: color-mix(in srgb, var(--surface) 86%, transparent);
+  /* Interface transparency defaults (overridden by JS from user preference). */
+  --interface-transparency: 20;
+  --interface-transparency-effective: 20;
+  --core-panel-alpha: 0.83;
+  --core-sidebar-alpha: 0.79;
+  --core-card-alpha: 0.92;
+  --core-control-alpha: 0.94;
+  --core-header-alpha: 0.9;
+  --core-modal-alpha: 0.96;
+  --core-readable-scrim-alpha: 0;
+  --core-content-overlay: color-mix(in srgb, var(--surface) 83%, transparent);
+  --core-sidebar-overlay: color-mix(in srgb, var(--surface) 79%, transparent);
 }
 
 html[data-theme="dark"] {
@@ -58,6 +68,6 @@ html[data-theme="dark"] {
   --success: #69c994;
   --shadow-soft: 0 12px 32px rgba(0, 0, 0, 0.35);
 
-  --core-content-overlay: color-mix(in srgb, var(--surface) 92%, transparent);
-  --core-sidebar-overlay: color-mix(in srgb, var(--surface) 88%, transparent);
+  --core-content-overlay: color-mix(in srgb, var(--surface) 83%, transparent);
+  --core-sidebar-overlay: color-mix(in srgb, var(--surface) 79%, transparent);
 }

@@ -195,6 +195,15 @@ export const AppSettingsSchema = z.object({
   textSecondaryDark: z.string().optional().default("#a6afa3"),
   wallpaper: WallpaperConfigSchema.default(DEFAULT_WALLPAPER),
   wallpaperJson: z.string().optional().nullable(),
+  /** Added Settings → Wallpapers: how much wallpaper shows through panels (0–60). */
+  interfaceTransparency: z.number().min(0).max(60).optional().default(20),
+  /** Base Setting — Smart | ask | off native window expansion. */
+  adaptiveWindowSizing: z
+    .enum(["smart", "ask", "off"])
+    .optional()
+    .default("smart"),
+  /** Preferred chat/tool split ratio (0.28–0.72). */
+  chatToolSplitRatio: z.number().min(0.28).max(0.72).optional().default(0.5),
   /** Base Setting — sanitized Action Log (default off). Legacy boolean. */
   actionLogEnabled: z.boolean().optional().default(false),
   /** Base Setting — `off` | `always` | `intelligent`. */

@@ -163,4 +163,26 @@ describe("activeCanvasPresetId", () => {
       }),
     ).toBe("none");
   });
+
+  it("treats legacy kind none JSON as none without requiring schemaVersion", () => {
+    expect(
+      activeCanvasPresetId({
+        globalWallpaperJson: JSON.stringify({ kind: "none" }),
+        globalWallpaper: { kind: "particles" },
+      }),
+    ).toBe("none");
+  });
+
+  it("treats static-color schema wallpaper as none", () => {
+    expect(
+      activeCanvasPresetId({
+        globalWallpaperJson: JSON.stringify({
+          schemaVersion: "1",
+          type: "static-color",
+          color: "#141714",
+        }),
+        globalWallpaper: DEFAULT_WALLPAPER,
+      }),
+    ).toBe("none");
+  });
 });

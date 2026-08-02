@@ -376,10 +376,41 @@ pub fn normalize_setting_kv(key: &str, value: &str) -> Result<String, String> {
             let trimmed = value.trim();
             if trimmed.is_empty() {
                 Ok(String::new())
+            } else if is_legacy_none_wallpaper_json(trimmed) {
+                // Canonical clear: do not persist `{kind:"none"}` as schema JSON.
+                Ok(String::new())
             } else {
                 crate::wallpapers::validate_wallpaper_config(trimmed)?;
                 Ok(trimmed.to_string())
             }
+        }
+        "interfaceTransparency" | "interface_transparency" => {
+            let n: f64 = value
+                .trim()
+                .parse()
+                .map_err(|_| "interfaceTransparency must be a number 0–60".to_string())?;
+            if !(0.0..=60.0).contains(&n) {
+                return Err("interfaceTransparency must be between 0 and 60".into());
+            }
+            Ok((n.round() as i32).to_string())
+        }
+        "adaptiveWindowSizing" | "adaptive_window_sizing" => {
+            let t = value.trim().to_lowercase();
+            if matches!(t.as_str(), "smart" | "ask" | "off") {
+                Ok(t)
+            } else {
+                Err("adaptiveWindowSizing must be smart, ask, or off".into())
+            }
+        }
+        "chatToolSplitRatio" | "chat_tool_split_ratio" => {
+            let n: f64 = value
+                .trim()
+                .parse()
+                .map_err(|_| "chatToolSplitRatio must be a number".to_string())?;
+            if !(0.28..=0.72).contains(&n) {
+                return Err("chatToolSplitRatio must be between 0.28 and 0.72".into());
+            }
+            Ok(format!("{n:.4}"))
         }
         k if k.starts_with("accent")
             || k.starts_with("background")
@@ -395,6 +426,20 @@ pub fn normalize_setting_kv(key: &str, value: &str) -> Result<String, String> {
             }
         }
         _ => Ok(value.to_string()),
+    }
+}
+
+/// Legacy `{ "kind": "none" }` must clear schema wallpaperJson, not validate as schema.
+fn is_legacy_none_wallpaper_json(value: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<Value>(value) else {
+        return false;
+    };
+    match v {
+        Value::Object(map) => {
+            let kind = map.get("kind").and_then(|k| k.as_str());
+            kind == Some("none") && !map.contains_key("schemaVersion") && !map.contains_key("type")
+        }
+        _ => false,
     }
 }
 
@@ -581,6 +626,23 @@ mod tests {
         .unwrap();
         assert!(wallpaper.contains("matrix"));
         assert!(wallpaper.contains("#33ff66"));
+    }
+
+    #[test]
+    fn wallpaper_json_legacy_none_clears_to_empty() {
+        assert_eq!(
+            normalize_setting_kv("wallpaperJson", r#"{"kind":"none"}"#).unwrap(),
+            ""
+        );
+        assert_eq!(normalize_setting_kv("wallpaperJson", "  ").unwrap(), "");
+        assert_eq!(
+            normalize_setting_kv("interfaceTransparency", "40.4").unwrap(),
+            "40"
+        );
+        assert_eq!(
+            normalize_setting_kv("adaptiveWindowSizing", "ASK").unwrap(),
+            "ask"
+        );
     }
 
     #[test]

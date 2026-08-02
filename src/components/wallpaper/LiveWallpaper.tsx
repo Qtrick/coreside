@@ -66,40 +66,69 @@ function CanvasWallpaper({
     let running = true;
     const reduced = prefersReducedMotion();
 
+    let viewW = window.innerWidth;
+    let viewH = window.innerHeight;
+    let resizeRaf = 0;
+    let hidden = document.visibilityState === "hidden";
+
     const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      canvas.width = Math.floor(w * dpr);
-      canvas.height = Math.floor(h * dpr);
-      canvas.style.width = `${w}px`;
-      canvas.style.height = `${h}px`;
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
+      viewW = Math.max(1, canvas.clientWidth || window.innerWidth);
+      viewH = Math.max(1, canvas.clientHeight || window.innerHeight);
+      const nextW = Math.floor(viewW * dpr);
+      const nextH = Math.floor(viewH * dpr);
+      if (canvas.width !== nextW || canvas.height !== nextH) {
+        canvas.width = nextW;
+        canvas.height = nextH;
+      }
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
     resize();
 
+    const scheduleResize = (after?: () => void) => {
+      cancelAnimationFrame(resizeRaf);
+      resizeRaf = requestAnimationFrame(() => {
+        resize();
+        after?.();
+      });
+    };
+
+    const onVisibility = () => {
+      hidden = document.visibilityState === "hidden";
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    const ro =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => scheduleResize())
+        : null;
+    ro?.observe(canvas.parentElement ?? canvas);
+
     if (kind === "matrix") {
       const fontSize = Math.max(12, Math.round(16 - density * 4));
-      let columns = Math.ceil(window.innerWidth / fontSize);
+      let columns = Math.ceil(viewW / fontSize);
       let drops = Array.from({ length: columns }, () => Math.random() * -40);
 
       const rebuild = () => {
-        columns = Math.max(8, Math.ceil(window.innerWidth / fontSize));
+        columns = Math.max(8, Math.ceil(viewW / fontSize));
         drops = Array.from({ length: columns }, (_, i) =>
           drops[i] ?? Math.random() * -40,
         );
       };
 
-      const onResize = () => {
-        resize();
-        rebuild();
-      };
+      const onResize = () => scheduleResize(rebuild);
       window.addEventListener("resize", onResize);
 
       const draw = () => {
         if (!running) return;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
+        if (hidden) {
+          raf = requestAnimationFrame(draw);
+          return;
+        }
+        const w = viewW;
+        const h = viewH;
         ctx.fillStyle = `rgba(0, 0, 0, ${0.05 + (1 - opacity) * 0.08})`;
         ctx.fillRect(0, 0, w, h);
         ctx.font = `${fontSize}px "IBM Plex Mono", ui-monospace, monospace`;
@@ -119,13 +148,16 @@ function CanvasWallpaper({
       };
 
       ctx.fillStyle = "#050805";
-      ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+      ctx.fillRect(0, 0, viewW, viewH);
       raf = requestAnimationFrame(draw);
 
       return () => {
         running = false;
         cancelAnimationFrame(raf);
+        cancelAnimationFrame(resizeRaf);
         window.removeEventListener("resize", onResize);
+        document.removeEventListener("visibilitychange", onVisibility);
+        ro?.disconnect();
       };
     }
 
@@ -136,8 +168,8 @@ function CanvasWallpaper({
     const spawn = () => {
       const count = Math.round(40 + density * 120);
       particles = Array.from({ length: count }, () => ({
-        x: Math.random() * window.innerWidth,
-        y: Math.random() * window.innerHeight,
+        x: Math.random() * viewW,
+        y: Math.random() * viewH,
         vx: (Math.random() - 0.5) * speed * (kind === "rain" ? 0.2 : 0.6),
         vy:
           kind === "rain"
@@ -149,16 +181,17 @@ function CanvasWallpaper({
     };
     spawn();
 
-    const onResize = () => {
-      resize();
-      spawn();
-    };
+    const onResize = () => scheduleResize(spawn);
     window.addEventListener("resize", onResize);
 
     const drawFrame = (now: number) => {
       if (!running) return;
-      const w = window.innerWidth;
-      const h = window.innerHeight;
+      if (hidden) {
+        raf = requestAnimationFrame(drawFrame);
+        return;
+      }
+      const w = viewW;
+      const h = viewH;
       const t = (now - t0) / 1000;
       ctx.clearRect(0, 0, w, h);
       ctx.globalAlpha = opacity;
@@ -238,7 +271,10 @@ function CanvasWallpaper({
     return () => {
       running = false;
       cancelAnimationFrame(raf);
+      cancelAnimationFrame(resizeRaf);
       window.removeEventListener("resize", onResize);
+      document.removeEventListener("visibilitychange", onVisibility);
+      ro?.disconnect();
     };
   }, [kind, color, secondaryColor, speed, density, opacity]);
 

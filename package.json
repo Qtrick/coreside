@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Coreside — an AI-native personal software environment",
+  "description": "Coreside - an AI-native personal software environment",
   "scripts": {
     "dev": "tauri dev",
     "dev:web": "vite",
@@ -69,7 +69,13 @@
     "e2e:ci": "npm run e2e:desktop",
     "release:evidence": "node scripts/release-evidence.mjs",
     "release:evidence:quick": "node scripts/release-evidence.mjs --quick",
-    "package:scan": "node scripts/scan-packaged-contents.mjs"
+    "package:scan": "node scripts/scan-packaged-contents.mjs",
+    "test:layout-overflow": "node scripts/layout-overflow-audit.mjs",
+    "test:responsive-layout": "vitest run src/lib/layout-mode.test.ts src/lib/tool-viewport.test.ts",
+    "test:interface-transparency": "vitest run src/lib/interface-transparency.test.ts",
+    "test:wallpaper-reset": "vitest run src/lib/wallpaper.test.ts src/lib/consumer-errors.test.ts",
+    "test:window-orchestrator": "cargo test --manifest-path src-tauri/Cargo.toml --lib windows::orchestrator",
+    "test:consumer-polish": "npm run test:layout-overflow && npm run test:wallpaper-reset && npm run test:interface-transparency && npm run test:responsive-layout"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",

@@ -9,8 +9,20 @@ import { LiveWallpaper } from "@/components/wallpaper/LiveWallpaper";
 import { MediaLibrary } from "@/components/media/MediaLibrary";
 import { ProjectPage } from "@/components/projects/ProjectPage";
 import { ProjectsListPage } from "@/components/projects/ProjectsListPage";
+import { ChatToolSplitter } from "@/components/layout/ChatToolSplitter";
 import { resolveActiveWallpaper } from "@/lib/wallpaper";
 import { wallpaperDataAttribute } from "@/types/wallpaper";
+import {
+  classifyLayoutMode,
+  clampSplitForWidth,
+  clampSplitRatio,
+  LAYOUT_SAFE,
+} from "@/lib/layout-mode";
+import {
+  applyInterfaceTransparencyCssVars,
+  clampInterfaceTransparency,
+  computeInterfaceTransparencyTokens,
+} from "@/lib/interface-transparency";
 import { CreateProjectDialog } from "@/components/projects/CreateProjectDialog";
 import { EditProjectDialog } from "@/components/projects/EditProjectDialog";
 import { AddChatsToProjectDialog } from "@/components/projects/AddChatsToProjectDialog";
@@ -19,10 +31,14 @@ import { RenameConversationDialog } from "@/components/projects/RenameConversati
 import { CommandPalette } from "@/components/CommandPalette";
 import { PendingApprovalsHost } from "@/components/applications/PendingApprovalsHost";
 import { useAppStore } from "@/stores/app-store";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 export function AppShell() {
   const [commandOpen, setCommandOpen] = useState(false);
+  const [mainWidth, setMainWidth] = useState(0);
+  const [liveSplit, setLiveSplit] = useState<number | null>(null);
+  const mainRef = useRef<HTMLDivElement>(null);
+
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const view = useAppStore((s) => s.view);
   const activeToolId = useAppStore((s) => s.activeToolId);
@@ -31,6 +47,11 @@ export function AppShell() {
   const closeExportDialog = useAppStore((s) => s.closeExportDialog);
   const wallpaper = useAppStore((s) => s.wallpaper);
   const globalWallpaperJson = useAppStore((s) => s.globalWallpaperJson);
+  const interfaceTransparency = useAppStore((s) => s.interfaceTransparency);
+  const chatToolSplitRatio = useAppStore((s) => s.chatToolSplitRatio);
+  const setChatToolSplitRatio = useAppStore((s) => s.setChatToolSplitRatio);
+  const layoutMode = useAppStore((s) => s.layoutMode);
+  const setLayoutMode = useAppStore((s) => s.setLayoutMode);
   const projects = useAppStore((s) => s.projects);
   const activeProject = useAppStore((s) => s.activeProject);
   const projectConversations = useAppStore((s) => s.projectConversations);
@@ -47,6 +68,7 @@ export function AppShell() {
     activeProject,
   });
   const wallpaperAttr = wallpaperDataAttribute(resolvedWallpaper);
+  const wallpaperActive = Boolean(wallpaperAttr);
 
   const createProjectDialogOpen = useAppStore((s) => s.createProjectDialogOpen);
   const setCreateProjectDialogOpen = useAppStore((s) => s.setCreateProjectDialogOpen);
@@ -89,6 +111,15 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  useEffect(() => {
+    const tokens = computeInterfaceTransparencyTokens(
+      clampInterfaceTransparency(interfaceTransparency),
+      { wallpaperActive },
+    );
+    applyInterfaceTransparencyCssVars(tokens);
+    document.body.dataset.wallpaperActive = wallpaperActive ? "true" : "false";
+  }, [interfaceTransparency, wallpaperActive]);
+
   const navigateToProjects = useAppStore((s) => s.navigateToProjects);
   const navigateToProject = useAppStore((s) => s.navigateToProject);
   const createChatInProject = useAppStore((s) => s.createChatInProject);
@@ -104,11 +135,67 @@ export function AppShell() {
   const showToolCanvas =
     view.kind === "chat" && activeToolId && !overlayMode;
 
+  const splitRatio = clampSplitForWidth(
+    liveSplit ?? chatToolSplitRatio,
+    mainWidth || 1,
+  );
+
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let frame = 0;
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const width = entry.contentRect.width;
+        setMainWidth(width);
+        if (!showToolCanvas) {
+          if (layoutMode !== "wide" && layoutMode !== "standard") {
+            setLayoutMode(
+              width >= LAYOUT_SAFE.standardMainThreshold ? "wide" : "standard",
+            );
+          }
+          return;
+        }
+        const next = classifyLayoutMode({
+          shellWidth: window.innerWidth,
+          mainWidth: width,
+          sidebarWidth: sidebarCollapsed ? 80 : 272,
+          toolOpen: true,
+          splitRatio: clampSplitRatio(chatToolSplitRatio),
+        });
+        if (next !== layoutMode) setLayoutMode(next);
+      });
+    });
+    ro.observe(el);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+    };
+  }, [
+    showToolCanvas,
+    sidebarCollapsed,
+    chatToolSplitRatio,
+    layoutMode,
+    setLayoutMode,
+  ]);
+
   const classes = [
     "app-shell",
     sidebarCollapsed ? "sidebar-collapsed" : "",
     !showToolCanvas ? "no-tool" : "",
     overlayMode ? "settings-mode" : "",
+    layoutMode === "compact" && showToolCanvas ? "layout-compact" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const mainClasses = [
+    "app-shell-main",
+    showToolCanvas ? "has-tool" : "",
+    layoutMode === "compact" && showToolCanvas ? "compact" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -120,6 +207,35 @@ export function AppShell() {
   const deleteProjectTarget =
     projects.find((p) => p.id === deleteProjectId) ?? null;
   const renameTarget = conversations.find((c) => c.id === renameConversationId);
+
+  const chatToolMain = (
+    <div
+      ref={mainRef}
+      className={mainClasses}
+      style={
+        showToolCanvas && layoutMode !== "compact"
+          ? ({
+              "--chat-split-fr": `${splitRatio}fr`,
+              "--tool-split-fr": `${1 - splitRatio}fr`,
+            } as CSSProperties)
+          : undefined
+      }
+    >
+      <ChatPanel />
+      {showToolCanvas && layoutMode !== "compact" ? (
+        <ChatToolSplitter
+          ratio={splitRatio}
+          mainWidth={mainWidth}
+          onChange={setLiveSplit}
+          onCommit={(r) => {
+            setLiveSplit(null);
+            void setChatToolSplitRatio(r);
+          }}
+        />
+      ) : null}
+      {showToolCanvas ? <ToolCanvas /> : null}
+    </div>
+  );
 
   const mainPanel = (() => {
     switch (view.kind) {
@@ -155,7 +271,7 @@ export function AppShell() {
             onOpenChat={(id) => void navigateToChat(id)}
             onEditProject={() => setEditProjectDialogOpen(activeProject.id)}
             onManageContext={() => {
-              window.alert("Project context search will be available in a later phase.");
+              /* Project context search arrives in a later phase — no browser alert. */
             }}
             onAddChats={() => setAddChatsDialogOpen(activeProject.id)}
           />
@@ -167,12 +283,7 @@ export function AppShell() {
           />
         );
       default:
-        return (
-          <>
-            <ChatPanel />
-            {showToolCanvas ? <ToolCanvas /> : null}
-          </>
-        );
+        return chatToolMain;
     }
   })();
 
@@ -180,6 +291,7 @@ export function AppShell() {
     <div
       className={classes}
       data-wallpaper={wallpaperAttr}
+      data-layout-mode={layoutMode}
     >
       <LiveWallpaper wallpaper={resolvedWallpaper} />
       <Sidebar />

@@ -132,6 +132,8 @@ export function buildCanvasPresetProposal(
   preset: WallpaperKind,
   opacity?: number,
 ): SchemaWallpaperConfig | WallpaperConfig {
+  // Callers that apply "none" should clear wallpaperJson (empty string), not
+  // persist this legacy sentinel as schema wallpaperJson.
   if (preset === "none") return DEFAULT_WALLPAPER;
   if (preset === "particles") {
     return {

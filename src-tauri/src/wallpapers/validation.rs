@@ -108,4 +108,25 @@ mod tests {
         let cfg = validate_wallpaper_config(&raw.to_string()).unwrap();
         assert_eq!(cfg.wallpaper_type, WallpaperType::ImageCover);
     }
+
+    #[test]
+    fn rejects_legacy_kind_none_without_schema_version() {
+        let raw = r#"{"kind":"none"}"#;
+        let err = validate_wallpaper_config(raw).unwrap_err();
+        assert!(
+            err.contains("schemaVersion") || err.contains("missing field"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn accepts_static_color_none_equivalent() {
+        let raw = serde_json::json!({
+            "schemaVersion": "1",
+            "type": "static-color",
+            "color": "#141714"
+        });
+        let cfg = validate_wallpaper_config(&raw.to_string()).unwrap();
+        assert_eq!(cfg.wallpaper_type, WallpaperType::StaticColor);
+    }
 }

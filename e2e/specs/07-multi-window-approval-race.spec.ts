@@ -1,4 +1,6 @@
 import {
+  approveOnce,
+  E2E_APPROVAL_ID,
   E2E_TOOL_ID,
   listTauriWindows,
   openPersonalTool,
@@ -10,8 +12,8 @@ import {
   waitForToolCanvas,
 } from "../helpers.js";
 
-describe("Journey 7 — multi-window approval race (partial)", () => {
-  it("keeps the pending approval on main while a secondary tool window opens", async () => {
+describe("Journey 7 — multi-window approval exact-once", () => {
+  it("shows one approval, propagates the decision, and executes once", async () => {
     requireExistingSeed("Journey 7");
 
     await waitForAppReady();
@@ -21,23 +23,54 @@ describe("Journey 7 — multi-window approval race (partial)", () => {
     await waitForToolCanvas(E2E_TOOL_ID);
     await openToolInWindow();
 
+    const toolLabel = `tool-${E2E_TOOL_ID}`;
     await browser.waitUntil(
-      async () => (await listTauriWindows()).includes(`tool-${E2E_TOOL_ID}`),
+      async () => (await listTauriWindows()).includes(toolLabel),
       {
         timeout: 20_000,
         timeoutMsg: "Secondary tool window label never appeared",
       },
     );
 
-    // Main window should still host the approval modal.
     await switchTauriWindow("main");
     await waitForPendingApproval();
 
+    // Secondary window must not host a second approval card.
+    await switchTauriWindow(toolLabel);
+    const secondaryHasApproval = await browser.execute((id) => {
+      return Boolean(document.querySelector(`#approval-${id}-title`));
+    }, E2E_APPROVAL_ID);
+    expect(secondaryHasApproval).toBe(false);
+
+    await switchTauriWindow("main");
+    const mainCountBefore = await browser.execute((id) => {
+      return document.querySelectorAll(`#approval-${id}-title`).length;
+    }, E2E_APPROVAL_ID);
+    expect(mainCountBefore).toBe(1);
+
+    await approveOnce();
+
+    await browser.waitUntil(
+      async () => {
+        return browser.execute((id) => {
+          return !document.querySelector(`#approval-${id}-title`);
+        }, E2E_APPROVAL_ID);
+      },
+      {
+        timeout: 15_000,
+        timeoutMsg: "Approval remained after approve-once",
+      },
+    );
+
+    await switchTauriWindow(toolLabel);
+    const secondaryStillClean = await browser.execute((id) => {
+      return !document.querySelector(`#approval-${id}-title`);
+    }, E2E_APPROVAL_ID);
+    expect(secondaryStillClean).toBe(true);
+
+    await switchTauriWindow("main");
     const windows = await listTauriWindows();
     expect(windows).toContain("main");
-    expect(windows).toContain(`tool-${E2E_TOOL_ID}`);
-
-    // Partial coverage: WebDriver session stays on main; we do not assert
-    // duplicate approval UI inside the secondary window in this harness yet.
+    expect(windows).toContain(toolLabel);
   });
 });

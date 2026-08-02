@@ -1,0 +1,32 @@
+{
+  "generatedAt": "2026-08-01",
+  "product": "Coreside",
+  "phase": "adaptive-viewport-wallpaper-polish",
+  "status": "skeleton",
+  "note": "Baseline overflow audit scaffold. Findings empty until npm run test:layout-overflow (or equivalent) instruments nested panels.",
+  "environment": {
+    "os": null,
+    "arch": null,
+    "node": null,
+    "displayScale": null,
+    "windowInnerWidth": null,
+    "windowInnerHeight": null,
+    "theme": null,
+    "activeWallpaper": null,
+    "activeToolId": null
+  },
+  "contract": "docs/APPLICATION_VIEWPORT_CONTRACT.md",
+  "checks": {
+    "rootHorizontalOverflow": null,
+    "nestedPanelsAudited": [],
+    "portalsAudited": []
+  },
+  "findings": [],
+  "summary": {
+    "findingCount": 0,
+    "p0Count": 0,
+    "p1Count": 0,
+    "p2Count": 0,
+    "p3Count": 0
+  }
+}
