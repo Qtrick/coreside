@@ -10,6 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -237,7 +238,26 @@ check(
   "action engine stays free of Tauri invoke",
 );
 
-const tauriTs = read("src/lib/tauri.ts");
+/** Frontend IPC bridge — directory split or legacy monolithic file. */
+function readTauriBridge() {
+  const dir = path.join(root, "src/lib/tauri");
+  if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
+    /** @type {string[]} */
+    const parts = [];
+    const walk = (abs) => {
+      for (const name of fs.readdirSync(abs).sort()) {
+        const child = path.join(abs, name);
+        if (fs.statSync(child).isDirectory()) walk(child);
+        else if (name.endsWith(".ts")) parts.push(fs.readFileSync(child, "utf8"));
+      }
+    };
+    walk(dir);
+    return parts.join("\n");
+  }
+  return read("src/lib/tauri.ts");
+}
+
+const tauriTs = readTauriBridge();
 check(
   "frontend.api_bindings",
   tauriTs.includes("kernelInvokeRegisteredAction") &&
@@ -320,7 +340,7 @@ check(
 );
 
 // --- Contract drift: frontend IPC wrappers vs registered Rust commands ---
-const bridge = read("src/lib/tauri.ts");
+const bridge = tauriTs;
 const registeredCommands = new Set(
   [...libRs.matchAll(/commands::([a-z0-9_]+)/g)].map((m) => m[1]),
 );
@@ -339,11 +359,20 @@ check(
 );
 
 // A mock case with no production command would let tests pass against behaviour
-// the desktop build cannot perform.
+// the desktop build cannot perform. Explicit mock-only allowlist is OK.
+const MOCK_ONLY = new Set(
+  [
+    ...bridge.matchAll(
+      /MOCK_ONLY_COMMANDS\s*=\s*new Set(?:<[^>]*>)?\(\[([^\]]*)\]/g,
+    ),
+  ].flatMap((m) => [...m[1].matchAll(/"([a-z0-9_]+)"/g)].map((x) => x[1])),
+);
 const mockedCommands = new Set(
   [...bridge.matchAll(/case\s+"([a-z0-9_]+)":/g)].map((m) => m[1]),
 );
-const ghostMocks = [...mockedCommands].filter((c) => !registeredCommands.has(c));
+const ghostMocks = [...mockedCommands].filter(
+  (c) => !registeredCommands.has(c) && !MOCK_ONLY.has(c),
+);
 check(
   "contracts.mock_has_production_command",
   ghostMocks.length === 0,
@@ -390,6 +419,158 @@ check(
     bridge.includes("openExternalUrl"),
   "external links open through the validated Rust command",
 );
+
+// --- Desktop E2E: production must not enable WebDriver ---
+const cargoToml = read("src-tauri/Cargo.toml");
+const defaultFeaturesMatch = cargoToml.match(
+  /\[features\][\s\S]*?^default\s*=\s*\[([^\]]*)\]/m,
+);
+const defaultFeatures = defaultFeaturesMatch
+  ? defaultFeaturesMatch[1]
+  : "";
+check(
+  "e2e.not_in_default_features",
+  !/\be2e\b/.test(defaultFeatures) &&
+    cargoToml.includes('e2e = ["dep:tauri-plugin-wdio"') &&
+    cargoToml.includes("optional = true"),
+  "Cargo feature e2e is optional and excluded from default features",
+);
+
+const tauriConf = read("src-tauri/tauri.conf.json");
+check(
+  "e2e.production_config_no_wdio",
+  !tauriConf.includes("wdio") &&
+    !tauriConf.includes("withGlobalTauri") &&
+    tauriConf.includes('"capabilities": ["default", "tool-window"]'),
+  "production tauri.conf.json does not enable WebDriver or e2e capabilities",
+);
+check(
+  "e2e.production_caps_no_wdio",
+  !mainCaps.includes("wdio") && !toolCaps.includes("wdio"),
+  "production capability files do not grant wdio permissions",
+);
+check(
+  "e2e.dedicated_config_present",
+  exists("src-tauri/tauri.e2e.conf.json") &&
+    read("src-tauri/tauri.e2e.conf.json").includes("wdio:default") &&
+    read("src-tauri/tauri.e2e.conf.json").includes('"tool-*"'),
+  "tauri.e2e.conf.json gates WebDriver for E2E builds on main + tool-* windows",
+);
+check(
+  "e2e.lib_plugins_feature_gated",
+  libRs.includes('#[cfg(feature = "e2e")]') &&
+    libRs.includes("tauri_plugin_wdio") &&
+    libRs.includes("tauri_plugin_wdio_webdriver"),
+  "WebDriver plugins register only behind cfg(feature = \"e2e\")",
+);
+check(
+  "e2e.seed_not_public_ipc",
+  exists("src-tauri/src/e2e_support.rs") &&
+    read("src-tauri/src/e2e_support.rs").includes("CORESIDE_E2E_SEED") &&
+    libRs.includes('#[cfg(feature = "e2e")]') &&
+    libRs.includes("mod e2e_support") &&
+    libRs.includes("e2e_support::maybe_seed") &&
+    !/\be2e_seed\b/.test(libRs) &&
+    !/generate_handler!\[[\s\S]*e2e_support/.test(libRs),
+  "E2E seed is env-only behind feature e2e — not a privileged Tauri IPC command",
+);
+check(
+  "e2e.harness_no_broad_pkill",
+  exists("e2e/wdio.conf.ts") &&
+    !/spawnSync\(\s*["']pkill["']/.test(read("e2e/wdio.conf.ts")) &&
+    !/["']pkill["']/.test(read("e2e/wdio.conf.ts")) &&
+    read("e2e/wdio.conf.ts").includes("killOrphanedE2eWebDrivers") &&
+    read("e2e/wdio.conf.ts").includes("WEBDRIVER_PORT") &&
+    read("e2e/run.mjs").includes("CORESIDE_DB_PATH"),
+  "E2E harness never broad-pkills Coreside; orphans cleaned only via WebDriver port + binary match",
+);
+check(
+  "e2e.tsconfig_isolated",
+  exists("e2e/tsconfig.json") &&
+    read("tsconfig.json").includes('"exclude"') &&
+    /"exclude"\s*:\s*\[[^\]]*e2e/.test(read("tsconfig.json")),
+  "Root tsconfig excludes e2e so @wdio types cannot leak into app tsc",
+);
+
+// --- Release evidence drift (do not fail solely because the tree is dirty) ---
+check(
+  "evidence.script_present",
+  exists("scripts/release-evidence.mjs") &&
+    read("package.json").includes('"release:evidence"'),
+  "npm run release:evidence is available",
+);
+check(
+  "evidence.tracks_separated",
+  exists("scripts/release-evidence.mjs") &&
+    read("scripts/release-evidence.mjs").includes("localByok") &&
+    read("scripts/release-evidence.mjs").includes("hostedAi"),
+  "Evidence script separates local BYOK vs hosted AI tracks",
+);
+
+// Missing evidence must not fail doctor: release:evidence runs doctor first
+// (chicken-and-egg). When a file exists, it must be honest and current.
+if (exists("reports/release-evidence.json")) {
+  let evidenceOk = false;
+  let detail = "release-evidence.json unreadable";
+  try {
+    const ev = JSON.parse(read("reports/release-evidence.json"));
+    const head = spawnSyncGitHead();
+    const sameCommit = !head || ev?.git?.commit === head;
+    const hasGates = Array.isArray(ev?.gates);
+    // "passed" requires a numeric exitCode of 0 — null/undefined is invented.
+    const inventsPass = (ev?.gates || []).some(
+      (g) =>
+        g.status === "passed" &&
+        (typeof g.exitCode !== "number" || g.exitCode !== 0),
+    );
+    evidenceOk = hasGates && sameCommit && !inventsPass;
+    detail = !hasGates
+      ? "release-evidence.json missing gates[]"
+      : !sameCommit
+        ? `evidence commit ${ev?.git?.commit?.slice(0, 7)} != HEAD ${head?.slice(0, 7)} (regenerate with npm run release:evidence)`
+        : inventsPass
+          ? "evidence claims passed without exitCode === 0"
+          : `evidence matches HEAD ${head?.slice(0, 7) || "(unknown)"}`;
+  } catch (e) {
+    detail = String(e && typeof e === "object" && "message" in e ? e.message : e);
+  }
+  check("evidence.current_commit", evidenceOk, detail);
+} else {
+  check(
+    "evidence.current_commit",
+    true,
+    "reports/release-evidence.json not generated yet (run npm run release:evidence)",
+  );
+}
+
+check(
+  "docs.release_readiness_points_to_evidence",
+  exists("docs/RELEASE_READINESS.md") &&
+    (read("docs/RELEASE_READINESS.md").includes("release-evidence.json") ||
+      read("docs/RELEASE_READINESS.md").includes("npm run release:evidence")),
+  "RELEASE_READINESS.md references generated evidence rather than stale July counts alone",
+);
+
+check(
+  "reports.release_gates_marked_historical",
+  !exists("reports/release-gates.json") ||
+    read("reports/release-gates.json").includes('"status": "historical"') ||
+    read("reports/release-gates.json").includes('"superseded"') ||
+    read("scripts/release-evidence.mjs").includes("release-gates.json"),
+  "Stale release-gates.json is superseded by release-evidence pipeline",
+);
+
+function spawnSyncGitHead() {
+  try {
+    const r = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    return (r.stdout || "").trim() || null;
+  } catch {
+    return null;
+  }
+}
 
 const failed = checks.filter((c) => !c.ok);
 const report = {

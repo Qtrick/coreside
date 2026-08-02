@@ -42,6 +42,7 @@ export default defineConfig({
       "**/dist/**",
       "**/.reference/**",
       "**/src-tauri/**",
+      "**/e2e/**",
     ],
   },
 });

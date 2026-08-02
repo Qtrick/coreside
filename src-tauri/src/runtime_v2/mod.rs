@@ -36,7 +36,10 @@ pub use continuity::{
     get_continuity, save_continuity, suspend_surface, ContinuitySnapshot, SuspensionState,
 };
 #[allow(unused_imports)]
-pub use drafts::{delete_draft, get_draft, save_draft, DraftConflict, SurfaceDraft};
+pub use drafts::{
+    delete_draft, delete_drafts_for_conversation, delete_drafts_for_surface, get_draft, save_draft,
+    DraftConflict, SurfaceDraft,
+};
 #[allow(unused_imports)]
 pub use events::{EventBus, EventBusError, EventRef, Subscription, SurfaceEvent};
 #[allow(unused_imports)]
@@ -77,9 +80,9 @@ pub use queue::{
 pub use streaming::{NdjsonFrameParser, StreamEvent};
 #[allow(unused_imports)]
 pub use surfaces::{
-    create_inline_surface, get_surface, get_surface_state, list_inline_surfaces,
-    promote_inline_to_tool, save_surface_state, update_surface_definition,
-    upsert_surface_from_tool, SurfaceRecord,
+    archive_surface, create_inline_surface, delete_surface, get_surface, get_surface_state,
+    list_inline_surfaces, promote_inline_to_tool, restore_surface, save_surface_state,
+    update_surface_definition, upsert_surface_from_tool, DeleteSurfaceOptions, SurfaceRecord,
 };
 #[allow(unused_imports)]
 pub use transactions::{

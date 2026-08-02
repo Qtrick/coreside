@@ -320,14 +320,8 @@ mod tests {
             .unwrap();
         }
 
-        let err = branch_from_message(
-            &mut db,
-            &conv.id,
-            &msg.id,
-            "overflow",
-            DEFAULT_WORKSPACE_ID,
-        )
-        .unwrap_err();
+        let err = branch_from_message(&mut db, &conv.id, &msg.id, "overflow", DEFAULT_WORKSPACE_ID)
+            .unwrap_err();
         assert!(
             err.to_string().contains("branch limit"),
             "expected branch limit error, got {err}"

@@ -14,7 +14,7 @@ Agent cannot raise these ceilings. Compact subset exposed via `limits_json()` / 
 | `MAX_COMPONENT_TREE_DEPTH` | 24 |
 | `MAX_COMPONENTS_PER_SURFACE` | 200 |
 | `MAX_SURFACES_PER_CONVERSATION` | 64 |
-| `MAX_INLINE_SURFACES_VISIBLE` | 12 |
+| `MAX_INLINE_SURFACES_VISIBLE` | 12 (UI soft-cap only; list API returns full active set) |
 | `MAX_SUBSCRIPTIONS_PER_SURFACE` | 16 |
 | `MAX_EVENT_DEPTH` | 8 |
 | `MAX_EVENTS_PER_SURFACE_PER_MINUTE` | 20 |

@@ -1,0 +1,9 @@
+{
+  "product": "Coreside",
+  "track": "hosted-ai",
+  "verdict": "not_ready",
+  "note": "Hosted AI private alpha is a separate track from local BYOK beta.",
+  "generatedAt": "2026-08-02T00:11:55.174Z",
+  "commit": "8b12b38843c08566e0280606e27033ae1884763a",
+  "sourceEvidence": "reports/release-evidence.json"
+}

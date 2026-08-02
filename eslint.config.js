@@ -9,6 +9,7 @@ export default tseslint.config(
     ignores: [
       "dist",
       "src-tauri",
+      "e2e/**",
       ".reference",
       "node_modules",
       "supabase/functions/**",

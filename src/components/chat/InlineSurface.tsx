@@ -470,9 +470,12 @@ export function InlineSurfacesForMessage({
   }, [conversationId, messageId]);
 
   if (!surfaces.length) return null;
+  // Soft per-message UI cap (matches MAX_INLINE_SURFACES_VISIBLE). Backend list
+  // returns the full conversation set so older messages are not starved.
+  const visible = surfaces.slice(0, 12);
   return (
     <div className="inline-surfaces">
-      {surfaces.map((s) => (
+      {visible.map((s) => (
         <InlineSurfaceCard
           key={s.instanceId}
           surface={s}

@@ -21,5 +21,6 @@
     },
     "types": ["vitest/globals", "node"]
   },
-  "include": ["src", "tests", "vite.config.ts"]
+  "include": ["src", "tests", "vite.config.ts"],
+  "exclude": ["e2e", "node_modules", "dist", "src-tauri"]
 }

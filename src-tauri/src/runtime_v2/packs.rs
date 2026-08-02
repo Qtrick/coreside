@@ -174,14 +174,9 @@ pub fn bundled_packs() -> Vec<CapabilityPackMeta> {
             "Sortable/filterable tables with bounded rows and CSV export metadata.",
             &["render", "local_state", "export"],
         ),
-        pack(
-            "coreside.dictation",
-            "Dictation (extension point)",
-            "0.1.0",
-            &["dictationButton"],
-            "Permissioned voice input extension point. Follow-up milestone.",
-            &["microphone", "render"],
-        ),
+        // ponytail: dictationButton removed from generatable packs. Old tools that
+        // still carry the type render via UnsupportedNode; do not re-add until mic
+        // permissions and a real dictation runtime exist.
     ]
 }
 
@@ -258,6 +253,8 @@ fn validate_labeled_props(
     component_id: &str,
     props: Option<&Value>,
 ) -> Result<(), String> {
+    use super::limits::{MAX_CANVAS_OBJECTS, MAX_CODE_EDITOR_CHARS};
+
     const NEEDS_LABEL: &[&str] = &[
         "textInput",
         "textArea",
@@ -272,6 +269,34 @@ fn validate_labeled_props(
         "text", "button", "notes", "number", "select", "checkbox", "date", "label", "input",
         "untitled", "field",
     ];
+
+    if component_type == "codeEditor" {
+        let value_len = props
+            .and_then(|p| {
+                p.get("value")
+                    .or_else(|| p.get("defaultValue"))
+                    .and_then(|v| v.as_str())
+            })
+            .map(|s| s.chars().count())
+            .unwrap_or(0);
+        if value_len > MAX_CODE_EDITOR_CHARS {
+            return Err(format!(
+                "codeEditor '{component_id}' exceeds max {MAX_CODE_EDITOR_CHARS} characters"
+            ));
+        }
+    }
+    if component_type == "canvasScene" {
+        let count = props
+            .and_then(|p| p.get("objects"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        if count > MAX_CANVAS_OBJECTS {
+            return Err(format!(
+                "canvasScene '{component_id}' exceeds max {MAX_CANVAS_OBJECTS} objects"
+            ));
+        }
+    }
 
     if NEEDS_LABEL.contains(&component_type) {
         let label = props
@@ -340,6 +365,9 @@ mod tests {
         assert!(validate_component_type_allowed("progress").is_ok());
         assert!(validate_component_type_allowed("svgScene").is_ok());
         assert!(validate_component_type_allowed("evilScript").is_err());
+        // Dictation is intentionally not generatable; legacy definitions still
+        // render via UnsupportedNode on the frontend.
+        assert!(validate_component_type_allowed("dictationButton").is_err());
     }
 
     #[test]

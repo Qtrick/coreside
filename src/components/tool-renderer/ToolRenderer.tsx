@@ -42,6 +42,16 @@ type ToolErrorBoundaryProps = {
 
 /** One report per application + definition until the tool version changes. */
 const reportedBuildFailures = new Set<string>();
+const MAX_REPORTED_BUILD_FAILURES = 200;
+
+function rememberBuildFailure(dedupeKey: string): boolean {
+  if (reportedBuildFailures.has(dedupeKey)) return false;
+  if (reportedBuildFailures.size >= MAX_REPORTED_BUILD_FAILURES) {
+    reportedBuildFailures.clear();
+  }
+  reportedBuildFailures.add(dedupeKey);
+  return true;
+}
 
 class ToolErrorBoundary extends Component<
   ToolErrorBoundaryProps,
@@ -61,8 +71,7 @@ class ToolErrorBoundary extends Component<
 
     const resetKey = this.props.resetKey ?? "";
     const dedupeKey = `${applicationId}:${resetKey}`;
-    if (reportedBuildFailures.has(dedupeKey)) return;
-    reportedBuildFailures.add(dedupeKey);
+    if (!rememberBuildFailure(dedupeKey)) return;
 
     const name = error?.name || "Error";
     const detail = String(error?.message ?? "").slice(0, 180);

@@ -63,6 +63,7 @@ export const ComponentTypeSchema = z.enum([
   "canvasScene",
   "audioPlayer",
   "dataTable",
+  // Kept for parse compatibility with saved tools; not generatable (pack removed).
   "dictationButton",
 ]);
 

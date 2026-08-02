@@ -359,6 +359,9 @@ impl CrawlerSupervisor {
     }
 
     /// Cancel every in-flight sidecar request (Stop button / agent cancel).
+    ///
+    /// Uses [`super::cancellation::cancel_request`] per id so the cancel
+    /// protocol path stays shared with any future per-request UI cancel.
     pub async fn cancel_active(&self) -> usize {
         let ids: Vec<String> = {
             let guard = self.inner.lock().await;
@@ -370,11 +373,11 @@ impl CrawlerSupervisor {
 
         let mut cancelled = 0usize;
         for id in &ids {
-            match self
-                .send_command_inner("cancel", json!({ "targetRequestId": id }))
-                .await
-            {
-                Ok(_) => cancelled += 1,
+            match super::cancellation::cancel_request(self, id).await {
+                Ok(true) => cancelled += 1,
+                Ok(false) => {
+                    tracing::debug!(request_id = %id, "sidecar reported cancel=false");
+                }
                 Err(e) => tracing::debug!(error = %e, request_id = %id, "sidecar cancel failed"),
             }
         }

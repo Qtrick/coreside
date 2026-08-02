@@ -3,14 +3,22 @@ import { createRoot } from "react-dom/client";
 import { App } from "@/app/App";
 import "@/styles/global.css";
 
-const root = document.getElementById("root");
+async function boot() {
+  // Tree-shaken out of production builds unless VITE_E2E=1.
+  if (import.meta.env.VITE_E2E === "1") {
+    await import("@wdio/tauri-plugin");
+  }
 
-if (!root) {
-  throw new Error("Root element #root not found");
+  const root = document.getElementById("root");
+  if (!root) {
+    throw new Error("Root element #root not found");
+  }
+
+  createRoot(root).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
 }
 
-createRoot(root).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+void boot();

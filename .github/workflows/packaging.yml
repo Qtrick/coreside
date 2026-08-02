@@ -1,0 +1,113 @@
+name: Packaging
+
+# Build native artifacts without publishing. No production secrets required.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src-tauri/**"
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/packaging.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src-tauri/**"
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/packaging.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos
+          - os: ubuntu-latest
+            platform: linux
+          - os: windows-latest
+            platform: windows
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install Linux Tauri deps
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Assert production excludes E2E feature
+        run: |
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            const cargo = fs.readFileSync('src-tauri/Cargo.toml','utf8');
+            if (/default\s*=\s*\[[^\]]*\"e2e\"/.test(cargo)) {
+              console.error('e2e must not be in default features');
+              process.exit(1);
+            }
+            const conf = fs.readFileSync('src-tauri/tauri.conf.json','utf8');
+            if (/\"capabilities\"\s*:\s*\[[^\]]*wdio/.test(conf) || conf.includes('wdio:')) {
+              console.error('production tauri.conf must not enable wdio capability');
+              process.exit(1);
+            }
+            if (conf.includes('withGlobalTauri')) {
+              console.error('production tauri.conf must not enable withGlobalTauri');
+              process.exit(1);
+            }
+            console.log('production e2e exclusion OK');
+          "
+
+      - name: Build packaged app (unsigned / ad-hoc where required)
+        run: npm run build
+        env:
+          # Avoid requiring Apple Developer signing secrets on PR builds.
+          TAURI_SIGNING_PRIVATE_KEY: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+
+      - name: Scan packaged contents for forbidden artifacts
+        shell: bash
+        run: node scripts/scan-packaged-contents.mjs
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coreside-${{ matrix.platform }}-${{ github.sha }}
+          path: |
+            src-tauri/target/release/bundle/**
+          if-no-files-found: warn
+          retention-days: 14

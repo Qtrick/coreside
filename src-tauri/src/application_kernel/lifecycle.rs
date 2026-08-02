@@ -315,7 +315,9 @@ mod tests {
         .expect("failure row must succeed even without a kernel app");
         assert!(!failure.retryable);
         assert_eq!(
-            list_build_failures(&db, "tool-without-manifest").unwrap().len(),
+            list_build_failures(&db, "tool-without-manifest")
+                .unwrap()
+                .len(),
             1
         );
     }

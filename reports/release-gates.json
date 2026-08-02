@@ -49,5 +49,8 @@
       "id": "packaged-build",
       "status": "pending"
     }
-  ]
+  ],
+  "status": "historical",
+  "supersededBy": "reports/release-evidence.json",
+  "note": "Do not treat this July 2026 snapshot as current. Regenerate via npm run release:evidence."
 }

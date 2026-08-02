@@ -1768,11 +1768,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
   resolveSurfaceDraftConflict: async (action) => {
     const conflict = get().surfaceDraftConflict;
     if (!conflict) return;
-    if (action === "cancel") {
-      set({ surfaceDraftConflict: null });
-      return;
-    }
     try {
+      if (action === "cancel") {
+        // Discard the persisted surface draft and dismiss the banner.
+        await api.deleteDraft(
+          conflict.surfaceId,
+          conflict.componentId,
+          conflict.windowId,
+        );
+        set({ surfaceDraftConflict: null });
+        return;
+      }
       if (action === "keep") {
         await api.saveDraft({
           surfaceId: conflict.surfaceId,

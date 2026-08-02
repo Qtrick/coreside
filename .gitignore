@@ -53,6 +53,17 @@ services/crawl4ai/**/.pytest_cache/
 # Local fallback database directory
 .coreside/
 
+# Desktop E2E temp / local overrides
+e2e/.artifacts/
+e2e-results/
+logs/
+
+# Generated assurance outputs (regenerate; do not commit stale invents)
+reports/release-evidence.json
+reports/local-beta-readiness.json
+reports/packaging-results.json
+reports/e2e-results.json
+
 # Test / temp
 tmp/
 *.tmp

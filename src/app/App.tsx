@@ -2,8 +2,28 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { ConflictBanner } from "@/components/chat/ConflictBanner";
 import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
-import { api } from "@/lib/tauri";
+import { api, isWebPreview } from "@/lib/tauri";
 import { applyAppearanceCssVars, useAppStore } from "@/stores/app-store";
+
+function WebPreviewBanner() {
+  if (!isWebPreview()) return null;
+  return (
+    <div
+      role="status"
+      style={{
+        flexShrink: 0,
+        padding: "0.35rem 0.75rem",
+        fontSize: "0.75rem",
+        textAlign: "center",
+        background: "var(--surface-muted, #ecefe8)",
+        color: "var(--text-secondary, #687066)",
+        borderBottom: "1px solid var(--border, #d8d8d4)",
+      }}
+    >
+      Web preview — in-memory mocks only; data is not persisted
+    </div>
+  );
+}
 
 function parseToolRoute(hash: string): string | null {
   const match = hash.match(/^#\/tool\/([^/?#]+)/);
@@ -182,5 +202,19 @@ export function App() {
     );
   }
 
-  return <AppShell />;
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        minHeight: "100%",
+      }}
+    >
+      <WebPreviewBanner />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <AppShell />
+      </div>
+    </div>
+  );
 }

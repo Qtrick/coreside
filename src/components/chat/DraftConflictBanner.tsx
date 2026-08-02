@@ -3,7 +3,6 @@ import { useAppStore } from "@/stores/app-store";
 export function DraftConflictBanner() {
   const conflict = useAppStore((s) => s.surfaceDraftConflict);
   const resolveDraftConflict = useAppStore((s) => s.resolveSurfaceDraftConflict);
-  const clearDraftConflict = useAppStore((s) => s.clearSurfaceDraftConflict);
 
   if (!conflict) return null;
 
@@ -31,9 +30,9 @@ export function DraftConflictBanner() {
         <button
           type="button"
           className="btn btn-ghost"
-          onClick={() => clearDraftConflict()}
+          onClick={() => void resolveDraftConflict("cancel")}
         >
-          Cancel
+          Discard draft
         </button>
       </div>
     </div>

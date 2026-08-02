@@ -1,0 +1,48 @@
+name: Desktop E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-macos:
+    name: Desktop E2E (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Doctor (E2E production gates)
+        run: npm run doctor -- --json
+
+      - name: Build E2E binary
+        run: npm run e2e:build
+
+      - name: Run desktop E2E
+        run: npm run e2e
+        # Real fail preferred. continue-on-error is intentionally NOT set.
+        # macOS runners provide a GUI session for the embedded WebDriver provider.

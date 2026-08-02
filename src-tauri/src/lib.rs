@@ -22,6 +22,9 @@ mod state;
 mod wallpapers;
 mod windows;
 
+#[cfg(feature = "e2e")]
+mod e2e_support;
+
 use std::sync::Arc;
 
 use automations::SchedulerHandle;
@@ -41,7 +44,7 @@ pub fn run() {
         "Coreside starting"
     );
 
-    let database = db::Database::open_default().unwrap_or_else(|e| {
+    let mut database = db::Database::open_default().unwrap_or_else(|e| {
         tracing::error!(error = %e, "Failed to open database");
         panic!("Failed to open database: {e}");
     });
@@ -50,11 +53,22 @@ pub fn run() {
         let _ = db::ensure_default_workspace(&database);
     }
 
+    #[cfg(feature = "e2e")]
+    e2e_support::maybe_seed(&mut database);
+
     let app_state = AppState::new(config, database);
     let scheduler_handle = Arc::new(SchedulerHandle::default());
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
+    let builder = tauri::Builder::default().plugin(tauri_plugin_shell::init());
+
+    // WebDriver plugins are compile-gated behind Cargo feature `e2e`.
+    // Production `tauri build` / default features never register them.
+    #[cfg(feature = "e2e")]
+    let builder = builder
+        .plugin(tauri_plugin_wdio::init())
+        .plugin(tauri_plugin_wdio_webdriver::init());
+
+    builder
         .manage(app_state)
         .manage(scheduler_handle.clone())
         .invoke_handler(tauri::generate_handler![
@@ -177,6 +191,7 @@ pub fn run() {
             commands::get_surface_state_cmd,
             commands::get_draft_cmd,
             commands::save_draft_cmd,
+            commands::delete_draft_cmd,
             commands::schedule_patches_cmd,
             commands::flush_patch_scheduler_cmd,
             commands::get_route_state_cmd,

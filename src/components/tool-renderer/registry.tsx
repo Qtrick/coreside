@@ -132,6 +132,8 @@ export const componentRegistry: Record<
   canvasScene: CanvasSceneNode,
   audioPlayer: AudioPlayerNode,
   dataTable: DataTableNode,
+  // Legacy type: kept in ComponentTypeSchema so old tools parse, but not
+  // generatable. DictationButtonNode is a compatibility fallback only.
   dictationButton: DictationButtonNode,
 };
 

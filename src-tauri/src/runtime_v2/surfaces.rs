@@ -12,6 +12,12 @@ use crate::ai::{layout_type_string, ToolDefinition};
 use crate::db::{now_rfc3339, Database, DbError, DbResult};
 use rusqlite::params;
 
+/// Options for [`delete_surface`]. Linked tools are kept unless explicitly requested.
+#[derive(Debug, Clone, Default)]
+pub struct DeleteSurfaceOptions {
+    pub delete_linked_tool: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SurfaceRecord {
@@ -163,6 +169,8 @@ pub fn create_inline_surface(
          VALUES (?1, ?2, 1, ?3, 'inline create', ?4)",
         params![version_id, id, def_json, now],
     )?;
+    // ponytail: dependency edges on create are optional; delete_surface cleans both
+    // directions. Wire add_dependency(conversation→surface) when impact UI needs it.
     get_surface(db, &id)
 }
 
@@ -209,6 +217,12 @@ pub fn get_surface(db: &Database, id: &str) -> DbResult<SurfaceRecord> {
         })
 }
 
+/// List all active inline surfaces for a conversation.
+///
+/// Do **not** apply `MAX_INLINE_SURFACES_VISIBLE` here — that ceiling is UI-only.
+/// Truncating at the DB layer would hide surfaces on older messages and silently
+/// drop them from branch clones (callers include `list_conversation_surfaces` and
+/// `branch_chat`). Creation remains capped by `MAX_SURFACES_PER_CONVERSATION`.
 pub fn list_inline_surfaces(db: &Database, conversation_id: &str) -> DbResult<Vec<SurfaceRecord>> {
     let mut stmt = db.conn().prepare(
         "SELECT id FROM surfaces WHERE conversation_id = ?1 AND placement = 'chat_inline'
@@ -218,6 +232,104 @@ pub fn list_inline_surfaces(db: &Database, conversation_id: &str) -> DbResult<Ve
         .query_map([conversation_id], |r| r.get(0))?
         .collect::<Result<Vec<_>, _>>()?;
     ids.into_iter().map(|id| get_surface(db, &id)).collect()
+}
+
+/// Soft-archive a surface. Does not delete versions, state, or linked tools.
+pub fn archive_surface(db: &mut Database, surface_id: &str) -> DbResult<SurfaceRecord> {
+    crate::security::assert_not_protected(surface_id).map_err(DbError::Invalid)?;
+    let current = get_surface(db, surface_id)?;
+    if let Some(tool_id) = current.tool_id.as_ref() {
+        crate::security::assert_not_protected(tool_id).map_err(DbError::Invalid)?;
+    }
+    let now = now_rfc3339();
+    db.conn().execute(
+        "UPDATE surfaces SET archived = 1, lifecycle_state = 'archived', updated_at = ?1 WHERE id = ?2",
+        params![now, surface_id],
+    )?;
+    get_surface(db, surface_id)
+}
+
+/// Clear archived flag and return the surface to active lifecycle.
+pub fn restore_surface(db: &mut Database, surface_id: &str) -> DbResult<SurfaceRecord> {
+    crate::security::assert_not_protected(surface_id).map_err(DbError::Invalid)?;
+    let current = get_surface(db, surface_id)?;
+    if !current.archived {
+        return Ok(current);
+    }
+    // Restoring counts toward the per-conversation active-surface cap.
+    if let Some(conversation_id) = current.conversation_id.as_deref() {
+        let count: i64 = db.conn().query_row(
+            "SELECT COUNT(*) FROM surfaces WHERE conversation_id = ?1 AND archived = 0",
+            [conversation_id],
+            |r| r.get(0),
+        )?;
+        if count as usize >= MAX_SURFACES_PER_CONVERSATION {
+            return Err(DbError::Invalid(format!(
+                "surface limit reached: max {MAX_SURFACES_PER_CONVERSATION} per conversation"
+            )));
+        }
+    }
+    let now = now_rfc3339();
+    db.conn().execute(
+        "UPDATE surfaces SET archived = 0, lifecycle_state = 'active', updated_at = ?1 WHERE id = ?2",
+        params![now, surface_id],
+    )?;
+    get_surface(db, surface_id)
+}
+
+/// Hard-delete a surface and non-cascading related rows.
+///
+/// Does **not** delete application manifests or shared application data.
+/// Linked tools are kept unless [`DeleteSurfaceOptions::delete_linked_tool`] is set.
+pub fn delete_surface(
+    db: &mut Database,
+    surface_id: &str,
+    options: DeleteSurfaceOptions,
+) -> DbResult<SurfaceRecord> {
+    crate::security::assert_not_protected(surface_id).map_err(DbError::Invalid)?;
+    let snapshot = get_surface(db, surface_id)?;
+    if let Some(tool_id) = snapshot.tool_id.as_ref() {
+        crate::security::assert_not_protected(tool_id).map_err(DbError::Invalid)?;
+    }
+
+    // Non-cascading cleanup (014 continuity / drafts / preservation).
+    let _ = super::drafts::delete_drafts_for_surface(db, surface_id)?;
+    db.conn().execute(
+        "DELETE FROM component_preservation WHERE surface_id = ?1",
+        [surface_id],
+    )?;
+    db.conn().execute(
+        "DELETE FROM surface_continuity WHERE surface_id = ?1",
+        [surface_id],
+    )?;
+    db.conn().execute(
+        "DELETE FROM manual_edit_provenance WHERE surface_id = ?1",
+        [surface_id],
+    )?;
+    db.conn().execute(
+        "DELETE FROM patch_scheduler_items WHERE surface_id = ?1",
+        [surface_id],
+    )?;
+    // Dependency edges referencing this surface (no FK cascade).
+    db.conn().execute(
+        "DELETE FROM application_dependencies
+         WHERE (source_type = 'surface' AND source_id = ?1)
+            OR (target_type = 'surface' AND target_id = ?1)",
+        [surface_id],
+    )?;
+
+    db.conn()
+        .execute("DELETE FROM surfaces WHERE id = ?1", [surface_id])?;
+
+    if options.delete_linked_tool {
+        if let Some(tool_id) = snapshot.tool_id.as_ref() {
+            crate::security::assert_not_protected(tool_id).map_err(DbError::Invalid)?;
+            db.conn()
+                .execute("DELETE FROM tools WHERE id = ?1", [tool_id])?;
+        }
+    }
+
+    Ok(snapshot)
 }
 
 pub fn update_surface_definition(
@@ -377,5 +489,183 @@ impl<T> OptionalCompat<T> for Result<T, rusqlite::Error> {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(DbError::Sqlite(e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::ToolDefinition;
+    use crate::db::{apply_tool_change, create_conversation, Database, DEFAULT_WORKSPACE_ID};
+    use serde_json::json;
+    use tempfile::tempdir;
+
+    fn test_db() -> Database {
+        let dir = tempdir().unwrap();
+        Database::open_path(&dir.path().join("t.db")).unwrap()
+    }
+
+    fn minimal_def(name: &str) -> Value {
+        json!({
+            "id": "inline-def",
+            "name": name,
+            "description": "",
+            "layout": "stack",
+            "components": [{
+                "id": "title",
+                "type": "heading",
+                "props": { "text": name }
+            }]
+        })
+    }
+
+    #[test]
+    fn delete_inline_surface_removes_row_and_drafts() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Inline",
+            &minimal_def("Inline"),
+            &[],
+        )
+        .unwrap();
+        super::super::drafts::save_draft(
+            &mut db,
+            &surface.id,
+            "title",
+            "main",
+            1,
+            &json!({"text": "draft"}),
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+
+        let deleted =
+            delete_surface(&mut db, &surface.id, DeleteSurfaceOptions::default()).unwrap();
+        assert_eq!(deleted.id, surface.id);
+        assert!(get_surface(&db, &surface.id).is_err());
+        assert!(
+            super::super::drafts::get_draft(&db, &surface.id, "title", "main")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn delete_tool_surface_keeps_tool_by_default() {
+        let mut db = test_db();
+        let tool = ToolDefinition {
+            id: "tool-keep-me".into(),
+            name: "Keep Me".into(),
+            description: "d".into(),
+            layout: json!("stack"),
+            components: vec![crate::ai::ToolComponent {
+                id: "h".into(),
+                component_type: "heading".into(),
+                props: Some(json!({"text": "Hi"})),
+                children: None,
+            }],
+        };
+        let applied =
+            apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "test")
+                .unwrap();
+        let surface =
+            upsert_surface_from_tool(&mut db, &applied.definition, DEFAULT_WORKSPACE_ID, 1)
+                .unwrap();
+        assert!(surface.tool_id.is_some());
+
+        delete_surface(&mut db, &surface.id, DeleteSurfaceOptions::default()).unwrap();
+        assert!(get_surface(&db, &surface.id).is_err());
+        assert!(crate::db::get_tool(&db, "tool-keep-me").is_ok());
+    }
+
+    #[test]
+    fn archive_and_restore_surface() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Archivable",
+            &minimal_def("Archivable"),
+            &[],
+        )
+        .unwrap();
+
+        let archived = archive_surface(&mut db, &surface.id).unwrap();
+        assert!(archived.archived);
+        assert_eq!(archived.lifecycle_state, "archived");
+        assert!(list_inline_surfaces(&db, &conv.id).unwrap().is_empty());
+
+        let restored = restore_surface(&mut db, &surface.id).unwrap();
+        assert!(!restored.archived);
+        assert_eq!(restored.lifecycle_state, "active");
+        assert_eq!(list_inline_surfaces(&db, &conv.id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn restore_surface_respects_conversation_limit() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        let archived = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Archived",
+            &minimal_def("Archived"),
+            &[],
+        )
+        .unwrap();
+        archive_surface(&mut db, &archived.id).unwrap();
+
+        for i in 0..MAX_SURFACES_PER_CONVERSATION {
+            create_inline_surface(
+                &mut db,
+                &conv.id,
+                None,
+                None,
+                &format!("Fill{i}"),
+                &minimal_def(&format!("Fill{i}")),
+                &[],
+            )
+            .unwrap();
+        }
+
+        let err = restore_surface(&mut db, &archived.id).unwrap_err();
+        assert!(
+            err.to_string().contains("surface limit"),
+            "expected surface limit error, got {err}"
+        );
+    }
+
+    #[test]
+    fn list_inline_surfaces_returns_all_active_not_ui_visible_cap() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        // UI visible cap is 12; listing must still return everything for branch/UI by message.
+        let count = super::super::limits::MAX_INLINE_SURFACES_VISIBLE + 3;
+        for i in 0..count {
+            create_inline_surface(
+                &mut db,
+                &conv.id,
+                None,
+                None,
+                &format!("S{i}"),
+                &minimal_def(&format!("S{i}")),
+                &[],
+            )
+            .unwrap();
+        }
+        let listed = list_inline_surfaces(&db, &conv.id).unwrap();
+        assert_eq!(listed.len(), count);
     }
 }

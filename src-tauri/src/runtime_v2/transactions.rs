@@ -8,7 +8,8 @@ use super::operations::{validate_operations, AppOperation};
 use super::packs::validate_definition_components;
 use super::patch::apply_component_op;
 use super::surfaces::{
-    create_inline_surface, get_surface, update_surface_definition, SurfaceRecord,
+    archive_surface, create_inline_surface, delete_surface, get_surface, restore_surface,
+    update_surface_definition, DeleteSurfaceOptions, SurfaceRecord,
 };
 use crate::ai::{ToolComponent, ToolDefinition};
 use crate::db::{now_rfc3339, Database, DbError, DbResult};
@@ -379,6 +380,65 @@ fn apply_one(
                 .map_err(|e| e.to_string())?;
             Ok(Some(s))
         }
+        "surface.delete" | "chat.inline_surface_remove" => {
+            let sid = op
+                .target
+                .surface_id
+                .as_deref()
+                .ok_or_else(|| "surfaceId required".to_string())?;
+            let delete_linked_tool = op
+                .payload
+                .get("deleteLinkedTool")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let deleted = delete_surface(db, sid, DeleteSurfaceOptions { delete_linked_tool })
+                .map_err(|e| e.to_string())?;
+            if let Some(bus) = bus {
+                bus.remove_subscriptions_for_surface(sid);
+                let ev = super::events::SurfaceEvent {
+                    id: format!("evt-{}", Uuid::new_v4()),
+                    event_type: "surface.deleted".into(),
+                    scope: "surface".into(),
+                    source: super::events::EventRef {
+                        surface_id: Some(sid.into()),
+                        tool_id: deleted.tool_id.clone(),
+                        conversation_id: deleted
+                            .conversation_id
+                            .clone()
+                            .or_else(|| op.target.conversation_id.clone()),
+                        project_id: deleted
+                            .project_id
+                            .clone()
+                            .or_else(|| op.target.project_id.clone()),
+                        component_id: None,
+                    },
+                    target: Default::default(),
+                    payload: json!({ "surfaceId": sid }),
+                    idempotency_key: op.idempotency_key.clone(),
+                };
+                // Cross-window reconciliation: best-effort; do not fail the delete.
+                let _ = bus.dispatch(&ev, 0);
+            }
+            Ok(Some(deleted))
+        }
+        "surface.archive" => {
+            let sid = op
+                .target
+                .surface_id
+                .as_deref()
+                .ok_or_else(|| "surfaceId required".to_string())?;
+            let s = archive_surface(db, sid).map_err(|e| e.to_string())?;
+            Ok(Some(s))
+        }
+        "surface.restore" => {
+            let sid = op
+                .target
+                .surface_id
+                .as_deref()
+                .ok_or_else(|| "surfaceId required".to_string())?;
+            let s = restore_surface(db, sid).map_err(|e| e.to_string())?;
+            Ok(Some(s))
+        }
         "state.set" | "state.patch" => {
             let sid = op
                 .target
@@ -418,10 +478,6 @@ fn apply_one(
         | "surface.update_metadata"
         | "surface.move"
         | "surface.duplicate"
-        | "surface.archive"
-        | "surface.restore"
-        | "surface.delete"
-        | "chat.inline_surface_remove"
         | "state.reset"
         | "state.delete_key"
         | "route.navigate"
@@ -618,12 +674,95 @@ pub fn list_transactions(
     conversation_id: &str,
     limit: usize,
 ) -> DbResult<Vec<AppTransactionRecord>> {
+    let capped = limit.min(super::limits::MAX_REPLAY_OPS_LOADED);
     let mut stmt = db.conn().prepare(
         "SELECT id FROM app_transactions WHERE conversation_id = ?1
          ORDER BY created_at DESC LIMIT ?2",
     )?;
     let ids: Vec<String> = stmt
-        .query_map(params![conversation_id, limit as i64], |r| r.get(0))?
+        .query_map(params![conversation_id, capped as i64], |r| r.get(0))?
         .collect::<Result<Vec<_>, _>>()?;
     ids.into_iter().map(|id| get_transaction(db, &id)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{create_conversation, Database, DEFAULT_WORKSPACE_ID};
+    use crate::runtime_v2::operations::OperationTarget;
+    use tempfile::tempdir;
+
+    fn test_db() -> Database {
+        let dir = tempdir().unwrap();
+        Database::open_path(&dir.path().join("t.db")).unwrap()
+    }
+
+    fn op(op_type: &str, surface_id: Option<&str>, payload: Value) -> AppOperation {
+        AppOperation {
+            id: format!("op-{}", Uuid::new_v4()),
+            op_type: op_type.into(),
+            target: OperationTarget {
+                surface_id: surface_id.map(|s| s.into()),
+                ..Default::default()
+            },
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload,
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }
+    }
+
+    #[test]
+    fn apply_delete_and_archive_ops() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Txn", None).unwrap();
+        let def = json!({
+            "id": "d",
+            "name": "Inline",
+            "layout": "stack",
+            "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+        });
+        let surface =
+            create_inline_surface(&mut db, &conv.id, None, None, "Inline", &def, &[]).unwrap();
+        let surface2 =
+            create_inline_surface(&mut db, &conv.id, None, None, "Keep", &def, &[]).unwrap();
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "delete+archive",
+            &[
+                op("chat.inline_surface_remove", Some(&surface.id), json!({})),
+                op("surface.archive", Some(&surface2.id), json!({})),
+            ],
+            false,
+        )
+        .unwrap();
+        let result = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(result.transaction.status, "applied");
+        assert!(get_surface(&db, &surface.id).is_err());
+
+        let archived = get_surface(&db, &surface2.id).unwrap();
+        assert!(archived.archived);
+
+        let txn2 = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "restore",
+            &[op("surface.restore", Some(&surface2.id), json!({}))],
+            false,
+        )
+        .unwrap();
+        apply_transaction(&mut db, &txn2.id).unwrap();
+        let restored = get_surface(&db, &surface2.id).unwrap();
+        assert!(!restored.archived);
+    }
 }

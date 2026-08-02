@@ -144,6 +144,27 @@ pub fn delete_draft(
     Ok(())
 }
 
+/// Delete all drafts for a surface (used before hard-deleting the surface).
+pub fn delete_drafts_for_surface(db: &mut Database, surface_id: &str) -> DbResult<u64> {
+    let n = db.conn().execute(
+        "DELETE FROM surface_drafts WHERE surface_id = ?1",
+        [surface_id],
+    )?;
+    Ok(n as u64)
+}
+
+/// Delete drafts for every surface belonging to a conversation.
+/// Call **before** deleting the conversation: surfaces SET NULL conversation_id on cascade.
+pub fn delete_drafts_for_conversation(db: &mut Database, conversation_id: &str) -> DbResult<u64> {
+    let n = db.conn().execute(
+        "DELETE FROM surface_drafts WHERE surface_id IN (
+            SELECT id FROM surfaces WHERE conversation_id = ?1
+         )",
+        [conversation_id],
+    )?;
+    Ok(n as u64)
+}
+
 trait OptionalRow<T> {
     fn optional(self) -> Result<Option<T>, rusqlite::Error>;
 }
@@ -211,5 +232,119 @@ mod tests {
         )
         .unwrap();
         assert_eq!(ok.base_revision, 2);
+    }
+
+    #[test]
+    fn delete_draft_removes_row() {
+        let mut db = test_db();
+        save_draft(
+            &mut db,
+            "surf-1",
+            "cmp-1",
+            "main",
+            1,
+            &json!({"text": "hello"}),
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        delete_draft(&mut db, "surf-1", "cmp-1", "main").unwrap();
+        assert!(get_draft(&db, "surf-1", "cmp-1", "main").unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_drafts_for_surface_and_conversation() {
+        let mut db = test_db();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "Drafts",
+            None,
+        )
+        .unwrap();
+        let surface = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "S",
+            &json!({
+                "id": "d",
+                "name": "S",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        save_draft(
+            &mut db,
+            &surface.id,
+            "t",
+            "main",
+            1,
+            &json!({"v": 1}),
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!(delete_drafts_for_surface(&mut db, &surface.id).unwrap(), 1);
+        assert!(get_draft(&db, &surface.id, "t", "main").unwrap().is_none());
+
+        save_draft(
+            &mut db,
+            &surface.id,
+            "t",
+            "main",
+            1,
+            &json!({"v": 2}),
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            delete_drafts_for_conversation(&mut db, &conv.id).unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn delete_conversation_cleans_surface_drafts() {
+        let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "Gone", None)
+                .unwrap();
+        let surface = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "S",
+            &json!({
+                "id": "d",
+                "name": "S",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        save_draft(
+            &mut db,
+            &surface.id,
+            "t",
+            "main",
+            1,
+            &json!({"v": 1}),
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        crate::db::delete_conversation(&mut db, &conv.id).unwrap();
+        assert!(get_draft(&db, &surface.id, "t", "main").unwrap().is_none());
     }
 }

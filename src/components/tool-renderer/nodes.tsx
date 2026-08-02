@@ -1220,17 +1220,21 @@ export function DataTableNode({ component }: ToolNodeProps) {
   );
 }
 
+/** Compatibility fallback for legacy tools that still include dictationButton. */
 export function DictationButtonNode({ component }: ToolNodeProps) {
   return (
-    <button
-      type="button"
-      className="btn btn-secondary"
+    <div
+      className="tr-fallback tr-unsupported-control"
       data-component-id={component.id}
-      disabled
-      title="Dictation is a follow-up milestone — permission extension point only"
+      role="alert"
+      aria-live="polite"
     >
-      {asString(component.props?.label, "Dictation (coming soon)")}
-    </button>
+      <strong>Unsupported control</strong>
+      <p>
+        Dictation is not available in this version of Coreside (
+        <code>{component.type}</code>).
+      </p>
+    </div>
   );
 }
 

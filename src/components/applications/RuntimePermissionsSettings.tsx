@@ -22,7 +22,7 @@ export function RuntimePermissionsSettings() {
         api.kernelListManifests().catch(() => [] as ManifestRecord[]),
       ]);
       setApprovals(pending);
-      setGrants(runtimeGrants);
+      setGrants(runtimeGrants.filter((grant) => grant.status === "active"));
       const names: Record<string, string> = {};
       for (const record of manifests) {
         names[record.applicationId] = record.manifest.name;
@@ -43,9 +43,12 @@ export function RuntimePermissionsSettings() {
     setError(null);
     try {
       await api.kernelRevokeRuntimeGrant(grantId);
+      // Drop locally first so the UI cannot show a stale active row if reload races.
+      setGrants((prev) => prev.filter((grant) => grant.id !== grantId));
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not revoke grant");
+      await reload();
     } finally {
       setBusy(false);
     }
@@ -94,7 +97,12 @@ export function RuntimePermissionsSettings() {
       ) : (
         <ul className="provider-connection-list">
           {grants.map((grant) => (
-            <li key={grant.id} className="provider-connection-item">
+            <li
+              key={grant.id}
+              className="provider-connection-item"
+              data-grant-id={grant.id}
+              data-action-name={grant.actionName}
+            >
               <div>
                 <strong>{grant.actionName}</strong>
                 <p className="muted">
@@ -107,6 +115,7 @@ export function RuntimePermissionsSettings() {
               <button
                 type="button"
                 className="btn btn-secondary"
+                data-testid={`revoke-grant-${grant.id}`}
                 disabled={busy}
                 onClick={() => void revoke(grant.id)}
               >

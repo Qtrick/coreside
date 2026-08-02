@@ -176,6 +176,8 @@ pub fn create_conversation(
 pub fn delete_conversation(db: &mut Database, id: &str) -> DbResult<()> {
     // Fail closed: never leave orphan FTS rows that could leak deleted chat text.
     crate::projects::remove_conversation_from_index(db, id)?;
+    // Surfaces SET NULL conversation_id — clean drafts while the join still works.
+    let _ = crate::runtime_v2::drafts::delete_drafts_for_conversation(db, id)?;
     let n = db
         .conn()
         .execute("DELETE FROM conversations WHERE id = ?1", [id])?;

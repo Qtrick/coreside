@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Coreside",
+  "identifier": "com.coreside.app.e2e",
+  "build": {
+    "beforeBuildCommand": "VITE_E2E=1 npm run build:web",
+    "beforeDevCommand": "VITE_E2E=1 npm run dev:web"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "capabilities": [
+        "default",
+        "tool-window",
+        {
+          "identifier": "e2e",
+          "description": "WebDriverIO permissions for desktop E2E builds only (main + secondary tool windows)",
+          "windows": ["main", "tool-*"],
+          "permissions": ["wdio:default", "wdio-webdriver:default"]
+        }
+      ]
+    }
+  }
+}
