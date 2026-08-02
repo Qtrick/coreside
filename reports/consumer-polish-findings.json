@@ -55,8 +55,8 @@
     {
       "id": "ask-mode-reprompt",
       "severity": "P2",
-      "status": "open",
-      "summary": "Ask-first expand prompt may reappear when switching tools in the same session."
+      "status": "fixed",
+      "summary": "Ask-first expand prompt remembered per tool for the session; switching tools no longer re-prompts for already-asked tools until Adaptive Window Sizing mode changes."
     },
     {
       "id": "remaining-surface-tint-occlusion",

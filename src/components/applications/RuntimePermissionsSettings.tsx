@@ -56,10 +56,10 @@ export function RuntimePermissionsSettings() {
 
   return (
     <section className="settings-section" aria-labelledby="runtime-permissions-heading">
-      <h3 id="runtime-permissions-heading">Runtime permissions</h3>
+      <h3 id="runtime-permissions-heading">App permissions</h3>
       <p>
-        Review pending action approvals and remembered grants for generated
-        applications. Destructive and critical actions always require your
+        Review pending approvals and remembered permissions for apps you
+        created. Destructive and critical actions always require your
         confirmation.
       </p>
 

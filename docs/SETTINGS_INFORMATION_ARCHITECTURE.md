@@ -2,8 +2,9 @@
 
 **Product:** Coreside  
 **Access date:** 2026-08-01  
-**Status:** Proposed target IA (current UI is flatter; migrate deliberately)  
-**Current UI:** `src/components/settings/SettingsPanel.tsx` + related panels
+**Status:** Category navigation + search shipped (2026-08-01); deepen Privacy/Data/backup next  
+**Current UI:** `src/components/settings/SettingsPanel.tsx` + related panels  
+**Wallpaper:** Remains under Added → Templates only (out of scope for redesign in this overhaul)
 
 ## Principles
 

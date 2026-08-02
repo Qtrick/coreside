@@ -73,6 +73,8 @@ type AppStore = {
   chatToolSplitRatio: number;
   layoutMode: "wide" | "standard" | "compact";
   windowExpandStatus: string | null;
+  /** Tool IDs already prompted for Ask-first expand this session. */
+  windowExpandAskedToolIds: string[];
   sidebarCollapsed: boolean;
   view: AppView;
   chatViewState: Record<string, ChatViewState>;
@@ -462,6 +464,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   chatToolSplitRatio: 0.5,
   layoutMode: "wide",
   windowExpandStatus: null,
+  windowExpandAskedToolIds: [],
   sidebarCollapsed: false,
   view: { ...DEFAULT_CHAT_VIEW },
   chatViewState: {},
@@ -851,7 +854,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   setAdaptiveWindowSizing: async (mode) => {
-    set({ adaptiveWindowSizing: mode });
+    set({
+      adaptiveWindowSizing: mode,
+      // Mode change resets Ask-first session memory.
+      windowExpandAskedToolIds: [],
+    });
     await api.setSetting("adaptiveWindowSizing", mode);
   },
 
@@ -875,8 +882,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (mode === "ask") {
+      const asked = get().windowExpandAskedToolIds;
+      if (asked.includes(toolId)) return;
       set({
         windowExpandStatus: `ask:${toolId}`,
+        windowExpandAskedToolIds: [...asked, toolId],
       });
       return;
     }

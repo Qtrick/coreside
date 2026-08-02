@@ -7,7 +7,7 @@
 
 | Archive | SHA-256 | Extract path |
 | --- | --- | --- |
-| Coreside Chat AI.zip | `044e7910633d0abb3c278ed79bf64f3436433bf574f5991119455f827d2ad2c1` | `.reference/coreside-uploaded-2026-08-01` |
+| Coreside Chat AI.zip | `5cdaa9f461d96322ca35de138e69ed04f4fc5ea57e9a75040de0abab08b09322` (refreshed; prior `044e7910…`) | `.reference/coreside-uploaded-2026-08-01` |
 | Vendo main.zip | `516d00b41ca5051087b2e9838ef84bde6b42bad48d16df924fd35152f55e4a55` | `.reference/vendo-uploaded-2026-08-01` |
 
 Manifests: `reports/coreside-uploaded-manifest.json`, `reports/vendo-uploaded-manifest.json`.

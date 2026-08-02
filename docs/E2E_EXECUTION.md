@@ -109,7 +109,7 @@ On suite success, `e2e/run.mjs` removes the isolated temp DB directory. Failed s
 | 5 | `05-generated-tool-state.spec.ts` | `existing-tool` | **Automated** | Seeded `tool-e2e-notes` text input persists |
 | 6 | `06-approval-approve-once.spec.ts` | `existing-approval` | **Automated** | `approval-e2e-1` → Approve once |
 | 7 | `07-multi-window-approval-race.spec.ts` | `existing-approval-race` | **Partial** | Opens secondary window; asserts approval stays on `main` only |
-| 8 | `08-grant-revoke.spec.ts` | `existing-grant` | **Automated** | Revokes seeded `grant-e2e-1` in Runtime permissions |
+| 8 | `08-grant-revoke.spec.ts` | `existing-grant` | **Automated** | Revokes seeded `grant-e2e-1` in App permissions |
 | 9 | `09-recovery-mode.spec.ts` | `existing-recovery` | **Automated** | Enter/exit Recovery Mode |
 | 10 | `10-secondary-window.spec.ts` | `existing-window` | **Partial** | Opens `tool-tool-e2e-notes`, switches WebDriver context; close not asserted |
 

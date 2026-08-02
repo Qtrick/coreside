@@ -76,7 +76,8 @@
     "test:wallpaper-reset": "vitest run src/lib/wallpaper.test.ts src/lib/consumer-errors.test.ts",
     "test:wallpaper-compositing": "vitest run src/lib/interface-transparency.test.ts src/lib/wallpaper-compositing.test.ts",
     "test:window-orchestrator": "cargo test --manifest-path src-tauri/Cargo.toml --lib windows::orchestrator",
-    "test:consumer-polish": "npm run test:layout-overflow && npm run test:wallpaper-reset && npm run test:wallpaper-compositing && npm run test:responsive-layout"
+    "test:settings": "vitest run src/lib/settings-categories.test.ts",
+    "test:consumer-polish": "npm run test:layout-overflow && npm run test:wallpaper-reset && npm run test:wallpaper-compositing && npm run test:responsive-layout && npm run test:settings"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",

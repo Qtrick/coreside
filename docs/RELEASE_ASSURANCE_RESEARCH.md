@@ -1,95 +1,49 @@
 # Release Assurance Research
 
-**Product:** Coreside v0.1.0  
-**Date:** 2026-07-19  
-**Purpose:** Ground release assurance in what the repo actually has — not aspirational tooling.
+**Product:** Coreside  
+**Access date:** 2026-08-01  
+**Public beta:** **NOT READY**  
+**Purpose:** Evidence required before claiming public beta — not aspirational tooling.
 
-## Tauri 2 testing references
+## Verdict
 
-Coreside ships on **Tauri 2** (`@tauri-apps/api` / `@tauri-apps/cli` ^2.5.0). Relevant upstream docs:
+Public beta is **not ready**. Unit/lib coverage and offline doctor checks are useful but **do not** substitute for packaged desktop evidence, Settings IA completion, or honest security verification records.
 
-| Topic | URL |
+## Evidence required for public beta
+
+| Gate | Required evidence | Current (2026-08-01) |
+| --- | --- | --- |
+| **Build** | Reproducible web + Tauri package on primary OS (macOS) | Scripts exist; full packaged smoke **not claimed** |
+| **Static** | `typecheck` + `lint` + `check:rust` green | Historically pass; re-run at gate |
+| **Unit** | Vitest + targeted Rust `test:*` green | Present; treat known Rust failures as blockers until fixed/waived |
+| **Migrations** | `test:migrations` on fresh + upgrade fixtures | Present (`docs/MIGRATION_ASSURANCE.md`) |
+| **Security** | ASVS L2–**style** checklist with findings JSON; no false certification | Docs exist; open P0s must be fixed or waived (`SECURITY_VERIFICATION_STANDARD.md`) |
+| **Agent choke** | Registered-action Allow / RequireApproval / Block + injection boundary tests | Runtime present; regression suite must be recorded green |
+| **Settings IA** | Consumer categories live; BYOK + Recovery discoverable | **Priority gap** — flat panel today |
+| **Manual matrix** | Recorded Pass on A–AB (or equivalent) on packaged build | **gap** |
+| **E2E desktop** | Cold start + chat + tool persist at minimum | Scripts (`e2e*`) exist; full matrix **not recorded** |
+| **Privacy** | Keys absent from SQLite/exports; Action Log off by default | Code paths exist; export journey AB **gap** |
+| **Performance** | Cold-start + chat-stream baseline on packaged build | Not a public-beta claim yet |
+| **Wallpaper** | Visual proof / residual occlusion | **Out of scope this phase** — do not block Settings IA; track separately |
+
+## What is insufficient alone
+
+- Vitest in jsdom (no keychain, no native windows, no packaged CSP)
+- In-memory / temp SQLite tests (not user app-data upgrade at scale)
+- Mock Tauri runtime without WebDriver / real shell
+- “Controls exist in code” without recorded verification
+
+## Archives used for continuity
+
+| Archive | SHA-256 |
 | --- | --- |
-| Tauri 2 prerequisites | https://v2.tauri.app/start/prerequisites/ |
-| Develop / debug | https://v2.tauri.app/develop/ |
-| Build / bundle | https://v2.tauri.app/distribute/ |
-| WebDriver (desktop E2E) | https://v2.tauri.app/develop/tests/webdriver/ |
-| Mock runtime (CI without native shell) | https://v2.tauri.app/develop/tests/mocking/ |
+| Coreside Chat AI.zip | `5cdaa9f461d96322ca35de138e69ed04f4fc5ea57e9a75040de0abab08b09322` |
+| Vendo main.zip | `516d00b41ca5051087b2e9838ef84bde6b42bad48d16df924fd35152f55e4a55` |
 
-**Current repo state:** No `tauri-driver`, WebDriver config, or CI workflow exists (`.github/` absent). Interactive assurance still depends on `npm run dev` or a packaged build.
+Extracts: `.reference/coreside-uploaded-2026-08-01`, `.reference/vendo-uploaded-2026-08-01`.
 
-## Existing automated stack
+## Related
 
-### TypeScript / Vitest
-
-- **Runner:** Vitest 3.x via `vite.config.ts` (`environment: jsdom`, `setupFiles: ./tests/setup.ts`)
-- **Scripts:** `npm test` (`vitest run`), `npm run test:watch`
-- **Test files (11):** `src/lib/*.test.ts`, `tests/*.test.ts`
-- **Verified 2026-07-19:** 66 tests passed across 11 files
-
-Targeted scripts already exist for subsystems (`test:preservation`, `test:partial-update-parity`, etc.).
-
-### Rust / Cargo
-
-- **Scripts:** `npm run test:rust`, plus many `test:*` filters (`test:runtime-v2`, `test:application-kernel`, `test:recovery`, …)
-- **Verified 2026-07-19:** 204 passed, **1 failed** (`config::env::tests::public_status_hides_key`)
-
-### Static analysis
-
-- `npm run typecheck` — passes (`tsc --noEmit`)
-- `npm run lint` — passes with 5 ESLint warnings (react-refresh/only-export-components)
-- `npm run check:rust` — available; not re-run for this document
-- `npm run verify` — chains typecheck, lint, vitest, check:rust, test:rust, build:web
-
-## AI access disclosure tests
-
-Dedicated script (to be added): `npm run test:ai-access`
-
-- Frontend: `src/lib/ai-access-disclosure.test.ts` (mirrors Rust disclosure policy)
-- Rust: `src-tauri/src/ai/access_mode.rs` (`#[cfg(test)]` module)
-
-Policy source of truth: `resolve_access_presentation` in Rust; frontend must not invent mode from scattered booleans.
-
-## WebDriver — future layer
-
-Tauri 2 WebDriver (`tauri-driver` + platform driver) is the intended path for:
-
-- Cold-start boot
-- Native window open/close (secondary tool windows)
-- Packaged-app smoke (not `vite` dev server alone)
-- Cross-window sync / conflict banners
-
-**Not implemented.** `docs/MANUAL_ACCEPTANCE_A_AB.md` scenarios A–AB remain human-driven on a real Tauri session.
-
-## Mock-runtime limitations
-
-Tauri mock runtime is useful for CI command invocation but **cannot** replace:
-
-| Gap | Why mock is insufficient |
-| --- | --- |
-| OS keychain / keyring | BYOK storage is native; Vitest uses no Tauri IPC |
-| SQLite migrations on real app data dir | Rust unit tests use in-memory / temp DBs, not full upgrade paths from user fixtures |
-| Crawl4AI sidecar lifecycle | Python subprocess supervision is Rust-only |
-| Secondary native windows | Window labels, focus, and IPC differ from jsdom |
-| Wallpaper / media asset protocol | `asset://` and filesystem scopes are Tauri-specific |
-| Packaged CSP and bundle resources | Dev server CSP ≠ production webview |
-
-Vitest + Rust lib tests give **logic assurance**; they do not prove **desktop integration**.
-
-## Related in-repo docs
-
-- `docs/MANUAL_ACCEPTANCE_A_AB.md` — interactive checklist A–AB
-- `docs/GENERATED_APPLICATION_TESTING.md` — kernel / package testing notes
-- `docs/SECURITY.md` — credential and export boundaries
-- `reports/coreside-feature-evidence.json` — subsystem evidence snapshot (2026-07-18)
-
-## Honest summary
-
-| Layer | Status |
-| --- | --- |
-| Unit / component (Vitest) | Present; green on 2026-07-19 |
-| Rust lib tests | Present; 1 known failure |
-| Tauri WebDriver E2E | Not started |
-| Mock runtime CI | Not configured |
-| Full A–AB manual pass | Pending human session |
-| Performance baselines | Not measured |
+- `docs/RELEASE_ASSURANCE_PLAN.md` · `docs/RELEASE_READINESS.md` · `docs/E2E_EXECUTION.md`
+- `docs/MANUAL_ACCEPTANCE_A_AB.md` · `docs/SECURITY_VERIFICATION_STANDARD.md`
+- `reports/release-gates.json` · `reports/local-beta-readiness.json`

@@ -17,7 +17,7 @@ export const BRAND_MANIFEST = {
     light: "coreside-dock-light.png",
   },
   note:
-    "In-app logos follow Coreside Appearance. Dock icon defaults to Auto (OS appearance); users can lock Dark or Light tile in Base Settings.",
+    "In-app logos follow Coreside Appearance. Dock icon defaults to Auto (OS appearance); users can lock Dark or Light tile in Settings.",
 } as const;
 
 export type BrandAppearance = "light" | "dark";

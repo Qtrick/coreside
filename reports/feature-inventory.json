@@ -1,26 +1,39 @@
 {
   "product": "Coreside",
   "version": "0.1.0",
-  "generatedAt": "2026-07-19",
+  "accessDate": "2026-08-01",
+  "generatedAt": "2026-08-01",
+  "publicBetaReady": false,
+  "archives": {
+    "coresideChatAiZipSha256": "5cdaa9f461d96322ca35de138e69ed04f4fc5ea57e9a75040de0abab08b09322",
+    "vendoMainZipSha256": "516d00b41ca5051087b2e9838ef84bde6b42bad48d16df924fd35152f55e4a55",
+    "notes": "Coreside Chat AI.zip refreshed 2026-08-01 23:51; prior hash 044e7910…"
+  },
   "features": [
     { "id": "chat", "status": "implemented" },
     { "id": "projects", "status": "implemented" },
     { "id": "tools", "status": "implemented" },
-    { "id": "kernel", "status": "partial" },
+    { "id": "kernel", "status": "implemented" },
+    { "id": "registered-actions", "status": "implemented" },
+    { "id": "providers", "status": "implemented" },
+    { "id": "ai-access-modes", "status": "partial", "notes": "hosted adapter not built" },
     { "id": "search", "status": "partial" },
     { "id": "media", "status": "implemented" },
-    { "id": "wallpapers", "status": "partial" },
+    { "id": "wallpapers", "status": "partial", "notes": "out of scope this phase; residual compositing risks" },
     { "id": "automations", "status": "implemented" },
     { "id": "exports", "status": "implemented" },
-    { "id": "ai-access-modes", "status": "partial" },
     { "id": "recovery", "status": "partial" },
     { "id": "multiwindow", "status": "partial" },
-    { "id": "providers", "status": "implemented" },
+    { "id": "settings", "status": "partial", "notes": "consumer IA not shipped" },
     { "id": "action-log", "status": "implemented" },
-    { "id": "settings", "status": "implemented" },
     { "id": "runtime-v2", "status": "implemented" },
     { "id": "continuity", "status": "implemented" },
     { "id": "mentions", "status": "implemented" },
-    { "id": "branding", "status": "implemented" }
+    { "id": "branding", "status": "implemented" },
+    { "id": "e2e-desktop", "status": "partial" },
+    { "id": "mcp", "status": "missing" },
+    { "id": "voice", "status": "missing" },
+    { "id": "cloud-sync", "status": "missing" },
+    { "id": "enterprise", "status": "missing" }
   ]
 }

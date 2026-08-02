@@ -93,7 +93,7 @@ export function AgentBehaviorSettings() {
       className="settings-section settings-section-compact"
       aria-labelledby="agent-behavior-heading"
     >
-      <h3 id="agent-behavior-heading">Agent Behavior</h3>
+      <h3 id="agent-behavior-heading">Agent</h3>
       <div className="settings-toggle-row settings-toggle-row-stack">
         <div>
           <strong id="action-log-label">Action Log</strong>

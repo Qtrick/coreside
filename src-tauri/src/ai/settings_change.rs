@@ -651,6 +651,8 @@ mod tests {
         assert!(!is_allowed_setting_key("action_log_enabled"));
         assert!(!is_allowed_setting_key("actionLogMode"));
         assert!(!is_allowed_setting_key("action_log_mode"));
+        assert!(!is_allowed_setting_key("adaptiveWindowSizing"));
+        assert!(!is_allowed_setting_key("adaptive_window_sizing"));
         // User IPC may still normalize the KV; agent apply path must gate on allowlist.
         assert_eq!(
             normalize_setting_kv("actionLogEnabled", "true").unwrap(),

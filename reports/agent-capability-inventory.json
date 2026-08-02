@@ -1,0 +1,30 @@
+{
+  "product": "Coreside",
+  "generatedAt": "2026-08-02T04:05:00Z",
+  "commit": "af03633",
+  "publicBeta": "not_ready",
+  "chokePoint": {
+    "path": "src-tauri/src/application_kernel/registered_actions/gateway.rs",
+    "entry": "execute_registered_action",
+    "trustedEntry": "execute_registered_action_trusted",
+    "status": "present",
+    "enforces": [
+      "recovery",
+      "lifecycle",
+      "declared_access",
+      "permission",
+      "breaker",
+      "authority",
+      "audit"
+    ],
+    "openGaps": [
+      "Prove all agent/tool/automation side effects converge here (inventory callers)",
+      "Multiwindow approval exactly-once E2E must pass on current commit",
+      "Prompt-injection fixtures incomplete for public beta"
+    ]
+  },
+  "policyDecisions": ["run", "ask", "block"],
+  "approvals": { "status": "partial", "notes": "Kernel present; packaged/multiwindow evidence incomplete" },
+  "grants": { "status": "partial" },
+  "breakers": { "status": "partial" }
+}

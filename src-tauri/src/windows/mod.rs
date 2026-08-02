@@ -85,6 +85,12 @@ pub fn expand(
             "toolId must be a non-empty ascii id (letters, digits, -, _; max 128 chars).",
         ));
     }
+    // Match open_tool_window: only resize for tools that exist.
+    {
+        let state = app.state::<AppState>();
+        let db = state.db.lock();
+        db::get_tool(&db, &tool_id).map_err(CommandError::from)?;
+    }
     orchestrator::expand(
         app,
         tool_id,

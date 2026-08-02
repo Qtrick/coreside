@@ -1,47 +1,48 @@
 # Feature Inventory
 
-**Product:** Coreside v0.1.0  
-**Last updated:** 2026-08-01  
-**Legend:** **implemented** = shipped in repo with persistence/UI; **partial** = present but incomplete or dev-only paths.
+**Product:** Coreside  
+**Access date:** 2026-08-01  
+**Public beta:** **NOT READY**  
+**Legend:** `implemented` · `partial` · `missing` · `uncertain`  
+Status from quick repo inspection (migrations 001–015, `src/` + `src-tauri/src/`), not a full QA pass.
 
-Status is evidence-based from source layout, migrations, and `README.md` — not a micro-feature census.
+## Archives (read-only extracts under `.reference/`)
 
-| ID | Area | Status | Evidence (representative) |
-| --- | --- | --- | --- |
-| `chat` | Chat, streaming, cancel, drafts, scroll preservation | **implemented** | `src/components/chat/`, `runtime_v2` queue/streaming, migration 001 |
-| `projects` | Projects, membership, FTS context, isolation | **implemented** | `src/components/projects/`, migration 006, `projects/retrieval.rs` |
-| `tools` | Personal tools / surfaces, inline + canvas, versions | **implemented** | `runtime_v2/patch.rs`, migration 012, tool renderer |
-| `kernel` | Application Kernel (manifest, packages, compiler, policy) | **implemented** | migrations 013–015, `application_kernel/` |
-| `registered-actions` | Gateway, grants, approvals, audit, UI | **implemented** | migration 015, `registered_actions/`, `src/components/applications/` |
-| `search` | Exa discovery, budgets, Crawl4AI crawl, citations | **partial** | `exa/`, `crawler/`, migrations 009–010; requires optional keys + sidecar setup |
-| `media` | Media Library, validation, thumbnails, import approval | **implemented** | `src/components/media/`, migrations 007–008 |
-| `wallpapers` | Templates, live assets, readability overlays | **partial** | migrations 005/010, `wallpapers/`, `readability/`; not every wallpaper type may be seeded |
-| `automations` | Scheduled automations, pause/cancel, app-bound away grants | **implemented** | migrations 005/015, `automations/`, `docs/APPLICATION_AUTOMATION_SECURITY.md` |
-| `exports` | Tool / package export, redaction | **implemented** | `exports/`, `docs/EXPORTS.md`, Rust export tests |
-| `ai-access-modes` | BYOK, local, developer_environment, hosted, unavailable | **partial** | `ai/access_mode.rs`; **hosted adapter not built** (`hosted_connected: false`) |
-| `recovery` | Recovery Mode, safe startup, LKG restore, execution block | **implemented** | recovery.rs + gateway `generated_execution_allowed`; ToolCanvas blocks unavailable apps |
-| `multiwindow` | Secondary native tool windows | **partial** | Tauri window commands, `docs/MULTIWINDOW_CONCURRENCY.md`; manual K journey pending |
+| Archive | SHA-256 (2026-08-01) |
+| --- | --- |
+| Coreside Chat AI.zip | `5cdaa9f461d96322ca35de138e69ed04f4fc5ea57e9a75040de0abab08b09322` (refreshed; prior `044e7910…`) |
+| Vendo main.zip | `516d00b41ca5051087b2e9838ef84bde6b42bad48d16df924fd35152f55e4a55` |
 
-## Cross-cutting systems
+## Major features
 
 | ID | Area | Status | Notes |
 | --- | --- | --- | --- |
-| `providers` | Gemini, OpenAI, Anthropic, OpenRouter adapters | **implemented** | `src-tauri/src/ai/`, migration 003 |
-| `action-log` | Base Setting, sanitized events | **implemented** | migrations 004, 011 |
-| `settings` | Base + Added Settings, templates | **implemented** | migrations 002, 005 |
-| `runtime-v2` | Operations, transactions, events, branching | **implemented** | migration 012, extensive Rust tests |
-| `continuity` | Drafts, preservation, patch scheduler, routes | **implemented** | migration 014, targeted `test:*` scripts |
-| `mentions` | `@` tool references | **implemented** | `src/lib/mentions/`, vitest |
-| `branding` | Protected logos, icons | **implemented** | `branding/`, `security/protected_resources.rs` |
+| `chat` | Chat, streaming, cancel, drafts | **implemented** | `src/components/chat/`, runtime_v2 queue |
+| `projects` | Projects, FTS, isolation | **implemented** | migration 006, projects UI |
+| `tools` | Personal tools / surfaces / versions | **implemented** | runtime_v2 + tool canvas |
+| `kernel` | Application Kernel (manifest, packages, policy) | **implemented** | migrations 013–015 |
+| `registered-actions` | Gateway, grants, approvals, breakers, audit | **implemented** | `registered_actions/` |
+| `providers` | Gemini, OpenAI, Anthropic, OpenRouter BYOK | **implemented** | `src-tauri/src/ai/` |
+| `ai-access-modes` | BYOK / local / env / hosted / unavailable | **partial** | Hosted adapter not shipped (`hosted_connected`) |
+| `search` | Exa + Crawl4AI + budgets + citations | **partial** | Needs keys + sidecar; budgets present |
+| `media` | Media Library, validation, import | **implemented** | migrations 007–008 |
+| `wallpapers` | Templates / live / readability | **partial** | Out of scope for this public-beta docs phase; residual compositing risks remain |
+| `automations` | Schedule, pause, app-bound grants | **implemented** | migrations 005/015 |
+| `exports` | Tool/package export + redaction | **implemented** | `exports/` |
+| `recovery` | Recovery Mode, LKG, execution gate | **partial** | Core gating present; full surface hiding uncertain |
+| `multiwindow` | Secondary native tool windows | **partial** | Commands exist; manual journey K pending |
+| `settings` | Base + Added Settings | **partial** | Category nav + search shipped; Privacy/Data/backup still thin |
+| `action-log` | Off / Always / Intelligent | **implemented** | migrations 004, 011 |
+| `runtime-v2` | Ops, transactions, events, branching | **implemented** | migration 012 |
+| `continuity` | Drafts, preservation, patch scheduler | **implemented** | migration 014 |
+| `mentions` | `@` tool references | **implemented** | `src/lib/mentions/` |
+| `branding` | Protected logos / dock icons | **implemented** | protected resources |
+| `e2e-desktop` | Packaged / WebDriver E2E matrix | **partial** | Scripts exist; full A–AB not recorded passing |
+| `mcp` | External MCP door | **missing** | Rejected for consumer beta |
+| `voice` | Voice input/output | **missing** | Rejected for consumer beta |
+| `cloud-sync` | Accounts / sync / billing | **missing** | Out of scope |
+| `enterprise` | Org admin / SSO / SCIM | **missing** | Deferred |
 
-## Explicitly out of scope (v0.1.0)
+## Machine-readable
 
-- Cloud sync / accounts / billing
-- Enterprise admin / SSO / SCIM
-- Hosted Coreside AI adapter (designed, not shipped)
-- Arbitrary code execution in generated surfaces
-- Full WebDriver E2E suite
-
-## Machine-readable export
-
-See `reports/feature-inventory.json`.
+`reports/feature-inventory.json`

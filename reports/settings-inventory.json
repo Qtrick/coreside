@@ -1,0 +1,28 @@
+{
+  "product": "Coreside",
+  "generatedAt": "2026-08-02T04:00:00Z",
+  "publicBeta": "not_ready",
+  "wallpaperScope": "out_of_scope_for_redesign",
+  "categories": [
+    { "id": "general", "status": "implemented", "owner": "SettingsPanel" },
+    { "id": "appearance", "status": "implemented", "notes": "Theme + dock; wallpaper link to Added" },
+    { "id": "ai-access", "status": "implemented", "owner": "AiProviderSettings" },
+    { "id": "agent", "status": "implemented", "owner": "AgentBehaviorSettings" },
+    { "id": "search", "status": "implemented", "owner": "SearchSettingsSection" },
+    { "id": "privacy", "status": "partial", "notes": "Consumer copy + deep links; consent/export thin" },
+    { "id": "data", "status": "partial", "notes": "Clear chats/tools; backup/restore not consumer-complete" },
+    { "id": "accessibility", "status": "partial", "notes": "System reduced-motion notice only" },
+    { "id": "advanced", "status": "implemented", "owners": ["RecoverySettings", "RuntimePermissionsSettings"] },
+    { "id": "about", "status": "implemented" },
+    { "id": "added", "status": "implemented", "notes": "Templates wallpapers + tool settings list" }
+  ],
+  "search": {
+    "status": "implemented",
+    "index": "src/lib/settings-categories.ts",
+    "tests": "npm run test:settings"
+  },
+  "categoryNav": {
+    "status": "implemented",
+    "persistence": "sessionStorage coreside.settings.category"
+  }
+}

@@ -49,5 +49,5 @@ Statuses: `pending` → `approved` / `denied` / `expired` → `consumed`
 ## UI
 
 - Approval cards via `PendingApprovalsHost`
-- Remembered grants in Settings → Runtime permissions
+- Remembered grants in Settings → App permissions
 - Per-application details panel (Details on tool canvas)

@@ -24,4 +24,4 @@ Secrets, key-shaped strings, and oversized previews are redacted/bounded before 
 
 ## UI
 
-Recent events appear in Application Details. Global clear is available from Runtime permissions settings when safe.
+Recent events appear in Application Details. Global clear is available from App permissions settings when safe.
