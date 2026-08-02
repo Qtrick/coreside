@@ -14,6 +14,7 @@ pub fn list_tools(
     state: State<'_, AppState>,
     workspace_id: Option<String>,
 ) -> Result<Vec<ToolRecord>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     let mut tools = db::list_tools(&db, workspace_id.as_deref())?;
     for tool in &mut tools {
@@ -24,6 +25,7 @@ pub fn list_tools(
 
 #[tauri::command]
 pub fn get_tool(state: State<'_, AppState>, tool_id: String) -> Result<ToolRecord, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     let mut tool = db::get_tool(&db, &tool_id)?;
     tool.definition.normalize_for_frontend();
@@ -35,6 +37,7 @@ pub fn get_tool_versions(
     state: State<'_, AppState>,
     tool_id: String,
 ) -> Result<Vec<ToolVersionRecord>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     let mut versions = db::get_tool_versions(&db, &tool_id)?;
     for v in &mut versions {
@@ -53,6 +56,7 @@ pub fn apply_tool_change(
     tool_change: ToolChangePayload,
     workspace_id: Option<String>,
 ) -> Result<ToolRecord, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
 
     // Validate conversation / message exist
@@ -112,6 +116,7 @@ pub fn undo_tool_change(
     state: State<'_, AppState>,
     tool_id: String,
 ) -> Result<ToolRecord, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     let mut tool = db::undo_tool_change(&mut db, &tool_id)?;
     tool.definition.normalize_for_frontend();
@@ -124,6 +129,7 @@ pub fn save_tool_state(
     tool_id: String,
     state: serde_json::Value,
 ) -> Result<(), CommandError> {
+    app_state.require_profile()?;
     let mut db = app_state.db.lock();
     Ok(db::save_tool_state(&mut db, &tool_id, &state)?)
 }
@@ -133,6 +139,7 @@ pub fn get_tool_state(
     state: State<'_, AppState>,
     tool_id: String,
 ) -> Result<serde_json::Value, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(db::get_tool_state(&db, &tool_id)?.unwrap_or_else(|| json!({})))
 }

@@ -35,6 +35,25 @@ pub fn get_app_info() -> AppInfo {
 
 #[tauri::command]
 pub fn get_ai_status(state: State<'_, AppState>) -> PublicAiStatus {
+    if !state.profile_ready() {
+        return PublicAiStatus {
+            provider: "none".into(),
+            model: "none".into(),
+            key_detected: false,
+            status: "database_unavailable".into(),
+            message: Some(
+                "Coreside needs Recovery before AI status is available.".into(),
+            ),
+            base_url: String::new(),
+            env_path: None,
+            source: "none".into(),
+            active_connection_id: None,
+            access_mode: Some("unavailable".into()),
+            consumer_display_name: None,
+            user_facing_status: Some("Recovery required".into()),
+            disclosure: None,
+        };
+    }
     let _ = state.reload_config();
     // Read the database half under the lock, then release it: the keychain
     // lookup inside `resolve_from_sources` is a blocking OS call.
@@ -95,6 +114,7 @@ pub fn get_ai_status(state: State<'_, AppState>) -> PublicAiStatus {
 
 #[tauri::command]
 pub fn get_model_catalog(state: State<'_, AppState>) -> Result<ModelCatalog, CommandError> {
+    state.require_profile()?;
     // Read the database half under the lock, then release it: the keychain
     // lookup inside `resolve_from_sources` is a blocking OS call.
     let sources = {
@@ -140,6 +160,7 @@ pub fn get_model_catalog(state: State<'_, AppState>) -> Result<ModelCatalog, Com
 pub async fn test_ai_connection(
     state: State<'_, AppState>,
 ) -> Result<crate::ai::ProviderHealth, CommandError> {
+    state.require_profile()?;
     // Read the database half under the lock, then release it: the keychain
     // lookup inside `resolve_from_sources` is a blocking OS call.
     let sources = {

@@ -219,6 +219,8 @@ export async function mockInvoke<T>(
         toolCount: mockDb.tools.length,
         projectCount: mockDb.projects?.length ?? 0,
         databaseBytes: 4096,
+        backupBytes: 8192,
+        mediaBytes: 0,
         profileReady: true,
       } as T;
 
@@ -233,9 +235,31 @@ export async function mockInvoke<T>(
 
     case "create_profile_backup":
       return {
-        path: "coreside-profile-mock.db",
+        path: "coreside-profile-mock.coreside-backup",
         byteSize: 4096,
         schemaVersion: "015_registered_actions",
+        format: "coreside-backup",
+      } as T;
+
+    case "preview_restore_backup":
+      return {
+        format: "coreside-backup",
+        schemaVersion: 1,
+        applicationVersion: "0.1.0",
+        createdAt: new Date().toISOString(),
+        latestMigration: "015_registered_actions",
+        databaseBytes: 4096,
+        mediaCount: 0,
+        attachmentCount: 0,
+        integrityOk: true,
+        warnings: ["Media files were not included in this backup."],
+      } as T;
+
+    case "restore_profile_backup":
+      return {
+        safetyBackupPath: "coreside-safety-before-restore-mock.coreside-backup",
+        restoredFrom: "coreside-profile-mock.coreside-backup",
+        restartRecommended: true,
       } as T;
 
     case "get_ai_status": {

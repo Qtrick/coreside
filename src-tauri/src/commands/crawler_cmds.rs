@@ -38,6 +38,7 @@ pub async fn sync_resource_profile(state: &AppState) -> ResourceProfile {
 pub async fn get_crawler_status(
     state: State<'_, AppState>,
 ) -> Result<CrawlerStatusView, CommandError> {
+    state.require_profile()?;
     let profile = sync_resource_profile(&state).await;
     let mut view = state.crawler.status_view().await;
     view.resource_profile = profile.as_str().to_string();
@@ -53,6 +54,7 @@ pub fn get_crawler_installation() -> Result<crate::crawler::InstallationReport, 
 pub async fn cleanup_crawler_cache(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, CommandError> {
+    state.require_profile()?;
     state
         .crawler
         .send_command("cleanup_cache", serde_json::json!({}))
@@ -64,6 +66,7 @@ pub async fn cleanup_crawler_cache(
 pub async fn get_crawler_cache_stats(
     state: State<'_, AppState>,
 ) -> Result<CacheStatsView, CommandError> {
+    state.require_profile()?;
     let payload = state
         .crawler
         .send_command("cache_stats", serde_json::json!({}))
@@ -83,6 +86,7 @@ pub async fn set_web_research_resource_profile(
     state: State<'_, AppState>,
     input: SetResourceProfileInput,
 ) -> Result<String, CommandError> {
+    state.require_profile()?;
     let profile = ResourceProfile::parse(&input.profile);
     state.crawler.set_resource_profile(profile).await;
     {

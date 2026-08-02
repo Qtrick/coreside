@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-02T21:55:00.000Z",
+  "commit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
+  "dirty": true,
+  "sourceFingerprint": "dirty-worktree-wallpaper-backup-trust-shell",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "dev",
+  "command": "npm run test:wallpaper-compositing",
+  "exitStatus": 0,
+  "result": "partial",
+  "levels": [0, 20, 40, 60],
+  "assertions": {
+    "panelAlphaMonotonic": "passed",
+    "syntheticBlendApproachesWallpaper": "passed",
+    "zeroPercentFullyOccludes": "passed",
+    "desktopPixelSampling": "not_run",
+    "packagedWebView": "not_run",
+    "lightDark": "not_run",
+    "projectOverride": "not_run"
+  },
+  "note": "Unit alpha/blend model proves monotonic contribution. Desktop and packaged screenshot proof remain required for wallpaper beta gate."
+}

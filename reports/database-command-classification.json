@@ -1,1067 +1,1487 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-02T21:57:38.735387+00:00",
+  "generatedAt": "2026-08-02T21:56:16.431116+00:00",
   "commit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
   "dirty": true,
-  "sourceFingerprint": "dirty-worktree-rc-closure-pass",
+  "sourceFingerprint": "dirty-worktree-wallpaper-backup-trust-shell",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
   "architecture": "arm64",
   "buildMode": "dev",
-  "command": "inline audit",
+  "command": "scripts/audit-tauri-commands (inline)",
   "exitStatus": 0,
   "counts": {
     "commandsFound": 209,
-    "withRequireProfile": 178,
-    "withoutRequireProfile": 31
+    "withRequireProfile": 63,
+    "withoutRequireProfile": 146,
+    "handlerRefsInLib": 209
   },
-  "commands": [
+  "classification": [
     {
       "name": "get_app_info",
       "source": "src-tauri/src/commands/ai_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "recovery_safe",
+      "disposition": "keep_recovery_only"
     },
     {
       "name": "get_ai_status",
       "source": "src-tauri/src/commands/ai_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_model_catalog",
       "source": "src-tauri/src/commands/ai_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "test_ai_connection",
       "source": "src-tauri/src/commands/ai_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "stage_chat_attachment",
       "source": "src-tauri/src/commands/attachment_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_chat_attachment_src",
       "source": "src-tauri/src/commands/attachment_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_automations",
       "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "upsert_automation",
       "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "set_automation_enabled",
       "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "delete_automation",
       "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "list_automation_runs",
       "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "run_automation_now",
       "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_workspace_backgrounds",
       "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "upsert_workspace_background",
       "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "get_bootstrap_status",
       "source": "src-tauri/src/commands/bootstrap_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "recovery_safe",
+      "disposition": "keep_recovery_only"
     },
     {
       "name": "retry_open_database",
       "source": "src-tauri/src/commands/bootstrap_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "recovery_safe",
+      "disposition": "keep_recovery_only"
     },
     {
       "name": "list_conversations",
       "source": "src-tauri/src/commands/conversation_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "create_conversation",
       "source": "src-tauri/src/commands/conversation_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "delete_conversation",
       "source": "src-tauri/src/commands/conversation_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "get_messages",
       "source": "src-tauri/src/commands/conversation_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "delete_messages_from",
       "source": "src-tauri/src/commands/conversation_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "clear_conversations",
       "source": "src-tauri/src/commands/conversation_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "get_crawler_status",
       "source": "src-tauri/src/commands/crawler_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_crawler_installation",
       "source": "src-tauri/src/commands/crawler_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "cleanup_crawler_cache",
       "source": "src-tauri/src/commands/crawler_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_crawler_cache_stats",
       "source": "src-tauri/src/commands/crawler_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "set_web_research_resource_profile",
       "source": "src-tauri/src/commands/crawler_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "list_provider_connections",
       "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "upsert_provider_connection",
       "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "delete_provider_connection",
       "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "set_active_provider_connection",
       "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "test_provider_connection",
       "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "provider_key_hints",
       "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "store_hosted_auth_session",
       "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "clear_hosted_auth_session",
       "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "get_hosted_auth_status",
       "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_database_health",
       "source": "src-tauri/src/commands/data_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "create_profile_backup",
       "source": "src-tauri/src/commands/data_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "preview_restore_backup",
       "source": "src-tauri/src/commands/data_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "restore_profile_backup",
       "source": "src-tauri/src/commands/data_cmds.rs",
-      "profileGuard": false
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "get_storage_summary",
       "source": "src-tauri/src/commands/data_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_exa_connection",
       "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "configure_exa_connection",
       "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "delete_exa_connection",
       "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "test_exa_connection",
       "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_exa_usage",
       "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_exa_usage",
       "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_exa_budget",
       "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "set_exa_budget",
       "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "get_search_profile",
       "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "set_search_profile",
       "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "export_tool",
       "source": "src-tauri/src/commands/export_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_export_formats",
       "source": "src-tauri/src/commands/export_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_capability_catalog",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_apply_change",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_compile_intent",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_list_manifests",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_get_manifest",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_ensure_tool_manifest",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_restore_last_known_good",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "kernel_mark_last_known_good",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_upsert_data_model",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_grant_permission",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_revoke_permission",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_list_permissions",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_get_recovery_state",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_set_recovery_mode",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_enter_safe_startup",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_clear_recovery",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_set_recovery_flags",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_export_package",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_export_package_bytes",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_preview_package",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_import_package",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_application_summary",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_data_model_summary",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_recent_transactions",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_upsert_test",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_run_test",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_visual_checks",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_garbage_collect",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_create_job",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_get_job",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_interrupt_jobs",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_set_policy_override",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_clear_policy_override",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_list_registered_actions",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_invoke_registered_action",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_list_pending_approvals",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_decide_approval",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_list_runtime_grants",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_revoke_runtime_grant",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_list_audit_events",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_clear_audit_events",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_set_application_lifecycle",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_record_build_failure",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_clear_build_failure",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_list_build_failures",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_list_application_versions",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "kernel_unified_search",
       "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "open_external_url",
       "source": "src-tauri/src/commands/link_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_media_assets_cmd",
       "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_media_asset_cmd",
       "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "delete_media_asset_cmd",
       "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "import_media_asset_cmd",
       "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "get_media_asset_src_cmd",
       "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_media_asset_thumb_src_cmd",
       "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "media_asset_usage_cmd",
       "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "touch_media_asset_cmd",
       "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "send_message",
       "source": "src-tauri/src/commands/message_cmds.rs",
-      "profileGuard": false
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "set_kernel_proposal_status",
       "source": "src-tauri/src/commands/message_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "discard_kernel_proposal",
       "source": "src-tauri/src/commands/message_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "cancel_request",
       "source": "src-tauri/src/commands/message_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "discard_tool_change",
       "source": "src-tauri/src/commands/message_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_projects_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_project_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "create_project_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "update_project_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "archive_project_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "restore_project_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "delete_project_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "create_conversation_in_project",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "assign_chats_to_project",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "remove_chat_from_project",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_project_conversations_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_unassigned_conversations_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "search_project_context_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "refresh_project_summary",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "rebuild_project_index_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "rename_conversation_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "duplicate_conversation_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "export_project",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "set_project_wallpaper_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "touch_project_opened",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "assign_conversation_to_project_cmd",
       "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_capability_packs",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_conversation_surfaces",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_surface_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "create_inline_surface_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "update_surface_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "promote_surface_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "save_surface_state_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_surface_state_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_draft_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "save_draft_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "delete_draft_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "schedule_patches_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "flush_patch_scheduler_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_route_state_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "set_route_state_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "navigate_route_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "append_context_ledger_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_context_ledger_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_provider_profile_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_continuity_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "save_continuity_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "suspend_surface_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "apply_operations_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "validate_agent_response_v2",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "undo_transaction_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_transactions_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_transaction_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "branch_conversation_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_branches_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "create_snapshot_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "get_snapshot_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "delete_snapshot_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "enqueue_agent_turn_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_agent_queue_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "cancel_queue_item_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "remove_queue_item_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "activate_next_queue_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "complete_queue_item_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "recover_agent_queue_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "store_diagnostics_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_diagnostics_cmd",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "runtime_v2_limits",
       "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_search_connection",
       "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "configure_search_connection",
       "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "delete_search_connection",
       "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "test_search_connection",
       "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "web_search_cmd",
       "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "image_search_cmd",
       "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "video_search_cmd",
       "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "list_search_sessions_cmd",
       "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_search_session_cmd",
       "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "clear_search_history_cmd",
       "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "fetch_web_page_cmd",
       "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_settings",
       "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "set_setting",
       "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "list_added_settings",
       "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "upsert_added_setting",
       "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "delete_added_setting",
       "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "validate_change_targets",
       "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "set_dock_icon",
       "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "set_dock_icon_for_os_appearance",
       "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "list_tools",
       "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_tool",
       "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_tool_versions",
       "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "apply_tool_change",
       "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "undo_tool_change",
       "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "save_tool_state",
       "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "get_tool_state",
       "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_read",
+      "disposition": "keep_main_read"
     },
     {
       "name": "clear_tools",
       "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
+      "profileGuard": true,
+      "class": "profile_write",
+      "disposition": "keep_main_write"
     },
     {
       "name": "open_tool_window",
       "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "window_orchestrator_inspect",
       "source": "src-tauri/src/commands/window_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "window_orchestrator_expand",
       "source": "src-tauri/src/commands/window_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     },
     {
       "name": "window_orchestrator_restore",
       "source": "src-tauri/src/commands/window_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "profile_write_unguarded",
+      "disposition": "keep_main_write"
     },
     {
       "name": "window_orchestrator_cancel",
       "source": "src-tauri/src/commands/window_cmds.rs",
-      "profileGuard": false
+      "profileGuard": false,
+      "class": "needs_review",
+      "disposition": "keep_main_read"
     }
-  ]
+  ],
+  "note": "Automated heuristic classification; kernel/runtime_v2 still need manual review for recovery_safe vs profile_write."
 }

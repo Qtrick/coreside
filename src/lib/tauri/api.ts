@@ -126,6 +126,8 @@ export const api = {
       toolCount: number;
       projectCount: number;
       databaseBytes: number | null;
+      backupBytes: number | null;
+      mediaBytes: number | null;
       profileReady: boolean;
     }>("get_storage_summary"),
   getDatabaseHealth: () =>
@@ -141,7 +143,27 @@ export const api = {
       path: string;
       byteSize: number;
       schemaVersion: string | null;
+      format: string;
     }>("create_profile_backup"),
+  previewRestoreBackup: (path: string) =>
+    invoke<{
+      format: string;
+      schemaVersion: number;
+      applicationVersion: string;
+      createdAt: string;
+      latestMigration: string | null;
+      databaseBytes: number;
+      mediaCount: number;
+      attachmentCount: number;
+      integrityOk: boolean;
+      warnings: string[];
+    }>("preview_restore_backup", { path }),
+  restoreProfileBackup: (path: string, confirm: boolean) =>
+    invoke<{
+      safetyBackupPath: string;
+      restoredFrom: string;
+      restartRecommended: boolean;
+    }>("restore_profile_backup", { path, confirm }),
   getAiStatus: () => invoke<AiStatus>("get_ai_status"),
   getModelCatalog: () => invoke<ModelCatalog>("get_model_catalog"),
   testAiConnection: () =>

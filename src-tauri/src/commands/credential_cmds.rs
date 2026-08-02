@@ -123,6 +123,7 @@ async fn health_check_key(config: &AppConfig) -> Result<(), CommandError> {
 pub fn list_provider_connections(
     state: State<'_, AppState>,
 ) -> Result<Vec<ProviderConnectionView>, CommandError> {
+    state.require_profile()?;
     // `to_view` probes the keychain per row; release the lock before that loop.
     let rows = {
         let db = state.db.lock();
@@ -136,6 +137,7 @@ pub async fn upsert_provider_connection(
     state: State<'_, AppState>,
     input: UpsertProviderConnectionInput,
 ) -> Result<ProviderConnectionView, CommandError> {
+    state.require_profile()?;
     let provider = normalize_provider(&input.provider)?;
     let label = input.label.trim();
     if label.is_empty() {
@@ -281,6 +283,7 @@ pub fn delete_provider_connection(
     state: State<'_, AppState>,
     connection_id: String,
 ) -> Result<(), CommandError> {
+    state.require_profile()?;
     let id = connection_id.trim();
     if id.is_empty() {
         return Err(CommandError::new("invalid", "connectionId is required"));
@@ -304,6 +307,7 @@ pub fn set_active_provider_connection(
     state: State<'_, AppState>,
     connection_id: String,
 ) -> Result<ProviderConnectionView, CommandError> {
+    state.require_profile()?;
     let id = connection_id.trim();
     if id.is_empty() {
         return Err(CommandError::new("invalid", "connectionId is required"));
@@ -318,6 +322,7 @@ pub async fn test_provider_connection(
     state: State<'_, AppState>,
     connection_id: Option<String>,
 ) -> Result<crate::ai::ProviderHealth, CommandError> {
+    state.require_profile()?;
     let explicit_id = connection_id
         .as_deref()
         .map(str::trim)

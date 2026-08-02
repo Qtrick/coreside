@@ -60,6 +60,7 @@ pub fn list_projects_cmd(
     state: State<'_, AppState>,
     include_archived: Option<bool>,
 ) -> Result<Vec<Project>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(list_projects(&db, include_archived.unwrap_or(false))?)
 }
@@ -69,6 +70,7 @@ pub fn get_project_cmd(
     state: State<'_, AppState>,
     project_id: String,
 ) -> Result<Project, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(get_project(&db, project_id.trim())?)
 }
@@ -78,6 +80,7 @@ pub fn create_project_cmd(
     state: State<'_, AppState>,
     input: CreateProjectInput,
 ) -> Result<Project, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(create_project(&mut db, &input)?)
 }
@@ -88,6 +91,7 @@ pub fn update_project_cmd(
     project_id: String,
     input: UpdateProjectInput,
 ) -> Result<Project, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(update_project(&mut db, project_id.trim(), &input)?)
 }
@@ -97,6 +101,7 @@ pub fn archive_project_cmd(
     state: State<'_, AppState>,
     project_id: String,
 ) -> Result<Project, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(archive_project(&mut db, project_id.trim())?)
 }
@@ -106,6 +111,7 @@ pub fn restore_project_cmd(
     state: State<'_, AppState>,
     project_id: String,
 ) -> Result<Project, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(restore_project(&mut db, project_id.trim())?)
 }
@@ -115,6 +121,7 @@ pub fn delete_project_cmd(
     state: State<'_, AppState>,
     input: DeleteProjectInput,
 ) -> Result<(), CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     let mode = input.mode.unwrap_or(DeleteProjectMode::KeepChats);
     Ok(delete_project(&mut db, input.project_id.trim(), mode)?)
@@ -127,6 +134,7 @@ pub fn create_conversation_in_project(
     title: Option<String>,
     workspace_id: Option<String>,
 ) -> Result<Conversation, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     let ws = workspace_id.unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
     let _ = db::ensure_default_workspace(&db)?;
@@ -147,6 +155,7 @@ pub fn assign_chats_to_project(
     state: State<'_, AppState>,
     input: AssignChatsInput,
 ) -> Result<Vec<Conversation>, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(move_conversations_to_project(
         &mut db,
@@ -160,6 +169,7 @@ pub fn remove_chat_from_project(
     state: State<'_, AppState>,
     conversation_id: String,
 ) -> Result<Conversation, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(remove_conversation_from_project(
         &mut db,
@@ -172,6 +182,7 @@ pub fn list_project_conversations_cmd(
     state: State<'_, AppState>,
     project_id: String,
 ) -> Result<Vec<Conversation>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(list_project_conversations(&db, project_id.trim())?)
 }
@@ -181,6 +192,7 @@ pub fn list_unassigned_conversations_cmd(
     state: State<'_, AppState>,
     workspace_id: Option<String>,
 ) -> Result<Vec<Conversation>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(list_unassigned_conversations(&db, workspace_id.as_deref())?)
 }
@@ -190,6 +202,7 @@ pub fn search_project_context_cmd(
     state: State<'_, AppState>,
     input: SearchProjectContextInput,
 ) -> Result<Vec<ProjectContextHit>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(search_project_context(
         &db,
@@ -204,6 +217,7 @@ pub fn refresh_project_summary(
     state: State<'_, AppState>,
     project_id: String,
 ) -> Result<String, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     let summary = deterministic_fallback_summary(&db, project_id.trim())?;
     Ok(set_project_summary(&mut db, project_id.trim(), &summary)?)
@@ -214,6 +228,7 @@ pub fn rebuild_project_index_cmd(
     state: State<'_, AppState>,
     project_id: String,
 ) -> Result<u64, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(rebuild_project_index(&db, project_id.trim())?)
 }
@@ -224,6 +239,7 @@ pub fn rename_conversation_cmd(
     conversation_id: String,
     title: String,
 ) -> Result<Conversation, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(rename_conversation(
         &mut db,
@@ -238,6 +254,7 @@ pub fn duplicate_conversation_cmd(
     conversation_id: String,
     title: Option<String>,
 ) -> Result<Conversation, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(duplicate_conversation(
         &mut db,
@@ -251,6 +268,7 @@ pub fn export_project(
     state: State<'_, AppState>,
     input: ExportProjectInput,
 ) -> Result<ExportProjectResult, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     let payload = export_project_json(&db, input.project_id.trim())?;
     let path = std::path::PathBuf::from(input.destination_path.trim());
@@ -278,6 +296,7 @@ pub fn set_project_wallpaper_cmd(
     project_id: String,
     wallpaper_json: Option<String>,
 ) -> Result<Project, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(set_project_wallpaper(
         &mut db,
@@ -291,6 +310,7 @@ pub fn touch_project_opened(
     state: State<'_, AppState>,
     project_id: String,
 ) -> Result<Project, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(touch_last_opened(&mut db, project_id.trim())?)
 }
@@ -301,6 +321,7 @@ pub fn assign_conversation_to_project_cmd(
     conversation_id: String,
     project_id: String,
 ) -> Result<Conversation, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(assign_conversation_to_project(
         &mut db,

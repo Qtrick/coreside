@@ -435,7 +435,7 @@ img {
 }
 
 .sidebar-nav button.active {
-  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface));
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));
   border-color: color-mix(in srgb, var(--accent-primary) 28%, var(--border));
 }
 
@@ -470,7 +470,7 @@ img {
 }
 
 .sidebar-settings-btn.active {
-  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface));
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));
   border-color: color-mix(in srgb, var(--accent-primary) 28%, var(--border));
 }
 
@@ -542,11 +542,8 @@ img {
   min-width: 0;
   min-height: 0;
   max-width: 100%;
-  background: color-mix(
-    in srgb,
-    var(--core-surface-primary) calc(var(--core-panel-alpha) * 100%),
-    transparent
-  );
+  /* Prefer --core-content-overlay so nested chrome and panel share one alpha pipeline. */
+  background: var(--core-content-overlay);
 }
 
 .chat-panel {
@@ -1059,7 +1056,7 @@ img {
   padding: var(--space-3) var(--space-4);
   border: 1px solid color-mix(in srgb, var(--accent-primary) 35%, var(--border));
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--accent-primary) 8%, var(--surface));
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--core-card-overlay));
 }
 
 .setup-banner-icon {
@@ -1069,7 +1066,7 @@ img {
   height: 2rem;
   border-radius: var(--radius-sm);
   color: var(--accent-primary);
-  background: color-mix(in srgb, var(--accent-primary) 16%, var(--surface));
+  background: color-mix(in srgb, var(--accent-primary) 16%, var(--core-control-overlay));
 }
 
 .setup-banner-body strong {
@@ -1090,7 +1087,7 @@ img {
   padding: var(--space-3);
   border-radius: var(--radius-sm);
   border: 1px dashed color-mix(in srgb, var(--accent-secondary) 45%, var(--border));
-  background: color-mix(in srgb, var(--accent-secondary) 10%, var(--surface));
+  background: color-mix(in srgb, var(--accent-secondary) 10%, var(--core-card-overlay));
 }
 
 .tool-change-preview h3 {
@@ -1546,7 +1543,7 @@ img {
 .theme-options button[aria-pressed="true"],
 .theme-options button[aria-checked="true"] {
   border-color: color-mix(in srgb, var(--accent-primary) 40%, var(--border));
-  background: color-mix(in srgb, var(--accent-primary) 12%, var(--surface));
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-control-overlay));
 }
 
 .settings-subheading {
@@ -1583,7 +1580,7 @@ img {
 
 .dock-icon-option[aria-pressed="true"] {
   border-color: color-mix(in srgb, var(--accent-primary) 40%, var(--border));
-  background: color-mix(in srgb, var(--accent-primary) 12%, var(--surface));
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-control-overlay));
 }
 
 .dock-icon-preview {
@@ -1618,17 +1615,17 @@ img {
 
 .status-pill.ready {
   color: var(--success);
-  background: color-mix(in srgb, var(--success) 14%, var(--surface));
+  background: color-mix(in srgb, var(--success) 14%, var(--core-card-overlay));
 }
 
 .status-pill.warn {
   color: var(--accent-secondary);
-  background: color-mix(in srgb, var(--accent-secondary) 16%, var(--surface));
+  background: color-mix(in srgb, var(--accent-secondary) 16%, var(--core-card-overlay));
 }
 
 .status-pill.error {
   color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 14%, var(--surface));
+  background: color-mix(in srgb, var(--danger) 14%, var(--core-card-overlay));
 }
 
 .settings-code-block {
@@ -1687,7 +1684,7 @@ img {
 }
 
 .tr-tablist button[aria-selected="true"] {
-  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface));
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));
   border-color: color-mix(in srgb, var(--accent-primary) 30%, var(--border));
 }
 
@@ -1725,7 +1722,7 @@ img {
 }
 
 .tr-badge.accent {
-  background: color-mix(in srgb, var(--accent-primary) 16%, var(--surface));
+  background: color-mix(in srgb, var(--accent-primary) 16%, var(--core-control-overlay));
   color: var(--accent-primary);
 }
 
@@ -1858,7 +1855,7 @@ img {
 
 .tr-quiz-choices button.correct {
   border-color: color-mix(in srgb, var(--success) 40%, var(--border));
-  background: color-mix(in srgb, var(--success) 12%, var(--surface));
+  background: color-mix(in srgb, var(--success) 12%, var(--core-card-overlay));
 }
 
 .tr-quiz-choices button.incorrect {
@@ -2068,7 +2065,7 @@ img {
 
 .provider-picker-item:hover {
   border-color: color-mix(in srgb, var(--accent-primary) 35%, var(--border));
-  background: color-mix(in srgb, var(--accent-primary) 8%, var(--surface));
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--core-card-overlay));
 }
 
 .provider-key-form,
@@ -2231,7 +2228,7 @@ img {
   margin-left: 0.5rem;
   padding: 0.1rem 0.45rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent-primary) 16%, var(--surface));
+  background: color-mix(in srgb, var(--accent-primary) 16%, var(--core-control-overlay));
   color: var(--accent-primary);
   font-size: 0.72rem;
   font-weight: 600;
@@ -2267,7 +2264,7 @@ img {
 }
 
 .settings-toggle[aria-checked="true"] {
-  background: color-mix(in srgb, var(--accent-primary) 55%, var(--surface));
+  background: color-mix(in srgb, var(--accent-primary) 55%, var(--core-control-overlay));
   border-color: color-mix(in srgb, var(--accent-primary) 40%, var(--border));
 }
 
@@ -2330,7 +2327,7 @@ img {
 
 .mention-menu-item:hover,
 .mention-menu-item.active {
-  background: color-mix(in srgb, var(--accent-primary) 12%, var(--surface));
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-control-overlay));
 }
 
 .mention-menu-icon {
@@ -2451,7 +2448,7 @@ img {
 
 .provider-picker-item.active {
   border-color: color-mix(in srgb, var(--accent-primary) 40%, var(--border));
-  background: color-mix(in srgb, var(--accent-primary) 10%, var(--surface));
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--core-control-overlay));
 }
 
 /* ─── Context menu ─── */
@@ -2596,7 +2593,7 @@ img {
 
 .sidebar-nav-btn:hover,
 .sidebar-nav-btn.active {
-  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface));
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));
   border-color: color-mix(in srgb, var(--accent-primary) 28%, var(--border));
 }
 
@@ -2636,7 +2633,7 @@ img {
   width: 1.35rem;
   height: 1.35rem;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--project-marker, var(--accent-primary)) 18%, var(--surface));
+  background: color-mix(in srgb, var(--project-marker, var(--accent-primary)) 18%, var(--core-card-overlay));
   color: var(--project-marker, var(--accent-primary));
   flex-shrink: 0;
 }
@@ -3114,7 +3111,7 @@ img {
   margin: 0;
   padding: 0.65rem 0.75rem;
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, #c06d3d 14%, var(--surface));
+  background: color-mix(in srgb, #c06d3d 14%, var(--core-card-overlay));
   color: var(--text-primary);
   font-size: 0.88rem;
 }

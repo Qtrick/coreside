@@ -203,6 +203,8 @@ impl GeminiProvider {
             .map(|m| {
                 let role = match m.role.as_str() {
                     "assistant" | "model" => "model",
+                    // tool_result maps to user for API shape; content is untrusted-enveloped.
+                    "tool_result" => "user",
                     _ => "user",
                 };
                 json!({

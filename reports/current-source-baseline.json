@@ -1,80 +1,68 @@
 {
+  "schemaVersion": 1,
   "product": "Coreside",
   "accessDate": "2026-08-02",
-  "generatedAt": "2026-08-02T04:34:00.000Z",
+  "accessWindow": "evening",
+  "generatedAt": "2026-08-02T21:55:00.000Z",
+  "phase": "release_candidate",
   "publicBeta": "NOT_READY",
+  "command": "baseline-refresh",
+  "exitStatus": 0,
+  "commit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
+  "dirty": true,
+  "sourceFingerprint": "dirty-worktree-wallpaper-backup-trust-shell",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "dev",
   "activeRepository": {
     "path": "/Users/qunyingfan/Coreside",
     "branch": "main",
-    "commit": "57f80bcb74de4107760350ad887df5d4ea246a3d",
+    "commit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
     "dirty": true,
-    "dirtyFiles": [
-      "e2e/helpers.ts",
-      "package.json",
-      "scripts/release-evidence.mjs",
-      "src-tauri/src/commands/attachment_cmds.rs",
-      "src-tauri/src/crawler/installation.rs",
-      "src-tauri/src/db/mod.rs",
-      "src-tauri/src/media/storage.rs",
-      "src/components/settings/AgentBehaviorSettings.tsx",
-      "src/components/settings/SettingsPanel.tsx",
-      "src/lib/settings-categories.test.ts",
-      "src/lib/settings-categories.ts"
-    ],
-    "dirtyNote": "Uncommitted review fixes: Settings IA tweaks, product_data_dir casing, release-evidence honesty, assurance:report wiring"
+    "dirtyNote": "Includes AppPaths, .coreside-backup archive, agent trust wiring, shell:allow-open removal, wallpaper visual model"
   },
   "archive": {
-    "observedNames": ["Coreside Chat AI.zip", "Chat AI.zip"],
+    "observedNames": ["Coreside Chat AI.zip", "Chat AI(5)"],
     "pathObserved": "/Users/qunyingfan/Downloads/Coreside Chat AI.zip",
-    "sha256": "d8fe0c3110e8fd9809962d61bb05a594b6cf821c109ce0d4c305aeec3152b36b",
-    "matchesTaskNote": "Matches Chat AI(4) hash from task",
-    "approxBytes": 2794666
-  },
-  "extract": {
-    "path": ".reference/coreside-uploaded-2026-08-02/coreside-main",
-    "gitignored": true,
-    "innerCommit": "57f80bcb74de4107760350ad887df5d4ea246a3d"
+    "sha256": "b2f8bf4e244cd82976de39cacb484cf86c641ba08314c285f7467e115dbf17f2",
+    "approxBytes": 2824600,
+    "verifiedAt": "2026-08-02T21:50:00.000Z",
+    "supersedes": {
+      "sha256": "d8fe0c3110e8fd9809962d61bb05a594b6cf821c109ce0d4c305aeec3152b36b",
+      "note": "Chat AI(4) — superseded; baseline must reference b2f8bf4e…"
+    }
   },
   "lockfileHashes": {
     "package-lock.json": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
-    "src-tauri/Cargo.lock": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
-    "note": "Active and extract lockfile SHA-256 values match"
+    "src-tauri/Cargo.lock": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729"
   },
   "counts": {
-    "note": "Approx match archive ↔ active for primary trees; Rust .rs count differs (active local growth / dirty worktree)",
+    "note": "Active tree grew slightly vs archive as RC work landed",
     "active": {
-      "srcFiles": 144,
-      "rustRsFiles": 179,
+      "srcFiles": 149,
+      "rustRsFiles": 172,
       "migrationsSql": 15,
       "e2eSpecs": 10
     },
-    "extract": {
-      "srcFiles": 144,
-      "rustRsFiles": 166,
-      "migrationsSql": 15,
-      "e2eSpecs": 10
-    },
-    "taskApprox": {
-      "srcFiles": 144,
-      "rustRsFiles": 165,
+    "archive": {
+      "srcFiles": 148,
+      "rustRsFiles": 170,
       "migrationsSql": 15,
       "e2eSpecs": 10
     }
   },
   "scope": {
-    "wallpaperRedesign": "OUT_OF_SCOPE",
-    "blockerClosureDocs": true
+    "wallpaperCompositingClosure": "IN_SCOPE",
+    "publicBetaShip": "NOT_READY"
   },
-  "p0Open": [
-    {
-      "id": "BOOTSTRAP-DB-PANIC",
-      "summary": "Database::open_default failure panics in src-tauri/src/lib.rs during startup",
-      "path": "src-tauri/src/lib.rs"
-    }
-  ],
-  "reviewFixesPresentUncommitted": [
-    "release-evidence: passed_partial no longer maps to passed",
-    "assurance:report no longer placeholder (npm run release:evidence:quick)",
-    "product_data_dir prefers canonical coreside then legacy Coreside"
+  "progressThisPass": [
+    "Verified archive SHA-256 b2f8bf4e…",
+    "AppPaths module",
+    ".coreside-backup create + restore preview",
+    "Agent retrieval trust labels + tool_result role",
+    "Removed shell:allow-open from main capability",
+    "Wallpaper unit visual contribution proof"
   ]
 }

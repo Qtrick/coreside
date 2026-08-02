@@ -20,6 +20,7 @@ pub fn list_media_assets_cmd(
     project_id: Option<String>,
     limit: Option<usize>,
 ) -> Result<Vec<MediaAsset>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     list_media_assets(&db, project_id.as_deref(), limit.unwrap_or(50)).map_err(CommandError::from)
 }
@@ -29,6 +30,7 @@ pub fn get_media_asset_cmd(
     state: State<'_, AppState>,
     asset_id: String,
 ) -> Result<MediaAsset, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     get_media_asset(&db, &asset_id).map_err(|e| e.into())
 }
@@ -38,6 +40,7 @@ pub fn delete_media_asset_cmd(
     state: State<'_, AppState>,
     asset_id: String,
 ) -> Result<(), CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     delete_media_asset(&mut db, &asset_id).map_err(|e| e.into())
 }
@@ -47,6 +50,7 @@ pub async fn import_media_asset_cmd(
     state: State<'_, AppState>,
     input: ImportMediaInput,
 ) -> Result<MediaAsset, CommandError> {
+    state.require_profile()?;
     let (bytes, hash, meta) =
         crate::media::download_and_validate(input.url.trim(), input.category.as_deref())
             .await
@@ -73,6 +77,7 @@ pub fn get_media_asset_src_cmd(
     state: State<'_, AppState>,
     asset_id: String,
 ) -> Result<MediaAssetSrc, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     let asset = get_media_asset(&db, &asset_id).map_err(CommandError::from)?;
     let path = resolve_asset_file_path(&asset.local_filename).map_err(map_media_err)?;
@@ -87,6 +92,7 @@ pub fn get_media_asset_thumb_src_cmd(
     state: State<'_, AppState>,
     asset_id: String,
 ) -> Result<Option<MediaAssetSrc>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     let asset = get_media_asset(&db, &asset_id).map_err(CommandError::from)?;
     let Some(thumb) = asset.thumbnail_filename.filter(|s| !s.is_empty()) else {
@@ -104,6 +110,7 @@ pub fn media_asset_usage_cmd(
     state: State<'_, AppState>,
     asset_id: String,
 ) -> Result<Vec<MediaAssetUsage>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     find_media_asset_usages(&db, &asset_id).map_err(CommandError::from)
 }
@@ -113,6 +120,7 @@ pub fn touch_media_asset_cmd(
     state: State<'_, AppState>,
     asset_id: String,
 ) -> Result<(), CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     touch_media_used(&db, &asset_id).map_err(|e| e.into())
 }

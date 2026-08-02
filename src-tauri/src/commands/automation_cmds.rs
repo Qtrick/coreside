@@ -32,6 +32,7 @@ pub struct UpsertAutomationInput {
 
 #[tauri::command]
 pub fn list_automations(state: State<'_, AppState>) -> Result<Vec<Automation>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(db::list_automations(&db)?)
 }
@@ -41,6 +42,7 @@ pub fn upsert_automation(
     state: State<'_, AppState>,
     input: UpsertAutomationInput,
 ) -> Result<Automation, CommandError> {
+    state.require_profile()?;
     let requires_ai = input.requires_ai.unwrap_or(false);
     validate_automation(&input.name, &input.trigger, &input.action, requires_ai)
         .map_err(|e| CommandError::new("invalid", e))?;
@@ -100,6 +102,7 @@ pub fn set_automation_enabled(
     automation_id: String,
     enabled: bool,
 ) -> Result<Automation, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     let mut row = db::get_automation(&db, automation_id.trim())?;
     row.enabled = enabled;
@@ -115,6 +118,7 @@ pub fn delete_automation(
     state: State<'_, AppState>,
     automation_id: String,
 ) -> Result<(), CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(db::delete_automation(&mut db, automation_id.trim())?)
 }
@@ -124,6 +128,7 @@ pub fn list_automation_runs(
     state: State<'_, AppState>,
     automation_id: String,
 ) -> Result<Vec<crate::automations::AutomationRun>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(db::list_automation_runs(&db, automation_id.trim(), 50)?)
 }
@@ -134,6 +139,7 @@ pub fn run_automation_now(
     scheduler: State<'_, std::sync::Arc<SchedulerHandle>>,
     automation_id: String,
 ) -> Result<String, CommandError> {
+    state.require_profile()?;
     crate::automations::run_now(&state, automation_id.trim(), &scheduler)
         .map_err(|e| CommandError::new("automation", e))
 }
@@ -143,6 +149,7 @@ pub fn list_workspace_backgrounds(
     state: State<'_, AppState>,
     workspace_id: Option<String>,
 ) -> Result<Vec<db::WorkspaceBackground>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     let ws = workspace_id.unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
     Ok(db::list_workspace_backgrounds(&db, &ws)?)
@@ -164,6 +171,7 @@ pub fn upsert_workspace_background(
     state: State<'_, AppState>,
     input: UpsertBackgroundInput,
 ) -> Result<db::WorkspaceBackground, CommandError> {
+    state.require_profile()?;
     let kind = input.kind.trim().to_lowercase();
     if !matches!(
         kind.as_str(),

@@ -1,21 +1,25 @@
 {
   "product": "Coreside",
-  "accessDate": "2026-08-01",
-  "generatedAt": "2026-08-02T03:44:49.000Z",
+  "accessDate": "2026-08-02",
+  "generatedAt": "2026-08-02T21:55:00.000Z",
+  "commit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
+  "dirty": true,
   "rootCause": {
     "id": "nested-opaque-surface",
     "summary": "Translucent panels were covered by nested opaque var(--surface) / tint-onto-surface fills",
     "primaryFiles": [
       "src/lib/interface-transparency.ts",
+      "src/lib/wallpaper-visual-proof.ts",
       "src/styles/tokens.css",
       "src/styles/global.css"
     ]
   },
   "fixPath": [
     "Emit --core-*-overlay tokens from interface transparency",
-    "Migrate nested chrome to overlays (settings-section, message-bubble, btn-secondary done)",
-    "Inventory and migrate remaining nested occlusion risks",
-    "Capture visual proof at 0/20/40/60% and None"
+    "Migrate nested chrome to overlays",
+    "Unify panel backgrounds onto --core-content-overlay",
+    "Unit visual model for 0/20/40/60% contribution",
+    "Capture desktop + packaged pixel proof (remaining)"
   ],
   "noneBehavior": {
     "clearsSchemaWallpaperJson": true,
@@ -26,15 +30,17 @@
   "status": {
     "schemaNoneP0": "fixed",
     "interfaceTransparencySetting": "implemented",
-    "nestedHighTrafficMigrations": "partial",
-    "remainingSurfaceRisk": "open",
-    "visualProof": "not_done",
+    "nestedHighTrafficMigrations": "advanced",
+    "remainingSurfaceRisk": "low_intentional_exceptions",
+    "visualProof": "unit_model_passed_desktop_pending",
     "betaReady": false
   },
   "docs": [
-    "docs/WALLPAPER_ASSURANCE.md",
-    "docs/SURFACE_COMPOSITING_MODEL.md",
-    "docs/WALLPAPER_COMPOSITING_RESEARCH.md"
+    "docs/WALLPAPER_COMPOSITING_GRAPH.md",
+    "docs/WALLPAPER_COMPOSITING_CLOSURE_RESEARCH.md",
+    "docs/WALLPAPER_ASSURANCE.md"
   ],
-  "inventory": "reports/background-rule-inventory.json"
+  "inventory": "reports/background-rule-inventory.json",
+  "visualResults": "reports/wallpaper-visual-results.json",
+  "reviewerNote": "2026-08-02 evening: unit blend contribution proof added; desktop/packaged screenshot gates still open."
 }

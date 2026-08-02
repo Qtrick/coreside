@@ -25,6 +25,8 @@ export function BootstrapRecoveryScreen({
         await bootstrap();
         return;
       }
+      // Rust returns an updated recovery status (not an exception) when reopen fails.
+      useAppStore.setState({ bootstrapStatus: next });
       setError(next.message);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not reopen local data.");
@@ -65,9 +67,10 @@ export function BootstrapRecoveryScreen({
         </button>
       </div>
       <p className="muted" style={{ marginTop: "1.25rem", maxWidth: "32rem" }}>
-        Your original database file is preserved when possible. Use a backup from
-        Data &amp; Storage once Recovery is available, or contact support with a
-        redacted diagnostic export.
+        Your original database file is preserved when possible. Local backup
+        snapshots are available from Data &amp; Storage after Recovery succeeds;
+        full restore is not yet available in this build. Contact support with a
+        redacted diagnostic export if you need help.
       </p>
     </main>
   );

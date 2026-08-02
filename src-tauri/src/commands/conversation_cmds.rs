@@ -11,6 +11,7 @@ pub fn list_conversations(
     state: State<'_, AppState>,
     workspace_id: Option<String>,
 ) -> Result<Vec<Conversation>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(db::list_conversations(&db, workspace_id.as_deref())?)
 }
@@ -46,6 +47,7 @@ pub fn get_messages(
     state: State<'_, AppState>,
     conversation_id: String,
 ) -> Result<Vec<Message>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(db::get_messages(&db, &conversation_id)?)
 }

@@ -118,6 +118,8 @@ export function SettingsPanel() {
     toolCount: number;
     projectCount: number;
     databaseBytes: number | null;
+    backupBytes: number | null;
+    mediaBytes: number | null;
     profileReady: boolean;
   } | null>(null);
   const [storageLoading, setStorageLoading] = useState(false);
@@ -595,6 +597,18 @@ export function SettingsPanel() {
                         ? `${(storageSummary.databaseBytes / (1024 * 1024)).toFixed(2)} MB`
                         : "—"}
                     </li>
+                    <li>
+                      Media size:{" "}
+                      {storageSummary.mediaBytes != null
+                        ? `${(storageSummary.mediaBytes / (1024 * 1024)).toFixed(2)} MB`
+                        : "—"}
+                    </li>
+                    <li>
+                      Backups size:{" "}
+                      {storageSummary.backupBytes != null
+                        ? `${(storageSummary.backupBytes / (1024 * 1024)).toFixed(2)} MB`
+                        : "—"}
+                    </li>
                   </ul>
                 ) : (
                   <p className="muted">Could not load storage summary.</p>
@@ -604,14 +618,17 @@ export function SettingsPanel() {
               <section className="settings-section" aria-labelledby="backup-heading">
                 <h3 id="backup-heading">Backup</h3>
                 <p>
-                  Create a consistent local database snapshot. Backups can contain
-                  private chats and tool data. Provider keys are not included.
+                  Create a verified local profile backup archive. Current backups
+                  include a consistent database snapshot. Media and attachments
+                  inclusion is expanding. Provider keys and credentials are never
+                  included.
                 </p>
                 <div className="button-row">
                   <button
                     type="button"
                     className="btn btn-primary"
                     disabled={backupBusy}
+                    aria-busy={backupBusy}
                     onClick={() => {
                       setBackupBusy(true);
                       setBackupMessage(null);
@@ -619,7 +636,7 @@ export function SettingsPanel() {
                         .createProfileBackup()
                         .then((result) => {
                           setBackupMessage(
-                            `Backup saved as ${result.path} (${(result.byteSize / 1024).toFixed(0)} KB).`,
+                            `Backup saved as ${result.path} (${(result.byteSize / 1024).toFixed(0)} KB, ${result.format}).`,
                           );
                         })
                         .catch((err: unknown) => {

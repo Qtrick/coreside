@@ -53,6 +53,8 @@ impl AnthropicProvider {
         for m in messages {
             let role = match m.role.as_str() {
                 "assistant" | "model" => "assistant",
+                // tool_result maps to user for API shape; content is untrusted-enveloped.
+                "tool_result" => "user",
                 _ => "user",
             };
             api_messages.push(json!({

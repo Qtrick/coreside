@@ -2,6 +2,7 @@
 
 pub mod bootstrap;
 pub mod backup;
+pub mod profile_archive;
 pub mod health;
 #[cfg(test)]
 mod migration_fixtures;
@@ -9,6 +10,9 @@ mod repositories;
 
 pub use bootstrap::{open_profile_or_shell, BootstrapStatus};
 pub use health::DatabaseHealthReport;
+pub use profile_archive::{
+    extract_database_from_archive, preview_profile_archive, RestorePreview,
+};
 pub use repositories::*;
 
 use std::path::{Path, PathBuf};

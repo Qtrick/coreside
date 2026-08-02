@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-02T21:55:00.000Z",
+  "commit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
+  "dirty": true,
+  "sourceFingerprint": "dirty-worktree-wallpaper-backup-trust-shell",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "dev",
+  "command": "docs/WALLPAPER_COMPOSITING_GRAPH.md",
+  "exitStatus": 0,
+  "layers": [
+    { "order": 1, "id": "html-body", "exposesWallpaper": false },
+    { "order": 2, "id": "app-shell", "exposesWallpaper": true },
+    { "order": 3, "id": "live-wallpaper", "exposesWallpaper": true, "role": "wallpaper-base" },
+    { "order": 4, "id": "readability-scrim", "exposesWallpaper": true },
+    { "order": 5, "id": "sidebar", "token": "--core-sidebar-overlay", "exposesWallpaper": true },
+    { "order": 6, "id": "main-panels", "token": "--core-content-overlay", "exposesWallpaper": true },
+    { "order": 7, "id": "sections-cards", "token": "--core-card-overlay", "exposesWallpaper": true },
+    { "order": 8, "id": "controls", "token": "--core-control-overlay", "exposesWallpaper": "limited" },
+    { "order": 9, "id": "menus-elevated", "exposesWallpaper": false, "intentional": true },
+    { "order": 10, "id": "modals-critical", "token": "--core-modal-overlay", "exposesWallpaper": false, "intentional": true }
+  ],
+  "visualProof": {
+    "unitAlphaModel": "passed",
+    "desktopScreenshots": "not_run",
+    "packaged": "not_run"
+  }
+}

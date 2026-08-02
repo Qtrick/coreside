@@ -280,6 +280,7 @@ fn value_to_storage(value: &Value) -> String {
 
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     let map = db::get_settings(&db)?;
     Ok(settings_from_map(&map))
@@ -291,6 +292,7 @@ pub fn set_setting(
     key: String,
     value: Value,
 ) -> Result<AppSettings, CommandError> {
+    state.require_profile()?;
     if key.trim().is_empty() {
         return Err(CommandError::new("invalid", "Setting key cannot be empty"));
     }
@@ -362,6 +364,7 @@ pub fn list_added_settings(
     state: State<'_, AppState>,
     owner_tool_id: Option<String>,
 ) -> Result<Vec<AddedSettingRecord>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(db::list_added_settings(&db, owner_tool_id.as_deref())?)
 }
@@ -371,12 +374,14 @@ pub fn upsert_added_setting(
     state: State<'_, AppState>,
     input: UpsertAddedSettingInput,
 ) -> Result<AddedSettingRecord, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(db::upsert_added_setting(&mut db, &input)?)
 }
 
 #[tauri::command]
 pub fn delete_added_setting(state: State<'_, AppState>, id: String) -> Result<(), CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(db::delete_added_setting(&mut db, &id)?)
 }

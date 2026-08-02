@@ -50,6 +50,7 @@ pub fn export_tool(
     state: State<'_, AppState>,
     input: ExportToolInput,
 ) -> Result<ExportResult, CommandError> {
+    state.require_profile()?;
     let format = input.format.trim().to_lowercase();
     let dest = PathBuf::from(input.destination_path.trim());
     if dest.as_os_str().is_empty() {
@@ -169,6 +170,7 @@ pub fn list_export_formats(
     tool_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<serde_json::Value>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     let tool = db::get_tool(&db, tool_id.trim())?;
     let mut def = tool.definition;

@@ -9,6 +9,10 @@ import {
   applyInterfaceTransparencyCssVars,
   computeInterfaceTransparencyTokens,
 } from "./interface-transparency";
+import {
+  assertMonotonicWallpaperVisibility,
+  sampleWallpaperThroughPanel,
+} from "./wallpaper-visual-proof";
 
 describe("wallpaper compositing proof", () => {
   it("panel and card alphas decrease monotonically across presets", () => {
@@ -53,5 +57,18 @@ describe("wallpaper compositing proof", () => {
     expect(
       document.documentElement.style.getPropertyValue("--core-content-overlay"),
     ).toMatch(/100%/);
+  });
+
+  it("proves monotonic wallpaper pixel contribution through panels (visual model)", () => {
+    const samples = assertMonotonicWallpaperVisibility();
+    expect(samples[0]!.wallpaperContribution).toBe(0);
+    expect(samples[3]!.wallpaperContribution).toBeGreaterThan(
+      samples[2]!.wallpaperContribution,
+    );
+    expect(sampleWallpaperThroughPanel(0).blended).toEqual({
+      r: 245,
+      g: 245,
+      b: 242,
+    });
   });
 });

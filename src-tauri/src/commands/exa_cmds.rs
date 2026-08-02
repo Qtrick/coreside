@@ -66,6 +66,7 @@ pub fn get_exa_usage(
     state: State<'_, AppState>,
     month_key: Option<String>,
 ) -> Result<UsageSummary, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     usage_summary(&db, month_key.as_deref()).map_err(CommandError::from)
 }
@@ -75,12 +76,14 @@ pub fn list_exa_usage(
     state: State<'_, AppState>,
     limit: Option<usize>,
 ) -> Result<Vec<UsageEntry>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     list_recent_usage(&db, limit.unwrap_or(50)).map_err(CommandError::from)
 }
 
 #[tauri::command]
 pub fn get_exa_budget(state: State<'_, AppState>) -> Result<BudgetStatus, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(budget_status(&db))
 }
@@ -99,6 +102,7 @@ pub fn set_exa_budget(
     state: State<'_, AppState>,
     input: SetExaBudgetInput,
 ) -> Result<BudgetStatus, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     let mut cfg = load_budget_config(&db);
     // Always apply monthly budget from this command: null / missing = unlimited.
@@ -147,6 +151,7 @@ impl From<SearchProfile> for SearchProfileView {
 
 #[tauri::command]
 pub fn get_search_profile(state: State<'_, AppState>) -> Result<SearchProfileView, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(SearchProfileView::from(load_search_profile(&db)))
 }
@@ -162,6 +167,7 @@ pub fn set_search_profile(
     state: State<'_, AppState>,
     input: SetSearchProfileInput,
 ) -> Result<SearchProfileView, CommandError> {
+    state.require_profile()?;
     let profile = SearchProfile::parse(&input.profile);
     let mut db = state.db.lock();
     save_search_profile(&mut db, profile).map_err(CommandError::from)?;

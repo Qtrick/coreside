@@ -54,6 +54,7 @@ async fn resolve_registry(state: &AppState) -> Result<SearchRegistry, CommandErr
 pub fn get_search_connection(
     state: State<'_, AppState>,
 ) -> Result<SearchConnectionView, CommandError> {
+    state.require_profile()?;
     let report = detect_installation();
     let _ = state;
     let exa = resolve_exa_credentials();
@@ -90,6 +91,7 @@ pub async fn configure_search_connection(
     state: State<'_, AppState>,
     input: ConfigureSearchInput,
 ) -> Result<SearchConnectionView, CommandError> {
+    state.require_profile()?;
     let _ = input;
     get_search_connection(state)
 }
@@ -104,6 +106,7 @@ pub fn delete_search_connection() -> Result<(), CommandError> {
 
 #[tauri::command]
 pub async fn test_search_connection(state: State<'_, AppState>) -> Result<String, CommandError> {
+    state.require_profile()?;
     let registry = resolve_registry(&state).await?;
     registry.health_check().await.map_err(map_search_err)?;
     Ok("Local research engine OK".into())
@@ -124,6 +127,7 @@ pub async fn web_search_cmd(
     state: State<'_, AppState>,
     input: SearchQueryInput,
 ) -> Result<crate::search::WebSearchResponse, CommandError> {
+    state.require_profile()?;
     let safe = {
         let db = state.db.lock();
         let settings = load_project_context_settings(&db)?;
@@ -164,6 +168,7 @@ pub async fn image_search_cmd(
     state: State<'_, AppState>,
     input: SearchQueryInput,
 ) -> Result<crate::search::ImageSearchResponse, CommandError> {
+    state.require_profile()?;
     let safe = {
         let db = state.db.lock();
         let settings = load_project_context_settings(&db)?;
@@ -197,6 +202,7 @@ pub async fn video_search_cmd(
     state: State<'_, AppState>,
     input: SearchQueryInput,
 ) -> Result<crate::search::VideoSearchResponse, CommandError> {
+    state.require_profile()?;
     let safe = {
         let db = state.db.lock();
         let settings = load_project_context_settings(&db)?;
@@ -239,6 +245,7 @@ pub fn list_search_sessions_cmd(
     state: State<'_, AppState>,
     input: Option<ListSearchSessionsInput>,
 ) -> Result<Vec<crate::search::SearchSessionSummary>, CommandError> {
+    state.require_profile()?;
     let input = input.unwrap_or(ListSearchSessionsInput {
         conversation_id: None,
         project_id: None,
@@ -261,6 +268,7 @@ pub fn get_search_session_cmd(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<crate::search::SearchSessionDetail, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     crate::search::get_search_session(&db, session_id.trim()).map_err(CommandError::from)
 }
@@ -277,6 +285,7 @@ pub fn clear_search_history_cmd(
     state: State<'_, AppState>,
     input: Option<ClearSearchHistoryInput>,
 ) -> Result<u64, CommandError> {
+    state.require_profile()?;
     let input = input.unwrap_or(ClearSearchHistoryInput {
         conversation_id: None,
         project_id: None,
@@ -301,6 +310,7 @@ pub async fn fetch_web_page_cmd(
     state: State<'_, AppState>,
     input: FetchWebPageInput,
 ) -> Result<crate::search::FetchedWebPage, CommandError> {
+    state.require_profile()?;
     let report = detect_installation();
     if report.state != InstallationState::Ready {
         return Err(CommandError::new(

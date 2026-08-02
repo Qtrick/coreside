@@ -42,7 +42,7 @@ impl BootstrapStatus {
     }
 }
 
-fn classify_open_error(err: &DbError) -> (&'static str, String) {
+pub(crate) fn classify_open_error(err: &DbError) -> (&'static str, String) {
     let raw = err.to_string();
     let lower = raw.to_lowercase();
     if lower.contains("locked") || lower.contains("busy") {

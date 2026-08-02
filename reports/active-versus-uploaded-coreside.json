@@ -1,41 +1,33 @@
 {
+  "schemaVersion": 1,
   "product": "Coreside",
-  "accessDate": "2026-08-02",
-  "generatedAt": "2026-08-02T04:34:00.000Z",
-  "publicBeta": "NOT_READY",
-  "summary": "Archive extract ≈ coreside-main snapshot at the same commit as active HEAD. Active worktree may be ahead via uncommitted Settings IA + review fixes.",
-  "archive": {
+  "generatedAt": "2026-08-02T21:55:00.000Z",
+  "commit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
+  "dirty": true,
+  "sourceFingerprint": "dirty-worktree-wallpaper-backup-trust-shell",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "dev",
+  "command": "shasum -a 256 archive + active inventory",
+  "exitStatus": 0,
+  "uploadedArchive": {
     "path": "/Users/qunyingfan/Downloads/Coreside Chat AI.zip",
-    "sha256": "d8fe0c3110e8fd9809962d61bb05a594b6cf821c109ce0d4c305aeec3152b36b",
-    "extract": ".reference/coreside-uploaded-2026-08-02/coreside-main"
+    "sha256": "b2f8bf4e244cd82976de39cacb484cf86c641ba08314c285f7467e115dbf17f2",
+    "matchExpected": true
   },
   "active": {
-    "path": "/Users/qunyingfan/Coreside",
-    "branch": "main",
-    "commit": "57f80bcb74de4107760350ad887df5d4ea246a3d",
-    "dirty": true
+    "commit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
+    "dirty": true,
+    "srcFiles": 149,
+    "rustRsFiles": 172
   },
-  "relationship": {
-    "commitMatch": true,
-    "lockfilesMatch": true,
-    "srcTreeCountMatch": true,
-    "rustRsCountMatch": false,
-    "activeMayBeAhead": true,
-    "aheadReason": "Dirty review fixes on Settings IA, product_data_dir, release-evidence honesty, assurance:report; active has more .rs files counted than extract (179 vs 166)"
-  },
-  "dirtyFiles": [
-    "e2e/helpers.ts",
-    "package.json",
-    "scripts/release-evidence.mjs",
-    "src-tauri/src/commands/attachment_cmds.rs",
-    "src-tauri/src/crawler/installation.rs",
-    "src-tauri/src/db/mod.rs",
-    "src-tauri/src/media/storage.rs",
-    "src/components/settings/AgentBehaviorSettings.tsx",
-    "src/components/settings/SettingsPanel.tsx",
-    "src/lib/settings-categories.test.ts",
-    "src/lib/settings-categories.ts"
+  "differences": [
+    "Active dirty worktree adds AppPaths, profile_archive, wallpaper-visual-proof, trust/shell/capability edits beyond archive snapshot",
+    "Active src file count 149 vs archive 148",
+    "Active Rust file count 172 vs archive 170",
+    "Lockfile hashes still match archive continuity"
   ],
-  "outOfScope": ["wallpaper redesign / wallpaper runtime code"],
-  "verdict": "Use extract as continuity baseline; treat dirty active tree as candidate blocker-closure patch set, not as a clean release snapshot."
+  "verdict": "Active workspace is a strict superset of the uploaded archive baseline; not byte-identical."
 }

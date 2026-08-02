@@ -24,10 +24,15 @@ pub fn retry_open_database(state: State<'_, AppState>) -> Result<BootstrapStatus
             tracing::info!("profile database reopened successfully");
             Ok(BootstrapStatus::Ready)
         }
-        Err(err) => Err(CommandError::sanitized(
-            "database_unavailable",
-            err,
-            None,
-        )),
+        Err(err) => {
+            // Keep the recovery shell; return an updated RecoveryRequired status
+            // so the UI can refresh the reason without treating this as a crash.
+            let (code, message) = db::bootstrap::classify_open_error(&err);
+            tracing::warn!(error = %err, reason = code, "retry open database failed");
+            let profile_path = db::default_db_path_for_diagnostics().ok();
+            let status = BootstrapStatus::recovery(code, message, profile_path, true);
+            *state.bootstrap.lock() = status.clone();
+            Ok(status)
+        }
     }
 }

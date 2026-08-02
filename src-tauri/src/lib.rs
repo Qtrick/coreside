@@ -8,6 +8,7 @@ mod commands;
 mod config;
 mod crawler;
 mod credentials;
+mod app_paths;
 mod db;
 mod exa;
 mod exports;
@@ -74,6 +75,8 @@ pub fn run() {
             commands::retry_open_database,
             commands::get_database_health,
             commands::create_profile_backup,
+            commands::preview_restore_backup,
+            commands::restore_profile_backup,
             commands::get_storage_summary,
             commands::get_ai_status,
             commands::get_model_catalog,

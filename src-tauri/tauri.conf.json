@@ -28,7 +28,9 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
+          "$APPDATA/coreside/media/**",
           "$APPDATA/Coreside/media/**",
+          "$HOME/Library/Application Support/coreside/media/**",
           "$HOME/Library/Application Support/Coreside/media/**"
         ]
       }

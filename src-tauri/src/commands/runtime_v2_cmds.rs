@@ -32,6 +32,7 @@ pub fn list_conversation_surfaces(
     state: State<'_, AppState>,
     conversation_id: String,
 ) -> Result<Vec<SurfaceRecord>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(list_inline_surfaces(&db, &conversation_id)?)
 }
@@ -41,6 +42,7 @@ pub fn get_surface_cmd(
     state: State<'_, AppState>,
     surface_id: String,
 ) -> Result<SurfaceRecord, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(get_surface(&db, &surface_id)?)
 }
@@ -61,6 +63,7 @@ pub fn create_inline_surface_cmd(
     state: State<'_, AppState>,
     args: CreateInlineSurfaceArgs,
 ) -> Result<SurfaceRecord, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     let packs = args.capability_packs.unwrap_or_default();
     Ok(create_inline_surface(
@@ -88,6 +91,7 @@ pub fn update_surface_cmd(
     state: State<'_, AppState>,
     args: UpdateSurfaceArgs,
 ) -> Result<SurfaceRecord, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(update_surface_definition(
         &mut db,
@@ -103,6 +107,7 @@ pub fn promote_surface_cmd(
     state: State<'_, AppState>,
     surface_id: String,
 ) -> Result<SurfaceRecord, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(promote_inline_to_tool(
         &mut db,
@@ -117,6 +122,7 @@ pub fn save_surface_state_cmd(
     surface_id: String,
     state_json: Value,
 ) -> Result<(), CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(save_surface_state(&mut db, &surface_id, &state_json)?)
 }
@@ -126,6 +132,7 @@ pub fn get_surface_state_cmd(
     state: State<'_, AppState>,
     surface_id: String,
 ) -> Result<Value, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(get_surface_state(&db, &surface_id)?)
 }
@@ -150,6 +157,7 @@ pub fn get_draft_cmd(
     component_id: String,
     window_id: Option<String>,
 ) -> Result<Option<SurfaceDraft>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(get_draft(
         &db,
@@ -164,6 +172,7 @@ pub fn save_draft_cmd(
     state: State<'_, AppState>,
     args: SaveDraftArgs,
 ) -> Result<SurfaceDraft, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     save_draft(
         &mut db,
@@ -194,6 +203,7 @@ pub fn delete_draft_cmd(
     component_id: String,
     window_id: Option<String>,
 ) -> Result<(), CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(delete_draft(
         &mut db,
@@ -222,6 +232,7 @@ pub fn schedule_patches_cmd(
     state: State<'_, AppState>,
     args: SchedulePatchesArgs,
 ) -> Result<Vec<ScheduledPatch>, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     let priority = PatchPriority::parse(&args.priority)
         .ok_or_else(|| CommandError::new("invalid", "unknown patch priority"))?;
@@ -255,6 +266,7 @@ pub fn flush_patch_scheduler_cmd(
     source_type: Option<String>,
     approval_granted: Option<bool>,
 ) -> Result<Vec<crate::application_kernel::ChangeResult>, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     let mut bus = state.event_bus.lock();
     let mut bus_opt = Some(&mut *bus);
@@ -273,6 +285,7 @@ pub fn get_route_state_cmd(
     application_id: String,
     window_id: Option<String>,
 ) -> Result<RouteState, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(get_route_state(
         &db,
@@ -297,6 +310,7 @@ pub fn set_route_state_cmd(
     state: State<'_, AppState>,
     args: SetRouteStateArgs,
 ) -> Result<RouteState, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(set_route_state(
         &mut db,
@@ -324,6 +338,7 @@ pub fn navigate_route_cmd(
     state: State<'_, AppState>,
     args: NavigateRouteArgs,
 ) -> Result<NavigateResult, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(navigate_route(
         &mut db,
@@ -353,6 +368,7 @@ pub fn append_context_ledger_cmd(
     state: State<'_, AppState>,
     args: AppendLedgerArgs,
 ) -> Result<ContextLedgerEntry, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(append_ledger_entry(
         &mut db,
@@ -374,6 +390,7 @@ pub fn list_context_ledger_cmd(
     project_id: Option<String>,
     limit: Option<usize>,
 ) -> Result<Vec<ContextLedgerEntry>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(list_ledger_entries(
         &db,
@@ -389,6 +406,7 @@ pub fn get_provider_profile_cmd(
     provider_id: String,
     model_id: Option<String>,
 ) -> Result<ProviderConformanceRecord, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(get_provider_profile(
         &mut db,
@@ -414,6 +432,7 @@ pub fn get_continuity_cmd(
     surface_id: String,
     window_id: Option<String>,
 ) -> Result<ContinuitySnapshot, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(get_continuity(
         &db,
@@ -427,6 +446,7 @@ pub fn save_continuity_cmd(
     state: State<'_, AppState>,
     args: SaveContinuityArgs,
 ) -> Result<ContinuitySnapshot, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     let suspension = args
         .suspension_state
@@ -450,6 +470,7 @@ pub fn suspend_surface_cmd(
     surface_id: String,
     window_id: Option<String>,
 ) -> Result<ContinuitySnapshot, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(suspend_surface(
         &mut db,
@@ -474,6 +495,7 @@ pub fn apply_operations_cmd(
     state: State<'_, AppState>,
     args: ApplyOperationsArgs,
 ) -> Result<ApplyResult, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     let silent = args.silent.unwrap_or(false);
     let mut bus = state.event_bus.lock();
@@ -520,6 +542,7 @@ pub fn undo_transaction_cmd(
     state: State<'_, AppState>,
     transaction_id: String,
 ) -> Result<AppTransactionRecord, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(undo_transaction(&mut db, &transaction_id)?)
 }
@@ -530,6 +553,7 @@ pub fn list_transactions_cmd(
     conversation_id: String,
     limit: Option<usize>,
 ) -> Result<Vec<AppTransactionRecord>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     let capped = limit
         .unwrap_or(50)
@@ -542,6 +566,7 @@ pub fn get_transaction_cmd(
     state: State<'_, AppState>,
     transaction_id: String,
 ) -> Result<AppTransactionRecord, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(get_transaction(&db, &transaction_id)?)
 }
@@ -559,6 +584,7 @@ pub fn branch_conversation_cmd(
     state: State<'_, AppState>,
     args: BranchArgs,
 ) -> Result<(ChatBranchRecord, Vec<SurfaceRecord>), CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(branch_from_message(
         &mut db,
@@ -574,6 +600,7 @@ pub fn list_branches_cmd(
     state: State<'_, AppState>,
     conversation_id: String,
 ) -> Result<Vec<ChatBranchRecord>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(list_branches(&db, &conversation_id)?)
 }
@@ -585,6 +612,7 @@ pub fn create_snapshot_cmd(
     project_id: Option<String>,
     description: Option<String>,
 ) -> Result<SnapshotRecord, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(create_snapshot(
         &mut db,
@@ -599,6 +627,7 @@ pub fn get_snapshot_cmd(
     state: State<'_, AppState>,
     snapshot_id: String,
 ) -> Result<SnapshotRecord, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(get_snapshot(&db, &snapshot_id)?)
 }
@@ -608,6 +637,7 @@ pub fn delete_snapshot_cmd(
     state: State<'_, AppState>,
     snapshot_id: String,
 ) -> Result<(), CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(delete_snapshot(&mut db, &snapshot_id)?)
 }
@@ -619,6 +649,7 @@ pub fn enqueue_agent_turn_cmd(
     prompt: Value,
     priority: Option<i64>,
 ) -> Result<QueueItem, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(enqueue(
         &mut db,
@@ -633,6 +664,7 @@ pub fn list_agent_queue_cmd(
     state: State<'_, AppState>,
     conversation_id: String,
 ) -> Result<Vec<QueueItem>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(list_queue(&db, &conversation_id)?)
 }
@@ -642,6 +674,7 @@ pub fn cancel_queue_item_cmd(
     state: State<'_, AppState>,
     item_id: String,
 ) -> Result<QueueItem, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(cancel_queue_item(&mut db, &item_id)?)
 }
@@ -651,6 +684,7 @@ pub fn remove_queue_item_cmd(
     state: State<'_, AppState>,
     item_id: String,
 ) -> Result<(), CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(remove_queued(&mut db, &item_id)?)
 }
@@ -660,6 +694,7 @@ pub fn activate_next_queue_cmd(
     state: State<'_, AppState>,
     conversation_id: String,
 ) -> Result<Option<QueueItem>, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(activate_next(&mut db, &conversation_id)?)
 }
@@ -670,12 +705,14 @@ pub fn complete_queue_item_cmd(
     item_id: String,
     error: Option<String>,
 ) -> Result<QueueItem, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(complete_queue_item(&mut db, &item_id, error.as_deref())?)
 }
 
 #[tauri::command]
 pub fn recover_agent_queue_cmd(state: State<'_, AppState>) -> Result<u64, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     Ok(recover_stale_active(&mut db)?)
 }
@@ -687,6 +724,7 @@ pub fn store_diagnostics_cmd(
     turn_id: Option<String>,
     payload: Value,
 ) -> Result<String, CommandError> {
+    state.require_profile()?;
     let mut db = state.db.lock();
     let key = state.config.lock().api_key.clone();
     Ok(store_diagnostics(
@@ -704,6 +742,7 @@ pub fn list_diagnostics_cmd(
     conversation_id: String,
     limit: Option<usize>,
 ) -> Result<Vec<Value>, CommandError> {
+    state.require_profile()?;
     let db = state.db.lock();
     Ok(list_diagnostics(
         &db,

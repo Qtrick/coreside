@@ -1,44 +1,68 @@
-# Implementation Plan — Public Beta Blocker Closure (current priority)
+# Implementation Plan — Release Candidate (current priority)
 
 **Product:** Coreside  
-**Status:** Research + baseline docs; **public beta NOT READY**  
-**Last updated:** 2026-08-02  
-**Access date:** 2026-08-02  
-**Active commit:** `57f80bcb74de4107760350ad887df5d4ea246a3d` (may be dirty with review fixes)
+**Status:** RC research + baseline; **public beta NOT READY**  
+**Last updated:** 2026-08-02 (evening)  
+**Access date:** 2026-08-02 (evening)  
+**Archive:** `b2f8bf4e244cd82976de39cacb484cf86c641ba08314c285f7467e115dbf17f2` (Chat AI(5); supersedes `d8fe0c…`)  
+**Active commit:** `90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6` (may be dirty with wallpaper/bootstrap review fixes)
 
-### Scope note (2026-08-02)
+### Scope note (2026-08-02 evening)
 
-- **Wallpaper redesign / wallpaper runtime code is OUT OF SCOPE.** Do not modify wallpaper compositing while closing these blockers.
+- **Wallpaper compositing closure is IN SCOPE** — visual proof + residual nested-surface risks. No unrelated wallpaper redesign.
 - Baseline: [CURRENT_SOURCE_BASELINE.md](./CURRENT_SOURCE_BASELINE.md) · `reports/current-source-baseline.json` · `reports/active-versus-uploaded-coreside.json`
-- Research hub: [BETA_BLOCKER_CLOSURE_RESEARCH.md](./BETA_BLOCKER_CLOSURE_RESEARCH.md)
+- Research: [RELEASE_CANDIDATE_RESEARCH.md](./RELEASE_CANDIDATE_RESEARCH.md) · [WALLPAPER_COMPOSITING_CLOSURE_RESEARCH.md](./WALLPAPER_COMPOSITING_CLOSURE_RESEARCH.md)
 
-## Blocker-closure phases (priority order)
+## RC phases (priority order)
 
 | Phase | Scope | Exit criteria | Research |
 | --- | --- | --- | --- |
-| B0 | Paths — `product_data_dir` (`coreside` / legacy `Coreside`) | Canonical path documented; media/attachments/db co-located; review fix landed | Baseline + db/mod.rs |
-| B1 | Bootstrap — no panic on `Database::open_default` failure | Recoverable startup / clear error; P0 closed | lib.rs panic |
-| B2 | Backup / restore | Trusted snapshot path (Backup API preferred; `VACUUM INTO` valid); rusqlite `backup` feature when implementing | [BACKUP_AND_RESTORE_RESEARCH.md](./BACKUP_AND_RESTORE_RESEARCH.md) |
-| B3 | Privacy / Data Settings | Consumer Data copy; export/privacy journeys honest | Settings IA |
-| B4 | Tauri command authority | AppManifest commands + capability `allow-*`; not default allow-all custom IPC | [TAURI_COMMAND_AUTHORITY_RESEARCH.md](./TAURI_COMMAND_AUTHORITY_RESEARCH.md) |
-| B5 | CSP | Tighten `tauri.conf.json` CSP (e.g. broad `img-src https:`); evidence updated | security-findings |
-| B6 | Agent trust boundary | Policy/permissions/recovery/registered-actions evidence recorded | [AGENT_TRUST_BOUNDARY_RESEARCH.md](./AGENT_TRUST_BOUNDARY_RESEARCH.md) |
-| B7 | E2E 07 / 10 | Multi-window approval race + secondary window close fully asserted or waived in writing | E2E_EXECUTION |
-| B8 | Packaged smoke | macOS bundle + scan + cold-start checklist recorded | [PACKAGED_SMOKE_RESEARCH.md](./PACKAGED_SMOKE_RESEARCH.md) |
-| B9 | Release evidence | Full `release:evidence`; `passed_partial` never inflates to `passed`; `assurance:report` wired | [RELEASE_EVIDENCE_RESEARCH.md](./RELEASE_EVIDENCE_RESEARCH.md) |
-
-## Review fixes already present (dirty; land without regressing)
-
-1. `release-evidence.mjs` — `passed_partial` ≠ `passed`
-2. `assurance:report` → `release:evidence:quick`
-3. `product_data_dir` casing / legacy reuse
+| RC1 | Wallpaper visual proof | Proof at 0/20/40/60% + None; `wallpaper-compositing.json` updated | [WALLPAPER_COMPOSITING_CLOSURE_RESEARCH.md](./WALLPAPER_COMPOSITING_CLOSURE_RESEARCH.md) |
+| RC2 | AppPaths | Canonical `coreside` / legacy `Coreside` co-located; documented | Baseline + product_data_dir |
+| RC3 | Profile boundary | Consumer profile vs protected-core separation evidence | RC research |
+| RC4 | Full backup/restore | Trusted snapshot path; restore verified or waived in writing | [BACKUP_AND_RESTORE_RESEARCH.md](./BACKUP_AND_RESTORE_RESEARCH.md) |
+| RC5 | Tauri ACL | AppManifest + capability `allow-*`; not default allow-all custom IPC | [TAURI_COMMAND_AUTHORITY_RESEARCH.md](./TAURI_COMMAND_AUTHORITY_RESEARCH.md) |
+| RC6 | Agent trust Rust wiring | Policy/permissions/recovery choke points wired and test-backed in Rust | [AGENT_TRUST_BOUNDARY_RESEARCH.md](./AGENT_TRUST_BOUNDARY_RESEARCH.md) |
+| RC7 | E2E | Critical journeys asserted or waived in writing | [E2E_EXECUTION.md](./E2E_EXECUTION.md) |
+| RC8 | Packaged smoke | macOS bundle + scan + cold-start checklist recorded | [PACKAGED_SMOKE_RESEARCH.md](./PACKAGED_SMOKE_RESEARCH.md) |
+| RC9 | Assurance | Full `release:evidence`; `passed_partial` never → `passed` | [RELEASE_EVIDENCE_RESEARCH.md](./RELEASE_EVIDENCE_RESEARCH.md) |
 
 ## Explicit non-claims
 
-- Public beta **NOT READY** as of this plan update.
-- Do not invent that full E2E or packaged smoke has passed.
+- Public beta **NOT READY**.
+- Do not invent E2E, packaged smoke, or wallpaper visual-proof pass without evidence.
 - Not ASVS/WCAG certified.
-- Wallpaper visual proof is **not** an exit criterion for this track.
+- Dirty worktree ≠ release snapshot.
+
+---
+
+# Implementation Plan — Public Beta Blocker Closure (prior track; superseded by RC above)
+
+**Product:** Coreside  
+**Status:** Superseded by RC phases; retained for continuity  
+**Last updated:** 2026-08-02  
+**Access date:** 2026-08-02  
+**Note:** Older baseline commit `57f80bcb…` / archive `d8fe0c…` — use Chat AI(5) `b2f8bf4e…` + `90b99538…` going forward.
+
+### Historical scope note
+
+- Wallpaper was OUT OF SCOPE on this track; **RC track brings compositing closure IN SCOPE**.
+- Research hub (historical): [BETA_BLOCKER_CLOSURE_RESEARCH.md](./BETA_BLOCKER_CLOSURE_RESEARCH.md)
+
+## Historical blocker-closure phases (B0–B9)
+
+| Phase | Scope | Exit criteria | Research |
+| --- | --- | --- | --- |
+| B0 | Paths — `product_data_dir` | Canonical path; co-located data | → RC2 |
+| B1 | Bootstrap — no panic on DB open failure | Recoverable startup | Bootstrap recovery |
+| B2 | Backup / restore | Trusted snapshot | → RC4 |
+| B3 | Privacy / Data Settings | Honest consumer copy | Settings IA |
+| B4 | Tauri command authority | Capability allow-list | → RC5 |
+| B5 | CSP | Tighten CSP; evidence | security-findings |
+| B6 | Agent trust boundary | Evidence recorded | → RC6 |
+| B7 | E2E 07 / 10 | Asserted or waived | → RC7 |
+| B8 | Packaged smoke | Checklist recorded | → RC8 |
+| B9 | Release evidence | Honest evidence | → RC9 |
 
 ---
 
@@ -51,8 +75,8 @@
 
 ### Scope note (2026-08-01)
 
-- **Wallpaper implementation is OUT OF SCOPE for this phase.** Do not change wallpaper compositing/runtime code while executing this plan’s Settings/security/docs track. Residual wallpaper risks stay tracked in existing wallpaper docs/reports only.
-- **Settings IA remains important** — consumer category navigation and language per [SETTINGS_INFORMATION_ARCHITECTURE.md](./SETTINGS_INFORMATION_ARCHITECTURE.md) and [CONSUMER_SETTINGS_RESEARCH.md](./CONSUMER_SETTINGS_RESEARCH.md). Prefer blocker-closure phases B0–B9 above when they conflict.
+- **Wallpaper compositing closure is owned by RC1** above; Settings/security track should not fork a parallel wallpaper redesign.
+- **Settings IA remains important** — consumer category navigation and language per [SETTINGS_INFORMATION_ARCHITECTURE.md](./SETTINGS_INFORMATION_ARCHITECTURE.md) and [CONSUMER_SETTINGS_RESEARCH.md](./CONSUMER_SETTINGS_RESEARCH.md). Prefer **RC phases** when they conflict.
 - Inventories / journeys / assurance stubs: [FEATURE_INVENTORY.md](./FEATURE_INVENTORY.md) · [USER_JOURNEY_MATRIX.md](./USER_JOURNEY_MATRIX.md) · [RELEASE_ASSURANCE_RESEARCH.md](./RELEASE_ASSURANCE_RESEARCH.md) · [DATABASE_READINESS_RESEARCH.md](./DATABASE_READINESS_RESEARCH.md) · [VENDO_DEEP_ADOPTION_AUDIT.md](./VENDO_DEEP_ADOPTION_AUDIT.md).
 
 Research: [BETA_OVERHAUL_RESEARCH.md](./BETA_OVERHAUL_RESEARCH.md) · [SETTINGS_INFORMATION_ARCHITECTURE.md](./SETTINGS_INFORMATION_ARCHITECTURE.md) · [SECURITY_VERIFICATION_STANDARD.md](./SECURITY_VERIFICATION_STANDARD.md) · [AGENT_SECURITY_MODEL.md](./AGENT_SECURITY_MODEL.md)  
