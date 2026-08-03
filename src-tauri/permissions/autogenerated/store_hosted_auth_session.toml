@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-store-hosted-auth-session"
+description = "Enables the store_hosted_auth_session command without any pre-configured scope."
+commands.allow = ["store_hosted_auth_session"]
+
+[[permission]]
+identifier = "deny-store-hosted-auth-session"
+description = "Denies the store_hosted_auth_session command without any pre-configured scope."
+commands.deny = ["store_hosted_auth_session"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-export-formats"
+description = "Enables the list_export_formats command without any pre-configured scope."
+commands.allow = ["list_export_formats"]
+
+[[permission]]
+identifier = "deny-list-export-formats"
+description = "Denies the list_export_formats command without any pre-configured scope."
+commands.deny = ["list_export_formats"]

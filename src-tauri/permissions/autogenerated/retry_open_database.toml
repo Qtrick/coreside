@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-retry-open-database"
+description = "Enables the retry_open_database command without any pre-configured scope."
+commands.allow = ["retry_open_database"]
+
+[[permission]]
+identifier = "deny-retry-open-database"
+description = "Denies the retry_open_database command without any pre-configured scope."
+commands.deny = ["retry_open_database"]

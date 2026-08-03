@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-garbage-collect"
+description = "Enables the kernel_garbage_collect command without any pre-configured scope."
+commands.allow = ["kernel_garbage_collect"]
+
+[[permission]]
+identifier = "deny-kernel-garbage-collect"
+description = "Denies the kernel_garbage_collect command without any pre-configured scope."
+commands.deny = ["kernel_garbage_collect"]

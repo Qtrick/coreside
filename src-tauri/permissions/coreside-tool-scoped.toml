@@ -1,0 +1,18 @@
+# Least-privilege commands for generated tool-* windows.
+"$schema" = "../gen/schemas/schema.json"
+
+[[set]]
+identifier = "coreside-tool-scoped"
+description = "Scoped read/state/registered-action access for secondary tool windows. No backup, restore, credentials, or data-clear commands."
+permissions = [
+  "allow-get-tool",
+  "allow-get-tool-state",
+  "allow-save-tool-state",
+  "allow-get-tool-versions",
+  "allow-kernel-invoke-registered-action",
+  "allow-open-external-url",
+  "allow-get-surface-cmd",
+  "allow-get-surface-state-cmd",
+  "allow-save-surface-state-cmd",
+  "allow-get-app-info"
+]

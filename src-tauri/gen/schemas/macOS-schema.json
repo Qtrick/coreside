@@ -387,6 +387,2544 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Allow every Coreside application command from the main window (Rust still enforces profile/authz).\n#### This permission set includes:\n\n- `allow-activate-next-queue-cmd`\n- `allow-append-context-ledger-cmd`\n- `allow-apply-operations-cmd`\n- `allow-apply-tool-change`\n- `allow-archive-project-cmd`\n- `allow-assign-chats-to-project`\n- `allow-assign-conversation-to-project-cmd`\n- `allow-branch-conversation-cmd`\n- `allow-cancel-queue-item-cmd`\n- `allow-cancel-request`\n- `allow-cleanup-crawler-cache`\n- `allow-clear-conversations`\n- `allow-clear-hosted-auth-session`\n- `allow-clear-search-history-cmd`\n- `allow-clear-tools`\n- `allow-complete-queue-item-cmd`\n- `allow-configure-exa-connection`\n- `allow-configure-search-connection`\n- `allow-create-conversation`\n- `allow-create-conversation-in-project`\n- `allow-create-inline-surface-cmd`\n- `allow-create-profile-backup`\n- `allow-create-project-cmd`\n- `allow-create-snapshot-cmd`\n- `allow-delete-added-setting`\n- `allow-delete-automation`\n- `allow-delete-conversation`\n- `allow-delete-draft-cmd`\n- `allow-delete-exa-connection`\n- `allow-delete-media-asset-cmd`\n- `allow-delete-messages-from`\n- `allow-delete-project-cmd`\n- `allow-delete-provider-connection`\n- `allow-delete-search-connection`\n- `allow-delete-snapshot-cmd`\n- `allow-discard-kernel-proposal`\n- `allow-discard-tool-change`\n- `allow-duplicate-conversation-cmd`\n- `allow-enqueue-agent-turn-cmd`\n- `allow-export-project`\n- `allow-export-tool`\n- `allow-fetch-web-page-cmd`\n- `allow-flush-patch-scheduler-cmd`\n- `allow-get-ai-status`\n- `allow-get-app-info`\n- `allow-get-bootstrap-status`\n- `allow-get-chat-attachment-src`\n- `allow-get-continuity-cmd`\n- `allow-get-crawler-cache-stats`\n- `allow-get-crawler-installation`\n- `allow-get-crawler-status`\n- `allow-get-database-health`\n- `allow-get-draft-cmd`\n- `allow-get-exa-budget`\n- `allow-get-exa-connection`\n- `allow-get-exa-usage`\n- `allow-get-hosted-auth-status`\n- `allow-get-media-asset-cmd`\n- `allow-get-media-asset-src-cmd`\n- `allow-get-media-asset-thumb-src-cmd`\n- `allow-get-messages`\n- `allow-get-model-catalog`\n- `allow-get-project-cmd`\n- `allow-get-provider-profile-cmd`\n- `allow-get-route-state-cmd`\n- `allow-get-search-connection`\n- `allow-get-search-profile`\n- `allow-get-search-session-cmd`\n- `allow-get-settings`\n- `allow-get-snapshot-cmd`\n- `allow-get-storage-summary`\n- `allow-get-surface-cmd`\n- `allow-get-surface-state-cmd`\n- `allow-get-tool`\n- `allow-get-tool-state`\n- `allow-get-tool-versions`\n- `allow-get-transaction-cmd`\n- `allow-image-search-cmd`\n- `allow-import-media-asset-cmd`\n- `allow-kernel-application-summary`\n- `allow-kernel-apply-change`\n- `allow-kernel-capability-catalog`\n- `allow-kernel-clear-audit-events`\n- `allow-kernel-clear-build-failure`\n- `allow-kernel-clear-policy-override`\n- `allow-kernel-clear-recovery`\n- `allow-kernel-compile-intent`\n- `allow-kernel-create-job`\n- `allow-kernel-data-model-summary`\n- `allow-kernel-decide-approval`\n- `allow-kernel-ensure-tool-manifest`\n- `allow-kernel-enter-safe-startup`\n- `allow-kernel-export-package`\n- `allow-kernel-export-package-bytes`\n- `allow-kernel-garbage-collect`\n- `allow-kernel-get-job`\n- `allow-kernel-get-manifest`\n- `allow-kernel-get-recovery-state`\n- `allow-kernel-grant-permission`\n- `allow-kernel-import-package`\n- `allow-kernel-interrupt-jobs`\n- `allow-kernel-invoke-registered-action`\n- `allow-kernel-list-application-versions`\n- `allow-kernel-list-audit-events`\n- `allow-kernel-list-build-failures`\n- `allow-kernel-list-manifests`\n- `allow-kernel-list-pending-approvals`\n- `allow-kernel-list-permissions`\n- `allow-kernel-list-registered-actions`\n- `allow-kernel-list-runtime-grants`\n- `allow-kernel-mark-last-known-good`\n- `allow-kernel-preview-package`\n- `allow-kernel-recent-transactions`\n- `allow-kernel-record-build-failure`\n- `allow-kernel-restore-last-known-good`\n- `allow-kernel-revoke-permission`\n- `allow-kernel-revoke-runtime-grant`\n- `allow-kernel-run-test`\n- `allow-kernel-set-application-lifecycle`\n- `allow-kernel-set-policy-override`\n- `allow-kernel-set-recovery-flags`\n- `allow-kernel-set-recovery-mode`\n- `allow-kernel-unified-search`\n- `allow-kernel-upsert-data-model`\n- `allow-kernel-upsert-test`\n- `allow-kernel-visual-checks`\n- `allow-list-added-settings`\n- `allow-list-agent-queue-cmd`\n- `allow-list-automation-runs`\n- `allow-list-automations`\n- `allow-list-branches-cmd`\n- `allow-list-capability-packs`\n- `allow-list-context-ledger-cmd`\n- `allow-list-conversation-surfaces`\n- `allow-list-conversations`\n- `allow-list-diagnostics-cmd`\n- `allow-list-exa-usage`\n- `allow-list-export-formats`\n- `allow-list-managed-backups`\n- `allow-list-media-assets-cmd`\n- `allow-list-project-conversations-cmd`\n- `allow-list-projects-cmd`\n- `allow-list-provider-connections`\n- `allow-list-search-sessions-cmd`\n- `allow-list-tools`\n- `allow-list-transactions-cmd`\n- `allow-list-unassigned-conversations-cmd`\n- `allow-list-workspace-backgrounds`\n- `allow-media-asset-usage-cmd`\n- `allow-navigate-route-cmd`\n- `allow-open-external-url`\n- `allow-open-tool-window`\n- `allow-preview-restore-backup`\n- `allow-promote-surface-cmd`\n- `allow-provider-key-hints`\n- `allow-rebuild-project-index-cmd`\n- `allow-recover-agent-queue-cmd`\n- `allow-refresh-project-summary`\n- `allow-remove-chat-from-project`\n- `allow-remove-queue-item-cmd`\n- `allow-rename-conversation-cmd`\n- `allow-restore-profile-backup`\n- `allow-restore-project-cmd`\n- `allow-retry-open-database`\n- `allow-run-automation-now`\n- `allow-runtime-v2-limits`\n- `allow-save-continuity-cmd`\n- `allow-save-draft-cmd`\n- `allow-save-surface-state-cmd`\n- `allow-save-tool-state`\n- `allow-schedule-patches-cmd`\n- `allow-search-project-context-cmd`\n- `allow-send-message`\n- `allow-set-active-provider-connection`\n- `allow-set-automation-enabled`\n- `allow-set-dock-icon`\n- `allow-set-dock-icon-for-os-appearance`\n- `allow-set-exa-budget`\n- `allow-set-kernel-proposal-status`\n- `allow-set-project-wallpaper-cmd`\n- `allow-set-route-state-cmd`\n- `allow-set-search-profile`\n- `allow-set-setting`\n- `allow-set-web-research-resource-profile`\n- `allow-stage-chat-attachment`\n- `allow-store-diagnostics-cmd`\n- `allow-store-hosted-auth-session`\n- `allow-suspend-surface-cmd`\n- `allow-test-ai-connection`\n- `allow-test-exa-connection`\n- `allow-test-provider-connection`\n- `allow-test-search-connection`\n- `allow-touch-media-asset-cmd`\n- `allow-touch-project-opened`\n- `allow-undo-tool-change`\n- `allow-undo-transaction-cmd`\n- `allow-update-project-cmd`\n- `allow-update-surface-cmd`\n- `allow-upsert-added-setting`\n- `allow-upsert-automation`\n- `allow-upsert-provider-connection`\n- `allow-upsert-workspace-background`\n- `allow-validate-agent-response-v2`\n- `allow-validate-change-targets`\n- `allow-video-search-cmd`\n- `allow-web-search-cmd`\n- `allow-window-orchestrator-cancel`\n- `allow-window-orchestrator-expand`\n- `allow-window-orchestrator-inspect`\n- `allow-window-orchestrator-restore`",
+          "type": "string",
+          "const": "coreside-main-default",
+          "markdownDescription": "Allow every Coreside application command from the main window (Rust still enforces profile/authz).\n#### This permission set includes:\n\n- `allow-activate-next-queue-cmd`\n- `allow-append-context-ledger-cmd`\n- `allow-apply-operations-cmd`\n- `allow-apply-tool-change`\n- `allow-archive-project-cmd`\n- `allow-assign-chats-to-project`\n- `allow-assign-conversation-to-project-cmd`\n- `allow-branch-conversation-cmd`\n- `allow-cancel-queue-item-cmd`\n- `allow-cancel-request`\n- `allow-cleanup-crawler-cache`\n- `allow-clear-conversations`\n- `allow-clear-hosted-auth-session`\n- `allow-clear-search-history-cmd`\n- `allow-clear-tools`\n- `allow-complete-queue-item-cmd`\n- `allow-configure-exa-connection`\n- `allow-configure-search-connection`\n- `allow-create-conversation`\n- `allow-create-conversation-in-project`\n- `allow-create-inline-surface-cmd`\n- `allow-create-profile-backup`\n- `allow-create-project-cmd`\n- `allow-create-snapshot-cmd`\n- `allow-delete-added-setting`\n- `allow-delete-automation`\n- `allow-delete-conversation`\n- `allow-delete-draft-cmd`\n- `allow-delete-exa-connection`\n- `allow-delete-media-asset-cmd`\n- `allow-delete-messages-from`\n- `allow-delete-project-cmd`\n- `allow-delete-provider-connection`\n- `allow-delete-search-connection`\n- `allow-delete-snapshot-cmd`\n- `allow-discard-kernel-proposal`\n- `allow-discard-tool-change`\n- `allow-duplicate-conversation-cmd`\n- `allow-enqueue-agent-turn-cmd`\n- `allow-export-project`\n- `allow-export-tool`\n- `allow-fetch-web-page-cmd`\n- `allow-flush-patch-scheduler-cmd`\n- `allow-get-ai-status`\n- `allow-get-app-info`\n- `allow-get-bootstrap-status`\n- `allow-get-chat-attachment-src`\n- `allow-get-continuity-cmd`\n- `allow-get-crawler-cache-stats`\n- `allow-get-crawler-installation`\n- `allow-get-crawler-status`\n- `allow-get-database-health`\n- `allow-get-draft-cmd`\n- `allow-get-exa-budget`\n- `allow-get-exa-connection`\n- `allow-get-exa-usage`\n- `allow-get-hosted-auth-status`\n- `allow-get-media-asset-cmd`\n- `allow-get-media-asset-src-cmd`\n- `allow-get-media-asset-thumb-src-cmd`\n- `allow-get-messages`\n- `allow-get-model-catalog`\n- `allow-get-project-cmd`\n- `allow-get-provider-profile-cmd`\n- `allow-get-route-state-cmd`\n- `allow-get-search-connection`\n- `allow-get-search-profile`\n- `allow-get-search-session-cmd`\n- `allow-get-settings`\n- `allow-get-snapshot-cmd`\n- `allow-get-storage-summary`\n- `allow-get-surface-cmd`\n- `allow-get-surface-state-cmd`\n- `allow-get-tool`\n- `allow-get-tool-state`\n- `allow-get-tool-versions`\n- `allow-get-transaction-cmd`\n- `allow-image-search-cmd`\n- `allow-import-media-asset-cmd`\n- `allow-kernel-application-summary`\n- `allow-kernel-apply-change`\n- `allow-kernel-capability-catalog`\n- `allow-kernel-clear-audit-events`\n- `allow-kernel-clear-build-failure`\n- `allow-kernel-clear-policy-override`\n- `allow-kernel-clear-recovery`\n- `allow-kernel-compile-intent`\n- `allow-kernel-create-job`\n- `allow-kernel-data-model-summary`\n- `allow-kernel-decide-approval`\n- `allow-kernel-ensure-tool-manifest`\n- `allow-kernel-enter-safe-startup`\n- `allow-kernel-export-package`\n- `allow-kernel-export-package-bytes`\n- `allow-kernel-garbage-collect`\n- `allow-kernel-get-job`\n- `allow-kernel-get-manifest`\n- `allow-kernel-get-recovery-state`\n- `allow-kernel-grant-permission`\n- `allow-kernel-import-package`\n- `allow-kernel-interrupt-jobs`\n- `allow-kernel-invoke-registered-action`\n- `allow-kernel-list-application-versions`\n- `allow-kernel-list-audit-events`\n- `allow-kernel-list-build-failures`\n- `allow-kernel-list-manifests`\n- `allow-kernel-list-pending-approvals`\n- `allow-kernel-list-permissions`\n- `allow-kernel-list-registered-actions`\n- `allow-kernel-list-runtime-grants`\n- `allow-kernel-mark-last-known-good`\n- `allow-kernel-preview-package`\n- `allow-kernel-recent-transactions`\n- `allow-kernel-record-build-failure`\n- `allow-kernel-restore-last-known-good`\n- `allow-kernel-revoke-permission`\n- `allow-kernel-revoke-runtime-grant`\n- `allow-kernel-run-test`\n- `allow-kernel-set-application-lifecycle`\n- `allow-kernel-set-policy-override`\n- `allow-kernel-set-recovery-flags`\n- `allow-kernel-set-recovery-mode`\n- `allow-kernel-unified-search`\n- `allow-kernel-upsert-data-model`\n- `allow-kernel-upsert-test`\n- `allow-kernel-visual-checks`\n- `allow-list-added-settings`\n- `allow-list-agent-queue-cmd`\n- `allow-list-automation-runs`\n- `allow-list-automations`\n- `allow-list-branches-cmd`\n- `allow-list-capability-packs`\n- `allow-list-context-ledger-cmd`\n- `allow-list-conversation-surfaces`\n- `allow-list-conversations`\n- `allow-list-diagnostics-cmd`\n- `allow-list-exa-usage`\n- `allow-list-export-formats`\n- `allow-list-managed-backups`\n- `allow-list-media-assets-cmd`\n- `allow-list-project-conversations-cmd`\n- `allow-list-projects-cmd`\n- `allow-list-provider-connections`\n- `allow-list-search-sessions-cmd`\n- `allow-list-tools`\n- `allow-list-transactions-cmd`\n- `allow-list-unassigned-conversations-cmd`\n- `allow-list-workspace-backgrounds`\n- `allow-media-asset-usage-cmd`\n- `allow-navigate-route-cmd`\n- `allow-open-external-url`\n- `allow-open-tool-window`\n- `allow-preview-restore-backup`\n- `allow-promote-surface-cmd`\n- `allow-provider-key-hints`\n- `allow-rebuild-project-index-cmd`\n- `allow-recover-agent-queue-cmd`\n- `allow-refresh-project-summary`\n- `allow-remove-chat-from-project`\n- `allow-remove-queue-item-cmd`\n- `allow-rename-conversation-cmd`\n- `allow-restore-profile-backup`\n- `allow-restore-project-cmd`\n- `allow-retry-open-database`\n- `allow-run-automation-now`\n- `allow-runtime-v2-limits`\n- `allow-save-continuity-cmd`\n- `allow-save-draft-cmd`\n- `allow-save-surface-state-cmd`\n- `allow-save-tool-state`\n- `allow-schedule-patches-cmd`\n- `allow-search-project-context-cmd`\n- `allow-send-message`\n- `allow-set-active-provider-connection`\n- `allow-set-automation-enabled`\n- `allow-set-dock-icon`\n- `allow-set-dock-icon-for-os-appearance`\n- `allow-set-exa-budget`\n- `allow-set-kernel-proposal-status`\n- `allow-set-project-wallpaper-cmd`\n- `allow-set-route-state-cmd`\n- `allow-set-search-profile`\n- `allow-set-setting`\n- `allow-set-web-research-resource-profile`\n- `allow-stage-chat-attachment`\n- `allow-store-diagnostics-cmd`\n- `allow-store-hosted-auth-session`\n- `allow-suspend-surface-cmd`\n- `allow-test-ai-connection`\n- `allow-test-exa-connection`\n- `allow-test-provider-connection`\n- `allow-test-search-connection`\n- `allow-touch-media-asset-cmd`\n- `allow-touch-project-opened`\n- `allow-undo-tool-change`\n- `allow-undo-transaction-cmd`\n- `allow-update-project-cmd`\n- `allow-update-surface-cmd`\n- `allow-upsert-added-setting`\n- `allow-upsert-automation`\n- `allow-upsert-provider-connection`\n- `allow-upsert-workspace-background`\n- `allow-validate-agent-response-v2`\n- `allow-validate-change-targets`\n- `allow-video-search-cmd`\n- `allow-web-search-cmd`\n- `allow-window-orchestrator-cancel`\n- `allow-window-orchestrator-expand`\n- `allow-window-orchestrator-inspect`\n- `allow-window-orchestrator-restore`"
+        },
+        {
+          "description": "Scoped read/state/registered-action access for secondary tool windows. No backup, restore, credentials, or data-clear commands.\n#### This permission set includes:\n\n- `allow-get-tool`\n- `allow-get-tool-state`\n- `allow-save-tool-state`\n- `allow-get-tool-versions`\n- `allow-kernel-invoke-registered-action`\n- `allow-open-external-url`\n- `allow-get-surface-cmd`\n- `allow-get-surface-state-cmd`\n- `allow-save-surface-state-cmd`\n- `allow-get-app-info`",
+          "type": "string",
+          "const": "coreside-tool-scoped",
+          "markdownDescription": "Scoped read/state/registered-action access for secondary tool windows. No backup, restore, credentials, or data-clear commands.\n#### This permission set includes:\n\n- `allow-get-tool`\n- `allow-get-tool-state`\n- `allow-save-tool-state`\n- `allow-get-tool-versions`\n- `allow-kernel-invoke-registered-action`\n- `allow-open-external-url`\n- `allow-get-surface-cmd`\n- `allow-get-surface-state-cmd`\n- `allow-save-surface-state-cmd`\n- `allow-get-app-info`"
+        },
+        {
+          "description": "Enables the activate_next_queue_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-activate-next-queue-cmd",
+          "markdownDescription": "Enables the activate_next_queue_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the append_context_ledger_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-append-context-ledger-cmd",
+          "markdownDescription": "Enables the append_context_ledger_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the apply_operations_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-apply-operations-cmd",
+          "markdownDescription": "Enables the apply_operations_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the apply_tool_change command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-apply-tool-change",
+          "markdownDescription": "Enables the apply_tool_change command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the archive_project_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-archive-project-cmd",
+          "markdownDescription": "Enables the archive_project_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the assign_chats_to_project command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-assign-chats-to-project",
+          "markdownDescription": "Enables the assign_chats_to_project command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the assign_conversation_to_project_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-assign-conversation-to-project-cmd",
+          "markdownDescription": "Enables the assign_conversation_to_project_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the branch_conversation_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-branch-conversation-cmd",
+          "markdownDescription": "Enables the branch_conversation_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel_queue_item_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cancel-queue-item-cmd",
+          "markdownDescription": "Enables the cancel_queue_item_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel_request command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cancel-request",
+          "markdownDescription": "Enables the cancel_request command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cleanup_crawler_cache command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cleanup-crawler-cache",
+          "markdownDescription": "Enables the cleanup_crawler_cache command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_conversations command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-conversations",
+          "markdownDescription": "Enables the clear_conversations command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_hosted_auth_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-hosted-auth-session",
+          "markdownDescription": "Enables the clear_hosted_auth_session command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_search_history_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-search-history-cmd",
+          "markdownDescription": "Enables the clear_search_history_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_tools command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-tools",
+          "markdownDescription": "Enables the clear_tools command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the complete_queue_item_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-complete-queue-item-cmd",
+          "markdownDescription": "Enables the complete_queue_item_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the configure_exa_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-configure-exa-connection",
+          "markdownDescription": "Enables the configure_exa_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the configure_search_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-configure-search-connection",
+          "markdownDescription": "Enables the configure_search_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_conversation command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-create-conversation",
+          "markdownDescription": "Enables the create_conversation command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_conversation_in_project command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-create-conversation-in-project",
+          "markdownDescription": "Enables the create_conversation_in_project command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_inline_surface_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-create-inline-surface-cmd",
+          "markdownDescription": "Enables the create_inline_surface_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_profile_backup command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-create-profile-backup",
+          "markdownDescription": "Enables the create_profile_backup command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_project_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-create-project-cmd",
+          "markdownDescription": "Enables the create_project_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_snapshot_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-create-snapshot-cmd",
+          "markdownDescription": "Enables the create_snapshot_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_added_setting command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-added-setting",
+          "markdownDescription": "Enables the delete_added_setting command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_automation command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-automation",
+          "markdownDescription": "Enables the delete_automation command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_conversation command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-conversation",
+          "markdownDescription": "Enables the delete_conversation command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_draft_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-draft-cmd",
+          "markdownDescription": "Enables the delete_draft_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_exa_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-exa-connection",
+          "markdownDescription": "Enables the delete_exa_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_media_asset_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-media-asset-cmd",
+          "markdownDescription": "Enables the delete_media_asset_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_messages_from command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-messages-from",
+          "markdownDescription": "Enables the delete_messages_from command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_project_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-project-cmd",
+          "markdownDescription": "Enables the delete_project_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_provider_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-provider-connection",
+          "markdownDescription": "Enables the delete_provider_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_search_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-search-connection",
+          "markdownDescription": "Enables the delete_search_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_snapshot_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-snapshot-cmd",
+          "markdownDescription": "Enables the delete_snapshot_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the discard_kernel_proposal command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-discard-kernel-proposal",
+          "markdownDescription": "Enables the discard_kernel_proposal command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the discard_tool_change command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-discard-tool-change",
+          "markdownDescription": "Enables the discard_tool_change command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the duplicate_conversation_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-duplicate-conversation-cmd",
+          "markdownDescription": "Enables the duplicate_conversation_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the enqueue_agent_turn_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-enqueue-agent-turn-cmd",
+          "markdownDescription": "Enables the enqueue_agent_turn_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the export_project command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-export-project",
+          "markdownDescription": "Enables the export_project command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the export_tool command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-export-tool",
+          "markdownDescription": "Enables the export_tool command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fetch_web_page_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fetch-web-page-cmd",
+          "markdownDescription": "Enables the fetch_web_page_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the flush_patch_scheduler_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-flush-patch-scheduler-cmd",
+          "markdownDescription": "Enables the flush_patch_scheduler_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_ai_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-ai-status",
+          "markdownDescription": "Enables the get_ai_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_app_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-app-info",
+          "markdownDescription": "Enables the get_app_info command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_bootstrap_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-bootstrap-status",
+          "markdownDescription": "Enables the get_bootstrap_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_chat_attachment_src command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-chat-attachment-src",
+          "markdownDescription": "Enables the get_chat_attachment_src command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_continuity_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-continuity-cmd",
+          "markdownDescription": "Enables the get_continuity_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_crawler_cache_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-crawler-cache-stats",
+          "markdownDescription": "Enables the get_crawler_cache_stats command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_crawler_installation command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-crawler-installation",
+          "markdownDescription": "Enables the get_crawler_installation command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_crawler_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-crawler-status",
+          "markdownDescription": "Enables the get_crawler_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_database_health command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-database-health",
+          "markdownDescription": "Enables the get_database_health command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_draft_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-draft-cmd",
+          "markdownDescription": "Enables the get_draft_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_exa_budget command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-exa-budget",
+          "markdownDescription": "Enables the get_exa_budget command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_exa_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-exa-connection",
+          "markdownDescription": "Enables the get_exa_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_exa_usage command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-exa-usage",
+          "markdownDescription": "Enables the get_exa_usage command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_hosted_auth_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-hosted-auth-status",
+          "markdownDescription": "Enables the get_hosted_auth_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_media_asset_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-media-asset-cmd",
+          "markdownDescription": "Enables the get_media_asset_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_media_asset_src_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-media-asset-src-cmd",
+          "markdownDescription": "Enables the get_media_asset_src_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_media_asset_thumb_src_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-media-asset-thumb-src-cmd",
+          "markdownDescription": "Enables the get_media_asset_thumb_src_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_messages command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-messages",
+          "markdownDescription": "Enables the get_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_model_catalog command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-model-catalog",
+          "markdownDescription": "Enables the get_model_catalog command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_project_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-project-cmd",
+          "markdownDescription": "Enables the get_project_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_provider_profile_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-provider-profile-cmd",
+          "markdownDescription": "Enables the get_provider_profile_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_route_state_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-route-state-cmd",
+          "markdownDescription": "Enables the get_route_state_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_search_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-search-connection",
+          "markdownDescription": "Enables the get_search_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_search_profile command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-search-profile",
+          "markdownDescription": "Enables the get_search_profile command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_search_session_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-search-session-cmd",
+          "markdownDescription": "Enables the get_search_session_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-settings",
+          "markdownDescription": "Enables the get_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_snapshot_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-snapshot-cmd",
+          "markdownDescription": "Enables the get_snapshot_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_storage_summary command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-storage-summary",
+          "markdownDescription": "Enables the get_storage_summary command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_surface_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-surface-cmd",
+          "markdownDescription": "Enables the get_surface_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_surface_state_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-surface-state-cmd",
+          "markdownDescription": "Enables the get_surface_state_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_tool command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-tool",
+          "markdownDescription": "Enables the get_tool command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_tool_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-tool-state",
+          "markdownDescription": "Enables the get_tool_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_tool_versions command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-tool-versions",
+          "markdownDescription": "Enables the get_tool_versions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_transaction_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-transaction-cmd",
+          "markdownDescription": "Enables the get_transaction_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the image_search_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-image-search-cmd",
+          "markdownDescription": "Enables the image_search_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the import_media_asset_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-import-media-asset-cmd",
+          "markdownDescription": "Enables the import_media_asset_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_application_summary command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-application-summary",
+          "markdownDescription": "Enables the kernel_application_summary command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_apply_change command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-apply-change",
+          "markdownDescription": "Enables the kernel_apply_change command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_capability_catalog command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-capability-catalog",
+          "markdownDescription": "Enables the kernel_capability_catalog command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_clear_audit_events command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-clear-audit-events",
+          "markdownDescription": "Enables the kernel_clear_audit_events command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_clear_build_failure command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-clear-build-failure",
+          "markdownDescription": "Enables the kernel_clear_build_failure command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_clear_policy_override command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-clear-policy-override",
+          "markdownDescription": "Enables the kernel_clear_policy_override command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_clear_recovery command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-clear-recovery",
+          "markdownDescription": "Enables the kernel_clear_recovery command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_compile_intent command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-compile-intent",
+          "markdownDescription": "Enables the kernel_compile_intent command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_create_job command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-create-job",
+          "markdownDescription": "Enables the kernel_create_job command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_data_model_summary command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-data-model-summary",
+          "markdownDescription": "Enables the kernel_data_model_summary command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_decide_approval command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-decide-approval",
+          "markdownDescription": "Enables the kernel_decide_approval command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_ensure_tool_manifest command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-ensure-tool-manifest",
+          "markdownDescription": "Enables the kernel_ensure_tool_manifest command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_enter_safe_startup command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-enter-safe-startup",
+          "markdownDescription": "Enables the kernel_enter_safe_startup command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_export_package command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-export-package",
+          "markdownDescription": "Enables the kernel_export_package command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_export_package_bytes command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-export-package-bytes",
+          "markdownDescription": "Enables the kernel_export_package_bytes command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_garbage_collect command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-garbage-collect",
+          "markdownDescription": "Enables the kernel_garbage_collect command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_get_job command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-get-job",
+          "markdownDescription": "Enables the kernel_get_job command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_get_manifest command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-get-manifest",
+          "markdownDescription": "Enables the kernel_get_manifest command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_get_recovery_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-get-recovery-state",
+          "markdownDescription": "Enables the kernel_get_recovery_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_grant_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-grant-permission",
+          "markdownDescription": "Enables the kernel_grant_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_import_package command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-import-package",
+          "markdownDescription": "Enables the kernel_import_package command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_interrupt_jobs command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-interrupt-jobs",
+          "markdownDescription": "Enables the kernel_interrupt_jobs command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_invoke_registered_action command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-invoke-registered-action",
+          "markdownDescription": "Enables the kernel_invoke_registered_action command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_list_application_versions command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-list-application-versions",
+          "markdownDescription": "Enables the kernel_list_application_versions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_list_audit_events command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-list-audit-events",
+          "markdownDescription": "Enables the kernel_list_audit_events command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_list_build_failures command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-list-build-failures",
+          "markdownDescription": "Enables the kernel_list_build_failures command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_list_manifests command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-list-manifests",
+          "markdownDescription": "Enables the kernel_list_manifests command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_list_pending_approvals command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-list-pending-approvals",
+          "markdownDescription": "Enables the kernel_list_pending_approvals command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_list_permissions command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-list-permissions",
+          "markdownDescription": "Enables the kernel_list_permissions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_list_registered_actions command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-list-registered-actions",
+          "markdownDescription": "Enables the kernel_list_registered_actions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_list_runtime_grants command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-list-runtime-grants",
+          "markdownDescription": "Enables the kernel_list_runtime_grants command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_mark_last_known_good command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-mark-last-known-good",
+          "markdownDescription": "Enables the kernel_mark_last_known_good command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_preview_package command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-preview-package",
+          "markdownDescription": "Enables the kernel_preview_package command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_recent_transactions command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-recent-transactions",
+          "markdownDescription": "Enables the kernel_recent_transactions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_record_build_failure command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-record-build-failure",
+          "markdownDescription": "Enables the kernel_record_build_failure command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_restore_last_known_good command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-restore-last-known-good",
+          "markdownDescription": "Enables the kernel_restore_last_known_good command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_revoke_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-revoke-permission",
+          "markdownDescription": "Enables the kernel_revoke_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_revoke_runtime_grant command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-revoke-runtime-grant",
+          "markdownDescription": "Enables the kernel_revoke_runtime_grant command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_run_test command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-run-test",
+          "markdownDescription": "Enables the kernel_run_test command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_set_application_lifecycle command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-set-application-lifecycle",
+          "markdownDescription": "Enables the kernel_set_application_lifecycle command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_set_policy_override command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-set-policy-override",
+          "markdownDescription": "Enables the kernel_set_policy_override command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_set_recovery_flags command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-set-recovery-flags",
+          "markdownDescription": "Enables the kernel_set_recovery_flags command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_set_recovery_mode command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-set-recovery-mode",
+          "markdownDescription": "Enables the kernel_set_recovery_mode command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_unified_search command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-unified-search",
+          "markdownDescription": "Enables the kernel_unified_search command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_upsert_data_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-upsert-data-model",
+          "markdownDescription": "Enables the kernel_upsert_data_model command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_upsert_test command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-upsert-test",
+          "markdownDescription": "Enables the kernel_upsert_test command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kernel_visual_checks command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kernel-visual-checks",
+          "markdownDescription": "Enables the kernel_visual_checks command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_added_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-added-settings",
+          "markdownDescription": "Enables the list_added_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_agent_queue_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-agent-queue-cmd",
+          "markdownDescription": "Enables the list_agent_queue_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_automation_runs command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-automation-runs",
+          "markdownDescription": "Enables the list_automation_runs command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_automations command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-automations",
+          "markdownDescription": "Enables the list_automations command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_branches_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-branches-cmd",
+          "markdownDescription": "Enables the list_branches_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_capability_packs command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-capability-packs",
+          "markdownDescription": "Enables the list_capability_packs command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_context_ledger_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-context-ledger-cmd",
+          "markdownDescription": "Enables the list_context_ledger_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_conversation_surfaces command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-conversation-surfaces",
+          "markdownDescription": "Enables the list_conversation_surfaces command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_conversations command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-conversations",
+          "markdownDescription": "Enables the list_conversations command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_diagnostics_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-diagnostics-cmd",
+          "markdownDescription": "Enables the list_diagnostics_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_exa_usage command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-exa-usage",
+          "markdownDescription": "Enables the list_exa_usage command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_export_formats command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-export-formats",
+          "markdownDescription": "Enables the list_export_formats command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_managed_backups command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-managed-backups",
+          "markdownDescription": "Enables the list_managed_backups command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_media_assets_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-media-assets-cmd",
+          "markdownDescription": "Enables the list_media_assets_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_project_conversations_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-project-conversations-cmd",
+          "markdownDescription": "Enables the list_project_conversations_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_projects_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-projects-cmd",
+          "markdownDescription": "Enables the list_projects_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_provider_connections command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-provider-connections",
+          "markdownDescription": "Enables the list_provider_connections command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_search_sessions_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-search-sessions-cmd",
+          "markdownDescription": "Enables the list_search_sessions_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_tools command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-tools",
+          "markdownDescription": "Enables the list_tools command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_transactions_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-transactions-cmd",
+          "markdownDescription": "Enables the list_transactions_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_unassigned_conversations_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-unassigned-conversations-cmd",
+          "markdownDescription": "Enables the list_unassigned_conversations_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_workspace_backgrounds command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-workspace-backgrounds",
+          "markdownDescription": "Enables the list_workspace_backgrounds command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the media_asset_usage_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-media-asset-usage-cmd",
+          "markdownDescription": "Enables the media_asset_usage_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the navigate_route_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-navigate-route-cmd",
+          "markdownDescription": "Enables the navigate_route_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_external_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-external-url",
+          "markdownDescription": "Enables the open_external_url command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_tool_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-tool-window",
+          "markdownDescription": "Enables the open_tool_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the preview_restore_backup command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-preview-restore-backup",
+          "markdownDescription": "Enables the preview_restore_backup command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the promote_surface_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-promote-surface-cmd",
+          "markdownDescription": "Enables the promote_surface_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the provider_key_hints command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-provider-key-hints",
+          "markdownDescription": "Enables the provider_key_hints command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the rebuild_project_index_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-rebuild-project-index-cmd",
+          "markdownDescription": "Enables the rebuild_project_index_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the recover_agent_queue_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-recover-agent-queue-cmd",
+          "markdownDescription": "Enables the recover_agent_queue_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the refresh_project_summary command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-refresh-project-summary",
+          "markdownDescription": "Enables the refresh_project_summary command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remove_chat_from_project command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remove-chat-from-project",
+          "markdownDescription": "Enables the remove_chat_from_project command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remove_queue_item_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remove-queue-item-cmd",
+          "markdownDescription": "Enables the remove_queue_item_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the rename_conversation_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-rename-conversation-cmd",
+          "markdownDescription": "Enables the rename_conversation_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the restore_profile_backup command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-restore-profile-backup",
+          "markdownDescription": "Enables the restore_profile_backup command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the restore_project_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-restore-project-cmd",
+          "markdownDescription": "Enables the restore_project_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the retry_open_database command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-retry-open-database",
+          "markdownDescription": "Enables the retry_open_database command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the run_automation_now command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-run-automation-now",
+          "markdownDescription": "Enables the run_automation_now command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the runtime_v2_limits command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-runtime-v2-limits",
+          "markdownDescription": "Enables the runtime_v2_limits command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_continuity_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-continuity-cmd",
+          "markdownDescription": "Enables the save_continuity_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_draft_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-draft-cmd",
+          "markdownDescription": "Enables the save_draft_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_surface_state_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-surface-state-cmd",
+          "markdownDescription": "Enables the save_surface_state_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_tool_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-tool-state",
+          "markdownDescription": "Enables the save_tool_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the schedule_patches_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-schedule-patches-cmd",
+          "markdownDescription": "Enables the schedule_patches_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the search_project_context_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-search-project-context-cmd",
+          "markdownDescription": "Enables the search_project_context_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the send_message command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-send-message",
+          "markdownDescription": "Enables the send_message command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_active_provider_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-active-provider-connection",
+          "markdownDescription": "Enables the set_active_provider_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_automation_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-automation-enabled",
+          "markdownDescription": "Enables the set_automation_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_dock_icon command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-dock-icon",
+          "markdownDescription": "Enables the set_dock_icon command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_dock_icon_for_os_appearance command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-dock-icon-for-os-appearance",
+          "markdownDescription": "Enables the set_dock_icon_for_os_appearance command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_exa_budget command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-exa-budget",
+          "markdownDescription": "Enables the set_exa_budget command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_kernel_proposal_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-kernel-proposal-status",
+          "markdownDescription": "Enables the set_kernel_proposal_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_project_wallpaper_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-project-wallpaper-cmd",
+          "markdownDescription": "Enables the set_project_wallpaper_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_route_state_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-route-state-cmd",
+          "markdownDescription": "Enables the set_route_state_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_search_profile command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-search-profile",
+          "markdownDescription": "Enables the set_search_profile command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_setting command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-setting",
+          "markdownDescription": "Enables the set_setting command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_web_research_resource_profile command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-web-research-resource-profile",
+          "markdownDescription": "Enables the set_web_research_resource_profile command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stage_chat_attachment command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stage-chat-attachment",
+          "markdownDescription": "Enables the stage_chat_attachment command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the store_diagnostics_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-store-diagnostics-cmd",
+          "markdownDescription": "Enables the store_diagnostics_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the store_hosted_auth_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-store-hosted-auth-session",
+          "markdownDescription": "Enables the store_hosted_auth_session command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the suspend_surface_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-suspend-surface-cmd",
+          "markdownDescription": "Enables the suspend_surface_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the test_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-test-ai-connection",
+          "markdownDescription": "Enables the test_ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the test_exa_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-test-exa-connection",
+          "markdownDescription": "Enables the test_exa_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the test_provider_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-test-provider-connection",
+          "markdownDescription": "Enables the test_provider_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the test_search_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-test-search-connection",
+          "markdownDescription": "Enables the test_search_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the touch_media_asset_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-touch-media-asset-cmd",
+          "markdownDescription": "Enables the touch_media_asset_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the touch_project_opened command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-touch-project-opened",
+          "markdownDescription": "Enables the touch_project_opened command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the undo_tool_change command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-undo-tool-change",
+          "markdownDescription": "Enables the undo_tool_change command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the undo_transaction_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-undo-transaction-cmd",
+          "markdownDescription": "Enables the undo_transaction_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_project_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-project-cmd",
+          "markdownDescription": "Enables the update_project_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_surface_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-surface-cmd",
+          "markdownDescription": "Enables the update_surface_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the upsert_added_setting command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-upsert-added-setting",
+          "markdownDescription": "Enables the upsert_added_setting command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the upsert_automation command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-upsert-automation",
+          "markdownDescription": "Enables the upsert_automation command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the upsert_provider_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-upsert-provider-connection",
+          "markdownDescription": "Enables the upsert_provider_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the upsert_workspace_background command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-upsert-workspace-background",
+          "markdownDescription": "Enables the upsert_workspace_background command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the validate_agent_response_v2 command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-validate-agent-response-v2",
+          "markdownDescription": "Enables the validate_agent_response_v2 command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the validate_change_targets command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-validate-change-targets",
+          "markdownDescription": "Enables the validate_change_targets command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the video_search_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-video-search-cmd",
+          "markdownDescription": "Enables the video_search_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the web_search_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-web-search-cmd",
+          "markdownDescription": "Enables the web_search_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the window_orchestrator_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-window-orchestrator-cancel",
+          "markdownDescription": "Enables the window_orchestrator_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the window_orchestrator_expand command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-window-orchestrator-expand",
+          "markdownDescription": "Enables the window_orchestrator_expand command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the window_orchestrator_inspect command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-window-orchestrator-inspect",
+          "markdownDescription": "Enables the window_orchestrator_inspect command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the window_orchestrator_restore command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-window-orchestrator-restore",
+          "markdownDescription": "Enables the window_orchestrator_restore command without any pre-configured scope."
+        },
+        {
+          "description": "Deny sensitive profile/data/credential commands from tool windows.",
+          "type": "string",
+          "const": "coreside-tool-deny-sensitive",
+          "markdownDescription": "Deny sensitive profile/data/credential commands from tool windows."
+        },
+        {
+          "description": "Denies the activate_next_queue_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-activate-next-queue-cmd",
+          "markdownDescription": "Denies the activate_next_queue_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the append_context_ledger_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-append-context-ledger-cmd",
+          "markdownDescription": "Denies the append_context_ledger_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the apply_operations_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-apply-operations-cmd",
+          "markdownDescription": "Denies the apply_operations_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the apply_tool_change command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-apply-tool-change",
+          "markdownDescription": "Denies the apply_tool_change command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the archive_project_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-archive-project-cmd",
+          "markdownDescription": "Denies the archive_project_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the assign_chats_to_project command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-assign-chats-to-project",
+          "markdownDescription": "Denies the assign_chats_to_project command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the assign_conversation_to_project_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-assign-conversation-to-project-cmd",
+          "markdownDescription": "Denies the assign_conversation_to_project_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the branch_conversation_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-branch-conversation-cmd",
+          "markdownDescription": "Denies the branch_conversation_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel_queue_item_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cancel-queue-item-cmd",
+          "markdownDescription": "Denies the cancel_queue_item_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel_request command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cancel-request",
+          "markdownDescription": "Denies the cancel_request command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cleanup_crawler_cache command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cleanup-crawler-cache",
+          "markdownDescription": "Denies the cleanup_crawler_cache command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_conversations command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-conversations",
+          "markdownDescription": "Denies the clear_conversations command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_hosted_auth_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-hosted-auth-session",
+          "markdownDescription": "Denies the clear_hosted_auth_session command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_search_history_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-search-history-cmd",
+          "markdownDescription": "Denies the clear_search_history_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_tools command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-tools",
+          "markdownDescription": "Denies the clear_tools command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the complete_queue_item_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-complete-queue-item-cmd",
+          "markdownDescription": "Denies the complete_queue_item_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the configure_exa_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-configure-exa-connection",
+          "markdownDescription": "Denies the configure_exa_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the configure_search_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-configure-search-connection",
+          "markdownDescription": "Denies the configure_search_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_conversation command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-create-conversation",
+          "markdownDescription": "Denies the create_conversation command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_conversation_in_project command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-create-conversation-in-project",
+          "markdownDescription": "Denies the create_conversation_in_project command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_inline_surface_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-create-inline-surface-cmd",
+          "markdownDescription": "Denies the create_inline_surface_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_profile_backup command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-create-profile-backup",
+          "markdownDescription": "Denies the create_profile_backup command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_project_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-create-project-cmd",
+          "markdownDescription": "Denies the create_project_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_snapshot_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-create-snapshot-cmd",
+          "markdownDescription": "Denies the create_snapshot_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_added_setting command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-added-setting",
+          "markdownDescription": "Denies the delete_added_setting command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_automation command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-automation",
+          "markdownDescription": "Denies the delete_automation command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_conversation command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-conversation",
+          "markdownDescription": "Denies the delete_conversation command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_draft_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-draft-cmd",
+          "markdownDescription": "Denies the delete_draft_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_exa_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-exa-connection",
+          "markdownDescription": "Denies the delete_exa_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_media_asset_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-media-asset-cmd",
+          "markdownDescription": "Denies the delete_media_asset_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_messages_from command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-messages-from",
+          "markdownDescription": "Denies the delete_messages_from command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_project_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-project-cmd",
+          "markdownDescription": "Denies the delete_project_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_provider_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-provider-connection",
+          "markdownDescription": "Denies the delete_provider_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_search_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-search-connection",
+          "markdownDescription": "Denies the delete_search_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_snapshot_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-snapshot-cmd",
+          "markdownDescription": "Denies the delete_snapshot_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the discard_kernel_proposal command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-discard-kernel-proposal",
+          "markdownDescription": "Denies the discard_kernel_proposal command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the discard_tool_change command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-discard-tool-change",
+          "markdownDescription": "Denies the discard_tool_change command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the duplicate_conversation_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-duplicate-conversation-cmd",
+          "markdownDescription": "Denies the duplicate_conversation_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the enqueue_agent_turn_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-enqueue-agent-turn-cmd",
+          "markdownDescription": "Denies the enqueue_agent_turn_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the export_project command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-export-project",
+          "markdownDescription": "Denies the export_project command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the export_tool command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-export-tool",
+          "markdownDescription": "Denies the export_tool command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fetch_web_page_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fetch-web-page-cmd",
+          "markdownDescription": "Denies the fetch_web_page_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the flush_patch_scheduler_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-flush-patch-scheduler-cmd",
+          "markdownDescription": "Denies the flush_patch_scheduler_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_ai_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-ai-status",
+          "markdownDescription": "Denies the get_ai_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_app_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-app-info",
+          "markdownDescription": "Denies the get_app_info command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_bootstrap_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-bootstrap-status",
+          "markdownDescription": "Denies the get_bootstrap_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_chat_attachment_src command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-chat-attachment-src",
+          "markdownDescription": "Denies the get_chat_attachment_src command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_continuity_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-continuity-cmd",
+          "markdownDescription": "Denies the get_continuity_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_crawler_cache_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-crawler-cache-stats",
+          "markdownDescription": "Denies the get_crawler_cache_stats command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_crawler_installation command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-crawler-installation",
+          "markdownDescription": "Denies the get_crawler_installation command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_crawler_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-crawler-status",
+          "markdownDescription": "Denies the get_crawler_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_database_health command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-database-health",
+          "markdownDescription": "Denies the get_database_health command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_draft_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-draft-cmd",
+          "markdownDescription": "Denies the get_draft_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_exa_budget command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-exa-budget",
+          "markdownDescription": "Denies the get_exa_budget command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_exa_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-exa-connection",
+          "markdownDescription": "Denies the get_exa_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_exa_usage command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-exa-usage",
+          "markdownDescription": "Denies the get_exa_usage command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_hosted_auth_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-hosted-auth-status",
+          "markdownDescription": "Denies the get_hosted_auth_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_media_asset_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-media-asset-cmd",
+          "markdownDescription": "Denies the get_media_asset_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_media_asset_src_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-media-asset-src-cmd",
+          "markdownDescription": "Denies the get_media_asset_src_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_media_asset_thumb_src_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-media-asset-thumb-src-cmd",
+          "markdownDescription": "Denies the get_media_asset_thumb_src_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_messages command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-messages",
+          "markdownDescription": "Denies the get_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_model_catalog command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-model-catalog",
+          "markdownDescription": "Denies the get_model_catalog command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_project_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-project-cmd",
+          "markdownDescription": "Denies the get_project_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_provider_profile_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-provider-profile-cmd",
+          "markdownDescription": "Denies the get_provider_profile_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_route_state_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-route-state-cmd",
+          "markdownDescription": "Denies the get_route_state_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_search_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-search-connection",
+          "markdownDescription": "Denies the get_search_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_search_profile command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-search-profile",
+          "markdownDescription": "Denies the get_search_profile command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_search_session_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-search-session-cmd",
+          "markdownDescription": "Denies the get_search_session_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-settings",
+          "markdownDescription": "Denies the get_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_snapshot_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-snapshot-cmd",
+          "markdownDescription": "Denies the get_snapshot_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_storage_summary command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-storage-summary",
+          "markdownDescription": "Denies the get_storage_summary command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_surface_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-surface-cmd",
+          "markdownDescription": "Denies the get_surface_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_surface_state_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-surface-state-cmd",
+          "markdownDescription": "Denies the get_surface_state_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_tool command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-tool",
+          "markdownDescription": "Denies the get_tool command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_tool_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-tool-state",
+          "markdownDescription": "Denies the get_tool_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_tool_versions command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-tool-versions",
+          "markdownDescription": "Denies the get_tool_versions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_transaction_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-transaction-cmd",
+          "markdownDescription": "Denies the get_transaction_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the image_search_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-image-search-cmd",
+          "markdownDescription": "Denies the image_search_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the import_media_asset_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-import-media-asset-cmd",
+          "markdownDescription": "Denies the import_media_asset_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_application_summary command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-application-summary",
+          "markdownDescription": "Denies the kernel_application_summary command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_apply_change command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-apply-change",
+          "markdownDescription": "Denies the kernel_apply_change command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_capability_catalog command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-capability-catalog",
+          "markdownDescription": "Denies the kernel_capability_catalog command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_clear_audit_events command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-clear-audit-events",
+          "markdownDescription": "Denies the kernel_clear_audit_events command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_clear_build_failure command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-clear-build-failure",
+          "markdownDescription": "Denies the kernel_clear_build_failure command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_clear_policy_override command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-clear-policy-override",
+          "markdownDescription": "Denies the kernel_clear_policy_override command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_clear_recovery command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-clear-recovery",
+          "markdownDescription": "Denies the kernel_clear_recovery command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_compile_intent command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-compile-intent",
+          "markdownDescription": "Denies the kernel_compile_intent command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_create_job command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-create-job",
+          "markdownDescription": "Denies the kernel_create_job command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_data_model_summary command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-data-model-summary",
+          "markdownDescription": "Denies the kernel_data_model_summary command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_decide_approval command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-decide-approval",
+          "markdownDescription": "Denies the kernel_decide_approval command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_ensure_tool_manifest command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-ensure-tool-manifest",
+          "markdownDescription": "Denies the kernel_ensure_tool_manifest command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_enter_safe_startup command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-enter-safe-startup",
+          "markdownDescription": "Denies the kernel_enter_safe_startup command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_export_package command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-export-package",
+          "markdownDescription": "Denies the kernel_export_package command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_export_package_bytes command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-export-package-bytes",
+          "markdownDescription": "Denies the kernel_export_package_bytes command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_garbage_collect command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-garbage-collect",
+          "markdownDescription": "Denies the kernel_garbage_collect command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_get_job command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-get-job",
+          "markdownDescription": "Denies the kernel_get_job command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_get_manifest command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-get-manifest",
+          "markdownDescription": "Denies the kernel_get_manifest command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_get_recovery_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-get-recovery-state",
+          "markdownDescription": "Denies the kernel_get_recovery_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_grant_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-grant-permission",
+          "markdownDescription": "Denies the kernel_grant_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_import_package command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-import-package",
+          "markdownDescription": "Denies the kernel_import_package command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_interrupt_jobs command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-interrupt-jobs",
+          "markdownDescription": "Denies the kernel_interrupt_jobs command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_invoke_registered_action command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-invoke-registered-action",
+          "markdownDescription": "Denies the kernel_invoke_registered_action command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_list_application_versions command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-list-application-versions",
+          "markdownDescription": "Denies the kernel_list_application_versions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_list_audit_events command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-list-audit-events",
+          "markdownDescription": "Denies the kernel_list_audit_events command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_list_build_failures command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-list-build-failures",
+          "markdownDescription": "Denies the kernel_list_build_failures command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_list_manifests command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-list-manifests",
+          "markdownDescription": "Denies the kernel_list_manifests command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_list_pending_approvals command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-list-pending-approvals",
+          "markdownDescription": "Denies the kernel_list_pending_approvals command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_list_permissions command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-list-permissions",
+          "markdownDescription": "Denies the kernel_list_permissions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_list_registered_actions command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-list-registered-actions",
+          "markdownDescription": "Denies the kernel_list_registered_actions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_list_runtime_grants command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-list-runtime-grants",
+          "markdownDescription": "Denies the kernel_list_runtime_grants command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_mark_last_known_good command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-mark-last-known-good",
+          "markdownDescription": "Denies the kernel_mark_last_known_good command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_preview_package command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-preview-package",
+          "markdownDescription": "Denies the kernel_preview_package command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_recent_transactions command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-recent-transactions",
+          "markdownDescription": "Denies the kernel_recent_transactions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_record_build_failure command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-record-build-failure",
+          "markdownDescription": "Denies the kernel_record_build_failure command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_restore_last_known_good command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-restore-last-known-good",
+          "markdownDescription": "Denies the kernel_restore_last_known_good command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_revoke_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-revoke-permission",
+          "markdownDescription": "Denies the kernel_revoke_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_revoke_runtime_grant command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-revoke-runtime-grant",
+          "markdownDescription": "Denies the kernel_revoke_runtime_grant command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_run_test command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-run-test",
+          "markdownDescription": "Denies the kernel_run_test command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_set_application_lifecycle command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-set-application-lifecycle",
+          "markdownDescription": "Denies the kernel_set_application_lifecycle command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_set_policy_override command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-set-policy-override",
+          "markdownDescription": "Denies the kernel_set_policy_override command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_set_recovery_flags command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-set-recovery-flags",
+          "markdownDescription": "Denies the kernel_set_recovery_flags command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_set_recovery_mode command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-set-recovery-mode",
+          "markdownDescription": "Denies the kernel_set_recovery_mode command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_unified_search command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-unified-search",
+          "markdownDescription": "Denies the kernel_unified_search command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_upsert_data_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-upsert-data-model",
+          "markdownDescription": "Denies the kernel_upsert_data_model command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_upsert_test command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-upsert-test",
+          "markdownDescription": "Denies the kernel_upsert_test command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kernel_visual_checks command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kernel-visual-checks",
+          "markdownDescription": "Denies the kernel_visual_checks command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_added_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-added-settings",
+          "markdownDescription": "Denies the list_added_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_agent_queue_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-agent-queue-cmd",
+          "markdownDescription": "Denies the list_agent_queue_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_automation_runs command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-automation-runs",
+          "markdownDescription": "Denies the list_automation_runs command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_automations command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-automations",
+          "markdownDescription": "Denies the list_automations command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_branches_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-branches-cmd",
+          "markdownDescription": "Denies the list_branches_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_capability_packs command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-capability-packs",
+          "markdownDescription": "Denies the list_capability_packs command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_context_ledger_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-context-ledger-cmd",
+          "markdownDescription": "Denies the list_context_ledger_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_conversation_surfaces command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-conversation-surfaces",
+          "markdownDescription": "Denies the list_conversation_surfaces command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_conversations command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-conversations",
+          "markdownDescription": "Denies the list_conversations command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_diagnostics_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-diagnostics-cmd",
+          "markdownDescription": "Denies the list_diagnostics_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_exa_usage command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-exa-usage",
+          "markdownDescription": "Denies the list_exa_usage command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_export_formats command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-export-formats",
+          "markdownDescription": "Denies the list_export_formats command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_managed_backups command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-managed-backups",
+          "markdownDescription": "Denies the list_managed_backups command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_media_assets_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-media-assets-cmd",
+          "markdownDescription": "Denies the list_media_assets_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_project_conversations_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-project-conversations-cmd",
+          "markdownDescription": "Denies the list_project_conversations_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_projects_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-projects-cmd",
+          "markdownDescription": "Denies the list_projects_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_provider_connections command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-provider-connections",
+          "markdownDescription": "Denies the list_provider_connections command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_search_sessions_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-search-sessions-cmd",
+          "markdownDescription": "Denies the list_search_sessions_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_tools command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-tools",
+          "markdownDescription": "Denies the list_tools command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_transactions_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-transactions-cmd",
+          "markdownDescription": "Denies the list_transactions_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_unassigned_conversations_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-unassigned-conversations-cmd",
+          "markdownDescription": "Denies the list_unassigned_conversations_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_workspace_backgrounds command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-workspace-backgrounds",
+          "markdownDescription": "Denies the list_workspace_backgrounds command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the media_asset_usage_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-media-asset-usage-cmd",
+          "markdownDescription": "Denies the media_asset_usage_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the navigate_route_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-navigate-route-cmd",
+          "markdownDescription": "Denies the navigate_route_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_external_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-external-url",
+          "markdownDescription": "Denies the open_external_url command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_tool_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-tool-window",
+          "markdownDescription": "Denies the open_tool_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the preview_restore_backup command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-preview-restore-backup",
+          "markdownDescription": "Denies the preview_restore_backup command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the promote_surface_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-promote-surface-cmd",
+          "markdownDescription": "Denies the promote_surface_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the provider_key_hints command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-provider-key-hints",
+          "markdownDescription": "Denies the provider_key_hints command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the rebuild_project_index_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-rebuild-project-index-cmd",
+          "markdownDescription": "Denies the rebuild_project_index_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the recover_agent_queue_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-recover-agent-queue-cmd",
+          "markdownDescription": "Denies the recover_agent_queue_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the refresh_project_summary command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-refresh-project-summary",
+          "markdownDescription": "Denies the refresh_project_summary command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_chat_from_project command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remove-chat-from-project",
+          "markdownDescription": "Denies the remove_chat_from_project command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_queue_item_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remove-queue-item-cmd",
+          "markdownDescription": "Denies the remove_queue_item_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the rename_conversation_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-rename-conversation-cmd",
+          "markdownDescription": "Denies the rename_conversation_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the restore_profile_backup command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-restore-profile-backup",
+          "markdownDescription": "Denies the restore_profile_backup command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the restore_project_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-restore-project-cmd",
+          "markdownDescription": "Denies the restore_project_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the retry_open_database command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-retry-open-database",
+          "markdownDescription": "Denies the retry_open_database command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the run_automation_now command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-run-automation-now",
+          "markdownDescription": "Denies the run_automation_now command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the runtime_v2_limits command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-runtime-v2-limits",
+          "markdownDescription": "Denies the runtime_v2_limits command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_continuity_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-continuity-cmd",
+          "markdownDescription": "Denies the save_continuity_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_draft_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-draft-cmd",
+          "markdownDescription": "Denies the save_draft_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_surface_state_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-surface-state-cmd",
+          "markdownDescription": "Denies the save_surface_state_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_tool_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-tool-state",
+          "markdownDescription": "Denies the save_tool_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the schedule_patches_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-schedule-patches-cmd",
+          "markdownDescription": "Denies the schedule_patches_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the search_project_context_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-search-project-context-cmd",
+          "markdownDescription": "Denies the search_project_context_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the send_message command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-send-message",
+          "markdownDescription": "Denies the send_message command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_active_provider_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-active-provider-connection",
+          "markdownDescription": "Denies the set_active_provider_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_automation_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-automation-enabled",
+          "markdownDescription": "Denies the set_automation_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_dock_icon command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-dock-icon",
+          "markdownDescription": "Denies the set_dock_icon command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_dock_icon_for_os_appearance command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-dock-icon-for-os-appearance",
+          "markdownDescription": "Denies the set_dock_icon_for_os_appearance command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_exa_budget command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-exa-budget",
+          "markdownDescription": "Denies the set_exa_budget command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_kernel_proposal_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-kernel-proposal-status",
+          "markdownDescription": "Denies the set_kernel_proposal_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_project_wallpaper_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-project-wallpaper-cmd",
+          "markdownDescription": "Denies the set_project_wallpaper_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_route_state_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-route-state-cmd",
+          "markdownDescription": "Denies the set_route_state_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_search_profile command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-search-profile",
+          "markdownDescription": "Denies the set_search_profile command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_setting command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-setting",
+          "markdownDescription": "Denies the set_setting command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_web_research_resource_profile command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-web-research-resource-profile",
+          "markdownDescription": "Denies the set_web_research_resource_profile command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stage_chat_attachment command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stage-chat-attachment",
+          "markdownDescription": "Denies the stage_chat_attachment command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the store_diagnostics_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-store-diagnostics-cmd",
+          "markdownDescription": "Denies the store_diagnostics_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the store_hosted_auth_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-store-hosted-auth-session",
+          "markdownDescription": "Denies the store_hosted_auth_session command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the suspend_surface_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-suspend-surface-cmd",
+          "markdownDescription": "Denies the suspend_surface_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the test_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-test-ai-connection",
+          "markdownDescription": "Denies the test_ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the test_exa_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-test-exa-connection",
+          "markdownDescription": "Denies the test_exa_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the test_provider_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-test-provider-connection",
+          "markdownDescription": "Denies the test_provider_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the test_search_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-test-search-connection",
+          "markdownDescription": "Denies the test_search_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the touch_media_asset_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-touch-media-asset-cmd",
+          "markdownDescription": "Denies the touch_media_asset_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the touch_project_opened command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-touch-project-opened",
+          "markdownDescription": "Denies the touch_project_opened command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the undo_tool_change command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-undo-tool-change",
+          "markdownDescription": "Denies the undo_tool_change command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the undo_transaction_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-undo-transaction-cmd",
+          "markdownDescription": "Denies the undo_transaction_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_project_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-project-cmd",
+          "markdownDescription": "Denies the update_project_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_surface_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-surface-cmd",
+          "markdownDescription": "Denies the update_surface_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the upsert_added_setting command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-upsert-added-setting",
+          "markdownDescription": "Denies the upsert_added_setting command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the upsert_automation command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-upsert-automation",
+          "markdownDescription": "Denies the upsert_automation command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the upsert_provider_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-upsert-provider-connection",
+          "markdownDescription": "Denies the upsert_provider_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the upsert_workspace_background command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-upsert-workspace-background",
+          "markdownDescription": "Denies the upsert_workspace_background command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the validate_agent_response_v2 command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-validate-agent-response-v2",
+          "markdownDescription": "Denies the validate_agent_response_v2 command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the validate_change_targets command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-validate-change-targets",
+          "markdownDescription": "Denies the validate_change_targets command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the video_search_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-video-search-cmd",
+          "markdownDescription": "Denies the video_search_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the web_search_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-web-search-cmd",
+          "markdownDescription": "Denies the web_search_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the window_orchestrator_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-window-orchestrator-cancel",
+          "markdownDescription": "Denies the window_orchestrator_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the window_orchestrator_expand command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-window-orchestrator-expand",
+          "markdownDescription": "Denies the window_orchestrator_expand command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the window_orchestrator_inspect command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-window-orchestrator-inspect",
+          "markdownDescription": "Denies the window_orchestrator_inspect command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the window_orchestrator_restore command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-window-orchestrator-restore",
+          "markdownDescription": "Denies the window_orchestrator_restore command without any pre-configured scope."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",

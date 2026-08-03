@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-clear-policy-override"
+description = "Enables the kernel_clear_policy_override command without any pre-configured scope."
+commands.allow = ["kernel_clear_policy_override"]
+
+[[permission]]
+identifier = "deny-kernel-clear-policy-override"
+description = "Denies the kernel_clear_policy_override command without any pre-configured scope."
+commands.deny = ["kernel_clear_policy_override"]

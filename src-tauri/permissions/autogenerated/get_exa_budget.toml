@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-exa-budget"
+description = "Enables the get_exa_budget command without any pre-configured scope."
+commands.allow = ["get_exa_budget"]
+
+[[permission]]
+identifier = "deny-get-exa-budget"
+description = "Denies the get_exa_budget command without any pre-configured scope."
+commands.deny = ["get_exa_budget"]

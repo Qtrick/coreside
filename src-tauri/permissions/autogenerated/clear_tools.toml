@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-tools"
+description = "Enables the clear_tools command without any pre-configured scope."
+commands.allow = ["clear_tools"]
+
+[[permission]]
+identifier = "deny-clear-tools"
+description = "Denies the clear_tools command without any pre-configured scope."
+commands.deny = ["clear_tools"]

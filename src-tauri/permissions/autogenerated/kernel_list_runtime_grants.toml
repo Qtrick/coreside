@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-list-runtime-grants"
+description = "Enables the kernel_list_runtime_grants command without any pre-configured scope."
+commands.allow = ["kernel_list_runtime_grants"]
+
+[[permission]]
+identifier = "deny-kernel-list-runtime-grants"
+description = "Denies the kernel_list_runtime_grants command without any pre-configured scope."
+commands.deny = ["kernel_list_runtime_grants"]

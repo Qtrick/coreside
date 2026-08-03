@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-automation-runs"
+description = "Enables the list_automation_runs command without any pre-configured scope."
+commands.allow = ["list_automation_runs"]
+
+[[permission]]
+identifier = "deny-list-automation-runs"
+description = "Denies the list_automation_runs command without any pre-configured scope."
+commands.deny = ["list_automation_runs"]

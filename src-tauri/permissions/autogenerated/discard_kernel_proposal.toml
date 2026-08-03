@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-discard-kernel-proposal"
+description = "Enables the discard_kernel_proposal command without any pre-configured scope."
+commands.allow = ["discard_kernel_proposal"]
+
+[[permission]]
+identifier = "deny-discard-kernel-proposal"
+description = "Denies the discard_kernel_proposal command without any pre-configured scope."
+commands.deny = ["discard_kernel_proposal"]

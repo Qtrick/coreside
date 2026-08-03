@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-touch-project-opened"
+description = "Enables the touch_project_opened command without any pre-configured scope."
+commands.allow = ["touch_project_opened"]
+
+[[permission]]
+identifier = "deny-touch-project-opened"
+description = "Denies the touch_project_opened command without any pre-configured scope."
+commands.deny = ["touch_project_opened"]

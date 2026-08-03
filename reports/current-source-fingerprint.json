@@ -1,16 +1,25 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-03T13:56:49.006781+00:00",
-  "commit": "3054afb40a4202cda62cfb13f310d8a4ed4fbebf",
+  "generatedAt": "2026-08-03T15:18:00Z",
+  "commit": "74793b1d69d8e81e3d6a560018b3d4ce5021e243",
   "dirty": false,
-  "sourceFingerprint": "27082d218c93162391e718176f7f530bad837387a72ad7e817e90db68c4090e2",
+  "sourceFingerprint": "d31e19940a397434376dcf00233bcd35d55821dd8c98351bd38c8202025e1111",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
   "architecture": "arm64",
-  "buildMode": "dev",
-  "command": "rc2-fingerprint",
+  "buildMode": "development",
+  "command": "manual-rc3-kickoff",
   "exitStatus": 0,
-  "method": "sha256-of-tracked-relpath+filehash for src,src-tauri,e2e,scripts,docs,package.json,package-lock.json"
+  "algorithm": "sha256-concat-path-bytes",
+  "roots": [
+    "src",
+    "src-tauri/src",
+    "src-tauri/capabilities",
+    "src-tauri/permissions",
+    "e2e",
+    "scripts"
+  ],
+  "fileCount": 369
 }

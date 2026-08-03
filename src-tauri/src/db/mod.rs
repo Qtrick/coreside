@@ -11,7 +11,8 @@ mod repositories;
 pub use bootstrap::{open_profile_or_shell, BootstrapStatus};
 pub use health::DatabaseHealthReport;
 pub use profile_archive::{
-    extract_database_from_archive, preview_profile_archive, RestorePreview,
+    extract_assets_from_archive, extract_database_from_archive, preview_profile_archive,
+    promote_restored_assets, RestorePreview,
 };
 pub use repositories::*;
 

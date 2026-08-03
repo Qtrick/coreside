@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-profile-backup"
+description = "Enables the create_profile_backup command without any pre-configured scope."
+commands.allow = ["create_profile_backup"]
+
+[[permission]]
+identifier = "deny-create-profile-backup"
+description = "Denies the create_profile_backup command without any pre-configured scope."
+commands.deny = ["create_profile_backup"]

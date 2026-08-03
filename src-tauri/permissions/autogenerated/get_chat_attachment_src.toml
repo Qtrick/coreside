@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-chat-attachment-src"
+description = "Enables the get_chat_attachment_src command without any pre-configured scope."
+commands.allow = ["get_chat_attachment_src"]
+
+[[permission]]
+identifier = "deny-get-chat-attachment-src"
+description = "Denies the get_chat_attachment_src command without any pre-configured scope."
+commands.deny = ["get_chat_attachment_src"]

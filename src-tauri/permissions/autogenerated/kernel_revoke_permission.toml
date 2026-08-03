@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-revoke-permission"
+description = "Enables the kernel_revoke_permission command without any pre-configured scope."
+commands.allow = ["kernel_revoke_permission"]
+
+[[permission]]
+identifier = "deny-kernel-revoke-permission"
+description = "Denies the kernel_revoke_permission command without any pre-configured scope."
+commands.deny = ["kernel_revoke_permission"]

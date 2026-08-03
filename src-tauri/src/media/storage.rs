@@ -1,18 +1,22 @@
 use std::path::{Path, PathBuf};
 
-use dirs::data_dir;
-
 use super::errors::MediaError;
-use crate::db::product_data_dir;
+use crate::app_paths::AppPaths;
 
 pub fn media_root() -> Result<PathBuf, MediaError> {
-    let base = data_dir().ok_or_else(|| MediaError::Storage("app data dir unavailable".into()))?;
-    Ok(product_data_dir(&base).join("media"))
+    let paths =
+        AppPaths::resolve().map_err(|e| MediaError::Storage(format!("app paths: {e}")))?;
+    Ok(paths.media)
 }
 
 pub fn ensure_media_root() -> Result<PathBuf, MediaError> {
     let root = media_root()?;
     std::fs::create_dir_all(&root).map_err(|e| MediaError::Storage(e.to_string()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700));
+    }
     Ok(root)
 }
 
@@ -36,7 +40,23 @@ pub fn asset_path(local_filename: &str) -> Result<PathBuf, MediaError> {
 
 pub fn write_asset_bytes(local_filename: &str, bytes: &[u8]) -> Result<PathBuf, MediaError> {
     let path = asset_path(local_filename)?;
-    std::fs::write(&path, bytes).map_err(|e| MediaError::Storage(e.to_string()))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| MediaError::Storage("invalid media destination".into()))?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|e| MediaError::Storage(e.to_string()))?;
+    use std::io::Write;
+    tmp.write_all(bytes)
+        .map_err(|e| MediaError::Storage(e.to_string()))?;
+    tmp.flush()
+        .map_err(|e| MediaError::Storage(e.to_string()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o600));
+    }
+    tmp.persist(&path)
+        .map_err(|e| MediaError::Storage(e.error.to_string()))?;
     Ok(path)
 }
 

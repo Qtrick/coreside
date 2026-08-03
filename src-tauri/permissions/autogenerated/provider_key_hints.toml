@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-provider-key-hints"
+description = "Enables the provider_key_hints command without any pre-configured scope."
+commands.allow = ["provider_key_hints"]
+
+[[permission]]
+identifier = "deny-provider-key-hints"
+description = "Denies the provider_key_hints command without any pre-configured scope."
+commands.deny = ["provider_key_hints"]

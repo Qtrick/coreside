@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-suspend-surface-cmd"
+description = "Enables the suspend_surface_cmd command without any pre-configured scope."
+commands.allow = ["suspend_surface_cmd"]
+
+[[permission]]
+identifier = "deny-suspend-surface-cmd"
+description = "Denies the suspend_surface_cmd command without any pre-configured scope."
+commands.deny = ["suspend_surface_cmd"]

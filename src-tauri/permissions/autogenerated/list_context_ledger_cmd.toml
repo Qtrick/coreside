@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-context-ledger-cmd"
+description = "Enables the list_context_ledger_cmd command without any pre-configured scope."
+commands.allow = ["list_context_ledger_cmd"]
+
+[[permission]]
+identifier = "deny-list-context-ledger-cmd"
+description = "Denies the list_context_ledger_cmd command without any pre-configured scope."
+commands.deny = ["list_context_ledger_cmd"]

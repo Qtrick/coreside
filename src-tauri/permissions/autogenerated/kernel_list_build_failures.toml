@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-list-build-failures"
+description = "Enables the kernel_list_build_failures command without any pre-configured scope."
+commands.allow = ["kernel_list_build_failures"]
+
+[[permission]]
+identifier = "deny-kernel-list-build-failures"
+description = "Denies the kernel_list_build_failures command without any pre-configured scope."
+commands.deny = ["kernel_list_build_failures"]

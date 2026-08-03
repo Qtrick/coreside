@@ -47,7 +47,7 @@ export const ImportMediaInputSchema = z.object({
 export type ImportMediaInput = z.infer<typeof ImportMediaInputSchema>;
 
 export const MediaAssetSrcSchema = z.object({
-  absolutePath: z.string(),
+  url: z.string(),
   mimeType: z.string(),
 });
 

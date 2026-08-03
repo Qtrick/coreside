@@ -1,5 +1,6 @@
 //! Media library CRUD commands.
 
+use serde::Serialize;
 use tauri::State;
 
 use super::CommandError;
@@ -65,11 +66,33 @@ pub async fn import_media_asset_cmd(
     crate::media::insert_media_asset(&mut db, &input, &bytes, &meta, &hash).map_err(map_media_err)
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaAssetSrc {
-    pub absolute_path: String,
+    /// Asset-protocol URL for rendering (no bare absolute filesystem path).
+    pub url: String,
     pub mime_type: String,
+}
+
+fn asset_protocol_url(path: &std::path::Path) -> String {
+    let raw = path.to_string_lossy();
+    let encoded: String = raw
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{:02X}", b),
+        })
+        .collect();
+    #[cfg(any(windows, target_os = "android"))]
+    {
+        format!("http://asset.localhost/{encoded}")
+    }
+    #[cfg(not(any(windows, target_os = "android")))]
+    {
+        format!("asset://localhost/{encoded}")
+    }
 }
 
 #[tauri::command]
@@ -82,7 +105,7 @@ pub fn get_media_asset_src_cmd(
     let asset = get_media_asset(&db, &asset_id).map_err(CommandError::from)?;
     let path = resolve_asset_file_path(&asset.local_filename).map_err(map_media_err)?;
     Ok(MediaAssetSrc {
-        absolute_path: path.to_string_lossy().into_owned(),
+        url: asset_protocol_url(&path),
         mime_type: asset.mime_type,
     })
 }
@@ -100,7 +123,7 @@ pub fn get_media_asset_thumb_src_cmd(
     };
     let path = resolve_asset_file_path(&thumb).map_err(map_media_err)?;
     Ok(Some(MediaAssetSrc {
-        absolute_path: path.to_string_lossy().into_owned(),
+        url: asset_protocol_url(&path),
         mime_type: "image/jpeg".into(),
     }))
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-recent-transactions"
+description = "Enables the kernel_recent_transactions command without any pre-configured scope."
+commands.allow = ["kernel_recent_transactions"]
+
+[[permission]]
+identifier = "deny-kernel-recent-transactions"
+description = "Denies the kernel_recent_transactions command without any pre-configured scope."
+commands.deny = ["kernel_recent_transactions"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-conversation-surfaces"
+description = "Enables the list_conversation_surfaces command without any pre-configured scope."
+commands.allow = ["list_conversation_surfaces"]
+
+[[permission]]
+identifier = "deny-list-conversation-surfaces"
+description = "Denies the list_conversation_surfaces command without any pre-configured scope."
+commands.deny = ["list_conversation_surfaces"]

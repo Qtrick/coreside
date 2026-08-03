@@ -15,7 +15,7 @@
     "test:ai-access": "vitest run src/lib/ai-access-disclosure.test.ts && cargo test --manifest-path src-tauri/Cargo.toml --lib ai::access_mode",
     "test:hosted-auth": "vitest run src/lib/hosted",
     "test:typescript-6": "tsc --version && npm run typecheck",
-    "assurance:report": "npm run release:evidence:quick",
+    "assurance:report": "node scripts/assurance-report.mjs",
     "test:watch": "vitest",
     "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",

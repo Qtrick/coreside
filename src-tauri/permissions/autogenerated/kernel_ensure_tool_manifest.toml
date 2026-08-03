@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-ensure-tool-manifest"
+description = "Enables the kernel_ensure_tool_manifest command without any pre-configured scope."
+commands.allow = ["kernel_ensure_tool_manifest"]
+
+[[permission]]
+identifier = "deny-kernel-ensure-tool-manifest"
+description = "Denies the kernel_ensure_tool_manifest command without any pre-configured scope."
+commands.deny = ["kernel_ensure_tool_manifest"]

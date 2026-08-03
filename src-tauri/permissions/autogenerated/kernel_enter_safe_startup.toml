@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-enter-safe-startup"
+description = "Enables the kernel_enter_safe_startup command without any pre-configured scope."
+commands.allow = ["kernel_enter_safe_startup"]
+
+[[permission]]
+identifier = "deny-kernel-enter-safe-startup"
+description = "Denies the kernel_enter_safe_startup command without any pre-configured scope."
+commands.deny = ["kernel_enter_safe_startup"]

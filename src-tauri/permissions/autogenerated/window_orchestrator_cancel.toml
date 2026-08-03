@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-window-orchestrator-cancel"
+description = "Enables the window_orchestrator_cancel command without any pre-configured scope."
+commands.allow = ["window_orchestrator_cancel"]
+
+[[permission]]
+identifier = "deny-window-orchestrator-cancel"
+description = "Denies the window_orchestrator_cancel command without any pre-configured scope."
+commands.deny = ["window_orchestrator_cancel"]

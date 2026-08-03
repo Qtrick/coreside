@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-compile-intent"
+description = "Enables the kernel_compile_intent command without any pre-configured scope."
+commands.allow = ["kernel_compile_intent"]
+
+[[permission]]
+identifier = "deny-kernel-compile-intent"
+description = "Denies the kernel_compile_intent command without any pre-configured scope."
+commands.deny = ["kernel_compile_intent"]

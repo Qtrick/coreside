@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-apply-change"
+description = "Enables the kernel_apply_change command without any pre-configured scope."
+commands.allow = ["kernel_apply_change"]
+
+[[permission]]
+identifier = "deny-kernel-apply-change"
+description = "Denies the kernel_apply_change command without any pre-configured scope."
+commands.deny = ["kernel_apply_change"]

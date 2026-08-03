@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-search-history-cmd"
+description = "Enables the clear_search_history_cmd command without any pre-configured scope."
+commands.allow = ["clear_search_history_cmd"]
+
+[[permission]]
+identifier = "deny-clear-search-history-cmd"
+description = "Denies the clear_search_history_cmd command without any pre-configured scope."
+commands.deny = ["clear_search_history_cmd"]

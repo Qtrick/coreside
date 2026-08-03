@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-assign-chats-to-project"
+description = "Enables the assign_chats_to_project command without any pre-configured scope."
+commands.allow = ["assign_chats_to_project"]
+
+[[permission]]
+identifier = "deny-assign-chats-to-project"
+description = "Denies the assign_chats_to_project command without any pre-configured scope."
+commands.deny = ["assign_chats_to_project"]

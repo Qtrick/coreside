@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-image-search-cmd"
+description = "Enables the image_search_cmd command without any pre-configured scope."
+commands.allow = ["image_search_cmd"]
+
+[[permission]]
+identifier = "deny-image-search-cmd"
+description = "Denies the image_search_cmd command without any pre-configured scope."
+commands.deny = ["image_search_cmd"]

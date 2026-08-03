@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-list-registered-actions"
+description = "Enables the kernel_list_registered_actions command without any pre-configured scope."
+commands.allow = ["kernel_list_registered_actions"]
+
+[[permission]]
+identifier = "deny-kernel-list-registered-actions"
+description = "Denies the kernel_list_registered_actions command without any pre-configured scope."
+commands.deny = ["kernel_list_registered_actions"]

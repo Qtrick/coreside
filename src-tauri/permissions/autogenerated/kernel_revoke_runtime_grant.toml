@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-revoke-runtime-grant"
+description = "Enables the kernel_revoke_runtime_grant command without any pre-configured scope."
+commands.allow = ["kernel_revoke_runtime_grant"]
+
+[[permission]]
+identifier = "deny-kernel-revoke-runtime-grant"
+description = "Denies the kernel_revoke_runtime_grant command without any pre-configured scope."
+commands.deny = ["kernel_revoke_runtime_grant"]

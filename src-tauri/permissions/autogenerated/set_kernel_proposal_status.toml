@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-kernel-proposal-status"
+description = "Enables the set_kernel_proposal_status command without any pre-configured scope."
+commands.allow = ["set_kernel_proposal_status"]
+
+[[permission]]
+identifier = "deny-set-kernel-proposal-status"
+description = "Denies the set_kernel_proposal_status command without any pre-configured scope."
+commands.deny = ["set_kernel_proposal_status"]

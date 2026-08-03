@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-schedule-patches-cmd"
+description = "Enables the schedule_patches_cmd command without any pre-configured scope."
+commands.allow = ["schedule_patches_cmd"]
+
+[[permission]]
+identifier = "deny-schedule-patches-cmd"
+description = "Denies the schedule_patches_cmd command without any pre-configured scope."
+commands.deny = ["schedule_patches_cmd"]

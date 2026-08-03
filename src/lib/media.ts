@@ -1,4 +1,3 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { api } from "@/lib/tauri";
 import type { MediaAsset } from "@/types/media";
 
@@ -41,7 +40,7 @@ export async function resolveMediaAssetUrl(assetId: string): Promise<string> {
   }
 
   const src = await api.getMediaAssetSrc(assetId);
-  const url = convertFileSrc(src.absolutePath);
+  const url = src.url;
   srcCache.set(assetId, url);
   return url;
 }
@@ -68,7 +67,7 @@ export async function resolveMediaThumbUrl(asset: MediaAsset): Promise<string> {
   try {
     const thumb = await api.getMediaAssetThumbSrc(asset.id);
     if (thumb) {
-      const url = convertFileSrc(thumb.absolutePath);
+      const url = thumb.url;
       thumbCache.set(asset.id, url);
       return url;
     }

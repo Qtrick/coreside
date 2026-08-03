@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-run-test"
+description = "Enables the kernel_run_test command without any pre-configured scope."
+commands.allow = ["kernel_run_test"]
+
+[[permission]]
+identifier = "deny-kernel-run-test"
+description = "Denies the kernel_run_test command without any pre-configured scope."
+commands.deny = ["kernel_run_test"]

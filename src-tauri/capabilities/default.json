@@ -1,10 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main Coreside window only",
+  "description": "Main Coreside window: application commands plus minimal core window/event privileges (no core:default).",
   "windows": ["main"],
   "permissions": [
-    "core:default",
+    "coreside-main-default",
+    "core:event:default",
+    "core:app:default",
     "core:window:allow-close",
     "core:window:allow-create",
     "core:window:allow-set-title",

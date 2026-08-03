@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-upsert-workspace-background"
+description = "Enables the upsert_workspace_background command without any pre-configured scope."
+commands.allow = ["upsert_workspace_background"]
+
+[[permission]]
+identifier = "deny-upsert-workspace-background"
+description = "Denies the upsert_workspace_background command without any pre-configured scope."
+commands.deny = ["upsert_workspace_background"]

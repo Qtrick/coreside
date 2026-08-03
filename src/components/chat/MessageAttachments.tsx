@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { FileText, Paperclip } from "lucide-react";
 import { api } from "@/lib/tauri";
 import { StagedAttachmentSchema, type StagedAttachment } from "@/types/attachments";
@@ -29,8 +28,8 @@ function AttachmentCard({ attachment }: { attachment: StagedAttachment }) {
     void (async () => {
       try {
         if (!isTauriRuntime()) return;
-        const path = await api.getChatAttachmentSrc(attachment.localFilename);
-        if (!cancelled) setSrc(convertFileSrc(path));
+        const srcResult = await api.getChatAttachmentSrc(attachment.localFilename);
+        if (!cancelled) setSrc(srcResult.url);
       } catch {
         // Preview is best-effort.
       }

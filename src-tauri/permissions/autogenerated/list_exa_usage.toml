@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-exa-usage"
+description = "Enables the list_exa_usage command without any pre-configured scope."
+commands.allow = ["list_exa_usage"]
+
+[[permission]]
+identifier = "deny-list-exa-usage"
+description = "Denies the list_exa_usage command without any pre-configured scope."
+commands.deny = ["list_exa_usage"]

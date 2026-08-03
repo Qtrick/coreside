@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-test-exa-connection"
+description = "Enables the test_exa_connection command without any pre-configured scope."
+commands.allow = ["test_exa_connection"]
+
+[[permission]]
+identifier = "deny-test-exa-connection"
+description = "Denies the test_exa_connection command without any pre-configured scope."
+commands.deny = ["test_exa_connection"]

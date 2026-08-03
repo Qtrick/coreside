@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-interrupt-jobs"
+description = "Enables the kernel_interrupt_jobs command without any pre-configured scope."
+commands.allow = ["kernel_interrupt_jobs"]
+
+[[permission]]
+identifier = "deny-kernel-interrupt-jobs"
+description = "Denies the kernel_interrupt_jobs command without any pre-configured scope."
+commands.deny = ["kernel_interrupt_jobs"]

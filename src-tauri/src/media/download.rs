@@ -1,3 +1,4 @@
+use futures_util::StreamExt;
 use reqwest::Client;
 use tokio::time::{timeout, Duration};
 
@@ -8,6 +9,33 @@ use super::limits::max_bytes_for_category;
 use super::validation::{content_hash, validate_bytes};
 
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Stream a response body while enforcing a hard byte budget (decompressed).
+pub async fn read_body_bounded(
+    response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, MediaError> {
+    if let Some(len) = response.content_length() {
+        if len as usize > max_bytes {
+            return Err(MediaError::Invalid(format!(
+                "declared Content-Length {len} exceeds {max_bytes} bytes"
+            )));
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| MediaError::Download(e.to_string()))?;
+        if out.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(MediaError::Invalid(format!(
+                "download exceeds {max_bytes} bytes"
+            )));
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
+}
 
 pub async fn download_url(
     client: &Client,
@@ -32,18 +60,7 @@ pub async fn download_url(
     let final_url = response.url().to_string();
     validate_public_http_url(&final_url).map_err(|e| MediaError::SsrfBlocked(e.to_string()))?;
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| MediaError::Download(e.to_string()))?;
-
-    if bytes.len() > max_bytes {
-        return Err(MediaError::Invalid(format!(
-            "download exceeds {max_bytes} bytes"
-        )));
-    }
-
-    Ok(bytes.to_vec())
+    read_body_bounded(response, max_bytes).await
 }
 
 pub async fn download_and_validate(

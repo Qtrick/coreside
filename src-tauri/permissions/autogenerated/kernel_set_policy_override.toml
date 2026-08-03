@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-set-policy-override"
+description = "Enables the kernel_set_policy_override command without any pre-configured scope."
+commands.allow = ["kernel_set_policy_override"]
+
+[[permission]]
+identifier = "deny-kernel-set-policy-override"
+description = "Denies the kernel_set_policy_override command without any pre-configured scope."
+commands.deny = ["kernel_set_policy_override"]

@@ -1,0 +1,39 @@
+# Explicit denies for high-risk commands (defense in depth for tool windows).
+"$schema" = "../gen/schemas/schema.json"
+
+[[permission]]
+identifier = "coreside-tool-deny-sensitive"
+description = "Deny sensitive profile/data/credential commands from tool windows."
+commands.deny = [
+  "clear_conversations",
+  "clear_hosted_auth_session",
+  "clear_search_history_cmd",
+  "clear_tools",
+  "configure_exa_connection",
+  "configure_search_connection",
+  "create_profile_backup",
+  "delete_exa_connection",
+  "delete_provider_connection",
+  "delete_search_connection",
+  "get_hosted_auth_status",
+  "import_media_asset_cmd",
+  "kernel_clear_policy_override",
+  "kernel_export_package",
+  "kernel_export_package_bytes",
+  "kernel_grant_permission",
+  "kernel_import_package",
+  "kernel_set_policy_override",
+  "list_managed_backups",
+  "preview_restore_backup",
+  "provider_key_hints",
+  "restore_profile_backup",
+  "retry_open_database",
+  "send_message",
+  "set_active_provider_connection",
+  "set_exa_budget",
+  "set_setting",
+  "stage_chat_attachment",
+  "store_hosted_auth_session",
+  "test_provider_connection",
+  "upsert_provider_connection"
+]

@@ -1,47 +1,56 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-03T13:56:49.006781+00:00",
-  "commit": "3054afb40a4202cda62cfb13f310d8a4ed4fbebf",
+  "generatedAt": "2026-08-03T15:18:00Z",
+  "commit": "74793b1d69d8e81e3d6a560018b3d4ce5021e243",
   "dirty": false,
-  "sourceFingerprint": "27082d218c93162391e718176f7f530bad837387a72ad7e817e90db68c4090e2",
+  "sourceFingerprint": "d31e19940a397434376dcf00233bcd35d55821dd8c98351bd38c8202025e1111",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
   "architecture": "arm64",
-  "buildMode": "dev",
-  "command": "rc2-baseline",
+  "buildMode": "development",
+  "command": "manual-rc3-kickoff",
   "exitStatus": 0,
+  "phase": "RC3",
+  "publicBeta": "Not ready",
+  "hostedAi": "Not ready",
   "branch": "main",
   "archive": {
-    "path": "/Users/qunyingfan/Downloads/Coreside Chat AI.zip",
-    "sha256": "2856063093f6570bf20f87b082ef9d771880d86d58292a1e3c1f38447c09b07c",
-    "expected": "2856063093f6570bf20f87b082ef9d771880d86d58292a1e3c1f38447c09b07c",
-    "match": true,
-    "observedNames": [
-      "Coreside Chat AI.zip",
-      "Chat AI(6)"
-    ],
-    "supersedes": "b2f8bf4e244cd82976de39cacb484cf86c641ba08314c285f7467e115dbf17f2"
+    "expectedPath": "/Users/qunyingfan/Downloads/Coreside Chat AI (1).zip",
+    "expectedSha256": "b0f80f58d3d45f381a94956a5fec9e5cec4736cd585e12e0460f01734a18ada6",
+    "present": false,
+    "observedSha256": null,
+    "status": "archive_unavailable",
+    "supersedes": "2856063093f6570bf20f87b082ef9d771880d86d58292a1e3c1f38447c09b07c"
+  },
+  "counts": {
+    "srcFiles": 149,
+    "rustFiles": 172,
+    "migrations": 15,
+    "e2eSpecs": 10,
+    "tauriCommands": 210,
+    "fingerprintFileCount": 369
   },
   "toolVersions": {
     "node": "v24.17.0",
     "npm": "11.18.0",
-    "rustc": "rustc 1.96.1 (31fca3adb 2026-06-26)",
-    "cargo": "cargo 1.96.1 (356927216 2026-06-26)",
-    "tauriCli": "tauri-cli 2.11.4"
+    "rustc": "1.96.1",
+    "cargo": "1.96.1",
+    "tauriCli": "2.11.4"
   },
-  "counts": {
-    "srcFiles": 149,
-    "rustRsFiles": 172,
-    "migrationsSql": 15,
-    "e2eSpecs": 10,
-    "tauriCommands": 209,
-    "capabilities": [
-      "default.json",
-      "tool-window.json"
-    ]
-  },
-  "publicBeta": "NOT_READY",
-  "phase": "rc2"
+  "previousBaselineCommit": "3054afb40a4202cda62cfb13f310d8a4ed4fbebf",
+  "previousArchiveHash": "2856063093f6570bf20f87b082ef9d771880d86d58292a1e3c1f38447c09b07c",
+  "previousBaselineStatus": "stale",
+  "capabilities": [
+    "default.json",
+    "tool-window.json"
+  ],
+  "notes": [
+    "RC3 archive path not found on disk; cannot verify b0f80f58\u2026 against local file.",
+    "Active workspace advanced past RC2 baseline commit 3054afb to 74793b1.",
+    "Do not treat prior reports as current RC3 release evidence until regenerated against this fingerprint.",
+    "No scripts/rc3-baseline automation exists yet; these reports were produced by manual RC3 kickoff.",
+    "ACL, attachment AppPaths, and full backup media/attachments remain open — not claimed fixed."
+  ]
 }

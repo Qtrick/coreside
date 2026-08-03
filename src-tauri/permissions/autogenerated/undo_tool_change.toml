@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-undo-tool-change"
+description = "Enables the undo_tool_change command without any pre-configured scope."
+commands.allow = ["undo_tool_change"]
+
+[[permission]]
+identifier = "deny-undo-tool-change"
+description = "Denies the undo_tool_change command without any pre-configured scope."
+commands.deny = ["undo_tool_change"]

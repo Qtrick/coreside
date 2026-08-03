@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-window-orchestrator-expand"
+description = "Enables the window_orchestrator_expand command without any pre-configured scope."
+commands.allow = ["window_orchestrator_expand"]
+
+[[permission]]
+identifier = "deny-window-orchestrator-expand"
+description = "Denies the window_orchestrator_expand command without any pre-configured scope."
+commands.deny = ["window_orchestrator_expand"]

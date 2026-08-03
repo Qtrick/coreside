@@ -88,9 +88,40 @@ pub fn build_http_client() -> Result<Client, SearchError> {
     Client::builder()
         .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
         .timeout(FETCH_TIMEOUT)
+        // Public-web SSRF policy: do not honor ambient system/env proxies.
+        .no_proxy()
         .user_agent("Coreside/0.1 (+https://coreside.local)")
         .build()
         .map_err(|e| SearchError::Fetch(e.to_string()))
+}
+
+/// Stream response body with a hard decompressed-byte budget.
+async fn read_body_bounded(
+    response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, SearchError> {
+    use futures_util::StreamExt;
+
+    if let Some(len) = response.content_length() {
+        if len as usize > max_bytes {
+            return Err(SearchError::Fetch(format!(
+                "declared Content-Length {len} exceeds {max_bytes} bytes"
+            )));
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| SearchError::Fetch(e.to_string()))?;
+        if out.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(SearchError::Fetch(format!(
+                "response exceeds {max_bytes} bytes"
+            )));
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
 }
 
 /// SSRF-safe webpage fetch with size limits and HTML text extraction.
@@ -119,15 +150,7 @@ pub async fn fetch_web_page(client: &Client, raw_url: &str) -> Result<FetchedWeb
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| SearchError::Fetch(e.to_string()))?;
-    if bytes.len() > MAX_FETCH_BYTES {
-        return Err(SearchError::Fetch(format!(
-            "response exceeds {MAX_FETCH_BYTES} bytes"
-        )));
-    }
+    let bytes = read_body_bounded(response, MAX_FETCH_BYTES).await?;
 
     let body = String::from_utf8_lossy(&bytes);
     let is_html = content_type

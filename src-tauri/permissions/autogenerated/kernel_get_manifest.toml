@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-get-manifest"
+description = "Enables the kernel_get_manifest command without any pre-configured scope."
+commands.allow = ["kernel_get_manifest"]
+
+[[permission]]
+identifier = "deny-kernel-get-manifest"
+description = "Denies the kernel_get_manifest command without any pre-configured scope."
+commands.deny = ["kernel_get_manifest"]

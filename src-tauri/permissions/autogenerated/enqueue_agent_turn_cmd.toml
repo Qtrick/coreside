@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-enqueue-agent-turn-cmd"
+description = "Enables the enqueue_agent_turn_cmd command without any pre-configured scope."
+commands.allow = ["enqueue_agent_turn_cmd"]
+
+[[permission]]
+identifier = "deny-enqueue-agent-turn-cmd"
+description = "Denies the enqueue_agent_turn_cmd command without any pre-configured scope."
+commands.deny = ["enqueue_agent_turn_cmd"]

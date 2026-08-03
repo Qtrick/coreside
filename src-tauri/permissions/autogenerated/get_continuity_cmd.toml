@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-continuity-cmd"
+description = "Enables the get_continuity_cmd command without any pre-configured scope."
+commands.allow = ["get_continuity_cmd"]
+
+[[permission]]
+identifier = "deny-get-continuity-cmd"
+description = "Denies the get_continuity_cmd command without any pre-configured scope."
+commands.deny = ["get_continuity_cmd"]

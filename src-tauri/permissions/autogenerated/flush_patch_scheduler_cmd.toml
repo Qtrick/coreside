@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-flush-patch-scheduler-cmd"
+description = "Enables the flush_patch_scheduler_cmd command without any pre-configured scope."
+commands.allow = ["flush_patch_scheduler_cmd"]
+
+[[permission]]
+identifier = "deny-flush-patch-scheduler-cmd"
+description = "Denies the flush_patch_scheduler_cmd command without any pre-configured scope."
+commands.deny = ["flush_patch_scheduler_cmd"]

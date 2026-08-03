@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-list-pending-approvals"
+description = "Enables the kernel_list_pending_approvals command without any pre-configured scope."
+commands.allow = ["kernel_list_pending_approvals"]
+
+[[permission]]
+identifier = "deny-kernel-list-pending-approvals"
+description = "Denies the kernel_list_pending_approvals command without any pre-configured scope."
+commands.deny = ["kernel_list_pending_approvals"]

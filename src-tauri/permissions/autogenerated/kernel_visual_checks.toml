@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-visual-checks"
+description = "Enables the kernel_visual_checks command without any pre-configured scope."
+commands.allow = ["kernel_visual_checks"]
+
+[[permission]]
+identifier = "deny-kernel-visual-checks"
+description = "Denies the kernel_visual_checks command without any pre-configured scope."
+commands.deny = ["kernel_visual_checks"]

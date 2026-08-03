@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-workspace-backgrounds"
+description = "Enables the list_workspace_backgrounds command without any pre-configured scope."
+commands.allow = ["list_workspace_backgrounds"]
+
+[[permission]]
+identifier = "deny-list-workspace-backgrounds"
+description = "Denies the list_workspace_backgrounds command without any pre-configured scope."
+commands.deny = ["list_workspace_backgrounds"]

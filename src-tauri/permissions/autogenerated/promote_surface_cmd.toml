@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-promote-surface-cmd"
+description = "Enables the promote_surface_cmd command without any pre-configured scope."
+commands.allow = ["promote_surface_cmd"]
+
+[[permission]]
+identifier = "deny-promote-surface-cmd"
+description = "Denies the promote_surface_cmd command without any pre-configured scope."
+commands.deny = ["promote_surface_cmd"]

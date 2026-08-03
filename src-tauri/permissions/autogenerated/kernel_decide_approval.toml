@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-decide-approval"
+description = "Enables the kernel_decide_approval command without any pre-configured scope."
+commands.allow = ["kernel_decide_approval"]
+
+[[permission]]
+identifier = "deny-kernel-decide-approval"
+description = "Denies the kernel_decide_approval command without any pre-configured scope."
+commands.deny = ["kernel_decide_approval"]

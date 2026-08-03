@@ -817,7 +817,7 @@ export async function mockInvoke<T>(
         throw new TauriCommandError(`Media asset not found: ${assetId}`, "not_found");
       }
       return {
-        absolutePath: `/tmp/coreside-media/${asset.localFilename}`,
+        url: `asset://localhost/mock-media/${asset.localFilename}`,
         mimeType: asset.mimeType,
       } satisfies MediaAssetSrc as T;
     }
@@ -829,7 +829,7 @@ export async function mockInvoke<T>(
         return null as T;
       }
       return {
-        absolutePath: `/tmp/coreside-media/${asset.thumbnailFilename}`,
+        url: `asset://localhost/mock-media/${asset.thumbnailFilename}`,
         mimeType: "image/jpeg",
       } satisfies MediaAssetSrc as T;
     }
@@ -1839,7 +1839,10 @@ export async function mockInvoke<T>(
     }
 
     case "get_chat_attachment_src":
-      return `/tmp/coreside-attachments/${String(args?.localFilename ?? "file")}` as T;
+      return {
+        localFilename: String(args?.localFilename ?? "file"),
+        url: `asset://localhost/mock-attachments/${String(args?.localFilename ?? "file")}`,
+      } as T;
 
     case "list_search_sessions_cmd": {
       const input = (args?.input ?? {}) as {

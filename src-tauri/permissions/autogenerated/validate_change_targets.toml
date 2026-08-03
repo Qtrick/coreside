@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-validate-change-targets"
+description = "Enables the validate_change_targets command without any pre-configured scope."
+commands.allow = ["validate_change_targets"]
+
+[[permission]]
+identifier = "deny-validate-change-targets"
+description = "Denies the validate_change_targets command without any pre-configured scope."
+commands.deny = ["validate_change_targets"]

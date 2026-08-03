@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-upsert-automation"
+description = "Enables the upsert_automation command without any pre-configured scope."
+commands.allow = ["upsert_automation"]
+
+[[permission]]
+identifier = "deny-upsert-automation"
+description = "Denies the upsert_automation command without any pre-configured scope."
+commands.deny = ["upsert_automation"]

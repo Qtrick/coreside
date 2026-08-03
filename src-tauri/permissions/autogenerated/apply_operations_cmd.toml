@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-apply-operations-cmd"
+description = "Enables the apply_operations_cmd command without any pre-configured scope."
+commands.allow = ["apply_operations_cmd"]
+
+[[permission]]
+identifier = "deny-apply-operations-cmd"
+description = "Denies the apply_operations_cmd command without any pre-configured scope."
+commands.deny = ["apply_operations_cmd"]

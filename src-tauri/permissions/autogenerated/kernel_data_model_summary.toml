@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-data-model-summary"
+description = "Enables the kernel_data_model_summary command without any pre-configured scope."
+commands.allow = ["kernel_data_model_summary"]
+
+[[permission]]
+identifier = "deny-kernel-data-model-summary"
+description = "Denies the kernel_data_model_summary command without any pre-configured scope."
+commands.deny = ["kernel_data_model_summary"]

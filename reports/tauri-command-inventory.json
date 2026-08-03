@@ -1,1067 +1,2338 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-02T21:57:38.735387+00:00",
-  "commit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
+  "generatedAt": "2026-08-03T15:26:38Z",
+  "commit": "74793b1d69d8e81e3d6a560018b3d4ce5021e243",
   "dirty": true,
-  "sourceFingerprint": "dirty-worktree-rc-closure-pass",
+  "sourceFingerprint": "d31e19940a397434376dcf00233bcd35d55821dd8c98351bd38c8202025e1111",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
   "architecture": "arm64",
-  "buildMode": "dev",
-  "command": "inline audit",
+  "buildMode": "development",
+  "command": "manual-rc3-authority-inventory",
   "exitStatus": 0,
-  "counts": {
-    "commandsFound": 209,
-    "withRequireProfile": 178,
-    "withoutRequireProfile": 31
-  },
   "commands": [
     {
-      "name": "get_app_info",
-      "source": "src-tauri/src/commands/ai_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "get_ai_status",
-      "source": "src-tauri/src/commands/ai_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_model_catalog",
-      "source": "src-tauri/src/commands/ai_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "test_ai_connection",
-      "source": "src-tauri/src/commands/ai_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "stage_chat_attachment",
-      "source": "src-tauri/src/commands/attachment_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "get_chat_attachment_src",
-      "source": "src-tauri/src/commands/attachment_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "list_automations",
-      "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "upsert_automation",
-      "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "set_automation_enabled",
-      "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "delete_automation",
-      "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_automation_runs",
-      "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "run_automation_now",
-      "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_workspace_backgrounds",
-      "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "upsert_workspace_background",
-      "source": "src-tauri/src/commands/automation_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_bootstrap_status",
-      "source": "src-tauri/src/commands/bootstrap_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "retry_open_database",
-      "source": "src-tauri/src/commands/bootstrap_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_conversations",
-      "source": "src-tauri/src/commands/conversation_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "create_conversation",
-      "source": "src-tauri/src/commands/conversation_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "delete_conversation",
-      "source": "src-tauri/src/commands/conversation_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_messages",
-      "source": "src-tauri/src/commands/conversation_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "delete_messages_from",
-      "source": "src-tauri/src/commands/conversation_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "clear_conversations",
-      "source": "src-tauri/src/commands/conversation_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_crawler_status",
-      "source": "src-tauri/src/commands/crawler_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_crawler_installation",
-      "source": "src-tauri/src/commands/crawler_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "cleanup_crawler_cache",
-      "source": "src-tauri/src/commands/crawler_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_crawler_cache_stats",
-      "source": "src-tauri/src/commands/crawler_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "set_web_research_resource_profile",
-      "source": "src-tauri/src/commands/crawler_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_provider_connections",
-      "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "upsert_provider_connection",
-      "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "delete_provider_connection",
-      "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "set_active_provider_connection",
-      "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "test_provider_connection",
-      "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "provider_key_hints",
-      "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "store_hosted_auth_session",
-      "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "clear_hosted_auth_session",
-      "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "get_hosted_auth_status",
-      "source": "src-tauri/src/commands/credential_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "get_database_health",
-      "source": "src-tauri/src/commands/data_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "create_profile_backup",
-      "source": "src-tauri/src/commands/data_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "preview_restore_backup",
-      "source": "src-tauri/src/commands/data_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "restore_profile_backup",
-      "source": "src-tauri/src/commands/data_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "get_storage_summary",
-      "source": "src-tauri/src/commands/data_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_exa_connection",
-      "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "configure_exa_connection",
-      "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "delete_exa_connection",
-      "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "test_exa_connection",
-      "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "get_exa_usage",
-      "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_exa_usage",
-      "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_exa_budget",
-      "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "set_exa_budget",
-      "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_search_profile",
-      "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "set_search_profile",
-      "source": "src-tauri/src/commands/exa_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "export_tool",
-      "source": "src-tauri/src/commands/export_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_export_formats",
-      "source": "src-tauri/src/commands/export_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_capability_catalog",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_apply_change",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_compile_intent",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "kernel_list_manifests",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_get_manifest",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_ensure_tool_manifest",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_restore_last_known_good",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_mark_last_known_good",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_upsert_data_model",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_grant_permission",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_revoke_permission",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_list_permissions",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_get_recovery_state",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_set_recovery_mode",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_enter_safe_startup",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_clear_recovery",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_set_recovery_flags",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_export_package",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_export_package_bytes",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_preview_package",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "kernel_import_package",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_application_summary",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_data_model_summary",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_recent_transactions",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_upsert_test",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_run_test",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_visual_checks",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_garbage_collect",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_create_job",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_get_job",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_interrupt_jobs",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_set_policy_override",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_clear_policy_override",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_list_registered_actions",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "kernel_invoke_registered_action",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_list_pending_approvals",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_decide_approval",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "kernel_list_runtime_grants",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_revoke_runtime_grant",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_list_audit_events",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_clear_audit_events",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_set_application_lifecycle",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_record_build_failure",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_clear_build_failure",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_list_build_failures",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_list_application_versions",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "kernel_unified_search",
-      "source": "src-tauri/src/commands/kernel_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "open_external_url",
-      "source": "src-tauri/src/commands/link_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "list_media_assets_cmd",
-      "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_media_asset_cmd",
-      "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "delete_media_asset_cmd",
-      "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "import_media_asset_cmd",
-      "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_media_asset_src_cmd",
-      "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_media_asset_thumb_src_cmd",
-      "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "media_asset_usage_cmd",
-      "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "touch_media_asset_cmd",
-      "source": "src-tauri/src/commands/media_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "send_message",
-      "source": "src-tauri/src/commands/message_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "set_kernel_proposal_status",
-      "source": "src-tauri/src/commands/message_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "discard_kernel_proposal",
-      "source": "src-tauri/src/commands/message_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "cancel_request",
-      "source": "src-tauri/src/commands/message_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "discard_tool_change",
-      "source": "src-tauri/src/commands/message_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_projects_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_project_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "create_project_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "update_project_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "archive_project_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "restore_project_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "delete_project_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "create_conversation_in_project",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "assign_chats_to_project",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "remove_chat_from_project",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_project_conversations_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_unassigned_conversations_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "search_project_context_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "refresh_project_summary",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "rebuild_project_index_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "rename_conversation_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "duplicate_conversation_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "export_project",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "set_project_wallpaper_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "touch_project_opened",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "assign_conversation_to_project_cmd",
-      "source": "src-tauri/src/commands/project_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_capability_packs",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "list_conversation_surfaces",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_surface_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "create_inline_surface_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "update_surface_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "promote_surface_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "save_surface_state_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_surface_state_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_draft_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "save_draft_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "delete_draft_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "schedule_patches_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "flush_patch_scheduler_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_route_state_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "set_route_state_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "navigate_route_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "append_context_ledger_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_context_ledger_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_provider_profile_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_continuity_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "save_continuity_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "suspend_surface_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "apply_operations_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "validate_agent_response_v2",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "undo_transaction_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_transactions_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_transaction_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "branch_conversation_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_branches_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "create_snapshot_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_snapshot_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "delete_snapshot_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "enqueue_agent_turn_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_agent_queue_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "cancel_queue_item_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "remove_queue_item_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "activate_next_queue_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "complete_queue_item_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "recover_agent_queue_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "store_diagnostics_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_diagnostics_cmd",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "runtime_v2_limits",
-      "source": "src-tauri/src/commands/runtime_v2_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "get_search_connection",
-      "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "configure_search_connection",
-      "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "delete_search_connection",
-      "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "test_search_connection",
-      "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "web_search_cmd",
-      "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "image_search_cmd",
-      "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "video_search_cmd",
-      "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_search_sessions_cmd",
-      "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_search_session_cmd",
-      "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "clear_search_history_cmd",
-      "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "fetch_web_page_cmd",
-      "source": "src-tauri/src/commands/search_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_settings",
-      "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "set_setting",
-      "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "list_added_settings",
-      "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "upsert_added_setting",
-      "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "delete_added_setting",
-      "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "validate_change_targets",
-      "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "set_dock_icon",
-      "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "set_dock_icon_for_os_appearance",
-      "source": "src-tauri/src/commands/settings_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "list_tools",
-      "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_tool",
-      "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_tool_versions",
-      "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "apply_tool_change",
-      "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "undo_tool_change",
-      "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "save_tool_state",
-      "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "get_tool_state",
-      "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "clear_tools",
-      "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": true
-    },
-    {
-      "name": "open_tool_window",
-      "source": "src-tauri/src/commands/tool_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "window_orchestrator_inspect",
-      "source": "src-tauri/src/commands/window_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "window_orchestrator_expand",
-      "source": "src-tauri/src/commands/window_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "window_orchestrator_restore",
-      "source": "src-tauri/src/commands/window_cmds.rs",
-      "profileGuard": false
-    },
-    {
-      "name": "window_orchestrator_cancel",
-      "source": "src-tauri/src/commands/window_cmds.rs",
-      "profileGuard": false
+      "command": "activate_next_queue_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-activate-next-queue-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "append_context_ledger_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-append-context-ledger-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "apply_operations_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-apply-operations-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "apply_tool_change",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-apply-tool-change",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "archive_project_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-archive-project-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "assign_chats_to_project",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-assign-chats-to-project",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "assign_conversation_to_project_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-assign-conversation-to-project-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "branch_conversation_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-branch-conversation-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "cancel_queue_item_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-cancel-queue-item-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "cancel_request",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-cancel-request",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "cleanup_crawler_cache",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-cleanup-crawler-cache",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "clear_conversations",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-clear-conversations",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "clear_hosted_auth_session",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-clear-hosted-auth-session",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "clear_search_history_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-clear-search-history-cmd",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "clear_tools",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-clear-tools",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "complete_queue_item_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-complete-queue-item-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "configure_exa_connection",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-configure-exa-connection",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "configure_search_connection",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-configure-search-connection",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "create_conversation",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-create-conversation",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "create_conversation_in_project",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-create-conversation-in-project",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "create_inline_surface_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-create-inline-surface-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "create_profile_backup",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-create-profile-backup",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "create_project_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-create-project-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "create_snapshot_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-create-snapshot-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "delete_added_setting",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-delete-added-setting",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "delete_automation",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-delete-automation",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "delete_conversation",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-delete-conversation",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "delete_draft_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-delete-draft-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "delete_exa_connection",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-delete-exa-connection",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "delete_media_asset_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-delete-media-asset-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "delete_messages_from",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-delete-messages-from",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "delete_project_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-delete-project-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "delete_provider_connection",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-delete-provider-connection",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "delete_search_connection",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-delete-search-connection",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "delete_snapshot_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-delete-snapshot-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "discard_kernel_proposal",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-discard-kernel-proposal",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "discard_tool_change",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-discard-tool-change",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "duplicate_conversation_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-duplicate-conversation-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "enqueue_agent_turn_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-enqueue-agent-turn-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "export_project",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-export-project",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "export_tool",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-export-tool",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "fetch_web_page_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-fetch-web-page-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "flush_patch_scheduler_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-flush-patch-scheduler-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_ai_status",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-ai-status",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_app_info",
+      "windowEligibility": [
+        "main",
+        "tool-*"
+      ],
+      "capabilityPermission": "allow-get-app-info",
+      "disposition": "keep-tool-scoped",
+      "risk": "medium",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_bootstrap_status",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-bootstrap-status",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_chat_attachment_src",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-chat-attachment-src",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_continuity_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-continuity-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_crawler_cache_stats",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-crawler-cache-stats",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_crawler_installation",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-crawler-installation",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_crawler_status",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-crawler-status",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_database_health",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-database-health",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_draft_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-draft-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_exa_budget",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-exa-budget",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_exa_connection",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-exa-connection",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_exa_usage",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-exa-usage",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_hosted_auth_status",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-hosted-auth-status",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_media_asset_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-media-asset-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_media_asset_src_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-media-asset-src-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_media_asset_thumb_src_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-media-asset-thumb-src-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_messages",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-messages",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_model_catalog",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-model-catalog",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_project_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-project-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_provider_profile_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-provider-profile-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_route_state_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-route-state-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_search_connection",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-search-connection",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_search_profile",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-search-profile",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_search_session_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-search-session-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_settings",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-settings",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_snapshot_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-snapshot-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_storage_summary",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-storage-summary",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_surface_cmd",
+      "windowEligibility": [
+        "main",
+        "tool-*"
+      ],
+      "capabilityPermission": "allow-get-surface-cmd",
+      "disposition": "keep-tool-scoped",
+      "risk": "medium",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_surface_state_cmd",
+      "windowEligibility": [
+        "main",
+        "tool-*"
+      ],
+      "capabilityPermission": "allow-get-surface-state-cmd",
+      "disposition": "keep-tool-scoped",
+      "risk": "medium",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_tool",
+      "windowEligibility": [
+        "main",
+        "tool-*"
+      ],
+      "capabilityPermission": "allow-get-tool",
+      "disposition": "keep-tool-scoped",
+      "risk": "medium",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_tool_state",
+      "windowEligibility": [
+        "main",
+        "tool-*"
+      ],
+      "capabilityPermission": "allow-get-tool-state",
+      "disposition": "keep-tool-scoped",
+      "risk": "medium",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_tool_versions",
+      "windowEligibility": [
+        "main",
+        "tool-*"
+      ],
+      "capabilityPermission": "allow-get-tool-versions",
+      "disposition": "keep-tool-scoped",
+      "risk": "medium",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "get_transaction_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-get-transaction-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "image_search_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-image-search-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "import_media_asset_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-import-media-asset-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_application_summary",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-application-summary",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_apply_change",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-apply-change",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_capability_catalog",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-capability-catalog",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_clear_audit_events",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-clear-audit-events",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_clear_build_failure",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-clear-build-failure",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_clear_policy_override",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-clear-policy-override",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_clear_recovery",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-clear-recovery",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_compile_intent",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-compile-intent",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_create_job",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-create-job",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_data_model_summary",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-data-model-summary",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_decide_approval",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-decide-approval",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_ensure_tool_manifest",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-ensure-tool-manifest",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_enter_safe_startup",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-enter-safe-startup",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_export_package",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-export-package",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_export_package_bytes",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-export-package-bytes",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_garbage_collect",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-garbage-collect",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_get_job",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-get-job",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_get_manifest",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-get-manifest",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_get_recovery_state",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-get-recovery-state",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_grant_permission",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-grant-permission",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_import_package",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-import-package",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_interrupt_jobs",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-interrupt-jobs",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_invoke_registered_action",
+      "windowEligibility": [
+        "main",
+        "tool-*"
+      ],
+      "capabilityPermission": "allow-kernel-invoke-registered-action",
+      "disposition": "keep-tool-scoped",
+      "risk": "medium",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_list_application_versions",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-list-application-versions",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_list_audit_events",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-list-audit-events",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_list_build_failures",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-list-build-failures",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_list_manifests",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-list-manifests",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_list_pending_approvals",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-list-pending-approvals",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_list_permissions",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-list-permissions",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_list_registered_actions",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-list-registered-actions",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_list_runtime_grants",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-list-runtime-grants",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_mark_last_known_good",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-mark-last-known-good",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_preview_package",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-preview-package",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_recent_transactions",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-recent-transactions",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_record_build_failure",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-record-build-failure",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_restore_last_known_good",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-restore-last-known-good",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_revoke_permission",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-revoke-permission",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_revoke_runtime_grant",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-revoke-runtime-grant",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_run_test",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-run-test",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_set_application_lifecycle",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-set-application-lifecycle",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_set_policy_override",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-set-policy-override",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_set_recovery_flags",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-set-recovery-flags",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_set_recovery_mode",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-set-recovery-mode",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_unified_search",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-unified-search",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_upsert_data_model",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-upsert-data-model",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_upsert_test",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-upsert-test",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "kernel_visual_checks",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-kernel-visual-checks",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_added_settings",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-added-settings",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_agent_queue_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-agent-queue-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_automation_runs",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-automation-runs",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_automations",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-automations",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_branches_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-branches-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_capability_packs",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-capability-packs",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_context_ledger_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-context-ledger-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_conversation_surfaces",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-conversation-surfaces",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_conversations",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-conversations",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_diagnostics_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-diagnostics-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_exa_usage",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-exa-usage",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_export_formats",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-export-formats",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_managed_backups",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-managed-backups",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_media_assets_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-media-assets-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_project_conversations_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-project-conversations-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_projects_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-projects-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_provider_connections",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-provider-connections",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_search_sessions_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-search-sessions-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_tools",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-tools",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_transactions_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-transactions-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_unassigned_conversations_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-unassigned-conversations-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "list_workspace_backgrounds",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-list-workspace-backgrounds",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "media_asset_usage_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-media-asset-usage-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "navigate_route_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-navigate-route-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "open_external_url",
+      "windowEligibility": [
+        "main",
+        "tool-*"
+      ],
+      "capabilityPermission": "allow-open-external-url",
+      "disposition": "keep-tool-scoped",
+      "risk": "medium",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "open_tool_window",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-open-tool-window",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "preview_restore_backup",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-preview-restore-backup",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "promote_surface_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-promote-surface-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "provider_key_hints",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-provider-key-hints",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "rebuild_project_index_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-rebuild-project-index-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "recover_agent_queue_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-recover-agent-queue-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "refresh_project_summary",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-refresh-project-summary",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "remove_chat_from_project",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-remove-chat-from-project",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "remove_queue_item_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-remove-queue-item-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "rename_conversation_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-rename-conversation-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "restore_profile_backup",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-restore-profile-backup",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "restore_project_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-restore-project-cmd",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "retry_open_database",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-retry-open-database",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "run_automation_now",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-run-automation-now",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "runtime_v2_limits",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-runtime-v2-limits",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "save_continuity_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-save-continuity-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "save_draft_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-save-draft-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "save_surface_state_cmd",
+      "windowEligibility": [
+        "main",
+        "tool-*"
+      ],
+      "capabilityPermission": "allow-save-surface-state-cmd",
+      "disposition": "keep-tool-scoped",
+      "risk": "medium",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "save_tool_state",
+      "windowEligibility": [
+        "main",
+        "tool-*"
+      ],
+      "capabilityPermission": "allow-save-tool-state",
+      "disposition": "keep-tool-scoped",
+      "risk": "medium",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "schedule_patches_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-schedule-patches-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "search_project_context_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-search-project-context-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "send_message",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-send-message",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "set_active_provider_connection",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-set-active-provider-connection",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "set_automation_enabled",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-set-automation-enabled",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "set_dock_icon",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-set-dock-icon",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "set_dock_icon_for_os_appearance",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-set-dock-icon-for-os-appearance",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "set_exa_budget",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-set-exa-budget",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "set_kernel_proposal_status",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-set-kernel-proposal-status",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "set_project_wallpaper_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-set-project-wallpaper-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "set_route_state_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-set-route-state-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "set_search_profile",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-set-search-profile",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "set_setting",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-set-setting",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "set_web_research_resource_profile",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-set-web-research-resource-profile",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "stage_chat_attachment",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-stage-chat-attachment",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "store_diagnostics_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-store-diagnostics-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "store_hosted_auth_session",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-store-hosted-auth-session",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "suspend_surface_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-suspend-surface-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "test_ai_connection",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-test-ai-connection",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "test_exa_connection",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-test-exa-connection",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "test_provider_connection",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-test-provider-connection",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "test_search_connection",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-test-search-connection",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "touch_media_asset_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-touch-media-asset-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "touch_project_opened",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-touch-project-opened",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "undo_tool_change",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-undo-tool-change",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "undo_transaction_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-undo-transaction-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "update_project_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-update-project-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "update_surface_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-update-surface-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "upsert_added_setting",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-upsert-added-setting",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "upsert_automation",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-upsert-automation",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "upsert_provider_connection",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-upsert-provider-connection",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "upsert_workspace_background",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-upsert-workspace-background",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "validate_agent_response_v2",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-validate-agent-response-v2",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "validate_change_targets",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-validate-change-targets",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "video_search_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-video-search-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "web_search_cmd",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-web-search-cmd",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "window_orchestrator_cancel",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-window-orchestrator-cancel",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "window_orchestrator_expand",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-window-orchestrator-expand",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "window_orchestrator_inspect",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-window-orchestrator-inspect",
+      "disposition": "keep-main-write",
+      "risk": "low",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
+    },
+    {
+      "command": "window_orchestrator_restore",
+      "windowEligibility": [
+        "main"
+      ],
+      "capabilityPermission": "allow-window-orchestrator-restore",
+      "disposition": "keep-main-sensitive",
+      "risk": "high",
+      "test": "pending",
+      "reason": "RC3 ACL phase inventory"
     }
-  ]
+  ],
+  "count": 210
 }

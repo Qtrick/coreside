@@ -241,7 +241,9 @@ export const api = {
       { input },
     ),
   getChatAttachmentSrc: (localFilename: string) =>
-    invoke<string>("get_chat_attachment_src", { localFilename }),
+    invoke<{ localFilename: string; url: string }>("get_chat_attachment_src", {
+      localFilename,
+    }),
   cancelRequest: (conversationId?: string) =>
     invoke<void>("cancel_request", { conversationId }),
   discardToolChange: (messageId: string) =>

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-mark-last-known-good"
+description = "Enables the kernel_mark_last_known_good command without any pre-configured scope."
+commands.allow = ["kernel_mark_last_known_good"]
+
+[[permission]]
+identifier = "deny-kernel-mark-last-known-good"
+description = "Denies the kernel_mark_last_known_good command without any pre-configured scope."
+commands.deny = ["kernel_mark_last_known_good"]

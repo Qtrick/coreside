@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-apply-tool-change"
+description = "Enables the apply_tool_change command without any pre-configured scope."
+commands.allow = ["apply_tool_change"]
+
+[[permission]]
+identifier = "deny-apply-tool-change"
+description = "Denies the apply_tool_change command without any pre-configured scope."
+commands.deny = ["apply_tool_change"]

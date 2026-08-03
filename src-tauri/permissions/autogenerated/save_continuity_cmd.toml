@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-continuity-cmd"
+description = "Enables the save_continuity_cmd command without any pre-configured scope."
+commands.allow = ["save_continuity_cmd"]
+
+[[permission]]
+identifier = "deny-save-continuity-cmd"
+description = "Denies the save_continuity_cmd command without any pre-configured scope."
+commands.deny = ["save_continuity_cmd"]

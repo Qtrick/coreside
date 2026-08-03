@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-remove-chat-from-project"
+description = "Enables the remove_chat_from_project command without any pre-configured scope."
+commands.allow = ["remove_chat_from_project"]
+
+[[permission]]
+identifier = "deny-remove-chat-from-project"
+description = "Denies the remove_chat_from_project command without any pre-configured scope."
+commands.deny = ["remove_chat_from_project"]

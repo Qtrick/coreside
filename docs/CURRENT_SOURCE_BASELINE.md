@@ -1,9 +1,10 @@
-# Current Source Baseline (RC2)
+# Current Source Baseline (RC3)
 
 **Product:** Coreside  
 **Access date:** 2026-08-03  
-**Phase:** Public-beta release candidate 2  
-**Public beta:** **NOT READY**
+**Phase:** Public-beta release candidate 3  
+**Public beta:** **NOT READY**  
+**Hosted AI:** **NOT READY**
 
 ## Active repository
 
@@ -11,18 +12,18 @@
 | --- | --- |
 | Path | `/Users/qunyingfan/Coreside` |
 | Branch | `main` |
-| Commit | `3054afb40a4202cda62cfb13f310d8a4ed4fbebf` |
-| Dirty | No (clean at baseline generation) |
-| Source fingerprint | See `reports/current-source-fingerprint.json` |
+| Commit | `74793b1d69d8e81e3d6a560018b3d4ce5021e243` |
+| Dirty at kickoff snapshot | No (clean at RC3 start; report JSON edits may dirty the tree) |
+| Source fingerprint | `d31e19940a397434376dcf00233bcd35d55821dd8c98351bd38c8202025e1111` |
 
 ## Uploaded archive
 
 | Field | Value |
 | --- | --- |
-| Observed names | `Coreside Chat AI.zip` / Chat AI(6) |
-| Path | `/Users/qunyingfan/Downloads/Coreside Chat AI.zip` |
-| SHA-256 | `2856063093f6570bf20f87b082ef9d771880d86d58292a1e3c1f38447c09b07c` |
-| Supersedes | `b2f8bf4e…` (Chat AI(5)) |
+| Expected path | `/Users/qunyingfan/Downloads/Coreside Chat AI (1).zip` |
+| Expected SHA-256 | `b0f80f58d3d45f381a94956a5fec9e5cec4736cd585e12e0460f01734a18ada6` |
+| Status | **archive_unavailable** (file not present on disk; byte-level archive vs workspace diff unavailable) |
+| Supersedes | `2856063093f6570bf20f87b082ef9d771880d86d58292a1e3c1f38447c09b07c` (RC2 / Chat AI(6)) |
 
 ## Lockfiles
 
@@ -49,22 +50,31 @@
 | Rust `.rs` | 172 |
 | Migrations | 15 |
 | E2E specs | 10 |
-| Tauri commands | 209 |
+| Tauri commands | 210 |
 | Capabilities | `default.json`, `tool-window.json` |
 
-## RC2 packaged-runtime status (in progress)
+## RC2 packaged-runtime (do not regress)
 
 | Area | Status |
 | --- | --- |
-| Protected prompts embedded (`include_str!`) | Implemented this pass |
-| Production dotenv restricted | Implemented this pass |
-| Crawl4AI AppPaths data root | Implemented this pass |
-| Recovery-safe list/preview/restore to `AppPaths.database` | Implemented this pass |
-| Scheduler gated off recovery shell | Implemented this pass |
+| Protected prompts embedded (`include_str!`) | Implemented (keep) |
+| Production dotenv restricted | Implemented (keep) |
+| Crawl4AI AppPaths data root | Implemented (keep) |
+| Recovery-safe list/preview/restore to `AppPaths.database` | Implemented (keep) |
+| Scheduler gated off recovery shell | Implemented (keep) |
+| Unicode `sanitize_error` | Implemented (keep) |
+
+## RC3 open work (not fixed / not beta-verified)
+
+| Area | Status |
+| --- | --- |
 | Desktop/packaged wallpaper pixel proof | Open |
-| Full backup media/attachments | Open |
-| Tauri AppManifest command ACL | Open |
+| Full backup media/attachments | Code landed; restore/E2E not beta-verified |
+| Tauri AppManifest command ACL (`build.rs`) | Code landed; raw-invoke denial E2E pending |
+| Attachment/media roots via `AppPaths` | Code landed; packaged proof pending |
+| Attachment magic-byte hardening | Code landed; packaged proof pending |
 | Full E2E / packaged smoke / assurance | Open |
+| RC3 uploaded archive verification | Blocked (`archive_unavailable`) |
 
 ## Reports
 

@@ -42,7 +42,12 @@ pub fn create_profile_backup(state: State<'_, AppState>) -> Result<BackupCreated
         .backups
         .join(format!("coreside-profile-{stamp}.coreside-backup"));
     let version = env!("CARGO_PKG_VERSION");
-    let manifest = db.create_profile_archive(&dest, version)?;
+    let manifest = db.create_profile_archive_with_assets(
+        &dest,
+        version,
+        Some(&paths.media),
+        Some(&paths.attachments),
+    )?;
     let archive_bytes = std::fs::metadata(&dest)
         .map(|m| m.len())
         .map_err(|e| {
@@ -309,7 +314,12 @@ pub fn restore_profile_backup(
         ));
         {
             let db = state.db.lock();
-            db.create_profile_archive(&safety_dest, version)?;
+            db.create_profile_archive_with_assets(
+                &safety_dest,
+                version,
+                Some(&paths.media),
+                Some(&paths.attachments),
+            )?;
         }
         safety_dest
             .file_name()
@@ -322,6 +332,10 @@ pub fn restore_profile_backup(
     };
 
     let staging_db = paths.restore_staging.join(format!("restore-{stamp}.db"));
+    let asset_media_staging = paths
+        .restore_staging
+        .join(format!("assets-media-{stamp}"));
+    let asset_att_staging = paths.restore_staging.join(format!("assets-att-{stamp}"));
     let cleanup_staging = |staging: &std::path::Path, hold: Option<&std::path::Path>| {
         let _ = std::fs::remove_file(staging);
         remove_db_sidecars(staging);
@@ -329,6 +343,10 @@ pub fn restore_profile_backup(
             let _ = std::fs::remove_file(hold_path);
             remove_db_sidecars(hold_path);
         }
+    };
+    let cleanup_asset_staging = || {
+        let _ = std::fs::remove_dir_all(&asset_media_staging);
+        let _ = std::fs::remove_dir_all(&asset_att_staging);
     };
 
     if let Err(e) = crate::db::extract_database_from_archive(&archive_path, &staging_db) {
@@ -427,20 +445,37 @@ pub fn restore_profile_backup(
     let hold_db = paths.restore_staging.join(format!("hold-{stamp}.db"));
     if let Err(e) = std::fs::copy(&staging_db, &hold_db) {
         cleanup_staging(&staging_db, None);
+        cleanup_asset_staging();
         return Err(CommandError::new(
             "restore_failed",
             format!("Could not stage hold copy: {e}"),
         ));
     }
 
+    // Extract media/attachments into staging BEFORE committing the DB swap so a bad
+    // archive cannot leave a restored profile with incomplete live assets.
+    if let Err(e) = crate::db::extract_assets_from_archive(
+        &archive_path,
+        &asset_media_staging,
+        &asset_att_staging,
+    ) {
+        cleanup_staging(&staging_db, Some(&hold_db));
+        cleanup_asset_staging();
+        return Err(match e {
+            crate::db::DbError::Invalid(msg) => CommandError::new("restore_failed", msg),
+            other => CommandError::from(other),
+        });
+    }
+
     // Critical section: keep the profile mutex held for quarantine + install + reopen so
     // concurrent commands cannot observe the temporary hold database or a half-swapped tree.
     // ponytail: global db lock for the filesystem swap; upgrade to a dedicated restore latch if
     // lock hold time becomes a UX problem.
-    {
+    let quarantined = {
         let mut db_guard = state.db.lock();
         let hold = crate::db::Database::open_path(&hold_db).map_err(|e| {
             cleanup_staging(&staging_db, Some(&hold_db));
+            cleanup_asset_staging();
             CommandError::new("restore_failed", format!("Could not open hold DB: {e}"))
         })?;
         *db_guard = hold;
@@ -450,6 +485,7 @@ pub fn restore_profile_backup(
             Err(err) => {
                 recover_connection_after_failed_restore(&state, &mut db_guard, &live_path);
                 cleanup_staging(&staging_db, Some(&hold_db));
+                cleanup_asset_staging();
                 return Err(err);
             }
         };
@@ -458,6 +494,7 @@ pub fn restore_profile_backup(
             restore_quarantined_tree(&quarantined);
             recover_connection_after_failed_restore(&state, &mut db_guard, &live_path);
             cleanup_staging(&staging_db, Some(&hold_db));
+            cleanup_asset_staging();
             return Err(CommandError::new(
                 "restore_failed",
                 format!("Could not install restored database: {e}"),
@@ -472,6 +509,7 @@ pub fn restore_profile_backup(
                 restore_quarantined_tree(&quarantined);
                 recover_connection_after_failed_restore(&state, &mut db_guard, &live_path);
                 cleanup_staging(&staging_db, Some(&hold_db));
+                cleanup_asset_staging();
                 return Err(CommandError::new(
                     "restore_failed",
                     format!("Restored database could not reopen: {e}"),
@@ -479,7 +517,32 @@ pub fn restore_profile_backup(
             }
         };
         *db_guard = restored;
+        quarantined
+    };
+
+    // Promote staged assets into live roots. On failure, roll the DB back from quarantine
+    // so we never leave a restored profile with missing media/attachments.
+    if let Err(e) = crate::db::promote_restored_assets(
+        &asset_media_staging,
+        &paths.media,
+        &asset_att_staging,
+        &paths.attachments,
+    ) {
+        {
+            let mut db_guard = state.db.lock();
+            let _ = std::fs::remove_file(&live_path);
+            remove_db_sidecars(&live_path);
+            restore_quarantined_tree(&quarantined);
+            recover_connection_after_failed_restore(&state, &mut db_guard, &live_path);
+        }
+        cleanup_staging(&staging_db, Some(&hold_db));
+        cleanup_asset_staging();
+        return Err(match e {
+            crate::db::DbError::Invalid(msg) => CommandError::new("restore_failed", msg),
+            other => CommandError::from(other),
+        });
     }
+    cleanup_asset_staging();
 
     // Refresh derived state now that the live profile is installed under the mutex.
     {
