@@ -73,8 +73,8 @@ pub use provider_conformance::{
 };
 #[allow(unused_imports)]
 pub use queue::{
-    activate_next, cancel as cancel_queue_item, complete as complete_queue_item, enqueue,
-    list_queue, recover_stale_active, remove_queued, QueueItem,
+    activate_next, cancel as cancel_queue_item, complete as complete_queue_item, enqueue, get_item,
+    list_queue, recover_stale_active, remove_queued, requeue as requeue_queue_item, QueueItem,
 };
 #[allow(unused_imports)]
 pub use streaming::{NdjsonFrameParser, StreamEvent};

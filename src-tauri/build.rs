@@ -17,6 +17,7 @@ fn main() {
             "assign_chats_to_project",
             "assign_conversation_to_project_cmd",
             "branch_conversation_cmd",
+            "cancel_chat_attachment",
             "cancel_queue_item_cmd",
             "cancel_request",
             "cleanup_crawler_cache",

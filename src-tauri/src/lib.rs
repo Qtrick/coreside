@@ -122,6 +122,7 @@ pub fn run() {
             commands::send_message,
             commands::cancel_request,
             commands::stage_chat_attachment,
+            commands::cancel_chat_attachment,
             commands::get_chat_attachment_src,
             commands::discard_tool_change,
             commands::discard_kernel_proposal,

@@ -1,6 +1,6 @@
 //! Shared application state.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -18,6 +18,8 @@ pub struct AppState {
     /// Profile readiness. When not Ready, `db` holds a recovery shell database.
     pub bootstrap: Mutex<BootstrapStatus>,
     pub active_requests: Mutex<HashMap<String, CancellationToken>>,
+    /// Conversations with an in-flight queue drain task (prevents concurrent drainers).
+    pub queue_drain_inflight: Mutex<HashSet<String>>,
     pub crawler: Arc<CrawlerSupervisor>,
     pub event_bus: Mutex<EventBus>,
     pub maintenance: Mutex<MaintenanceMode>,
@@ -39,10 +41,23 @@ impl AppState {
             db: Arc::new(Mutex::new(db)),
             bootstrap: Mutex::new(bootstrap),
             active_requests: Mutex::new(HashMap::new()),
+            queue_drain_inflight: Mutex::new(HashSet::new()),
             crawler: Arc::new(CrawlerSupervisor::new()),
             event_bus: Mutex::new(event_bus),
             maintenance: Mutex::new(MaintenanceMode::default()),
         }
+    }
+
+    /// Claim exclusive queue-drain ownership for a conversation. Returns false if
+    /// another drain task already holds it.
+    pub fn try_begin_queue_drain(&self, conversation_id: &str) -> bool {
+        self.queue_drain_inflight
+            .lock()
+            .insert(conversation_id.to_string())
+    }
+
+    pub fn end_queue_drain(&self, conversation_id: &str) {
+        self.queue_drain_inflight.lock().remove(conversation_id);
     }
 
     pub fn bootstrap_status(&self) -> BootstrapStatus {

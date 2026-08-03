@@ -190,6 +190,31 @@ for (const file of [
         failed = true;
         rawInvokePending = true;
       } else if (
+        typeof d.commit !== "string" ||
+        !d.commit ||
+        typeof d.dirty !== "boolean" ||
+        d.publicBeta !== "Not ready"
+      ) {
+        findings.push({
+          severity: "P1",
+          file: "command-authority-results.json",
+          status: "journey11_identity_incomplete",
+          detail: "Requires commit, dirty, and publicBeta Not ready",
+        });
+        failed = true;
+        // Evidence exists but is incomplete — not the same as not_run.
+        rawInvokePending = false;
+      } else if (d.commit !== commit) {
+        findings.push({
+          severity: "P1",
+          file: "command-authority-results.json",
+          status: "stale_commit",
+          reportCommit: d.commit,
+          activeCommit: commit,
+        });
+        failed = true;
+        rawInvokePending = false;
+      } else if (
         !Array.isArray(d.denials) ||
         d.denials.length === 0 ||
         d.denials.some((row) => !row || row.denied !== true)
@@ -288,10 +313,14 @@ const report = {
   dirty,
   command: "assurance:report",
   exitStatus: failed ? "failed" : "passed",
-  note: "Validates report presence/freshness/partial rejection. Does not execute the full release suite.",
+  narrowAssuranceOnly: true,
+  fullReleasePass: false,
+  note:
+    "Narrow evidence validator only (presence/freshness/partial rejection). Not a full release pass. Public beta remains Not ready.",
   findings,
   localFirstVerdict: "Not ready",
   hostedAiVerdict: "Not ready",
+  publicBeta: "Not ready",
 };
 
 fs.mkdirSync(reportsDir, { recursive: true });

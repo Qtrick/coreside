@@ -29,7 +29,15 @@ pub struct StagedAttachment {
     pub name: String,
     pub mime_type: String,
     pub byte_size: i64,
-    pub local_filename: String,
+}
+
+/// Trusted attachment fields resolved from SQLite (never trust frontend metadata).
+#[derive(Debug, Clone)]
+pub struct TrustedAttachmentMeta {
+    pub id: String,
+    pub name: String,
+    pub mime_type: String,
+    pub byte_size: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -375,8 +383,216 @@ pub fn stage_chat_attachment(
         name: safe_name,
         mime_type: detected.to_string(),
         byte_size: bytes.len() as i64,
-        local_filename: storage_key,
     })
+}
+
+/// Read-only readiness check before inserting a user message.
+pub fn assert_staged_attachments_ready(
+    state: &AppState,
+    attachment_ids: &[String],
+) -> Result<(), CommandError> {
+    if attachment_ids.is_empty() {
+        return Ok(());
+    }
+    if attachment_ids.len() > MAX_ATTACHMENTS_PER_MESSAGE {
+        return Err(CommandError::new("invalid", "Too many attachments"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    let (durable_root, staging_root) = attachments_paths()?;
+    let db = state.db.lock();
+    for raw_id in attachment_ids {
+        let id = raw_id.trim();
+        if !is_safe_attachment_id(id) {
+            return Err(CommandError::new("invalid", "Invalid attachment id"));
+        }
+        if !seen.insert(id.to_string()) {
+            return Err(CommandError::new("invalid", "Duplicate attachment id"));
+        }
+        let (storage_key, att_state): (String, String) = db
+            .conn()
+            .query_row(
+                "SELECT storage_key, state FROM chat_attachments
+                 WHERE id = ?1 AND deleted_at IS NULL",
+                rusqlite::params![id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|_| CommandError::new("not_found", "Attachment not found"))?;
+        if att_state != "staged" {
+            return Err(CommandError::new(
+                "invalid",
+                "Attachment is not available to attach",
+            ));
+        }
+        let name = Path::new(&storage_key)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| CommandError::new("invalid", "Invalid attachment storage key"))?;
+        if name != storage_key
+            || name.contains("..")
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains('\0')
+        {
+            return Err(CommandError::new("invalid", "Invalid attachment storage key"));
+        }
+        if !durable_root.join(name).exists() && !staging_root.join(name).exists() {
+            return Err(CommandError::new(
+                "not_found",
+                "Attachment file missing from staging",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Resolve staged attachments by opaque id, promote into durable storage, and mark
+/// backup-eligible. Frontend-supplied name/mime/size/filename are ignored.
+pub fn bind_attachments_to_message(
+    state: &AppState,
+    conversation_id: &str,
+    message_id: &str,
+    attachment_ids: &[String],
+) -> Result<Vec<TrustedAttachmentMeta>, CommandError> {
+    if attachment_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    if attachment_ids.len() > MAX_ATTACHMENTS_PER_MESSAGE {
+        return Err(CommandError::new("invalid", "Too many attachments"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for id in attachment_ids {
+        let id = id.trim();
+        if !is_safe_attachment_id(id) {
+            return Err(CommandError::new("invalid", "Invalid attachment id"));
+        }
+        if !seen.insert(id.to_string()) {
+            return Err(CommandError::new("invalid", "Duplicate attachment id"));
+        }
+    }
+
+    let (durable_root, staging_root) = attachments_paths()?;
+    let mut out = Vec::with_capacity(attachment_ids.len());
+
+    {
+        let db = state.db.lock();
+        for raw_id in attachment_ids {
+            let id = raw_id.trim();
+            let (storage_key, display_name, mime, byte_size, att_state, existing_message): (
+                String,
+                String,
+                String,
+                i64,
+                String,
+                Option<String>,
+            ) = db
+                .conn()
+                .query_row(
+                    "SELECT storage_key, display_name, detected_mime, byte_size, state, message_id
+                     FROM chat_attachments
+                     WHERE id = ?1 AND deleted_at IS NULL",
+                    rusqlite::params![id],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                        ))
+                    },
+                )
+                .map_err(|_| CommandError::new("not_found", "Attachment not found"))?;
+
+            if att_state == "attached" && existing_message.as_deref() == Some(message_id) {
+                out.push(TrustedAttachmentMeta {
+                    id: id.to_string(),
+                    name: display_name,
+                    mime_type: mime,
+                    byte_size,
+                });
+                continue;
+            }
+            if att_state != "staged" {
+                return Err(CommandError::new(
+                    "invalid",
+                    "Attachment is not available to attach",
+                ));
+            }
+
+            let name = Path::new(&storage_key)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| CommandError::new("invalid", "Invalid attachment storage key"))?;
+            if name != storage_key
+                || name.contains("..")
+                || name.contains('/')
+                || name.contains('\\')
+                || name.contains('\0')
+            {
+                return Err(CommandError::new("invalid", "Invalid attachment storage key"));
+            }
+
+            let durable_path = durable_root.join(name);
+            let staging_path = staging_root.join(name);
+            if !durable_path.exists() {
+                if !staging_path.exists() {
+                    return Err(CommandError::new(
+                        "not_found",
+                        "Attachment file missing from staging",
+                    ));
+                }
+                std::fs::rename(&staging_path, &durable_path)
+                    .or_else(|_| {
+                        std::fs::copy(&staging_path, &durable_path)
+                            .and_then(|_| std::fs::remove_file(&staging_path))
+                    })
+                    .map_err(|e| {
+                        CommandError::new("storage", sanitize_error(&e.to_string(), None))
+                    })?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(
+                        &durable_path,
+                        std::fs::Permissions::from_mode(0o600),
+                    );
+                }
+            }
+
+            let updated = db
+                .conn()
+                .execute(
+                    "UPDATE chat_attachments
+                     SET conversation_id = ?1,
+                         message_id = ?2,
+                         state = 'attached',
+                         backup_eligible = 1,
+                         expires_at = NULL,
+                         updated_at = datetime('now')
+                     WHERE id = ?3 AND deleted_at IS NULL AND state = 'staged'",
+                    rusqlite::params![conversation_id, message_id, id],
+                )
+                .map_err(|e| {
+                    CommandError::new("storage", sanitize_error(&e.to_string(), None))
+                })?;
+            if updated != 1 {
+                return Err(CommandError::new(
+                    "invalid",
+                    "Attachment is not available to attach",
+                ));
+            }
+
+            out.push(TrustedAttachmentMeta {
+                id: id.to_string(),
+                name: display_name,
+                mime_type: mime,
+                byte_size,
+            });
+        }
+    }
+
+    Ok(out)
 }
 
 #[tauri::command]
@@ -429,6 +645,114 @@ pub fn get_chat_attachment_src(
         url: opaque_attachment_url(&id),
         id,
     })
+}
+
+/// Cancel a staged (or failed) attachment: mark cancelled, clear backup eligibility,
+/// and delete managed files. Idempotent for already-cancelled/deleted/expired rows.
+#[tauri::command]
+pub fn cancel_chat_attachment(
+    state: State<'_, AppState>,
+    attachment_id: String,
+) -> Result<(), CommandError> {
+    state.require_profile()?;
+    cancel_staged_attachment_ids(&state, &[attachment_id])
+}
+
+/// Cancel multiple staged attachments by opaque id. Skips unknown ids; fails closed
+/// when an id is committed to a message.
+pub fn cancel_staged_attachment_ids(
+    state: &AppState,
+    attachment_ids: &[String],
+) -> Result<(), CommandError> {
+    if attachment_ids.is_empty() {
+        return Ok(());
+    }
+    let (durable_root, staging_root) = attachments_paths()?;
+    let db = state.db.lock();
+    for raw_id in attachment_ids {
+        let id = raw_id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        if !is_safe_attachment_id(id) {
+            return Err(CommandError::new("invalid", "Invalid attachment id"));
+        }
+        let row: Result<(String, String, Option<String>), rusqlite::Error> = db.conn().query_row(
+            "SELECT storage_key, state, message_id FROM chat_attachments
+             WHERE id = ?1",
+            rusqlite::params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        );
+        let Ok((storage_key, att_state, message_id)) = row else {
+            continue;
+        };
+        if att_state == "attached" || message_id.is_some() {
+            return Err(CommandError::new(
+                "invalid",
+                "Committed attachments cannot be cancelled",
+            ));
+        }
+        if matches!(att_state.as_str(), "cancelled" | "deleted" | "expired") {
+            continue;
+        }
+        if att_state != "staged" && att_state != "failed" {
+            return Err(CommandError::new(
+                "invalid",
+                "Attachment is not available to cancel",
+            ));
+        }
+        let name = Path::new(&storage_key)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| CommandError::new("invalid", "Invalid attachment storage key"))?;
+        if name != storage_key
+            || name.contains("..")
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains('\0')
+        {
+            return Err(CommandError::new("invalid", "Invalid attachment storage key"));
+        }
+        let updated = db
+            .conn()
+            .execute(
+                "UPDATE chat_attachments
+                 SET state = 'cancelled',
+                     backup_eligible = 0,
+                     deleted_at = datetime('now'),
+                     updated_at = datetime('now'),
+                     expires_at = NULL
+                 WHERE id = ?1 AND state IN ('staged', 'failed') AND deleted_at IS NULL",
+                rusqlite::params![id],
+            )
+            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+        // Race with bind: UPDATE matched 0 rows — do not delete durable files.
+        if updated != 1 {
+            let now_state: Result<(String, Option<String>), rusqlite::Error> = db.conn().query_row(
+                "SELECT state, message_id FROM chat_attachments WHERE id = ?1",
+                rusqlite::params![id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            );
+            if let Ok((s, mid)) = now_state {
+                if s == "attached" || mid.is_some() {
+                    return Err(CommandError::new(
+                        "invalid",
+                        "Committed attachments cannot be cancelled",
+                    ));
+                }
+                if matches!(s.as_str(), "cancelled" | "deleted" | "expired") {
+                    continue;
+                }
+            }
+            return Err(CommandError::new(
+                "invalid",
+                "Attachment is not available to cancel",
+            ));
+        }
+        let _ = std::fs::remove_file(staging_root.join(name));
+        let _ = std::fs::remove_file(durable_root.join(name));
+    }
+    Ok(())
 }
 
 /// Resolve opaque attachment ID to bytes for the custom protocol (no path leak).

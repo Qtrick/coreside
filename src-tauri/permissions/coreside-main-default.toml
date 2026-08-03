@@ -13,6 +13,7 @@ permissions = [
   "allow-assign-chats-to-project",
   "allow-assign-conversation-to-project-cmd",
   "allow-branch-conversation-cmd",
+  "allow-cancel-chat-attachment",
   "allow-cancel-queue-item-cmd",
   "allow-cancel-request",
   "allow-cleanup-crawler-cache",

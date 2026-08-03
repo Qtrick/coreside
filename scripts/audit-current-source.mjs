@@ -20,9 +20,9 @@ const DEFAULT_ARCHIVE =
   process.env.CORESIDE_ARCHIVE ||
   path.join(process.env.HOME || "", "Downloads", "Coreside Chat AI.zip");
 const EXPECTED_ARCHIVE_SHA256 =
-  "dd1370465031e1cf4e4e7317eed37f03301ec49ece5ca6135a439042dd1dcccb";
+  "907a21f13ccbea5d7cbf7793bb5cb53098fa72836756b8f4c9a15569ef7c88c4";
 const PREVIOUS_ARCHIVE_SHA256 =
-  "b0f80f58d3d45f381a94956a5fec9e5cec4736cd585e12e0460f01734a18ada6";
+  "dd1370465031e1cf4e4e7317eed37f03301ec49ece5ca6135a439042dd1dcccb";
 
 const FINGERPRINT_ROOTS = [
   "src",
@@ -117,6 +117,12 @@ function archiveExtractRoot() {
   const preferred = path.join(root, ".reference", "coreside-rc3-archive", "coreside-main");
   if (fs.existsSync(preferred)) return preferred;
   return null;
+}
+
+function archiveExtractMatchesExpected() {
+  const marker = path.join(root, ".reference", "coreside-rc3-archive", "source.sha256");
+  if (!fs.existsSync(marker)) return false;
+  return fs.readFileSync(marker, "utf8").trim() === EXPECTED_ARCHIVE_SHA256;
 }
 
 function compareTrees(activeRoot, archiveRoot) {
@@ -230,13 +236,18 @@ const archivePath = DEFAULT_ARCHIVE;
 const archivePresent = fs.existsSync(archivePath);
 const observedSha = archivePresent ? sha256File(archivePath) : null;
 const extractRoot = archiveExtractRoot();
+const extractMatchesExpected = archiveExtractMatchesExpected();
 const archiveStatus =
   !archivePresent
-    ? extractRoot
+    ? extractRoot && extractMatchesExpected
       ? "zip_unavailable_extract_present"
-      : "archive_unavailable"
+      : extractRoot
+        ? "zip_unavailable_extract_stale"
+        : "archive_unavailable"
     : observedSha === EXPECTED_ARCHIVE_SHA256
-      ? "present_hash_match"
+      ? extractRoot && !extractMatchesExpected
+        ? "present_hash_match_extract_stale"
+        : "present_hash_match"
       : "present_hash_mismatch";
 
 let archiveDiff = {
@@ -258,9 +269,21 @@ if (
     expectedArchiveSha256: EXPECTED_ARCHIVE_SHA256,
     note:
       archiveStatus === "zip_unavailable_extract_present"
-        ? "Zip missing from Downloads; comparing against previously extracted .reference/coreside-rc3-archive/coreside-main (hash previously verified as dd137046…)."
+        ? "Zip missing from Downloads; comparing against previously extracted .reference/coreside-rc3-archive/coreside-main (source.sha256 matches 907a21f1…)."
         : undefined,
     ...compareTrees(root, extractRoot),
+  };
+} else if (
+  archiveStatus === "present_hash_match_extract_stale" ||
+  archiveStatus === "zip_unavailable_extract_stale"
+) {
+  archiveDiff = {
+    status: "extract_stale_or_unmarked",
+    hint: "Re-extract Coreside Chat AI.zip into .reference/coreside-rc3-archive and write source.sha256 with the expected archive hash",
+    expectedArchiveSha256: EXPECTED_ARCHIVE_SHA256,
+    onlyInActive: [],
+    onlyInArchive: [],
+    changed: [],
   };
 } else if (archiveStatus === "present_hash_match") {
   archiveDiff = {

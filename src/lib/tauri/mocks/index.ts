@@ -1834,13 +1834,15 @@ export async function mockInvoke<T>(
         name: String(input.name ?? "file"),
         mimeType: String(input.mimeType ?? "application/octet-stream"),
         byteSize: Math.floor((String(input.dataBase64 ?? "").length * 3) / 4),
-        localFilename: `${crypto.randomUUID()}_${String(input.name ?? "file")}`,
       } as T;
     }
 
+    case "cancel_chat_attachment":
+      return undefined as T;
+
     case "get_chat_attachment_src":
       return {
-        id: String(args?.attachmentId ?? args?.localFilename ?? "file"),
+        id: String(args?.attachmentId ?? "file"),
         url: `coreside-asset://localhost/attachment/${String(args?.attachmentId ?? "file")}`,
       } as T;
 

@@ -1436,7 +1436,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
                       name: a.name,
                       mimeType: a.mimeType,
                       byteSize: a.byteSize,
-                      localFilename: a.localFilename,
                     })),
                   }
                 : {}),
@@ -1501,10 +1500,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
         })),
         attachments: attachments.map((a) => ({
           id: a.id,
-          name: a.name,
-          mimeType: a.mimeType,
-          byteSize: a.byteSize,
-          localFilename: a.localFilename,
         })),
       });
 

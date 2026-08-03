@@ -228,6 +228,13 @@ export function Composer() {
         staged.push(saved);
       }
     } catch (err) {
+      for (const saved of staged) {
+        try {
+          await api.cancelChatAttachment(saved.id);
+        } catch {
+          // Best-effort cleanup of already-staged files.
+        }
+      }
       setAttachError(
         err instanceof Error ? err.message : "Failed to attach files",
       );

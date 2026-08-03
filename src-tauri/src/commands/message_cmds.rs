@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio_util::sync::CancellationToken;
 
 use super::CommandError;
@@ -305,7 +305,7 @@ async fn emit_text_fluidly(
     );
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolMentionInput {
     pub tool_id: String,
@@ -316,10 +316,188 @@ pub struct ToolMentionInput {
 #[serde(rename_all = "camelCase")]
 pub struct ChatAttachmentInput {
     pub id: String,
-    pub name: String,
-    pub mime_type: String,
-    pub byte_size: i64,
-    pub local_filename: String,
+    /// Ignored — trusted metadata comes from SQLite after stage.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Ignored — trusted metadata comes from SQLite after stage.
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    /// Ignored — trusted metadata comes from SQLite after stage.
+    #[serde(default)]
+    pub byte_size: Option<i64>,
+    /// Ignored / rejected from public contracts — storage keys are not client-authoritative.
+    #[serde(default)]
+    pub local_filename: Option<String>,
+}
+
+fn attachment_ids_from_queue_prompt(prompt: &serde_json::Value) -> Vec<String> {
+    prompt
+        .get("attachmentIds")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(|s| s.trim().to_string()))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn schedule_queued_turn_drain(app: &AppHandle, conversation_id: &str) {
+    let app = app.clone();
+    let conversation_id = conversation_id.to_string();
+    tauri::async_runtime::spawn(async move {
+        drain_queued_turns(app, conversation_id).await;
+    });
+}
+
+struct QueueDrainGuard {
+    app: AppHandle,
+    conversation_id: String,
+    armed: bool,
+}
+
+impl Drop for QueueDrainGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            schedule_queued_turn_drain(&self.app, &self.conversation_id);
+        }
+    }
+}
+
+/// Releases per-conversation drain exclusivity when the drain task exits.
+struct QueueDrainInflightGuard<'a> {
+    state: &'a AppState,
+    conversation_id: String,
+}
+
+impl Drop for QueueDrainInflightGuard<'_> {
+    fn drop(&mut self) {
+        self.state.end_queue_drain(&self.conversation_id);
+    }
+}
+
+/// Activate and execute queued turns, replaying opaque attachment IDs from the
+/// queue prompt through the same authoritative send path.
+async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
+    let Some(state_handle) = app.try_state::<AppState>() else {
+        return;
+    };
+    // AppState is managed for the process lifetime; keep a stable & across awaits.
+    let state: &AppState = state_handle.inner();
+    if !state.try_begin_queue_drain(&conversation_id) {
+        // Another drain is already running for this conversation.
+        return;
+    }
+    let _inflight = QueueDrainInflightGuard {
+        state,
+        conversation_id: conversation_id.clone(),
+    };
+
+    loop {
+        if state.active_requests.lock().contains_key(&conversation_id) {
+            return;
+        }
+        let item = {
+            let mut db = state.db.lock();
+            match crate::runtime_v2::activate_next(&mut db, &conversation_id) {
+                Ok(item) => item,
+                Err(e) => {
+                    tracing::warn!(error = %e, "queue activate_next failed");
+                    return;
+                }
+            }
+        };
+        let Some(item) = item else {
+            return;
+        };
+
+        // Lost the race to a live turn after activate: put the item back and exit.
+        // The live turn's QueueDrainGuard will reschedule drain on completion.
+        if state.active_requests.lock().contains_key(&conversation_id) {
+            let mut db = state.db.lock();
+            if let Err(e) = crate::runtime_v2::requeue_queue_item(&mut db, &item.id) {
+                tracing::warn!(error = %e, queue_item = %item.id, "queue requeue failed");
+            }
+            return;
+        }
+
+        let content = item
+            .prompt
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let active_tool_id = item
+            .prompt
+            .get("activeToolId")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let model = item.prompt.get("model").and_then(|v| match v {
+            serde_json::Value::Null => None,
+            serde_json::Value::String(s) => Some(s.clone()),
+            other => other.as_str().map(|s| s.to_string()),
+        });
+        let mentions: Option<Vec<ToolMentionInput>> = item
+            .prompt
+            .get("mentions")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok());
+        let attachment_ids = attachment_ids_from_queue_prompt(&item.prompt);
+        let attachments: Option<Vec<ChatAttachmentInput>> = if attachment_ids.is_empty() {
+            None
+        } else {
+            Some(
+                attachment_ids
+                    .into_iter()
+                    .map(|id| ChatAttachmentInput {
+                        id,
+                        name: None,
+                        mime_type: None,
+                        byte_size: None,
+                        local_filename: None,
+                    })
+                    .collect(),
+            )
+        };
+
+        let result = send_message_inner(
+            app.clone(),
+            state,
+            content,
+            conversation_id.clone(),
+            active_tool_id,
+            model,
+            mentions,
+            attachments,
+            false,
+        )
+        .await;
+
+        if matches!(&result, Err(e) if e.code == "busy") {
+            let mut db = state.db.lock();
+            if let Err(e) = crate::runtime_v2::requeue_queue_item(&mut db, &item.id) {
+                tracing::warn!(error = %e, queue_item = %item.id, "queue requeue after busy failed");
+            }
+            return;
+        }
+
+        {
+            let mut db = state.db.lock();
+            let err_msg = result.as_ref().err().map(|e| e.message.clone());
+            if let Err(e) =
+                crate::runtime_v2::complete_queue_item(&mut db, &item.id, err_msg.as_deref())
+            {
+                tracing::warn!(error = %e, queue_item = %item.id, "queue complete failed");
+            }
+        }
+
+        if matches!(&result, Ok(r) if r.queued == Some(true)) {
+            // Should not happen on the drain path (enqueue is disabled); treat as stop.
+            return;
+        }
+    }
 }
 
 #[tauri::command]
@@ -332,6 +510,31 @@ pub async fn send_message(
     model: Option<String>,
     mentions: Option<Vec<ToolMentionInput>>,
     attachments: Option<Vec<ChatAttachmentInput>>,
+) -> Result<SendMessageResult, CommandError> {
+    send_message_inner(
+        app,
+        state.inner(),
+        content,
+        conversation_id,
+        active_tool_id,
+        model,
+        mentions,
+        attachments,
+        true,
+    )
+    .await
+}
+
+async fn send_message_inner(
+    app: AppHandle,
+    state: &AppState,
+    content: String,
+    conversation_id: String,
+    active_tool_id: Option<String>,
+    model: Option<String>,
+    mentions: Option<Vec<ToolMentionInput>>,
+    attachments: Option<Vec<ChatAttachmentInput>>,
+    schedule_drain: bool,
 ) -> Result<SendMessageResult, CommandError> {
     state.require_profile()?;
     let mut content = content.trim().to_string();
@@ -350,7 +553,20 @@ pub async fn send_message(
     }
 
     // If a turn is already active for this chat, enqueue instead of overlapping.
+    // Preserve attachment ids + mentions so the queued turn cannot silently drop them.
+    // Drain path (schedule_drain=false) must never re-enqueue an already-activated item.
     if state.active_requests.lock().contains_key(&conversation_id) {
+        if !schedule_drain {
+            return Err(CommandError::new(
+                "busy",
+                "A reply is already in progress for this chat",
+            ));
+        }
+        let attachment_ids: Vec<String> = attachments.iter().map(|a| a.id.clone()).collect();
+        crate::commands::attachment_cmds::assert_staged_attachments_ready(
+            state,
+            &attachment_ids,
+        )?;
         let mut db = state.db.lock();
         let item = crate::runtime_v2::enqueue(
             &mut db,
@@ -359,6 +575,8 @@ pub async fn send_message(
                 "content": content,
                 "activeToolId": active_tool_id,
                 "model": model,
+                "mentions": mentions,
+                "attachmentIds": attachment_ids,
             }),
             100,
         )?;
@@ -431,7 +649,13 @@ pub async fn send_message(
         }
     };
 
-    let (user_message, history, active_tool, referenced_tools, request_key, project_id) = {
+    let (user_message, history, active_tool, referenced_tools, request_key, project_id, trusted_attachments) = {
+        let attachment_ids: Vec<String> = attachments.iter().map(|a| a.id.clone()).collect();
+        crate::commands::attachment_cmds::assert_staged_attachments_ready(
+            state,
+            &attachment_ids,
+        )?;
+
         let mut db = state.db.lock();
         let conv = db::get_conversation(&db, &conversation_id)?;
         let project_id = conv.project_id.clone();
@@ -450,21 +674,6 @@ pub async fn send_message(
                         .collect::<Vec<_>>()),
                 );
             }
-            if !attachments.is_empty() {
-                meta.insert(
-                    "attachments".into(),
-                    json!(attachments
-                        .iter()
-                        .map(|a| json!({
-                            "id": a.id,
-                            "name": a.name,
-                            "mimeType": a.mime_type,
-                            "byteSize": a.byte_size,
-                            "localFilename": a.local_filename,
-                        }))
-                        .collect::<Vec<_>>()),
-                );
-            }
             if meta.is_empty() {
                 None
             } else {
@@ -479,6 +688,35 @@ pub async fn send_message(
             &content,
             mention_meta.as_ref(),
         )?;
+        drop(db);
+
+        let trusted_attachments = crate::commands::attachment_cmds::bind_attachments_to_message(
+            state,
+            &conversation_id,
+            &user_message.id,
+            &attachment_ids,
+        )?;
+
+        let mut db = state.db.lock();
+        if !trusted_attachments.is_empty() {
+            let mut meta = match &user_message.metadata {
+                Some(serde_json::Value::Object(m)) => m.clone(),
+                _ => serde_json::Map::new(),
+            };
+            meta.insert(
+                "attachments".into(),
+                json!(trusted_attachments
+                    .iter()
+                    .map(|a| json!({
+                        "id": a.id,
+                        "name": a.name,
+                        "mimeType": a.mime_type,
+                        "byteSize": a.byte_size,
+                    }))
+                    .collect::<Vec<_>>()),
+            );
+            db::update_message_metadata(&mut db, &user_message.id, &serde_json::Value::Object(meta))?;
+        }
         let _ = db::maybe_rename_conversation_from_message(&mut db, &conversation_id, &content)?;
 
         let history = db::get_recent_messages(&db, &conversation_id, 40)?;
@@ -524,6 +762,7 @@ pub async fn send_message(
             referenced_tools,
             request_key,
             project_id,
+            trusted_attachments,
         )
     };
 
@@ -600,8 +839,8 @@ pub async fn send_message(
         })
         .collect();
 
-    if !attachments.is_empty() {
-        let note = attachments
+    if !trusted_attachments.is_empty() {
+        let note = trusted_attachments
             .iter()
             .map(|a| format!("- {} ({}, {} bytes)", a.name, a.mime_type, a.byte_size))
             .collect::<Vec<_>>()
@@ -618,7 +857,7 @@ pub async fn send_message(
             &app,
             &conversation_id,
             &mut action_log,
-            &format!("Attached {} file(s)", attachments.len()),
+            &format!("Attached {} file(s)", trusted_attachments.len()),
             "attachments_included",
             api_key_ref,
         );
@@ -663,6 +902,9 @@ pub async fn send_message(
         Ok(r) => r,
         Err(e) => {
             state.take_request(&request_key);
+            if schedule_drain {
+                schedule_queued_turn_drain(&app, &conversation_id);
+            }
             let message = sanitize_error(&e.to_string(), api_key_ref);
             tracing::warn!(
                 code = e.code(),
@@ -692,6 +934,9 @@ pub async fn send_message(
     let mut parsed: ParsedAgentResponse = parse_agent_response(&resolved.response.raw_text)
         .map_err(|e| {
             state.take_request(&request_key);
+            if schedule_drain {
+                schedule_queued_turn_drain(&app, &conversation_id);
+            }
             tracing::warn!(error = %sanitize_for_log(&e, api_key_ref), "send_message parse failed");
             let message = sanitize_error(&e, api_key_ref);
             emit_turn(
@@ -754,6 +999,9 @@ pub async fn send_message(
 
         let tool_loop = ToolLoop::new(registry).map_err(|e| {
             state.take_request(&request_key);
+            if schedule_drain {
+                schedule_queued_turn_drain(&app, &conversation_id);
+            }
             CommandError::new("invalid", e)
         })?;
         let loop_ctx = ToolLoopContext {
@@ -845,6 +1093,9 @@ pub async fn send_message(
             Ok(r) => r,
             Err(e) => {
                 state.take_request(&request_key);
+                if schedule_drain {
+                    schedule_queued_turn_drain(&app, &conversation_id);
+                }
                 let message = sanitize_error(&e.to_string(), api_key_ref);
                 emit_turn(
                     &app,
@@ -859,12 +1110,21 @@ pub async fn send_message(
 
         parsed = parse_agent_response(&resolved.response.raw_text).map_err(|e| {
             state.take_request(&request_key);
+            if schedule_drain {
+                schedule_queued_turn_drain(&app, &conversation_id);
+            }
             CommandError::sanitized("parse", e, api_key_ref)
         })?;
         parsed.payload.normalize_for_frontend();
     }
 
     state.take_request(&request_key);
+    // Any return after this point (Ok or Err) must drain the queue when requested.
+    let _queue_drain_guard = QueueDrainGuard {
+        app: app.clone(),
+        conversation_id: conversation_id.clone(),
+        armed: schedule_drain,
+    };
 
     if !search_meta.citations.is_empty() && parsed.payload.citations.is_none() {
         parsed.payload.citations = Some(search_meta.citations.clone());
@@ -1296,6 +1556,31 @@ pub fn cancel_request(
         }
     });
     Ok(cancelled)
+}
+
+#[cfg(test)]
+mod queue_attachment_tests {
+    use super::attachment_ids_from_queue_prompt;
+    use serde_json::json;
+
+    #[test]
+    fn queue_prompt_preserves_attachment_ids() {
+        let prompt = json!({
+            "content": "see files",
+            "attachmentIds": ["att-1", "att-2", ""],
+            "model": "auto"
+        });
+        assert_eq!(
+            attachment_ids_from_queue_prompt(&prompt),
+            vec!["att-1".to_string(), "att-2".to_string()]
+        );
+    }
+
+    #[test]
+    fn queue_prompt_without_attachments_is_empty() {
+        let prompt = json!({ "content": "hi" });
+        assert!(attachment_ids_from_queue_prompt(&prompt).is_empty());
+    }
 }
 
 #[tauri::command]

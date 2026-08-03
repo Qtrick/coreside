@@ -374,8 +374,8 @@ fn list_referenced_media_filenames(db: &Database) -> DbResult<Vec<String>> {
     Ok(names)
 }
 
-/// Active chat attachment storage keys (staged + durable). Omitting these from the
-/// archive would restore a DB that points at missing files.
+/// Active chat attachment storage keys that are backup-eligible (attached/durable).
+/// Staged drafts remain backup_eligible=0 and must not enter profile archives.
 fn list_referenced_attachment_storage_keys(db: &Database) -> DbResult<Vec<String>> {
     if !table_exists(db, "chat_attachments")? {
         return Ok(Vec::new());
@@ -385,7 +385,8 @@ fn list_referenced_attachment_storage_keys(db: &Database) -> DbResult<Vec<String
         .prepare(
             "SELECT storage_key FROM chat_attachments
              WHERE deleted_at IS NULL
-               AND state NOT IN ('deleted', 'expired', 'failed', 'cancelled')",
+               AND backup_eligible = 1
+               AND state NOT IN ('deleted', 'expired', 'failed', 'cancelled', 'staged')",
         )
         .map_err(|e| DbError::Invalid(format!("chat_attachments query prepare: {e}")))?;
     let rows = stmt
@@ -1342,6 +1343,32 @@ mod tests {
         assert_eq!(manifest.attachments.count, 0);
         assert_eq!(manifest.media.completeness, "complete");
         assert_eq!(manifest.attachments.completeness, "complete");
+    }
+
+    #[test]
+    fn archive_excludes_staged_not_backup_eligible() {
+        let dir = tempdir().unwrap();
+        let media = dir.path().join("media");
+        let attachments = dir.path().join("attachments");
+        let staging = attachments.join("staging");
+        std::fs::create_dir_all(&media).unwrap();
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("draft.txt"), b"draft").unwrap();
+        let src = Database::open_path(&dir.path().join("src.db")).unwrap();
+        src.conn()
+            .execute(
+                "INSERT INTO chat_attachments
+                 (id, storage_key, original_filename, display_name, detected_mime, detected_format,
+                  byte_size, content_hash, state, backup_eligible)
+                 VALUES ('a1', 'draft.txt', 'draft.txt', 'draft.txt', 'text/plain', 'text/plain', 5, 'hash', 'staged', 0)",
+                [],
+            )
+            .unwrap();
+        let archive = dir.path().join("profile.coreside-backup");
+        let manifest = src
+            .create_profile_archive_with_assets(&archive, "0.1.0", Some(&media), Some(&attachments))
+            .unwrap();
+        assert_eq!(manifest.attachments.count, 0);
     }
 
     #[test]

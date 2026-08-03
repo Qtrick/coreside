@@ -90,36 +90,53 @@ pub fn list_queue(db: &Database, conversation_id: &str) -> DbResult<Vec<QueueIte
 }
 
 pub fn activate_next(db: &mut Database, conversation_id: &str) -> DbResult<Option<QueueItem>> {
-    let active: Option<String> = db
-        .conn()
-        .query_row(
-            "SELECT id FROM agent_request_queue WHERE conversation_id = ?1 AND status = 'active' LIMIT 1",
-            [conversation_id],
-            |r| r.get(0),
-        )
-        .ok();
-    if active.is_some() {
+    // Single atomic UPDATE so concurrent drainers cannot activate two items (or the
+    // same item twice) after both observe an empty active set.
+    let now = now_rfc3339();
+    let n = db.conn().execute(
+        "UPDATE agent_request_queue
+         SET status = 'active', started_at = ?1
+         WHERE id = (
+           SELECT q.id FROM agent_request_queue q
+           WHERE q.conversation_id = ?2
+             AND q.status = 'queued'
+             AND NOT EXISTS (
+               SELECT 1 FROM agent_request_queue a
+               WHERE a.conversation_id = ?2 AND a.status = 'active'
+             )
+           ORDER BY q.priority ASC, q.created_at ASC
+           LIMIT 1
+         )",
+        params![now, conversation_id],
+    )?;
+    if n == 0 {
         return Ok(None);
     }
-    let next: Option<String> = db
-        .conn()
-        .query_row(
-            "SELECT id FROM agent_request_queue
-             WHERE conversation_id = ?1 AND status = 'queued'
-             ORDER BY priority ASC, created_at ASC LIMIT 1",
-            [conversation_id],
-            |r| r.get(0),
-        )
-        .ok();
-    let Some(id) = next else {
-        return Ok(None);
-    };
-    let now = now_rfc3339();
-    db.conn().execute(
-        "UPDATE agent_request_queue SET status = 'active', started_at = ?1 WHERE id = ?2",
-        params![now, id],
+    let id: String = db.conn().query_row(
+        "SELECT id FROM agent_request_queue
+         WHERE conversation_id = ?1 AND status = 'active' AND started_at = ?2
+         LIMIT 1",
+        params![conversation_id, now],
+        |r| r.get(0),
     )?;
     Ok(Some(get_item(db, &id)?))
+}
+
+/// Return an activated item to `queued` so a later drain can retry (e.g. lost a
+/// race with a live turn).
+pub fn requeue(db: &mut Database, id: &str) -> DbResult<QueueItem> {
+    let n = db.conn().execute(
+        "UPDATE agent_request_queue
+         SET status = 'queued', started_at = NULL
+         WHERE id = ?1 AND status = 'active'",
+        params![id],
+    )?;
+    if n == 0 {
+        return Err(DbError::Invalid(format!(
+            "queue item {id} is not active and cannot be requeued"
+        )));
+    }
+    get_item(db, id)
 }
 
 pub fn complete(db: &mut Database, id: &str, error: Option<&str>) -> DbResult<QueueItem> {
@@ -168,4 +185,38 @@ pub fn recover_stale_active(db: &mut Database) -> DbResult<u64> {
         [now],
     )?;
     Ok(n as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{create_conversation, DEFAULT_WORKSPACE_ID};
+    use serde_json::json;
+    use tempfile::tempdir;
+
+    fn test_db() -> Database {
+        let dir = tempdir().unwrap();
+        Database::open_path(&dir.path().join("q.db")).unwrap()
+    }
+
+    #[test]
+    fn activate_next_is_exclusive_and_requeue_restores_queued() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Queue", None).unwrap();
+        let a = enqueue(&mut db, &conv.id, &json!({"content": "one"}), 100).unwrap();
+        let _b = enqueue(&mut db, &conv.id, &json!({"content": "two"}), 100).unwrap();
+
+        let first = activate_next(&mut db, &conv.id).unwrap().expect("first");
+        assert_eq!(first.id, a.id);
+        assert_eq!(first.status, "active");
+
+        // Second activate must not promote another item while one is active.
+        assert!(activate_next(&mut db, &conv.id).unwrap().is_none());
+
+        let restored = requeue(&mut db, &a.id).unwrap();
+        assert_eq!(restored.status, "queued");
+
+        let again = activate_next(&mut db, &conv.id).unwrap().expect("after requeue");
+        assert_eq!(again.id, a.id);
+    }
 }

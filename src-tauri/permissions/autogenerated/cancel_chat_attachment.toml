@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-chat-attachment"
+description = "Enables the cancel_chat_attachment command without any pre-configured scope."
+commands.allow = ["cancel_chat_attachment"]
+
+[[permission]]
+identifier = "deny-cancel-chat-attachment"
+description = "Denies the cancel_chat_attachment command without any pre-configured scope."
+commands.deny = ["cancel_chat_attachment"]

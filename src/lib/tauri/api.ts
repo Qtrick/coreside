@@ -225,10 +225,9 @@ export const api = {
     mentions?: Array<{ toolId: string; label?: string | null }> | null;
     attachments?: Array<{
       id: string;
-      name: string;
-      mimeType: string;
-      byteSize: number;
-      localFilename: string;
+      name?: string;
+      mimeType?: string;
+      byteSize?: number;
     }> | null;
   }) => invoke<SendMessageResult>("send_message", args),
   stageChatAttachment: (input: {
@@ -240,6 +239,8 @@ export const api = {
       "stage_chat_attachment",
       { input },
     ),
+  cancelChatAttachment: (attachmentId: string) =>
+    invoke<void>("cancel_chat_attachment", { attachmentId }),
   getChatAttachmentSrc: (attachmentId: string) =>
     invoke<{ id: string; url: string }>("get_chat_attachment_src", {
       attachmentId,

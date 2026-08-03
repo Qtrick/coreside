@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import {
   denyPendingApprovalIfPresent,
   E2E_TOOL_ID,
@@ -21,6 +22,27 @@ const evidencePath = path.resolve(
   __dirname,
   "../../reports/command-authority-results.json",
 );
+const repoRoot = path.resolve(__dirname, "../..");
+
+function evidenceIdentity() {
+  const commitEnv = process.env.CORESIDE_E2E_COMMIT?.trim();
+  const dirtyEnv = process.env.CORESIDE_E2E_DIRTY;
+  if (commitEnv && (dirtyEnv === "0" || dirtyEnv === "1")) {
+    return { commit: commitEnv, dirty: dirtyEnv === "1" };
+  }
+  const commit = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  const porcelain = spawnSync("git", ["status", "--porcelain"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  return {
+    commit: (commit.stdout || "").trim(),
+    dirty: (porcelain.stdout || "").trim().length > 0,
+  };
+}
 
 /** Sensitive commands that must be denied from tool-* windows before side effects. */
 const SENSITIVE_DENIALS: Array<{ command: string; args?: Record<string, unknown> }> = [
@@ -38,6 +60,8 @@ const SENSITIVE_DENIALS: Array<{ command: string; args?: Record<string, unknown>
   { command: "kernel_grant_permission", args: { applicationId: "other", permission: "local_data.write" } },
   { command: "kernel_export_package", args: { applicationId: "other" } },
   { command: "send_message", args: { conversationId: "x", content: "y" } },
+  { command: "stage_chat_attachment", args: { input: { name: "x.txt", mimeType: "text/plain", dataBase64: "eA==" } } },
+  { command: "cancel_chat_attachment", args: { attachmentId: "att-nonexistent" } },
 ];
 
 describe("Journey 11 — tool-window command authority denial", () => {
@@ -86,10 +110,13 @@ describe("Journey 11 — tool-window command authority denial", () => {
     });
     expect(stillThere.ok).toBe(true);
 
+    const identity = evidenceIdentity();
     const evidence = {
       schemaVersion: 1,
       product: "Coreside",
       generatedAt: new Date().toISOString(),
+      commit: identity.commit,
+      dirty: identity.dirty,
       command: "e2e:journey-11-command-authority",
       status: "generated_from_e2e",
       rawInvokeDenialTest: "passed",

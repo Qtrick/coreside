@@ -1,13 +1,23 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-03T17:58:38.126Z",
-  "commit": "c3e2a01a3883fc2ef4e065bf955b750ecf8f7055",
+  "generatedAt": "2026-08-03T18:44:22.012Z",
+  "commit": "1f5fc88a1d569d32c14e329697964ff01acdd034",
   "dirty": true,
   "command": "assurance:report",
-  "exitStatus": "passed",
-  "note": "Validates report presence/freshness/partial rejection. Does not execute the full release suite.",
-  "findings": [],
+  "exitStatus": "failed",
+  "narrowAssuranceOnly": true,
+  "fullReleasePass": false,
+  "note": "Narrow evidence validator only (presence/freshness/partial rejection). Not a full release pass. Public beta remains Not ready.",
+  "findings": [
+    {
+      "severity": "P1",
+      "file": "command-authority-results.json",
+      "status": "journey11_identity_incomplete",
+      "detail": "Requires commit, dirty, and publicBeta Not ready"
+    }
+  ],
   "localFirstVerdict": "Not ready",
-  "hostedAiVerdict": "Not ready"
+  "hostedAiVerdict": "Not ready",
+  "publicBeta": "Not ready"
 }

@@ -91,11 +91,21 @@ function writeResults(overallStatus) {
 function runSuite(suite, { seed } = {}) {
   const dbDir = fs.mkdtempSync(path.join(os.tmpdir(), `coreside-e2e-${suite}-`));
   const dbPath = path.join(dbDir, "coreside.db");
+  const commit = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  const porcelain = spawnSync("git", ["status", "--porcelain"], {
+    cwd: root,
+    encoding: "utf8",
+  });
   const env = {
     ...process.env,
     CORESIDE_E2E: "1",
     CORESIDE_DB_PATH: dbPath,
     AI_PROVIDER: process.env.AI_PROVIDER || "mock",
+    CORESIDE_E2E_COMMIT: (commit.stdout || "").trim(),
+    CORESIDE_E2E_DIRTY: (porcelain.stdout || "").trim().length > 0 ? "1" : "0",
   };
   // Explicitly unset vs empty-string: a polluted parent shell must not leak seed.
   if (seed) {

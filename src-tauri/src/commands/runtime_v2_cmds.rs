@@ -9,14 +9,14 @@ use crate::runtime_v2::packs::CapabilityPackMeta as PackMeta;
 use crate::runtime_v2::{
     self, activate_next, append_ledger_entry, branch_from_message, bundled_packs,
     cancel_queue_item, complete_queue_item, create_inline_surface, create_snapshot, delete_draft,
-    delete_snapshot, enqueue, flush_scheduler, get_continuity, get_draft, get_provider_profile,
-    get_route_state, get_snapshot, get_surface, get_surface_state, get_transaction, list_branches,
-    list_diagnostics, list_inline_surfaces, list_ledger_entries, list_queue, list_transactions,
-    navigate_route, promote_inline_to_tool, recover_stale_active, remove_queued, save_continuity,
-    save_draft, save_surface_state, schedule_and_apply, schedule_patches, set_route_state,
-    store_diagnostics, suspend_surface, undo_transaction, update_surface_definition,
-    AgentResponseV2, AppOperation, AppTransactionRecord, ApplyResult, ChatBranchRecord,
-    ContextLedgerEntry, ContinuitySnapshot, NavigateResult, PatchPriority,
+    delete_snapshot, enqueue, flush_scheduler, get_continuity, get_draft, get_item,
+    get_provider_profile, get_route_state, get_snapshot, get_surface, get_surface_state,
+    get_transaction, list_branches, list_diagnostics, list_inline_surfaces, list_ledger_entries,
+    list_queue, list_transactions, navigate_route, promote_inline_to_tool, recover_stale_active,
+    remove_queued, save_continuity, save_draft, save_surface_state, schedule_and_apply,
+    schedule_patches, set_route_state, store_diagnostics, suspend_surface, undo_transaction,
+    update_surface_definition, AgentResponseV2, AppOperation, AppTransactionRecord, ApplyResult,
+    ChatBranchRecord, ContextLedgerEntry, ContinuitySnapshot, NavigateResult, PatchPriority,
     ProviderConformanceRecord, QueueItem, RouteState, ScheduleRequest, ScheduledPatch,
     SnapshotRecord, SurfaceDraft, SurfaceRecord, SuspensionState,
 };
@@ -697,6 +697,25 @@ pub fn cancel_queue_item_cmd(
     item_id: String,
 ) -> Result<QueueItem, CommandError> {
     state.require_profile()?;
+    let mut db = state.db.lock();
+    let item = get_item(&db, &item_id).map_err(CommandError::from)?;
+    let attachment_ids: Vec<String> = item
+        .prompt
+        .get("attachmentIds")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    drop(db);
+    if !attachment_ids.is_empty() {
+        let _ = crate::commands::attachment_cmds::cancel_staged_attachment_ids(
+            state.inner(),
+            &attachment_ids,
+        );
+    }
     let mut db = state.db.lock();
     Ok(cancel_queue_item(&mut db, &item_id)?)
 }
