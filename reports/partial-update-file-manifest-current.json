@@ -1,0 +1,436 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-03T19:48:00Z",
+  "commit": "41fd4595db420eac8b1c5cc30723f1dd377608f4",
+  "dirty": true,
+  "sourceFingerprint": "3306d5de459be8d661c52e0101b70d956c2218f841bacafdbedb6ebb6acf9f41",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "command": "manual:partial-update-file-manifest-2026",
+  "exitStatus": 0,
+  "archive": {
+    "sha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
+    "extractPath": ".reference/partial-update/partialupdate-main",
+    "byteIdenticalToPriorJulyAudit": true,
+    "fileCount": 29,
+    "totalBytes": 772523
+  },
+  "coresideArchiveSha256": "ec8292249b58b565abef72baf285e36adce0ddea0059931166702d4ccf9bd228",
+  "staleJulyClaims": [
+    "July docs that treat PU-STREAM/PU-PARSE as implemented streaming parity are stale relative to AiProvider::chat-only + emit_text_fluidly fake typing",
+    "July feature matrix missing_high_value for CS-INLINE/CS-PATCH/CS-PACKS understates backend presence; UI/wiring gaps remain",
+    "July final-gap complete_but_unverified claims must not be read as release-ready"
+  ],
+  "files": [
+    {
+      "path": ".env.example",
+      "bytes": 1079,
+      "sha256": "9942c5589d2f487956dbc7601ee7c1e0ead46b3fb061fc9461640f2b6192ca67",
+      "purpose": "Example Cloudflare / AI Gateway / auth env vars",
+      "adaptation": "conceptual_only",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 2097,
+      "sha256": "8680f96fbff53dc7d86934c5e0ad19c73eb96384ec82b84e0429f91a8ea6be8e",
+      "purpose": "Ignore secrets, node_modules, wrangler state",
+      "adaptation": "conceptual_only",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": ".secrets.example",
+      "bytes": 315,
+      "sha256": "a79eb32cf211e07dd82dab44794ee17e6ac269f6d9f7f867e92e2ca55d72107a",
+      "purpose": "Example secrets file layout for deploy",
+      "adaptation": "conceptual_only",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1068,
+      "sha256": "81a1435f9e9c699a979e712782df50c9d3b6dd429b02921550babe69abc77f07",
+      "purpose": "MIT Copyright (c) 2026 Phil Holden",
+      "adaptation": "attribution_reference",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": "README.md",
+      "bytes": 6033,
+      "sha256": "6aaa597883e272d4b569af3f77954a93f99d4438385829eb0b0efbc83df94297",
+      "purpose": "Product overview, demos, install warnings, CDN/HTML/JS model",
+      "adaptation": "attribution_reference",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": "package-lock.json",
+      "bytes": 58122,
+      "sha256": "c5e5dc5611f9e782a5a0997e31864233d8b3328db0367729abf1c590b07d0131",
+      "purpose": "Locked npm deps for Worker project",
+      "adaptation": "conceptual_only",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": "package.json",
+      "bytes": 1289,
+      "sha256": "d4603c2edc61d00e85e4eae996bc92b1501a71ce2c8ed94e9c06303b69fc68ba",
+      "purpose": "Wrangler scripts; better-auth/kysely deps",
+      "adaptation": "conceptual_only",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": "spec.md",
+      "bytes": 2321,
+      "sha256": "96fb83c4f8c744c48a97e9bd3429b75f184ab130789c6e4744982bcff1b816b0",
+      "purpose": "V2 delimiter protocol, events, wrangler notes",
+      "adaptation": "secure_adaptation_required",
+      "directCodeReuse": false,
+      "coresideMapping": "Runtime V2 declarative ops + trusted packs; reject HTML/JS/CDN/iframe forms",
+      "securityNotes": [
+        "Model-generated HTML/JS/CDN applied into document",
+        "Form POST via hidden iframe",
+        "Multiuser routing trusts model cooperation"
+      ],
+      "systems": [
+        "protocol"
+      ]
+    },
+    {
+      "path": "tsconfig.json",
+      "bytes": 414,
+      "sha256": "2b9b58a43fd7d685a08b6d3e523d317926f43707430d57e15afbe3f1e0c3b366",
+      "purpose": "TypeScript compiler options",
+      "adaptation": "conceptual_only",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": "worker-configuration.d.ts",
+      "bytes": 514500,
+      "sha256": "7356b4ce521cb728d33d8262dc017faf8a351849abf4d83550a2ddc50d280d82",
+      "purpose": "Generated Cloudflare Worker type stubs",
+      "adaptation": "conceptual_only",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": "wrangler.jsonc",
+      "bytes": 4258,
+      "sha256": "2e40302b0e25e40599b55b4c7ba80e30b3f2521bccdcda878a6f260f9740ab8a",
+      "purpose": "Worker name, DO bindings, D1, AI gateway vars",
+      "adaptation": "conceptual_only",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": "migrations/0001_better_auth.sql",
+      "bytes": 1730,
+      "sha256": "3c6c7bc5fb8440f4b5be4cd80021497e4373fdc279558c63e4b139a72e5d79a3",
+      "purpose": "D1 better-auth user/session/account tables",
+      "adaptation": "deferred_enterprise",
+      "directCodeReuse": false,
+      "coresideMapping": "Local consumer; no cloud OAuth in current scope",
+      "securityNotes": [],
+      "systems": [
+        "auth"
+      ]
+    },
+    {
+      "path": "migrations/0002_user_roles.sql",
+      "bytes": 170,
+      "sha256": "25c1d90458336cc06491c969bcd4f3c6df46c8e0e006368118c260bc1fea5222",
+      "purpose": "Add user.role column default view",
+      "adaptation": "deferred_enterprise",
+      "directCodeReuse": false,
+      "coresideMapping": "Local consumer; no cloud OAuth in current scope",
+      "securityNotes": [],
+      "systems": [
+        "auth"
+      ]
+    },
+    {
+      "path": "public/index.html",
+      "bytes": 530,
+      "sha256": "d7ac597ece8466372ab1660858bbc5e3eb69a07a30a56ac960420b61ff89163b",
+      "purpose": "Minimal public entry HTML",
+      "adaptation": "conceptual_only",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": "scripts/dev-secure.sh",
+      "bytes": 1300,
+      "sha256": "61bf9edfb36d3f741bf2636ceaf8e1d9b7297737012edc5f69dcdcabe988aec8",
+      "purpose": "Keychain-backed local .dev.vars bootstrap",
+      "adaptation": "conceptual_only",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": "src/app.css",
+      "bytes": 5771,
+      "sha256": "85eaf00f7dd525d4ef3ccfa4c64ce2f9c07bc32819813a35965d275d2ad97936",
+      "purpose": "Default chat/card layout CSS",
+      "adaptation": "conceptual_only",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": "src/app.html",
+      "bytes": 1358,
+      "sha256": "ce1e5656efe5dae86b6fa9c333eedf15a012568b564e24dfdec90db9b9a7022a",
+      "purpose": "Initial shell with <?marker> template zones",
+      "adaptation": "secure_adaptation_required",
+      "directCodeReuse": false,
+      "coresideMapping": "Runtime V2 declarative ops + trusted packs; reject HTML/JS/CDN/iframe forms",
+      "securityNotes": [
+        "Model-generated HTML/JS/CDN applied into document",
+        "Form POST via hidden iframe",
+        "Multiuser routing trusts model cooperation"
+      ],
+      "systems": [
+        "markers",
+        "shell"
+      ]
+    },
+    {
+      "path": "src/debug.ts",
+      "bytes": 12868,
+      "sha256": "b4865bf7423eab8440754df3706b16e1e1f10778cb69bad41629b0ae3b233db8",
+      "purpose": "Debug HTML history views (raw/pretty)",
+      "adaptation": "secure_adaptation_required",
+      "directCodeReuse": false,
+      "coresideMapping": "Developer Mode diagnostics (backend present; inspector UI disconnected)",
+      "securityNotes": [],
+      "systems": [
+        "debug"
+      ]
+    },
+    {
+      "path": "src/env.ts",
+      "bytes": 1191,
+      "sha256": "66800b968913396be9d13b6c1c4e9f0df7df4322db83445ed996b367d26611f9",
+      "purpose": "Worker env typing",
+      "adaptation": "conceptual_only",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": "src/getPrompt.ts",
+      "bytes": 354,
+      "sha256": "f1fda336ccb11fc22292d0a2a86535e5d3a4e3a2abd1ed53d06e9de039ab1a6d",
+      "purpose": "Compose system prompt with HTML/CSS injection",
+      "adaptation": "conceptual_only",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": "src/index.ts",
+      "bytes": 100960,
+      "sha256": "a32d70eeec03fc01359e2d7263756cb054101f55decd9015445d912cb93816e6",
+      "purpose": "Durable Object: WS, forms, queue, forks, stream apply, rate limits",
+      "adaptation": "secure_adaptation_required",
+      "directCodeReuse": false,
+      "coresideMapping": "Runtime V2 declarative ops + trusted packs; reject HTML/JS/CDN/iframe forms",
+      "securityNotes": [
+        "Model-generated HTML/JS/CDN applied into document",
+        "Form POST via hidden iframe",
+        "Multiuser routing trusts model cooperation"
+      ],
+      "systems": [
+        "protocol",
+        "streaming",
+        "forms",
+        "queue",
+        "fork",
+        "replay",
+        "rateLimit",
+        "websocket",
+        "durableObject"
+      ]
+    },
+    {
+      "path": "src/initialPrompt.md",
+      "bytes": 10508,
+      "sha256": "ff166fd69dcc3f799dc124cf76364d8ae2e2629576b4083e90957beab162d62b",
+      "purpose": "Model instructions: HTML forms, markers, CDN, multiuser",
+      "adaptation": "secure_adaptation_required",
+      "directCodeReuse": false,
+      "coresideMapping": "Runtime V2 declarative ops + trusted packs; reject HTML/JS/CDN/iframe forms",
+      "securityNotes": [
+        "Model-generated HTML/JS/CDN applied into document",
+        "Form POST via hidden iframe",
+        "Multiuser routing trusts model cooperation"
+      ],
+      "systems": [
+        "prompt",
+        "htmlInjection",
+        "forms",
+        "cdn",
+        "multiuser"
+      ]
+    },
+    {
+      "path": "src/page.css",
+      "bytes": 2151,
+      "sha256": "95c84da9e8b39bc3cfe1832c4bb8efd21c7867a66ee1bfff1cf30e282b635c91",
+      "purpose": "Light/dark page scheme variables",
+      "adaptation": "conceptual_only",
+      "directCodeReuse": false,
+      "coresideMapping": null,
+      "securityNotes": [],
+      "systems": [
+        "infra"
+      ]
+    },
+    {
+      "path": "src/auth/email.ts",
+      "bytes": 1452,
+      "sha256": "fcf65053fecf9611d96acdf035bf7068b0222faba9099fb401dd684ac6a16c03",
+      "purpose": "Verification email sender",
+      "adaptation": "deferred_enterprise",
+      "directCodeReuse": false,
+      "coresideMapping": "Local consumer; no cloud OAuth in current scope",
+      "securityNotes": [],
+      "systems": [
+        "auth"
+      ]
+    },
+    {
+      "path": "src/auth/profile.ts",
+      "bytes": 877,
+      "sha256": "a959f75d51915b9d78be46aad06c5ea6547ece78148200609f94ff941b2f3f17",
+      "purpose": "Profile consent upsert",
+      "adaptation": "deferred_enterprise",
+      "directCodeReuse": false,
+      "coresideMapping": "Local consumer; no cloud OAuth in current scope",
+      "securityNotes": [],
+      "systems": [
+        "auth"
+      ]
+    },
+    {
+      "path": "src/auth/providers.ts",
+      "bytes": 1722,
+      "sha256": "37b5aa41c78f2f2cf86143b696fadb83634a73c74427b3d4489a4e0c7916fc1d",
+      "purpose": "Auth provider enablement parsing",
+      "adaptation": "deferred_enterprise",
+      "directCodeReuse": false,
+      "coresideMapping": "Local consumer; no cloud OAuth in current scope",
+      "securityNotes": [],
+      "systems": [
+        "auth"
+      ]
+    },
+    {
+      "path": "src/auth/roles.ts",
+      "bytes": 4029,
+      "sha256": "c92d7dd154a78dacfb089405f71a9081c24e360a0c236c5d313c99e81c1ce150",
+      "purpose": "Role permission matrix admin/dev/chat/view/blocked",
+      "adaptation": "deferred_enterprise",
+      "directCodeReuse": false,
+      "coresideMapping": "Local consumer; no cloud OAuth in current scope",
+      "securityNotes": [],
+      "systems": [
+        "auth"
+      ]
+    },
+    {
+      "path": "src/auth/routes.ts",
+      "bytes": 30631,
+      "sha256": "5022126a4bbfcc134985008b26778c6ac0261dbd4122e45180c9ece90db56578",
+      "purpose": "Better-auth HTTP routes and UI pages",
+      "adaptation": "deferred_enterprise",
+      "directCodeReuse": false,
+      "coresideMapping": "Local consumer; no cloud OAuth in current scope",
+      "securityNotes": [],
+      "systems": [
+        "auth"
+      ]
+    },
+    {
+      "path": "src/auth/server.ts",
+      "bytes": 3425,
+      "sha256": "3ea13154707547c70cb5df392820a3667a4a06255b9a52bbb6deb0591e4c8024",
+      "purpose": "betterAuth server construction",
+      "adaptation": "deferred_enterprise",
+      "directCodeReuse": false,
+      "coresideMapping": "Local consumer; no cloud OAuth in current scope",
+      "securityNotes": [],
+      "systems": [
+        "auth"
+      ]
+    }
+  ]
+}

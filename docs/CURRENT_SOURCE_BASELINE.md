@@ -12,20 +12,20 @@
 | --- | --- |
 | Path | `/Users/qunyingfan/Coreside` |
 | Branch | `main` |
-| Commit | `1f5fc88a1d569d32c14e329697964ff01acdd034` |
+| Commit | `41fd4595db420eac8b1c5cc30723f1dd377608f4` |
 | Dirty | Yes (development evidence only) |
-| Source fingerprint | `be0da4e5c7d802cb4dedaf4d1789d4dc114f2022aa5e76fa8ba25e4c7734dc99` |
+| Source fingerprint | `432bd1256464df1daa367b3cd68763973c49d8f21edc2ac3b1a2853a20524536` |
 
 ## Uploaded archive
 
 | Field | Value |
 | --- | --- |
-| Filename | `Coreside Chat AI.zip` |
-| Path | `/Users/qunyingfan/Downloads/Coreside Chat AI.zip` |
-| Expected SHA-256 | `907a21f13ccbea5d7cbf7793bb5cb53098fa72836756b8f4c9a15569ef7c88c4` |
-| Observed SHA-256 | `907a21f13ccbea5d7cbf7793bb5cb53098fa72836756b8f4c9a15569ef7c88c4` |
+| Filename | `Coreside main.zip` |
+| Path | `/Users/qunyingfan/Downloads/Coreside main.zip` |
+| Expected SHA-256 | `ec8292249b58b565abef72baf285e36adce0ddea0059931166702d4ccf9bd228` |
+| Observed SHA-256 | `ec8292249b58b565abef72baf285e36adce0ddea0059931166702d4ccf9bd228` |
 | Status | **present_hash_match** |
-| Supersedes | `dd1370465031e1cf4e4e7317eed37f03301ec49ece5ca6135a439042dd1dcccb` (prior expected / unavailable baseline) |
+| Supersedes | `907a21f13ccbea5d7cbf7793bb5cb53098fa72836756b8f4c9a15569ef7c88c4` (prior expected / unavailable baseline) |
 
 ## Lockfiles
 
@@ -49,20 +49,20 @@
 | Metric | Active |
 | --- | --- |
 | `src` files | 149 |
-| Rust `.rs` | 173 |
+| Rust `.rs` | 175 |
 | Migrations | 16 |
 | E2E specs | 11 |
 | Tauri commands | 211 |
-| Fingerprint files | 601 |
+| Fingerprint files | 603 |
 
 ## Archive vs active
 
 | Metric | Count |
 | --- | --- |
 | Comparison status | compared |
-| Only in active | 0 |
+| Only in active | 2 |
 | Only in archive | 0 |
-| Changed | 17 |
+| Changed | 19 |
 
 ## Generation command
 
@@ -75,3 +75,4 @@ Reports:
 - `reports/current-source-baseline.json`
 - `reports/current-source-fingerprint.json`
 - `reports/active-versus-uploaded-coreside.json`
+- `reports/report-freshness-inventory.json`

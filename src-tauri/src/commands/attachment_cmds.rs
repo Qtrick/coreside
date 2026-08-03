@@ -423,18 +423,7 @@ pub fn assert_staged_attachments_ready(
                 "Attachment is not available to attach",
             ));
         }
-        let name = Path::new(&storage_key)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| CommandError::new("invalid", "Invalid attachment storage key"))?;
-        if name != storage_key
-            || name.contains("..")
-            || name.contains('/')
-            || name.contains('\\')
-            || name.contains('\0')
-        {
-            return Err(CommandError::new("invalid", "Invalid attachment storage key"));
-        }
+        let name = validated_storage_file_name(&storage_key)?;
         if !durable_root.join(name).exists() && !staging_root.join(name).exists() {
             return Err(CommandError::new(
                 "not_found",
@@ -445,154 +434,351 @@ pub fn assert_staged_attachments_ready(
     Ok(())
 }
 
-/// Resolve staged attachments by opaque id, promote into durable storage, and mark
-/// backup-eligible. Frontend-supplied name/mime/size/filename are ignored.
-pub fn bind_attachments_to_message(
-    state: &AppState,
+fn validated_storage_file_name(storage_key: &str) -> Result<&str, CommandError> {
+    let name = Path::new(storage_key)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| CommandError::new("invalid", "Invalid attachment storage key"))?;
+    if name != storage_key
+        || name.contains("..")
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0')
+    {
+        return Err(CommandError::new("invalid", "Invalid attachment storage key"));
+    }
+    Ok(name)
+}
+
+fn promote_attachment_file(storage_key: &str) -> Result<(), CommandError> {
+    let name = validated_storage_file_name(storage_key)?;
+    let (durable_root, staging_root) = attachments_paths()?;
+    let durable_path = durable_root.join(name);
+    let staging_path = staging_root.join(name);
+    if durable_path.exists() {
+        // Crash/copy window may leave a staging duplicate — durable wins.
+        if staging_path.exists() {
+            let _ = std::fs::remove_file(&staging_path);
+        }
+        return Ok(());
+    }
+    if !staging_path.exists() {
+        return Err(CommandError::new(
+            "not_found",
+            "Attachment file missing from staging",
+        ));
+    }
+    std::fs::rename(&staging_path, &durable_path)
+        .or_else(|_| {
+            std::fs::copy(&staging_path, &durable_path).and_then(|_| std::fs::remove_file(&staging_path))
+        })
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&durable_path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+fn demote_attachment_file(storage_key: &str) -> Result<(), CommandError> {
+    let name = validated_storage_file_name(storage_key)?;
+    let (durable_root, staging_root) = attachments_paths()?;
+    let durable_path = durable_root.join(name);
+    let staging_path = staging_root.join(name);
+    if staging_path.exists() {
+        // Incomplete promote (copy ok, staging delete failed) can leave both copies.
+        // Staging is authoritative after demote — drop the durable duplicate.
+        if durable_path.exists() {
+            let _ = std::fs::remove_file(&durable_path);
+        }
+        return Ok(());
+    }
+    if !durable_path.exists() {
+        return Ok(());
+    }
+    std::fs::rename(&durable_path, &staging_path)
+        .or_else(|_| {
+            std::fs::copy(&durable_path, &staging_path).and_then(|_| std::fs::remove_file(&durable_path))
+        })
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+    Ok(())
+}
+
+struct ClaimedAttachment {
+    id: String,
+    storage_key: String,
+    display_name: String,
+    mime: String,
+    byte_size: i64,
+    already_bound: bool,
+}
+
+fn claim_attachment_row(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    message_id: &str,
+    id: &str,
+) -> Result<ClaimedAttachment, CommandError> {
+    let (storage_key, display_name, mime, byte_size, att_state, existing_message): (
+        String,
+        String,
+        String,
+        i64,
+        String,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT storage_key, display_name, detected_mime, byte_size, state, message_id
+             FROM chat_attachments
+             WHERE id = ?1 AND deleted_at IS NULL",
+            rusqlite::params![id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .map_err(|_| CommandError::new("not_found", "Attachment not found"))?;
+
+    if att_state == "attached" && existing_message.as_deref() == Some(message_id) {
+        let _ = validated_storage_file_name(&storage_key)?;
+        return Ok(ClaimedAttachment {
+            id: id.to_string(),
+            storage_key,
+            display_name,
+            mime,
+            byte_size,
+            already_bound: true,
+        });
+    }
+    if att_state != "staged" {
+        return Err(CommandError::new(
+            "invalid",
+            "Attachment is not available to attach",
+        ));
+    }
+    let name = validated_storage_file_name(&storage_key)?;
+    // Fail closed before flipping state so we never mark attached without a file.
+    let (durable_root, staging_root) = attachments_paths()?;
+    if !durable_root.join(name).exists() && !staging_root.join(name).exists() {
+        return Err(CommandError::new(
+            "not_found",
+            "Attachment file missing from staging",
+        ));
+    }
+
+    let updated = conn
+        .execute(
+            "UPDATE chat_attachments
+             SET conversation_id = ?1,
+                 message_id = ?2,
+                 state = 'attached',
+                 backup_eligible = 1,
+                 expires_at = NULL,
+                 updated_at = datetime('now')
+             WHERE id = ?3 AND deleted_at IS NULL AND state = 'staged'",
+            rusqlite::params![conversation_id, message_id, id],
+        )
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+    if updated != 1 {
+        return Err(CommandError::new(
+            "invalid",
+            "Attachment is not available to attach",
+        ));
+    }
+
+    Ok(ClaimedAttachment {
+        id: id.to_string(),
+        storage_key,
+        display_name,
+        mime,
+        byte_size,
+        already_bound: false,
+    })
+}
+
+fn unclaim_attachment_rows(
+    conn: &rusqlite::Connection,
+    message_id: &str,
+    ids: &[String],
+) -> Result<(), CommandError> {
+    for id in ids {
+        conn.execute(
+            "UPDATE chat_attachments
+             SET conversation_id = NULL,
+                 message_id = NULL,
+                 state = 'staged',
+                 backup_eligible = 0,
+                 expires_at = datetime('now', '+24 hours'),
+                 updated_at = datetime('now')
+             WHERE id = ?1 AND message_id = ?2 AND state = 'attached' AND deleted_at IS NULL",
+            rusqlite::params![id, message_id],
+        )
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+    }
+    Ok(())
+}
+
+/// Roll back attachment claims for a message that is being deleted after a failed
+/// commit. Demotes durable files back to staging when present.
+pub fn unbind_attachments_from_message(
+    db: &mut crate::db::Database,
+    message_id: &str,
+    attachment_ids: &[String],
+) -> Result<(), CommandError> {
+    if attachment_ids.is_empty() {
+        return Ok(());
+    }
+    let mut storage_keys = Vec::with_capacity(attachment_ids.len());
+    {
+        let conn = db.conn();
+        for id in attachment_ids {
+            let key: Result<String, rusqlite::Error> = conn.query_row(
+                "SELECT storage_key FROM chat_attachments
+                 WHERE id = ?1 AND message_id = ?2 AND state = 'attached' AND deleted_at IS NULL",
+                rusqlite::params![id, message_id],
+                |row| row.get(0),
+            );
+            if let Ok(key) = key {
+                storage_keys.push(key);
+            }
+        }
+        unclaim_attachment_rows(conn, message_id, attachment_ids)?;
+    }
+    for key in storage_keys {
+        let _ = demote_attachment_file(&key);
+    }
+    Ok(())
+}
+
+/// Result of claiming attachment rows before filesystem promotion.
+pub struct AttachmentClaimResult {
+    pub attachments: Vec<TrustedAttachmentMeta>,
+    /// Storage keys that still need staging→durable promotion.
+    pub promote_keys: Vec<String>,
+    /// Newly claimed ids (not already bound); revert these on promote failure.
+    pub new_claim_ids: Vec<String>,
+}
+
+/// Claim staged attachment rows on an existing connection/transaction.
+/// Prefer wrapping message insert + this claim + metadata in one BEGIN/COMMIT.
+pub fn claim_attachments_on_conn(
+    conn: &rusqlite::Connection,
     conversation_id: &str,
     message_id: &str,
     attachment_ids: &[String],
-) -> Result<Vec<TrustedAttachmentMeta>, CommandError> {
+) -> Result<AttachmentClaimResult, CommandError> {
     if attachment_ids.is_empty() {
-        return Ok(Vec::new());
+        return Ok(AttachmentClaimResult {
+            attachments: Vec::new(),
+            promote_keys: Vec::new(),
+            new_claim_ids: Vec::new(),
+        });
     }
     if attachment_ids.len() > MAX_ATTACHMENTS_PER_MESSAGE {
         return Err(CommandError::new("invalid", "Too many attachments"));
     }
+
     let mut seen = std::collections::HashSet::new();
-    for id in attachment_ids {
-        let id = id.trim();
+    let mut claimed: Vec<ClaimedAttachment> = Vec::with_capacity(attachment_ids.len());
+    for raw_id in attachment_ids {
+        let id = raw_id.trim();
         if !is_safe_attachment_id(id) {
             return Err(CommandError::new("invalid", "Invalid attachment id"));
         }
         if !seen.insert(id.to_string()) {
             return Err(CommandError::new("invalid", "Duplicate attachment id"));
         }
+        claimed.push(claim_attachment_row(
+            conn,
+            conversation_id,
+            message_id,
+            id,
+        )?);
     }
 
-    let (durable_root, staging_root) = attachments_paths()?;
-    let mut out = Vec::with_capacity(attachment_ids.len());
-
-    {
-        let db = state.db.lock();
-        for raw_id in attachment_ids {
-            let id = raw_id.trim();
-            let (storage_key, display_name, mime, byte_size, att_state, existing_message): (
-                String,
-                String,
-                String,
-                i64,
-                String,
-                Option<String>,
-            ) = db
-                .conn()
-                .query_row(
-                    "SELECT storage_key, display_name, detected_mime, byte_size, state, message_id
-                     FROM chat_attachments
-                     WHERE id = ?1 AND deleted_at IS NULL",
-                    rusqlite::params![id],
-                    |row| {
-                        Ok((
-                            row.get(0)?,
-                            row.get(1)?,
-                            row.get(2)?,
-                            row.get(3)?,
-                            row.get(4)?,
-                            row.get(5)?,
-                        ))
-                    },
-                )
-                .map_err(|_| CommandError::new("not_found", "Attachment not found"))?;
-
-            if att_state == "attached" && existing_message.as_deref() == Some(message_id) {
-                out.push(TrustedAttachmentMeta {
-                    id: id.to_string(),
-                    name: display_name,
-                    mime_type: mime,
-                    byte_size,
-                });
-                continue;
-            }
-            if att_state != "staged" {
-                return Err(CommandError::new(
-                    "invalid",
-                    "Attachment is not available to attach",
-                ));
-            }
-
-            let name = Path::new(&storage_key)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| CommandError::new("invalid", "Invalid attachment storage key"))?;
-            if name != storage_key
-                || name.contains("..")
-                || name.contains('/')
-                || name.contains('\\')
-                || name.contains('\0')
-            {
-                return Err(CommandError::new("invalid", "Invalid attachment storage key"));
-            }
-
-            let durable_path = durable_root.join(name);
-            let staging_path = staging_root.join(name);
-            if !durable_path.exists() {
-                if !staging_path.exists() {
-                    return Err(CommandError::new(
-                        "not_found",
-                        "Attachment file missing from staging",
-                    ));
-                }
-                std::fs::rename(&staging_path, &durable_path)
-                    .or_else(|_| {
-                        std::fs::copy(&staging_path, &durable_path)
-                            .and_then(|_| std::fs::remove_file(&staging_path))
-                    })
-                    .map_err(|e| {
-                        CommandError::new("storage", sanitize_error(&e.to_string(), None))
-                    })?;
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ = std::fs::set_permissions(
-                        &durable_path,
-                        std::fs::Permissions::from_mode(0o600),
-                    );
-                }
-            }
-
-            let updated = db
-                .conn()
-                .execute(
-                    "UPDATE chat_attachments
-                     SET conversation_id = ?1,
-                         message_id = ?2,
-                         state = 'attached',
-                         backup_eligible = 1,
-                         expires_at = NULL,
-                         updated_at = datetime('now')
-                     WHERE id = ?3 AND deleted_at IS NULL AND state = 'staged'",
-                    rusqlite::params![conversation_id, message_id, id],
-                )
-                .map_err(|e| {
-                    CommandError::new("storage", sanitize_error(&e.to_string(), None))
-                })?;
-            if updated != 1 {
-                return Err(CommandError::new(
-                    "invalid",
-                    "Attachment is not available to attach",
-                ));
-            }
-
-            out.push(TrustedAttachmentMeta {
-                id: id.to_string(),
-                name: display_name,
-                mime_type: mime,
-                byte_size,
-            });
+    let mut promote_keys = Vec::new();
+    let mut new_claim_ids = Vec::new();
+    let mut attachments = Vec::with_capacity(claimed.len());
+    for row in claimed {
+        // Always ensure durable promotion — including already_bound rows whose
+        // prior attempt may have crashed after claim but before rename.
+        promote_keys.push(row.storage_key.clone());
+        if !row.already_bound {
+            new_claim_ids.push(row.id.clone());
         }
+        attachments.push(TrustedAttachmentMeta {
+            id: row.id,
+            name: row.display_name,
+            mime_type: row.mime,
+            byte_size: row.byte_size,
+        });
     }
 
-    Ok(out)
+    Ok(AttachmentClaimResult {
+        attachments,
+        promote_keys,
+        new_claim_ids,
+    })
+}
+
+/// Claim staged attachment rows for a message (DB only), in a dedicated transaction.
+/// Prefer `claim_attachments_on_conn` inside a broader insert+claim+metadata transaction.
+pub fn claim_attachments_on_db(
+    db: &crate::db::Database,
+    conversation_id: &str,
+    message_id: &str,
+    attachment_ids: &[String],
+) -> Result<AttachmentClaimResult, CommandError> {
+    let tx = db.conn().unchecked_transaction().map_err(|e| {
+        CommandError::new("storage", sanitize_error(&e.to_string(), None))
+    })?;
+    let claimed = claim_attachments_on_conn(&tx, conversation_id, message_id, attachment_ids)?;
+    tx.commit()
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+    Ok(claimed)
+}
+
+/// Promote claimed attachment files. On failure, demotes any files already moved.
+pub fn promote_claimed_attachment_files(storage_keys: &[String]) -> Result<(), CommandError> {
+    let mut promoted: Vec<String> = Vec::new();
+    for key in storage_keys {
+        if let Err(err) = promote_attachment_file(key) {
+            for done in promoted.iter().rev() {
+                let _ = demote_attachment_file(done.as_str());
+            }
+            return Err(err);
+        }
+        promoted.push(key.clone());
+    }
+    Ok(())
+}
+
+/// Resolve staged attachments by opaque id, claim rows first (affected-row guard),
+/// then promote into durable storage. Frontend-supplied name/mime/size/filename are ignored.
+/// On failure, newly claimed rows are unclaimed and promoted files are demoted.
+pub fn bind_attachments_to_message(
+    state: &AppState,
+    conversation_id: &str,
+    message_id: &str,
+    attachment_ids: &[String],
+) -> Result<Vec<TrustedAttachmentMeta>, CommandError> {
+    let claimed = {
+        let db = state.db.lock();
+        claim_attachments_on_db(&db, conversation_id, message_id, attachment_ids)?
+    };
+    if let Err(err) = promote_claimed_attachment_files(&claimed.promote_keys) {
+        let mut db = state.db.lock();
+        let _ = unbind_attachments_from_message(&mut db, message_id, &claimed.new_claim_ids);
+        return Err(err);
+    }
+    Ok(claimed.attachments)
 }
 
 #[tauri::command]
@@ -602,30 +788,27 @@ pub fn get_chat_attachment_src(
     local_filename: Option<String>,
 ) -> Result<AttachmentSrc, CommandError> {
     state.require_profile()?;
-    let db = state.db.lock();
+    // Storage keys are not an accepted public contract — opaque id only.
+    if local_filename
+        .as_ref()
+        .is_some_and(|s| !s.trim().is_empty())
+    {
+        return Err(CommandError::new(
+            "invalid",
+            "Attachment id required; storage keys are not accepted",
+        ));
+    }
     let id = if let Some(id) = attachment_id.filter(|s| !s.trim().is_empty()) {
         let id = id.trim().to_string();
         if !is_safe_attachment_id(&id) {
             return Err(CommandError::new("invalid", "Invalid attachment id"));
         }
         id
-    } else if let Some(name) = local_filename.filter(|s| !s.trim().is_empty()) {
-        // Legacy callers may pass storage_key; resolve to opaque ID.
-        let key = Path::new(name.trim())
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| CommandError::new("invalid", "Invalid attachment filename"))?;
-        db.conn()
-            .query_row(
-                "SELECT id FROM chat_attachments WHERE storage_key = ?1 AND deleted_at IS NULL LIMIT 1",
-                rusqlite::params![key],
-                |row| row.get::<_, String>(0),
-            )
-            .map_err(|_| CommandError::new("not_found", "Attachment not found"))?
     } else {
         return Err(CommandError::new("invalid", "Attachment id required"));
     };
 
+    let db = state.db.lock();
     let (state_s, _key): (String, String) = db
         .conn()
         .query_row(
@@ -656,6 +839,28 @@ pub fn cancel_chat_attachment(
 ) -> Result<(), CommandError> {
     state.require_profile()?;
     cancel_staged_attachment_ids(&state, &[attachment_id])
+}
+
+/// Best-effort release for queue cancel/remove/failed-drain cleanup.
+/// Skips missing and already-committed ids so attached message files are preserved.
+pub fn release_staged_attachment_ids_best_effort(state: &AppState, attachment_ids: &[String]) {
+    for raw_id in attachment_ids {
+        let id = raw_id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        if let Err(err) = cancel_staged_attachment_ids(state, &[id.to_string()]) {
+            // Committed / unavailable rows are expected when the turn already bound them.
+            if err.code == "invalid" || err.code == "not_found" {
+                continue;
+            }
+            tracing::warn!(
+                attachment_id = %id,
+                error = %err.message,
+                "best-effort staged attachment release failed"
+            );
+        }
+    }
 }
 
 /// Cancel multiple staged attachments by opaque id. Skips unknown ids; fails closed
@@ -701,18 +906,7 @@ pub fn cancel_staged_attachment_ids(
                 "Attachment is not available to cancel",
             ));
         }
-        let name = Path::new(&storage_key)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| CommandError::new("invalid", "Invalid attachment storage key"))?;
-        if name != storage_key
-            || name.contains("..")
-            || name.contains('/')
-            || name.contains('\\')
-            || name.contains('\0')
-        {
-            return Err(CommandError::new("invalid", "Invalid attachment storage key"));
-        }
+        let name = validated_storage_file_name(&storage_key)?;
         let updated = db
             .conn()
             .execute(
@@ -787,18 +981,7 @@ pub fn read_attachment_bytes_for_protocol(
     ) {
         return Err("attachment not available".into());
     }
-    let name = Path::new(&storage_key)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| "invalid storage key".to_string())?;
-    if name != storage_key
-        || name.contains("..")
-        || name.contains('/')
-        || name.contains('\\')
-        || name.contains('\0')
-    {
-        return Err("invalid storage key".into());
-    }
+    let name = validated_storage_file_name(&storage_key).map_err(|e| e.message)?;
     let paths = AppPaths::resolve().map_err(|e| e.to_string())?;
     for root in [&paths.attachment_staging, &paths.attachments] {
         let candidate = root.join(name);
@@ -813,6 +996,120 @@ pub fn read_attachment_bytes_for_protocol(
         }
     }
     Err("attachment file missing".into())
+}
+
+/// Bounded startup/periodic GC for expired staged attachments and orphaned rows.
+/// Does not delete committed (`attached`) message files.
+pub fn reconcile_and_sweep_attachments(state: &AppState) -> Result<AttachmentSweepReport, CommandError> {
+    state.require_profile()?;
+    let (durable_root, staging_root) = attachments_paths()?;
+    const MAX_ROWS: usize = 200;
+    let mut report = AttachmentSweepReport::default();
+
+    let expired_rows: Vec<(String, String)> = {
+        let db = state.db.lock();
+        let mut stmt = db
+            .conn()
+            .prepare(
+                "SELECT id, storage_key FROM chat_attachments
+                 WHERE deleted_at IS NULL
+                   AND state IN ('staged', 'failed', 'cancelled', 'expired')
+                   AND expires_at IS NOT NULL
+                   AND expires_at < datetime('now')
+                 LIMIT ?1",
+            )
+            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+        let rows = stmt
+            .query_map(rusqlite::params![MAX_ROWS as i64], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+        rows.filter_map(Result::ok).collect()
+    };
+
+    for (id, storage_key) in expired_rows {
+        if !is_safe_attachment_id(&id) {
+            continue;
+        }
+        let Ok(name) = validated_storage_file_name(&storage_key) else {
+            continue;
+        };
+        {
+            let db = state.db.lock();
+            let updated = db
+                .conn()
+                .execute(
+                    "UPDATE chat_attachments
+                     SET state = 'expired',
+                         backup_eligible = 0,
+                         deleted_at = datetime('now'),
+                         updated_at = datetime('now')
+                     WHERE id = ?1
+                       AND state IN ('staged', 'failed', 'cancelled', 'expired')
+                       AND message_id IS NULL
+                       AND deleted_at IS NULL",
+                    rusqlite::params![id],
+                )
+                .unwrap_or(0);
+            if updated != 1 {
+                continue;
+            }
+        }
+        let _ = std::fs::remove_file(staging_root.join(name));
+        let _ = std::fs::remove_file(durable_root.join(name));
+        report.expired += 1;
+    }
+
+    // Reconcile: attached rows whose durable file is missing (diagnostic only).
+    let attached_keys: Vec<(String, String)> = {
+        let db = state.db.lock();
+        let mut stmt = db
+            .conn()
+            .prepare(
+                "SELECT id, storage_key FROM chat_attachments
+                 WHERE state = 'attached' AND deleted_at IS NULL
+                 LIMIT ?1",
+            )
+            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+        let rows = stmt
+            .query_map(rusqlite::params![MAX_ROWS as i64], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+        rows.filter_map(Result::ok).collect()
+    };
+    for (id, storage_key) in attached_keys {
+        let Ok(name) = validated_storage_file_name(&storage_key) else {
+            report.missing_durable += 1;
+            continue;
+        };
+        let in_durable = durable_root.join(name).exists();
+        let in_staging = staging_root.join(name).exists();
+        if !in_durable && !in_staging {
+            report.missing_durable += 1;
+            tracing::warn!(attachment_id = %id, "attached attachment file missing from managed roots");
+        } else if !in_durable && in_staging {
+            // Crash window after claim / before promote — heal by promoting.
+            if std::fs::rename(staging_root.join(name), durable_root.join(name)).is_ok()
+                || (std::fs::copy(staging_root.join(name), durable_root.join(name)).is_ok()
+                    && std::fs::remove_file(staging_root.join(name)).is_ok())
+            {
+                report.promoted_orphans += 1;
+            } else {
+                report.missing_durable += 1;
+            }
+        }
+    }
+
+    Ok(report)
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentSweepReport {
+    pub expired: u64,
+    pub missing_durable: u64,
+    pub promoted_orphans: u64,
 }
 
 #[cfg(test)]

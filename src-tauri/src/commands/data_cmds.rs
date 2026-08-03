@@ -670,20 +670,24 @@ pub fn get_storage_summary(state: State<'_, AppState>) -> Result<StorageSummary,
             profile_ready: false,
         });
     }
-    let db = state.db.lock();
-    let chat_count: u64 = db
-        .conn()
-        .query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))
-        .unwrap_or(0);
-    let tool_count: u64 = db
-        .conn()
-        .query_row("SELECT COUNT(*) FROM tools", [], |r| r.get(0))
-        .unwrap_or(0);
-    let project_count: u64 = db
-        .conn()
-        .query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))
-        .unwrap_or(0);
-    let database_bytes = std::fs::metadata(db.path()).ok().map(|m| m.len());
+    // Hold the DB mutex only for cheap queries + path metadata — never for recursive FS walks.
+    let (chat_count, tool_count, project_count, database_bytes) = {
+        let db = state.db.lock();
+        let chat_count: u64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))
+            .unwrap_or(0);
+        let tool_count: u64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM tools", [], |r| r.get(0))
+            .unwrap_or(0);
+        let project_count: u64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))
+            .unwrap_or(0);
+        let database_bytes = std::fs::metadata(db.path()).ok().map(|m| m.len());
+        (chat_count, tool_count, project_count, database_bytes)
+    };
     let paths = AppPaths::resolve().ok();
     let backup_bytes = paths.as_ref().and_then(|p| dir_size(&p.backups));
     let media_bytes = paths.as_ref().and_then(|p| dir_size(&p.media));

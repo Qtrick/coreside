@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-03T19:48:00Z",
+  "commit": "41fd4595db420eac8b1c5cc30723f1dd377608f4",
+  "dirty": true,
+  "sourceFingerprint": "3306d5de459be8d661c52e0101b70d956c2218f841bacafdbedb6ebb6acf9f41",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "command": "manual:partial-update-current-gap-audit-2026",
+  "exitStatus": 0,
+  "accessDate": "2026-08-03",
+  "phase": "RC3-partial-update-reaudit",
+  "publicBeta": "Not ready",
+  "localFirst": "Not ready",
+  "hostedAi": "Not ready",
+  "julyAuditsSuperseded": [
+    "docs/PARTIAL_UPDATE_EXHAUSTIVE_AUDIT.md",
+    "docs/PARTIAL_UPDATE_FEATURE_MATRIX.md",
+    "docs/PARTIAL_UPDATE_FINAL_GAP_AUDIT.md",
+    "docs/PARTIAL_UPDATE_FILE_ANALYSIS.md",
+    "reports/partial-update-feature-matrix.json",
+    "reports/partial-update-final-gap-audit.json",
+    "reports/partial-update-file-manifest.json"
+  ],
+  "julyStatusPolicy": "Treat July Coreside status claims as stale unless re-proven against commit 41fd4595 + dirty tree evidence",
+  "gapCount": 9,
+  "gaps": [
+    {
+      "id": "G-STREAM",
+      "system": "true_provider_streaming",
+      "severity": "P0",
+      "status": "absent",
+      "evidence": [
+        "src-tauri/src/ai/provider.rs AiProvider::chat only",
+        "message_cmds.rs emit_text_fluidly post-hoc",
+        "streaming.rs NdjsonFrameParser not fed by providers"
+      ],
+      "julyClaim": "PU-STREAM implemented_differently / progressive NDJSON complete_but_unverified",
+      "julyClaimVerdict": "stale_overclaim",
+      "requiredWork": "Stream trait + provider adapters + message_cmds wiring + E2E proof",
+      "releaseBlocker": true
+    },
+    {
+      "id": "G-FORMS-LEDGER",
+      "system": "forms_context_ledger_prompt",
+      "severity": "P0",
+      "status": "partial",
+      "evidence": [
+        "InlineSurface.tsx appendContextLedger then sendMessage(summary)",
+        "ToolCanvas.tsx same",
+        "message_cmds.rs no list_context_ledger in prompt path"
+      ],
+      "julyClaim": "PU-FORMS implemented_differently; context ledgers complete_but_unverified",
+      "julyClaimVerdict": "stale_overclaim",
+      "requiredWork": "Inject model_context_only ledger into build_agent_prompt; tests for values visibility",
+      "releaseBlocker": true
+    },
+    {
+      "id": "G-BRANCH-UI",
+      "system": "branch_ui",
+      "severity": "P1",
+      "status": "disconnected",
+      "evidence": [
+        "branch.rs + api.branchConversation/listBranches",
+        "rg finds no src/components usage"
+      ],
+      "julyClaim": "CS-BRANCH missing_high_value / forks implemented_differently",
+      "julyClaimVerdict": "backend_exists_product_gap",
+      "requiredWork": "Branch create/list/switch UI",
+      "releaseBlocker": false
+    },
+    {
+      "id": "G-REPLAY-UI",
+      "system": "replay_ui",
+      "severity": "P1",
+      "status": "disconnected",
+      "evidence": [
+        "transactions APIs",
+        "no replay player component"
+      ],
+      "julyClaim": "PU-REPLAY partially_implemented",
+      "julyClaimVerdict": "stale_toward_disconnected",
+      "requiredWork": "Paced replay player on trusted transactions",
+      "releaseBlocker": false
+    },
+    {
+      "id": "G-INSPECTOR-UI",
+      "system": "inspector_ui",
+      "severity": "P1",
+      "status": "disconnected",
+      "evidence": [
+        "Developer Mode checkbox in AiProviderSettings",
+        "no inspector panel"
+      ],
+      "julyClaim": "CS-INSPECTOR partially_implemented",
+      "julyClaimVerdict": "partial_toggle_only",
+      "requiredWork": "Redacted inspector UI",
+      "releaseBlocker": false
+    },
+    {
+      "id": "G-QUEUE-UI",
+      "system": "queue_ui",
+      "severity": "P1",
+      "status": "disconnected",
+      "evidence": [
+        "queue.rs + listAgentQueue API",
+        "no components UI"
+      ],
+      "julyClaim": "CS-QUEUE missing_high_value / PU-QUEUE implemented_differently",
+      "julyClaimVerdict": "backend_exists_product_gap",
+      "requiredWork": "Queue list/cancel/remove UI",
+      "releaseBlocker": false
+    },
+    {
+      "id": "G-HTML-JS-CDN",
+      "system": "unsafe_generative_execution",
+      "severity": "P0-reject",
+      "status": "deliberately-rejected",
+      "evidence": [
+        "Packs-only architecture",
+        "product rules reject HTML/JS/CDN/iframe forms"
+      ],
+      "julyClaim": "rejected_security",
+      "julyClaimVerdict": "still_correct",
+      "requiredWork": "Maintain rejection; adversarial tests",
+      "releaseBlocker": false
+    },
+    {
+      "id": "G-ATTACHMENT-ATOMIC",
+      "system": "attachment_message_commit",
+      "severity": "P0",
+      "status": "started",
+      "evidence": [
+        "Dirty attachment_cmds claim_attachments_on_conn",
+        "message_cmds uses claim path"
+      ],
+      "julyClaim": "N/A (RC3)",
+      "julyClaimVerdict": "n/a",
+      "requiredWork": "Complete all-or-none commit + crash reconciliation proof",
+      "releaseBlocker": true
+    },
+    {
+      "id": "G-PROVIDER-BOUNDS",
+      "system": "provider_response_bounds",
+      "severity": "P0",
+      "status": "started",
+      "evidence": [
+        "New http_limits.rs used by openai/anthropic/gemini/openrouter/hosted"
+      ],
+      "julyClaim": "N/A",
+      "julyClaimVerdict": "n/a",
+      "requiredWork": "Health/catalog/error body limits + streaming backpressure when stream lands",
+      "releaseBlocker": true
+    }
+  ],
+  "readiness": {
+    "publicBeta": "Not ready",
+    "localFirst": "Not ready",
+    "hostedAi": "Not ready",
+    "trueStreaming": "absent",
+    "formsLedgerInPrompt": "absent",
+    "branchReplayInspectorQueueUi": "largely_disconnected"
+  }
+}

@@ -92,12 +92,13 @@ impl OpenRouterProvider {
         };
 
         let status = response.status();
-        let text = tokio::select! {
-            _ = cancel.cancelled() => return Err(AiError::Cancelled),
-            result = response.text() => {
-                result.map_err(|e| AiError::Http(redact_secrets(&e.to_string(), Some(&self.api_key))))?
-            }
-        };
+        let text = super::http_limits::read_response_text_bounded(
+            response,
+            &cancel,
+            super::http_limits::MAX_PROVIDER_RESPONSE_BYTES,
+            Some(&self.api_key),
+        )
+        .await?;
 
         if cancel.is_cancelled() {
             return Err(AiError::Cancelled);

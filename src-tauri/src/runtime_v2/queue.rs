@@ -155,11 +155,22 @@ pub fn complete(db: &mut Database, id: &str, error: Option<&str>) -> DbResult<Qu
 
 pub fn cancel(db: &mut Database, id: &str) -> DbResult<QueueItem> {
     let now = now_rfc3339();
-    db.conn().execute(
+    // Only queued items: cancelling an active item races with drain/bind and can
+    // release staged attachments that the live turn already claimed.
+    let n = db.conn().execute(
         "UPDATE agent_request_queue SET status = 'cancelled', finished_at = ?1 WHERE id = ?2
-         AND status IN ('queued', 'active')",
+         AND status = 'queued'",
         params![now, id],
     )?;
+    if n == 0 {
+        let item = get_item(db, id)?;
+        if item.status == "cancelled" {
+            return Ok(item);
+        }
+        return Err(DbError::Invalid(
+            "only queued turns can be cancelled".into(),
+        ));
+    }
     get_item(db, id)
 }
 
@@ -218,5 +229,19 @@ mod tests {
 
         let again = activate_next(&mut db, &conv.id).unwrap().expect("after requeue");
         assert_eq!(again.id, a.id);
+    }
+
+    #[test]
+    fn cancel_rejects_active_items() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Queue", None).unwrap();
+        let a = enqueue(&mut db, &conv.id, &json!({"content": "one"}), 100).unwrap();
+        let active = activate_next(&mut db, &conv.id).unwrap().expect("active");
+        assert_eq!(active.id, a.id);
+        let err = cancel(&mut db, &a.id).unwrap_err();
+        assert!(matches!(err, DbError::Invalid(_)));
+        let queued = enqueue(&mut db, &conv.id, &json!({"content": "two"}), 100).unwrap();
+        let cancelled = cancel(&mut db, &queued.id).unwrap();
+        assert_eq!(cancelled.status, "cancelled");
     }
 }

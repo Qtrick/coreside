@@ -7,6 +7,7 @@ mod capability_registry;
 mod errors;
 mod gemini;
 mod hosted_provider;
+mod http_limits;
 mod mock;
 mod openai;
 mod openrouter;
@@ -28,7 +29,11 @@ pub use mock::MockAiProvider;
 pub use openai::OpenAiProvider;
 pub use openrouter::OpenRouterProvider;
 pub use prompt_builder::{build_agent_prompt_with_references, PROMPT_VERSION};
-pub use provider::{AgentMessage, AgentRequest, AiProvider, ProviderHealth};
+#[allow(unused_imports)] // Stream types are the public foundation for Phase 7 wiring.
+pub use provider::{
+    AgentMessage, AgentRequest, AgentResponse, AiProvider, ProviderHealth, ProviderStreamEvent,
+    ProviderStreamRx, ProviderStreamTx, UsageMetadata,
+};
 pub use response_parser::{parse_agent_response, ParsedAgentResponse};
 pub use response_schema::{
     layout_type_string, ResponseType, SourceCitation, ToolAction, ToolChangePayload, ToolComponent,

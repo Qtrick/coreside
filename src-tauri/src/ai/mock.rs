@@ -305,6 +305,7 @@ mod tests {
                     content: "Create a simple water tracker".into(),
                 }],
                 cancel: CancellationToken::new(),
+                idempotency_key: None,
             })
             .await
             .unwrap();
@@ -336,6 +337,7 @@ mod tests {
                     content: "Create a geography quiz".into(),
                 }],
                 cancel: CancellationToken::new(),
+                idempotency_key: None,
             })
             .await
             .unwrap();

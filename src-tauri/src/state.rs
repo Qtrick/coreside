@@ -93,7 +93,16 @@ impl AppState {
         &self,
         operation_type: &str,
     ) -> Result<String, crate::commands::CommandError> {
-        self.maintenance.lock().begin(operation_type)
+        let id = self.maintenance.lock().begin(operation_type)?;
+        if let Ok(paths) = crate::app_paths::AppPaths::resolve() {
+            let mut journal = crate::maintenance_journal::MaintenanceJournal::new(operation_type);
+            journal.operation_id = id.clone();
+            if let Err(err) = crate::maintenance_journal::persist_journal(&paths, &journal) {
+                let _ = self.maintenance.lock().clear(&id);
+                return Err(err);
+            }
+        }
+        Ok(id)
     }
 
     pub fn set_maintenance_stage(
@@ -101,14 +110,31 @@ impl AppState {
         operation_id: &str,
         stage: MaintenanceStage,
     ) -> Result<(), crate::commands::CommandError> {
-        self.maintenance.lock().set_stage(operation_id, stage)
+        self.maintenance.lock().set_stage(operation_id, stage)?;
+        if let Ok(paths) = crate::app_paths::AppPaths::resolve() {
+            if let Ok(Some(mut journal)) = crate::maintenance_journal::load_journal(&paths) {
+                if journal.operation_id == operation_id {
+                    journal.touch_stage(stage);
+                    let _ = crate::maintenance_journal::persist_journal(&paths, &journal);
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn clear_maintenance(
         &self,
         operation_id: &str,
     ) -> Result<(), crate::commands::CommandError> {
-        self.maintenance.lock().clear(operation_id)
+        self.maintenance.lock().clear(operation_id)?;
+        if let Ok(paths) = crate::app_paths::AppPaths::resolve() {
+            if let Ok(Some(journal)) = crate::maintenance_journal::load_journal(&paths) {
+                if journal.operation_id == operation_id {
+                    let _ = crate::maintenance_journal::clear_journal(&paths);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Replace the active database after a successful retry or restore.

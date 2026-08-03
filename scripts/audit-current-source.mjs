@@ -18,11 +18,11 @@ const commandName = "audit:current-source";
 
 const DEFAULT_ARCHIVE =
   process.env.CORESIDE_ARCHIVE ||
-  path.join(process.env.HOME || "", "Downloads", "Coreside Chat AI.zip");
+  path.join(process.env.HOME || "", "Downloads", "Coreside main.zip");
 const EXPECTED_ARCHIVE_SHA256 =
-  "907a21f13ccbea5d7cbf7793bb5cb53098fa72836756b8f4c9a15569ef7c88c4";
+  "ec8292249b58b565abef72baf285e36adce0ddea0059931166702d4ccf9bd228";
 const PREVIOUS_ARCHIVE_SHA256 =
-  "dd1370465031e1cf4e4e7317eed37f03301ec49ece5ca6135a439042dd1dcccb";
+  "907a21f13ccbea5d7cbf7793bb5cb53098fa72836756b8f4c9a15569ef7c88c4";
 
 const FINGERPRINT_ROOTS = [
   "src",
@@ -269,7 +269,7 @@ if (
     expectedArchiveSha256: EXPECTED_ARCHIVE_SHA256,
     note:
       archiveStatus === "zip_unavailable_extract_present"
-        ? "Zip missing from Downloads; comparing against previously extracted .reference/coreside-rc3-archive/coreside-main (source.sha256 matches 907a21f1…)."
+        ? "Zip missing from Downloads; comparing against previously extracted .reference/coreside-rc3-archive/coreside-main (source.sha256 matches expected archive hash)."
         : undefined,
     ...compareTrees(root, extractRoot),
   };
@@ -279,7 +279,7 @@ if (
 ) {
   archiveDiff = {
     status: "extract_stale_or_unmarked",
-    hint: "Re-extract Coreside Chat AI.zip into .reference/coreside-rc3-archive and write source.sha256 with the expected archive hash",
+    hint: "Re-extract Coreside main.zip into .reference/coreside-rc3-archive and write source.sha256 with the expected archive hash",
     expectedArchiveSha256: EXPECTED_ARCHIVE_SHA256,
     onlyInActive: [],
     onlyInArchive: [],
@@ -427,6 +427,63 @@ writeJson("current-source-fingerprint.json", fingerprintReport);
 writeJson("current-source-baseline.json", baselineReport);
 writeJson("active-versus-uploaded-coreside.json", compareReport);
 
+// Mark prior reports stale when fingerprint or archive expectation changes.
+const freshnessEntries = fs
+  .readdirSync(reportsDir)
+  .filter((f) => f.endsWith(".json"))
+  .sort()
+  .map((name) => {
+    const abs = path.join(reportsDir, name);
+    let parsed = null;
+    try {
+      parsed = JSON.parse(fs.readFileSync(abs, "utf8"));
+    } catch {
+      parsed = null;
+    }
+    const reportFp = parsed && typeof parsed.sourceFingerprint === "string" ? parsed.sourceFingerprint : null;
+    const reportCommit = parsed && typeof parsed.commit === "string" ? parsed.commit : null;
+    const sameFp = reportFp === sourceFingerprint;
+    const sameCommit = reportCommit === commit;
+    let status = "unknown";
+    if (name === "current-source-baseline.json" || name === "current-source-fingerprint.json" || name === "active-versus-uploaded-coreside.json" || name === "report-freshness-inventory.json") {
+      status = "current";
+    } else if (!parsed) {
+      status = "unreadable";
+    } else if (reportFp && !sameFp) {
+      status = "stale_fingerprint";
+    } else if (reportCommit && !sameCommit) {
+      status = dirty ? "stale_or_dirty_tree" : "stale_commit";
+    } else if (!reportFp && !reportCommit) {
+      status = "missing_provenance";
+    } else if (dirty) {
+      status = "dirty_tree_untrusted";
+    } else {
+      status = "provisionally_current";
+    }
+    return {
+      file: name,
+      status,
+      reportFingerprint: reportFp,
+      reportCommit,
+      mtimeMs: fs.statSync(abs).mtimeMs,
+    };
+  });
+
+const freshnessReport = {
+  ...common,
+  command: "audit:current-source/report-freshness",
+  currentFingerprint: sourceFingerprint,
+  currentCommit: commit,
+  archiveExpectedSha256: EXPECTED_ARCHIVE_SHA256,
+  inventory: freshnessEntries,
+  staleCount: freshnessEntries.filter((e) => String(e.status).startsWith("stale")).length,
+  notes: [
+    "Reports without matching sourceFingerprint are not release evidence.",
+    "Dirty trees cannot claim public-beta readiness regardless of report freshness.",
+  ],
+};
+writeJson("report-freshness-inventory.json", freshnessReport);
+
 const md = `# Current Source Baseline (RC3)
 
 **Product:** Coreside  
@@ -504,6 +561,7 @@ Reports:
 - \`reports/current-source-baseline.json\`
 - \`reports/current-source-fingerprint.json\`
 - \`reports/active-versus-uploaded-coreside.json\`
+- \`reports/report-freshness-inventory.json\`
 `;
 
 fs.writeFileSync(path.join(root, "docs", "CURRENT_SOURCE_BASELINE.md"), md);

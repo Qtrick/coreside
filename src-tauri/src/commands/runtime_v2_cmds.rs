@@ -705,19 +705,21 @@ pub fn cancel_queue_item_cmd(
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .filter_map(|x| x.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
                 .collect()
         })
         .unwrap_or_default();
+    // Cancel the queue row first (queued-only). Only then release staged IDs so a
+    // concurrent drain cannot activate the item after attachments were deleted.
+    let cancelled = cancel_queue_item(&mut db, &item_id)?;
     drop(db);
-    if !attachment_ids.is_empty() {
-        let _ = crate::commands::attachment_cmds::cancel_staged_attachment_ids(
-            state.inner(),
-            &attachment_ids,
-        );
-    }
-    let mut db = state.db.lock();
-    Ok(cancel_queue_item(&mut db, &item_id)?)
+    crate::commands::attachment_cmds::release_staged_attachment_ids_best_effort(
+        state.inner(),
+        &attachment_ids,
+    );
+    Ok(cancelled)
 }
 
 #[tauri::command]
@@ -727,7 +729,27 @@ pub fn remove_queue_item_cmd(
 ) -> Result<(), CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
-    Ok(remove_queued(&mut db, &item_id)?)
+    let item = get_item(&db, &item_id).map_err(CommandError::from)?;
+    let attachment_ids: Vec<String> = item
+        .prompt
+        .get("attachmentIds")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    // Remove queued row first, then release staged IDs (same ordering as cancel).
+    remove_queued(&mut db, &item_id)?;
+    drop(db);
+    crate::commands::attachment_cmds::release_staged_attachment_ids_best_effort(
+        state.inner(),
+        &attachment_ids,
+    );
+    Ok(())
 }
 
 #[tauri::command]

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use super::CommandError;
 use crate::ai::{
@@ -330,17 +331,82 @@ pub struct ChatAttachmentInput {
     pub local_filename: Option<String>,
 }
 
-fn attachment_ids_from_queue_prompt(prompt: &serde_json::Value) -> Vec<String> {
-    prompt
-        .get("attachmentIds")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|x| x.as_str().map(|s| s.trim().to_string()))
-                .filter(|s| !s.is_empty())
-                .collect()
-        })
-        .unwrap_or_default()
+fn attachment_ids_from_queue_prompt(
+    prompt: &serde_json::Value,
+) -> Result<Vec<String>, CommandError> {
+    match prompt.get("attachmentIds") {
+        None | Some(serde_json::Value::Null) => Ok(Vec::new()),
+        Some(serde_json::Value::Array(arr)) => {
+            let mut ids = Vec::with_capacity(arr.len());
+            for value in arr {
+                let Some(raw) = value.as_str() else {
+                    return Err(CommandError::new(
+                        "invalid",
+                        "Queued attachmentIds must be strings",
+                    ));
+                };
+                let id = raw.trim();
+                if !id.is_empty() {
+                    ids.push(id.to_string());
+                }
+            }
+            Ok(ids)
+        }
+        Some(_) => Err(CommandError::new(
+            "invalid",
+            "Queued attachmentIds must be an array",
+        )),
+    }
+}
+
+fn mentions_from_queue_prompt(
+    prompt: &serde_json::Value,
+) -> Result<Option<Vec<ToolMentionInput>>, CommandError> {
+    match prompt.get("mentions") {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => serde_json::from_value::<Vec<ToolMentionInput>>(value.clone())
+            .map(Some)
+            .map_err(|_| {
+                CommandError::new("invalid", "Queued mentions payload is invalid")
+            }),
+    }
+}
+
+/// Best-effort staged-id extraction for cleanup when a queue prompt is rejected.
+/// Prefers the strict parser; falls back to string entries only.
+fn staged_attachment_ids_for_queue_cleanup(prompt: &serde_json::Value) -> Vec<String> {
+    match attachment_ids_from_queue_prompt(prompt) {
+        Ok(ids) => ids,
+        Err(_) => prompt
+            .get("attachmentIds")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|x| x.as_str())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
+fn release_staged_attachments_from_queue_prompt(state: &AppState, prompt: &serde_json::Value) {
+    let ids = staged_attachment_ids_for_queue_cleanup(prompt);
+    if ids.is_empty() {
+        return;
+    }
+    // Per-id best-effort: skips committed rows so a bound turn cannot lose files.
+    crate::commands::attachment_cmds::release_staged_attachment_ids_best_effort(state, &ids);
+}
+
+fn delete_orphaned_user_message(db: &mut crate::db::Database, message_id: &str) {
+    let _ = db
+        .conn()
+        .execute("DELETE FROM message_fts WHERE message_id = ?1", [message_id]);
+    let _ = db
+        .conn()
+        .execute("DELETE FROM messages WHERE id = ?1", [message_id]);
 }
 
 fn schedule_queued_turn_drain(app: &AppHandle, conversation_id: &str) {
@@ -439,12 +505,48 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
             serde_json::Value::String(s) => Some(s.clone()),
             other => other.as_str().map(|s| s.to_string()),
         });
-        let mentions: Option<Vec<ToolMentionInput>> = item
-            .prompt
-            .get("mentions")
-            .cloned()
-            .and_then(|v| serde_json::from_value(v).ok());
-        let attachment_ids = attachment_ids_from_queue_prompt(&item.prompt);
+        let mentions = match mentions_from_queue_prompt(&item.prompt) {
+            Ok(m) => m,
+            Err(e) => {
+                // Complete first (mirrors cancel_queue_item), then release staged IDs.
+                {
+                    let mut db = state.db.lock();
+                    if let Err(complete_err) =
+                        crate::runtime_v2::complete_queue_item(&mut db, &item.id, Some(&e.message))
+                    {
+                        tracing::warn!(
+                            error = %complete_err,
+                            queue_item = %item.id,
+                            "queue complete after invalid mentions failed"
+                        );
+                        // Leave staged IDs in place if the item is still active.
+                        continue;
+                    }
+                }
+                release_staged_attachments_from_queue_prompt(state, &item.prompt);
+                continue;
+            }
+        };
+        let attachment_ids = match attachment_ids_from_queue_prompt(&item.prompt) {
+            Ok(ids) => ids,
+            Err(e) => {
+                {
+                    let mut db = state.db.lock();
+                    if let Err(complete_err) =
+                        crate::runtime_v2::complete_queue_item(&mut db, &item.id, Some(&e.message))
+                    {
+                        tracing::warn!(
+                            error = %complete_err,
+                            queue_item = %item.id,
+                            "queue complete after invalid attachmentIds failed"
+                        );
+                        continue;
+                    }
+                }
+                release_staged_attachments_from_queue_prompt(state, &item.prompt);
+                continue;
+            }
+        };
         let attachments: Option<Vec<ChatAttachmentInput>> = if attachment_ids.is_empty() {
             None
         } else {
@@ -483,14 +585,22 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
             return;
         }
 
-        {
+        let completed_ok = {
             let mut db = state.db.lock();
             let err_msg = result.as_ref().err().map(|e| e.message.clone());
-            if let Err(e) =
-                crate::runtime_v2::complete_queue_item(&mut db, &item.id, err_msg.as_deref())
-            {
-                tracing::warn!(error = %e, queue_item = %item.id, "queue complete failed");
+            match crate::runtime_v2::complete_queue_item(&mut db, &item.id, err_msg.as_deref()) {
+                Ok(_) => true,
+                Err(e) => {
+                    tracing::warn!(error = %e, queue_item = %item.id, "queue complete failed");
+                    false
+                }
             }
+        };
+
+        // Failed turns that never bound attachments leave staged IDs behind; release
+        // only after the active queue row is completed so a retry cannot race delete.
+        if result.is_err() && completed_ok {
+            release_staged_attachments_from_queue_prompt(state, &item.prompt);
         }
 
         if matches!(&result, Ok(r) if r.queued == Some(true)) {
@@ -681,42 +791,86 @@ async fn send_message_inner(
             }
         };
 
-        let user_message = db::insert_message(
-            &mut db,
-            &conversation_id,
-            "user",
-            &content,
-            mention_meta.as_ref(),
-        )?;
+        // One SQLite transaction for insert + claim + metadata so readers never see
+        // a message without matching chat_attachments rows (and crash mid-flight rolls back).
+        db.conn()
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+        let commit_result = (|| {
+            let user_message = db::insert_message(
+                &mut db,
+                &conversation_id,
+                "user",
+                &content,
+                mention_meta.as_ref(),
+            )?;
+            let claimed = crate::commands::attachment_cmds::claim_attachments_on_conn(
+                db.conn(),
+                &conversation_id,
+                &user_message.id,
+                &attachment_ids,
+            )?;
+            let mut user_message = user_message;
+            if !claimed.attachments.is_empty() {
+                let mut meta = match &user_message.metadata {
+                    Some(serde_json::Value::Object(m)) => m.clone(),
+                    _ => serde_json::Map::new(),
+                };
+                meta.insert(
+                    "attachments".into(),
+                    json!(claimed
+                        .attachments
+                        .iter()
+                        .map(|a| json!({
+                            "id": a.id,
+                            "name": a.name,
+                            "mimeType": a.mime_type,
+                            "byteSize": a.byte_size,
+                        }))
+                        .collect::<Vec<_>>()),
+                );
+                let meta_value = serde_json::Value::Object(meta);
+                db::update_message_metadata(&mut db, &user_message.id, &meta_value)?;
+                user_message.metadata = Some(meta_value);
+            }
+            Ok::<_, CommandError>((user_message, claimed))
+        })();
+        let (user_message, claimed) = match commit_result {
+            Ok(ok) => {
+                if let Err(e) = db.conn().execute_batch("COMMIT") {
+                    let _ = db.conn().execute_batch("ROLLBACK");
+                    return Err(CommandError::new(
+                        "storage",
+                        sanitize_error(&e.to_string(), None),
+                    ));
+                }
+                ok
+            }
+            Err(err) => {
+                let _ = db.conn().execute_batch("ROLLBACK");
+                return Err(err);
+            }
+        };
+
+        let promote_keys = claimed.promote_keys;
+        let new_claim_ids = claimed.new_claim_ids;
+        let trusted_attachments = claimed.attachments;
         drop(db);
 
-        let trusted_attachments = crate::commands::attachment_cmds::bind_attachments_to_message(
-            state,
-            &conversation_id,
-            &user_message.id,
-            &attachment_ids,
-        )?;
+        if let Err(err) =
+            crate::commands::attachment_cmds::promote_claimed_attachment_files(&promote_keys)
+        {
+            let mut db = state.db.lock();
+            let _ = crate::commands::attachment_cmds::unbind_attachments_from_message(
+                &mut db,
+                &user_message.id,
+                &new_claim_ids,
+            );
+            delete_orphaned_user_message(&mut db, &user_message.id);
+            return Err(err);
+        }
 
         let mut db = state.db.lock();
-        if !trusted_attachments.is_empty() {
-            let mut meta = match &user_message.metadata {
-                Some(serde_json::Value::Object(m)) => m.clone(),
-                _ => serde_json::Map::new(),
-            };
-            meta.insert(
-                "attachments".into(),
-                json!(trusted_attachments
-                    .iter()
-                    .map(|a| json!({
-                        "id": a.id,
-                        "name": a.name,
-                        "mimeType": a.mime_type,
-                        "byteSize": a.byte_size,
-                    }))
-                    .collect::<Vec<_>>()),
-            );
-            db::update_message_metadata(&mut db, &user_message.id, &serde_json::Value::Object(meta))?;
-        }
         let _ = db::maybe_rename_conversation_from_message(&mut db, &conversation_id, &content)?;
 
         let history = db::get_recent_messages(&db, &conversation_id, 40)?;
@@ -878,6 +1032,7 @@ async fn send_message_inner(
             system_prompt: system_prompt.clone(),
             messages: chat_messages.clone(),
             cancel: cancel.clone(),
+            idempotency_key: Some(Uuid::new_v4().to_string()),
         },
         move |label| {
             let key = api_key_for_cb.as_deref();
@@ -1070,6 +1225,7 @@ async fn send_message_inner(
                 system_prompt: system_prompt.clone(),
                 messages: chat_messages.clone(),
                 cancel: cancel.clone(),
+                idempotency_key: Some(Uuid::new_v4().to_string()),
             },
             move |label| {
                 let key = api_key_for_cb.as_deref();
@@ -1571,7 +1727,7 @@ mod queue_attachment_tests {
             "model": "auto"
         });
         assert_eq!(
-            attachment_ids_from_queue_prompt(&prompt),
+            attachment_ids_from_queue_prompt(&prompt).unwrap(),
             vec!["att-1".to_string(), "att-2".to_string()]
         );
     }
@@ -1579,7 +1735,16 @@ mod queue_attachment_tests {
     #[test]
     fn queue_prompt_without_attachments_is_empty() {
         let prompt = json!({ "content": "hi" });
-        assert!(attachment_ids_from_queue_prompt(&prompt).is_empty());
+        assert!(attachment_ids_from_queue_prompt(&prompt).unwrap().is_empty());
+    }
+
+    #[test]
+    fn queue_prompt_rejects_non_string_attachment_ids() {
+        let prompt = json!({
+            "attachmentIds": ["ok", 12]
+        });
+        let err = attachment_ids_from_queue_prompt(&prompt).unwrap_err();
+        assert_eq!(err.code, "invalid");
     }
 }
 

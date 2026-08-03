@@ -33,6 +33,7 @@ commands.deny = [
   "set_exa_budget",
   "set_setting",
   "cancel_chat_attachment",
+  "get_chat_attachment_src",
   "stage_chat_attachment",
   "store_hosted_auth_session",
   "test_provider_connection",

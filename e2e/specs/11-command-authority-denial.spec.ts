@@ -62,6 +62,7 @@ const SENSITIVE_DENIALS: Array<{ command: string; args?: Record<string, unknown>
   { command: "send_message", args: { conversationId: "x", content: "y" } },
   { command: "stage_chat_attachment", args: { input: { name: "x.txt", mimeType: "text/plain", dataBase64: "eA==" } } },
   { command: "cancel_chat_attachment", args: { attachmentId: "att-nonexistent" } },
+  { command: "get_chat_attachment_src", args: { attachmentId: "att-nonexistent" } },
 ];
 
 describe("Journey 11 — tool-window command authority denial", () => {

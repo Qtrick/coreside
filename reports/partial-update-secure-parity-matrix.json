@@ -1,0 +1,1760 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-03T19:48:00Z",
+  "commit": "41fd4595db420eac8b1c5cc30723f1dd377608f4",
+  "dirty": true,
+  "sourceFingerprint": "3306d5de459be8d661c52e0101b70d956c2218f841bacafdbedb6ebb6acf9f41",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "command": "manual:partial-update-secure-parity-matrix-2026",
+  "exitStatus": 0,
+  "accessDate": "2026-08-03",
+  "phase": "RC3-partial-update-reaudit",
+  "publicBeta": "Not ready",
+  "localFirst": "Not ready",
+  "hostedAi": "Not ready",
+  "julyAuditStale": true,
+  "julyAccessDate": "2026-07-18",
+  "archives": {
+    "coreside": "ec8292249b58b565abef72baf285e36adce0ddea0059931166702d4ccf9bd228",
+    "partialUpdate": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607"
+  },
+  "statusVocabulary": [
+    "absent",
+    "scaffold-only",
+    "disconnected",
+    "partial",
+    "implemented-unverified",
+    "implemented-verified",
+    "deliberately-rejected",
+    "deferred-collaboration"
+  ],
+  "statusCounts": {
+    "deliberately-rejected": 10,
+    "absent": 1,
+    "disconnected": 8,
+    "partial": 14,
+    "implemented-unverified": 12,
+    "deferred-collaboration": 9,
+    "scaffold-only": 2
+  },
+  "featureCount": 56,
+  "features": [
+    {
+      "id": "PU-HTML-RESP",
+      "feature": "HTML not Markdown responses",
+      "category": "generative",
+      "userValue": 9,
+      "partialUpdate": {
+        "files": [
+          "src/initialPrompt.md"
+        ],
+        "mechanism": "LLM emits HTML bodies applied to document",
+        "trustAssumptions": [
+          "Model output is trusted as executable UI"
+        ],
+        "securityRisk": 10
+      },
+      "coreside": {
+        "secureEquivalent": "Trusted declarative components + Markdown/text; never raw HTML",
+        "files": [
+          "src-tauri/src/ai/response_schema.rs",
+          "docs/GENERATIVE_UI_SECURITY_MODEL.md"
+        ],
+        "status": "deliberately-rejected",
+        "evidence": "Protected response schema + Runtime V2 ops; no HTML body apply path"
+      },
+      "remainingGap": "Keep rejection; no parity target",
+      "priority": "P0-reject",
+      "requiredTests": "adversarial-html",
+      "releaseImpact": "blocks_unsafe_parity",
+      "july2026StatusStale": "rejected_security"
+    },
+    {
+      "id": "PU-JS",
+      "feature": "Arbitrary generated JavaScript",
+      "category": "security",
+      "userValue": 2,
+      "partialUpdate": {
+        "files": [
+          "src/initialPrompt.md",
+          "README.md"
+        ],
+        "mechanism": "Script tags / CDN scripts in HTML",
+        "trustAssumptions": [
+          "Browser executes model JS"
+        ],
+        "securityRisk": 10
+      },
+      "coreside": {
+        "secureEquivalent": "No model JS; registered actions only",
+        "files": [
+          "src-tauri/src/runtime_v2/packs.rs",
+          "src/lib/actions.ts"
+        ],
+        "status": "deliberately-rejected",
+        "evidence": "No eval/CDN script injection path in tool renderer"
+      },
+      "remainingGap": "Keep rejection",
+      "priority": "P0-reject",
+      "requiredTests": [
+        "adversarial-js"
+      ],
+      "releaseImpact": "blocks_unsafe_parity",
+      "july2026StatusStale": "rejected_security"
+    },
+    {
+      "id": "PU-CDN",
+      "feature": "CDN Tailwind/D3/CodeMirror",
+      "category": "security",
+      "userValue": 3,
+      "partialUpdate": {
+        "files": [
+          "README.md"
+        ],
+        "mechanism": "Model injects CDN script/link tags",
+        "trustAssumptions": [
+          "Network + script trust"
+        ],
+        "securityRisk": 10
+      },
+      "coreside": {
+        "secureEquivalent": "Bundled capability packs only",
+        "files": [
+          "src-tauri/src/runtime_v2/packs.rs"
+        ],
+        "status": "deliberately-rejected",
+        "evidence": "Packs registry; agent cannot install packages"
+      },
+      "remainingGap": "Keep rejection",
+      "priority": "P0-reject",
+      "requiredTests": [
+        "pack-allowlist"
+      ],
+      "releaseImpact": "blocks_unsafe_parity",
+      "july2026StatusStale": "rejected_security"
+    },
+    {
+      "id": "PU-FORM-ROUTE",
+      "feature": "POST c/:chatId/form iframe",
+      "category": "interaction",
+      "userValue": 8,
+      "partialUpdate": {
+        "files": [
+          "src/index.ts"
+        ],
+        "mechanism": "Hidden iframe form POST with clientSecret",
+        "trustAssumptions": [
+          "Form posts are authenticated via client secret"
+        ],
+        "securityRisk": 8
+      },
+      "coreside": {
+        "secureEquivalent": "In-process submitToAgent + registered actions; no iframe route",
+        "files": [
+          "src/lib/actions.ts",
+          "src/components/chat/InlineSurface.tsx"
+        ],
+        "status": "deliberately-rejected",
+        "evidence": "No form HTTP route; ToolRenderer submitToAgent"
+      },
+      "remainingGap": "Keep rejection of iframe forms; fix ledger\u2192prompt wiring instead",
+      "priority": "P0-reject",
+      "requiredTests": [
+        "form-no-iframe"
+      ],
+      "releaseImpact": "blocks_unsafe_parity",
+      "july2026StatusStale": "rejected_security"
+    },
+    {
+      "id": "PU-TAILWIND",
+      "feature": "Tailwind via CDN",
+      "category": "security",
+      "userValue": 2,
+      "partialUpdate": {
+        "files": [
+          "README.md"
+        ],
+        "mechanism": "CDN stylesheet injection",
+        "trustAssumptions": [
+          "Network CSS trust"
+        ],
+        "securityRisk": 9
+      },
+      "coreside": {
+        "secureEquivalent": "Design tokens / protected CSS",
+        "files": [
+          "src/styles"
+        ],
+        "status": "deliberately-rejected",
+        "evidence": "No CDN CSS path"
+      },
+      "remainingGap": "Keep rejection",
+      "priority": "P0-reject",
+      "requiredTests": [
+        "csp"
+      ],
+      "releaseImpact": "blocks_unsafe_parity",
+      "july2026StatusStale": "rejected_security"
+    },
+    {
+      "id": "PU-STREAM",
+      "feature": "Progressive stream apply",
+      "category": "streaming",
+      "userValue": 10,
+      "partialUpdate": {
+        "files": [
+          "src/index.ts"
+        ],
+        "mechanism": "Provider stream \u2192 UpdateStreamParser \u2192 progressive DOM apply",
+        "trustAssumptions": [
+          "Incomplete frames not applied; DO owns stream"
+        ],
+        "securityRisk": 6
+      },
+      "coreside": {
+        "secureEquivalent": "True provider streaming into NDJSON StreamEvent parser \u2192 validated op frames",
+        "files": [
+          "src-tauri/src/ai/provider.rs",
+          "src-tauri/src/commands/message_cmds.rs",
+          "src-tauri/src/runtime_v2/streaming.rs"
+        ],
+        "status": "absent",
+        "evidence": "AiProvider trait exposes only chat(); emit_text_fluidly post-hoc types complete text; NdjsonFrameParser exists but is not fed by provider bytes"
+      },
+      "remainingGap": "Add stream API on AiProvider; wire message_cmds; remove fake fluid typing as 'streaming'",
+      "priority": "P0",
+      "requiredTests": [
+        "provider-stream",
+        "e2e-true-streaming"
+      ],
+      "releaseImpact": "high_consumer_gap",
+      "july2026StatusStale": "implemented_differently \u2014 STALE; true streaming ABSENT"
+    },
+    {
+      "id": "PU-PARSE",
+      "feature": "UpdateStreamParser incremental parse",
+      "category": "streaming",
+      "userValue": 9,
+      "partialUpdate": {
+        "files": [
+          "src/index.ts"
+        ],
+        "mechanism": "Incremental delimiter/HTML frame parse",
+        "trustAssumptions": [
+          "Parser rejects incomplete"
+        ],
+        "securityRisk": 5
+      },
+      "coreside": {
+        "secureEquivalent": "NdjsonFrameParser + schema validation",
+        "files": [
+          "src-tauri/src/runtime_v2/streaming.rs"
+        ],
+        "status": "disconnected",
+        "evidence": "Parser module present with unit-oriented API; not driven by live provider stream"
+      },
+      "remainingGap": "Connect to true provider stream + out-of-order secure frame handling",
+      "priority": "P0",
+      "requiredTests": [
+        "parser-incomplete-reject"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "implemented_differently \u2014 STALE for live path"
+    },
+    {
+      "id": "PU-FORMS",
+      "feature": "Structured forms to LLM",
+      "category": "interaction",
+      "userValue": 10,
+      "partialUpdate": {
+        "files": [
+          "src/initialPrompt.md",
+          "src/index.ts"
+        ],
+        "mechanism": "HTML forms submit structured fields into LLM context",
+        "trustAssumptions": [
+          "Form values become model-visible history"
+        ],
+        "securityRisk": 5
+      },
+      "coreside": {
+        "secureEquivalent": "Trusted form components + context ledger entries injected into agent prompt",
+        "files": [
+          "src/components/chat/InlineSurface.tsx",
+          "src/components/tool-canvas/ToolCanvas.tsx",
+          "src-tauri/src/runtime_v2/context_ledger.rs",
+          "src-tauri/src/commands/message_cmds.rs"
+        ],
+        "status": "partial",
+        "evidence": "submitToAgent appends ledger with values then sendMessage(summary only); message_cmds build_agent_prompt path has no list_context_ledger injection"
+      },
+      "remainingGap": "Inject model_context_only ledger entries into prompt construction; do not send only opaque summary",
+      "priority": "P0",
+      "requiredTests": [
+        "form-values-in-prompt",
+        "ledger-isolation"
+      ],
+      "releaseImpact": "high_consumer_gap",
+      "july2026StatusStale": "implemented_differently \u2014 STALE; values not model-visible"
+    },
+    {
+      "id": "PU-PROTOCOL",
+      "feature": "Delimiter protocol PpqUtcLGQdYN4oqc",
+      "category": "protocol",
+      "userValue": 8,
+      "partialUpdate": {
+        "files": [
+          "spec.md",
+          "src/index.ts"
+        ],
+        "mechanism": "Delimiter sections SERVER/CLIENT/BODY",
+        "trustAssumptions": [
+          "Raw HTML bodies unescaped"
+        ],
+        "securityRisk": 7
+      },
+      "coreside": {
+        "secureEquivalent": "JSON schema v2 operations",
+        "files": [
+          "src-tauri/src/runtime_v2/operations.rs",
+          "src-tauri/src/ai/response_schema.rs"
+        ],
+        "status": "implemented-unverified",
+        "evidence": "Schema v2 ops parser present; not claimed release-verified"
+      },
+      "remainingGap": "Keep schema; never adopt delimiter HTML bodies",
+      "priority": "P2",
+      "requiredTests": [
+        "schema-v2-parse"
+      ],
+      "releaseImpact": "medium",
+      "july2026StatusStale": "implemented_differently"
+    },
+    {
+      "id": "PU-MARKERS",
+      "feature": "template for + <?marker>",
+      "category": "identity",
+      "userValue": 9,
+      "partialUpdate": {
+        "files": [
+          "src/app.html",
+          "src/initialPrompt.md"
+        ],
+        "mechanism": "Path markers for targeted replace",
+        "trustAssumptions": [
+          "Stable path names"
+        ],
+        "securityRisk": 4
+      },
+      "coreside": {
+        "secureEquivalent": "Stable surface/component/instance IDs + patches",
+        "files": [
+          "src-tauri/src/runtime_v2/patch.rs",
+          "src-tauri/src/runtime_v2/surfaces.rs"
+        ],
+        "status": "implemented-unverified",
+        "evidence": "IDs + patches in Rust; preservation helpers exist"
+      },
+      "remainingGap": "Manual acceptance of targeted update fidelity",
+      "priority": "P1",
+      "requiredTests": [
+        "patch-revision"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "implemented_differently"
+    },
+    {
+      "id": "PU-MULTI-MSG",
+      "feature": "Multiple messages per turn",
+      "category": "protocol",
+      "userValue": 7,
+      "partialUpdate": {
+        "files": [
+          "spec.md"
+        ],
+        "mechanism": "SPLIT_MESSAGE delimiter",
+        "trustAssumptions": [
+          "Model may emit multi bodies"
+        ],
+        "securityRisk": 3
+      },
+      "coreside": {
+        "secureEquivalent": "assistantMessages[] in schema v2",
+        "files": [
+          "src-tauri/src/runtime_v2/operations.rs"
+        ],
+        "status": "implemented-unverified",
+        "evidence": "Schema supports array; UI/agent verification incomplete"
+      },
+      "remainingGap": "Verify multi-message turn UX",
+      "priority": "P2",
+      "requiredTests": [
+        "multi-msg"
+      ],
+      "releaseImpact": "low",
+      "july2026StatusStale": "implemented_equivalent"
+    },
+    {
+      "id": "PU-SILENT",
+      "feature": "Silent updates",
+      "category": "ux",
+      "userValue": 8,
+      "partialUpdate": {
+        "files": [
+          "src/initialPrompt.md"
+        ],
+        "mechanism": "Update UI without chat noise",
+        "trustAssumptions": [
+          "Silent must not hide errors"
+        ],
+        "securityRisk": 4
+      },
+      "coreside": {
+        "secureEquivalent": "schema v2 silent flag + Action Log policy",
+        "files": [
+          "src-tauri/src/runtime_v2/operations.rs"
+        ],
+        "status": "implemented-unverified",
+        "evidence": "silent field exists; consumer proof incomplete"
+      },
+      "remainingGap": "E2E silent update",
+      "priority": "P2",
+      "requiredTests": [
+        "silent-ops"
+      ],
+      "releaseImpact": "medium",
+      "july2026StatusStale": "implemented_equivalent"
+    },
+    {
+      "id": "PU-INSTANCES",
+      "feature": "Instance numbers ttt/1 ttt/2",
+      "category": "identity",
+      "userValue": 9,
+      "partialUpdate": {
+        "files": [
+          "src/initialPrompt.md"
+        ],
+        "mechanism": "Path instance segments",
+        "trustAssumptions": [
+          "Distinct instances"
+        ],
+        "securityRisk": 3
+      },
+      "coreside": {
+        "secureEquivalent": "instance_id per surface",
+        "files": [
+          "src-tauri/src/runtime_v2/surfaces.rs"
+        ],
+        "status": "implemented-unverified",
+        "evidence": "instanceId on surfaces"
+      },
+      "remainingGap": "Prove two same-name tools do not overwrite",
+      "priority": "P1",
+      "requiredTests": [
+        "instance-isolation"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "implemented_equivalent"
+    },
+    {
+      "id": "PU-QUEUE",
+      "feature": "LLM request queue limit 5",
+      "category": "concurrency",
+      "userValue": 8,
+      "partialUpdate": {
+        "files": [
+          "src/index.ts"
+        ],
+        "mechanism": "DO LLM_QUEUE_LIMIT with active/stale recovery",
+        "trustAssumptions": [
+          "Queue in DO storage"
+        ],
+        "securityRisk": 4
+      },
+      "coreside": {
+        "secureEquivalent": "Local per-conversation agent queue",
+        "files": [
+          "src-tauri/src/runtime_v2/queue.rs",
+          "src/lib/tauri/api.ts"
+        ],
+        "status": "disconnected",
+        "evidence": "Rust queue + tauri API wrappers; no src/components UI; sendMessage may enqueue but consumer queue UI absent"
+      },
+      "remainingGap": "Ship queue status UI + cancel/remove flows",
+      "priority": "P1",
+      "requiredTests": [
+        "queue-ui",
+        "queue-cancel"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "implemented_differently \u2014 STALE for product completeness"
+    },
+    {
+      "id": "PU-FORK",
+      "feature": "Fork chat + read-only fork pages",
+      "category": "continuity",
+      "userValue": 9,
+      "partialUpdate": {
+        "files": [
+          "src/index.ts"
+        ],
+        "mechanism": "fork_index + read-only fork pages",
+        "trustAssumptions": [
+          "Fork IDs stable"
+        ],
+        "securityRisk": 3
+      },
+      "coreside": {
+        "secureEquivalent": "chat_branches + snapshots",
+        "files": [
+          "src-tauri/src/runtime_v2/branch.rs",
+          "src/lib/tauri/api.ts"
+        ],
+        "status": "disconnected",
+        "evidence": "branchConversation/listBranches in API only; no chat UI components call them"
+      },
+      "remainingGap": "Branch picker + create/switch UX",
+      "priority": "P1",
+      "requiredTests": [
+        "branch-ui"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "implemented_differently / missing_high_value \u2014 STALE matrix inconsistency"
+    },
+    {
+      "id": "PU-REPLAY",
+      "feature": "Replay page with pacing",
+      "category": "continuity",
+      "userValue": 7,
+      "partialUpdate": {
+        "files": [
+          "src/index.ts"
+        ],
+        "mechanism": "Replay HTML with pacing options",
+        "trustAssumptions": [
+          "Read-only replay"
+        ],
+        "securityRisk": 3
+      },
+      "coreside": {
+        "secureEquivalent": "Transaction list + paced replay player",
+        "files": [
+          "src-tauri/src/runtime_v2/transactions.rs"
+        ],
+        "status": "disconnected",
+        "evidence": "Transaction APIs exist; no play/pause replay UI in components"
+      },
+      "remainingGap": "Replay player UI wired to trusted transactions",
+      "priority": "P1",
+      "requiredTests": [
+        "replay-ui"
+      ],
+      "releaseImpact": "medium",
+      "july2026StatusStale": "partially_implemented \u2014 STALE toward disconnected"
+    },
+    {
+      "id": "PU-DEBUG",
+      "feature": "/debug raw/pretty history",
+      "category": "developer",
+      "userValue": 6,
+      "partialUpdate": {
+        "files": [
+          "src/debug.ts"
+        ],
+        "mechanism": "Debug HTML views of LLM history",
+        "trustAssumptions": [
+          "Debug may expose model history"
+        ],
+        "securityRisk": 5
+      },
+      "coreside": {
+        "secureEquivalent": "Developer Mode inspector with redaction",
+        "files": [
+          "src-tauri/src/runtime_v2/",
+          "src/components/settings/AiProviderSettings.tsx"
+        ],
+        "status": "disconnected",
+        "evidence": "Developer Mode toggle exists; no inspector panel consuming diagnostics/history"
+      },
+      "remainingGap": "Inspector UI with redaction",
+      "priority": "P1",
+      "requiredTests": [
+        "inspector-ui"
+      ],
+      "releaseImpact": "medium",
+      "july2026StatusStale": "partially_implemented"
+    },
+    {
+      "id": "PU-UNDO",
+      "feature": "Hard undo multi-turn",
+      "category": "continuity",
+      "userValue": 8,
+      "partialUpdate": {
+        "files": [
+          "src/index.ts"
+        ],
+        "mechanism": "Undo across turns",
+        "trustAssumptions": [
+          "Undo trusted"
+        ],
+        "securityRisk": 3
+      },
+      "coreside": {
+        "secureEquivalent": "Cross-surface undo_transaction",
+        "files": [
+          "src-tauri/src/runtime_v2/transactions.rs"
+        ],
+        "status": "partial",
+        "evidence": "Undo paths exist; create/delete reversal gaps per July Runtime V2 audit"
+      },
+      "remainingGap": "Complete undo coverage + UI",
+      "priority": "P2",
+      "requiredTests": [
+        "undo"
+      ],
+      "releaseImpact": "medium",
+      "july2026StatusStale": "implemented_differently"
+    },
+    {
+      "id": "PU-RATELIMIT",
+      "feature": "Browser/IP rate limits",
+      "category": "security",
+      "userValue": 7,
+      "partialUpdate": {
+        "files": [
+          "src/index.ts"
+        ],
+        "mechanism": "Signed cookie + IP/browser limits",
+        "trustAssumptions": [
+          "Worker enforces"
+        ],
+        "securityRisk": 4
+      },
+      "coreside": {
+        "secureEquivalent": "BYOK spend discipline + event/search/agent budgets",
+        "files": [
+          "src-tauri/src/runtime_v2/limits.rs"
+        ],
+        "status": "partial",
+        "evidence": "Limits modules present; not equivalent to PU browser/IP model"
+      },
+      "remainingGap": "Keep Coreside budgets; do not copy CF cookie model",
+      "priority": "P2",
+      "requiredTests": [
+        "limits"
+      ],
+      "releaseImpact": "medium",
+      "july2026StatusStale": "implemented_differently"
+    },
+    {
+      "id": "PU-SUBSCRIBE",
+      "feature": "window.partialupdates.subscribe",
+      "category": "events",
+      "userValue": 8,
+      "partialUpdate": {
+        "files": [
+          "spec.md",
+          "src/index.ts"
+        ],
+        "mechanism": "Client Subscription API",
+        "trustAssumptions": [
+          "Client code can subscribe to paths"
+        ],
+        "securityRisk": 6
+      },
+      "coreside": {
+        "secureEquivalent": "Typed EventBus with loop limits; no arbitrary window API for model scripts",
+        "files": [
+          "src-tauri/src/runtime_v2/events.rs"
+        ],
+        "status": "partial",
+        "evidence": "EventBus persist/dispatch; no window.partialupdates"
+      },
+      "remainingGap": "Complete local audiences + form events without HTML subscribe API",
+      "priority": "P1",
+      "requiredTests": [
+        "event-loop"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "safe_adaptation_required"
+    },
+    {
+      "id": "PU-JSON-PATH",
+      "feature": "JSON client props path updates",
+      "category": "state",
+      "userValue": 8,
+      "partialUpdate": {
+        "files": [
+          "spec.md"
+        ],
+        "mechanism": "CLIENT_PROPS path JSON updates",
+        "trustAssumptions": [
+          "Path updates mutate client state"
+        ],
+        "securityRisk": 4
+      },
+      "coreside": {
+        "secureEquivalent": "state.* operations + patches",
+        "files": [
+          "src-tauri/src/runtime_v2/operations.rs",
+          "src-tauri/src/runtime_v2/patch.rs"
+        ],
+        "status": "implemented-unverified",
+        "evidence": "Ops/patches present"
+      },
+      "remainingGap": "Verify progressive state updates with preservation",
+      "priority": "P1",
+      "requiredTests": [
+        "state-ops"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "implemented_differently"
+    },
+    {
+      "id": "PU-WS",
+      "feature": "Hibernatable WebSockets",
+      "category": "collab",
+      "userValue": 5,
+      "partialUpdate": {
+        "files": [
+          "src/index.ts"
+        ],
+        "mechanism": "CF hibernatable WS",
+        "trustAssumptions": [
+          "Multiuser DO"
+        ],
+        "securityRisk": 7
+      },
+      "coreside": {
+        "secureEquivalent": "Local single-user; defer multiuser sync",
+        "files": [],
+        "status": "deferred-collaboration",
+        "evidence": "No WS multiuser runtime"
+      },
+      "remainingGap": "Out of consumer scope",
+      "priority": "P3",
+      "requiredTests": [],
+      "releaseImpact": "deferred",
+      "july2026StatusStale": "deferred_collaboration_scope"
+    },
+    {
+      "id": "PU-AUTH",
+      "feature": "Better Auth OAuth roles",
+      "category": "auth",
+      "userValue": 4,
+      "partialUpdate": {
+        "files": [
+          "src/auth/*",
+          "migrations/*"
+        ],
+        "mechanism": "better-auth + D1 roles",
+        "trustAssumptions": [
+          "Cloud identity"
+        ],
+        "securityRisk": 6
+      },
+      "coreside": {
+        "secureEquivalent": "Local consumer; OS credentials for BYOK",
+        "files": [],
+        "status": "deferred-collaboration",
+        "evidence": "No better-auth"
+      },
+      "remainingGap": "Enterprise deferred",
+      "priority": "P3",
+      "requiredTests": [],
+      "releaseImpact": "deferred",
+      "july2026StatusStale": "deferred_enterprise_scope"
+    },
+    {
+      "id": "PU-DO",
+      "feature": "Cloudflare Durable Object",
+      "category": "infra",
+      "userValue": 3,
+      "partialUpdate": {
+        "files": [
+          "src/index.ts"
+        ],
+        "mechanism": "PartialUpdate DO class",
+        "trustAssumptions": [
+          "CF required"
+        ],
+        "securityRisk": 5
+      },
+      "coreside": {
+        "secureEquivalent": "Local-first Tauri + SQLite",
+        "files": [
+          "src-tauri"
+        ],
+        "status": "deliberately-rejected",
+        "evidence": "Desktop architecture"
+      },
+      "remainingGap": "Keep reject",
+      "priority": "P0-reject",
+      "requiredTests": [],
+      "releaseImpact": "product_direction",
+      "july2026StatusStale": "rejected_product_direction"
+    },
+    {
+      "id": "PU-GATEWAY",
+      "feature": "Cloudflare AI Gateway",
+      "category": "infra",
+      "userValue": 3,
+      "partialUpdate": {
+        "files": [
+          "src/env.ts"
+        ],
+        "mechanism": "CF AI Gateway billing",
+        "trustAssumptions": [
+          "Gateway keys"
+        ],
+        "securityRisk": 5
+      },
+      "coreside": {
+        "secureEquivalent": "Provider-neutral BYOK + future hosted mode",
+        "files": [
+          "src-tauri/src/ai"
+        ],
+        "status": "deliberately-rejected",
+        "evidence": "Hosted AI Not ready; BYOK path separate"
+      },
+      "remainingGap": "Keep separation",
+      "priority": "P0-reject",
+      "requiredTests": [],
+      "releaseImpact": "product_direction",
+      "july2026StatusStale": "rejected_product_direction"
+    },
+    {
+      "id": "PU-WIKI",
+      "feature": "Full page redesign Wikipedia",
+      "category": "generative",
+      "userValue": 4,
+      "partialUpdate": {
+        "files": [
+          "README.md"
+        ],
+        "mechanism": "Replace entire page chrome via HTML",
+        "trustAssumptions": [
+          "Model may destroy host UI"
+        ],
+        "securityRisk": 9
+      },
+      "coreside": {
+        "secureEquivalent": "Safe editable zones only; protected chrome immutable",
+        "files": [
+          "src-tauri/src/security/protected_resources.rs"
+        ],
+        "status": "deliberately-rejected",
+        "evidence": "Protected core resources"
+      },
+      "remainingGap": "Keep reject",
+      "priority": "P0-reject",
+      "requiredTests": [
+        "protected-chrome"
+      ],
+      "releaseImpact": "security",
+      "july2026StatusStale": "rejected_product_direction"
+    },
+    {
+      "id": "PU-MULTIPLAYER",
+      "feature": "Multiplayer Connect 4",
+      "category": "collab",
+      "userValue": 6,
+      "partialUpdate": {
+        "files": [
+          "README.md"
+        ],
+        "mechanism": "Shared DO multiuser game",
+        "trustAssumptions": [
+          "Shared state"
+        ],
+        "securityRisk": 7
+      },
+      "coreside": {
+        "secureEquivalent": "Deferred collaboration",
+        "files": [],
+        "status": "deferred-collaboration",
+        "evidence": "Absent"
+      },
+      "remainingGap": "Deferred",
+      "priority": "P3",
+      "requiredTests": [],
+      "releaseImpact": "deferred",
+      "july2026StatusStale": "deferred_collaboration_scope"
+    },
+    {
+      "id": "PU-PRIVATE",
+      "feature": "Private model history include ids",
+      "category": "collab",
+      "userValue": 5,
+      "partialUpdate": {
+        "files": [
+          "src/initialPrompt.md"
+        ],
+        "mechanism": "SERVER_PROPS include/exclude",
+        "trustAssumptions": [
+          "Model cooperates"
+        ],
+        "securityRisk": 8
+      },
+      "coreside": {
+        "secureEquivalent": "Deferred; trust model insufficient",
+        "files": [],
+        "status": "deferred-collaboration",
+        "evidence": "Absent"
+      },
+      "remainingGap": "Deferred",
+      "priority": "P3",
+      "requiredTests": [],
+      "releaseImpact": "deferred",
+      "july2026StatusStale": "deferred_collaboration_scope"
+    },
+    {
+      "id": "PU-INCLUDE-EXCLUDE",
+      "feature": "Client include/exclude routing",
+      "category": "collab",
+      "userValue": 5,
+      "partialUpdate": {
+        "files": [
+          "spec.md"
+        ],
+        "mechanism": "SERVER_PROPS clients include/exclude",
+        "trustAssumptions": [
+          "Model routing"
+        ],
+        "securityRisk": 8
+      },
+      "coreside": {
+        "secureEquivalent": "audience extension point only",
+        "files": [
+          "src-tauri/src/runtime_v2/operations.rs"
+        ],
+        "status": "deferred-collaboration",
+        "evidence": "Extension fields only"
+      },
+      "remainingGap": "Deferred",
+      "priority": "P3",
+      "requiredTests": [],
+      "releaseImpact": "deferred",
+      "july2026StatusStale": "deferred_collaboration_scope"
+    },
+    {
+      "id": "PU-CLIENT-SECRET",
+      "feature": "Client secret tokens",
+      "category": "collab",
+      "userValue": 4,
+      "partialUpdate": {
+        "files": [
+          "src/index.ts"
+        ],
+        "mechanism": "clientId/clientSecret on forms",
+        "trustAssumptions": [
+          "Secret in browser"
+        ],
+        "securityRisk": 7
+      },
+      "coreside": {
+        "secureEquivalent": "Deferred collaboration auth",
+        "files": [],
+        "status": "deferred-collaboration",
+        "evidence": "Absent"
+      },
+      "remainingGap": "Deferred",
+      "priority": "P3",
+      "requiredTests": [],
+      "releaseImpact": "deferred",
+      "july2026StatusStale": "deferred_collaboration_scope"
+    },
+    {
+      "id": "PU-CLIENT-COLOR",
+      "feature": "User-specific colors",
+      "category": "collab",
+      "userValue": 3,
+      "partialUpdate": {
+        "files": [
+          "src/initialPrompt.md"
+        ],
+        "mechanism": "Per-client color CSS",
+        "trustAssumptions": [
+          "Client identity"
+        ],
+        "securityRisk": 3
+      },
+      "coreside": {
+        "secureEquivalent": "Deferred",
+        "files": [],
+        "status": "deferred-collaboration",
+        "evidence": "Absent"
+      },
+      "remainingGap": "Deferred",
+      "priority": "P3",
+      "requiredTests": [],
+      "releaseImpact": "deferred",
+      "july2026StatusStale": "deferred_collaboration_scope"
+    },
+    {
+      "id": "PU-D1",
+      "feature": "Cloudflare D1 auth DB",
+      "category": "infra",
+      "userValue": 2,
+      "partialUpdate": {
+        "files": [
+          "migrations/0001_better_auth.sql"
+        ],
+        "mechanism": "D1 for auth",
+        "trustAssumptions": [
+          "Cloud DB"
+        ],
+        "securityRisk": 4
+      },
+      "coreside": {
+        "secureEquivalent": "SQLite local profile",
+        "files": [
+          "src-tauri/migrations"
+        ],
+        "status": "deferred-collaboration",
+        "evidence": "Local SQLite only"
+      },
+      "remainingGap": "Deferred",
+      "priority": "P3",
+      "requiredTests": [],
+      "releaseImpact": "deferred",
+      "july2026StatusStale": "deferred_enterprise_scope"
+    },
+    {
+      "id": "PU-TRANSLATE",
+      "feature": "Per-client translation",
+      "category": "collab",
+      "userValue": 5,
+      "partialUpdate": {
+        "files": [
+          "README.md"
+        ],
+        "mechanism": "Per-client language via routing",
+        "trustAssumptions": [
+          "Multiuser"
+        ],
+        "securityRisk": 5
+      },
+      "coreside": {
+        "secureEquivalent": "Deferred consumer",
+        "files": [],
+        "status": "deferred-collaboration",
+        "evidence": "Absent"
+      },
+      "remainingGap": "Deferred",
+      "priority": "P3",
+      "requiredTests": [],
+      "releaseImpact": "deferred",
+      "july2026StatusStale": "deferred_consumer_scope"
+    },
+    {
+      "id": "PU-DICTATION",
+      "feature": "Voice dictation self-mod",
+      "category": "generative",
+      "userValue": 5,
+      "partialUpdate": {
+        "files": [
+          "README.md"
+        ],
+        "mechanism": "Self-mod UI adding dictation via HTML/JS",
+        "trustAssumptions": [
+          "Unrestricted UI change"
+        ],
+        "securityRisk": 8
+      },
+      "coreside": {
+        "secureEquivalent": "Dictation pack extension point only",
+        "files": [
+          "src-tauri/src/runtime_v2/packs.rs"
+        ],
+        "status": "scaffold-only",
+        "evidence": "Pack placeholder/disabled node"
+      },
+      "remainingGap": "Follow-up after secure packs UX",
+      "priority": "P3",
+      "requiredTests": [],
+      "releaseImpact": "low",
+      "july2026StatusStale": "deferred_consumer_scope"
+    },
+    {
+      "id": "PU-TTT",
+      "feature": "Game-styled forms",
+      "category": "interaction",
+      "userValue": 7,
+      "partialUpdate": {
+        "files": [
+          "src/initialPrompt.md"
+        ],
+        "mechanism": "CSS-styled forms as games",
+        "trustAssumptions": [
+          "HTML/CSS forms"
+        ],
+        "securityRisk": 5
+      },
+      "coreside": {
+        "secureEquivalent": "Trusted quiz/button/form components",
+        "files": [
+          "src/components/tool-renderer/nodes.tsx",
+          "src-tauri/src/runtime_v2/packs.rs"
+        ],
+        "status": "partial",
+        "evidence": "forms pack + components; game demos not product-complete"
+      },
+      "remainingGap": "Safe parity demos without HTML",
+      "priority": "P2",
+      "requiredTests": [
+        "forms-pack"
+      ],
+      "releaseImpact": "medium",
+      "july2026StatusStale": "safe_adaptation_required"
+    },
+    {
+      "id": "PU-SVG",
+      "feature": "SVG in responses",
+      "category": "generative",
+      "userValue": 7,
+      "partialUpdate": {
+        "files": [
+          "src/initialPrompt.md"
+        ],
+        "mechanism": "Inline SVG in HTML",
+        "trustAssumptions": [
+          "SVG may embed scripts"
+        ],
+        "securityRisk": 7
+      },
+      "coreside": {
+        "secureEquivalent": "coreside.svg pack with attr filtering",
+        "files": [
+          "src-tauri/src/runtime_v2/packs.rs",
+          "src/components/tool-renderer/nodes.tsx"
+        ],
+        "status": "partial",
+        "evidence": "Pack + filter; breadth unverified"
+      },
+      "remainingGap": "Expand safe SVG coverage + tests",
+      "priority": "P2",
+      "requiredTests": [
+        "svg-filter"
+      ],
+      "releaseImpact": "medium",
+      "july2026StatusStale": "safe_adaptation_required"
+    },
+    {
+      "id": "PU-MATH",
+      "feature": "MathML",
+      "category": "generative",
+      "userValue": 6,
+      "partialUpdate": {
+        "files": [
+          "src/initialPrompt.md"
+        ],
+        "mechanism": "MathML in HTML",
+        "trustAssumptions": [
+          "Markup trust"
+        ],
+        "securityRisk": 5
+      },
+      "coreside": {
+        "secureEquivalent": "coreside.math pack",
+        "files": [
+          "src/components/tool-renderer/nodes.tsx"
+        ],
+        "status": "partial",
+        "evidence": "Math nodes exist"
+      },
+      "remainingGap": "Verify rendering + a11y",
+      "priority": "P2",
+      "requiredTests": [
+        "math"
+      ],
+      "releaseImpact": "low",
+      "july2026StatusStale": "safe_adaptation_required"
+    },
+    {
+      "id": "PU-CANVAS",
+      "feature": "Canvas/3D whimsical",
+      "category": "generative",
+      "userValue": 6,
+      "partialUpdate": {
+        "files": [
+          "README.md"
+        ],
+        "mechanism": "Canvas/WebGL via JS",
+        "trustAssumptions": [
+          "Arbitrary JS"
+        ],
+        "securityRisk": 9
+      },
+      "coreside": {
+        "secureEquivalent": "Declarative canvas limits; no WebGL JS",
+        "files": [
+          "src/components/tool-renderer/nodes.tsx"
+        ],
+        "status": "partial",
+        "evidence": "Declarative canvas pack limits"
+      },
+      "remainingGap": "No unrestricted WebGL",
+      "priority": "P2",
+      "requiredTests": [
+        "canvas-limits"
+      ],
+      "releaseImpact": "medium",
+      "july2026StatusStale": "safe_adaptation_required"
+    },
+    {
+      "id": "PU-CODEMIRROR",
+      "feature": "CodeMirror playground",
+      "category": "generative",
+      "userValue": 5,
+      "partialUpdate": {
+        "files": [
+          "README.md"
+        ],
+        "mechanism": "CDN CodeMirror + submit CSS to LLM",
+        "trustAssumptions": [
+          "CDN + exec"
+        ],
+        "securityRisk": 9
+      },
+      "coreside": {
+        "secureEquivalent": "Bundled textarea/code editor; no auto-exec",
+        "files": [
+          "src/components/tool-renderer/nodes.tsx"
+        ],
+        "status": "partial",
+        "evidence": "Code pack textarea path; not CodeMirror CDN"
+      },
+      "remainingGap": "Keep bundled editor",
+      "priority": "P2",
+      "requiredTests": [
+        "code-pack"
+      ],
+      "releaseImpact": "low",
+      "july2026StatusStale": "safe_adaptation_required"
+    },
+    {
+      "id": "PU-SCOPED-CSS",
+      "feature": "Scoped style markers",
+      "category": "styling",
+      "userValue": 6,
+      "partialUpdate": {
+        "files": [
+          "src/app.html"
+        ],
+        "mechanism": "Style override markers",
+        "trustAssumptions": [
+          "Arbitrary CSS risk"
+        ],
+        "securityRisk": 8
+      },
+      "coreside": {
+        "secureEquivalent": "No arbitrary CSS; design tokens only",
+        "files": [
+          "src/styles"
+        ],
+        "status": "partial",
+        "evidence": "Tokens; no model CSS markers"
+      },
+      "remainingGap": "Keep reject arbitrary CSS",
+      "priority": "P2",
+      "requiredTests": [
+        "tokens"
+      ],
+      "releaseImpact": "security",
+      "july2026StatusStale": "safe_adaptation_required"
+    },
+    {
+      "id": "PU-DISMOUNT",
+      "feature": "MutationObserver cleanup",
+      "category": "runtime",
+      "userValue": 4,
+      "partialUpdate": {
+        "files": [
+          "src/initialPrompt.md"
+        ],
+        "mechanism": "Observer cleanup for injected scripts",
+        "trustAssumptions": [
+          "Implies scripts"
+        ],
+        "securityRisk": 9
+      },
+      "coreside": {
+        "secureEquivalent": "React lifecycle; no model scripts",
+        "files": [
+          "src/components/tool-renderer"
+        ],
+        "status": "deliberately-rejected",
+        "evidence": "N/A under no-script model"
+      },
+      "remainingGap": "Keep",
+      "priority": "P0-reject",
+      "requiredTests": [],
+      "releaseImpact": "security",
+      "july2026StatusStale": "safe_adaptation_required\u2192reject under no-script"
+    },
+    {
+      "id": "PU-FULLWIDTH",
+      "feature": "message-full-width class",
+      "category": "layout",
+      "userValue": 4,
+      "partialUpdate": {
+        "files": [
+          "src/initialPrompt.md"
+        ],
+        "mechanism": "CSS class for full width messages",
+        "trustAssumptions": [
+          "HTML class"
+        ],
+        "securityRisk": 2
+      },
+      "coreside": {
+        "secureEquivalent": "Inline surface expand/collapse",
+        "files": [
+          "src/components/chat/InlineSurface.tsx"
+        ],
+        "status": "partial",
+        "evidence": "Inline surface UI present"
+      },
+      "remainingGap": "Polish expand UX",
+      "priority": "P3",
+      "requiredTests": [
+        "inline-expand"
+      ],
+      "releaseImpact": "low",
+      "july2026StatusStale": "implemented_differently"
+    },
+    {
+      "id": "PU-PROMPT-ROUTE",
+      "feature": "Prompt submission route",
+      "category": "protocol",
+      "userValue": 7,
+      "partialUpdate": {
+        "files": [
+          "src/index.ts"
+        ],
+        "mechanism": "HTTP/WS prompt into DO",
+        "trustAssumptions": [
+          "Network edge"
+        ],
+        "securityRisk": 4
+      },
+      "coreside": {
+        "secureEquivalent": "Tauri send_message / agent turn",
+        "files": [
+          "src/stores/app-store.ts",
+          "src-tauri/src/commands/message_cmds.rs"
+        ],
+        "status": "implemented-unverified",
+        "evidence": "Primary chat path works; attachment/stream gaps remain"
+      },
+      "remainingGap": "Close attachment atomicity + streaming",
+      "priority": "P0",
+      "requiredTests": [
+        "send-message"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "implemented_differently"
+    },
+    {
+      "id": "PU-CLEAR-HIST",
+      "feature": "Clear history debug action",
+      "category": "developer",
+      "userValue": 3,
+      "partialUpdate": {
+        "files": [
+          "src/debug.ts"
+        ],
+        "mechanism": "Clear history from debug",
+        "trustAssumptions": [
+          "Destructive"
+        ],
+        "securityRisk": 4
+      },
+      "coreside": {
+        "secureEquivalent": "Existing clear chats + recovery",
+        "files": [
+          "src/stores"
+        ],
+        "status": "partial",
+        "evidence": "Clear chat exists; debug parity N/A"
+      },
+      "remainingGap": "OK for consumer",
+      "priority": "P3",
+      "requiredTests": [],
+      "releaseImpact": "low",
+      "july2026StatusStale": "partially_implemented"
+    },
+    {
+      "id": "WICG-DPU",
+      "feature": "Declarative Partial Updates platform",
+      "category": "reference",
+      "userValue": 2,
+      "partialUpdate": {
+        "files": [
+          "external WICG"
+        ],
+        "mechanism": "Browser DPU proposal",
+        "trustAssumptions": [
+          "Platform"
+        ],
+        "securityRisk": 1
+      },
+      "coreside": {
+        "secureEquivalent": "Reference only; not adopted into webview",
+        "files": [],
+        "status": "deliberately-rejected",
+        "evidence": "Not in webview"
+      },
+      "remainingGap": "Keep reference-only",
+      "priority": "P3",
+      "requiredTests": [],
+      "releaseImpact": "none",
+      "july2026StatusStale": "obsolete_or_reference_only"
+    },
+    {
+      "id": "CS-INLINE",
+      "feature": "Inline generative surfaces",
+      "category": "coreside",
+      "userValue": 10,
+      "partialUpdate": {
+        "files": [],
+        "mechanism": "N/A (Coreside target)",
+        "trustAssumptions": [],
+        "securityRisk": 0
+      },
+      "coreside": {
+        "secureEquivalent": "InlineSurface in chat",
+        "files": [
+          "src/components/chat/InlineSurface.tsx"
+        ],
+        "status": "partial",
+        "evidence": "UI exists; July missing_high_value is STALE; persisted-state/archive gaps remain"
+      },
+      "remainingGap": "Persist/load inline state; enable archive controls carefully",
+      "priority": "P1",
+      "requiredTests": [
+        "inline-persist"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "missing_high_value \u2014 STALE"
+    },
+    {
+      "id": "CS-PATCH",
+      "feature": "Fine-grained patches",
+      "category": "coreside",
+      "userValue": 10,
+      "partialUpdate": {
+        "files": [],
+        "mechanism": "N/A",
+        "trustAssumptions": [],
+        "securityRisk": 0
+      },
+      "coreside": {
+        "secureEquivalent": "component patches with revision checks",
+        "files": [
+          "src-tauri/src/runtime_v2/patch.rs"
+        ],
+        "status": "implemented-unverified",
+        "evidence": "Rust patches + tests; July missing_high_value STALE"
+      },
+      "remainingGap": "Acceptance proof with preservation",
+      "priority": "P1",
+      "requiredTests": [
+        "patch"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "missing_high_value \u2014 STALE"
+    },
+    {
+      "id": "CS-PACKS",
+      "feature": "Capability packs",
+      "category": "coreside",
+      "userValue": 9,
+      "partialUpdate": {
+        "files": [],
+        "mechanism": "N/A",
+        "trustAssumptions": [],
+        "securityRisk": 0
+      },
+      "coreside": {
+        "secureEquivalent": "Bundled packs registry",
+        "files": [
+          "src-tauri/src/runtime_v2/packs.rs"
+        ],
+        "status": "implemented-unverified",
+        "evidence": "Registry + renderers; July missing STALE"
+      },
+      "remainingGap": "Pack breadth + adversarial suite",
+      "priority": "P1",
+      "requiredTests": [
+        "packs"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "missing_high_value \u2014 STALE"
+    },
+    {
+      "id": "CS-BRANCH",
+      "feature": "Chat branching",
+      "category": "coreside",
+      "userValue": 9,
+      "partialUpdate": {
+        "files": [],
+        "mechanism": "N/A",
+        "trustAssumptions": [],
+        "securityRisk": 0
+      },
+      "coreside": {
+        "secureEquivalent": "branch.rs + commands",
+        "files": [
+          "src-tauri/src/runtime_v2/branch.rs",
+          "src/lib/tauri/api.ts"
+        ],
+        "status": "disconnected",
+        "evidence": "API only; no UI"
+      },
+      "remainingGap": "Branch UI",
+      "priority": "P1",
+      "requiredTests": [
+        "branch-ui"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "missing_high_value accurate for product"
+    },
+    {
+      "id": "CS-QUEUE",
+      "feature": "Request queue UI",
+      "category": "coreside",
+      "userValue": 8,
+      "partialUpdate": {
+        "files": [],
+        "mechanism": "N/A",
+        "trustAssumptions": [],
+        "securityRisk": 0
+      },
+      "coreside": {
+        "secureEquivalent": "queue.rs + API",
+        "files": [
+          "src-tauri/src/runtime_v2/queue.rs",
+          "src/lib/tauri/api.ts"
+        ],
+        "status": "disconnected",
+        "evidence": "API only; no components UI"
+      },
+      "remainingGap": "Queue UI",
+      "priority": "P1",
+      "requiredTests": [
+        "queue-ui"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "missing_high_value accurate for product"
+    },
+    {
+      "id": "CS-TXN",
+      "feature": "Cross-surface transactions",
+      "category": "coreside",
+      "userValue": 9,
+      "partialUpdate": {
+        "files": [],
+        "mechanism": "N/A",
+        "trustAssumptions": [],
+        "securityRisk": 0
+      },
+      "coreside": {
+        "secureEquivalent": "transactions + kernel apply",
+        "files": [
+          "src-tauri/src/runtime_v2/transactions.rs"
+        ],
+        "status": "implemented-unverified",
+        "evidence": "Backend present; July missing STALE for backend"
+      },
+      "remainingGap": "Consumer undo/history UX proof",
+      "priority": "P1",
+      "requiredTests": [
+        "txn"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "missing_high_value \u2014 STALE for backend"
+    },
+    {
+      "id": "CS-LAYOUT",
+      "feature": "Workspace layout model",
+      "category": "coreside",
+      "userValue": 6,
+      "partialUpdate": {
+        "files": [],
+        "mechanism": "N/A",
+        "trustAssumptions": [],
+        "securityRisk": 0
+      },
+      "coreside": {
+        "secureEquivalent": "workspace_layouts + layout ops",
+        "files": [
+          "src-tauri/migrations/012_runtime_v2.sql"
+        ],
+        "status": "scaffold-only",
+        "evidence": "Table/ops often no-op; no drag UI"
+      },
+      "remainingGap": "Layout UI later",
+      "priority": "P3",
+      "requiredTests": [],
+      "releaseImpact": "low",
+      "july2026StatusStale": "partially_implemented"
+    },
+    {
+      "id": "CS-INSPECTOR",
+      "feature": "Developer inspector UI",
+      "category": "coreside",
+      "userValue": 6,
+      "partialUpdate": {
+        "files": [],
+        "mechanism": "N/A",
+        "trustAssumptions": [],
+        "securityRisk": 0
+      },
+      "coreside": {
+        "secureEquivalent": "Diagnostics + Developer Mode",
+        "files": [
+          "src/components/settings/AiProviderSettings.tsx"
+        ],
+        "status": "disconnected",
+        "evidence": "Toggle only; no inspector panel"
+      },
+      "remainingGap": "Inspector panel",
+      "priority": "P1",
+      "requiredTests": [
+        "inspector"
+      ],
+      "releaseImpact": "medium",
+      "july2026StatusStale": "partially_implemented"
+    },
+    {
+      "id": "CS-EVENT-LOOP",
+      "feature": "Event loop protection",
+      "category": "coreside",
+      "userValue": 9,
+      "partialUpdate": {
+        "files": [],
+        "mechanism": "N/A",
+        "trustAssumptions": [],
+        "securityRisk": 0
+      },
+      "coreside": {
+        "secureEquivalent": "EventBus loop limits",
+        "files": [
+          "src-tauri/src/runtime_v2/events.rs"
+        ],
+        "status": "implemented-unverified",
+        "evidence": "Loop controls in events module"
+      },
+      "remainingGap": "Adversarial form-loop tests",
+      "priority": "P1",
+      "requiredTests": [
+        "event-loop"
+      ],
+      "releaseImpact": "high",
+      "july2026StatusStale": "implemented_equivalent"
+    },
+    {
+      "id": "CS-V1-TOOL",
+      "feature": "Schema v1 tool_change",
+      "category": "coreside",
+      "userValue": 7,
+      "partialUpdate": {
+        "files": [],
+        "mechanism": "N/A",
+        "trustAssumptions": [],
+        "securityRisk": 0
+      },
+      "coreside": {
+        "secureEquivalent": "Keep v1 + v2 ops",
+        "files": [
+          "src-tauri/src/ai/response_schema.rs"
+        ],
+        "status": "partial",
+        "evidence": "Compatibility maintained"
+      },
+      "remainingGap": "Preserve until v2 sole path proven",
+      "priority": "P2",
+      "requiredTests": [
+        "v1-compat"
+      ],
+      "releaseImpact": "medium",
+      "july2026StatusStale": "partially_implemented"
+    },
+    {
+      "id": "CS-V1-COMPAT",
+      "feature": "Schema v1 compatibility",
+      "category": "coreside",
+      "userValue": 7,
+      "partialUpdate": {
+        "files": [],
+        "mechanism": "N/A",
+        "trustAssumptions": [],
+        "securityRisk": 0
+      },
+      "coreside": {
+        "secureEquivalent": "Parser accepts v1",
+        "files": [
+          "src-tauri/src/ai/response_parser.rs"
+        ],
+        "status": "implemented-unverified",
+        "evidence": "Parser path present"
+      },
+      "remainingGap": "Regression suite",
+      "priority": "P2",
+      "requiredTests": [
+        "v1"
+      ],
+      "releaseImpact": "medium",
+      "july2026StatusStale": "implemented_equivalent"
+    }
+  ],
+  "criticalGaps": [
+    {
+      "id": "PU-STREAM",
+      "status": "absent",
+      "note": "True provider streaming absent; emit_text_fluidly is fake"
+    },
+    {
+      "id": "PU-FORMS",
+      "status": "partial",
+      "note": "Forms ledger not injected into prompts"
+    },
+    {
+      "id": "CS-BRANCH",
+      "status": "disconnected",
+      "note": "Branch API without UI"
+    },
+    {
+      "id": "PU-REPLAY",
+      "status": "disconnected",
+      "note": "Replay UI absent"
+    },
+    {
+      "id": "CS-INSPECTOR",
+      "status": "disconnected",
+      "note": "Inspector UI absent"
+    },
+    {
+      "id": "CS-QUEUE",
+      "status": "disconnected",
+      "note": "Queue UI absent"
+    }
+  ],
+  "explicitRejections": [
+    "PU-HTML-RESP",
+    "PU-JS",
+    "PU-CDN",
+    "PU-FORM-ROUTE",
+    "PU-TAILWIND",
+    "PU-DO",
+    "PU-GATEWAY",
+    "PU-WIKI"
+  ]
+}

@@ -14,6 +14,7 @@ mod exa;
 mod exports;
 mod media;
 mod maintenance;
+mod maintenance_journal;
 mod projects;
 mod research;
 mod runtime_v2;
@@ -316,6 +317,57 @@ pub fn run() {
                 if let Some(state) = app.try_state::<AppState>() {
                     let mut db = state.db.lock();
                     let _ = application_kernel::lifecycle::interrupt_active_jobs(&mut db);
+                    // Stale `active` queue rows from a crash must not block the conversation forever.
+                    match runtime_v2::recover_stale_active(&mut db) {
+                        Ok(n) if n > 0 => {
+                            tracing::warn!(count = n, "recovered stale active agent queue items")
+                        }
+                        Err(err) => tracing::warn!(error = %err, "stale queue recovery failed"),
+                        _ => {}
+                    }
+                }
+                if let Some(state) = app.try_state::<AppState>() {
+                    match commands::reconcile_and_sweep_attachments(&state) {
+                        Ok(report) if report.expired > 0 || report.promoted_orphans > 0 || report.missing_durable > 0 => {
+                            tracing::info!(
+                                expired = report.expired,
+                                promoted = report.promoted_orphans,
+                                missing = report.missing_durable,
+                                "attachment sweep completed"
+                            );
+                        }
+                        Err(err) => tracing::warn!(error = %err.message, "attachment sweep failed"),
+                        _ => {}
+                    }
+                }
+                if let Ok(paths) = app_paths::AppPaths::resolve() {
+                    match maintenance_journal::load_journal(&paths) {
+                        Ok(Some(journal)) => {
+                            let action = maintenance_journal::classify_unfinished_journal(&journal);
+                            tracing::warn!(
+                                operation_id = %journal.operation_id,
+                                stage = %journal.stage,
+                                ?action,
+                                "unfinished maintenance journal detected at startup"
+                            );
+                            // Never delete profile trees from a stale journal alone.
+                            if matches!(
+                                action,
+                                maintenance_journal::JournalStartupAction::EnterRecovery
+                            ) {
+                                tracing::error!(
+                                    "maintenance journal requires Recovery — refusing silent blank profile"
+                                );
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            tracing::error!(
+                                error = %err.message,
+                                "maintenance journal unreadable — Recovery may be required"
+                            );
+                        }
+                    }
                 }
                 let handle = scheduler_handle.clone();
                 let app_handle = app.handle().clone();

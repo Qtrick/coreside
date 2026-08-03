@@ -98,14 +98,13 @@ impl HostedAiProvider {
         };
 
         let status = response.status();
-        let text = tokio::select! {
-            _ = cancel.cancelled() => return Err(AiError::Cancelled),
-            result = response.text() => {
-                result.map_err(|e| {
-                    AiError::Http(redact_secrets(&e.to_string(), Some(&self.access_token)))
-                })?
-            }
-        };
+        let text = super::http_limits::read_response_text_bounded(
+            response,
+            &cancel,
+            super::http_limits::MAX_PROVIDER_RESPONSE_BYTES,
+            Some(&self.access_token),
+        )
+        .await?;
 
         if !status.is_success() {
             let consumer = serde_json::from_str::<Value>(&text)
@@ -168,7 +167,10 @@ impl AiProvider for HostedAiProvider {
         let body = json!({
             "messages": Self::build_messages(&request.system_prompt, &request.messages),
             "profile": "balanced",
-            "idempotencyKey": Uuid::new_v4().to_string(),
+            "idempotencyKey": request
+                .idempotency_key
+                .clone()
+                .unwrap_or_else(|| Uuid::new_v4().to_string()),
             "stream": false
         });
         let payload = self.post_gateway(body, request.cancel).await?;

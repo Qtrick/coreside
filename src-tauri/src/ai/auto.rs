@@ -2,9 +2,15 @@
 //!
 //! Important: avoid probe+chat double requests (burns Gemini/OpenRouter rate limits).
 //! On 429, back off once before switching models.
+//!
+//! Production path currently uses `chat` (and the default buffered `chat_stream`
+//! when adapters do not override). OpenAI implements live SSE `chat_stream`;
+//! wiring send_message through live deltas is tracked in TRUE_STREAMING_RUNTIME.md.
 
 use std::sync::Arc;
 use std::time::Duration;
+
+use uuid::Uuid;
 
 use super::errors::AiError;
 use super::provider::{AgentRequest, AgentResponse, AiProvider};
@@ -29,7 +35,6 @@ pub fn auto_model_candidates(provider: &str, configured_default: &str) -> Vec<St
     match provider {
         "openrouter" => {
             for id in [
-                // Prefer non-Gemini first when default is Gemini-heavy, to avoid shared rate walls.
                 "openai/gpt-4o-mini",
                 "google/gemini-2.5-flash",
                 "meta-llama/llama-3.3-70b-instruct",
@@ -74,7 +79,6 @@ pub fn is_auto_preference(model: &str) -> bool {
 
 fn is_rate_limited(err: &AiError) -> bool {
     let msg = err.to_string().to_lowercase();
-    // Avoid bare "rate" — it false-positives on "generate" / "generateContent".
     msg.contains("429")
         || msg.contains("rate limit")
         || msg.contains("rate-limit")
@@ -107,6 +111,9 @@ pub struct ResolvedChat {
     pub model_used: String,
     pub auto_mode: bool,
     pub attempts: usize,
+    /// True when live provider TextDelta events reached the UI path.
+    /// Currently false until send_message consumes `chat_stream` deltas.
+    pub streamed_live: bool,
 }
 
 /// Run chat with optional Auto fallback across candidate models.
@@ -129,6 +136,10 @@ pub async fn chat_with_auto(
 
     let mut attempts = 0usize;
     let mut last_err: Option<AiError> = None;
+    let base_idempotency_key = request
+        .idempotency_key
+        .clone()
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
 
     if !auto_mode {
         on_action("Connecting to the model");
@@ -142,9 +153,19 @@ pub async fn chat_with_auto(
         attempts += 1;
         let provider = build_provider(config, model)?;
 
-        // Single chat attempt (no separate probe — probes double rate-limit usage).
+        let attempt = AgentRequest {
+            system_prompt: request.system_prompt.clone(),
+            messages: request.messages.clone(),
+            cancel: request.cancel.clone(),
+            idempotency_key: Some(if auto_mode {
+                format!("{base_idempotency_key}:{model}")
+            } else {
+                base_idempotency_key.clone()
+            }),
+        };
+
         on_action("Generating a response");
-        match chat_with_rate_limit_retry(provider.as_ref(), &request).await {
+        match chat_with_rate_limit_retry(provider.as_ref(), &attempt).await {
             Ok(response) => {
                 on_action("Reading the response");
                 return Ok(ResolvedChat {
@@ -152,6 +173,7 @@ pub async fn chat_with_auto(
                     response,
                     auto_mode,
                     attempts,
+                    streamed_live: false,
                 });
             }
             Err(err) => {
@@ -171,18 +193,22 @@ async fn chat_with_rate_limit_retry(
     provider: &dyn AiProvider,
     request: &AgentRequest,
 ) -> Result<AgentResponse, AiError> {
+    let idempotency_key = request
+        .idempotency_key
+        .clone()
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
     let first = provider
         .chat(AgentRequest {
             system_prompt: request.system_prompt.clone(),
             messages: request.messages.clone(),
             cancel: request.cancel.clone(),
+            idempotency_key: Some(idempotency_key.clone()),
         })
         .await;
 
     match first {
         Ok(response) => Ok(response),
         Err(err) if is_rate_limited(&err) => {
-            // One quiet backoff, then a single retry on the same model.
             tokio::select! {
                 _ = request.cancel.cancelled() => return Err(AiError::Cancelled),
                 _ = tokio::time::sleep(Duration::from_millis(1200)) => {}
@@ -192,6 +218,7 @@ async fn chat_with_rate_limit_retry(
                     system_prompt: request.system_prompt.clone(),
                     messages: request.messages.clone(),
                     cancel: request.cancel.clone(),
+                    idempotency_key: Some(idempotency_key),
                 })
                 .await
         }
@@ -200,7 +227,6 @@ async fn chat_with_rate_limit_retry(
 }
 
 fn build_provider(config: &AppConfig, model: &str) -> Result<Arc<dyn AiProvider>, AiError> {
-    // Delegate to the shared factory so openai/anthropic/compatible stay wired.
     crate::ai::create_provider_with_model(config, Some(model))
 }
 
@@ -231,7 +257,6 @@ mod tests {
         let generate_err =
             AiError::Provider("Gemini HTTP 400: generateContent failed: INVALID_ARGUMENT".into());
         assert!(!is_rate_limited(&generate_err));
-        // Provider errors remain retryable for Auto fallback — just not via the rate-limit path.
         assert!(is_retryable_model_error(&generate_err));
 
         let limited = AiError::Provider("Gemini HTTP 429: rate limit exceeded".into());

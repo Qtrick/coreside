@@ -127,10 +127,16 @@ impl NdjsonFrameParser {
 
 fn truncate(s: &str, n: usize) -> String {
     if s.len() <= n {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..n])
+        return s.to_string();
     }
+    // Never slice mid–code-point: `&s[..n]` panics on multibyte UTF-8.
+    let end = s
+        .char_indices()
+        .map(|(i, _)| i)
+        .take_while(|&i| i <= n)
+        .last()
+        .unwrap_or(0);
+    format!("{}…", &s[..end])
 }
 
 #[cfg(test)]
@@ -173,5 +179,16 @@ mod tests {
         let mut p = NdjsonFrameParser::new();
         let events = p.push("{\"type\":\"turn.started\"\n");
         assert!(events[0].is_err());
+    }
+
+    #[test]
+    fn truncate_respects_utf8_char_boundaries() {
+        // Emoji (4 bytes), CJK (3 bytes), combining-mark sequence.
+        assert_eq!(truncate("hi", 10), "hi");
+        assert_eq!(truncate("你好世界", 2), "…"); // first CJK char needs 3 bytes
+        assert_eq!(truncate("你好世界", 3), "你…");
+        assert_eq!(truncate("你好世界", 6), "你好…");
+        assert_eq!(truncate("hello🎉world", 7), "hello…"); // 🎉 starts at byte 5
+        assert_eq!(truncate("a\u{0301}b", 2), "a…"); // combining acute starts at byte 1
     }
 }

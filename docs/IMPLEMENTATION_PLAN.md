@@ -1,19 +1,68 @@
-# Implementation Plan — Release Candidate (current priority)
+# Implementation Plan — RC3 Final Closure + Secure Partial Update Parity (current priority)
 
 **Product:** Coreside  
-**Status:** RC research + baseline; **public beta NOT READY**  
+**Status:** RC3 dependency-order execution; **public beta NOT READY** · **local-first NOT READY** · **Hosted AI NOT READY**  
+**Last updated:** 2026-08-03  
+**Access date:** 2026-08-03  
+**Coreside archive:** `ec8292249b58b565abef72baf285e36adce0ddea0059931166702d4ccf9bd228`  
+**Partial Update archive:** `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607` (byte-identical to prior)  
+**Active commit:** `41fd4595db420eac8b1c5cc30723f1dd377608f4` (dirty)  
+**Source fingerprint:** `3306d5de459be8d661c52e0101b70d956c2218f841bacafdbedb6ebb6acf9f41`
+
+### Scope note (2026-08-03)
+
+- Proceed in **dependency order** below unless source analysis proves another order safer.
+- Partial Update re-audit: [PARTIAL_UPDATE_2026_REAUDIT.md](./PARTIAL_UPDATE_2026_REAUDIT.md) · [PARTIAL_UPDATE_FILE_ANALYSIS_2026.md](./PARTIAL_UPDATE_FILE_ANALYSIS_2026.md) · [PARTIAL_UPDATE_SECURE_ADOPTION_ARCHITECTURE.md](./PARTIAL_UPDATE_SECURE_ADOPTION_ARCHITECTURE.md) · `reports/partial-update-file-manifest-current.json` · `reports/partial-update-secure-parity-matrix.json` · `reports/partial-update-system-map.json` · `reports/partial-update-current-gap-audit.json`.
+- Baseline: [CURRENT_SOURCE_BASELINE.md](./CURRENT_SOURCE_BASELINE.md) · `reports/current-source-baseline.json`.
+- July Partial Update status claims are **stale** for Coreside completeness.
+- True provider streaming is **ABSENT** (`AiProvider::chat` only; `emit_text_fluidly` is fake). Forms ledger is **not** injected into prompts. Branch/replay/inspector/queue UI are **largely disconnected**. HTML/JS/CDN/iframe forms remain **rejected**.
+
+## RC3 phases 1–13 (dependency order; mark started)
+
+| # | Scope | Status | Exit criteria (honest) |
+| ---: | --- | --- | --- |
+| 1 | Current-source and archive baseline | **Started** | Baseline docs/JSON match archives + fingerprint; dirty labeled |
+| 2 | Current Partial Update file/system re-audit | **Started** | 2026 re-audit docs + four JSON reports present; July claims marked stale |
+| 3 | Attachment message-commit atomicity | **Started** | All-or-none message+attachment commit + crash reconciliation evidenced |
+| 4 | Attachment GC, ownership, protocol auth, multimodal handoff | **Started** | GC/ownership/protocol proofs; no client-authoritative storage keys |
+| 5 | Durable-profile definition | Not started | Normative profile contents enumerated and tested |
+| 6 | Persisted maintenance journal | Not started | Intent journal survives crash across profile ops |
+| 7 | Subsystem quiescence and scheduler lifecycle | Not started | Quiesce/resume documented and test-backed |
+| 8 | Coherent full-profile restore | Not started | Restore verified end-to-end or waived in writing |
+| 9 | Media consistency | Not started | Media/attachment references consistent across backup/restore |
+| 10 | Backup provenance and archive hardening | Not started | Per-asset provenance + component ZIP validation |
+| 11 | `.coreside-app` hardening | Not started | Secure package import transaction; adversarial suite |
+| 12 | Provider endpoint and response security | **Started** | Bounded bodies/timeouts (`http_limits`); health/catalog covered |
+| 13 | Typed provider-neutral messages and context | **Started** | Stable idempotency / logical request identity; typed context path |
+
+Phases **14+** (true streaming, secure frames, forms/events, branch/replay/inspector, E2E, packaged assurance, release evidence) follow after 1–13 foundations. Early dirty edits to `streaming.rs` / `queue.rs` do **not** mark those later phases complete.
+
+## Explicit non-claims
+
+- Public beta **NOT READY**. Local-first **NOT READY**. Hosted AI **NOT READY**.
+- Do not invent E2E, packaged smoke, wallpaper visual-proof, or streaming pass without evidence.
+- Not ASVS/WCAG certified.
+- Dirty worktree ≠ release snapshot.
+- Do not claim Partial Update parity for HTML/JS/CDN/iframe forms.
+
+---
+
+# Implementation Plan — Release Candidate (prior RC1–RC9 track; superseded for ordering by RC3 phases 1–13 above)
+
+**Product:** Coreside  
+**Status:** Historical RC track; retain for continuity — **prefer RC3 dependency table above**  
 **Last updated:** 2026-08-02 (evening)  
 **Access date:** 2026-08-02 (evening)  
-**Archive:** `b2f8bf4e244cd82976de39cacb484cf86c641ba08314c285f7467e115dbf17f2` (Chat AI(5); supersedes `d8fe0c…`)  
-**Active commit:** `90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6` (may be dirty with wallpaper/bootstrap review fixes)
+**Archive (historical):** `b2f8bf4e244cd82976de39cacb484cf86c641ba08314c285f7467e115dbf17f2`  
+**Active commit (historical note):** `90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6`
 
 ### Scope note (2026-08-02 evening)
 
-- **Wallpaper compositing closure is IN SCOPE** — visual proof + residual nested-surface risks. No unrelated wallpaper redesign.
+- **Wallpaper compositing closure remains in later RC3 order** (phase 21 in full task list) — visual proof + residual nested-surface risks.
 - Baseline: [CURRENT_SOURCE_BASELINE.md](./CURRENT_SOURCE_BASELINE.md) · `reports/current-source-baseline.json` · `reports/active-versus-uploaded-coreside.json`
 - Research: [RELEASE_CANDIDATE_RESEARCH.md](./RELEASE_CANDIDATE_RESEARCH.md) · [WALLPAPER_COMPOSITING_CLOSURE_RESEARCH.md](./WALLPAPER_COMPOSITING_CLOSURE_RESEARCH.md)
 
-## RC phases (priority order)
+## Historical RC phases (RC1–RC9)
 
 | Phase | Scope | Exit criteria | Research |
 | --- | --- | --- | --- |
@@ -26,13 +75,6 @@
 | RC7 | E2E | Critical journeys asserted or waived in writing | [E2E_EXECUTION.md](./E2E_EXECUTION.md) |
 | RC8 | Packaged smoke | macOS bundle + scan + cold-start checklist recorded | [PACKAGED_SMOKE_RESEARCH.md](./PACKAGED_SMOKE_RESEARCH.md) |
 | RC9 | Assurance | Full `release:evidence`; `passed_partial` never → `passed` | [RELEASE_EVIDENCE_RESEARCH.md](./RELEASE_EVIDENCE_RESEARCH.md) |
-
-## Explicit non-claims
-
-- Public beta **NOT READY**.
-- Do not invent E2E, packaged smoke, or wallpaper visual-proof pass without evidence.
-- Not ASVS/WCAG certified.
-- Dirty worktree ≠ release snapshot.
 
 ---
 
@@ -180,15 +222,16 @@ Feature-flag layout modes, transparency UI, and window orchestration independent
 
 ---
 
-# Implementation Plan — Final Partial Update Gap Completion
+# Implementation Plan — Final Partial Update Gap Completion (July 2026; status claims STALE)
 
 **Product:** Coreside  
-**Status:** Continuity / scheduler / preservation phase shipped (foundation)  
-**Last updated:** 2026-07-18
+**Status:** Historical foundation track — **Coreside completeness claims superseded by 2026-08-03 re-audit**  
+**Last updated:** 2026-07-18 (claims stale as of 2026-08-03)
 
-Prior: Application Kernel + Runtime V2. Research: [PARTIAL_UPDATE_FINAL_GAP_RESEARCH.md](./PARTIAL_UPDATE_FINAL_GAP_RESEARCH.md). Audit: [PARTIAL_UPDATE_FINAL_GAP_AUDIT.md](./PARTIAL_UPDATE_FINAL_GAP_AUDIT.md).
+Prior: Application Kernel + Runtime V2. Research: [PARTIAL_UPDATE_FINAL_GAP_RESEARCH.md](./PARTIAL_UPDATE_FINAL_GAP_RESEARCH.md). Audit: [PARTIAL_UPDATE_FINAL_GAP_AUDIT.md](./PARTIAL_UPDATE_FINAL_GAP_AUDIT.md) (**stale status**).  
+Current: [PARTIAL_UPDATE_2026_REAUDIT.md](./PARTIAL_UPDATE_2026_REAUDIT.md).
 
-## Completed this phase
+## Shipped as foundation (do not read as release-complete)
 
 1. Migration `014_continuity_scheduler.sql`
 2. Preservation engine + frontend helpers
@@ -197,18 +240,21 @@ Prior: Application Kernel + Runtime V2. Research: [PARTIAL_UPDATE_FINAL_GAP_RESE
 5. Generated route state + AppRouteShell + same-route no-op
 6. Customize mode → same operation protocol + provenance
 7. Optimistic local controls with rollback
-8. Context ledger (model-only)
+8. Context ledger **storage** (model-only) — **not** injected into prompts as of 2026-08-03
 9. Provider conformance seeded profiles
 10. Surface state hydration + continuity suspension
 11. Safe parity demo documentation
 
-## Explicitly partial / deferred
+## Explicitly partial / deferred / corrected by re-audit
 
+- True provider streaming **ABSENT** (July progressive-stream claims stale)
+- Forms ledger → prompt injection missing
+- Branch / replay / inspector / queue UI largely disconnected
 - Full caret/selection fidelity across every control type
 - View-transition presets beyond CSS reduced-motion awareness
 - Local provider benchmark numbers (no fabricated metrics)
 - Public multiuser collaboration (rejected/deferred)
-- Unrestricted HTML/JS (rejected)
+- Unrestricted HTML/JS/CDN/iframe forms (rejected)
 
 ## Verify
 

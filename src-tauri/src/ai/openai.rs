@@ -8,12 +8,16 @@ use tokio_util::sync::CancellationToken;
 
 use super::errors::AiError;
 use super::provider::{
-    AgentMessage, AgentRequest, AgentResponse, AiProvider, ProviderHealth, UsageMetadata,
+    AgentMessage, AgentRequest, AgentResponse, AiProvider, ProviderHealth, ProviderStreamEvent,
+    ProviderStreamTx, UsageMetadata,
 };
 use super::response_schema::SCHEMA_VERSION;
 use crate::security::redact_secrets;
+use futures_util::StreamExt;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
+const MAX_STREAM_EVENTS: usize = 50_000;
+const MAX_STREAM_TEXT_BYTES: usize = super::http_limits::MAX_PROVIDER_RESPONSE_BYTES;
 
 pub struct OpenAiProvider {
     api_key: String,
@@ -107,12 +111,13 @@ impl OpenAiProvider {
         };
 
         let status = response.status();
-        let text = tokio::select! {
-            _ = cancel.cancelled() => return Err(AiError::Cancelled),
-            result = response.text() => {
-                result.map_err(|e| AiError::Http(redact_secrets(&e.to_string(), Some(&self.api_key))))?
-            }
-        };
+        let text = super::http_limits::read_response_text_bounded(
+            response,
+            &cancel,
+            super::http_limits::MAX_PROVIDER_RESPONSE_BYTES,
+            Some(&self.api_key),
+        )
+        .await?;
 
         if !status.is_success() {
             return Err(AiError::Provider(format!(
@@ -165,6 +170,98 @@ impl OpenAiProvider {
                 .and_then(|v| v.as_u64())
                 .map(|v| v as u32),
         }
+    }
+
+    /// Extract assistant content delta from one OpenAI chat.completion.chunk JSON object.
+    fn stream_delta_text(chunk: &Value) -> Option<String> {
+        chunk
+            .pointer("/choices/0/delta/content")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    }
+
+    async fn consume_sse_chat_stream(
+        &self,
+        response: reqwest::Response,
+        cancel: &CancellationToken,
+        tx: &ProviderStreamTx,
+    ) -> Result<(String, UsageMetadata, String), AiError> {
+        let mut buf: Vec<u8> = Vec::new();
+        let mut full_text = String::new();
+        let mut usage = UsageMetadata::default();
+        let mut model = self.model.clone();
+        let mut events = 0usize;
+        let mut stream = response.bytes_stream();
+
+        loop {
+            let next = tokio::select! {
+                _ = cancel.cancelled() => {
+                    let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
+                    return Err(AiError::Cancelled);
+                }
+                item = stream.next() => item,
+            };
+            match next {
+                None => break,
+                Some(Err(e)) => {
+                    return Err(AiError::Http(redact_secrets(&e.to_string(), Some(&self.api_key))));
+                }
+                Some(Ok(chunk)) => {
+                    if buf.len().saturating_add(chunk.len()) > MAX_STREAM_TEXT_BYTES {
+                        return Err(AiError::Provider(format!(
+                            "stream exceeded limit of {MAX_STREAM_TEXT_BYTES} bytes"
+                        )));
+                    }
+                    buf.extend_from_slice(&chunk);
+                    while let Some(idx) = buf.iter().position(|&b| b == b'\n') {
+                        let line_bytes = buf.drain(..=idx).collect::<Vec<u8>>();
+                        let line = String::from_utf8_lossy(&line_bytes);
+                        let line = line.trim();
+                        if line.is_empty() || line.starts_with(':') {
+                            continue;
+                        }
+                        let Some(data) = line.strip_prefix("data:") else {
+                            continue;
+                        };
+                        let data = data.trim();
+                        if data == "[DONE]" {
+                            return Ok((full_text, usage, model));
+                        }
+                        events += 1;
+                        if events > MAX_STREAM_EVENTS {
+                            return Err(AiError::Provider("stream event count exceeded".into()));
+                        }
+                        let Ok(value) = serde_json::from_str::<Value>(data) else {
+                            continue;
+                        };
+                        if let Some(m) = value.get("model").and_then(|v| v.as_str()) {
+                            model = m.to_string();
+                        }
+                        if value.get("usage").is_some() {
+                            usage = Self::extract_usage(&value);
+                            let _ = tx
+                                .send(ProviderStreamEvent::UsageUpdated {
+                                    usage: usage.clone(),
+                                })
+                                .await;
+                        }
+                        if let Some(delta) = Self::stream_delta_text(&value) {
+                            if full_text.len().saturating_add(delta.len()) > MAX_STREAM_TEXT_BYTES {
+                                return Err(AiError::Provider(
+                                    "stream text exceeded byte limit".into(),
+                                ));
+                            }
+                            full_text.push_str(&delta);
+                            let _ = tx
+                                .send(ProviderStreamEvent::TextDelta { text: delta })
+                                .await;
+                        }
+                    }
+                }
+            }
+        }
+        Ok((full_text, usage, model))
     }
 }
 
@@ -248,5 +345,140 @@ impl AiProvider for OpenAiProvider {
             model,
             provider_id: self.provider_id().to_string(),
         })
+    }
+
+    async fn chat_stream(
+        &self,
+        request: AgentRequest,
+        tx: ProviderStreamTx,
+    ) -> Result<AgentResponse, AiError> {
+        if request.cancel.is_cancelled() {
+            let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
+            return Err(AiError::Cancelled);
+        }
+        let messages = Self::build_messages(&request.system_prompt, &request.messages);
+        let _ = SCHEMA_VERSION;
+        let body = json!({
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.4,
+            "stream": true,
+            "stream_options": { "include_usage": true },
+            "response_format": { "type": "json_object" }
+        });
+        let _ = tx
+            .send(ProviderStreamEvent::ResponseStarted {
+                provider_id: self.provider_id().to_string(),
+                model: self.model.clone(),
+                live: true,
+            })
+            .await;
+
+        let http_req = self
+            .auth_headers(self.client.post(self.chat_url()))
+            .json(&body);
+        let response = tokio::select! {
+            _ = request.cancel.cancelled() => {
+                let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
+                return Err(AiError::Cancelled);
+            }
+            result = http_req.send() => {
+                result.map_err(|e| {
+                    if e.is_timeout() {
+                        AiError::Timeout
+                    } else {
+                        AiError::Http(redact_secrets(&e.to_string(), Some(&self.api_key)))
+                    }
+                })?
+            }
+        };
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = super::http_limits::read_response_text_bounded(
+                response,
+                &request.cancel,
+                super::http_limits::MAX_PROVIDER_RESPONSE_BYTES,
+                Some(&self.api_key),
+            )
+            .await
+            .unwrap_or_default();
+            let err = AiError::Provider(format!(
+                "{} HTTP {}: {}",
+                self.display_name,
+                status.as_u16(),
+                redact_secrets(&text, Some(&self.api_key))
+            ));
+            let _ = tx
+                .send(ProviderStreamEvent::ResponseFailed {
+                    code: err.code().to_string(),
+                    message: err.to_string(),
+                })
+                .await;
+            return Err(err);
+        }
+
+        let (raw_text, usage, model) = match self
+            .consume_sse_chat_stream(response, &request.cancel, &tx)
+            .await
+        {
+            Ok(v) => v,
+            Err(err) => {
+                if !matches!(err, AiError::Cancelled) {
+                    let _ = tx
+                        .send(ProviderStreamEvent::ResponseFailed {
+                            code: err.code().to_string(),
+                            message: err.to_string(),
+                        })
+                        .await;
+                }
+                return Err(err);
+            }
+        };
+
+        if raw_text.trim().is_empty() {
+            let err = AiError::Parse("Empty streamed model text".into());
+            let _ = tx
+                .send(ProviderStreamEvent::ResponseFailed {
+                    code: err.code().to_string(),
+                    message: err.to_string(),
+                })
+                .await;
+            return Err(err);
+        }
+
+        let response = AgentResponse {
+            raw_text: raw_text.clone(),
+            usage,
+            model,
+            provider_id: self.provider_id().to_string(),
+        };
+        let _ = tx
+            .send(ProviderStreamEvent::TextCompleted {
+                text: raw_text,
+            })
+            .await;
+        let _ = tx
+            .send(ProviderStreamEvent::ResponseCompleted {
+                response: response.clone(),
+                buffered: false,
+            })
+            .await;
+        Ok(response)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_openai_stream_delta_content() {
+        let chunk = json!({
+            "choices": [{ "delta": { "content": "Hel" } }]
+        });
+        assert_eq!(OpenAiProvider::stream_delta_text(&chunk).as_deref(), Some("Hel"));
+        let empty = json!({ "choices": [{ "delta": {} }] });
+        assert!(OpenAiProvider::stream_delta_text(&empty).is_none());
     }
 }
