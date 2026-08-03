@@ -11,7 +11,7 @@
 //! OpenAI, Anthropic, and compatible endpoints are also supported at runtime.
 
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::Serialize;
 
@@ -182,7 +182,7 @@ pub struct PublicAiStatus {
     pub disclosure: Option<crate::ai::DisclosurePolicy>,
 }
 
-/// Load `.env` from project root (walk up from cwd, or parent of `CARGO_MANIFEST_DIR`), then build config.
+/// Load `.env` only under the developer dotenv policy, then build config.
 pub fn load_config() -> AppConfig {
     let env_path = load_dotenv_files();
 
@@ -334,13 +334,24 @@ fn first_nonempty(candidates: &[Option<String>]) -> Option<String> {
 }
 
 fn load_dotenv_files() -> Option<PathBuf> {
+    // Production / packaged builds must not walk cwd/parents for `.env`.
+    // Developer opt-in: debug build OR explicit CORESIDE_ALLOW_DOTENV=1.
+    let allow = cfg!(debug_assertions)
+        || std::env::var("CORESIDE_ALLOW_DOTENV")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+    if !allow {
+        tracing::debug!("dotenv loading disabled (release build without CORESIDE_ALLOW_DOTENV)");
+        return None;
+    }
+
     let candidates = candidate_env_paths();
     for path in &candidates {
         if path.is_file() {
             // Override so Refresh Status picks up keys after the user saves `.env`.
             match dotenvy::from_path_override(path) {
                 Ok(()) => {
-                    tracing::info!(path = %path.display(), "loaded .env");
+                    tracing::info!(path = %path.display(), "loaded .env (developer override)");
                     return Some(path.clone());
                 }
                 Err(e) => {
@@ -349,38 +360,41 @@ fn load_dotenv_files() -> Option<PathBuf> {
             }
         }
     }
-    tracing::warn!(
+    tracing::debug!(
         candidates = ?candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
-        "no .env file found; AI keys will be missing until one is created"
+        "no .env file found under developer dotenv policy"
     );
-    // Fall back to default dotenv search (cwd).
-    let _ = dotenvy::dotenv();
+    // Do not call dotenvy::dotenv() — that searches cwd silently.
     None
 }
 
 fn candidate_env_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
-    // Parent of src-tauri (project root) via compile-time manifest dir.
+    // Parent of src-tauri (project root) via compile-time manifest dir — debug/dev only.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     if let Some(root) = manifest_dir.parent() {
         paths.push(root.join(".env"));
     }
     paths.push(manifest_dir.join(".env"));
 
-    // Walk up from current working directory.
+    // Optional: cwd only (not parent walk) when explicitly allowed.
     if let Ok(cwd) = env::current_dir() {
-        let mut dir: Option<&Path> = Some(cwd.as_path());
-        while let Some(d) = dir {
-            paths.push(d.join(".env"));
-            dir = d.parent();
-        }
+        paths.push(cwd.join(".env"));
     }
 
     // Deduplicate while preserving order.
     let mut seen = std::collections::HashSet::new();
     paths.retain(|p| seen.insert(p.clone()));
     paths
+}
+
+/// True when dotenv loading is compiled/active for this process.
+pub fn dotenv_loading_allowed() -> bool {
+    cfg!(debug_assertions)
+        || std::env::var("CORESIDE_ALLOW_DOTENV")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -430,5 +444,17 @@ mod tests {
         assert_eq!(strip_env_quotes("\"abc\""), "abc");
         assert_eq!(strip_env_quotes("'abc'"), "abc");
         assert_eq!(strip_env_quotes("  abc  "), "abc");
+    }
+
+    #[test]
+    fn dotenv_policy_is_debug_or_explicit() {
+        let allowed = dotenv_loading_allowed();
+        assert_eq!(
+            allowed,
+            cfg!(debug_assertions)
+                || std::env::var("CORESIDE_ALLOW_DOTENV")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false)
+        );
     }
 }

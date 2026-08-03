@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,6 +19,8 @@ pub use super::models::compute_next_after as compute_next_run;
 #[derive(Default)]
 pub struct SchedulerHandle {
     running: Mutex<HashSet<String>>,
+    /// Ensures at most one ticker loop (setup or post-recovery restore).
+    started: AtomicBool,
 }
 
 impl SchedulerHandle {
@@ -37,13 +40,21 @@ impl SchedulerHandle {
 
 /// Start the automation ticker on Tauri's async runtime (not a bare `tokio::spawn`
 /// from `setup`, which has no reactor and aborts the process).
+///
+/// Idempotent: a second call after recovery restore is a no-op if already running.
 pub fn spawn_scheduler(app: AppHandle, handle: Arc<SchedulerHandle>) {
+    if handle.started.swap(true, Ordering::SeqCst) {
+        tracing::debug!("automation scheduler already running");
+        return;
+    }
     tauri::async_runtime::spawn(async move {
         {
             if let Some(state) = app.try_state::<AppState>() {
-                let mut db = state.db.lock();
-                if let Err(e) = catch_up_missed(&mut db, &handle) {
-                    tracing::warn!(error = %e, "automation missed-run catch-up failed");
+                if state.profile_ready() {
+                    let mut db = state.db.lock();
+                    if let Err(e) = catch_up_missed(&mut db, &handle) {
+                        tracing::warn!(error = %e, "automation missed-run catch-up failed");
+                    }
                 }
             }
         }
@@ -54,6 +65,10 @@ pub fn spawn_scheduler(app: AppHandle, handle: Arc<SchedulerHandle>) {
             let Some(state) = app.try_state::<AppState>() else {
                 continue;
             };
+            // Never schedule against the recovery shell database.
+            if !state.profile_ready() {
+                continue;
+            }
             let due = {
                 let db = state.db.lock();
                 db::list_due_automations(&db, &Utc::now().to_rfc3339()).unwrap_or_default()
@@ -68,7 +83,9 @@ pub fn spawn_scheduler(app: AppHandle, handle: Arc<SchedulerHandle>) {
                 tauri::async_runtime::spawn_blocking(move || {
                     let parked_before = pending_approval_total(&app_clone);
                     if let Some(state) = app_clone.try_state::<AppState>() {
-                        run_one(&state, &id);
+                        if state.profile_ready() {
+                            run_one(&state, &id);
+                        }
                     }
                     handle_clone.end(&id);
                     // An away run that parks an approval must reach open windows
@@ -185,6 +202,9 @@ pub fn run_now(
     automation_id: &str,
     handle: &SchedulerHandle,
 ) -> Result<String, String> {
+    if !state.profile_ready() {
+        return Err("Automations are unavailable until Recovery finishes.".into());
+    }
     if !handle.try_begin(automation_id) {
         return Err("Automation is already running".into());
     }

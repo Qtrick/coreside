@@ -158,6 +158,8 @@ export const api = {
       integrityOk: boolean;
       warnings: string[];
     }>("preview_restore_backup", { path }),
+  listManagedBackups: () =>
+    invoke<Array<{ path: string; byteSize: number }>>("list_managed_backups"),
   restoreProfileBackup: (path: string, confirm: boolean) =>
     invoke<{
       safetyBackupPath: string;

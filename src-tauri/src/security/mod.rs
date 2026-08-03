@@ -51,12 +51,17 @@ pub fn sanitize_error(err: &str, key: Option<&str>) -> String {
     if trimmed.is_empty() {
         return "An unexpected error occurred.".to_string();
     }
-    // Keep messages readable but bounded.
-    if trimmed.len() > 400 {
-        format!("{}…", &trimmed[..400])
-    } else {
-        trimmed.to_string()
+    // Keep messages readable but bounded. Truncate on a char boundary (never panic on UTF-8).
+    const MAX_CHARS: usize = 400;
+    let mut out = String::new();
+    for (i, ch) in trimmed.chars().enumerate() {
+        if i >= MAX_CHARS {
+            out.push('…');
+            break;
+        }
+        out.push(ch);
     }
+    out
 }
 
 #[cfg(test)]
@@ -74,5 +79,15 @@ mod tests {
     fn redacts_gemini_style_key() {
         let s = redact_secrets("AIzaSyA-test-key-value-1234567890abcd", None);
         assert_eq!(s, "[REDACTED]");
+    }
+
+    #[test]
+    fn sanitize_error_truncates_unicode_safely() {
+        // 500 CJK chars cross the 400-char bound mid-string without ASCII.
+        let long = "测".repeat(500);
+        let out = sanitize_error(&long, None);
+        assert!(out.ends_with('…'));
+        assert!(out.chars().count() <= 401);
+        assert!(std::str::from_utf8(out.as_bytes()).is_ok());
     }
 }

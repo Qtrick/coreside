@@ -3,7 +3,7 @@
 mod env;
 
 pub use env::{
-    load_config, supabase_publishable_config, AppConfig, PublicAiStatus,
+    dotenv_loading_allowed, load_config, supabase_publishable_config, AppConfig, PublicAiStatus,
     DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_ANTHROPIC_MODEL, DEFAULT_GEMINI_BASE_URL,
     DEFAULT_GEMINI_MODEL, DEFAULT_OPENAI_BASE_URL, DEFAULT_OPENAI_MODEL,
     DEFAULT_OPENROUTER_BASE_URL, DEFAULT_OPENROUTER_MODEL,

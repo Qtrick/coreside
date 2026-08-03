@@ -1,10 +1,13 @@
 //! Data integrity and backup-related settings commands.
 
+use std::sync::Arc;
+
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use super::CommandError;
 use crate::app_paths::AppPaths;
+use crate::automations::SchedulerHandle;
 use crate::db::{preview_profile_archive, DatabaseHealthReport, RestorePreview};
 use crate::state::AppState;
 
@@ -62,15 +65,58 @@ pub fn create_profile_backup(state: State<'_, AppState>) -> Result<BackupCreated
 
 #[tauri::command]
 pub fn preview_restore_backup(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     path: String,
 ) -> Result<RestorePreview, CommandError> {
-    state.require_profile()?;
+    // Recovery-safe: preview must work when the profile cannot open.
     let (_paths, resolved_canon) = resolve_managed_backup(&path)?;
     Ok(preview_profile_archive(&resolved_canon).map_err(|e| match e {
         crate::db::DbError::Invalid(msg) => CommandError::new("archive_invalid", msg),
         other => CommandError::from(other),
     })?)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedBackupEntry {
+    pub path: String,
+    pub byte_size: u64,
+}
+
+/// List managed backup filenames (recovery-safe).
+#[tauri::command]
+pub fn list_managed_backups(
+    _state: State<'_, AppState>,
+) -> Result<Vec<ManagedBackupEntry>, CommandError> {
+    let paths = AppPaths::resolve().map_err(|e| {
+        CommandError::new("storage_unavailable", e.to_string())
+    })?;
+    paths.ensure_dirs().map_err(|e| {
+        CommandError::new("storage_unavailable", e.to_string())
+    })?;
+    let mut out = Vec::new();
+    let entries = std::fs::read_dir(&paths.backups).map_err(|e| {
+        CommandError::new("storage_unavailable", format!("Cannot read backups: {e}"))
+    })?;
+    for entry in entries.flatten() {
+        // Do not follow symlinks — list only real files inside the managed backups root.
+        let meta = std::fs::symlink_metadata(entry.path()).ok();
+        let Some(meta) = meta else { continue };
+        if meta.file_type().is_symlink() || !meta.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.ends_with(".coreside-backup") {
+            continue;
+        }
+        out.push(ManagedBackupEntry {
+            path: name.to_string(),
+            byte_size: meta.len(),
+        });
+    }
+    out.sort_by(|a, b| b.path.cmp(&a.path));
+    Ok(out)
 }
 
 fn resolve_managed_backup(
@@ -197,10 +243,38 @@ fn mark_restore_rollback_recovery(state: &AppState, live_path: &std::path::Path)
     );
 }
 
-/// Restore a validated managed backup after creating a safety backup of the live profile.
-/// Requires explicit `confirm: true`. Does not run from tool windows by capability (main only).
+/// After a failed restore swap: reopen the live profile, or a fresh recovery shell.
+/// Never leave a staging/hold database attached while reporting Recovery.
+fn recover_connection_after_failed_restore(
+    state: &AppState,
+    db_guard: &mut crate::db::Database,
+    live_path: &std::path::Path,
+) {
+    if try_reopen_live_into(db_guard, live_path) {
+        return;
+    }
+    match crate::db::bootstrap::open_shell_database() {
+        Ok(shell) => {
+            *db_guard = shell;
+            mark_restore_rollback_recovery(state, live_path);
+        }
+        Err(err) => {
+            tracing::error!(
+                error = %err,
+                path = %live_path.display(),
+                "failed to open recovery shell after restore rollback"
+            );
+            mark_restore_rollback_recovery(state, live_path);
+        }
+    }
+}
+
+/// Restore a validated managed backup.
+/// Works from a healthy profile **or** bootstrap recovery (disaster restore).
+/// Requires explicit `confirm: true`. Main protected UI only.
 #[tauri::command]
 pub fn restore_profile_backup(
+    app: AppHandle,
     state: State<'_, AppState>,
     path: String,
     confirm: bool,
@@ -211,7 +285,8 @@ pub fn restore_profile_backup(
             "Restore requires explicit confirmation.",
         ));
     }
-    state.require_profile()?;
+    // Intentionally no require_profile(): disaster recovery must restore when the profile cannot open.
+    let started_without_profile = !state.profile_ready();
     state.cancel_all();
 
     let (paths, archive_path) = resolve_managed_backup(&path)?;
@@ -227,14 +302,24 @@ pub fn restore_profile_backup(
     }
 
     let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
-    let safety_dest = paths.backups.join(format!(
-        "coreside-safety-before-restore-{stamp}.coreside-backup"
-    ));
     let version = env!("CARGO_PKG_VERSION");
-    {
-        let db = state.db.lock();
-        db.create_profile_archive(&safety_dest, version)?;
-    }
+    let safety_backup_path = if !started_without_profile {
+        let safety_dest = paths.backups.join(format!(
+            "coreside-safety-before-restore-{stamp}.coreside-backup"
+        ));
+        {
+            let db = state.db.lock();
+            db.create_profile_archive(&safety_dest, version)?;
+        }
+        safety_dest
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("safety.coreside-backup")
+            .to_string()
+    } else {
+        // Broken profile: do not snapshot the recovery shell as a safety backup.
+        "none-recovery-restore".to_string()
+    };
 
     let staging_db = paths.restore_staging.join(format!("restore-{stamp}.db"));
     let cleanup_staging = |staging: &std::path::Path, hold: Option<&std::path::Path>| {
@@ -309,10 +394,28 @@ pub fn restore_profile_backup(
     }
     remove_db_sidecars(&staging_db);
 
-    let live_path = {
-        let db = state.db.lock();
-        db.path().to_path_buf()
-    };
+    // Always restore into the canonical profile database path — never into the recovery shell DB.
+    let live_path = paths.database.clone();
+    if live_path.starts_with(&paths.recovery)
+        || live_path
+            .file_name()
+            .is_some_and(|n| n == std::ffi::OsStr::new("shell.db"))
+    {
+        cleanup_staging(&staging_db, None);
+        return Err(CommandError::new(
+            "restore_failed",
+            "Refusing to restore into the recovery shell database.",
+        ));
+    }
+    if let Some(parent) = live_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            cleanup_staging(&staging_db, None);
+            CommandError::new(
+                "restore_failed",
+                format!("Could not create profile directory: {e}"),
+            )
+        })?;
+    }
 
     let quarantine = paths.quarantine.join(format!("pre-restore-{stamp}"));
     std::fs::create_dir_all(&quarantine).map_err(|e| {
@@ -345,24 +448,16 @@ pub fn restore_profile_backup(
         let quarantined = match quarantine_db_tree(&live_path, &quarantine) {
             Ok(moved) => moved,
             Err(err) => {
-                if try_reopen_live_into(&mut db_guard, &live_path) {
-                    cleanup_staging(&staging_db, Some(&hold_db));
-                } else {
-                    cleanup_staging(&staging_db, None);
-                    mark_restore_rollback_recovery(&state, &live_path);
-                }
+                recover_connection_after_failed_restore(&state, &mut db_guard, &live_path);
+                cleanup_staging(&staging_db, Some(&hold_db));
                 return Err(err);
             }
         };
 
         if let Err(e) = std::fs::copy(&staging_db, &live_path) {
             restore_quarantined_tree(&quarantined);
-            if try_reopen_live_into(&mut db_guard, &live_path) {
-                cleanup_staging(&staging_db, Some(&hold_db));
-            } else {
-                cleanup_staging(&staging_db, None);
-                mark_restore_rollback_recovery(&state, &live_path);
-            }
+            recover_connection_after_failed_restore(&state, &mut db_guard, &live_path);
+            cleanup_staging(&staging_db, Some(&hold_db));
             return Err(CommandError::new(
                 "restore_failed",
                 format!("Could not install restored database: {e}"),
@@ -375,12 +470,8 @@ pub fn restore_profile_backup(
                 let _ = std::fs::remove_file(&live_path);
                 remove_db_sidecars(&live_path);
                 restore_quarantined_tree(&quarantined);
-                if try_reopen_live_into(&mut db_guard, &live_path) {
-                    cleanup_staging(&staging_db, Some(&hold_db));
-                } else {
-                    cleanup_staging(&staging_db, None);
-                    mark_restore_rollback_recovery(&state, &live_path);
-                }
+                recover_connection_after_failed_restore(&state, &mut db_guard, &live_path);
+                cleanup_staging(&staging_db, Some(&hold_db));
                 return Err(CommandError::new(
                     "restore_failed",
                     format!("Restored database could not reopen: {e}"),
@@ -399,12 +490,15 @@ pub fn restore_profile_backup(
 
     cleanup_staging(&staging_db, Some(&hold_db));
 
+    // Recovery shells skip scheduler at setup; start it once the profile is restored.
+    if started_without_profile {
+        if let Some(handle) = app.try_state::<Arc<SchedulerHandle>>() {
+            crate::automations::spawn_scheduler(app.clone(), handle.inner().clone());
+        }
+    }
+
     Ok(RestoreApplied {
-        safety_backup_path: safety_dest
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("safety.coreside-backup")
-            .to_string(),
+        safety_backup_path,
         restored_from: archive_path
             .file_name()
             .and_then(|s| s.to_str())

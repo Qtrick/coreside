@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-03T14:00:24.561971+00:00",
+  "commit": "3054afb40a4202cda62cfb13f310d8a4ed4fbebf",
+  "dirty": true,
+  "sourceFingerprint": "see-current-source-fingerprint",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "dev",
+  "command": "prompt-inventory",
+  "exitStatus": 0,
+  "promptVersion": "coreside-prompt-v1",
+  "loadingStrategy": "include_str!",
+  "failClosed": true,
+  "repositoryIndependent": true,
+  "entries": [
+    {
+      "name": "system.md",
+      "byteLen": 3244,
+      "sha256": "188e236438f9e7df7e8115b3ef0681a60be406494643fdc1717fc3e5b4f8022b",
+      "nonempty": true,
+      "packaging": "include_str_compile_time"
+    },
+    {
+      "name": "tool_builder.md",
+      "byteLen": 2897,
+      "sha256": "d14cd368b66cbe353cc35293ae2b59b70700c6cce819057e3f73105f80fd5cc8",
+      "nonempty": true,
+      "packaging": "include_str_compile_time"
+    },
+    {
+      "name": "tool_editor.md",
+      "byteLen": 1732,
+      "sha256": "32339fef766c8e88f703510c273a186181d794736bfa38113420125251b772a8",
+      "nonempty": true,
+      "packaging": "include_str_compile_time"
+    },
+    {
+      "name": "response_rules.md",
+      "byteLen": 6360,
+      "sha256": "2556ccc6a2d45545998805fa29a1930923dcb3993be45af29829c83e05588bb5",
+      "nonempty": true,
+      "packaging": "include_str_compile_time"
+    },
+    {
+      "name": "protected_resources.md",
+      "byteLen": 6165,
+      "sha256": "c270e458af2602938ea474219fd63f1a30f0182f1294e70b9626af472b167563",
+      "nonempty": true,
+      "packaging": "include_str_compile_time"
+    }
+  ],
+  "allNonempty": true
+}

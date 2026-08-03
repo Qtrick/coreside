@@ -255,6 +255,11 @@ export async function mockInvoke<T>(
         warnings: ["Media files were not included in this backup."],
       } as T;
 
+    case "list_managed_backups":
+      return [
+        { path: "coreside-profile-mock.coreside-backup", byteSize: 4096 },
+      ] as T;
+
     case "restore_profile_backup":
       return {
         safetyBackupPath: "coreside-safety-before-restore-mock.coreside-backup",

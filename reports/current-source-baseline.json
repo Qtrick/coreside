@@ -1,68 +1,47 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "accessDate": "2026-08-02",
-  "accessWindow": "evening",
-  "generatedAt": "2026-08-02T21:55:00.000Z",
-  "phase": "release_candidate",
-  "publicBeta": "NOT_READY",
-  "command": "baseline-refresh",
-  "exitStatus": 0,
-  "commit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
-  "dirty": true,
-  "sourceFingerprint": "dirty-worktree-wallpaper-backup-trust-shell",
+  "generatedAt": "2026-08-03T13:56:49.006781+00:00",
+  "commit": "3054afb40a4202cda62cfb13f310d8a4ed4fbebf",
+  "dirty": false,
+  "sourceFingerprint": "27082d218c93162391e718176f7f530bad837387a72ad7e817e90db68c4090e2",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
   "architecture": "arm64",
   "buildMode": "dev",
-  "activeRepository": {
-    "path": "/Users/qunyingfan/Coreside",
-    "branch": "main",
-    "commit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
-    "dirty": true,
-    "dirtyNote": "Includes AppPaths, .coreside-backup archive, agent trust wiring, shell:allow-open removal, wallpaper visual model"
-  },
+  "command": "rc2-baseline",
+  "exitStatus": 0,
+  "branch": "main",
   "archive": {
-    "observedNames": ["Coreside Chat AI.zip", "Chat AI(5)"],
-    "pathObserved": "/Users/qunyingfan/Downloads/Coreside Chat AI.zip",
-    "sha256": "b2f8bf4e244cd82976de39cacb484cf86c641ba08314c285f7467e115dbf17f2",
-    "approxBytes": 2824600,
-    "verifiedAt": "2026-08-02T21:50:00.000Z",
-    "supersedes": {
-      "sha256": "d8fe0c3110e8fd9809962d61bb05a594b6cf821c109ce0d4c305aeec3152b36b",
-      "note": "Chat AI(4) — superseded; baseline must reference b2f8bf4e…"
-    }
+    "path": "/Users/qunyingfan/Downloads/Coreside Chat AI.zip",
+    "sha256": "2856063093f6570bf20f87b082ef9d771880d86d58292a1e3c1f38447c09b07c",
+    "expected": "2856063093f6570bf20f87b082ef9d771880d86d58292a1e3c1f38447c09b07c",
+    "match": true,
+    "observedNames": [
+      "Coreside Chat AI.zip",
+      "Chat AI(6)"
+    ],
+    "supersedes": "b2f8bf4e244cd82976de39cacb484cf86c641ba08314c285f7467e115dbf17f2"
   },
-  "lockfileHashes": {
-    "package-lock.json": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
-    "src-tauri/Cargo.lock": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729"
+  "toolVersions": {
+    "node": "v24.17.0",
+    "npm": "11.18.0",
+    "rustc": "rustc 1.96.1 (31fca3adb 2026-06-26)",
+    "cargo": "cargo 1.96.1 (356927216 2026-06-26)",
+    "tauriCli": "tauri-cli 2.11.4"
   },
   "counts": {
-    "note": "Active tree grew slightly vs archive as RC work landed",
-    "active": {
-      "srcFiles": 149,
-      "rustRsFiles": 172,
-      "migrationsSql": 15,
-      "e2eSpecs": 10
-    },
-    "archive": {
-      "srcFiles": 148,
-      "rustRsFiles": 170,
-      "migrationsSql": 15,
-      "e2eSpecs": 10
-    }
+    "srcFiles": 149,
+    "rustRsFiles": 172,
+    "migrationsSql": 15,
+    "e2eSpecs": 10,
+    "tauriCommands": 209,
+    "capabilities": [
+      "default.json",
+      "tool-window.json"
+    ]
   },
-  "scope": {
-    "wallpaperCompositingClosure": "IN_SCOPE",
-    "publicBetaShip": "NOT_READY"
-  },
-  "progressThisPass": [
-    "Verified archive SHA-256 b2f8bf4e…",
-    "AppPaths module",
-    ".coreside-backup create + restore preview",
-    "Agent retrieval trust labels + tool_result role",
-    "Removed shell:allow-open from main capability",
-    "Wallpaper unit visual contribution proof"
-  ]
+  "publicBeta": "NOT_READY",
+  "phase": "rc2"
 }

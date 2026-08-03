@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-03T13:56:49.006781+00:00",
+  "commit": "3054afb40a4202cda62cfb13f310d8a4ed4fbebf",
+  "dirty": false,
+  "sourceFingerprint": "27082d218c93162391e718176f7f530bad837387a72ad7e817e90db68c4090e2",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "dev",
+  "command": "rc2-fingerprint",
+  "exitStatus": 0,
+  "method": "sha256-of-tracked-relpath+filehash for src,src-tauri,e2e,scripts,docs,package.json,package-lock.json"
+}

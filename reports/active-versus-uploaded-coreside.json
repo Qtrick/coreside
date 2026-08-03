@@ -1,33 +1,47 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-02T21:55:00.000Z",
-  "commit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
-  "dirty": true,
-  "sourceFingerprint": "dirty-worktree-wallpaper-backup-trust-shell",
+  "generatedAt": "2026-08-03T13:56:49.006781+00:00",
+  "commit": "3054afb40a4202cda62cfb13f310d8a4ed4fbebf",
+  "dirty": false,
+  "sourceFingerprint": "27082d218c93162391e718176f7f530bad837387a72ad7e817e90db68c4090e2",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
   "architecture": "arm64",
   "buildMode": "dev",
-  "command": "shasum -a 256 archive + active inventory",
+  "command": "rc2-active-vs-archive",
   "exitStatus": 0,
   "uploadedArchive": {
     "path": "/Users/qunyingfan/Downloads/Coreside Chat AI.zip",
-    "sha256": "b2f8bf4e244cd82976de39cacb484cf86c641ba08314c285f7467e115dbf17f2",
-    "matchExpected": true
+    "sha256": "2856063093f6570bf20f87b082ef9d771880d86d58292a1e3c1f38447c09b07c",
+    "expected": "2856063093f6570bf20f87b082ef9d771880d86d58292a1e3c1f38447c09b07c",
+    "match": true,
+    "observedNames": [
+      "Coreside Chat AI.zip",
+      "Chat AI(6)"
+    ],
+    "supersedes": "b2f8bf4e244cd82976de39cacb484cf86c641ba08314c285f7467e115dbf17f2"
   },
   "active": {
-    "commit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
-    "dirty": true,
-    "srcFiles": 149,
-    "rustRsFiles": 172
+    "commit": "3054afb40a4202cda62cfb13f310d8a4ed4fbebf",
+    "dirty": false,
+    "counts": {
+      "srcFiles": 149,
+      "rustRsFiles": 172,
+      "migrationsSql": 15,
+      "e2eSpecs": 10,
+      "tauriCommands": 209,
+      "capabilities": [
+        "default.json",
+        "tool-window.json"
+      ]
+    }
   },
   "differences": [
-    "Active dirty worktree adds AppPaths, profile_archive, wallpaper-visual-proof, trust/shell/capability edits beyond archive snapshot",
-    "Active src file count 149 vs archive 148",
-    "Active Rust file count 172 vs archive 170",
-    "Lockfile hashes still match archive continuity"
+    "Active commit 3054afb4\u2026; archive has no git history",
+    "Lockfile hashes match archive continuity",
+    "Active counts match archive observation (149/172/15/10)"
   ],
-  "verdict": "Active workspace is a strict superset of the uploaded archive baseline; not byte-identical."
+  "verdict": "Active workspace aligns with Chat AI(6) archive locks/counts; regenerate all evidence for this commit."
 }

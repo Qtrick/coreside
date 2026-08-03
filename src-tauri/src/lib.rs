@@ -75,6 +75,7 @@ pub fn run() {
             commands::retry_open_database,
             commands::get_database_health,
             commands::create_profile_backup,
+            commands::list_managed_backups,
             commands::preview_restore_backup,
             commands::restore_profile_backup,
             commands::get_storage_summary,
@@ -282,14 +283,24 @@ pub fn run() {
         ])
         .setup(move |app| {
             branding::apply_display_name();
-            // Interrupt in-flight application jobs after unclean restart (do not resume provider calls)
-            if let Some(state) = app.try_state::<AppState>() {
-                let mut db = state.db.lock();
-                let _ = application_kernel::lifecycle::interrupt_active_jobs(&mut db);
+            let profile_ready = app
+                .try_state::<AppState>()
+                .map(|s| s.profile_ready())
+                .unwrap_or(false);
+            if profile_ready {
+                // Interrupt in-flight application jobs after unclean restart (do not resume provider calls)
+                if let Some(state) = app.try_state::<AppState>() {
+                    let mut db = state.db.lock();
+                    let _ = application_kernel::lifecycle::interrupt_active_jobs(&mut db);
+                }
+                let handle = scheduler_handle.clone();
+                let app_handle = app.handle().clone();
+                automations::spawn_scheduler(app_handle, handle);
+            } else {
+                tracing::warn!(
+                    "skipping automation scheduler and job interruption — recovery shell active"
+                );
             }
-            let handle = scheduler_handle.clone();
-            let app_handle = app.handle().clone();
-            automations::spawn_scheduler(app_handle, handle);
             tracing::info!("Coreside setup complete");
             Ok(())
         })
