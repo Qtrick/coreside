@@ -14,5 +14,6 @@ permissions = [
   "allow-get-surface-cmd",
   "allow-get-surface-state-cmd",
   "allow-save-surface-state-cmd",
-  "allow-get-app-info"
+  "allow-get-app-info",
+  "allow-get-bootstrap-status"
 ]

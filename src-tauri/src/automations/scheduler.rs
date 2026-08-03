@@ -21,6 +21,8 @@ pub struct SchedulerHandle {
     running: Mutex<HashSet<String>>,
     /// Ensures at most one ticker loop (setup or post-recovery restore).
     started: AtomicBool,
+    /// When true, due automations are skipped (restore / maintenance).
+    paused: AtomicBool,
 }
 
 impl SchedulerHandle {
@@ -36,6 +38,34 @@ impl SchedulerHandle {
     pub fn end(&self, id: &str) {
         self.running.lock().remove(id);
     }
+
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::SeqCst);
+    }
+
+    pub fn resume(&self) {
+        self.paused.store(false, Ordering::SeqCst);
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::SeqCst)
+    }
+
+    pub fn status(&self) -> SchedulerStatus {
+        SchedulerStatus {
+            started: self.started.load(Ordering::SeqCst),
+            paused: self.is_paused(),
+            running_count: self.running.lock().len(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchedulerStatus {
+    pub started: bool,
+    pub paused: bool,
+    pub running_count: usize,
 }
 
 /// Start the automation ticker on Tauri's async runtime (not a bare `tokio::spawn`
@@ -67,6 +97,9 @@ pub fn spawn_scheduler(app: AppHandle, handle: Arc<SchedulerHandle>) {
             };
             // Never schedule against the recovery shell database.
             if !state.profile_ready() {
+                continue;
+            }
+            if handle.is_paused() {
                 continue;
             }
             let due = {

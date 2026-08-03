@@ -43,8 +43,13 @@ const JOURNEYS = [
     id: 10,
     name: "secondary-window",
     suite: "existing-window",
-    coverage: "partial",
-    note: "Open + switchWindow; close not asserted",
+    coverage: "full",
+  },
+  {
+    id: 11,
+    name: "command-authority-denial",
+    suite: "existing-authority",
+    coverage: "full",
   },
 ];
 
@@ -133,6 +138,7 @@ const existingSuites = [
   "existing-grant",
   "existing-recovery",
   "existing-window",
+  "existing-authority",
 ];
 
 for (const suite of existingSuites) {

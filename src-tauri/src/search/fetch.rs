@@ -7,7 +7,7 @@ use tokio::time::timeout;
 use super::errors::SearchError;
 use super::models::FetchedWebPage;
 use super::normalization::{bound_text, extract_text_from_html};
-use super::safety::validate_public_http_url;
+use super::safety::{validate_and_pin_public_http_url, validate_public_http_url, PinnedPublicUrl};
 
 pub const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
 pub const MAX_REDIRECTS: usize = 3;
@@ -84,15 +84,63 @@ pub fn brave_account() -> &'static str {
     BRAVE_ACCOUNT
 }
 
+fn pinned_client(pinned: &PinnedPublicUrl) -> Result<Client, SearchError> {
+    let host = pinned.host_for_resolve()?.to_string();
+    Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(FETCH_TIMEOUT)
+        .no_proxy()
+        .resolve_to_addrs(&host, &pinned.addrs)
+        .user_agent("Coreside/0.1 (+https://coreside.local)")
+        .build()
+        .map_err(|e| SearchError::Fetch(e.to_string()))
+}
+
+/// Shared public-web client for callers that only need timeouts/no_proxy.
+/// Prefer [`send_public_get`] for URL fetches so DNS stays pinned per hop.
 pub fn build_http_client() -> Result<Client, SearchError> {
     Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(FETCH_TIMEOUT)
-        // Public-web SSRF policy: do not honor ambient system/env proxies.
         .no_proxy()
         .user_agent("Coreside/0.1 (+https://coreside.local)")
         .build()
         .map_err(|e| SearchError::Fetch(e.to_string()))
+}
+
+/// GET with DNS pin + manual redirect hop validation.
+pub async fn send_public_get(raw_url: &str) -> Result<(reqwest::Response, String), SearchError> {
+    let mut pinned = validate_and_pin_public_http_url(raw_url)?;
+    let mut hops = 0usize;
+    loop {
+        let client = pinned_client(&pinned)?;
+        let response = timeout(FETCH_TIMEOUT, client.get(pinned.url.clone()).send())
+            .await
+            .map_err(|_| SearchError::Timeout)?
+            .map_err(|e| SearchError::Fetch(e.to_string()))?;
+
+        let status = response.status();
+        if status.is_redirection() {
+            if hops >= MAX_REDIRECTS {
+                return Err(SearchError::SsrfBlocked("too many redirects".into()));
+            }
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .ok_or_else(|| SearchError::SsrfBlocked("redirect missing Location".into()))?;
+            let next = pinned
+                .url
+                .join(location)
+                .map_err(|e| SearchError::SsrfBlocked(format!("bad redirect: {e}")))?;
+            pinned = validate_and_pin_public_http_url(next.as_str())?;
+            hops += 1;
+            continue;
+        }
+
+        let final_url = pinned.url.to_string();
+        return Ok((response, final_url));
+    }
 }
 
 /// Stream response body with a hard decompressed-byte budget.
@@ -125,14 +173,10 @@ async fn read_body_bounded(
 }
 
 /// SSRF-safe webpage fetch with size limits and HTML text extraction.
-/// Prefer Crawl4AI `crawl_url` via the research provider in production paths;
-/// this HTTP helper remains for tests and fallback.
 pub async fn fetch_web_page(client: &Client, raw_url: &str) -> Result<FetchedWebPage, SearchError> {
-    let url = validate_public_http_url(raw_url)?;
-    let response = timeout(FETCH_TIMEOUT, client.get(url.clone()).send())
-        .await
-        .map_err(|_| SearchError::Timeout)?
-        .map_err(|e| SearchError::Fetch(e.to_string()))?;
+    let _ = client; // callers may still pass a shared client; hops use pinned clients.
+    let _ = validate_public_http_url(raw_url)?;
+    let (response, final_url) = send_public_get(raw_url).await?;
 
     if response.status().as_u16() == 429 {
         return Err(SearchError::RateLimited);
@@ -140,9 +184,6 @@ pub async fn fetch_web_page(client: &Client, raw_url: &str) -> Result<FetchedWeb
     if !response.status().is_success() {
         return Err(SearchError::Fetch(format!("HTTP {}", response.status())));
     }
-
-    let final_url = response.url().to_string();
-    validate_public_http_url(&final_url)?;
 
     let content_type = response
         .headers()

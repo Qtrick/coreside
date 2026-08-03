@@ -28,7 +28,7 @@ function AttachmentCard({ attachment }: { attachment: StagedAttachment }) {
     void (async () => {
       try {
         if (!isTauriRuntime()) return;
-        const srcResult = await api.getChatAttachmentSrc(attachment.localFilename);
+        const srcResult = await api.getChatAttachmentSrc(attachment.id);
         if (!cancelled) setSrc(srcResult.url);
       } catch {
         // Preview is best-effort.
@@ -37,7 +37,7 @@ function AttachmentCard({ attachment }: { attachment: StagedAttachment }) {
     return () => {
       cancelled = true;
     };
-  }, [attachment.localFilename, isImage]);
+  }, [attachment.id, isImage]);
 
   return (
     <li className="message-attachment-chip">

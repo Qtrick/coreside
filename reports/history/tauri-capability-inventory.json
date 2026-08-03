@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-03T15:26:38Z",
+  "commit": "74793b1d69d8e81e3d6a560018b3d4ce5021e243",
+  "dirty": true,
+  "sourceFingerprint": "d31e19940a397434376dcf00233bcd35d55821dd8c98351bd38c8202025e1111",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "command": "manual-rc3-authority-inventory",
+  "exitStatus": 0,
+  "capabilities": {
+    "default": {
+      "identifier": "default",
+      "description": "Main Coreside window: application commands plus minimal core window/event privileges (no core:default).",
+      "local": true,
+      "windows": [
+        "main"
+      ],
+      "permissions": [
+        "coreside-main-default",
+        "core:event:default",
+        "core:app:default",
+        "core:window:allow-close",
+        "core:window:allow-create",
+        "core:window:allow-set-title",
+        "core:window:allow-show",
+        "core:window:allow-hide",
+        "core:window:allow-set-focus",
+        "core:webview:allow-create-webview-window"
+      ]
+    },
+    "tool-window": {
+      "identifier": "tool-window",
+      "description": "Generated tool-* windows: scoped app commands only; no core:default, no backup/restore/credentials.",
+      "local": true,
+      "windows": [
+        "tool-*"
+      ],
+      "permissions": [
+        "coreside-tool-scoped",
+        "coreside-tool-deny-sensitive",
+        "core:event:default",
+        "core:window:allow-close",
+        "core:window:allow-set-title",
+        "core:window:allow-show",
+        "core:window:allow-hide",
+        "core:window:allow-set-focus"
+      ]
+    }
+  }
+}

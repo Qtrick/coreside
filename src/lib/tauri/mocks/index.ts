@@ -1840,8 +1840,8 @@ export async function mockInvoke<T>(
 
     case "get_chat_attachment_src":
       return {
-        localFilename: String(args?.localFilename ?? "file"),
-        url: `asset://localhost/mock-attachments/${String(args?.localFilename ?? "file")}`,
+        id: String(args?.attachmentId ?? args?.localFilename ?? "file"),
+        url: `coreside-asset://localhost/attachment/${String(args?.attachmentId ?? "file")}`,
       } as T;
 
     case "list_search_sessions_cmd": {

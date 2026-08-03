@@ -1,7 +1,7 @@
 //! Tauri command handlers.
 
 mod ai_cmds;
-mod attachment_cmds;
+pub mod attachment_cmds;
 mod automation_cmds;
 mod bootstrap_cmds;
 mod conversation_cmds;

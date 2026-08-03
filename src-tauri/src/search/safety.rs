@@ -1,6 +1,6 @@
-//! SSRF-safe URL validation for outbound fetch.
+//! SSRF-safe URL validation with DNS-to-connection address pinning.
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::str::FromStr;
 
 use url::Url;
@@ -18,11 +18,28 @@ const BLOCKED_HOSTS: &[&str] = &[
     "metadata.goog",
 ];
 
-/// Reject URLs that could reach private networks or local resources.
-///
-/// Literal private/reserved IPs are blocked immediately. Hostnames are DNS-resolved
-/// and every returned address must be public (fail closed on resolution failure).
+/// Validated public URL plus the socket addresses the HTTP client must use.
+#[derive(Debug, Clone)]
+pub struct PinnedPublicUrl {
+    pub url: Url,
+    pub addrs: Vec<SocketAddr>,
+}
+
+impl PinnedPublicUrl {
+    pub fn host_for_resolve(&self) -> Result<&str, SearchError> {
+        self.url
+            .host_str()
+            .ok_or_else(|| SearchError::SsrfBlocked("missing host".into()))
+    }
+}
+
+/// Reject URLs that could reach private networks and pin validated addresses.
 pub fn validate_public_http_url(raw: &str) -> Result<Url, SearchError> {
+    Ok(validate_and_pin_public_http_url(raw)?.url)
+}
+
+/// Validate scheme/host policy and resolve DNS once for connection pinning.
+pub fn validate_and_pin_public_http_url(raw: &str) -> Result<PinnedPublicUrl, SearchError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err(SearchError::Invalid("URL is required".into()));
@@ -59,49 +76,65 @@ pub fn validate_public_http_url(raw: &str) -> Result<Url, SearchError> {
         return Err(SearchError::SsrfBlocked(format!("blocked host: {host}")));
     }
 
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| SearchError::SsrfBlocked("missing port".into()))?;
+
+    // Public research/media: only standard web ports unless explicitly expanded later.
+    if port != 80 && port != 443 {
+        return Err(SearchError::SsrfBlocked(format!(
+            "public-web port not allowed: {port}"
+        )));
+    }
+
     if let Ok(ip) = IpAddr::from_str(host) {
         if is_private_or_reserved(ip) {
             return Err(SearchError::SsrfBlocked(format!("private IP: {ip}")));
         }
-        return Ok(url);
+        return Ok(PinnedPublicUrl {
+            url,
+            addrs: vec![SocketAddr::new(ip, port)],
+        });
     }
 
-    // Bracketed IPv6 literals (url::Host may keep brackets in host_str).
     if host.starts_with('[') && host.ends_with(']') {
         let inner = &host[1..host.len() - 1];
         if let Ok(ip) = IpAddr::from_str(inner) {
             if is_private_or_reserved(ip) {
                 return Err(SearchError::SsrfBlocked(format!("private IP: {ip}")));
             }
-            return Ok(url);
+            return Ok(PinnedPublicUrl {
+                url,
+                addrs: vec![SocketAddr::new(ip, port)],
+            });
         }
     }
 
-    resolve_public_host(&host_lower)?;
-    Ok(url)
+    let addrs = resolve_public_host_addrs(&host_lower, port)?;
+    Ok(PinnedPublicUrl { url, addrs })
 }
 
-fn resolve_public_host(host: &str) -> Result<(), SearchError> {
-    let addrs = (host, 80)
+fn resolve_public_host_addrs(host: &str, port: u16) -> Result<Vec<SocketAddr>, SearchError> {
+    let addrs = (host, port)
         .to_socket_addrs()
         .map_err(|e| SearchError::SsrfBlocked(format!("DNS resolution failed for {host}: {e}")))?;
 
-    let mut saw_any = false;
+    let mut out = Vec::new();
     for addr in addrs {
-        saw_any = true;
         let ip = addr.ip();
         if is_private_or_reserved(ip) {
             return Err(SearchError::SsrfBlocked(format!(
                 "host {host} resolves to private IP: {ip}"
             )));
         }
+        out.push(SocketAddr::new(ip, port));
     }
-    if !saw_any {
+    if out.is_empty() {
         return Err(SearchError::SsrfBlocked(format!(
             "DNS returned no addresses for {host}"
         )));
     }
-    Ok(())
+    Ok(out)
 }
 
 fn is_private_or_reserved(ip: IpAddr) -> bool {
@@ -163,10 +196,16 @@ mod tests {
     }
 
     #[test]
-    fn allows_public_https_ip_literal() {
-        // Use a public IP literal so the unit test does not depend on DNS/network.
-        assert!(validate_public_http_url("https://1.1.1.1/").is_ok());
+    fn allows_public_https_ip_literal_and_pins_addr() {
+        let pinned = validate_and_pin_public_http_url("https://1.1.1.1/").unwrap();
+        assert_eq!(pinned.addrs.len(), 1);
+        assert_eq!(pinned.addrs[0].port(), 443);
         assert!(validate_public_http_url("https://8.8.8.8/dns").is_ok());
+    }
+
+    #[test]
+    fn rejects_nonstandard_public_port() {
+        assert!(validate_public_http_url("https://1.1.1.1:8443/").is_err());
     }
 
     #[test]
@@ -177,7 +216,6 @@ mod tests {
 
     #[test]
     fn rejects_public_ipv4_literals_that_are_private() {
-        // Covered by rejects_private_ranges; ensure early-return path stays fail-closed.
         assert!(validate_public_http_url("https://169.254.169.254/latest").is_err());
     }
 }

@@ -58,12 +58,83 @@ pub fn open_tool_window(
 }
 
 /// Window labels are `tool-{id}` and must match the `tool-*` capability pattern.
-fn is_safe_tool_window_id(tool_id: &str) -> bool {
+pub fn is_safe_tool_window_id(tool_id: &str) -> bool {
     !tool_id.is_empty()
         && tool_id.len() <= 128
         && tool_id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Tool-window label prefix used when opening secondary windows (`tool-{toolId}`).
+pub const TOOL_WINDOW_PREFIX: &str = "tool-";
+
+/// If the caller is a secondary tool window, return the tool id bound to that window.
+///
+/// Labels that start with `tool-` but fail the id safety check yield `Some("")` so
+/// enforce_* denies access instead of treating the caller as unrestricted.
+pub fn caller_bound_tool_id(window: &tauri::WebviewWindow) -> Option<String> {
+    let label = window.label();
+    let Some(id) = label.strip_prefix(TOOL_WINDOW_PREFIX) else {
+        return None;
+    };
+    if is_safe_tool_window_id(id) {
+        Some(id.to_string())
+    } else {
+        Some(String::new())
+    }
+}
+
+/// Pure scope check used by [`enforce_caller_surface_scope`] (unit-testable).
+pub fn surface_allowed_for_bound_tool(
+    bound_tool_id: &str,
+    surface_tool_id: Option<&str>,
+    surface_id: &str,
+) -> bool {
+    if bound_tool_id.is_empty() || !is_safe_tool_window_id(bound_tool_id) {
+        return false;
+    }
+    match surface_tool_id {
+        Some(tid) => tid == bound_tool_id,
+        // Canonical personal-tool surface ids are `surf-{toolId}` when tool_id is unset.
+        None => surface_id == format!("surf-{bound_tool_id}"),
+    }
+}
+
+/// Tool windows may only touch their own tool id. Main and other windows are unrestricted here
+/// (Tauri ACL still applies).
+pub fn enforce_caller_tool_scope(
+    window: &tauri::WebviewWindow,
+    resource_tool_id: &str,
+) -> Result<(), CommandError> {
+    let Some(bound) = caller_bound_tool_id(window) else {
+        return Ok(());
+    };
+    if bound.is_empty() || bound != resource_tool_id {
+        return Err(CommandError::new(
+            "forbidden",
+            "This tool window cannot access another tool.",
+        ));
+    }
+    Ok(())
+}
+
+/// Tool windows may only read/write surfaces owned by their bound tool.
+pub fn enforce_caller_surface_scope(
+    window: &tauri::WebviewWindow,
+    surface_tool_id: Option<&str>,
+    surface_id: &str,
+) -> Result<(), CommandError> {
+    let Some(bound) = caller_bound_tool_id(window) else {
+        return Ok(());
+    };
+    if surface_allowed_for_bound_tool(&bound, surface_tool_id, surface_id) {
+        return Ok(());
+    }
+    Err(CommandError::new(
+        "forbidden",
+        "This tool window cannot access another surface.",
+    ))
 }
 
 pub fn inspect(app: &AppHandle) -> Result<OrchestratorInspect, CommandError> {
@@ -111,7 +182,9 @@ pub fn cancel_animation() -> Result<(), CommandError> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_safe_tool_window_id;
+    use super::{
+        is_safe_tool_window_id, surface_allowed_for_bound_tool, TOOL_WINDOW_PREFIX,
+    };
 
     #[test]
     fn tool_window_ids_reject_path_and_empty() {
@@ -124,5 +197,35 @@ mod tests {
         assert!(!is_safe_tool_window_id("tool id"));
         assert!(!is_safe_tool_window_id("tool%2eid"));
         assert!(!is_safe_tool_window_id(&"x".repeat(129)));
+    }
+
+    #[test]
+    fn tool_window_label_strips_single_prefix() {
+        assert_eq!(TOOL_WINDOW_PREFIX, "tool-");
+        let label = format!("{TOOL_WINDOW_PREFIX}{}", "tool-notes");
+        assert_eq!(label.strip_prefix(TOOL_WINDOW_PREFIX), Some("tool-notes"));
+    }
+
+    #[test]
+    fn surface_scope_requires_matching_tool_id() {
+        assert!(surface_allowed_for_bound_tool(
+            "notes",
+            Some("notes"),
+            "surf-other"
+        ));
+        assert!(!surface_allowed_for_bound_tool(
+            "notes",
+            Some("other"),
+            "surf-notes"
+        ));
+        assert!(surface_allowed_for_bound_tool("notes", None, "surf-notes"));
+        assert!(!surface_allowed_for_bound_tool(
+            "notes",
+            None,
+            "surf-other"
+        ));
+        assert!(!surface_allowed_for_bound_tool("", None, "surf-"));
+        assert!(!surface_allowed_for_bound_tool("../x", None, "surf-../x"));
+        assert!(!surface_allowed_for_bound_tool("bad/id", Some("bad/id"), "x"));
     }
 }

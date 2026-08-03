@@ -12,7 +12,7 @@ pub use bootstrap::{open_profile_or_shell, BootstrapStatus};
 pub use health::DatabaseHealthReport;
 pub use profile_archive::{
     extract_assets_from_archive, extract_database_from_archive, preview_profile_archive,
-    promote_restored_assets, RestorePreview,
+    promote_restored_assets, replace_restored_asset_roots, RestorePreview,
 };
 pub use repositories::*;
 
@@ -84,10 +84,14 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         "015_registered_actions",
         include_str!("../../migrations/015_registered_actions.sql"),
     ),
+    (
+        "016_chat_attachments",
+        include_str!("../../migrations/016_chat_attachments.sql"),
+    ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "015_registered_actions";
+pub const LATEST_MIGRATION: &str = "016_chat_attachments";
 
 #[derive(Debug, Error)]
 pub enum DbError {

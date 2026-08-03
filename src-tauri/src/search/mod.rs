@@ -18,7 +18,7 @@ mod web;
 pub use errors::SearchError;
 pub use fetch::{
     brave_account, build_http_client, delete_search_secret, fetch_web_page, get_search_secret,
-    search_keyring_account, set_search_secret, MAX_FETCH_BYTES,
+    search_keyring_account, send_public_get, set_search_secret, MAX_FETCH_BYTES,
 };
 pub use history::{
     clear_search_history, get_search_session, list_search_sessions, persist_image_session,

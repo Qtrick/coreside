@@ -162,6 +162,7 @@ export const config: Options.Testrunner = {
       "./specs/08-grant-revoke.spec.ts",
       "./specs/09-recovery-mode.spec.ts",
       "./specs/10-secondary-window.spec.ts",
+      "./specs/11-command-authority-denial.spec.ts",
     ],
     "existing-chat": ["./specs/02-existing-profile.spec.ts"],
     "existing-tool": ["./specs/05-generated-tool-state.spec.ts"],
@@ -170,6 +171,7 @@ export const config: Options.Testrunner = {
     "existing-grant": ["./specs/08-grant-revoke.spec.ts"],
     "existing-recovery": ["./specs/09-recovery-mode.spec.ts"],
     "existing-window": ["./specs/10-secondary-window.spec.ts"],
+    "existing-authority": ["./specs/11-command-authority-denial.spec.ts"],
     main: [
       "./specs/01-clean-startup.spec.ts",
       "./specs/03-settings.spec.ts",

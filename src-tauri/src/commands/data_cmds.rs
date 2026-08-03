@@ -291,8 +291,49 @@ pub fn restore_profile_backup(
         ));
     }
     // Intentionally no require_profile(): disaster recovery must restore when the profile cannot open.
+    // Block concurrent profile work; clear maintenance on every exit path.
+    let maintenance_id = state.begin_maintenance("restore")?;
+    struct ClearMaintenanceOnDrop<'a> {
+        state: &'a AppState,
+        id: String,
+    }
+    impl Drop for ClearMaintenanceOnDrop<'_> {
+        fn drop(&mut self) {
+            let _ = self.state.clear_maintenance(&self.id);
+        }
+    }
+    // Resume on every exit path (success or failure) so a failed restore cannot leave automations paused.
+    // Declare resume guard before maintenance clear guard so Drop order is:
+    // clear maintenance first, then resume scheduler (never tick while maintenance is active).
+    struct ResumeSchedulerOnDrop(Option<Arc<SchedulerHandle>>);
+    impl Drop for ResumeSchedulerOnDrop {
+        fn drop(&mut self) {
+            if let Some(handle) = self.0.take() {
+                handle.resume();
+            }
+        }
+    }
+    let _scheduler_guard = ResumeSchedulerOnDrop({
+        let handle = app.try_state::<Arc<SchedulerHandle>>().map(|s| s.inner().clone());
+        if let Some(ref h) = handle {
+            h.pause();
+        }
+        handle
+    });
+    let _maintenance_guard = ClearMaintenanceOnDrop {
+        state: &state,
+        id: maintenance_id.clone(),
+    };
+    let _ = state.set_maintenance_stage(
+        &maintenance_id,
+        crate::maintenance::MaintenanceStage::CancellingWork,
+    );
     let started_without_profile = !state.profile_ready();
     state.cancel_all();
+    let _ = state.set_maintenance_stage(
+        &maintenance_id,
+        crate::maintenance::MaintenanceStage::Staging,
+    );
 
     let (paths, archive_path) = resolve_managed_backup(&path)?;
     let preview = preview_profile_archive(&archive_path).map_err(|e| match e {
@@ -471,6 +512,10 @@ pub fn restore_profile_backup(
     // concurrent commands cannot observe the temporary hold database or a half-swapped tree.
     // ponytail: global db lock for the filesystem swap; upgrade to a dedicated restore latch if
     // lock hold time becomes a UX problem.
+    let _ = state.set_maintenance_stage(
+        &maintenance_id,
+        crate::maintenance::MaintenanceStage::Swapping,
+    );
     let quarantined = {
         let mut db_guard = state.db.lock();
         let hold = crate::db::Database::open_path(&hold_db).map_err(|e| {
@@ -520,14 +565,22 @@ pub fn restore_profile_backup(
         quarantined
     };
 
-    // Promote staged assets into live roots. On failure, roll the DB back from quarantine
-    // so we never leave a restored profile with missing media/attachments.
-    if let Err(e) = crate::db::promote_restored_assets(
+    // Replace live media/attachments trees with staged restore trees (directory swap).
+    // On failure, roll the DB back from quarantine so DB and assets stay coherent.
+    // Asset swap is ordered/non-atomic across roots; replace_restored_asset_roots
+    // restores quarantined trees before returning Err.
+    let asset_quarantine = paths.quarantine.join(format!("assets-pre-restore-{stamp}"));
+    if let Err(e) = crate::db::replace_restored_asset_roots(
         &asset_media_staging,
         &paths.media,
         &asset_att_staging,
         &paths.attachments,
+        &asset_quarantine,
     ) {
+        let _ = state.set_maintenance_stage(
+            &maintenance_id,
+            crate::maintenance::MaintenanceStage::RollingBack,
+        );
         {
             let mut db_guard = state.db.lock();
             let _ = std::fs::remove_file(&live_path);
@@ -554,6 +607,7 @@ pub fn restore_profile_backup(
     cleanup_staging(&staging_db, Some(&hold_db));
 
     // Recovery shells skip scheduler at setup; start it once the profile is restored.
+    // ResumeSchedulerOnDrop resumes the ticker on function exit.
     if started_without_profile {
         if let Some(handle) = app.try_state::<Arc<SchedulerHandle>>() {
             crate::automations::spawn_scheduler(app.clone(), handle.inner().clone());

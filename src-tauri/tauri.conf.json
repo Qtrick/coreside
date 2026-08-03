@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: data: https:; media-src 'self' asset: data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
+      "csp": "default-src 'self'; img-src 'self' asset: coreside-asset: http://coreside-asset.localhost data:; media-src 'self' asset: coreside-asset: http://coreside-asset.localhost data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
       "capabilities": ["default", "tool-window"],
       "assetProtocol": {
         "enable": true,

@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-03T15:18:00Z",
-  "commit": "74793b1d69d8e81e3d6a560018b3d4ce5021e243",
-  "dirty": false,
-  "sourceFingerprint": "d31e19940a397434376dcf00233bcd35d55821dd8c98351bd38c8202025e1111",
+  "generatedAt": "2026-08-03T17:58:37.892Z",
+  "commit": "c3e2a01a3883fc2ef4e065bf955b750ecf8f7055",
+  "dirty": true,
+  "sourceFingerprint": "5022bb80bbc730d652a2f6399832cb7544098a2cf58ad60d15b03a73941d41dc",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
   "architecture": "arm64",
   "buildMode": "development",
-  "command": "manual-rc3-kickoff",
+  "command": "audit:current-source",
   "exitStatus": 0,
   "algorithm": "sha256-concat-path-bytes",
   "roots": [
@@ -18,8 +18,24 @@
     "src-tauri/src",
     "src-tauri/capabilities",
     "src-tauri/permissions",
+    "src-tauri/migrations",
+    "src-tauri/prompts",
+    "src-tauri/tauri.conf.json",
+    "src-tauri/tauri.e2e.conf.json",
+    "src-tauri/Cargo.toml",
+    "src-tauri/Cargo.lock",
+    "src-tauri/build.rs",
     "e2e",
-    "scripts"
+    "scripts",
+    "package.json",
+    "package-lock.json",
+    "vite.config.ts",
+    "tsconfig.json",
+    "eslint.config.js"
   ],
-  "fileCount": 369
+  "fileCount": 600,
+  "inclusionRules": [
+    "Tracked and untracked files under fingerprint roots",
+    "Excludes node_modules, target, dist, .git, .reference, gen"
+  ]
 }

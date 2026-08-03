@@ -248,3 +248,60 @@ export async function scrollSettingsToHeading(heading: string) {
     match?.scrollIntoView({ block: "center" });
   }, heading);
 }
+
+export async function invokeFromCurrentWindow(
+  command: string,
+  args: Record<string, unknown> = {},
+): Promise<{ ok: true; result: unknown } | { ok: false; error: string }> {
+  try {
+    // Resolve (never reject) inside the page so ACL denials are evidence, not WDIO failures.
+    return await browser.execute(
+      (cmd, invokeArgs) => {
+        const w = window as Window & {
+          __TAURI__?: { core?: { invoke?: (c: string, a?: unknown) => Promise<unknown> } };
+        };
+        const invoke = w.__TAURI__?.core?.invoke;
+        if (!invoke) {
+          return Promise.resolve({
+            ok: false as const,
+            error: "__TAURI__.core.invoke unavailable",
+          });
+        }
+        return invoke(cmd, invokeArgs).then(
+          (result) => ({ ok: true as const, result }),
+          (err: unknown) => {
+            const message =
+              typeof err === "string"
+                ? err
+                : err && typeof err === "object" && "message" in err
+                  ? String((err as { message: unknown }).message)
+                  : String(err);
+            return { ok: false as const, error: message };
+          },
+        );
+      },
+      command,
+      args,
+    );
+  } catch (err) {
+    // Some ACL denials surface as WebDriver execute errors; treat as denial evidence.
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export async function expectInvokeDenied(
+  command: string,
+  args: Record<string, unknown> = {},
+) {
+  const outcome = await invokeFromCurrentWindow(command, args);
+  expect(outcome.ok).toBe(false);
+  if (!outcome.ok) {
+    expect(outcome.error.length).toBeGreaterThan(0);
+    // Missing IPC is not ACL denial — do not mint false-positive authority evidence.
+    expect(outcome.error).not.toContain("__TAURI__.core.invoke unavailable");
+  }
+  return outcome;
+}

@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 use crate::config::{self, AppConfig};
 use crate::crawler::CrawlerSupervisor;
 use crate::db::{BootstrapStatus, Database};
+use crate::maintenance::{MaintenanceMode, MaintenanceStage, MaintenanceStatus};
 use crate::runtime_v2::EventBus;
 
 pub struct AppState {
@@ -19,6 +20,7 @@ pub struct AppState {
     pub active_requests: Mutex<HashMap<String, CancellationToken>>,
     pub crawler: Arc<CrawlerSupervisor>,
     pub event_bus: Mutex<EventBus>,
+    pub maintenance: Mutex<MaintenanceMode>,
 }
 
 impl AppState {
@@ -39,6 +41,7 @@ impl AppState {
             active_requests: Mutex::new(HashMap::new()),
             crawler: Arc::new(CrawlerSupervisor::new()),
             event_bus: Mutex::new(event_bus),
+            maintenance: Mutex::new(MaintenanceMode::default()),
         }
     }
 
@@ -50,8 +53,9 @@ impl AppState {
         self.bootstrap.lock().is_ready()
     }
 
-    /// Require a healthy profile database (not the recovery shell).
+    /// Require a healthy profile database (not the recovery shell) and no maintenance.
     pub fn require_profile(&self) -> Result<(), crate::commands::CommandError> {
+        self.maintenance.lock().require_inactive()?;
         if self.profile_ready() {
             Ok(())
         } else {
@@ -60,6 +64,36 @@ impl AppState {
                 "Coreside needs Recovery before this action can run.",
             ))
         }
+    }
+
+    pub fn require_not_maintenance(&self) -> Result<(), crate::commands::CommandError> {
+        self.maintenance.lock().require_inactive()
+    }
+
+    pub fn maintenance_status(&self) -> MaintenanceStatus {
+        self.maintenance.lock().status()
+    }
+
+    pub fn begin_maintenance(
+        &self,
+        operation_type: &str,
+    ) -> Result<String, crate::commands::CommandError> {
+        self.maintenance.lock().begin(operation_type)
+    }
+
+    pub fn set_maintenance_stage(
+        &self,
+        operation_id: &str,
+        stage: MaintenanceStage,
+    ) -> Result<(), crate::commands::CommandError> {
+        self.maintenance.lock().set_stage(operation_id, stage)
+    }
+
+    pub fn clear_maintenance(
+        &self,
+        operation_id: &str,
+    ) -> Result<(), crate::commands::CommandError> {
+        self.maintenance.lock().clear(operation_id)
     }
 
     /// Replace the active database after a successful retry or restore.

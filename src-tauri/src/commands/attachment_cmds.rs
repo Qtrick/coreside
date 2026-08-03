@@ -13,6 +13,7 @@ use super::CommandError;
 use crate::app_paths::AppPaths;
 use crate::security::sanitize_error;
 use crate::state::AppState;
+use tauri::Manager;
 
 /// Max decoded bytes per attached file (12 MiB).
 const MAX_ATTACHMENT_BYTES: usize = 12 * 1024 * 1024;
@@ -34,9 +35,9 @@ pub struct StagedAttachment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentSrc {
-    /// Opaque storage filename (not an absolute path).
-    pub local_filename: String,
-    /// Asset-protocol URL for rendering (no bare filesystem path field).
+    /// Opaque attachment ID (not a filesystem path).
+    pub id: String,
+    /// Opaque custom-protocol URL — no absolute filesystem path.
     pub url: String,
 }
 
@@ -48,18 +49,68 @@ pub struct StageAttachmentInput {
     pub data_base64: String,
 }
 
-fn attachments_root() -> Result<PathBuf, CommandError> {
+fn attachments_paths() -> Result<(PathBuf, PathBuf), CommandError> {
     let paths = AppPaths::resolve().map_err(|e| {
         CommandError::new("storage", sanitize_error(&e.to_string(), None))
     })?;
-    std::fs::create_dir_all(&paths.attachments)
-        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+    paths.ensure_dirs().map_err(|e| {
+        CommandError::new("storage", sanitize_error(&e.to_string(), None))
+    })?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&paths.attachments, std::fs::Permissions::from_mode(0o700));
+        let _ = std::fs::set_permissions(
+            &paths.attachment_staging,
+            std::fs::Permissions::from_mode(0o700),
+        );
     }
-    Ok(paths.attachments)
+    Ok((paths.attachments, paths.attachment_staging))
+}
+
+fn opaque_attachment_url(id: &str) -> String {
+    #[cfg(any(windows, target_os = "android"))]
+    {
+        format!("http://coreside-asset.localhost/attachment/{id}")
+    }
+    #[cfg(not(any(windows, target_os = "android")))]
+    {
+        format!("coreside-asset://localhost/attachment/{id}")
+    }
+}
+
+fn is_safe_attachment_id(id: &str) -> bool {
+    let id = id.trim();
+    !id.is_empty()
+        && id.len() <= 64
+        && !id.contains('/')
+        && !id.contains('\\')
+        && !id.contains("..")
+        && id
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
+/// Strip CR/LF/controls so DB-corrupted mime cannot inject response headers.
+fn safe_response_mime(mime: &str) -> String {
+    let cleaned: String = mime
+        .chars()
+        .take(128)
+        .filter(|c| c.is_ascii_graphic() || *c == ' ')
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() || !trimmed.contains('/') {
+        "application/octet-stream".into()
+    } else {
+        trimmed.to_ascii_lowercase()
+    }
+}
+
+fn content_hash(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
 }
 
 fn sanitize_filename(name: &str) -> String {
@@ -218,27 +269,6 @@ fn mime_compatible(declared: &str, detected: &str) -> bool {
     false
 }
 
-fn asset_protocol_url(path: &Path) -> String {
-    let raw = path.to_string_lossy();
-    let encoded: String = raw
-        .bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (b as char).to_string()
-            }
-            _ => format!("%{:02X}", b),
-        })
-        .collect();
-    #[cfg(any(windows, target_os = "android"))]
-    {
-        format!("http://asset.localhost/{encoded}")
-    }
-    #[cfg(not(any(windows, target_os = "android")))]
-    {
-        format!("asset://localhost/{encoded}")
-    }
-}
-
 fn atomic_write(final_path: &Path, bytes: &[u8]) -> Result<(), CommandError> {
     let parent = final_path.parent().ok_or_else(|| {
         CommandError::new("storage", "Invalid attachment destination")
@@ -307,53 +337,158 @@ pub fn stage_chat_attachment(
 
     let id = Uuid::new_v4().to_string();
     let safe_name = sanitize_filename(&input.name);
-    let local_filename = format!("{id}_{safe_name}");
-    let path = attachments_root()?.join(&local_filename);
+    let storage_key = format!("{id}_{safe_name}");
+    let (_root, staging) = attachments_paths()?;
+    let path = staging.join(&storage_key);
     atomic_write(&path, &bytes)?;
+    let hash = content_hash(&bytes);
+    let expires = chrono::Utc::now() + chrono::Duration::hours(24);
+
+    {
+        let db = state.db.lock();
+        db.conn()
+            .execute(
+                "INSERT INTO chat_attachments
+                 (id, storage_key, original_filename, display_name, detected_mime, detected_format,
+                  byte_size, content_hash, state, expires_at, backup_eligible)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'staged',?9,0)",
+                rusqlite::params![
+                    id,
+                    storage_key,
+                    input.name,
+                    safe_name,
+                    detected,
+                    detected,
+                    bytes.len() as i64,
+                    hash,
+                    expires.to_rfc3339(),
+                ],
+            )
+            .map_err(|e| {
+                let _ = std::fs::remove_file(&path);
+                CommandError::new("storage", sanitize_error(&e.to_string(), None))
+            })?;
+    }
 
     Ok(StagedAttachment {
         id,
         name: safe_name,
         mime_type: detected.to_string(),
         byte_size: bytes.len() as i64,
-        local_filename,
+        local_filename: storage_key,
     })
 }
 
 #[tauri::command]
 pub fn get_chat_attachment_src(
     state: State<'_, AppState>,
-    local_filename: String,
+    attachment_id: Option<String>,
+    local_filename: Option<String>,
 ) -> Result<AttachmentSrc, CommandError> {
     state.require_profile()?;
-    let name = Path::new(local_filename.trim())
+    let db = state.db.lock();
+    let id = if let Some(id) = attachment_id.filter(|s| !s.trim().is_empty()) {
+        let id = id.trim().to_string();
+        if !is_safe_attachment_id(&id) {
+            return Err(CommandError::new("invalid", "Invalid attachment id"));
+        }
+        id
+    } else if let Some(name) = local_filename.filter(|s| !s.trim().is_empty()) {
+        // Legacy callers may pass storage_key; resolve to opaque ID.
+        let key = Path::new(name.trim())
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| CommandError::new("invalid", "Invalid attachment filename"))?;
+        db.conn()
+            .query_row(
+                "SELECT id FROM chat_attachments WHERE storage_key = ?1 AND deleted_at IS NULL LIMIT 1",
+                rusqlite::params![key],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|_| CommandError::new("not_found", "Attachment not found"))?
+    } else {
+        return Err(CommandError::new("invalid", "Attachment id required"));
+    };
+
+    let (state_s, _key): (String, String) = db
+        .conn()
+        .query_row(
+            "SELECT state, storage_key FROM chat_attachments WHERE id = ?1 AND deleted_at IS NULL",
+            rusqlite::params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| CommandError::new("not_found", "Attachment not found"))?;
+    if matches!(
+        state_s.as_str(),
+        "deleted" | "expired" | "failed" | "cancelled"
+    ) {
+        return Err(CommandError::new("not_found", "Attachment not available"));
+    }
+
+    Ok(AttachmentSrc {
+        url: opaque_attachment_url(&id),
+        id,
+    })
+}
+
+/// Resolve opaque attachment ID to bytes for the custom protocol (no path leak).
+pub fn read_attachment_bytes_for_protocol(
+    app: &tauri::AppHandle,
+    attachment_id: &str,
+) -> Result<(Vec<u8>, String), String> {
+    let id = attachment_id.trim();
+    if !is_safe_attachment_id(id) {
+        return Err("invalid attachment id".into());
+    }
+    let state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| "app state unavailable".to_string())?;
+    if !state.profile_ready() {
+        return Err("profile unavailable".into());
+    }
+    let (storage_key, mime, state_s): (String, String, String) = {
+        let db = state.db.lock();
+        db.conn()
+            .query_row(
+                "SELECT storage_key, detected_mime, state FROM chat_attachments
+                 WHERE id = ?1 AND deleted_at IS NULL",
+                rusqlite::params![id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|_| "attachment not found".to_string())?
+    };
+    if matches!(
+        state_s.as_str(),
+        "deleted" | "expired" | "failed" | "cancelled"
+    ) {
+        return Err("attachment not available".into());
+    }
+    let name = Path::new(&storage_key)
         .file_name()
         .and_then(|n| n.to_str())
-        .ok_or_else(|| CommandError::new("invalid", "Invalid attachment filename"))?;
-    if name.contains("..") || name.contains('/') || name.contains('\\') || name.contains('\0') {
-        return Err(CommandError::new("invalid", "Path traversal rejected"));
+        .ok_or_else(|| "invalid storage key".to_string())?;
+    if name != storage_key
+        || name.contains("..")
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0')
+    {
+        return Err("invalid storage key".into());
     }
-    let root = attachments_root()?;
-    let path = root.join(name);
-    if !path.exists() {
-        return Err(CommandError::new("not_found", "Attachment not found"));
+    let paths = AppPaths::resolve().map_err(|e| e.to_string())?;
+    for root in [&paths.attachment_staging, &paths.attachments] {
+        let candidate = root.join(name);
+        if candidate.exists() {
+            let canonical = candidate.canonicalize().map_err(|e| e.to_string())?;
+            let root_c = root.canonicalize().map_err(|e| e.to_string())?;
+            if !canonical.starts_with(&root_c) {
+                return Err("path outside attachments".into());
+            }
+            let bytes = std::fs::read(&canonical).map_err(|e| e.to_string())?;
+            return Ok((bytes, safe_response_mime(&mime)));
+        }
     }
-    let canonical = path
-        .canonicalize()
-        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
-    let root_canonical = root
-        .canonicalize()
-        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
-    if !canonical.starts_with(&root_canonical) {
-        return Err(CommandError::new(
-            "invalid",
-            "Path outside attachments directory",
-        ));
-    }
-    Ok(AttachmentSrc {
-        local_filename: name.to_string(),
-        url: asset_protocol_url(&canonical),
-    })
+    Err("attachment file missing".into())
 }
 
 #[cfg(test)]

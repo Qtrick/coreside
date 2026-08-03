@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-03T17:58:38.126Z",
+  "commit": "c3e2a01a3883fc2ef4e065bf955b750ecf8f7055",
+  "dirty": true,
+  "command": "assurance:report",
+  "exitStatus": "passed",
+  "note": "Validates report presence/freshness/partial rejection. Does not execute the full release suite.",
+  "findings": [],
+  "localFirstVerdict": "Not ready",
+  "hostedAiVerdict": "Not ready"
+}

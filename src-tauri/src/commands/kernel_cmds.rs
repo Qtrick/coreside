@@ -423,13 +423,53 @@ pub fn kernel_list_registered_actions() -> Value {
 /// cannot choose the actor, the venue's authority, the presence, or the session.
 /// `presence` is always `present` over IPC — away runs only exist inside the
 /// automation executor.
+///
+/// Tool windows may only invoke actions for their bound tool (`application_id`).
 #[tauri::command]
 pub fn kernel_invoke_registered_action(
+    window: tauri::WebviewWindow,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
-    request: ClientActionRequest,
+    mut request: ClientActionRequest,
 ) -> Result<ActionOutcome, CommandError> {
     state.require_profile()?;
+    if let Some(bound) = crate::windows::caller_bound_tool_id(&window) {
+        if bound.is_empty() {
+            return Err(CommandError::new(
+                "forbidden",
+                "This tool window cannot invoke registered actions.",
+            ));
+        }
+        // Normalize blank client ids to "missing" before binding.
+        if request
+            .application_id
+            .as_deref()
+            .is_some_and(|id| id.trim().is_empty())
+        {
+            request.application_id = None;
+        }
+        match request.application_id.as_deref() {
+            Some(id) if id == bound => {}
+            Some(_) => {
+                return Err(CommandError::new(
+                    "forbidden",
+                    "This tool window cannot invoke actions for another application.",
+                ));
+            }
+            None => {
+                request.application_id = Some(bound.clone());
+            }
+        }
+        if let Some(ref surface_id) = request.surface_id {
+            let db = state.db.lock();
+            let surface = crate::runtime_v2::get_surface(&db, surface_id).map_err(CommandError::from)?;
+            crate::windows::enforce_caller_surface_scope(
+                &window,
+                surface.tool_id.as_deref(),
+                &surface.id,
+            )?;
+        }
+    }
     let venue = if request.application_id.is_some() {
         Venue::Application
     } else {

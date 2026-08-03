@@ -13,6 +13,7 @@ mod db;
 mod exa;
 mod exports;
 mod media;
+mod maintenance;
 mod projects;
 mod research;
 mod runtime_v2;
@@ -31,6 +32,7 @@ use std::sync::Arc;
 use automations::SchedulerHandle;
 use state::AppState;
 use tauri::Manager;
+use tauri::http;
 use tracing_subscriber::{fmt, EnvFilter};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -45,7 +47,7 @@ pub fn run() {
         "Coreside starting"
     );
 
-    let (database, bootstrap) = db::open_profile_or_shell();
+    let (mut database, bootstrap) = db::open_profile_or_shell();
     if bootstrap.is_ready() {
         let _ = db::ensure_default_workspace(&database);
         #[cfg(feature = "e2e")]
@@ -69,6 +71,27 @@ pub fn run() {
     builder
         .manage(app_state)
         .manage(scheduler_handle.clone())
+        .register_uri_scheme_protocol("coreside-asset", |ctx, request| {
+            let path = request.uri().path().to_string();
+            let id = path
+                .trim_start_matches('/')
+                .strip_prefix("attachment/")
+                .unwrap_or("")
+                .trim();
+            let app = ctx.app_handle();
+            match commands::attachment_cmds::read_attachment_bytes_for_protocol(app, id) {
+                Ok((bytes, mime)) => http::Response::builder()
+                    .header(http::header::CONTENT_TYPE, &mime)
+                    .header(http::header::CACHE_CONTROL, "private, max-age=60")
+                    .header(http::header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+                    .body(bytes)
+                    .unwrap_or_else(|_| http::Response::new(Vec::new())),
+                Err(_) => http::Response::builder()
+                    .status(http::StatusCode::NOT_FOUND)
+                    .body(Vec::new())
+                    .unwrap_or_else(|_| http::Response::new(Vec::new())),
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_app_info,
             commands::get_bootstrap_status,

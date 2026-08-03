@@ -1,32 +1,70 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-03T15:26:38Z",
-  "commit": "74793b1d69d8e81e3d6a560018b3d4ce5021e243",
-  "dirty": true,
-  "sourceFingerprint": "d31e19940a397434376dcf00233bcd35d55821dd8c98351bd38c8202025e1111",
-  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
-  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
-  "platform": "darwin",
-  "architecture": "arm64",
-  "buildMode": "development",
-  "command": "manual-rc3-authority-inventory",
-  "exitStatus": 0,
-  "appManifestCommands": 210,
-  "toolScopedAllow": [
-    "get_app_info",
-    "get_surface_cmd",
-    "get_surface_state_cmd",
-    "get_tool",
-    "get_tool_state",
-    "get_tool_versions",
-    "kernel_invoke_registered_action",
-    "open_external_url",
-    "save_surface_state_cmd",
-    "save_tool_state"
+  "generatedAt": "2026-08-03T17:55:53.740Z",
+  "command": "e2e:journey-11-command-authority",
+  "status": "generated_from_e2e",
+  "rawInvokeDenialTest": "passed",
+  "window": "tool-tool-e2e-notes",
+  "denials": [
+    {
+      "command": "clear_conversations",
+      "denied": true,
+      "error": "WebDriverError: clear_conversations explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+    },
+    {
+      "command": "clear_tools",
+      "denied": true,
+      "error": "WebDriverError: clear_tools explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+    },
+    {
+      "command": "create_profile_backup",
+      "denied": true,
+      "error": "WebDriverError: create_profile_backup explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+    },
+    {
+      "command": "list_managed_backups",
+      "denied": true,
+      "error": "WebDriverError: list_managed_backups explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+    },
+    {
+      "command": "preview_restore_backup",
+      "denied": true,
+      "error": "WebDriverError: preview_restore_backup explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+    },
+    {
+      "command": "restore_profile_backup",
+      "denied": true,
+      "error": "WebDriverError: restore_profile_backup explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+    },
+    {
+      "command": "provider_key_hints",
+      "denied": true,
+      "error": "WebDriverError: provider_key_hints explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+    },
+    {
+      "command": "store_hosted_auth_session",
+      "denied": true,
+      "error": "WebDriverError: store_hosted_auth_session explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+    },
+    {
+      "command": "kernel_grant_permission",
+      "denied": true,
+      "error": "WebDriverError: kernel_grant_permission explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+    },
+    {
+      "command": "kernel_export_package",
+      "denied": true,
+      "error": "WebDriverError: kernel_export_package explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+    },
+    {
+      "command": "send_message",
+      "denied": true,
+      "error": "WebDriverError: send_message explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+    }
   ],
-  "sensitiveDenyCount": 21,
-  "coreDefault": "replaced_with_explicit_core_permissions",
-  "rawInvokeDenialTest": "not_run",
-  "status": "partial_implementation"
+  "crossToolStateWriteDenied": true,
+  "ownToolStateReadable": true,
+  "seededToolStillPresent": true,
+  "publicBeta": "Not ready"
 }

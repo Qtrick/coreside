@@ -240,9 +240,9 @@ export const api = {
       "stage_chat_attachment",
       { input },
     ),
-  getChatAttachmentSrc: (localFilename: string) =>
-    invoke<{ localFilename: string; url: string }>("get_chat_attachment_src", {
-      localFilename,
+  getChatAttachmentSrc: (attachmentId: string) =>
+    invoke<{ id: string; url: string }>("get_chat_attachment_src", {
+      attachmentId,
     }),
   cancelRequest: (conversationId?: string) =>
     invoke<void>("cancel_request", { conversationId }),

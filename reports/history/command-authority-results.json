@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-03T15:26:38Z",
+  "commit": "74793b1d69d8e81e3d6a560018b3d4ce5021e243",
+  "dirty": true,
+  "sourceFingerprint": "d31e19940a397434376dcf00233bcd35d55821dd8c98351bd38c8202025e1111",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "command": "manual-rc3-authority-inventory",
+  "exitStatus": 0,
+  "appManifestCommands": 210,
+  "toolScopedAllow": [
+    "get_app_info",
+    "get_surface_cmd",
+    "get_surface_state_cmd",
+    "get_tool",
+    "get_tool_state",
+    "get_tool_versions",
+    "kernel_invoke_registered_action",
+    "open_external_url",
+    "save_surface_state_cmd",
+    "save_tool_state"
+  ],
+  "sensitiveDenyCount": 21,
+  "coreDefault": "replaced_with_explicit_core_permissions",
+  "rawInvokeDenialTest": "not_run",
+  "status": "partial_implementation"
+}

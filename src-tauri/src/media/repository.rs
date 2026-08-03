@@ -113,7 +113,7 @@ pub fn insert_media_asset(
     let id = Uuid::new_v4().to_string();
     let ext = extension_for_mime(&meta.mime_type);
     let local_filename = format!("{id}.{ext}");
-    write_asset_bytes(&local_filename, bytes)?;
+    write_asset_bytes(&local_filename, bytes).map_err(|e| MediaError::Storage(e.to_string()))?;
 
     let thumbnail_filename =
         match crate::media::thumbnails::generate_thumbnail(&id, &meta.mime_type, bytes) {
@@ -139,36 +139,52 @@ pub fn insert_media_asset(
         .unwrap_or(meta.category.as_str())
         .to_string();
 
-    db.conn()
-        .execute(
-            "INSERT INTO media_assets
+    if let Err(e) = db.conn().execute(
+        "INSERT INTO media_assets
              (id, project_id, category, title, local_filename, mime_type, byte_size,
               width, height, duration_ms, content_hash, source_url, source_page_url,
               creator, license, attribution, validation_status, thumbnail_filename)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,'ok',?17)",
-            params![
-                id,
-                input.project_id,
-                category,
-                title,
-                local_filename,
-                meta.mime_type,
-                bytes.len() as i64,
-                meta.width.map(|v| v as i64),
-                meta.height.map(|v| v as i64),
-                meta.duration_ms,
-                hash,
-                input.url,
-                input.source_page_url,
-                input.creator,
-                input.license,
-                input.attribution,
-                thumbnail_filename,
-            ],
-        )
-        .map_err(|e| MediaError::Database(e.to_string()))?;
+        params![
+            id,
+            input.project_id,
+            category,
+            title,
+            local_filename,
+            meta.mime_type,
+            bytes.len() as i64,
+            meta.width.map(|v| v as i64),
+            meta.height.map(|v| v as i64),
+            meta.duration_ms,
+            hash,
+            input.url,
+            input.source_page_url,
+            input.creator,
+            input.license,
+            input.attribution,
+            thumbnail_filename.clone(),
+        ],
+    ) {
+        let _ = delete_asset_file(&local_filename);
+        if let Some(thumb) = thumbnail_filename.as_deref() {
+            let _ = delete_asset_file(thumb);
+        }
+        return Err(MediaError::Database(e.to_string()));
+    }
 
-    get_media_asset(db, &id).map_err(|e| MediaError::Database(e.to_string()))
+    match get_media_asset(db, &id) {
+        Ok(asset) => Ok(asset),
+        Err(e) => {
+            let _ = db
+                .conn()
+                .execute("DELETE FROM media_assets WHERE id = ?1", params![id]);
+            let _ = delete_asset_file(&local_filename);
+            if let Some(thumb) = thumbnail_filename.as_deref() {
+                let _ = delete_asset_file(thumb);
+            }
+            Err(MediaError::Database(e.to_string()))
+        }
+    }
 }
 
 fn extension_for_mime(mime: &str) -> &'static str {

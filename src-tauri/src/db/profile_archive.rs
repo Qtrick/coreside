@@ -10,6 +10,7 @@ use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use super::{Database, DbError, DbResult};
+use rusqlite::OptionalExtension;
 
 pub const BACKUP_FORMAT: &str = "coreside-backup";
 pub const BACKUP_SCHEMA_VERSION: u32 = 2;
@@ -48,10 +49,27 @@ pub struct BackupDatabaseEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BackupAssetEntry {
+    pub name: String,
+    pub sha256: String,
+    pub byte_size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BackupAssetSection {
     pub included: bool,
     pub count: u64,
     pub total_bytes: u64,
+    /// `complete` | `directory_enumerated` | `truncated` | `unknown` (legacy).
+    #[serde(default = "default_asset_completeness")]
+    pub completeness: String,
+    #[serde(default)]
+    pub entries: Vec<BackupAssetEntry>,
+}
+
+fn default_asset_completeness() -> String {
+    "unknown".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,15 +231,19 @@ fn classify_archive_entry(name: &str) -> Option<&'static str> {
     None
 }
 
-fn collect_named_files(root: &Path, max_count: u64, max_total: u64) -> DbResult<(Vec<(String, PathBuf, u64)>, u64, Vec<String>)> {
+fn collect_named_files(
+    root: &Path,
+    max_count: u64,
+    max_total: u64,
+) -> DbResult<(Vec<(String, PathBuf, u64, String)>, u64, String)> {
     let mut files = Vec::new();
     let mut total = 0u64;
-    let mut warnings = Vec::new();
     if !root.exists() {
-        return Ok((files, total, warnings));
+        return Ok((files, total, "complete".into()));
     }
     let entries = std::fs::read_dir(root)
         .map_err(|e| DbError::Invalid(format!("read asset root: {e}")))?;
+    let mut truncated = false;
     for entry in entries.flatten() {
         let meta = match std::fs::symlink_metadata(entry.path()) {
             Ok(m) => m,
@@ -232,27 +254,213 @@ fn collect_named_files(root: &Path, max_count: u64, max_total: u64) -> DbResult<
         }
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name.is_empty() || name.contains("..") || name.contains('/') || name.contains('\\') || name.contains('\0') {
-            warnings.push(format!("skipped unsafe asset name in {}", root.file_name().and_then(|s| s.to_str()).unwrap_or("assets")));
-            continue;
+        if name.is_empty()
+            || name.contains("..")
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains('\0')
+        {
+            return Err(DbError::Invalid(format!(
+                "unsafe asset name under {}",
+                root.file_name().and_then(|s| s.to_str()).unwrap_or("assets")
+            )));
         }
         let size = meta.len();
         if size > MAX_ARCHIVE_ASSET_BYTES {
-            warnings.push(format!("skipped oversized asset ({name})"));
-            continue;
+            return Err(DbError::Invalid(format!(
+                "asset exceeds per-file size limit ({name})"
+            )));
+        }
+        if files.len() as u64 >= max_count || total.saturating_add(size) > max_total {
+            truncated = true;
+            break;
+        }
+        let hash = sha256_file(&entry.path())?;
+        files.push((name.to_string(), entry.path(), size, hash));
+        total = total.saturating_add(size);
+    }
+    if truncated {
+        return Err(DbError::Invalid(
+            "asset archive budget exceeded; refusing truncated backup".into(),
+        ));
+    }
+    Ok((files, total, "directory_enumerated".into()))
+}
+
+fn collect_named_files_from_list(
+    root: &Path,
+    names: &[String],
+    max_count: u64,
+    max_total: u64,
+) -> DbResult<(Vec<(String, PathBuf, u64, String)>, u64, String)> {
+    let mut files = Vec::new();
+    let mut total = 0u64;
+    for name in names {
+        if name.is_empty()
+            || name.contains("..")
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains('\0')
+        {
+            return Err(DbError::Invalid(format!("unsafe referenced asset name: {name}")));
         }
         if files.len() as u64 >= max_count {
-            warnings.push("asset count limit reached; remaining files omitted".into());
-            break;
+            return Err(DbError::Invalid(
+                "asset archive count limit exceeded; refusing truncated backup".into(),
+            ));
+        }
+        let path = root.join(name);
+        let meta = std::fs::symlink_metadata(&path).map_err(|_| {
+            DbError::Invalid(format!("referenced media asset missing on disk: {name}"))
+        })?;
+        if meta.file_type().is_symlink() || !meta.is_file() {
+            return Err(DbError::Invalid(format!(
+                "referenced media asset is not a regular file: {name}"
+            )));
+        }
+        let size = meta.len();
+        if size > MAX_ARCHIVE_ASSET_BYTES {
+            return Err(DbError::Invalid(format!(
+                "referenced asset exceeds per-file size limit ({name})"
+            )));
         }
         if total.saturating_add(size) > max_total {
-            warnings.push("asset byte budget reached; remaining files omitted".into());
-            break;
+            return Err(DbError::Invalid(
+                "asset archive byte budget exceeded; refusing truncated backup".into(),
+            ));
         }
+        let hash = sha256_file(&path)?;
+        files.push((name.clone(), path, size, hash));
         total = total.saturating_add(size);
-        files.push((name.to_string(), entry.path(), size));
     }
-    Ok((files, total, warnings))
+    Ok((files, total, "complete".into()))
+}
+
+fn table_exists(db: &Database, name: &str) -> DbResult<bool> {
+    db.conn()
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
+            [name],
+            |_| Ok(true),
+        )
+        .optional()
+        .map(|v| v.unwrap_or(false))
+        .map_err(|e| DbError::Invalid(format!("{name} presence check: {e}")))
+}
+
+fn list_referenced_media_filenames(db: &Database) -> DbResult<Vec<String>> {
+    if !table_exists(db, "media_assets")? {
+        return Ok(Vec::new());
+    }
+    let mut stmt = db
+        .conn()
+        .prepare(
+            "SELECT local_filename AS name FROM media_assets
+             UNION
+             SELECT thumbnail_filename AS name FROM media_assets
+             WHERE thumbnail_filename IS NOT NULL AND TRIM(thumbnail_filename) != ''",
+        )
+        .map_err(|e| DbError::Invalid(format!("media_assets query prepare: {e}")))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| DbError::Invalid(format!("media_assets query: {e}")))?;
+    let mut names = Vec::new();
+    for row in rows {
+        let name = row.map_err(|e| DbError::Invalid(format!("media_assets row: {e}")))?;
+        names.push(name);
+    }
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
+/// Active chat attachment storage keys (staged + durable). Omitting these from the
+/// archive would restore a DB that points at missing files.
+fn list_referenced_attachment_storage_keys(db: &Database) -> DbResult<Vec<String>> {
+    if !table_exists(db, "chat_attachments")? {
+        return Ok(Vec::new());
+    }
+    let mut stmt = db
+        .conn()
+        .prepare(
+            "SELECT storage_key FROM chat_attachments
+             WHERE deleted_at IS NULL
+               AND state NOT IN ('deleted', 'expired', 'failed', 'cancelled')",
+        )
+        .map_err(|e| DbError::Invalid(format!("chat_attachments query prepare: {e}")))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| DbError::Invalid(format!("chat_attachments query: {e}")))?;
+    let mut names = Vec::new();
+    for row in rows {
+        let name = row.map_err(|e| DbError::Invalid(format!("chat_attachments row: {e}")))?;
+        names.push(name);
+    }
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
+/// Resolve attachment files from the durable root and its `staging/` subdirectory.
+fn collect_named_files_from_attachment_roots(
+    attachments_root: &Path,
+    names: &[String],
+    max_count: u64,
+    max_total: u64,
+) -> DbResult<(Vec<(String, PathBuf, u64, String)>, u64, String)> {
+    let staging_root = attachments_root.join("staging");
+    let mut files = Vec::new();
+    let mut total = 0u64;
+    for name in names {
+        if name.is_empty()
+            || name.contains("..")
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains('\0')
+        {
+            return Err(DbError::Invalid(format!(
+                "unsafe referenced attachment name: {name}"
+            )));
+        }
+        if files.len() as u64 >= max_count {
+            return Err(DbError::Invalid(
+                "asset archive count limit exceeded; refusing truncated backup".into(),
+            ));
+        }
+        let path = {
+            let mut found = None;
+            for root in [attachments_root, &staging_root] {
+                let candidate = root.join(name);
+                match std::fs::symlink_metadata(&candidate) {
+                    Ok(meta) if !meta.file_type().is_symlink() && meta.is_file() => {
+                        found = Some((candidate, meta.len()));
+                        break;
+                    }
+                    _ => continue,
+                }
+            }
+            found.ok_or_else(|| {
+                DbError::Invalid(format!(
+                    "referenced chat attachment missing on disk: {name}"
+                ))
+            })?
+        };
+        let (path, size) = path;
+        if size > MAX_ARCHIVE_ASSET_BYTES {
+            return Err(DbError::Invalid(format!(
+                "referenced attachment exceeds per-file size limit ({name})"
+            )));
+        }
+        if total.saturating_add(size) > max_total {
+            return Err(DbError::Invalid(
+                "asset archive byte budget exceeded; refusing truncated backup".into(),
+            ));
+        }
+        let hash = sha256_file(&path)?;
+        files.push((name.clone(), path, size, hash));
+        total = total.saturating_add(size);
+    }
+    Ok((files, total, "complete".into()))
 }
 
 fn set_owner_only_permissions(path: &Path) {
@@ -302,6 +510,10 @@ impl Database {
             let quick = snap.quick_check()?;
             let fk = snap.foreign_key_check_summary()?;
             let latest = snap.latest_migration_name()?;
+            let referenced_media = list_referenced_media_filenames(&snap)?;
+            let referenced_attachments = list_referenced_attachment_storage_keys(&snap)?;
+            let media_table = table_exists(&snap, "media_assets")?;
+            let attachments_table = table_exists(&snap, "chat_attachments")?;
             drop(snap);
             let byte_size = std::fs::metadata(&db_snap)
                 .map(|m| m.len())
@@ -310,34 +522,78 @@ impl Database {
 
             let mut media_files = Vec::new();
             let mut media_bytes = 0u64;
+            let mut media_completeness = "complete".to_string();
             let mut attachment_files = Vec::new();
             let mut attachment_bytes = 0u64;
-            let mut asset_warnings = Vec::new();
+            let mut attachment_completeness = "complete".to_string();
             if let Some(root) = media_root {
-                let (files, total, warnings) =
-                    collect_named_files(root, MAX_ARCHIVE_ASSET_COUNT, MAX_ARCHIVE_TOTAL_ASSET_BYTES)?;
+                let (files, total, completeness) = if media_table {
+                    // DB-referenced media only — empty refs means nothing to archive.
+                    if referenced_media.is_empty() {
+                        (Vec::new(), 0, "complete".into())
+                    } else {
+                        collect_named_files_from_list(
+                            root,
+                            &referenced_media,
+                            MAX_ARCHIVE_ASSET_COUNT,
+                            MAX_ARCHIVE_TOTAL_ASSET_BYTES,
+                        )?
+                    }
+                } else {
+                    // Legacy profiles without media_assets: directory enumeration.
+                    collect_named_files(root, MAX_ARCHIVE_ASSET_COUNT, MAX_ARCHIVE_TOTAL_ASSET_BYTES)?
+                };
                 media_files = files;
                 media_bytes = total;
-                asset_warnings.extend(warnings);
+                media_completeness = completeness;
             }
             if let Some(root) = attachments_root {
                 let remaining_count =
                     MAX_ARCHIVE_ASSET_COUNT.saturating_sub(media_files.len() as u64);
                 let remaining_bytes =
                     MAX_ARCHIVE_TOTAL_ASSET_BYTES.saturating_sub(media_bytes);
-                let (files, total, warnings) =
-                    collect_named_files(root, remaining_count, remaining_bytes)?;
+                let (files, total, completeness) = if attachments_table {
+                    if referenced_attachments.is_empty() {
+                        (Vec::new(), 0, "complete".into())
+                    } else {
+                        collect_named_files_from_attachment_roots(
+                            root,
+                            &referenced_attachments,
+                            remaining_count,
+                            remaining_bytes,
+                        )?
+                    }
+                } else {
+                    // Legacy profiles without chat_attachments: durable root only.
+                    collect_named_files(root, remaining_count, remaining_bytes)?
+                };
                 attachment_files = files;
                 attachment_bytes = total;
-                asset_warnings.extend(warnings);
+                attachment_completeness = completeness;
             }
-            let _ = asset_warnings; // reserved for future manifest warnings field
 
             let schema_version = if include_assets {
                 BACKUP_SCHEMA_VERSION
             } else {
                 BACKUP_SCHEMA_VERSION_V1
             };
+
+            let media_entries: Vec<BackupAssetEntry> = media_files
+                .iter()
+                .map(|(name, _, size, hash)| BackupAssetEntry {
+                    name: name.clone(),
+                    sha256: hash.clone(),
+                    byte_size: *size,
+                })
+                .collect();
+            let attachment_entries: Vec<BackupAssetEntry> = attachment_files
+                .iter()
+                .map(|(name, _, size, hash)| BackupAssetEntry {
+                    name: name.clone(),
+                    sha256: hash.clone(),
+                    byte_size: *size,
+                })
+                .collect();
 
             let mut manifest = BackupManifest {
                 format: BACKUP_FORMAT.into(),
@@ -354,11 +610,23 @@ impl Database {
                     included: include_assets,
                     count: media_files.len() as u64,
                     total_bytes: media_bytes,
+                    completeness: if include_assets {
+                        media_completeness
+                    } else {
+                        "unknown".into()
+                    },
+                    entries: media_entries,
                 },
                 attachments: BackupAssetSection {
                     included: include_assets,
                     count: attachment_files.len() as u64,
                     total_bytes: attachment_bytes,
+                    completeness: if include_assets {
+                        attachment_completeness
+                    } else {
+                        "unknown".into()
+                    },
+                    entries: attachment_entries,
                 },
                 caches_included: false,
                 integrity: BackupIntegrity {
@@ -391,7 +659,7 @@ impl Database {
                 std::io::copy(&mut db_file, &mut zip)
                     .map_err(|e| DbError::Invalid(format!("copy db into zip: {e}")))?;
 
-                for (name, path, _) in &media_files {
+                for (name, path, ..) in &media_files {
                     let entry_name = format!("media/{name}");
                     if classify_archive_entry(&entry_name) != Some("media") {
                         return Err(DbError::Invalid("refusing unsafe media entry".into()));
@@ -403,7 +671,7 @@ impl Database {
                     std::io::copy(&mut f, &mut zip)
                         .map_err(|e| DbError::Invalid(format!("copy media asset: {e}")))?;
                 }
-                for (name, path, _) in &attachment_files {
+                for (name, path, ..) in &attachment_files {
                     let entry_name = format!("attachments/{name}");
                     if classify_archive_entry(&entry_name) != Some("attachments") {
                         return Err(DbError::Invalid("refusing unsafe attachment entry".into()));
@@ -556,6 +824,34 @@ pub fn preview_profile_archive(path: &Path) -> DbResult<RestorePreview> {
                 "Backup manifest asset counts did not match archive entries.".into(),
             );
         }
+        if manifest.media.completeness == "truncated"
+            || manifest.attachments.completeness == "truncated"
+        {
+            warnings.push("Backup manifest reports truncated asset completeness.".into());
+        }
+        if manifest.media.completeness == "directory_enumerated" {
+            warnings.push(
+                "Media assets were directory-enumerated (no DB references captured).".into(),
+            );
+        }
+        if manifest.attachments.completeness == "directory_enumerated" {
+            warnings.push(
+                "Chat attachments were directory-enumerated (no DB storage_key references captured)."
+                    .into(),
+            );
+        }
+        if !manifest.media.entries.is_empty()
+            && manifest.media.entries.len() as u64 != manifest.media.count
+        {
+            warnings.push("Media entry hash list length does not match media count.".into());
+        }
+        if !manifest.attachments.entries.is_empty()
+            && manifest.attachments.entries.len() as u64 != manifest.attachments.count
+        {
+            warnings.push(
+                "Attachment entry hash list length does not match attachment count.".into(),
+            );
+        }
         if !integrity_ok {
             warnings.push("Database integrity checks did not pass for this backup.".into());
         }
@@ -635,6 +931,55 @@ pub fn extract_assets_from_archive(
         .map_err(|e| DbError::Invalid(format!("open backup failed: {e}")))?;
     let mut archive =
         ZipArchive::new(file).map_err(|e| DbError::Invalid(format!("invalid zip: {e}")))?;
+
+    let (expected_hashes, require_asset_hashes) = {
+        let mut manifest_entry = archive
+            .by_name("manifest.json")
+            .map_err(|_| DbError::Invalid("missing manifest.json".into()))?;
+        let buf = read_limited_string(&mut manifest_entry, MAX_MANIFEST_BYTES)?;
+        drop(manifest_entry);
+        let manifest: BackupManifest = serde_json::from_str(&buf)
+            .map_err(|e| DbError::Invalid(format!("manifest parse: {e}")))?;
+        let mut map = std::collections::HashMap::new();
+        for entry in &manifest.media.entries {
+            map.insert(format!("media/{}", entry.name), entry.sha256.clone());
+        }
+        for entry in &manifest.attachments.entries {
+            map.insert(
+                format!("attachments/{}", entry.name),
+                entry.sha256.clone(),
+            );
+        }
+        // Schema v2 archives that claim assets must carry per-asset hashes.
+        let require = manifest.schema_version >= BACKUP_SCHEMA_VERSION
+            && ((manifest.media.included && manifest.media.count > 0)
+                || (manifest.attachments.included && manifest.attachments.count > 0));
+        if require && map.is_empty() {
+            return Err(DbError::Invalid(
+                "schema v2 asset archive missing per-asset hashes".into(),
+            ));
+        }
+        if require {
+            if manifest.media.included
+                && manifest.media.count > 0
+                && manifest.media.entries.len() as u64 != manifest.media.count
+            {
+                return Err(DbError::Invalid(
+                    "media hash entry count does not match media count".into(),
+                ));
+            }
+            if manifest.attachments.included
+                && manifest.attachments.count > 0
+                && manifest.attachments.entries.len() as u64 != manifest.attachments.count
+            {
+                return Err(DbError::Invalid(
+                    "attachment hash entry count does not match attachment count".into(),
+                ));
+            }
+        }
+        (map, require)
+    };
+
     std::fs::create_dir_all(media_root)
         .map_err(|e| DbError::Invalid(format!("create media root: {e}")))?;
     std::fs::create_dir_all(attachments_root)
@@ -702,10 +1047,24 @@ pub fn extract_assets_from_archive(
                 "archive total asset byte budget exceeded".into(),
             ));
         }
-        let (bytes, _hash) = copy_limited_hashed(&mut entry, &dest, per_file_cap)?;
+        let (bytes, hash) = copy_limited_hashed(&mut entry, &dest, per_file_cap)?;
         if bytes == 0 {
             let _ = std::fs::remove_file(&dest);
             continue;
+        }
+        if require_asset_hashes || expected_hashes.contains_key(&name) {
+            let Some(expected) = expected_hashes.get(&name) else {
+                let _ = std::fs::remove_file(&dest);
+                return Err(DbError::Invalid(format!(
+                    "asset missing from manifest hash list: {name}"
+                )));
+            };
+            if &hash != expected {
+                let _ = std::fs::remove_file(&dest);
+                return Err(DbError::Invalid(format!(
+                    "asset hash mismatch for {name}"
+                )));
+            }
         }
         total_asset_bytes = total_asset_bytes.saturating_add(bytes);
         if kind == "media" {
@@ -717,62 +1076,186 @@ pub fn extract_assets_from_archive(
     Ok((media_count, attachment_count))
 }
 
-fn promote_one_root(staging: &Path, live: &Path) -> DbResult<()> {
-    if !staging.exists() {
-        return Ok(());
+fn ensure_dir(path: &Path) -> DbResult<()> {
+    std::fs::create_dir_all(path)
+        .map_err(|e| DbError::Invalid(format!("create directory {}: {e}", path.display())))?;
+    set_owner_only_permissions(path);
+    Ok(())
+}
+
+/// Move a directory tree. Prefers `rename` (same volume). On rename failure,
+/// falls back to recursive copy + delete of `src`. That fallback is **not**
+/// atomic and must not be treated as cross-volume transactional safety.
+fn rename_or_copy_tree(src: &Path, dest: &Path) -> DbResult<()> {
+    match std::fs::rename(src, dest) {
+        Ok(()) => {
+            set_owner_only_permissions(dest);
+            Ok(())
+        }
+        Err(e) => {
+            if dest.exists() {
+                let _ = std::fs::remove_dir_all(dest);
+            }
+            match copy_dir_recursive(src, dest) {
+                Ok(()) => {
+                    let _ = std::fs::remove_dir_all(src);
+                    set_owner_only_permissions(dest);
+                    Ok(())
+                }
+                Err(copy_err) => {
+                    // Leave `src` intact; do not keep a partial destination.
+                    let _ = std::fs::remove_dir_all(dest);
+                    Err(DbError::Invalid(format!(
+                        "asset root rename failed ({e}); copy fallback: {copy_err}"
+                    )))
+                }
+            }
+        }
     }
-    std::fs::create_dir_all(live)
-        .map_err(|e| DbError::Invalid(format!("create live asset root: {e}")))?;
-    set_owner_only_permissions(live);
-    let entries = std::fs::read_dir(staging)
-        .map_err(|e| DbError::Invalid(format!("read staged assets: {e}")))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| DbError::Invalid(format!("staged asset entry: {e}")))?;
-        let meta = std::fs::symlink_metadata(entry.path())
-            .map_err(|e| DbError::Invalid(format!("staged asset metadata: {e}")))?;
-        if meta.file_type().is_symlink() || !meta.is_file() {
+}
+
+fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
+    ensure_dir_io(dest)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let to = dest.join(entry.file_name());
+        if ty.is_symlink() {
             continue;
         }
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if name_str.is_empty()
-            || name_str.contains("..")
-            || name_str.contains('/')
-            || name_str.contains('\\')
-            || name_str.contains('\0')
-        {
-            return Err(DbError::Invalid("unsafe staged asset name".into()));
+        if ty.is_dir() {
+            copy_dir_recursive(&entry.path(), &to)?;
+        } else if ty.is_file() {
+            std::fs::copy(entry.path(), &to)?;
         }
-        let dest = live.join(name.as_os_str());
-        if dest.exists() {
-            let quarantine = dest.with_file_name(format!(
-                "{name_str}.pre-restore-{}",
-                uuid::Uuid::new_v4()
-            ));
-            let _ = std::fs::rename(&dest, &quarantine);
-        }
-        if let Err(e) = std::fs::rename(entry.path(), &dest) {
-            // Cross-device fallback.
-            std::fs::copy(entry.path(), &dest)
-                .map_err(|copy_err| {
-                    DbError::Invalid(format!("promote asset failed ({e}); copy: {copy_err}"))
-                })?;
-            let _ = std::fs::remove_file(entry.path());
-        }
-        set_owner_only_permissions(&dest);
     }
     Ok(())
 }
 
-/// Move staged restore assets into live media/attachments roots.
+fn ensure_dir_io(path: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(path)
+}
+
+fn require_staged_dir(staged: &Path) -> DbResult<()> {
+    let meta = std::fs::symlink_metadata(staged).map_err(|e| {
+        DbError::Invalid(format!("staged asset root missing ({}): {e}", staged.display()))
+    })?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err(DbError::Invalid(format!(
+            "staged asset root must be a directory ({})",
+            staged.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Quarantine a live asset root and install the staged tree in its place.
+///
+/// Ordered per-root replacement only — not an atomic multi-root transaction,
+/// and not cross-volume atomic even for a single root (copy fallback).
+/// On failure after quarantine, leaves `quarantine` in place for the caller to
+/// restore; does not delete `live` unless a partial install must be cleared.
+fn replace_one_asset_root(
+    staged: &Path,
+    live: &Path,
+    quarantine: &Path,
+) -> DbResult<()> {
+    require_staged_dir(staged)?;
+    if let Some(parent) = quarantine.parent() {
+        ensure_dir(parent)?;
+    }
+    if let Some(parent) = live.parent() {
+        ensure_dir(parent)?;
+    }
+
+    if live.exists() {
+        if quarantine.exists() {
+            let _ = std::fs::remove_dir_all(quarantine);
+        }
+        rename_or_copy_tree(live, quarantine)?;
+    }
+
+    if let Err(e) = rename_or_copy_tree(staged, live) {
+        // Clear a partial install; leave quarantine for caller rollback.
+        let _ = std::fs::remove_dir_all(live);
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// Restore `live` from `quarantine` only when quarantine actually holds a tree.
+/// If quarantine is absent, leave `live` untouched (early failure before move).
+fn restore_quarantined_asset_root(live: &Path, quarantine: &Path) -> DbResult<()> {
+    if !quarantine.exists() {
+        return Ok(());
+    }
+    let _ = std::fs::remove_dir_all(live);
+    rename_or_copy_tree(quarantine, live)
+}
+
+/// Replace live media/attachments trees with staged restore trees.
+///
+/// Prior live trees are moved into `quarantine_base` so assets absent from the
+/// backup do not remain active. On failure, both roots are restored from
+/// quarantine when present. Prefer a quarantine directory on the same volume;
+/// cross-volume copy fallback is best-effort and non-atomic.
+///
+/// Failure paths keep `quarantine_base` if rollback cannot fully drain it, so a
+/// mid-failure never deletes the only remaining copy of prior assets.
 pub fn promote_restored_assets(
     staged_media: &Path,
     live_media: &Path,
     staged_attachments: &Path,
     live_attachments: &Path,
 ) -> DbResult<()> {
-    promote_one_root(staged_media, live_media)?;
-    promote_one_root(staged_attachments, live_attachments)?;
+    let quarantine_base = live_media
+        .parent()
+        .unwrap_or(live_media)
+        .join(format!(".coreside-restore-quarantine-{}", uuid::Uuid::new_v4()));
+    replace_restored_asset_roots(
+        staged_media,
+        live_media,
+        staged_attachments,
+        live_attachments,
+        &quarantine_base,
+    )
+}
+
+/// Same as [`promote_restored_assets`] with an explicit quarantine base directory.
+pub fn replace_restored_asset_roots(
+    staged_media: &Path,
+    live_media: &Path,
+    staged_attachments: &Path,
+    live_attachments: &Path,
+    quarantine_base: &Path,
+) -> DbResult<()> {
+    ensure_dir(quarantine_base)?;
+    let q_media = quarantine_base.join("media");
+    let q_att = quarantine_base.join("attachments");
+
+    if let Err(e) = replace_one_asset_root(staged_media, live_media, &q_media) {
+        let restore_err = restore_quarantined_asset_root(live_media, &q_media).err();
+        if !q_media.exists() && !q_att.exists() {
+            let _ = std::fs::remove_dir_all(quarantine_base);
+        }
+        if let Some(restore_err) = restore_err {
+            return Err(restore_err);
+        }
+        return Err(e);
+    }
+    if let Err(e) = replace_one_asset_root(staged_attachments, live_attachments, &q_att) {
+        let att_err = restore_quarantined_asset_root(live_attachments, &q_att).err();
+        let media_err = restore_quarantined_asset_root(live_media, &q_media).err();
+        if !q_media.exists() && !q_att.exists() {
+            let _ = std::fs::remove_dir_all(quarantine_base);
+        }
+        if let Some(restore_err) = att_err.or(media_err) {
+            return Err(restore_err);
+        }
+        return Err(e);
+    }
+    // Success: drop quarantined prior trees (caller may retain a safety backup separately).
+    let _ = std::fs::remove_dir_all(quarantine_base);
     Ok(())
 }
 
@@ -792,6 +1275,23 @@ mod tests {
         std::fs::write(attachments.join("b.txt"), b"hello").unwrap();
 
         let src = Database::open_path(&dir.path().join("src.db")).unwrap();
+        src.conn()
+            .execute(
+                "INSERT INTO media_assets
+                 (id, category, title, local_filename, mime_type, byte_size, content_hash, validation_status)
+                 VALUES ('m1', 'image', 'a', 'a.png', 'image/png', 9, 'hash', 'ok')",
+                [],
+            )
+            .unwrap();
+        src.conn()
+            .execute(
+                "INSERT INTO chat_attachments
+                 (id, storage_key, original_filename, display_name, detected_mime, detected_format,
+                  byte_size, content_hash, state, backup_eligible)
+                 VALUES ('a1', 'b.txt', 'b.txt', 'b.txt', 'text/plain', 'text/plain', 5, 'hash', 'attached', 1)",
+                [],
+            )
+            .unwrap();
         let archive = dir.path().join("profile.coreside-backup");
         let manifest = src
             .create_profile_archive_with_assets(&archive, "0.1.0", Some(&media), Some(&attachments))
@@ -799,8 +1299,14 @@ mod tests {
         assert_eq!(manifest.schema_version, BACKUP_SCHEMA_VERSION);
         assert!(manifest.media.included);
         assert_eq!(manifest.media.count, 1);
+        assert_eq!(manifest.media.entries.len(), 1);
+        assert_eq!(manifest.media.entries[0].name, "a.png");
+        assert_eq!(manifest.media.entries[0].sha256.len(), 64);
+        assert_eq!(manifest.media.completeness, "complete");
         assert!(manifest.attachments.included);
         assert_eq!(manifest.attachments.count, 1);
+        assert_eq!(manifest.attachments.entries.len(), 1);
+        assert_eq!(manifest.attachments.completeness, "complete");
 
         let preview = preview_profile_archive(&archive).unwrap();
         assert!(preview.integrity_ok);
@@ -819,6 +1325,26 @@ mod tests {
     }
 
     #[test]
+    fn archive_skips_orphans_when_attachment_table_empty() {
+        let dir = tempdir().unwrap();
+        let media = dir.path().join("media");
+        let attachments = dir.path().join("attachments");
+        std::fs::create_dir_all(&media).unwrap();
+        std::fs::create_dir_all(&attachments).unwrap();
+        std::fs::write(media.join("orphan.png"), b"x").unwrap();
+        std::fs::write(attachments.join("orphan.txt"), b"y").unwrap();
+        let src = Database::open_path(&dir.path().join("src.db")).unwrap();
+        let archive = dir.path().join("profile.coreside-backup");
+        let manifest = src
+            .create_profile_archive_with_assets(&archive, "0.1.0", Some(&media), Some(&attachments))
+            .unwrap();
+        assert_eq!(manifest.media.count, 0);
+        assert_eq!(manifest.attachments.count, 0);
+        assert_eq!(manifest.media.completeness, "complete");
+        assert_eq!(manifest.attachments.completeness, "complete");
+    }
+
+    #[test]
     fn promote_moves_staged_assets_into_live_roots() {
         let dir = tempdir().unwrap();
         let staged_media = dir.path().join("staged-media");
@@ -832,6 +1358,96 @@ mod tests {
         promote_restored_assets(&staged_media, &live_media, &staged_att, &live_att).unwrap();
         assert_eq!(std::fs::read(live_media.join("a.png")).unwrap(), b"png");
         assert_eq!(std::fs::read(live_att.join("b.txt")).unwrap(), b"txt");
+    }
+
+    #[test]
+    fn promote_replaces_entire_live_tree_and_drops_stale_assets() {
+        let dir = tempdir().unwrap();
+        let staged_media = dir.path().join("staged-media");
+        let staged_att = dir.path().join("staged-att");
+        let live_media = dir.path().join("live-media");
+        let live_att = dir.path().join("live-att");
+        let quarantine = dir.path().join("q");
+        std::fs::create_dir_all(&staged_media).unwrap();
+        std::fs::create_dir_all(&staged_att).unwrap();
+        std::fs::create_dir_all(&live_media).unwrap();
+        std::fs::create_dir_all(&live_att).unwrap();
+        std::fs::write(live_media.join("stale.png"), b"old").unwrap();
+        std::fs::write(live_att.join("stale.txt"), b"old").unwrap();
+        std::fs::write(staged_media.join("a.png"), b"new-a").unwrap();
+        std::fs::write(staged_att.join("b.txt"), b"new-b").unwrap();
+        replace_restored_asset_roots(
+            &staged_media,
+            &live_media,
+            &staged_att,
+            &live_att,
+            &quarantine,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(live_media.join("a.png")).unwrap(), b"new-a");
+        assert_eq!(std::fs::read(live_att.join("b.txt")).unwrap(), b"new-b");
+        assert!(!live_media.join("stale.png").exists());
+        assert!(!live_att.join("stale.txt").exists());
+        assert!(!quarantine.exists());
+    }
+
+    #[test]
+    fn promote_failure_restores_quarantined_media_root() {
+        let dir = tempdir().unwrap();
+        let staged_media = dir.path().join("staged-media");
+        let staged_att = dir.path().join("staged-att");
+        let live_media = dir.path().join("live-media");
+        let live_att = dir.path().join("live-att");
+        let quarantine = dir.path().join("q");
+        std::fs::create_dir_all(&staged_media).unwrap();
+        std::fs::create_dir_all(&live_media).unwrap();
+        std::fs::write(live_media.join("keep.png"), b"original").unwrap();
+        std::fs::write(staged_media.join("a.png"), b"new-a").unwrap();
+        // File at staged_att path: attachments replace fails after media already swapped.
+        std::fs::write(&staged_att, b"not-a-directory").unwrap();
+        let err = replace_restored_asset_roots(
+            &staged_media,
+            &live_media,
+            &staged_att,
+            &live_att,
+            &quarantine,
+        );
+        assert!(err.is_err());
+        assert_eq!(
+            std::fs::read(live_media.join("keep.png")).unwrap(),
+            b"original",
+            "media root must roll back when attachments replace fails"
+        );
+        assert!(!live_media.join("a.png").exists());
+    }
+
+    #[test]
+    fn promote_early_media_failure_leaves_live_untouched() {
+        let dir = tempdir().unwrap();
+        let staged_media = dir.path().join("staged-media");
+        let staged_att = dir.path().join("staged-att");
+        let live_media = dir.path().join("live-media");
+        let live_att = dir.path().join("live-att");
+        let quarantine = dir.path().join("q");
+        std::fs::create_dir_all(&staged_att).unwrap();
+        std::fs::create_dir_all(&live_media).unwrap();
+        std::fs::create_dir_all(&live_att).unwrap();
+        std::fs::write(live_media.join("keep.png"), b"original").unwrap();
+        std::fs::write(live_att.join("keep.txt"), b"att-original").unwrap();
+        std::fs::write(staged_att.join("b.txt"), b"new-b").unwrap();
+        // staged_media is a file → fail before quarantining live media
+        std::fs::write(&staged_media, b"not-a-directory").unwrap();
+        let err = replace_restored_asset_roots(
+            &staged_media,
+            &live_media,
+            &staged_att,
+            &live_att,
+            &quarantine,
+        );
+        assert!(err.is_err());
+        assert_eq!(std::fs::read(live_media.join("keep.png")).unwrap(), b"original");
+        assert_eq!(std::fs::read(live_att.join("keep.txt")).unwrap(), b"att-original");
+        assert!(!live_att.join("b.txt").exists());
     }
 
     #[test]

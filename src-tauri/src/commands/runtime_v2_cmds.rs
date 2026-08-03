@@ -2,7 +2,7 @@
 
 use serde::Deserialize;
 use serde_json::Value;
-use tauri::State;
+use tauri::{State, WebviewWindow};
 
 use super::CommandError;
 use crate::runtime_v2::packs::CapabilityPackMeta as PackMeta;
@@ -21,6 +21,7 @@ use crate::runtime_v2::{
     SnapshotRecord, SurfaceDraft, SurfaceRecord, SuspensionState,
 };
 use crate::state::AppState;
+use crate::windows;
 
 #[tauri::command]
 pub fn list_capability_packs() -> Result<Vec<PackMeta>, CommandError> {
@@ -39,12 +40,19 @@ pub fn list_conversation_surfaces(
 
 #[tauri::command]
 pub fn get_surface_cmd(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     surface_id: String,
 ) -> Result<SurfaceRecord, CommandError> {
     state.require_profile()?;
     let db = state.db.lock();
-    Ok(get_surface(&db, &surface_id)?)
+    let surface = get_surface(&db, &surface_id)?;
+    windows::enforce_caller_surface_scope(
+        &window,
+        surface.tool_id.as_deref(),
+        &surface.id,
+    )?;
+    Ok(surface)
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,22 +126,36 @@ pub fn promote_surface_cmd(
 
 #[tauri::command]
 pub fn save_surface_state_cmd(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     surface_id: String,
     state_json: Value,
 ) -> Result<(), CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
+    let surface = get_surface(&db, &surface_id)?;
+    windows::enforce_caller_surface_scope(
+        &window,
+        surface.tool_id.as_deref(),
+        &surface.id,
+    )?;
     Ok(save_surface_state(&mut db, &surface_id, &state_json)?)
 }
 
 #[tauri::command]
 pub fn get_surface_state_cmd(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     surface_id: String,
 ) -> Result<Value, CommandError> {
     state.require_profile()?;
     let db = state.db.lock();
+    let surface = get_surface(&db, &surface_id)?;
+    windows::enforce_caller_surface_scope(
+        &window,
+        surface.tool_id.as_deref(),
+        &surface.id,
+    )?;
     Ok(get_surface_state(&db, &surface_id)?)
 }
 

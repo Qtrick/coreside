@@ -24,8 +24,13 @@ pub fn list_tools(
 }
 
 #[tauri::command]
-pub fn get_tool(state: State<'_, AppState>, tool_id: String) -> Result<ToolRecord, CommandError> {
+pub fn get_tool(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    tool_id: String,
+) -> Result<ToolRecord, CommandError> {
     state.require_profile()?;
+    windows::enforce_caller_tool_scope(&window, &tool_id)?;
     let db = state.db.lock();
     let mut tool = db::get_tool(&db, &tool_id)?;
     tool.definition.normalize_for_frontend();
@@ -34,10 +39,12 @@ pub fn get_tool(state: State<'_, AppState>, tool_id: String) -> Result<ToolRecor
 
 #[tauri::command]
 pub fn get_tool_versions(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     tool_id: String,
 ) -> Result<Vec<ToolVersionRecord>, CommandError> {
     state.require_profile()?;
+    windows::enforce_caller_tool_scope(&window, &tool_id)?;
     let db = state.db.lock();
     let mut versions = db::get_tool_versions(&db, &tool_id)?;
     for v in &mut versions {
@@ -125,21 +132,25 @@ pub fn undo_tool_change(
 
 #[tauri::command]
 pub fn save_tool_state(
+    window: tauri::WebviewWindow,
     app_state: State<'_, AppState>,
     tool_id: String,
     state: serde_json::Value,
 ) -> Result<(), CommandError> {
     app_state.require_profile()?;
+    windows::enforce_caller_tool_scope(&window, &tool_id)?;
     let mut db = app_state.db.lock();
     Ok(db::save_tool_state(&mut db, &tool_id, &state)?)
 }
 
 #[tauri::command]
 pub fn get_tool_state(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     tool_id: String,
 ) -> Result<serde_json::Value, CommandError> {
     state.require_profile()?;
+    windows::enforce_caller_tool_scope(&window, &tool_id)?;
     let db = state.db.lock();
     Ok(db::get_tool_state(&db, &tool_id)?.unwrap_or_else(|| json!({})))
 }
@@ -153,10 +164,18 @@ pub fn clear_tools(state: State<'_, AppState>) -> Result<u64, CommandError> {
 
 #[tauri::command]
 pub fn open_tool_window(
+    window: tauri::WebviewWindow,
     app: AppHandle,
     tool_id: String,
     width: Option<f64>,
     height: Option<f64>,
 ) -> Result<(), CommandError> {
+    // Defense in depth: tool windows must not spawn further windows even if ACL drifts.
+    if windows::caller_bound_tool_id(&window).is_some() {
+        return Err(CommandError::new(
+            "forbidden",
+            "Tool windows cannot open other tool windows.",
+        ));
+    }
     windows::open_tool_window(&app, &tool_id, width, height)
 }
