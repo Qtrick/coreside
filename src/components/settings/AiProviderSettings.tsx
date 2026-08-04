@@ -11,8 +11,8 @@ import {
 import { serializeHostedAuthSession } from "@/lib/hosted/auth-session";
 
 /**
- * Consumer AI Access card.
- * Provider/model identity only when disclosure policy allows (BYOK / local / Developer Mode).
+ * Consumer AI connections card.
+ * Provider/model identity only when disclosure policy allows (user-connected / local / Developer Mode).
  */
 export function AiProviderSettings() {
   const aiStatus = useAppStore((s) => s.aiStatus);
@@ -43,7 +43,7 @@ export function AiProviderSettings() {
   const allowTest = Boolean(disclosure?.allowConnectionTest);
   const heading =
     aiStatus?.consumerDisplayName ??
-    (accessMode === "user_byok" ? "AI Providers" : "AI Access");
+    (accessMode === "user_byok" ? "Your AI connections" : "AI connections");
   const statusLabel =
     aiStatus?.userFacingStatus ??
     (aiStatus?.status === "ready" ? "Connected" : "Unavailable");

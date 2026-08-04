@@ -8,7 +8,7 @@
   "launchedApp": true,
   "status": "launch_passed",
   "reason": "artifact_scanned_and_launched",
-  "evidenceLevel": "Packaged Verified",
+  "evidenceLevel": "Integrated – Not Verified",
   "launch": {
     "step": "launched_and_quit",
     "settleMs": 4000,
@@ -45,6 +45,6 @@
     "findingsCount": 0
   },
   "sourceIndependence": null,
-  "note": "Bundle scanned and macOS .app launched briefly then quit. Packaged Verified for smoke launch only — not a full product acceptance.",
+  "note": "Bundle scanned and macOS .app launched briefly then quit. Launch-only smoke — not Packaged Verified (BYOK/chat/persistence packaged proof still open).",
   "publicBeta": "Not ready"
 }

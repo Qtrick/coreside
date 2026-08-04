@@ -28,6 +28,12 @@ import { ensureReadableForeground } from "@/lib/readability/contrast";
 import type { ActionLogMode } from "@/lib/action-log";
 import { validateToolDefinition } from "@/lib/tool-schema";
 import {
+  applyPreviewSurfaceOverlay,
+  clearPreviewOverlaysForConversation,
+  clearPreviewOverlaysMatching,
+  type PreviewSurfaceOverlay,
+} from "@/lib/preview/surface-overlay";
+import {
   DEFAULT_CHAT_VIEW,
   shouldLoadChatMessages,
   shouldNavigateToChatNoOp,
@@ -135,6 +141,8 @@ type AppStore = {
   activeTool: ToolDefinition | null;
   toolState: ToolState;
   toolVersionsLoading: boolean;
+  /** Speculative Channel preview paint — cleared on Sync / interrupt / error. */
+  previewSurfacesByKey: Record<string, PreviewSurfaceOverlay>;
 
   pendingToolChange: PendingToolChange | null;
   pendingKernelProposal: PendingKernelProposal | null;
@@ -258,23 +266,152 @@ type AppStore = {
 };
 
 let agentTurnSyncAttached = false;
+/** Active conversation-scoped Sync Channel unlisten (main / tool window). */
+let conversationSyncUnlisten: (() => void) | null = null;
+let conversationSyncConversationId: string | null = null;
+
+type SyncListenerGet = () => {
+  reloadActiveSurfaces: () => Promise<void>;
+  activeConversationId: string | null;
+  activeToolId: string | null;
+  previewSurfacesByKey: Record<string, PreviewSurfaceOverlay>;
+};
+
+type SyncListenerSet = (partial: {
+  appConflict?: AppConflict | null;
+  previewSurfacesByKey?: Record<string, PreviewSurfaceOverlay>;
+}) => void;
+
+/** Shared Sync/Conflict apply path for scoped Channel + residual global bus. */
+function applySyncOrConflictEvent(
+  get: SyncListenerGet,
+  set: SyncListenerSet,
+  event: AgentTurnEvent,
+) {
+  if (
+    event.kind === "text"
+    || event.kind === "action"
+    || event.kind === "error"
+    || event.kind === "operation"
+    || event.kind === "previewSurface"
+  ) {
+    return;
+  }
+  const scope = {
+    activeConversationId: get().activeConversationId,
+    activeToolId: get().activeToolId,
+  };
+  if (event.kind === "conflict") {
+    // Failed durable commit — drop speculative paint so overlays cannot look applied.
+    const previewSurfacesByKey = clearPreviewOverlaysMatching(
+      get().previewSurfacesByKey,
+      {
+        conversationId: event.conversationId,
+        toolIds: [],
+        surfaceIds: [],
+      },
+    );
+    if (
+      !shouldShowAppConflict(
+        { conversationId: event.conversationId },
+        scope.activeConversationId,
+      )
+    ) {
+      if (previewSurfacesByKey !== get().previewSurfacesByKey) {
+        set({ previewSurfacesByKey });
+      }
+      return;
+    }
+    set({
+      appConflict: {
+        message: event.message,
+        conflicts: event.conflicts,
+        conversationId: event.conversationId ?? null,
+      },
+      previewSurfacesByKey,
+    });
+    return;
+  }
+  if (event.kind === "sync") {
+    set({
+      previewSurfacesByKey: clearPreviewOverlaysMatching(
+        get().previewSurfacesByKey,
+        {
+          conversationId: event.conversationId,
+          toolIds: event.toolIds ?? [],
+          surfaceIds: event.surfaceIds ?? [],
+        },
+      ),
+    });
+    if (!shouldApplyAgentTurnSync(event, scope)) {
+      return;
+    }
+    void get().reloadActiveSurfaces();
+  }
+}
+
+/**
+ * Keep a conversation-scoped Sync Channel alive while a chat (or tool surface
+ * bound to that conversation) is open. Primary Sync path.
+ */
+function ensureConversationSyncSubscription(
+  conversationId: string | null,
+  get: SyncListenerGet,
+  set: SyncListenerSet,
+) {
+  const trimmed = (conversationId ?? "").trim();
+  if (trimmed === (conversationSyncConversationId ?? "")) {
+    return;
+  }
+  conversationSyncUnlisten?.();
+  conversationSyncUnlisten = null;
+  conversationSyncConversationId = trimmed || null;
+  if (!trimmed) return;
+  void api
+    .subscribeConversationSync({
+      conversationId: trimmed,
+      onEvent: (event) => {
+        applySyncOrConflictEvent(get, set, event);
+      },
+    })
+    .then((stop) => {
+      if (conversationSyncConversationId !== trimmed) {
+        stop();
+        return;
+      }
+      conversationSyncUnlisten = stop;
+    })
+    .catch(() => {
+      // Best-effort; residual global listenAgentTurn remains.
+    });
+}
 
 /** Mark a conversation's active turn terminal; no-op if none. */
 function finalizeTurnInState(
   state: {
     turnsById: Record<string, TurnLiveState>;
     activeTurnIdByConversation: Record<string, string>;
+    previewSurfacesByKey: Record<string, PreviewSurfaceOverlay>;
   },
   conversationId: string,
   status: TurnLiveStatus,
   error: string | null = null,
 ): Partial<{
   turnsById: Record<string, TurnLiveState>;
+  previewSurfacesByKey: Record<string, PreviewSurfaceOverlay>;
 }> {
   const turnId = state.activeTurnIdByConversation[conversationId];
-  if (!turnId) return {};
+  const previewSurfacesByKey = clearPreviewOverlaysForConversation(
+    state.previewSurfacesByKey,
+    conversationId,
+  );
+  const previewPatch =
+    previewSurfacesByKey === state.previewSurfacesByKey
+      ? {}
+      : { previewSurfacesByKey };
+  if (!turnId) return previewPatch;
   const turn = state.turnsById[turnId];
-  if (!turn) return {};
+  if (!turn) return previewPatch;
   return {
     turnsById: {
       ...state.turnsById,
@@ -284,6 +421,7 @@ function finalizeTurnInState(
         error: error ?? turn.error,
       },
     },
+    ...previewPatch,
   };
 }
 
@@ -336,53 +474,15 @@ function upsertTurnFromChannel(
 }
 
 function attachAgentTurnSyncListener(
-  get: () => {
-    reloadActiveSurfaces: () => Promise<void>;
-    activeConversationId: string | null;
-    activeToolId: string | null;
-  },
-  set: (partial: {
-    appConflict: AppConflict | null;
-  }) => void,
+  get: SyncListenerGet,
+  set: SyncListenerSet,
 ) {
   if (agentTurnSyncAttached) return;
   agentTurnSyncAttached = true;
+  // Residual global bus: private kinds ignored; Sync/Conflict only when Rust
+  // fell back because no scoped subscriber delivered.
   void listenAgentTurn((event) => {
-    // Tool-window / sync path: only conflict + sync. Never render or retain
-    // text/action/error/operation — those ride the per-send Channel (RC3.2 Phase 3).
-    // Global emit is not an auth boundary; this filter is eavesdropping denial.
-    if (event.kind === "text" || event.kind === "action" || event.kind === "error" || event.kind === "operation") {
-      return;
-    }
-    const scope = {
-      activeConversationId: get().activeConversationId,
-      activeToolId: get().activeToolId,
-    };
-    if (event.kind === "conflict") {
-      // Store with conversationId; UI also filters by active conversation.
-      if (
-        !shouldShowAppConflict(
-          { conversationId: event.conversationId },
-          scope.activeConversationId,
-        )
-      ) {
-        return;
-      }
-      set({
-        appConflict: {
-          message: event.message,
-          conflicts: event.conflicts,
-          conversationId: event.conversationId ?? null,
-        },
-      });
-      return;
-    }
-    if (event.kind === "sync") {
-      if (!shouldApplyAgentTurnSync(event, scope)) {
-        return;
-      }
-      void get().reloadActiveSurfaces();
-    }
+    applySyncOrConflictEvent(get, set, event);
   });
 }
 
@@ -713,6 +813,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   activeTool: null,
   toolState: {},
   toolVersionsLoading: false,
+  previewSurfacesByKey: {},
 
   pendingToolChange: null,
   pendingKernelProposal: null,
@@ -885,6 +986,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         activeConversationId: null,
         appConflict: null,
       });
+      ensureConversationSyncSubscription(null, get, set);
       return;
     }
 
@@ -942,6 +1044,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
           }
         : {}),
     });
+
+    ensureConversationSyncSubscription(trimmed, get, set);
 
     if (needLoad) {
       try {
@@ -1773,8 +1877,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     const turnConversationId = conversationId;
     const onChannelEvent = (event: AgentTurnEvent) => {
-      // Sync/Conflict stay on the global bus (attachAgentTurnSyncListener).
+      // Sync/Conflict: Rust prefers subscribeConversationSync; invoke Channel
+      // is only used when no sync subscriber delivered. Apply whichever arrives
+      // — never both for the same emit (see emit_turn ordering).
       if (event.kind === "sync" || event.kind === "conflict") {
+        applySyncOrConflictEvent(get, set, event);
         return;
       }
       // Defense in depth: Channel is invoke-scoped, but still require conversation match.
@@ -1785,21 +1892,53 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // derived live UI fields when this conversation is on screen.
       const isActive = get().activeConversationId === turnConversationId;
 
+      if (event.kind === "previewSurface") {
+        set((state) => ({
+          previewSurfacesByKey: applyPreviewSurfaceOverlay(
+            state.previewSurfacesByKey,
+            {
+              conversationId: turnConversationId,
+              turnId: event.turnId,
+              toolId: event.toolId,
+              surfaceId: event.surfaceId,
+              applicationId: event.applicationId,
+              definitionJson: event.definitionJson,
+              stateJson: event.stateJson,
+              revision: event.revision,
+              sequence: event.sequence,
+            },
+          ),
+        }));
+        return;
+      }
+
       if (event.kind === "operation") {
-        const shortId = event.operationId.slice(0, 8);
+        const shortId = event.operationId.slice(0, 8) || "—";
         const label =
           event.status === "preview"
             ? `Preview: ${shortId}`
-            : `Operation ${event.status}: ${shortId}`;
+            : event.status === "interrupted"
+              ? "Preview interrupted"
+              : `Operation ${event.status}: ${shortId}`;
         set((state) => {
           const upserted = upsertTurnFromChannel(state, turnConversationId, null);
           const actions = [...upserted.turn.actions, label].slice(-8);
+          const clearPreview =
+            event.status === "interrupted" || event.status === "fatal";
           return {
             turnsById: {
               ...upserted.turnsById,
               [upserted.turnId]: { ...upserted.turn, actions },
             },
             activeTurnIdByConversation: upserted.activeTurnIdByConversation,
+            ...(clearPreview
+              ? {
+                  previewSurfacesByKey: clearPreviewOverlaysForConversation(
+                    state.previewSurfacesByKey,
+                    turnConversationId,
+                  ),
+                }
+              : {}),
             ...(isActive
               ? { agentActions: [...state.agentActions, label].slice(-8) }
               : {}),
@@ -1856,6 +1995,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
               },
             },
             activeTurnIdByConversation: upserted.activeTurnIdByConversation,
+            previewSurfacesByKey: clearPreviewOverlaysForConversation(
+              state.previewSurfacesByKey,
+              turnConversationId,
+            ),
             ...(isActive ? { sendError: event.message } : {}),
           };
         });
@@ -2426,6 +2569,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
         sidebarCollapsed: true,
       });
       attachAgentTurnSyncListener(get, set);
+      // Resolve conversation for Sync Channel (surf-{toolId} when promoted).
+      void api
+        .getSurface(`surf-${toolId}`)
+        .then((surface) => {
+          const cid =
+            typeof surface?.conversationId === "string"
+              ? surface.conversationId.trim()
+              : "";
+          if (cid) {
+            ensureConversationSyncSubscription(cid, get, set);
+          }
+        })
+        .catch(() => {
+          // Tool may lack a surface row; residual global Sync remains.
+        });
     } catch (error) {
       set({
         bootstrapped: true,

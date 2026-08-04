@@ -1,5 +1,7 @@
 import { Folder, FolderPlus } from "lucide-react";
 import type { Project } from "@/types/project";
+import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
+import { useAppStore } from "@/stores/app-store";
 import { projectIconClass } from "./project-icon";
 
 type ProjectsListPageProps = {
@@ -13,6 +15,7 @@ export function ProjectsListPage({
   onCreateProject,
   onOpenProject,
 }: ProjectsListPageProps) {
+  const navigateToSettings = useAppStore((s) => s.navigateToSettings);
   const visible = projects.filter((p) => !p.archived);
 
   return (
@@ -31,11 +34,20 @@ export function ProjectsListPage({
       </header>
       {visible.length === 0 ? (
         <div className="empty-state">
-          <h3>No projects yet</h3>
-          <p>Create a project to group related chats.</p>
-          <button type="button" className="btn btn-primary" onClick={onCreateProject}>
-            Create project
-          </button>
+          <h3>{EMPTY_STATES.noProjects.title}</h3>
+          <p>{EMPTY_STATES.noProjects.body}</p>
+          <div className="button-row empty-state-actions">
+            <button type="button" className="btn btn-primary" onClick={onCreateProject}>
+              {EMPTY_STATES.noProjects.primaryCta}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => openHelpAndLearning(navigateToSettings)}
+            >
+              {EMPTY_STATES.helpLink.label}
+            </button>
+          </div>
         </div>
       ) : (
         <ul className="projects-grid">

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/tauri";
+import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
+import { useAppStore } from "@/stores/app-store";
 
 type Automation = {
   id: string;
@@ -21,6 +23,7 @@ export function AutomationsPanel({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const navigateToSettings = useAppStore((s) => s.navigateToSettings);
 
   const reload = async () => {
     try {
@@ -72,11 +75,36 @@ export function AutomationsPanel({ onBack }: { onBack: () => void }) {
           </p>
         ) : null}
         {rows.length === 0 ? (
-          <div className="settings-section">
-            <p>
-              Recurring changes and routines you create with Coreside will appear
-              here.
-            </p>
+          <div className="empty-state">
+            <h3>{EMPTY_STATES.noAutomations.title}</h3>
+            <p>{EMPTY_STATES.noAutomations.body}</p>
+            <div className="button-row empty-state-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  onBack();
+                  const { activeConversationId: activeId, createConversation: create } =
+                    useAppStore.getState();
+                  const focus = () =>
+                    document.getElementById("composer-input")?.focus();
+                  if (activeId) {
+                    focus();
+                  } else {
+                    void create().then(focus);
+                  }
+                }}
+              >
+                {EMPTY_STATES.noAutomations.primaryCta}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => openHelpAndLearning(navigateToSettings)}
+              >
+                {EMPTY_STATES.helpLink.label}
+              </button>
+            </div>
           </div>
         ) : (
           <ul className="provider-connection-list">

@@ -6,11 +6,14 @@ export type AgentTurnEvent =
   | {
       kind: "text";
       conversationId: string;
-      /** Cumulative assistant text checkpoint (reconnect / catch-up). */
-      text: string;
+      /**
+       * Cumulative checkpoint. Omitted on ordinary delta-primary events;
+       * present every 32 sequences, on first event, and on non-prefix replaces.
+       */
+      text?: string | null;
       turnId?: string | null;
       sequence?: number | null;
-      /** New chunk since the previous checkpoint; `text` remains cumulative. */
+      /** New chunk since the previous event; preferred ordinary carrier. */
       delta?: string | null;
     }
   | { kind: "error"; conversationId: string; message: string }
@@ -19,6 +22,18 @@ export type AgentTurnEvent =
       conversationId: string;
       operationId: string;
       status: string;
+    }
+  | {
+      kind: "previewSurface";
+      conversationId: string;
+      turnId: string;
+      toolId?: string | null;
+      surfaceId: string;
+      applicationId?: string | null;
+      definitionJson: unknown;
+      stateJson: unknown;
+      revision: number;
+      sequence: number;
     }
   | {
       kind: "sync";
@@ -132,9 +147,9 @@ let agentTurnUnlisten: (() => void) | null = null;
  *
  * The global bus must not carry private assistant text. Interactive
  * `send_message` streams deliver text/action/error/operation on a Tauri
- * Channel (authoritative). This listener remains for Sync/Conflict multi-window
- * refresh — and as a temporary degradation path for queue-drain Action/Error/
- * Operation when no Channel is present.
+ * Channel (authoritative). Sync/Conflict prefer `subscribeConversationSync`;
+ * this listener remains as defense-in-depth for residual global emits when
+ * no scoped subscribers delivered (see docs/SCOPED_TURN_STREAMING.md).
  *
  * Tool windows must ignore text/action/error/operation (eavesdropping denial).
  * Client-side filtering is defense in depth, not authorization.
@@ -217,6 +232,46 @@ export async function subscribeConversationQueue(
     handler(event);
   };
   await invoke("subscribe_conversation_queue", {
+    conversationId,
+    onEvent: channel,
+  });
+  return () => {
+    alive = false;
+    channel.onmessage = () => undefined;
+  };
+}
+
+/** Defense-in-depth filter for conversation-scoped Sync Channels. */
+export function isSyncEventForConversation(
+  event: AgentTurnEvent,
+  conversationId: string,
+): boolean {
+  if (!conversationId) return false;
+  if (event.kind !== "sync" && event.kind !== "conflict") return false;
+  const eventConv = (event.conversationId ?? "").trim();
+  if (!eventConv) return false;
+  return eventConv === conversationId;
+}
+
+/**
+ * Subscribe to conversation-scoped Sync/Conflict via Tauri Channel.
+ * Primary path for surface reload + conflict banners (replaces global agent-turn
+ * when Rust has at least one successful scoped delivery).
+ */
+export async function subscribeConversationSync(
+  conversationId: string,
+  handler: (event: AgentTurnEvent) => void,
+): Promise<() => void> {
+  if (!isTauriRuntime() || !conversationId) return () => undefined;
+  const { Channel, invoke } = await import("@tauri-apps/api/core");
+  let alive = true;
+  const channel = new Channel<AgentTurnEvent>();
+  channel.onmessage = (event) => {
+    if (!alive) return;
+    if (!isSyncEventForConversation(event, conversationId)) return;
+    handler(event);
+  };
+  await invoke("subscribe_conversation_sync", {
     conversationId,
     onEvent: channel,
   });

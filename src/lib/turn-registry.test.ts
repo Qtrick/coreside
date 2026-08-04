@@ -6,7 +6,7 @@ import {
 } from "@/lib/turn-registry";
 
 describe("applyTextDelta", () => {
-  it("applies sequential text checkpoints (Channel always sends full text)", () => {
+  it("applies sequential text checkpoints when text is present", () => {
     const state = createTurnLiveState("t1", "c1", 1);
     const next = applyTextDelta(state, {
       text: "Hello",
@@ -25,6 +25,48 @@ describe("applyTextDelta", () => {
     expect(again.lastSequence).toBe(2);
   });
 
+  it("applies delta-primary ordinary events between checkpoints", () => {
+    const state = createTurnLiveState("t1", "c1", 1);
+    const first = applyTextDelta(state, {
+      text: "Hello",
+      delta: "Hello",
+      sequence: 1,
+    });
+    const next = applyTextDelta(first, {
+      delta: " world",
+      sequence: 2,
+    });
+    expect(next.text).toBe("Hello world");
+    expect(next.lastSequence).toBe(2);
+  });
+
+  it("starts from delta-only when the first event omits checkpoint text", () => {
+    const state = createTurnLiveState("t1", "c1", 1);
+    const first = applyTextDelta(state, {
+      delta: "Hello",
+      sequence: 1,
+    });
+    expect(first.text).toBe("Hello");
+    const next = applyTextDelta(first, {
+      delta: "!",
+      sequence: 2,
+    });
+    expect(next.text).toBe("Hello!");
+  });
+
+  it("treats null text as delta-primary (not an empty checkpoint)", () => {
+    const state = {
+      ...createTurnLiveState("t1", "c1", 1),
+      text: "Hello",
+      lastSequence: 1,
+    };
+    const next = applyTextDelta(state, {
+      text: null,
+      delta: " world",
+      sequence: 2,
+    });
+    expect(next.text).toBe("Hello world");
+  });
   it("uses text as checkpoint / full replace when delta is not next", () => {
     const state = {
       ...createTurnLiveState("t1", "c1", 1),

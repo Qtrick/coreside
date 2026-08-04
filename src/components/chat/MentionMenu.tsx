@@ -15,13 +15,13 @@ export function MentionMenu({
   activeIndex,
   onHover,
   onSelect,
-  emptyLabel = "No tools match",
+  emptyLabel = "No apps match",
 }: MentionMenuProps) {
   return (
-    <div className="mention-menu" role="listbox" aria-label="Tool mentions">
+    <div className="mention-menu" role="listbox" aria-label="App mentions">
       {tools.length === 0 ? (
         <p className="mention-menu-empty muted">
-          {query ? emptyLabel : "No tools yet"}
+          {query ? emptyLabel : "No apps yet"}
         </p>
       ) : (
         <ul className="mention-menu-list">

@@ -1,7 +1,7 @@
 # Beta Readiness Model
 
 **Product:** Coreside  
-**Phase:** RC3.3 Phase 1  
+**Phase:** RC3.4  
 **Source of truth:** `reports/readiness-ladder.json` (generate with `npm run audit:readiness`)
 
 This model classifies **evidence**, not marketing. Do not invent Desktop Verified, Packaged Verified, Human Accepted, or Public Beta without matching artifacts.

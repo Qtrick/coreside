@@ -151,6 +151,11 @@ export function ConversationQueue({
     }
   };
 
+  useEffect(() => {
+    if (items.length === 0) return;
+    window.dispatchEvent(new CustomEvent("coreside:queue-has-items"));
+  }, [items.length]);
+
   if (items.length === 0) return null;
 
   return (

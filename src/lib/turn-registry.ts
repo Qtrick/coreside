@@ -46,11 +46,11 @@ export function createTurnLiveState(
  * Apply a Channel text event to turn live state.
  *
  * - Soft-reject duplicate or older sequences (return state unchanged).
- * - When `text` is present, treat it as the authoritative checkpoint (matches
- *   prior `streamingText: event.text` behavior). Never append `delta` on top of
- *   an existing body when `text` is also supplied — Rust's non-prefix replace
- *   path sends the full body as `delta`, which would duplicate if appended.
- * - Append `delta` only when it is the sole body carrier (no `text`) and
+ * - When `text` is a string, treat it as the authoritative checkpoint.
+ *   Never append `delta` on top of an existing body when `text` is also
+ *   supplied — Rust's non-prefix replace path sends the full body as `delta`,
+ *   which would duplicate if appended.
+ * - Ordinary events may be delta-primary (no `text`); append `delta` when
  *   `sequence === lastSequence + 1`, or when sequence is absent.
  * - Gaps (sequence > lastSequence + 1) with only a delta are soft-rejected;
  *   a `text` checkpoint still applies when present.
@@ -70,9 +70,10 @@ export function applyTextDelta(
   }
 
   const delta = typeof event.delta === "string" ? event.delta : null;
+  // Only string checkpoints count — null/undefined means delta-primary.
   const text = typeof event.text === "string" ? event.text : null;
 
-  // Authoritative checkpoint — Rust Channel text events always carry full text.
+  // Authoritative checkpoint when present (periodic / first / non-prefix).
   if (text !== null) {
     return {
       ...state,

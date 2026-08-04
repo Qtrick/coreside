@@ -14,6 +14,7 @@ import {
   restoreMediaSnapshot,
   restoreScrollSnapshot,
 } from "@/lib/preservation";
+import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
 import { surfaceIdForTool } from "@/lib/surface-ops";
 import type {
   ActionOutcome,
@@ -21,6 +22,7 @@ import type {
   RecoveryState,
 } from "@/types/application-kernel";
 import { useAppStore } from "@/stores/app-store";
+import { getPreviewOverlayForTool } from "@/lib/preview/surface-overlay";
 
 function isApplicationUnavailable(
   record: ManifestRecord | null,
@@ -66,6 +68,7 @@ export function ToolCanvas() {
   // streams, and a full-store subscription re-renders the tool on every token.
   const activeTool = useAppStore((s) => s.activeTool);
   const toolState = useAppStore((s) => s.toolState);
+  const previewSurfacesByKey = useAppStore((s) => s.previewSurfacesByKey);
   const updateToolState = useAppStore((s) => s.updateToolState);
   const closeToolCanvas = useAppStore((s) => s.closeToolCanvas);
   const openToolWindow = useAppStore((s) => s.openToolWindow);
@@ -80,6 +83,8 @@ export function ToolCanvas() {
   const clearWindowExpandStatus = useAppStore((s) => s.clearWindowExpandStatus);
   const setAdaptiveWindowSizing = useAppStore((s) => s.setAdaptiveWindowSizing);
   const developerMode = useAppStore((s) => s.developerMode);
+  const createConversation = useAppStore((s) => s.createConversation);
+  const navigateToSettings = useAppStore((s) => s.navigateToSettings);
   const [manifestRecord, setManifestRecord] = useState<ManifestRecord | null>(null);
   const [recovery, setRecovery] = useState<RecoveryState | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -279,12 +284,45 @@ export function ToolCanvas() {
     setManifestRecord(rec);
   };
 
+  const previewOverlay = useMemo(
+    () =>
+      getPreviewOverlayForTool(
+        previewSurfacesByKey,
+        activeTool?.id,
+        activeConversationId,
+      ),
+    [previewSurfacesByKey, activeTool?.id, activeConversationId],
+  );
+  const renderTool = previewOverlay?.tool ?? activeTool;
+  const renderState = previewOverlay?.state ?? toolState;
+  const isPreviewPaint = Boolean(previewOverlay);
+
   if (!activeTool) {
     return (
-      <section className="tool-canvas" aria-label="Tool canvas">
+      <section className="tool-canvas" aria-label="App canvas" data-coreside-tour="app-panel">
         <div className="empty-state">
-          <h3>No active tool</h3>
-          <p>Ask the agent to create a tool, or select one from the sidebar.</p>
+          <h3>{EMPTY_STATES.noAppOpen.title}</h3>
+          <p>{EMPTY_STATES.noAppOpen.body}</p>
+          <div className="button-row empty-state-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                void createConversation().then(() => {
+                  document.getElementById("composer-input")?.focus();
+                });
+              }}
+            >
+              {EMPTY_STATES.noAppOpen.primaryCta}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => openHelpAndLearning(navigateToSettings)}
+            >
+              {EMPTY_STATES.helpLink.label}
+            </button>
+          </div>
         </div>
       </section>
     );
@@ -293,15 +331,25 @@ export function ToolCanvas() {
   const manifest = manifestRecord?.manifest ?? null;
 
   return (
-    <section className="tool-canvas" aria-label={`${activeTool.name} canvas`}>
+    <section className="tool-canvas" aria-label={`${activeTool.name} canvas`} data-coreside-tour="app-panel">
       <header className="tool-canvas-header">
         <div>
-          <h2>{activeTool.name}</h2>
+          <h2>
+            {activeTool.name}
+            {isPreviewPaint ? (
+              <span className="tool-preview-badge" aria-label="Preview — not saved yet">
+                Preview
+              </span>
+            ) : null}
+          </h2>
           <div className="tool-meta">
             <span title={activeTool.description || "Personal tool"}>
               {activeTool.description || "Personal tool"}
             </span>
             <span>v{activeTool.version ?? 1}</span>
+            {isPreviewPaint ? (
+              <span className="tool-preview-note">Speculative — not saved yet</span>
+            ) : null}
           </div>
         </div>
         <ToolHeaderActions
@@ -440,11 +488,11 @@ export function ToolCanvas() {
             applicationId={manifest.applicationId || activeTool.id}
             manifest={manifest}
             surfacesById={{
-              [surfaceIdForTool(activeTool.id)]: activeTool,
-              [activeTool.id]: activeTool,
+              [surfaceIdForTool(activeTool.id)]: renderTool ?? activeTool,
+              [activeTool.id]: renderTool ?? activeTool,
             }}
-            state={toolState}
-            onStateChange={onStateChange}
+            state={renderState}
+            onStateChange={isPreviewPaint ? () => undefined : onStateChange}
             onSubmitToAgent={onSubmitToAgent}
             surfaceId={surfaceId}
             conversationId={activeConversationId}
@@ -453,10 +501,10 @@ export function ToolCanvas() {
           />
         ) : (
           <ToolRenderer
-            tool={activeTool}
-            state={toolState}
-            onStateChange={onStateChange}
-            onPersistState={onPersistState}
+            tool={renderTool ?? activeTool}
+            state={renderState}
+            onStateChange={isPreviewPaint ? () => undefined : onStateChange}
+            onPersistState={isPreviewPaint ? async () => undefined : onPersistState}
             // Only a real manifest id — never invent one for legacy tools.
             applicationId={manifestRecord?.applicationId ?? null}
             surfaceId={surfaceId}

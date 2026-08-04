@@ -62,6 +62,7 @@ import type { ToolDefinition, ToolState, ToolSummary, ToolVersion } from "@/type
 import { Channel } from "@tauri-apps/api/core";
 import type { AgentTurnEvent } from "./events";
 import { subscribeConversationQueue as subscribeConversationQueueChannel } from "./events";
+import { subscribeConversationSync as subscribeConversationSyncChannel } from "./events";
 import { invoke } from "./invoke";
 import { isTauriRuntime } from "./runtime";
 import { isToolRecord, toToolDefinition, toToolSummary, type ToolRecord } from "./tools";
@@ -851,6 +852,15 @@ export const api = {
     onEvent: (event: import("./events").QueueChangedEvent) => void;
   }) =>
     subscribeConversationQueueChannel(args.conversationId, args.onEvent),
+  /**
+   * Conversation-scoped Channel for Sync/Conflict. Keep alive while the chat
+   * (or tool window for that conversation) is open.
+   */
+  subscribeConversationSync: (args: {
+    conversationId: string;
+    onEvent: (event: import("./events").AgentTurnEvent) => void;
+  }) =>
+    subscribeConversationSyncChannel(args.conversationId, args.onEvent),
   cancelQueueItem: (itemId: string) =>
     invoke<Record<string, unknown>>("cancel_queue_item_cmd", { itemId }),
   removeQueueItem: (itemId: string) =>
@@ -858,6 +868,16 @@ export const api = {
   listDiagnostics: (conversationId: string, limit?: number) =>
     invoke<unknown[]>("list_diagnostics_cmd", {
       conversationId,
+      limit: limit ?? null,
+    }),
+  listTurnTimeline: (
+    conversationId: string,
+    turnId?: string | null,
+    limit?: number,
+  ) =>
+    invoke<Record<string, unknown>[]>("list_turn_timeline_cmd", {
+      conversationId,
+      turnId: turnId ?? null,
       limit: limit ?? null,
     }),
   storeDiagnostics: (
@@ -997,4 +1017,24 @@ export const api = {
     invoke<ApplicationVersion[]>("kernel_list_application_versions", {
       applicationId,
     }),
+
+  getOnboardingState: () =>
+    invoke<import("@/lib/onboarding/types").OnboardingState>("get_onboarding_state"),
+  upsertTutorialProgress: (
+    input: import("@/lib/onboarding/types").UpsertTutorialProgressInput,
+  ) =>
+    invoke<import("@/lib/onboarding/types").TutorialProgress>("upsert_tutorial_progress", {
+      tutorialId: input.tutorialId,
+      tutorialVersion: input.tutorialVersion,
+      status: input.status,
+      currentStepId: input.currentStepId ?? null,
+      completedStepIds: input.completedStepIds ?? null,
+    }),
+  resetTutorialProgress: (tutorialId?: string | null) =>
+    invoke<number>("reset_tutorial_progress", {
+      tutorialId: tutorialId ?? null,
+    }),
+  seedTutorialSample: () =>
+    invoke<import("@/lib/onboarding/types").TutorialSampleSeed>("seed_tutorial_sample"),
+  cleanupTutorialSample: () => invoke<number>("cleanup_tutorial_sample"),
 };

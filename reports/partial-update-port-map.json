@@ -1,10 +1,11 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T00:50:00.000Z",
+  "generatedAt": "2026-08-04T16:30:00.000Z",
   "commit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
   "dirty": true,
   "partialUpdateArchiveSha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
+  "partialUpdateExtractPath": ".reference/partial-update-main/partialupdate-main",
   "license": "MIT",
   "copyright": "Copyright (c) 2026 Phil Holden",
   "ports": [
@@ -14,10 +15,11 @@
       "behavior": "Incremental protocol buffering and dispatch of complete units before model completion",
       "classification": "direct_translated_adapted",
       "coresideFile": "src-tauri/src/runtime_v2/streaming.rs",
-      "coresideSymbol": "NdjsonFrameParser",
-      "securityChanges": "Bounded buffers; StreamEvent-only production path; no HTML/DOM",
+      "coresideSymbol": "NdjsonFrameParser + PreviewTransaction PreviewSurface paint",
+      "securityChanges": "Bounded buffers; StreamEvent-only production path; no HTML/DOM; speculative paint does not write SQLite",
       "status": "partial",
-      "gap": "Live progressive operation apply + canonical envelope only"
+      "gap": "Live durable mid-stream apply; JSON-blob progressive split; desktop E2E not_run",
+      "rc34Relevant": true
     },
     {
       "partialUpdateFile": "src/index.ts",
@@ -25,10 +27,11 @@
       "behavior": "Parse and broadcast updates while generation continues",
       "classification": "behavioral_reimplementation",
       "coresideFile": "src-tauri/src/commands/message_cmds.rs",
-      "coresideSymbol": "send_message + Channel on_event",
-      "securityChanges": "Scoped Channel replaces global text broadcast; trusted declarative ops only",
+      "coresideSymbol": "send_message + Channel on_event + PreviewSurface",
+      "securityChanges": "Scoped Channel replaces global text broadcast; trusted declarative ops only; speculative paint is in-memory",
       "status": "partial",
-      "gap": "Delta-only efficiency; turn registry; reconnect snapshot"
+      "gap": "Delta-only efficiency; reconnect snapshot; desktop E2E",
+      "rc34Relevant": true
     },
     {
       "partialUpdateFile": "src/index.ts",
@@ -36,10 +39,11 @@
       "behavior": "Serialized queue mutation with single active item",
       "classification": "substantially_adapted",
       "coresideFile": "src-tauri/src/runtime_v2/queue.rs",
-      "coresideSymbol": "activate_next / recover_stale_active",
-      "securityChanges": "SQLite transactions; profile-scoped",
+      "coresideSymbol": "activate_next / recover_stale_active + subscribe_conversation_queue Channel",
+      "securityChanges": "SQLite transactions; profile-scoped; queue metadata never on process-wide bus",
       "status": "partial",
-      "gap": "Full withQueueMutation UI parity; 20s reconcile remains; desktop E2E not_run"
+      "gap": "Full withQueueMutation UI parity; 20s reconcile remains; desktop E2E not_run",
+      "rc34Relevant": true
     },
     {
       "partialUpdateFile": "src/index.ts",
@@ -47,10 +51,47 @@
       "behavior": "Filtered update delivery by client metadata",
       "classification": "behavioral_reimplementation",
       "coresideFile": "docs/SCOPED_TURN_STREAMING.md",
-      "coresideSymbol": "tauri::ipc::Channel on send_message",
-      "securityChanges": "Caller-bound Channel; no tool-window text eavesdrop via global bus",
+      "coresideSymbol": "Channel on send_message + subscribe_conversation_sync",
+      "securityChanges": "Caller-bound Channel for private kinds; Sync/Conflict prefer conversation-scoped subscribers; residual global Sync only when scoped delivery fails",
       "status": "partial",
-      "gap": "Queue drain Action/Error still may use global; Sync/Conflict global"
+      "gap": "Residual global Sync when no subscriber; queue-drain Action/Error/Operation dropped (no progress UI)",
+      "rc34Relevant": true
+    },
+    {
+      "partialUpdateFile": "src/index.ts",
+      "partialUpdateSymbol": "registerFork / snapshotForFork",
+      "behavior": "Branch indexing and chat snapshot clone for forks",
+      "classification": "substantially_adapted",
+      "coresideFile": "src-tauri/src/runtime_v2/branch.rs",
+      "coresideSymbol": "chat_branches + ConversationHistory Branches/Snapshots",
+      "securityChanges": "Local SQLite branch/snapshot records; no remote Durable Object fork pages",
+      "status": "partial",
+      "gap": "Message-picker branch points",
+      "rc34Relevant": true
+    },
+    {
+      "partialUpdateFile": "src/index.ts",
+      "partialUpdateSymbol": "replay pacing (parseReplayPageOptions / replayHistory)",
+      "behavior": "Chronological paced history replay for inspection",
+      "classification": "behavioral_reimplementation",
+      "coresideFile": "src-tauri/src/runtime_v2/turn_timeline.rs",
+      "coresideSymbol": "list_turn_timeline_cmd + History ReplayPlayer",
+      "securityChanges": "Read-only redacted timeline / transaction stepper; never re-invokes provider or re-applies transactions",
+      "status": "partial",
+      "gap": "Full PU stream/token replay parity; desktop E2E not_run",
+      "rc34Relevant": true
+    },
+    {
+      "partialUpdateFile": "src/index.ts",
+      "partialUpdateSymbol": "form submit → model",
+      "behavior": "Structured form fields continue the turn",
+      "classification": "behavioral_reimplementation",
+      "coresideFile": "src-tauri/src/ai/structured_user_input.rs",
+      "coresideSymbol": "StructuredUserInput + ledger seal",
+      "securityChanges": "Trust authority is typed sealed input; text delimiters are not authority; no hidden iframe forms",
+      "status": "unit_verified",
+      "gap": "Native multimodal provider parts; desktop E2E",
+      "rc34Relevant": true
     },
     {
       "partialUpdateFile": "src/app.html / generated HTML",
@@ -61,7 +102,8 @@
       "coresideSymbol": null,
       "securityChanges": "Trusted declarative components only",
       "status": "rejected",
-      "gap": null
+      "gap": null,
+      "rc34Relevant": false
     }
   ]
 }

@@ -17,5 +17,7 @@ permissions = [
   "allow-get-app-info",
   "allow-get-bootstrap-status",
   # Read-only appearance/theme for tool chrome (set_setting stays denied via allowlist).
-  "allow-get-settings"
+  "allow-get-settings",
+  # Conversation-scoped Sync/Conflict (avoids process-wide agent-turn when subscribed).
+  "allow-subscribe-conversation-sync"
 ]

@@ -1,8 +1,20 @@
 # Known Issues
 
 **Product:** Coreside v0.1.0  
-**Last updated:** 2026-08-03  
+**Last updated:** 2026-08-04  
 **Evidence:** regenerate with `npm run release:evidence` — do not treat July counts as current.
+
+## RC3.4 notes
+
+| Issue | Severity | Status |
+| --- | --- | --- |
+| Onboarding desktop E2E (welcome + tour) | P2 evidence | **Open** — specs 15–16 registered; harness leaves them **not_run** (`CORESIDE_E2E` disables onboarding) |
+| Contextual tips / What’s new | P3 | **Unit landed** — vitest eligibility; desktop **not_run** |
+| Help category remount when Settings already open | P3 | Mitigated via `coreside:settings-category` event; still verify manually |
+| Tour sample seed/cleanup IPC unused in UI | P3 | Commands ACL-registered; no Help button yet; cleanup is id-scoped |
+| Baseline report migrations/command counts | P2 evidence | Counts corrected to migrations=17 / commands=220; re-run `npm run audit:current-source` after commit for fingerprint parity |
+| Preview overlay conversation scoping | P1 | **Mitigated** — overlays keyed with conversationId; Sync/Conflict clear even when reload skipped; interrupt/error/finalize clear per-conversation |
+| Consumer language audit | P3 evidence | Heuristic `npm run audit:consumer-language` — review findings; not Desktop Verified |
 
 Tracked gaps affecting release assurance. Not an exhaustive bug list.
 
@@ -16,7 +28,7 @@ Tracked gaps affecting release assurance. Not an exhaustive bug list.
 | Journey 12/13 desktop execution | P1 evidence | **In progress** — ACL deny fixed; re-run E2E required |
 | Full turn registry / delta-only IPC | P1 | **Partial** — frontend `turnsById` + delta apply landed; reconnect / delta-only wire / concurrent UI still open |
 | Typed StructuredUserInput (not text delimiter) | P1 | **Unit Verified** — typed seal + trust gate; delimiter not authority; desktop E2E **not_run** (see [STRUCTURED_FORMS_AND_CONTEXT.md](./STRUCTURED_FORMS_AND_CONTEXT.md)) |
-| Progressive preview transaction | P1 | **Partial** — live NDJSON preview + `PreviewTransaction` landed; JSON-blob / surface paint / E2E remain open (see [PROGRESSIVE_PREVIEW_TRANSACTION.md](./PROGRESSIVE_PREVIEW_TRANSACTION.md)) |
+| Progressive preview transaction | P1 | **Partial** — live NDJSON preview + speculative surface paint landed; JSON-blob progressive / desktop E2E remain open (see [PROGRESSIVE_PREVIEW_TRANSACTION.md](./PROGRESSIVE_PREVIEW_TRANSACTION.md)) |
 | Attachment crash suite + scoped ACL | P1 | **Partial** — crash/reconcile suite + authorize **Unit Verified** (`reports/attachment-crash-results.json`); window ACL / desktop proof **open** |
 | Coherent profile restore | P1 | **Partial** — journal stage ladder + mid-swap → Recovery **Unit Verified** (`reports/restore-transaction-results.json`); packaged FS swap proof **open** (see [DURABLE_PROFILE_ARCHITECTURE.md](./DURABLE_PROFILE_ARCHITECTURE.md)) |
 | Global queue metadata emit | P1 | **Closed** — conversation-scoped `subscribe_conversation_queue` Channel; no process-wide `agent-queue-changed` (see [QUEUE_COORDINATION.md](./QUEUE_COORDINATION.md); Unit Verified, desktop **not_run**) |

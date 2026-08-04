@@ -1,16 +1,21 @@
-# Implementation Plan — RC3.3 Direct Partial Update + Progressive UI + Wallpaper + Readiness Ladder
+# Implementation Plan — RC3.4 Onboarding + prior RC3.3 work
 
 **Product:** Coreside  
-**Status:** RC3.3 in progress; ladder = **Development Build** (not Automated Public-Beta Candidate) · Hosted AI **Development Build / Deliberately Deferred**  
+**Status:** RC3.4 onboarding vertical slice landed (Unit Verified); ladder remains **Development Build**  
 **Last updated:** 2026-08-04  
-**Access date:** 2026-08-04  
-**Coreside archive:** `a7d6c7ab2e5ac1c58b83b1607a49171338dbfba927b29ed549aa5d3510f0317d`  
-**Previous Coreside archive:** `10d7c5110a12525b53a48ee3dc66bf8d3a054c243553bc4ee9a1db27bc8b86b5`  
-**Partial Update archive:** `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607`  
-**Active commit:** `a491887e2a80d21619301ed6049de7f29ad9b44b` (dirty)  
-**Commands:** **213** (recalculated; see baseline)
 
-### RC3.3 landed (this session)
+### RC3.4 onboarding (this slice)
+
+| Workstream | Evidence state |
+| --- | --- |
+| Migration `017` + tutorial progress repo + IPC | Unit Verified (`db::tutorial`) |
+| Essentials tour UI + Help & learning + Apps language | Integrated – Not Verified (desktop not_run) |
+| Docs: onboarding / help / product language / IA | Done |
+
+Non-claims: no Desktop Verified; no Packaged Verified; no Human Accepted.
+
+### RC3.3 landed (prior)
+
 
 | Workstream | Evidence state |
 | --- | --- |

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T03:21:55.438Z",
-  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "generatedAt": "2026-08-04T17:39:52.692Z",
+  "commit": "25e6c80e8ec7c0b9f43829f4efa053b56508e257",
   "dirty": true,
   "command": "assurance:report",
   "exitStatus": "failed",
@@ -12,23 +12,16 @@
   "findings": [
     {
       "severity": "P1",
-      "file": "current-source-baseline.json",
-      "status": "stale_commit",
-      "reportCommit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
-      "activeCommit": "3202ca67450687760f8166e65e7c035de0eda2b8"
-    },
-    {
-      "severity": "P1",
-      "file": "current-source-fingerprint.json",
-      "status": "stale_commit",
-      "reportCommit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
-      "activeCommit": "3202ca67450687760f8166e65e7c035de0eda2b8"
-    },
-    {
-      "severity": "P1",
       "file": "command-authority-results.json",
-      "status": "journey11_identity_incomplete",
-      "detail": "Requires commit, dirty, and publicBeta Not ready"
+      "status": "stale_commit",
+      "reportCommit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+      "activeCommit": "25e6c80e8ec7c0b9f43829f4efa053b56508e257"
+    },
+    {
+      "severity": "P1",
+      "file": "evidence-manifest.json",
+      "status": "integrity_failed",
+      "detail": "findings=3"
     }
   ],
   "localFirstVerdict": "Not ready",

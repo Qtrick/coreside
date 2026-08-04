@@ -1,6 +1,6 @@
 /**
  * Consumer Settings category model + search index.
- * Wallpaper templates stay under Added Settings (not a Base category).
+ * Wallpapers live under Appearance. Added Settings are tool-created preferences.
  */
 
 export type SettingsCategoryId =
@@ -13,6 +13,7 @@ export type SettingsCategoryId =
   | "data"
   | "accessibility"
   | "advanced"
+  | "help-learning"
   | "about"
   | "added";
 
@@ -36,25 +37,25 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
     id: "appearance",
     label: "Appearance",
     group: "coreside",
-    description: "Theme and Dock icon. Wallpapers live under Added Settings.",
+    description: "Theme, Dock icon, and wallpapers.",
   },
   {
     id: "ai-access",
-    label: "AI Access",
+    label: "AI connections",
     group: "coreside",
     description: "How Coreside connects to AI on this computer.",
   },
   {
     id: "agent",
-    label: "Agent",
+    label: "Assistant",
     group: "coreside",
-    description: "How the assistant shows progress and Action Log detail.",
+    description: "How the assistant shows progress and activity detail.",
   },
   {
     id: "search",
-    label: "Search & Research",
+    label: "Web research",
     group: "coreside",
-    description: "Web discovery, crawl, budgets, and research cache.",
+    description: "Web discovery, page inspection, budgets, and research cache.",
   },
   {
     id: "privacy",
@@ -66,7 +67,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
     id: "data",
     label: "Data & Storage",
     group: "coreside",
-    description: "Local chats, tools, and clear controls.",
+    description: "Local chats, apps, and clear controls.",
   },
   {
     id: "accessibility",
@@ -81,6 +82,12 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
     description: "Recovery and application permissions.",
   },
   {
+    id: "help-learning",
+    label: "Help & learning",
+    group: "coreside",
+    description: "Tours, shortcuts, and learning resources.",
+  },
+  {
     id: "about",
     label: "About",
     group: "coreside",
@@ -88,9 +95,9 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
   },
   {
     id: "added",
-    label: "Added Settings",
+    label: "App settings",
     group: "added",
-    description: "Wallpapers and preferences created by your tools.",
+    description: "Preferences created by your apps.",
   },
 ] as const;
 
@@ -108,6 +115,8 @@ export function normalizeSettingsCategoryId(
   value: unknown,
   fallback: SettingsCategoryId = DEFAULT_SETTINGS_CATEGORY,
 ): SettingsCategoryId {
+  // Legacy sessions that opened Added Settings only for wallpapers still resolve.
+  if (value === "wallpaper" || value === "wallpapers") return "appearance";
   return isSettingsCategoryId(value) ? value : fallback;
 }
 
@@ -140,7 +149,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchEntry[] = [
   },
   {
     id: "wallpaper-link",
-    categoryId: "added",
+    categoryId: "appearance",
     label: "Wallpapers",
     keywords: ["wallpaper", "templates", "transparency", "live"],
   },
@@ -159,8 +168,8 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchEntry[] = [
   {
     id: "action-log",
     categoryId: "agent",
-    label: "Action Log",
-    keywords: ["agent", "progress", "steps"],
+    label: "Activity",
+    keywords: ["action log", "agent", "assistant", "progress", "steps"],
   },
   {
     id: "exa",
@@ -178,7 +187,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchEntry[] = [
     id: "backup",
     categoryId: "data",
     label: "Backup and data",
-    keywords: ["clear", "storage", "conversations", "tools", "export"],
+    keywords: ["clear", "storage", "conversations", "apps", "tools", "export", "backup", "recovery"],
   },
   {
     id: "reduced-motion",
@@ -199,16 +208,22 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchEntry[] = [
     keywords: ["grants", "revoke", "runtime", "application permissions"],
   },
   {
+    id: "help-learning",
+    categoryId: "help-learning",
+    label: "Help & learning",
+    keywords: ["tutorial", "tour", "help", "shortcuts", "learning", "onboarding"],
+  },
+  {
     id: "version",
     categoryId: "about",
     label: "Version",
     keywords: ["about", "coreside"],
   },
   {
-    id: "templates",
+    id: "app-settings",
     categoryId: "added",
-    label: "Templates",
-    keywords: ["wallpaper", "added settings", "tool settings"],
+    label: "App settings",
+    keywords: ["added settings", "tool settings", "app preferences"],
   },
 ];
 
@@ -261,6 +276,11 @@ export function storeSettingsCategory(id: SettingsCategoryId): void {
   try {
     if (typeof sessionStorage !== "undefined") {
       sessionStorage.setItem(STORAGE_KEY, id);
+    }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("coreside:settings-category", { detail: id }),
+      );
     }
   } catch {
     // ignore quota / private mode

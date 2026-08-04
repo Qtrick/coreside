@@ -297,7 +297,7 @@ export function Composer() {
   };
 
   return (
-    <div className="composer">
+    <div className="composer" data-coreside-tour="chat-composer">
       <ToolChangePreview />
       <KernelProposalPreview />
       <ConflictBanner />
@@ -411,7 +411,7 @@ export function Composer() {
           placeholder={
             needsSetup
               ? "Connect a provider to start chatting…"
-              : "Message Coreside… Use @ to mention a tool"
+              : "Message Coreside… Use @ to mention an app"
           }
           disabled={sending}
           aria-label="Message composer"
@@ -423,7 +423,7 @@ export function Composer() {
           <div className="composer-footer-left">
             <ModelPicker />
           </div>
-          <div className="composer-footer-right">
+          <div className="composer-footer-right" data-coreside-tour="chat-composer-send">
             <input
               id={fileInputId}
               ref={fileInputRef}
@@ -474,7 +474,7 @@ export function Composer() {
       </div>
 
       <p className="composer-hint">
-        Enter to send · Shift+Enter for a new line · @ for tools · paperclip to
+        Enter to send · Shift+Enter for a new line · @ for apps · paperclip to
         attach
       </p>
     </div>

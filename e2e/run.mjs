@@ -6,10 +6,13 @@
  * 1. main — clean DB (Journeys 1, 3, 4)
  * 2. existing-* — seeded profile, one fresh DB per journey group (2, 5–11, 14)
  * 3. true-streaming / wallpaper-targeted — clean DB (Journeys 12–13)
+ * 4. Journeys 15–16 (onboarding) are registered as not_run — CORESIDE_E2E
+ *    disables onboarding; specs exist under e2e/specs/ but are not executed here.
  *
  * Writes reports/e2e-results.json from actual suite exits — never invents passes.
- * Journeys 7 and 10 are recorded as passed_partial when their suite exits 0
- * (coverage is intentionally incomplete; see docs/E2E_EXECUTION.md).
+ * Journey 7 is recorded as passed_partial when its suite exits 0 (coverage is
+ * intentionally incomplete; see docs/E2E_EXECUTION.md). Overall status becomes
+ * passed_partial whenever any journey is partial — never inflate to a full pass.
  */
 
 import { spawnSync } from "node:child_process";
@@ -70,6 +73,20 @@ const JOURNEYS = [
     suite: "existing-eavesdrop",
     coverage: "full",
   },
+  {
+    id: 15,
+    name: "first-run-welcome",
+    suite: "first-run-welcome",
+    coverage: "full",
+    note: "Spec present; not executed — CORESIDE_E2E disables onboarding",
+  },
+  {
+    id: 16,
+    name: "core-tutorial",
+    suite: "core-tutorial",
+    coverage: "full",
+    note: "Spec present; not executed — CORESIDE_E2E disables onboarding",
+  },
 ];
 
 /** @type {Map<string, "passed" | "failed" | "not_run">} */
@@ -112,17 +129,26 @@ function writeResults(overallStatus) {
       ...(j.note && status === "passed_partial" ? { note: j.note } : {}),
     };
   });
+  const hasFailed = journeys.some((j) => j.status === "failed");
+  const hasPartial = journeys.some((j) => j.status === "passed_partial");
+  let status = overallStatus;
+  if (hasFailed) {
+    status = "failed";
+  } else if (hasPartial && (overallStatus === "passed" || overallStatus === "passed_partial")) {
+    // Journey 7 (and any future partial) must not inflate a full desktop pass.
+    status = "passed_partial";
+  }
   const payload = {
     product: "Coreside",
     generatedAt: new Date().toISOString(),
     commit,
     dirty,
     command: "npm run e2e",
-    status: overallStatus,
+    status,
     platform: os.platform(),
     arch: os.arch(),
     evidenceLevel:
-      overallStatus === "passed" ? "Desktop Verified" : "not_desktop_verified",
+      status === "passed" ? "Desktop Verified" : "not_desktop_verified",
     journeys,
   };
   fs.mkdirSync(path.dirname(resultsPath), { recursive: true });

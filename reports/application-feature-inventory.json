@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T03:01:23.107Z",
-  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "generatedAt": "2026-08-04T15:32:19.504Z",
+  "commit": "25e6c80e8ec7c0b9f43829f4efa053b56508e257",
   "dirty": true,
   "command": "audit:application-features",
   "evidenceLevel": "Scaffolded",
   "note": "Static catalog of known routes/panels with readiness guesses — not Desktop/Packaged Verified.",
   "readinessLadderPresent": true,
-  "readinessLadderCommit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+  "readinessLadderCommit": "25e6c80e8ec7c0b9f43829f4efa053b56508e257",
   "settingsCategories": [
     "general",
     "appearance",
@@ -40,11 +40,11 @@
       "viewKind": "chat",
       "entry": "src/components/chat/ChatPanel.tsx",
       "entryPresent": true,
-      "readinessGuess": "Unit Verified",
+      "readinessGuess": "Integrated – Not Verified",
       "notes": "Derived from readiness-ladder: true-streaming, channel-scoped-streaming, queue-ui",
       "linkedLadderStates": {
-        "true-streaming": "Unit Verified",
-        "channel-scoped-streaming": "Unit Verified",
+        "true-streaming": "Integrated – Not Verified",
+        "channel-scoped-streaming": "Integrated – Not Verified",
         "queue-ui": "Unit Verified"
       }
     },
@@ -103,10 +103,10 @@
       "viewKind": "settings",
       "entry": "src/components/settings/SettingsPanel.tsx",
       "entryPresent": true,
-      "readinessGuess": "Unit Verified",
+      "readinessGuess": "Integrated – Not Verified",
       "notes": "Derived from readiness-ladder: wallpaper-atomic-settings",
       "linkedLadderStates": {
-        "wallpaper-atomic-settings": "Unit Verified"
+        "wallpaper-atomic-settings": "Integrated – Not Verified"
       }
     },
     {

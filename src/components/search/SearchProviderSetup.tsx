@@ -12,6 +12,7 @@ import type {
 } from "@/types/search";
 import { SearchHistoryPanel } from "@/components/search/SearchHistoryPanel";
 import { ModalPortal } from "@/components/ui/ModalPortal";
+import { useAppStore } from "@/stores/app-store";
 
 type EngineStatusLabel = "Ready" | "Needs Setup" | "Unavailable" | "Error";
 
@@ -85,6 +86,7 @@ type SetupProps = {
 export function SearchProviderSetup({ open, onClose }: SetupProps) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const developerMode = useAppStore((s) => s.developerMode);
 
   useEffect(() => {
     if (!open) return;
@@ -128,13 +130,22 @@ export function SearchProviderSetup({ open, onClose }: SetupProps) {
               Indexed web discovery uses Exa (optional API key). Page inspection
               uses the local Crawl4AI engine on this computer.
             </p>
-            <p className="muted">Developers: install the local engine with:</p>
-            <pre className="settings-code-block">npm run crawl4ai:setup</pre>
-            <p className="muted">
-              Add <code>EXA_API_KEY=</code> to <code>.env</code> for indexed web
-              discovery (development). Crawl4AI remains the local page inspector
-              when installed.
-            </p>
+            {developerMode ? (
+              <>
+                <p className="muted">Developers: install the local engine with:</p>
+                <pre className="settings-code-block">npm run crawl4ai:setup</pre>
+                <p className="muted">
+                  Add <code>EXA_API_KEY=</code> to <code>.env</code> for indexed web
+                  discovery (development). Crawl4AI remains the local page inspector
+                  when installed.
+                </p>
+              </>
+            ) : (
+              <p className="muted">
+                If page inspection is unavailable, check Help & learning or ask
+                someone who manages this install to finish setup.
+              </p>
+            )}
             <div className="button-row provider-form-actions">
               <button type="button" className="btn btn-primary" onClick={onClose}>
                 Got it
@@ -290,6 +301,7 @@ function ExaKeySetup({ open, onClose, onSaved }: ExaSetupProps) {
 }
 
 export function SearchSettingsSection() {
+  const developerMode = useAppStore((s) => s.developerMode);
   const [connection, setConnection] = useState<SearchConnection | null>(null);
   const [safeSearch, setSafeSearch] = useState<"strict" | "standard" | "off">(
     "standard",
@@ -654,8 +666,17 @@ export function SearchSettingsSection() {
 
         {needsSetup ? (
           <p>
-            The local crawl engine is not installed yet. Developers should run{" "}
-            <code>npm run crawl4ai:setup</code>, then reopen Settings.
+            {developerMode ? (
+              <>
+                The local crawl engine is not installed yet. Developers should run{" "}
+                <code>npm run crawl4ai:setup</code>, then reopen Settings.
+              </>
+            ) : (
+              <>
+                The local page inspector is not ready yet. Open setup guidance for
+                next steps, or ask whoever manages this install.
+              </>
+            )}
           </p>
         ) : null}
 

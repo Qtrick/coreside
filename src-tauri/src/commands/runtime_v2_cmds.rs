@@ -19,12 +19,13 @@ use crate::runtime_v2::{
     update_surface_definition, AgentResponseV2, AppOperation, AppTransactionRecord, ApplyResult,
     ChatBranchRecord, ContextLedgerEntry, ContinuitySnapshot, NavigateResult, PatchPriority,
     ProviderConformanceRecord, QueueItem, RouteState, ScheduleRequest, ScheduledPatch,
-    SnapshotRecord, SurfaceDraft, SurfaceRecord, SuspensionState,
+    SnapshotRecord, SurfaceDraft, SurfaceRecord, SuspensionState, TurnTimelineEvent,
+    list_turn_timeline_events,
 };
 use crate::state::AppState;
 use crate::windows;
 
-pub use crate::state::{QueueChangeKind, QueueChangedEvent};
+pub use crate::state::{QueueChangeKind, QueueChangedEvent, SyncScopedEvent};
 
 /// Notify conversation-scoped Channels that Rust/SQLite queue state mutated.
 /// Does not use the process-wide event bus.
@@ -57,6 +58,28 @@ pub fn subscribe_conversation_queue(
         ));
     }
     state.subscribe_queue(conversation_id, on_event);
+    Ok(())
+}
+
+/// Register a Channel for Sync/Conflict on one conversation (main + tool windows).
+/// Keep the Channel alive while the window needs surface reload events.
+/// Remounts for the same window label replace the prior Channel (no zombies).
+#[tauri::command]
+pub fn subscribe_conversation_sync(
+    state: State<'_, AppState>,
+    window: WebviewWindow,
+    conversation_id: String,
+    on_event: Channel<SyncScopedEvent>,
+) -> Result<(), CommandError> {
+    state.require_profile()?;
+    let conversation_id = conversation_id.trim().to_string();
+    if conversation_id.is_empty() {
+        return Err(CommandError::new(
+            "invalid_argument",
+            "conversation_id is required",
+        ));
+    }
+    state.subscribe_sync(conversation_id, window.label().to_string(), on_event);
     Ok(())
 }
 
@@ -907,6 +930,24 @@ pub fn list_diagnostics_cmd(
     )?)
 }
 
+/// List redacted turn timeline events for read-only replay (never re-applies).
+#[tauri::command]
+pub fn list_turn_timeline_cmd(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    turn_id: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<TurnTimelineEvent>, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    Ok(list_turn_timeline_events(
+        &db,
+        &conversation_id,
+        turn_id.as_deref(),
+        limit.unwrap_or(200),
+    )?)
+}
+
 #[tauri::command]
 pub fn runtime_v2_limits() -> Result<Value, CommandError> {
     Ok(serde_json::json!({
@@ -1016,5 +1057,111 @@ mod queue_event_tests {
             "replaced Channel must not receive events"
         );
         assert_eq!(second.lock().as_slice(), &["conv-a".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod sync_event_tests {
+    use super::SyncScopedEvent;
+    use crate::db::Database;
+    use crate::state::AppState;
+    use serde::Deserialize;
+    use std::sync::Arc;
+    use tauri::ipc::{Channel, InvokeResponseBody};
+
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "kind", rename_all = "camelCase")]
+    enum SyncWire {
+        #[serde(rename_all = "camelCase")]
+        Sync {
+            conversation_id: Option<String>,
+        },
+        #[serde(rename_all = "camelCase")]
+        Conflict {
+            conversation_id: Option<String>,
+        },
+    }
+
+    fn sync_test_channel(
+        sink: Arc<parking_lot::Mutex<Vec<String>>>,
+    ) -> Channel<SyncScopedEvent> {
+        Channel::new(move |body| {
+            let InvokeResponseBody::Json(json) = body else {
+                return Ok(());
+            };
+            if let Ok(parsed) = serde_json::from_str::<SyncWire>(&json) {
+                let cid = match parsed {
+                    SyncWire::Sync { conversation_id, .. }
+                    | SyncWire::Conflict { conversation_id, .. } => {
+                        conversation_id.unwrap_or_default()
+                    }
+                };
+                sink.lock().push(cid);
+            }
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn emit_sync_only_notifies_matching_conversation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Database::open_path(&dir.path().join("sync-scope.db")).expect("db");
+        let state = AppState::new_for_test(db);
+        let hit_a = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let hit_b = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        state.subscribe_sync("conv-a".into(), "main", sync_test_channel(hit_a.clone()));
+        state.subscribe_sync("conv-b".into(), "main", sync_test_channel(hit_b.clone()));
+
+        let n = state.emit_sync_to_subscribers(
+            "conv-a",
+            &SyncScopedEvent::Sync {
+                conversation_id: Some("conv-a".into()),
+                surface_ids: vec!["surf-1".into()],
+                tool_ids: vec![],
+                application_id: None,
+                revision: Some(1),
+                sync_kind: "transaction_applied".into(),
+            },
+        );
+
+        assert_eq!(n, 1);
+        assert_eq!(hit_a.lock().as_slice(), &["conv-a".to_string()]);
+        assert!(hit_b.lock().is_empty(), "wrong conversation must get nothing");
+    }
+
+    #[test]
+    fn subscribe_sync_replaces_same_window_and_fans_out_distinct_windows() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Database::open_path(&dir.path().join("sync-multi.db")).expect("db");
+        let state = AppState::new_for_test(db);
+        let zombie = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let main = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let tool = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        // Remount leaves a zombie if we only append — replace per window label.
+        state.subscribe_sync("conv-a".into(), "main", sync_test_channel(zombie.clone()));
+        state.subscribe_sync("conv-a".into(), "main", sync_test_channel(main.clone()));
+        state.subscribe_sync(
+            "conv-a".into(),
+            "tool-sample",
+            sync_test_channel(tool.clone()),
+        );
+
+        let n = state.emit_sync_to_subscribers(
+            "conv-a",
+            &SyncScopedEvent::Conflict {
+                conversation_id: Some("conv-a".into()),
+                message: "conflict".into(),
+                conflicts: vec!["rev".into()],
+            },
+        );
+
+        assert_eq!(n, 2, "main + tool window both receive");
+        assert!(
+            zombie.lock().is_empty(),
+            "replaced main Channel must not absorb Sync"
+        );
+        assert_eq!(main.lock().as_slice(), &["conv-a".to_string()]);
+        assert_eq!(tool.lock().as_slice(), &["conv-a".to_string()]);
+        assert_eq!(state.sync_subscriber_count("conv-a"), 2);
     }
 }

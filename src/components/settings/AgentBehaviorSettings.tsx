@@ -8,7 +8,7 @@ const MODES: { id: ActionLogMode; label: string; hint: string }[] = [
   {
     id: "off",
     label: "Off",
-    hint: "Hide Action Log",
+    hint: "Hide activity",
   },
   {
     id: "always",
@@ -72,7 +72,7 @@ export function AgentBehaviorSettings() {
       });
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Could not update Action Log.",
+        err instanceof Error ? err.message : "Could not update activity settings.",
       );
       try {
         const settings = await api.getSettings();
@@ -94,14 +94,14 @@ export function AgentBehaviorSettings() {
       className="settings-section settings-section-compact"
       aria-labelledby="agent-behavior-heading"
     >
-      <h3 id="agent-behavior-heading">Agent</h3>
+      <h3 id="agent-behavior-heading">Assistant</h3>
       <div className="settings-toggle-row settings-toggle-row-stack">
         <div>
-          <strong id="action-log-label">Action Log</strong>
+          <strong id="action-log-label">Activity</strong>
           <p>
             Show a concise record of actions Coreside performs — never private
-            model reasoning. Intelligent mode appears only when the agent
-            searches, changes tools, or does other real work.
+            model reasoning. Intelligent mode appears only when Coreside
+            searches, changes apps, or does other real work.
           </p>
         </div>
         <div

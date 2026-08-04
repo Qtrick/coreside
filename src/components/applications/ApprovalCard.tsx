@@ -138,7 +138,7 @@ export function ApprovalCard({
 
         <p className="muted approval-card-meta">
           Venue: {approval.venue} · Presence: {approval.presence}
-          {approval.surfaceId ? ` · Surface ${approval.surfaceId}` : ""}
+          {approval.surfaceId ? ` · Panel ${approval.surfaceId}` : ""}
         </p>
 
         {inactive ? (

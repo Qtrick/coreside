@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { shouldShowActionLog } from "@/lib/action-log";
+import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
 import { MessageBubble } from "./MessageBubble";
 
 export function MessageList() {
@@ -13,6 +14,7 @@ export function MessageList() {
   const messagesLoading = useAppStore((s) => s.messagesLoading);
   const messagesError = useAppStore((s) => s.messagesError);
   const activeConversationId = useAppStore((s) => s.activeConversationId);
+  const navigateToSettings = useAppStore((s) => s.navigateToSettings);
   const activeTurnId = useAppStore((s) =>
     s.activeConversationId
       ? (s.activeTurnIdByConversation[s.activeConversationId] ?? null)
@@ -100,8 +102,15 @@ export function MessageList() {
     return (
       <div className="message-list">
         <div className="empty-state">
-          <h3>Conversation failed to load</h3>
+          <h3>{EMPTY_STATES.chatLoadError.title}</h3>
           <p>{messagesError}</p>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => openHelpAndLearning(navigateToSettings)}
+          >
+            {EMPTY_STATES.chatLoadError.primaryCta}
+          </button>
         </div>
       </div>
     );
@@ -111,11 +120,26 @@ export function MessageList() {
     return (
       <div className="message-list">
         <div className="empty-state">
-          <h3>Start a conversation</h3>
-          <p>
-            Ask Coreside to explain something, or create a personal tool like a
-            water tracker or quiz.
-          </p>
+          <h3>{EMPTY_STATES.emptyChat.title}</h3>
+          <p>{EMPTY_STATES.emptyChat.body}</p>
+          <div className="button-row empty-state-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                document.getElementById("composer-input")?.focus();
+              }}
+            >
+              {EMPTY_STATES.emptyChat.primaryCta}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => openHelpAndLearning(navigateToSettings)}
+            >
+              {EMPTY_STATES.helpLink.label}
+            </button>
+          </div>
         </div>
       </div>
     );

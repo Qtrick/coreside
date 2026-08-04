@@ -6,9 +6,11 @@ export type {
 } from "./events";
 export {
   isQueueEventForConversation,
+  isSyncEventForConversation,
   listenAgentTurn,
   listenApprovalsChanged,
   subscribeConversationQueue,
+  subscribeConversationSync,
   shouldApplyAgentTurnSync,
   shouldShowAppConflict,
 } from "./events";

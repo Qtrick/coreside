@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-subscribe-conversation-sync"
+description = "Enables the subscribe_conversation_sync command without any pre-configured scope."
+commands.allow = ["subscribe_conversation_sync"]
+
+[[permission]]
+identifier = "deny-subscribe-conversation-sync"
+description = "Denies the subscribe_conversation_sync command without any pre-configured scope."
+commands.deny = ["subscribe_conversation_sync"]

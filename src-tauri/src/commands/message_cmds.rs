@@ -23,6 +23,24 @@ use crate::search::SearchRegistry;
 use crate::security::{redact_secrets, sanitize_error};
 use crate::state::AppState;
 
+/// Best-effort redacted timeline append — never blocks or fails the turn.
+fn note_timeline(
+    state: &AppState,
+    conversation_id: &str,
+    turn_id: &str,
+    kind: &str,
+    payload: serde_json::Value,
+) {
+    let db = state.db.lock();
+    crate::runtime_v2::try_append_turn_timeline_event(
+        &db,
+        conversation_id,
+        turn_id,
+        kind,
+        payload,
+    );
+}
+
 const MAX_TOOL_USE_ROUNDS: usize = 6;
 
 #[derive(Debug, Default)]
@@ -184,14 +202,17 @@ pub enum AgentTurnEvent {
     Text {
         conversation_id: String,
         /// Cumulative assistant text checkpoint (reconnect / catch-up).
-        text: String,
+        /// Omitted on ordinary delta-primary events; present every 32 sequences,
+        /// on the first event, and on non-prefix full replaces.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
         /// Stable turn id when known (optional; full turn registry is follow-up).
         #[serde(skip_serializing_if = "Option::is_none")]
         turn_id: Option<String>,
         /// Monotonic text-event sequence within this send.
         #[serde(skip_serializing_if = "Option::is_none")]
         sequence: Option<u64>,
-        /// New chunk since the previous checkpoint; `text` remains cumulative.
+        /// New chunk since the previous checkpoint; preferred ordinary carrier.
         #[serde(skip_serializing_if = "Option::is_none")]
         delta: Option<String>,
     },
@@ -205,6 +226,21 @@ pub enum AgentTurnEvent {
         conversation_id: String,
         operation_id: String,
         status: String,
+    },
+    /// Speculative surface paint — Channel-only; not durable until Sync.
+    #[serde(rename_all = "camelCase")]
+    PreviewSurface {
+        conversation_id: String,
+        turn_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_id: Option<String>,
+        surface_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        application_id: Option<String>,
+        definition_json: serde_json::Value,
+        state_json: serde_json::Value,
+        revision: i64,
+        sequence: u64,
     },
     #[serde(rename_all = "camelCase")]
     Sync {
@@ -239,25 +275,85 @@ fn make_text_event(
         Some(_) => Some(text.clone()),
         None => None,
     };
+    // Delta-primary ordinary delivery: omit cumulative `text` except on
+    // checkpoints (every 32 sequences), first event, or non-prefix replace.
+    // Frontend `applyTextDelta` appends delta-only when sequence is next.
+    let non_prefix_replace = matches!(
+        &delta,
+        Some(d) if previous.is_some() && d.as_str() == text.as_str()
+    );
+    let include_checkpoint =
+        previous.is_none() || non_prefix_replace || (*sequence % 32 == 0);
     AgentTurnEvent::Text {
         conversation_id: conversation_id.to_string(),
-        text,
+        text: if include_checkpoint {
+            Some(text)
+        } else {
+            None
+        },
         turn_id: Some(turn_id.to_string()),
         sequence: Some(*sequence),
         delta,
     }
 }
 
+fn sync_scoped_from_turn(event: &AgentTurnEvent) -> Option<crate::state::SyncScopedEvent> {
+    match event {
+        AgentTurnEvent::Sync {
+            conversation_id,
+            surface_ids,
+            tool_ids,
+            application_id,
+            revision,
+            sync_kind,
+        } => Some(crate::state::SyncScopedEvent::Sync {
+            conversation_id: conversation_id.clone(),
+            surface_ids: surface_ids.clone(),
+            tool_ids: tool_ids.clone(),
+            application_id: application_id.clone(),
+            revision: *revision,
+            sync_kind: sync_kind.clone(),
+        }),
+        AgentTurnEvent::Conflict {
+            conversation_id,
+            message,
+            conflicts,
+        } => Some(crate::state::SyncScopedEvent::Conflict {
+            conversation_id: conversation_id.clone(),
+            message: message.clone(),
+            conflicts: conflicts.clone(),
+        }),
+        _ => None,
+    }
+}
+
+fn sync_conversation_id(event: &AgentTurnEvent) -> Option<&str> {
+    match event {
+        AgentTurnEvent::Sync {
+            conversation_id: Some(id),
+            ..
+        }
+        | AgentTurnEvent::Conflict {
+            conversation_id: Some(id),
+            ..
+        } if !id.trim().is_empty() => Some(id.as_str()),
+        _ => None,
+    }
+}
+
 /// Deliver a turn event with Channel-scoped privacy for private kinds.
 ///
-/// - Text / Action / Error / Operation: send on Channel when present. **Never**
-///   put Text on the process-wide `agent-turn` bus (tool windows with
-///   `core:event:default` must not see another conversation's assistant text).
-///   When Channel is None (queue drain), skip Text; Action / Error / Operation
-///   may temporarily degrade to `app.emit` so background turns are not silent.
-/// - Sync / Conflict: keep `app.emit("agent-turn")` for multi-window surface
-///   refresh (turn registry / Channel-only sync is a follow-up). Also forward
-///   on Channel when present.
+/// - Text / Action / Error / Operation / PreviewSurface: send on Channel when
+///   present. **Never** put these on the process-wide `agent-turn` bus (tool
+///   windows with `core:event:default` must not see another conversation's
+///   private payloads). When Channel is None (queue drain): skip Text; drop
+///   Action / Error / Operation / PreviewSurface rather than global-leak
+///   (queue-drain progress UI is a follow-up).
+/// - Sync / Conflict: prefer `subscribe_conversation_sync` fan-out; if that
+///   delivers to any live Channel, **do not** also send on the invoke Channel
+///   (avoids double reload/conflict apply on main). Fall back to invoke
+///   Channel only when no sync subscriber delivered, then residual
+///   `app.emit("agent-turn")` only when neither scoped path succeeded.
 fn emit_turn(
     app: &AppHandle,
     on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
@@ -272,19 +368,44 @@ fn emit_turn(
         }
         AgentTurnEvent::Action { .. }
         | AgentTurnEvent::Error { .. }
-        | AgentTurnEvent::Operation { .. } => {
+        | AgentTurnEvent::Operation { .. }
+        | AgentTurnEvent::PreviewSurface { .. } => {
             if let Some(ch) = on_event {
                 let _ = ch.send(event);
             } else {
-                // Queue-drain / no subscriber Channel: temporary global degradation.
-                let _ = app.emit("agent-turn", event);
+                // Queue-drain / no Channel: drop rather than leak on the global bus.
+                tracing::debug!(
+                    "skipping private turn event without Channel subscriber (queue drain)"
+                );
             }
         }
         AgentTurnEvent::Sync { .. } | AgentTurnEvent::Conflict { .. } => {
-            if let Some(ch) = on_event {
-                let _ = ch.send(event.clone());
+            let mut scoped_ok = false;
+            // 1) Conversation-scoped sync subscribers (main + tool windows).
+            if let (Some(cid), Some(scoped)) =
+                (sync_conversation_id(&event), sync_scoped_from_turn(&event))
+            {
+                if let Some(state) = app.try_state::<crate::state::AppState>() {
+                    if state.emit_sync_to_subscribers(cid, &scoped) > 0 {
+                        scoped_ok = true;
+                    }
+                }
             }
-            let _ = app.emit("agent-turn", event);
+            // 2) Invoke Channel only when no sync subscriber delivered — never
+            // both (ponytail: one apply path; double reload corrupts UI).
+            if !scoped_ok {
+                if let Some(ch) = on_event {
+                    if ch.send(event.clone()).is_ok() {
+                        scoped_ok = true;
+                    }
+                }
+            }
+            // 3) Residual global only when neither scoped path delivered.
+            // Documented: tool windows should call subscribe_conversation_sync;
+            // until they do (or when conversation_id is absent), this keeps reload.
+            if !scoped_ok {
+                let _ = app.emit("agent-turn", event);
+            }
         }
     }
 }
@@ -386,28 +507,82 @@ fn emit_live_text_delta(
     }
 }
 
-/// Progressive op preview during live TextDelta (RC3.3 Phase 5–6).
+/// Progressive op preview + speculative surface paint (RC3.4 Phase 7).
 ///
 /// Adapted from Partial Update `UpdateStreamParser` / `runModel` progressive
-/// dispatch (MIT) — preview only; durable apply stays at turn end.
+/// dispatch (MIT) — preview paint is in-memory only; durable apply stays at
+/// turn end.
 fn emit_progressive_op_previews(
     app: &AppHandle,
+    state: &AppState,
     on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
     conversation_id: &str,
     parser: &mut crate::runtime_v2::NdjsonFrameParser,
     preview_txn: &mut crate::runtime_v2::PreviewTransaction,
     delta: &str,
 ) {
-    for ev in crate::runtime_v2::ingest_live_chunk(parser, preview_txn, delta) {
+    use crate::runtime_v2::{get_surface, get_surface_state, PreviewSurfaceModel};
+
+    let events = crate::runtime_v2::ingest_live_chunk_with_seed(
+        parser,
+        preview_txn,
+        delta,
+        |surface_id| {
+            let db = state.db.lock();
+            let surface = get_surface(&db, surface_id).ok()?;
+            let state_json = get_surface_state(&db, surface_id).unwrap_or_else(|_| json!({}));
+            Some(PreviewSurfaceModel {
+                surface_id: surface.id.clone(),
+                tool_id: surface.tool_id.clone(),
+                application_id: surface.tool_id.clone(),
+                definition: surface.definition,
+                state: state_json,
+                base_revision: surface.current_revision,
+                preview_revision: surface.current_revision,
+            })
+        },
+    );
+
+    for ev in events {
+        let status = ev.status.clone();
         emit_turn(
             app,
             on_event,
             AgentTurnEvent::Operation {
                 conversation_id: conversation_id.to_string(),
-                operation_id: ev.operation_id,
-                status: ev.status,
+                operation_id: ev.operation_id.clone(),
+                status: status.clone(),
             },
         );
+        if let Some(paint) = ev.paint {
+            emit_turn(
+                app,
+                on_event,
+                AgentTurnEvent::PreviewSurface {
+                    conversation_id: conversation_id.to_string(),
+                    turn_id: paint.turn_id,
+                    tool_id: paint.tool_id,
+                    surface_id: paint.surface_id,
+                    application_id: paint.application_id,
+                    definition_json: paint.definition_json,
+                    state_json: paint.state_json,
+                    revision: paint.revision,
+                    sequence: paint.sequence,
+                },
+            );
+        }
+        if status == "fatal" {
+            if let Some(reason) = ev.reason {
+                emit_turn(
+                    app,
+                    on_event,
+                    AgentTurnEvent::Error {
+                        conversation_id: conversation_id.to_string(),
+                        message: sanitize_error(&reason, None),
+                    },
+                );
+            }
+        }
     }
 }
 
@@ -1566,6 +1741,7 @@ async fn send_message_inner(
                     );
                     emit_progressive_op_previews(
                         &app_for_stream,
+                        state,
                         on_event.as_ref(),
                         &conversation_for_stream,
                         &mut progressive_parser,
@@ -1586,6 +1762,22 @@ async fn send_message_inner(
         Err(e) => {
             if matches!(e, crate::ai::AiError::Cancelled) {
                 preview_txn.mark_interrupted();
+                note_timeline(
+                    state,
+                    &conversation_id,
+                    &turn_id,
+                    "cancellation",
+                    json!({}),
+                );
+                emit_turn(
+                    &app,
+                    on_event.as_ref(),
+                    AgentTurnEvent::Operation {
+                        conversation_id: conversation_id.clone(),
+                        operation_id: String::new(),
+                        status: "interrupted".into(),
+                    },
+                );
             }
             state.take_request(&request_key);
             if schedule_drain {
@@ -1597,6 +1789,15 @@ async fn send_message_inner(
                 error = %sanitize_for_log(&e, api_key_ref),
                 "send_message provider failed"
             );
+            if !matches!(e, crate::ai::AiError::Cancelled) {
+                note_timeline(
+                    state,
+                    &conversation_id,
+                    &turn_id,
+                    "failure",
+                    json!({ "code": e.code() }),
+                );
+            }
             emit_turn(
                 &app, on_event.as_ref(),
                 AgentTurnEvent::Error {
@@ -1625,6 +1826,13 @@ async fn send_message_inner(
             }
             tracing::warn!(error = %sanitize_for_log(&e, api_key_ref), "send_message parse failed");
             let message = sanitize_error(&e, api_key_ref);
+            note_timeline(
+                state,
+                &conversation_id,
+                &turn_id,
+                "failure",
+                json!({ "code": "parse" }),
+            );
             emit_turn(
                 &app, on_event.as_ref(),
                 AgentTurnEvent::Error {
@@ -1811,6 +2019,7 @@ async fn send_message_inner(
                         );
                         emit_progressive_op_previews(
                             &app_for_stream,
+                            state,
                             on_event.as_ref(),
                             &conversation_for_stream,
                             &mut progressive_parser,
@@ -1831,12 +2040,37 @@ async fn send_message_inner(
             Err(e) => {
                 if matches!(e, crate::ai::AiError::Cancelled) {
                     preview_txn.mark_interrupted();
+                    note_timeline(
+                        state,
+                        &conversation_id,
+                        &turn_id,
+                        "cancellation",
+                        json!({}),
+                    );
+                    emit_turn(
+                        &app,
+                        on_event.as_ref(),
+                        AgentTurnEvent::Operation {
+                            conversation_id: conversation_id.clone(),
+                            operation_id: String::new(),
+                            status: "interrupted".into(),
+                        },
+                    );
                 }
                 state.take_request(&request_key);
                 if schedule_drain {
                     schedule_queued_turn_drain(&app, &conversation_id);
                 }
                 let message = sanitize_error(&e.to_string(), api_key_ref);
+                if !matches!(e, crate::ai::AiError::Cancelled) {
+                    note_timeline(
+                        state,
+                        &conversation_id,
+                        &turn_id,
+                        "failure",
+                        json!({ "code": e.code() }),
+                    );
+                }
                 emit_turn(
                     &app, on_event.as_ref(),
                     AgentTurnEvent::Error {
@@ -2039,9 +2273,12 @@ async fn send_message_inner(
             .as_ref()
             .map(|o| o.is_empty())
             .unwrap_or(true)
+            && !preview_txn.interrupted
+            && !preview_txn.committed
             && !preview_txn.is_empty()
         {
             // Progressive live previews already emitted status "preview" on Channel.
+            // Never harvest after interrupt — that would durable-commit speculative ops.
             operations_from_payload = Some(preview_txn.accepted_operations().to_vec());
         }
         if operations_from_payload
@@ -2152,6 +2389,15 @@ async fn send_message_inner(
                                             sync_kind: "transaction_applied".into(),
                                         },
                                     );
+                                    note_timeline(
+                                        state,
+                                        &conversation_id,
+                                        &turn_id,
+                                        "commit",
+                                        json!({ "syncKind": "transaction_applied" }),
+                                    );
+                                    // Durable commit succeeded — drop speculative paint model.
+                                    preview_txn.mark_committed();
                                 } else {
                                     emit_turn(
                                         &app, on_event.as_ref(),
@@ -2160,6 +2406,13 @@ async fn send_message_inner(
                                             message: "This change conflicts with another window or newer revision.".into(),
                                             conflicts: result.conflicts.clone(),
                                         },
+                                    );
+                                    note_timeline(
+                                        state,
+                                        &conversation_id,
+                                        &turn_id,
+                                        "failure",
+                                        json!({ "reason": "conflict" }),
                                     );
                                 }
                                 v2_apply = serde_json::to_value(result).ok();
@@ -2279,6 +2532,14 @@ async fn send_message_inner(
             Some(&metadata),
         )?
     };
+
+    note_timeline(
+        state,
+        &conversation_id,
+        &turn_id,
+        "completion",
+        json!({}),
+    );
 
     // Bind inline surfaces created this turn to the assistant message when unset,
     // so InlineSurfacesForMessage can render them under the correct bubble.

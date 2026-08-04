@@ -322,7 +322,7 @@ export function InlineSurfaceCard({
           <strong>{surface.name || tool.name}</strong>
           <span className="muted">r{surface.currentRevision}</span>
         </div>
-        <div className="inline-surface-actions" role="toolbar" aria-label="Surface actions">
+        <div className="inline-surface-actions" role="toolbar" aria-label="App actions">
           <CustomizeMode
             surfaceId={surface.id}
             conversationId={conversationId}
@@ -414,7 +414,7 @@ export function InlineSurfaceCard({
               window.dispatchEvent(new Event("coreside:pending-approval"));
             }}
             onSubmitToAgent={(payload) => {
-              const summary = `Surface form submitted (${payload.eventName})`;
+              const summary = `App form submitted (${payload.eventName})`;
               // Typed StructuredUserInput is sealed in Rust via send_message.
               // Chat text is human-readable only — not trust authority.
               const fields =

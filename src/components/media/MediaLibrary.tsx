@@ -10,6 +10,7 @@ import {
   type WallpaperProposalResult,
 } from "@/components/wallpaper/WallpaperProposalDialog";
 import { useAppStore } from "@/stores/app-store";
+import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
 import {
   matchesMediaFilter,
   type ImportMediaInput,
@@ -38,6 +39,7 @@ export function MediaLibrary({
 }: MediaLibraryProps) {
   const applyWorkspaceWallpaper = useAppStore((s) => s.applyWorkspaceWallpaper);
   const applyProjectWallpaper = useAppStore((s) => s.applyProjectWallpaper);
+  const navigateToSettings = useAppStore((s) => s.navigateToSettings);
 
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -229,15 +231,24 @@ export function MediaLibrary({
             <p className="muted">Loading media…</p>
           ) : filtered.length === 0 ? (
             <div className="empty-state">
-              <h3>No media yet</h3>
-              <p>Import an image or video to use as a wallpaper or project asset.</p>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => setImportOpen(true)}
-              >
-                Import media
-              </button>
+              <h3>{EMPTY_STATES.noMedia.title}</h3>
+              <p>{EMPTY_STATES.noMedia.body}</p>
+              <div className="button-row empty-state-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => setImportOpen(true)}
+                >
+                  {EMPTY_STATES.noMedia.primaryCta}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => openHelpAndLearning(navigateToSettings)}
+                >
+                  {EMPTY_STATES.helpLink.label}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="media-library-grid">

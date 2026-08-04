@@ -6,6 +6,7 @@ import {
   ReplayPlayer,
   redactDiagnosticJson,
   redactSecretsForDisplay,
+  timelineToReplayEvents,
   transactionsToReplayEvents,
 } from "./ConversationHistory";
 
@@ -14,6 +15,7 @@ vi.mock("@/lib/tauri", () => ({
     listBranches: vi.fn(),
     listSnapshots: vi.fn(),
     listTransactions: vi.fn(),
+    listTurnTimeline: vi.fn(),
     listDiagnostics: vi.fn(),
     branchConversation: vi.fn(),
     createSnapshot: vi.fn(),
@@ -115,6 +117,34 @@ describe("transactionsToReplayEvents", () => {
   });
 });
 
+describe("timelineToReplayEvents", () => {
+  it("maps timeline rows without calling apply APIs", () => {
+    const events = timelineToReplayEvents([
+      {
+        id: "tle-2",
+        conversationId: "conv-1",
+        turnId: "turn-1",
+        sequence: 2,
+        kind: "completion",
+        createdAt: "2026-08-04T10:01:00Z",
+      },
+      {
+        id: "tle-1",
+        conversationId: "conv-1",
+        turnId: "turn-1",
+        sequence: 1,
+        kind: "commit",
+        redactedPayload: { syncKind: "transaction_applied" },
+        createdAt: "2026-08-04T10:00:00Z",
+      },
+    ]);
+    expect(events.map((e) => e.id)).toEqual(["tle-1", "tle-2"]);
+    expect(events[0]?.kind).toBe("commit");
+    expect(events[0]?.summary).toBe("Commit: transaction_applied");
+    expect(events[1]?.kind).toBe("completion");
+  });
+});
+
 describe("ReplayPlayer", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -197,6 +227,7 @@ describe("ConversationHistory", () => {
     vi.mocked(api.listBranches).mockReset().mockResolvedValue([]);
     vi.mocked(api.listSnapshots).mockReset().mockResolvedValue([]);
     vi.mocked(api.listTransactions).mockReset().mockResolvedValue([]);
+    vi.mocked(api.listTurnTimeline).mockReset().mockResolvedValue([]);
     vi.mocked(api.listDiagnostics).mockReset().mockResolvedValue([]);
     vi.mocked(api.applyOperations).mockReset();
     vi.mocked(api.undoTransaction).mockReset();
@@ -252,12 +283,51 @@ describe("ConversationHistory", () => {
     ).toBeInTheDocument();
     await waitFor(() => {
       expect(api.listTransactions).toHaveBeenCalledWith("conv-1", 50);
+      expect(api.listTurnTimeline).toHaveBeenCalledWith("conv-1", null, 200);
     });
     expect(
       screen.getByText("Committed transaction: Created clock"),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Next replay event" }));
+    expect(api.applyOperations).not.toHaveBeenCalled();
+    expect(api.undoTransaction).not.toHaveBeenCalled();
+  });
+
+  it("prefers timeline events over transactions when present", async () => {
+    vi.mocked(api.listTurnTimeline).mockResolvedValue([
+      {
+        id: "tle-1",
+        conversationId: "conv-1",
+        turnId: "turn-1",
+        sequence: 1,
+        kind: "commit",
+        redactedPayload: { syncKind: "transaction_applied" },
+        createdAt: "2026-08-04T10:00:00Z",
+      },
+    ]);
+    vi.mocked(api.listTransactions).mockResolvedValue([
+      {
+        id: "txn-1",
+        summary: "Should not show",
+        status: "applied",
+        createdAt: "2026-08-03T10:00:00Z",
+        operations: [],
+      },
+    ]);
+
+    render(<ConversationHistory conversationId="conv-1" />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open conversation history" }),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Replay" }));
+
+    expect(
+      await screen.findByText("Commit: transaction_applied"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Committed transaction: Should not show"),
+    ).not.toBeInTheDocument();
     expect(api.applyOperations).not.toHaveBeenCalled();
     expect(api.undoTransaction).not.toHaveBeenCalled();
   });

@@ -30,6 +30,10 @@ import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
 import { RenameConversationDialog } from "@/components/projects/RenameConversationDialog";
 import { CommandPalette } from "@/components/CommandPalette";
 import { PendingApprovalsHost } from "@/components/applications/PendingApprovalsHost";
+import { WelcomeDialog } from "@/components/onboarding/WelcomeDialog";
+import { TutorialOverlay } from "@/components/onboarding/TutorialOverlay";
+import { ContextualEducationHost } from "@/components/onboarding/ContextualEducationHost";
+import { useOnboardingStore } from "@/stores/onboarding-store";
 import { useAppStore } from "@/stores/app-store";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 
@@ -109,6 +113,12 @@ export function AppShell() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
+    void useOnboardingStore.getState().hydrate().then(() => {
+      void useOnboardingStore.getState().openWelcomeIfEligible();
+    });
   }, []);
 
   useEffect(() => {
@@ -368,6 +378,9 @@ export function AppShell() {
       />
       <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
       <PendingApprovalsHost />
+      <WelcomeDialog />
+      <TutorialOverlay />
+      <ContextualEducationHost />
     </div>
   );
 }

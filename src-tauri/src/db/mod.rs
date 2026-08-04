@@ -7,6 +7,7 @@ pub mod health;
 #[cfg(test)]
 mod migration_fixtures;
 mod repositories;
+mod tutorial;
 
 pub use bootstrap::{open_profile_or_shell, BootstrapStatus};
 pub use health::DatabaseHealthReport;
@@ -15,6 +16,7 @@ pub use profile_archive::{
     promote_restored_assets, replace_restored_asset_roots, RestorePreview,
 };
 pub use repositories::*;
+pub use tutorial::*;
 
 use std::path::{Path, PathBuf};
 
@@ -88,10 +90,18 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         "016_chat_attachments",
         include_str!("../../migrations/016_chat_attachments.sql"),
     ),
+    (
+        "017_tutorial_progress",
+        include_str!("../../migrations/017_tutorial_progress.sql"),
+    ),
+    (
+        "018_turn_timeline_events",
+        include_str!("../../migrations/018_turn_timeline_events.sql"),
+    ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "016_chat_attachments";
+pub const LATEST_MIGRATION: &str = "018_turn_timeline_events";
 
 #[derive(Debug, Error)]
 pub enum DbError {

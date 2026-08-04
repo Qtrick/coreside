@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T04:20:36.803Z",
-  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "generatedAt": "2026-08-04T17:39:52.447Z",
+  "commit": "25e6c80e8ec7c0b9f43829f4efa053b56508e257",
   "dirty": true,
-  "sourceFingerprint": "4d9e8454a5e9907e216f73252598ab544aa4f802eef1fb4e335b341b24ee4aea",
+  "sourceFingerprint": "b6afade1134a3a70e1d0d07cd9be007e6105bea52f9592b2bccc4c0663b65ab1",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
@@ -23,20 +23,20 @@
     {
       "id": "wallpaper-atomic-settings",
       "from": "Absent / fragmented settings writes",
-      "to": "Unit Verified",
-      "detail": "Atomic workspace appearance + slider coalesce."
+      "to": "Integrated – Not Verified",
+      "detail": "Atomic workspace appearance + slider coalesce; desktop only when Journey 13 evidence is on HEAD."
     },
     {
       "id": "channel-scoped-streaming",
       "from": "Global agent-turn text bus",
-      "to": "Unit Verified",
-      "detail": "Interactive send uses Channel; Text kept off global bus in unit path."
+      "to": "Integrated – Not Verified",
+      "detail": "Interactive send uses Channel; Text kept off global bus; desktop when Journey 14 evidence is on HEAD."
     },
     {
       "id": "true-streaming",
       "from": "Buffered / incomplete live path",
-      "to": "Unit Verified",
-      "detail": "chat_with_auto → chat_stream; TextDelta unit assertions."
+      "to": "Integrated – Not Verified",
+      "detail": "chat_with_auto → chat_stream; desktop when Journey 12 evidence is on HEAD."
     },
     {
       "id": "queue-ui",
@@ -53,8 +53,8 @@
     {
       "id": "e2e-12-13",
       "from": "Absent",
-      "to": "Scaffolded",
-      "detail": "Journey 12/13 specs added; not executed."
+      "to": "Integrated – Not Verified",
+      "detail": "Journey 12/13 specs exist; Desktop Verified only when both pass on HEAD."
     },
     {
       "id": "progressive-preview",
@@ -79,6 +79,18 @@
       "from": "Startup reconcile only",
       "to": "Unit Verified",
       "detail": "run_attachment_gc command + no-follow symlink remove + counts-only report."
+    },
+    {
+      "id": "packaged-smoke",
+      "from": "Absent",
+      "to": "Integrated – Not Verified",
+      "detail": "Launch-only scan+quit recorded when present — not Packaged Verified until BYOK/chat/persistence packaged proof."
+    },
+    {
+      "id": "e2e-1-14",
+      "from": "Absent",
+      "to": "Integrated – Not Verified",
+      "detail": "Journey 7 passed_partial blocks full Desktop Verified for the 1–14 suite."
     }
   ],
   "unchangedOrStillOpen": [
@@ -92,6 +104,11 @@
       "detail": "No speculative surface paint, JSON-blob progressive, or desktop E2E yet."
     },
     {
+      "id": "packaged-smoke-full",
+      "state": "Integrated – Not Verified",
+      "detail": "Launch-only smoke ≠ Packaged Verified; BYOK/chat/persistence packaged checklist still open."
+    },
+    {
       "id": "human-acceptance",
       "state": "Absent",
       "detail": "HUMAN_ACCEPTANCE_CHECKLIST unsigned — blocks Automated Public-Beta Candidate."
@@ -99,8 +116,10 @@
   ],
   "nonClaims": [
     "No Human Accepted",
-    "No Automated Public-Beta Candidate (dirty tree + unsigned human checklist)",
+    "No Automated Public-Beta Candidate (unsigned human checklist; Journey 7 partial; launch-only packaged smoke)",
     "Public beta Not ready",
-    "Hosted private alpha Not ready"
+    "Hosted private alpha Not ready",
+    "Journey 7 passed_partial is not a Desktop Verified suite pass",
+    "Launch-only packaged smoke is not Packaged Verified"
   ]
 }

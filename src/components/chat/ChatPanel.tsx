@@ -3,6 +3,7 @@ import { Composer } from "./Composer";
 import { ConversationQueue } from "./ConversationQueue";
 import { ConversationHistory } from "./ConversationHistory";
 import { ProjectIndicator } from "./ProjectIndicator";
+import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
 import { useAppStore } from "@/stores/app-store";
 
 export function ChatPanel() {
@@ -11,6 +12,7 @@ export function ChatPanel() {
   const projects = useAppStore((s) => s.projects);
   const createConversation = useAppStore((s) => s.createConversation);
   const navigateToProject = useAppStore((s) => s.navigateToProject);
+  const navigateToSettings = useAppStore((s) => s.navigateToSettings);
 
   const active = conversations.find((c) => c.id === activeConversationId);
   const activeProject = active?.projectId
@@ -59,15 +61,24 @@ export function ChatPanel() {
         </>
       ) : (
         <div className="empty-state">
-          <h3>No conversation selected</h3>
-          <p>Start a new chat to begin building with Coreside.</p>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => void createConversation()}
-          >
-            New chat
-          </button>
+          <h3>{EMPTY_STATES.noConversation.title}</h3>
+          <p>{EMPTY_STATES.noConversation.body}</p>
+          <div className="button-row empty-state-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void createConversation()}
+            >
+              {EMPTY_STATES.noConversation.primaryCta}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => openHelpAndLearning(navigateToSettings)}
+            >
+              {EMPTY_STATES.helpLink.label}
+            </button>
+          </div>
         </div>
       )}
     </section>

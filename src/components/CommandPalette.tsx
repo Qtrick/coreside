@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/tauri";
 import type { UnifiedSearchHit } from "@/types/application-kernel";
 import { useAppStore } from "@/stores/app-store";
+import { useOnboardingStore } from "@/stores/onboarding-store";
+import { storeSettingsCategory } from "@/lib/settings-categories";
 
 /**
  * Consumer command palette — protected actions + local discovery.
@@ -34,6 +36,21 @@ export function CommandPalette({
         id: "settings",
         title: "Open Settings",
         run: () => navigateToSettings(),
+      },
+      {
+        id: "help-learning",
+        title: "Open Help & learning",
+        run: () => {
+          storeSettingsCategory("help-learning");
+          navigateToSettings();
+        },
+      },
+      {
+        id: "start-tour",
+        title: "Start Coreside tour",
+        run: () => {
+          void useOnboardingStore.getState().startEssentials(false);
+        },
       },
       {
         id: "recovery",
@@ -133,7 +150,7 @@ export function CommandPalette({
         <input
           autoFocus
           aria-label="Search commands and applications"
-          placeholder="Search chats, tools, applications, commands…"
+          placeholder="Search chats, apps, applications, commands…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           style={{

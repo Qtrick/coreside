@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-turn-timeline-cmd"
+description = "Enables the list_turn_timeline_cmd command without any pre-configured scope."
+commands.allow = ["list_turn_timeline_cmd"]
+
+[[permission]]
+identifier = "deny-list-turn-timeline-cmd"
+description = "Denies the list_turn_timeline_cmd command without any pre-configured scope."
+commands.deny = ["list_turn_timeline_cmd"]

@@ -10,6 +10,7 @@ cancel_queue_item_cmd
 cancel_chat_attachment
 cancel_request
 cleanup_crawler_cache
+cleanup_tutorial_sample
 clear_conversations
 clear_hosted_auth_session
 clear_search_history_cmd
@@ -61,6 +62,7 @@ get_media_asset_src_cmd
 get_media_asset_thumb_src_cmd
 get_messages
 get_model_catalog
+get_onboarding_state
 get_project_cmd
 get_provider_profile_cmd
 get_route_state_cmd
@@ -135,6 +137,7 @@ list_context_ledger_cmd
 list_conversation_surfaces
 list_conversations
 list_diagnostics_cmd
+list_turn_timeline_cmd
 list_exa_usage
 list_export_formats
 list_managed_backups
@@ -161,6 +164,7 @@ refresh_project_summary
 remove_chat_from_project
 remove_queue_item_cmd
 rename_conversation_cmd
+reset_tutorial_progress
 restore_profile_backup
 restore_project_cmd
 retry_open_database
@@ -173,6 +177,7 @@ save_surface_state_cmd
 save_tool_state
 schedule_patches_cmd
 search_project_context_cmd
+seed_tutorial_sample
 send_message
 set_active_provider_connection
 set_automation_enabled
@@ -190,6 +195,7 @@ stage_chat_attachment
 store_diagnostics_cmd
 store_hosted_auth_session
 subscribe_conversation_queue
+subscribe_conversation_sync
 suspend_surface_cmd
 test_ai_connection
 test_exa_connection
@@ -204,6 +210,7 @@ update_surface_cmd
 upsert_added_setting
 upsert_automation
 upsert_provider_connection
+upsert_tutorial_progress
 upsert_workspace_background
 validate_agent_response_v2
 validate_change_targets

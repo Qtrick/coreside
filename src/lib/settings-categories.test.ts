@@ -19,9 +19,13 @@ describe("settings categories", () => {
     expect(ids).toContain("data");
     expect(ids).toContain("accessibility");
     expect(ids).toContain("advanced");
+    expect(ids).toContain("help-learning");
     expect(ids).toContain("about");
     expect(ids).toContain("added");
     expect(ids).not.toContain("wallpaper");
+    expect(SETTINGS_CATEGORIES.find((c) => c.id === "added")?.label).toBe(
+      "App settings",
+    );
   });
 
   it("normalizes invalid persisted category ids", () => {
@@ -35,7 +39,11 @@ describe("settings categories", () => {
     expect(matchSettingsSearch("API key")[0]?.categoryId).toBe("ai-access");
     expect(matchSettingsSearch("privacy")[0]?.categoryId).toBe("privacy");
     expect(matchSettingsSearch("backup")[0]?.categoryId).toBe("data");
-    expect(matchSettingsSearch("wallpaper")[0]?.categoryId).toBe("added");
+    expect(matchSettingsSearch("wallpaper")[0]?.categoryId).toBe("appearance");
+    expect(matchSettingsSearch("tutorial")[0]?.categoryId).toBe("help-learning");
+    expect(matchSettingsSearch("tour")[0]?.categoryId).toBe("help-learning");
+    expect(normalizeSettingsCategoryId("wallpaper")).toBe("appearance");
+    expect(normalizeSettingsCategoryId("wallpapers")).toBe("appearance");
     expect(matchSettingsSearch("recovery")[0]?.categoryId).toBe("advanced");
     expect(matchSettingsSearch("App permissions")[0]?.categoryId).toBe(
       "advanced",

@@ -17,6 +17,7 @@ import { ChatContextMenu } from "@/components/context-menu/ChatContextMenu";
 import { ProjectContextMenu } from "@/components/context-menu/ProjectContextMenu";
 import { useContextMenuTrigger } from "@/components/context-menu/use-context-menu";
 import { ProjectList } from "@/components/projects/ProjectList";
+import { EMPTY_STATES } from "@/lib/empty-states";
 import { isCurrentChat } from "@/lib/navigation";
 import type { Project } from "@/types/project";
 import type { Conversation } from "@/types/messages";
@@ -202,7 +203,7 @@ export function Sidebar() {
         <span className="nav-label">New chat</span>
       </button>
 
-      <section className="sidebar-section" aria-label="Projects">
+      <section className="sidebar-section" aria-label="Projects" data-coreside-tour="sidebar-projects">
         <div className="sidebar-section-header">
           <button
             type="button"
@@ -262,7 +263,7 @@ export function Sidebar() {
         <div className="sidebar-nav">
           {sidebarChats.length === 0 ? (
             <p className="muted sidebar-empty-hint">
-              <span className="nav-label">No chats yet</span>
+              <span className="nav-label">{EMPTY_STATES.sidebarNoChats.hint}</span>
             </p>
           ) : (
             sidebarChats.map((conversation) => (
@@ -301,12 +302,12 @@ export function Sidebar() {
         </div>
       </section>
 
-      <section className="sidebar-section grow" aria-label="Personal tools">
-        <div className="sidebar-section-label">Tools</div>
+      <section className="sidebar-section grow" aria-label="Personal apps">
+        <div className="sidebar-section-label">Apps</div>
         <div className="sidebar-nav">
           {tools.length === 0 ? (
             <p className="muted sidebar-empty-hint">
-              <span className="nav-label">No tools yet</span>
+              <span className="nav-label">{EMPTY_STATES.sidebarNoApps.hint}</span>
             </p>
           ) : (
             tools.map((tool) => (

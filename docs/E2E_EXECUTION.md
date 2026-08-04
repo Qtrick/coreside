@@ -50,6 +50,7 @@ npm run e2e:ci
 1. **main** — empty `CORESIDE_DB_PATH` (Journeys 1, 3, 4)
 2. **existing-*** — fresh DB + `CORESIDE_E2E_SEED=existing`, one DB per journey group (2, 5–11, 14)
 3. **true-streaming** / **wallpaper-targeted** — clean DB (Journeys 12–13; `AI_PROVIDER=mock`)
+4. **Journeys 15–16** (first-run welcome / core tutorial) — specs + WDIO suites registered; **not executed** by `e2e/run.mjs` (`not_run`). Default `CORESIDE_E2E=1` disables onboarding.
 
 Each seeded journey gets its own temp database so approval/grant state does not leak between specs.
 
@@ -74,6 +75,10 @@ npx wdio run e2e/wdio.conf.ts --suite wallpaper-targeted
 
 # Journey 14 — stream eavesdropping denial (seeded tool window)
 CORESIDE_E2E_SEED=existing npx wdio run e2e/wdio.conf.ts --suite existing-eavesdrop
+
+# Journeys 15–16 — onboarding (registered; expect limited value while CORESIDE_E2E=1)
+npx wdio run e2e/wdio.conf.ts --suite first-run-welcome
+npx wdio run e2e/wdio.conf.ts --suite core-tutorial
 ```
 
 ## Security reminders
@@ -146,4 +151,4 @@ Seed is compile-gated (`e2e` feature) and env-gated — not a public Tauri comma
 
 - `browser.tauri.listWindows()` / `switchWindow()` work with the embedded provider.
 - Journey 7 does **not** assert duplicate approval UI in the secondary window (WebDriver session targets one window at a time).
-- Journey 10 verifies open + `browser.tauri.switchWindow()`; **close is not asserted** (bundled frontend cannot reliably call `getCurrentWebviewWindow().close()` from WebDriver execute).
+- Journey 10 verifies open + `browser.tauri.switchWindow()` + `browser.closeWindow()` + reopen (full coverage).

@@ -18,6 +18,7 @@ pub mod queue;
 pub mod streaming;
 pub mod surfaces;
 pub mod transactions;
+pub mod turn_timeline;
 
 #[allow(unused_imports)]
 pub use app_routes::{
@@ -79,7 +80,8 @@ pub use queue::{
 };
 #[allow(unused_imports)]
 pub use preview_transaction::{
-    ingest_live_chunk, PreviewOpEvent, PreviewTransaction, RejectedPreviewOp,
+    ingest_live_chunk, ingest_live_chunk_with_seed, PreviewOpEvent, PreviewPaintEvent,
+    PreviewSurfaceModel, PreviewTransaction, RejectedPreviewOp,
 };
 #[allow(unused_imports)]
 pub use streaming::{NdjsonFrameParser, StreamEvent};
@@ -93,6 +95,9 @@ pub use surfaces::{
 pub use transactions::{
     apply_transaction, apply_transaction_with_bus, create_transaction, get_transaction,
     list_transactions, undo_transaction, AppTransactionRecord, ApplyResult,
+};
+pub use turn_timeline::{
+    list_turn_timeline_events, try_append_turn_timeline_event, TurnTimelineEvent,
 };
 
 use serde_json::Value;

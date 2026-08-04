@@ -9,9 +9,16 @@ import { RecoverySettings } from "@/components/settings/RecoverySettings";
 import { RuntimePermissionsSettings } from "@/components/applications/RuntimePermissionsSettings";
 import { WallpaperSettings } from "@/components/settings/WallpaperSettings";
 import { SearchSettingsSection } from "@/components/search/SearchProviderSetup";
+import { listConsumerTutorials, ESSENTIALS_TUTORIAL_ID } from "@/lib/onboarding/tutorials";
+import {
+  WHATS_NEW_ITEMS,
+  WHATS_NEW_VERSION_LABEL,
+} from "@/lib/onboarding/whats-new";
+import { useOnboardingStore } from "@/stores/onboarding-store";
 import { api } from "@/lib/tauri";
 import {
   matchSettingsSearch,
+  normalizeSettingsCategoryId,
   readStoredSettingsCategory,
   SETTINGS_CATEGORIES,
   storeSettingsCategory,
@@ -51,7 +58,7 @@ function categorySummary(
           : ctx.actionLogMode === "intelligent"
             ? "Intelligent"
             : "Off";
-      return `Action Log: ${modeLabel}`;
+      return `Activity: ${modeLabel}`;
     }
     case "search":
       return "Web research settings";
@@ -63,12 +70,14 @@ function categorySummary(
       return "Reduced motion follows system";
     case "advanced":
       return "Recovery and permissions";
+    case "help-learning":
+      return "Tours and guides";
     case "about":
       return null;
     case "added":
       return ctx.addedCount > 0
-        ? `${ctx.addedCount} tool setting${ctx.addedCount === 1 ? "" : "s"}`
-        : "Templates and tool settings";
+        ? `${ctx.addedCount} app setting${ctx.addedCount === 1 ? "" : "s"}`
+        : "Preferences from your apps";
   }
 }
 
@@ -141,6 +150,20 @@ export function SettingsPanel() {
   }, [category]);
 
   useEffect(() => {
+    const onExternalCategory = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      setCategory((prev) => normalizeSettingsCategoryId(detail, prev));
+    };
+    window.addEventListener("coreside:settings-category", onExternalCategory);
+    return () => {
+      window.removeEventListener(
+        "coreside:settings-category",
+        onExternalCategory,
+      );
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     setAddedLoading(true);
     void api
@@ -200,6 +223,14 @@ export function SettingsPanel() {
     addedCount: addedSettings.length,
   };
 
+  const developerMode = useAppStore((s) => s.developerMode);
+  const startEssentials = useOnboardingStore((s) => s.startEssentials);
+  const startModule = useOnboardingStore((s) => s.startModule);
+  const resetEssentials = useOnboardingStore((s) => s.resetEssentials);
+  const onboardingProgress = useOnboardingStore((s) => s.progressById);
+  const essentialsProgress = onboardingProgress[ESSENTIALS_TUTORIAL_ID];
+  const unfinishedEssentials =
+    essentialsProgress?.status === "in_progress";
   const active = SETTINGS_CATEGORIES.find((c) => c.id === category);
   const coresideCats = SETTINGS_CATEGORIES.filter((c) => c.group === "coreside");
   const addedCats = SETTINGS_CATEGORIES.filter((c) => c.group === "added");
@@ -233,8 +264,8 @@ export function SettingsPanel() {
         <div>
           <h1>Settings</h1>
           <p className="panel-subtitle" style={{ margin: 0 }}>
-            Coreside settings control the app itself. Tool settings are added by
-            the tools you create.
+            Coreside settings control the app itself. App settings are added by
+            the apps you create.
           </p>
         </div>
         <button
@@ -325,6 +356,9 @@ export function SettingsPanel() {
                   type="button"
                   className="settings-nav-item"
                   aria-current={category === cat.id ? "page" : undefined}
+                  data-coreside-tour={
+                    cat.id === "help-learning" ? "help-learning-nav" : undefined
+                  }
                   onClick={() => selectCategory(cat.id)}
                 >
                   <span className="settings-nav-item-label">{cat.label}</span>
@@ -338,7 +372,7 @@ export function SettingsPanel() {
             })}
           </nav>
 
-          <nav className="settings-nav-list" aria-label="Added settings">
+          <nav className="settings-nav-list" aria-label="App settings">
             {addedCats.map((cat) => {
               const summary = categorySummary(cat.id, summaryCtx);
               return (
@@ -435,14 +469,15 @@ export function SettingsPanel() {
           ) : null}
 
           {category === "appearance" ? (
+            <div className="settings-group">
             <section
               className="settings-section"
               aria-labelledby="appearance-heading"
             >
               <h3 id="appearance-heading">Theme</h3>
               <p>
-                Choose how Coreside looks. For wallpapers and how much they show
-                through panels, open Added Settings → Templates.
+                Choose how Coreside looks. Wallpapers and panel transparency are
+                below.
               </p>
               <div className="theme-options" role="group" aria-label="Theme">
                 {themes.map((option) => (
@@ -495,16 +530,19 @@ export function SettingsPanel() {
                   </button>
                 ))}
               </div>
-              <p className="muted" style={{ marginTop: "1rem" }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => selectCategory("added")}
-                >
-                  Open wallpaper templates
-                </button>
-              </p>
             </section>
+            <section
+              className="settings-section"
+              aria-labelledby="wallpapers-heading"
+            >
+              <h3 id="wallpapers-heading">Wallpapers</h3>
+              <p>
+                Workspace wallpaper presets. Readability stays enforced for
+                protected UI.
+              </p>
+              <WallpaperSettings />
+            </section>
+            </div>
           ) : null}
 
           {category === "ai-access" ? <AiProviderSettings /> : null}
@@ -521,17 +559,17 @@ export function SettingsPanel() {
               >
                 <h3 id="privacy-heading">Your data</h3>
                 <p>
-                  Chats, tools, and most research caches stay on this computer.
+                  Chats, apps, and most research caches stay on this computer.
                   Provider keys use the operating system credential store when
                   available.
                 </p>
                 <ul className="settings-plain-list">
                   <li>
-                    AI Access mode:{" "}
+                    AI connection:{" "}
                     {aiStatus?.accessMode === "coreside_hosted"
                       ? "Coreside AI may send conversation content needed for replies."
                       : aiStatus?.accessMode === "user_byok"
-                        ? "Your provider receives messages you send while BYOK is active."
+                        ? "Your connected AI provider receives messages you send."
                         : aiStatus?.accessMode === "user_local"
                           ? "Local AI keeps model traffic on this machine when configured."
                           : "No AI provider is connected."}
@@ -540,7 +578,7 @@ export function SettingsPanel() {
                     Product analytics and automatic crash upload are not enabled
                     in this build. Local diagnostic export remains available.
                   </li>
-                  <li>Action Log stores sanitized steps only when you enable it.</li>
+                  <li>Activity stores sanitized steps only when you enable it.</li>
                 </ul>
                 <div className="button-row">
                   <button
@@ -548,7 +586,7 @@ export function SettingsPanel() {
                     className="btn btn-secondary"
                     onClick={() => selectCategory("ai-access")}
                   >
-                    Open AI Access
+                    Open AI connections
                   </button>
                   <button
                     type="button"
@@ -590,7 +628,7 @@ export function SettingsPanel() {
                   <ul className="settings-plain-list">
                     <li>{storageSummary.chatCount} chats</li>
                     <li>{storageSummary.projectCount} projects</li>
-                    <li>{storageSummary.toolCount} tools</li>
+                    <li>{storageSummary.toolCount} apps</li>
                     <li>
                       Database size:{" "}
                       {storageSummary.databaseBytes != null
@@ -732,7 +770,7 @@ export function SettingsPanel() {
                       onClick={() => setConfirmClearTools(true)}
                     >
                       <Trash2 size={16} aria-hidden />
-                      Clear tools
+                      Clear apps
                     </button>
                   ) : (
                     <>
@@ -744,7 +782,7 @@ export function SettingsPanel() {
                           setConfirmClearTools(false);
                         }}
                       >
-                        Confirm clear tools
+                        Confirm clear apps
                       </button>
                       <button
                         type="button"
@@ -791,6 +829,104 @@ export function SettingsPanel() {
             </div>
           ) : null}
 
+          {category === "help-learning" ? (
+            <div className="settings-group">
+              <section
+                className="settings-section"
+                aria-labelledby="whats-new-heading"
+              >
+                <h3 id="whats-new-heading">What&apos;s new</h3>
+                <p className="muted">
+                  {WHATS_NEW_VERSION_LABEL} highlights for Coreside.
+                </p>
+                <ul className="settings-plain-list">
+                  {WHATS_NEW_ITEMS.map((item) => (
+                    <li key={item.title}>
+                      <strong>{item.title}</strong>
+                      <span className="muted"> — {item.body}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+              <section
+                className="settings-section"
+                aria-labelledby="help-learning-heading"
+              >
+                <h3 id="help-learning-heading">Tours</h3>
+                <p>
+                  Learn Coreside offline. Tours do not require an AI provider.
+                </p>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => void startEssentials(false)}
+                  >
+                    Restart essentials
+                  </button>
+                  {unfinishedEssentials ? (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => void startEssentials(true)}
+                    >
+                      Continue unfinished
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => void resetEssentials()}
+                  >
+                    Reset progress
+                  </button>
+                </div>
+                <ul className="settings-plain-list" style={{ marginTop: "1rem" }}>
+                  {listConsumerTutorials(developerMode).map((mod) => (
+                    <li key={mod.id}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ marginTop: 4 }}
+                        onClick={() => void startModule(mod.id, true)}
+                      >
+                        {mod.title}
+                        {mod.developerOnly ? " (developer)" : ""}
+                      </button>
+                      <span className="muted"> — {mod.description}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+              <section className="settings-section">
+                <h3>Related</h3>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => selectCategory("privacy")}
+                  >
+                    Privacy & Security
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => selectCategory("data")}
+                  >
+                    Backup & data
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => selectCategory("about")}
+                  >
+                    About
+                  </button>
+                </div>
+              </section>
+            </div>
+          ) : null}
+
           {category === "about" ? (
             <section className="settings-section" aria-labelledby="about-heading">
               <h3 id="about-heading">About</h3>
@@ -805,7 +941,7 @@ export function SettingsPanel() {
                   </p>
                   <p style={{ margin: "0.35rem 0 0" }}>
                     {appInfo?.description ??
-                      "An AI-native personal software environment that can grow tools beside your conversations."}
+                      "An AI-native personal software environment that can grow apps beside your conversations."}
                   </p>
                 </div>
               </div>
@@ -814,26 +950,15 @@ export function SettingsPanel() {
 
           {category === "added" ? (
             <div className="settings-group">
-              <section
-                className="settings-section"
-                aria-labelledby="templates-heading"
-              >
-                <h3 id="templates-heading">Templates</h3>
-                <p>
-                  Workspace wallpaper presets and other product template
-                  settings.
-                </p>
-                <WallpaperSettings />
-              </section>
-
               <section className="settings-section settings-section-added">
-                <h3>Tool settings</h3>
+                <h3>App settings</h3>
                 {addedLoading ? (
                   <p className="muted">Loading…</p>
                 ) : addedSettings.length === 0 ? (
                   <div className="settings-empty">
                     <p>
-                      Settings created for your personal tools will appear here.
+                      Settings created for your personal apps will appear here.
+                      Wallpapers live under Appearance.
                     </p>
                   </div>
                 ) : (
@@ -849,7 +974,7 @@ export function SettingsPanel() {
                         <p className="added-setting-meta muted">
                           {setting.settingType}
                           {setting.ownerToolId
-                            ? ` · tool ${setting.ownerToolId}`
+                            ? ` · app ${setting.ownerToolId}`
                             : ""}
                         </p>
                       </li>

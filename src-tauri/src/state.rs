@@ -33,6 +33,31 @@ pub struct QueueChangedEvent {
     pub item_id: Option<String>,
 }
 
+/// Conversation-scoped Sync / Conflict payloads (same wire shape as AgentTurnEvent).
+/// Lives in state so AppState can own the subscriber map without depending on commands.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SyncScopedEvent {
+    #[serde(rename_all = "camelCase")]
+    Sync {
+        conversation_id: Option<String>,
+        surface_ids: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tool_ids: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        application_id: Option<String>,
+        revision: Option<i64>,
+        #[serde(rename = "syncKind")]
+        sync_kind: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    Conflict {
+        conversation_id: Option<String>,
+        message: String,
+        conflicts: Vec<String>,
+    },
+}
+
 pub struct AppState {
     pub config: Mutex<AppConfig>,
     pub db: Arc<Mutex<Database>>,
@@ -43,6 +68,10 @@ pub struct AppState {
     pub queue_drain_inflight: Mutex<HashSet<String>>,
     /// Conversation-scoped queue UI Channels (no process-wide queue bus).
     pub queue_subscribers: Mutex<HashMap<String, Vec<Channel<QueueChangedEvent>>>>,
+    /// Conversation-scoped Sync/Conflict Channels keyed by window label.
+    /// Remounts replace the same window's Channel (no zombie absorbers); distinct
+    /// windows (main + tool-*) still fan out together.
+    pub sync_subscribers: Mutex<HashMap<String, HashMap<String, Channel<SyncScopedEvent>>>>,
     pub crawler: Arc<CrawlerSupervisor>,
     pub event_bus: Mutex<EventBus>,
     pub maintenance: Mutex<MaintenanceMode>,
@@ -68,6 +97,7 @@ impl AppState {
             active_requests: Mutex::new(HashMap::new()),
             queue_drain_inflight: Mutex::new(HashSet::new()),
             queue_subscribers: Mutex::new(HashMap::new()),
+            sync_subscribers: Mutex::new(HashMap::new()),
             crawler: Arc::new(CrawlerSupervisor::new()),
             event_bus: Mutex::new(event_bus),
             maintenance: Mutex::new(MaintenanceMode::default()),
@@ -99,6 +129,65 @@ impl AppState {
         if subs.is_empty() {
             registry.remove(&event.conversation_id);
         }
+    }
+
+    /// Register a Sync/Conflict Channel for one conversation + window.
+    /// Replaces any prior Channel for the same window label so remounts cannot
+    /// leave zombies that absorb Sync (scoped_ok) while dropping JS handlers.
+    pub fn subscribe_sync(
+        &self,
+        conversation_id: String,
+        window_label: impl Into<String>,
+        channel: Channel<SyncScopedEvent>,
+    ) {
+        let label = {
+            let raw = window_label.into();
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                "main".to_string()
+            } else {
+                trimmed.to_string()
+            }
+        };
+        self.sync_subscribers
+            .lock()
+            .entry(conversation_id)
+            .or_default()
+            .insert(label, channel);
+    }
+
+    /// Fan-out Sync/Conflict to Channels for `conversation_id`. Returns successful send count.
+    /// Dead Channels are dropped. Does not use the process-wide event bus.
+    pub fn emit_sync_to_subscribers(
+        &self,
+        conversation_id: &str,
+        event: &SyncScopedEvent,
+    ) -> usize {
+        let mut registry = self.sync_subscribers.lock();
+        let Some(subs) = registry.get_mut(conversation_id) else {
+            return 0;
+        };
+        let mut ok = 0usize;
+        subs.retain(|_label, ch| {
+            if ch.send(event.clone()).is_ok() {
+                ok += 1;
+                true
+            } else {
+                false
+            }
+        });
+        if subs.is_empty() {
+            registry.remove(conversation_id);
+        }
+        ok
+    }
+
+    pub fn sync_subscriber_count(&self, conversation_id: &str) -> usize {
+        self.sync_subscribers
+            .lock()
+            .get(conversation_id)
+            .map(|v| v.len())
+            .unwrap_or(0)
     }
 
     /// Claim exclusive queue-drain ownership for a conversation. Returns false if

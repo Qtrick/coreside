@@ -53,6 +53,8 @@ commands.deny = [
   "stage_chat_attachment",
   "store_hosted_auth_session",
   "subscribe_conversation_queue",
+  # subscribe_conversation_sync is intentionally allowlisted in coreside-tool-scoped
+  # so tool windows can receive Sync without the global agent-turn bus.
   "test_provider_connection",
   "upsert_provider_connection"
 ]

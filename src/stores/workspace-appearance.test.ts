@@ -6,6 +6,8 @@ vi.mock("@/lib/tauri", () => ({
   api: {
     setWorkspaceAppearance: (...args: unknown[]) =>
       setWorkspaceAppearance(...args),
+    subscribeConversationSync: vi.fn(async () => () => undefined),
+    getSurface: vi.fn(async () => null),
   },
   TauriCommandError: class TauriCommandError extends Error {
     code: string;

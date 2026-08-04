@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T04:20:36.803Z",
-  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "generatedAt": "2026-08-04T17:39:52.447Z",
+  "commit": "25e6c80e8ec7c0b9f43829f4efa053b56508e257",
   "dirty": true,
-  "sourceFingerprint": "4d9e8454a5e9907e216f73252598ab544aa4f802eef1fb4e335b341b24ee4aea",
+  "sourceFingerprint": "b6afade1134a3a70e1d0d07cd9be007e6105bea52f9592b2bccc4c0663b65ab1",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
@@ -13,7 +13,7 @@
   "command": "audit:readiness",
   "exitStatus": 0,
   "evidenceLevel": "classified-not-desktop-verified",
-  "phase": "RC3.3-phase-1",
+  "phase": "RC3.4",
   "model": "docs/BETA_READINESS_MODEL.md",
   "humanChecklist": "docs/HUMAN_ACCEPTANCE_CHECKLIST.md",
   "humanChecklistSigned": false,
@@ -22,7 +22,7 @@
       "track": "local-byok",
       "ladder": "Development Build",
       "dirty": true,
-      "candidateNote": "Full e2e 1–14 Desktop Verified and packaged smoke Packaged Verified on this host, but dirty=true — remain Development Build until a clean commit fingerprints evidence.",
+      "candidateNote": "Dirty tree — remain Development Build. e2e-1-14=Integrated – Not Verified; packaged-smoke=Integrated – Not Verified (launch-only ≠ Packaged Verified).",
       "publicBeta": "Not ready"
     },
     "hosted": {
@@ -36,8 +36,8 @@
     {
       "id": "true-streaming",
       "name": "True streaming (chat_stream / TextDelta)",
-      "state": "Desktop Verified",
-      "notes": "Journey 12 passed on darwin/arm64 with turnId + live stream marker.",
+      "state": "Integrated – Not Verified",
+      "notes": "True streaming desktop claim withheld. (prior evidence 3202ca6) Re-run on HEAD to claim Desktop Verified.",
       "evidence": [
         "reports/true-streaming-results.json"
       ]
@@ -45,8 +45,8 @@
     {
       "id": "channel-scoped-streaming",
       "name": "Channel-scoped turn streaming",
-      "state": "Desktop Verified",
-      "notes": "Journey 14: tool window received zero Text events during main stream.",
+      "state": "Integrated – Not Verified",
+      "notes": "Channel-scoped streaming desktop claim withheld. (prior evidence 3202ca6) Re-run on HEAD to claim Desktop Verified.",
       "evidence": [
         "reports/scoped-streaming-results.json",
         "reports/stream-eavesdropping-results.json"
@@ -55,8 +55,8 @@
     {
       "id": "wallpaper-atomic-settings",
       "name": "Wallpaper atomic appearance writes",
-      "state": "Desktop Verified",
-      "notes": "Journey 13 Matrix + transparency 40 + canvas samples; packaged pixels not_run.",
+      "state": "Integrated – Not Verified",
+      "notes": "Wallpaper atomic settings desktop claim withheld. (prior evidence 3202ca6) Re-run on HEAD to claim Desktop Verified.",
       "evidence": [
         "reports/wallpaper-settings-results.json",
         "reports/wallpaper-visual-results.json"
@@ -127,8 +127,8 @@
     {
       "id": "e2e-1-14",
       "name": "Desktop E2E Journeys 1–14",
-      "state": "Desktop Verified",
-      "notes": "Full orchestrator npm run e2e passed on darwin/arm64 (Journey 7 passed_partial by design).",
+      "state": "Integrated – Not Verified",
+      "notes": "Journey 7 is passed_partial (evidence commit 3202ca6); suite must not be treated as Desktop Verified.",
       "evidence": [
         "reports/e2e-results.json",
         "reports/true-streaming-results.json",
@@ -140,8 +140,8 @@
     {
       "id": "e2e-12-13",
       "name": "Desktop E2E Journey 12 / 13",
-      "state": "Desktop Verified",
-      "notes": "Executed on darwin/arm64; Journey 13 asserts uniqueColors≥2 and lumSpan≥8 on Matrix canvas.",
+      "state": "Integrated – Not Verified",
+      "notes": "Journey 12/13 evidence not on HEAD. (prior evidence 3202ca6) Re-run on HEAD to claim Desktop Verified.",
       "evidence": [
         "reports/true-streaming-results.json",
         "reports/wallpaper-visual-results.json"
@@ -150,8 +150,8 @@
     {
       "id": "e2e-14-eavesdrop",
       "name": "Tool-window stream eavesdropping denial",
-      "state": "Desktop Verified",
-      "notes": "Journey 14 passed; zero Text events in tool window.",
+      "state": "Integrated – Not Verified",
+      "notes": "Journey 14 eavesdrop desktop claim withheld. (prior evidence 3202ca6) Re-run on HEAD to claim Desktop Verified.",
       "evidence": [
         "reports/stream-eavesdropping-results.json"
       ]
@@ -178,8 +178,8 @@
     {
       "id": "packaged-smoke",
       "name": "Normal package build + smoke launch",
-      "state": "Packaged Verified",
-      "notes": "Release .app/.dmg built; package:scan + brief launch/quit. Smoke only — not full product acceptance.",
+      "state": "Integrated – Not Verified",
+      "notes": "Launch-only smoke recorded on 3202ca6 (not HEAD). Not Packaged Verified.",
       "evidence": [
         "reports/packaged-smoke-results.json"
       ]
@@ -211,25 +211,24 @@
       "attachment-crash",
       "restore-transaction"
     ],
-    "desktopVerified": [
+    "desktopVerified": [],
+    "integratedNotVerified": [
       "true-streaming",
       "channel-scoped-streaming",
       "wallpaper-atomic-settings",
       "e2e-1-14",
       "e2e-12-13",
-      "e2e-14-eavesdrop"
+      "e2e-14-eavesdrop",
+      "packaged-smoke"
     ],
-    "integratedNotVerified": [],
     "scaffolded": [],
     "absent": [],
     "deferred": [
       "hosted-ai"
     ],
-    "highestDesktopClaim": "Desktop Verified",
-    "highestPackagedClaim": "Packaged Verified",
-    "packagedVerified": [
-      "packaged-smoke"
-    ],
+    "highestDesktopClaim": "none",
+    "highestPackagedClaim": "none",
+    "packagedVerified": [],
     "overallLocalFirst": "Development Build",
     "overallHosted": "Development Build"
   }

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T16:25:32.179Z",
+  "commit": "25e6c80e8ec7c0b9f43829f4efa053b56508e257",
+  "dirty": true,
+  "fingerprint": "8c3f72d523464e6dedb7371af88ef4f00cb44387f223b6c69e2bc279cc443a93",
+  "command": "audit:consumer-language",
+  "scannedFiles": 168,
+  "findingCount": 0,
+  "terms": [
+    {
+      "term": "Tool Canvas",
+      "proposedCanonical": "Apps panel / app beside chat"
+    },
+    {
+      "term": "Added Settings",
+      "proposedCanonical": "App settings"
+    },
+    {
+      "term": "Application Kernel",
+      "proposedCanonical": "(internal — avoid in consumer UI)"
+    },
+    {
+      "term": "BYOK",
+      "proposedCanonical": "AI connections / your own key"
+    },
+    {
+      "term": "Manifest",
+      "proposedCanonical": "App details (avoid Manifest as UI label)"
+    },
+    {
+      "term": "Gateway",
+      "proposedCanonical": "(internal — avoid in consumer UI)"
+    },
+    {
+      "term": "Surface",
+      "proposedCanonical": "App / panel (avoid Surface as UI label)"
+    }
+  ],
+  "findings": []
+}

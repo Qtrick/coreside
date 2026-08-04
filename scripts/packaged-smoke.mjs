@@ -2,9 +2,10 @@
 /**
  * Packaged smoke: scan bundle artifacts; on macOS, briefly launch a .app if present.
  *
- * Packaged Verified only when (1) the launched .app process matches the bundle
- * path and (2) package:scan exits 0. Launch-without-scan or any Coreside process
- * on the machine must not mint Packaged Verified. Missing artifact → not_run /
+ * Launch + package:scan is launch-only smoke — it does NOT mint Packaged Verified.
+ * Full Packaged Verified still requires BYOK/chat/persistence packaged proof
+ * (see docs/PACKAGED_SMOKE_RESEARCH.md). Launch-without-scan or any Coreside
+ * process on the machine must not inflate evidence. Missing artifact → not_run /
  * Scaffolded. Scan-only without launchable .app → Scaffolded.
  *
  * Writes: reports/packaged-smoke-results.json
@@ -236,11 +237,12 @@ const finish = (launch) => {
   let note;
 
   if (launchedOk && scanOk) {
+    // Honest: brief launch/quit + scan ≠ Packaged Verified (no BYOK/chat/persistence).
     status = "launch_passed";
-    evidenceLevel = "Packaged Verified";
+    evidenceLevel = "Integrated – Not Verified";
     reason = "artifact_scanned_and_launched";
     note =
-      "Bundle scanned and macOS .app launched briefly then quit. Packaged Verified for smoke launch only — not a full product acceptance.";
+      "Bundle scanned and macOS .app launched briefly then quit. Launch-only smoke — not Packaged Verified (BYOK/chat/persistence packaged proof still open).";
   } else if (launchedOk && !scanOk) {
     // Launch alone must not mint Packaged Verified when package:scan failed.
     status = "launch_passed_scan_failed";

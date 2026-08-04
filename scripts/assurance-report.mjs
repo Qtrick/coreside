@@ -305,6 +305,85 @@ if (
   failed = true;
 }
 
+// Evidence manifest integrity (required current reports + overclaim rules).
+{
+  const manifest = readJson("evidence-manifest.json");
+  if (manifest.missing) {
+    findings.push({
+      severity: "P1",
+      file: "evidence-manifest.json",
+      status: "missing",
+      detail: "Run npm run audit:evidence-manifest",
+    });
+    failed = true;
+  } else if (manifest.parseError) {
+    findings.push({
+      severity: "P1",
+      file: "evidence-manifest.json",
+      status: "invalid_json",
+      detail: manifest.parseError,
+    });
+    failed = true;
+  } else if (manifest.data?.exitStatus === "failed") {
+    findings.push({
+      severity: "P1",
+      file: "evidence-manifest.json",
+      status: "integrity_failed",
+      detail: `findings=${Array.isArray(manifest.data.findings) ? manifest.data.findings.length : "?"}`,
+    });
+    failed = true;
+  }
+}
+
+// E2E honesty: Journey 7 (or any) passed_partial must not inflate suite status/evidenceLevel.
+{
+  const e2e = readJson("e2e-results.json");
+  if (!e2e.missing && !e2e.parseError && e2e.data) {
+    const d = e2e.data;
+    const journeys = Array.isArray(d.journeys) ? d.journeys : [];
+    const hasPartial = journeys.some((j) => j && j.status === "passed_partial");
+    if (hasPartial && d.status === "passed") {
+      findings.push({
+        severity: "P1",
+        file: "e2e-results.json",
+        status: "passed_partial_inflated_to_passed",
+        detail: "Suite status must be passed_partial when any journey is passed_partial",
+      });
+      failed = true;
+    }
+    if (hasPartial && d.evidenceLevel === "Desktop Verified") {
+      findings.push({
+        severity: "P1",
+        file: "e2e-results.json",
+        status: "partial_suite_cannot_claim_desktop_verified",
+        detail: "Journey 7 passed_partial blocks Desktop Verified for the suite",
+      });
+      failed = true;
+    }
+  }
+}
+
+// Launch-only packaged smoke must not claim Packaged Verified.
+{
+  const smoke = readJson("packaged-smoke-results.json");
+  if (!smoke.missing && !smoke.parseError && smoke.data) {
+    const d = smoke.data;
+    if (
+      d.evidenceLevel === "Packaged Verified" &&
+      (d.status === "launch_passed" ||
+        d.reason === "artifact_scanned_and_launched")
+    ) {
+      findings.push({
+        severity: "P1",
+        file: "packaged-smoke-results.json",
+        status: "launch_only_cannot_claim_packaged_verified",
+        detail: "Brief launch/quit + scan is not Packaged Verified",
+      });
+      failed = true;
+    }
+  }
+}
+
 const report = {
   schemaVersion: 1,
   product: "Coreside",

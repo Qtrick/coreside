@@ -113,6 +113,8 @@ function sanitizeMockWallpaper(value: unknown): WallpaperConfig {
 
 const now = () => new Date().toISOString();
 
+let mockTutorialProgress: import("@/lib/onboarding/types").TutorialProgress[] = [];
+
 const mockDb = {
   conversations: [] as Conversation[],
   projects: [] as Project[],
@@ -2539,8 +2541,13 @@ export async function mockInvoke<T>(
     case "list_snapshots_cmd":
     case "list_transactions_cmd":
     case "list_diagnostics_cmd":
+    case "list_turn_timeline_cmd":
     case "list_agent_queue_cmd":
       return [] as T;
+    case "subscribe_conversation_queue":
+    case "subscribe_conversation_sync":
+      // Channel registration is a no-op in web/vitest mocks.
+      return undefined as T;
     case "create_snapshot_cmd": {
       const a = (args ?? {}) as {
         conversationId?: string;
@@ -2580,6 +2587,80 @@ export async function mockInvoke<T>(
       ] as T;
     }
 
+    case "get_onboarding_state": {
+      const essentials = mockTutorialProgress.find(
+        (p) => p.tutorialId === "coreside-essentials",
+      );
+      const essentialsDone =
+        essentials?.status === "completed" ||
+        essentials?.status === "skipped" ||
+        essentials?.status === "superseded" ||
+        essentials?.status === "in_progress";
+      return {
+        welcomeEligible: !essentialsDone && mockDb.conversations.length === 0,
+        onboardingDisabled: false,
+        isSecondaryWindow: false,
+        recoveryMode: false,
+        hasMeaningfulActivity: mockDb.conversations.length > 0,
+        progress: mockTutorialProgress,
+      } as T;
+    }
+
+    case "upsert_tutorial_progress": {
+      const a = (args ?? {}) as {
+        tutorialId?: string;
+        tutorialVersion?: number;
+        status?: string;
+        currentStepId?: string | null;
+        completedStepIds?: string[] | null;
+      };
+      const id = a.tutorialId ?? "coreside-essentials";
+      const idx = mockTutorialProgress.findIndex((p) => p.tutorialId === id);
+      const prev = idx >= 0 ? mockTutorialProgress[idx] : null;
+      const row = {
+        tutorialId: id,
+        tutorialVersion: a.tutorialVersion ?? 1,
+        status: (a.status ?? "not_started") as
+          | "not_started"
+          | "in_progress"
+          | "completed"
+          | "skipped"
+          | "superseded",
+        currentStepId: a.currentStepId ?? null,
+        completedStepIds: a.completedStepIds ?? prev?.completedStepIds ?? [],
+        startedAt: prev?.startedAt ?? now(),
+        updatedAt: now(),
+        completedAt: a.status === "completed" ? now() : prev?.completedAt ?? null,
+        skippedAt: a.status === "skipped" ? now() : prev?.skippedAt ?? null,
+        lastOpenedAt: now(),
+      };
+      if (idx >= 0) mockTutorialProgress[idx] = row;
+      else mockTutorialProgress.push(row);
+      return row as T;
+    }
+
+    case "reset_tutorial_progress": {
+      const id = (args as { tutorialId?: string | null })?.tutorialId;
+      if (id) {
+        const before = mockTutorialProgress.length;
+        mockTutorialProgress = mockTutorialProgress.filter((p) => p.tutorialId !== id);
+        return (before - mockTutorialProgress.length) as T;
+      }
+      const n = mockTutorialProgress.length;
+      mockTutorialProgress = [];
+      return n as T;
+    }
+
+    case "seed_tutorial_sample":
+      return {
+        conversationId: "conv-tutorial-sample",
+        toolId: "tool-tutorial-sample-planner",
+        created: true,
+      } as T;
+
+    case "cleanup_tutorial_sample":
+      return 0 as T;
+
     default:
       throw new TauriCommandError(`Unknown command: ${command}`);
   }
@@ -2592,6 +2673,7 @@ export function __setMockAiConfigured(configured: boolean): void {
 
 /** Test helper to reset mock database. */
 export function __resetMockDb(): void {
+  mockTutorialProgress = [];
   mockDb.conversations = [];
   mockDb.projects = [];
   mockDb.messages.clear();

@@ -28,17 +28,17 @@ type TransactionRow = {
 };
 
 /**
- * Synthetic read-only replay event.
+ * Synthetic or timeline-backed read-only replay event.
  *
  * HARD RULE: Replay never reinvokes the provider, never re-applies
  * transactions, and never resubmits forms. Events are display-only.
  *
- * Backend today exposes a transaction list (not a full event log), so each
- * row is mapped to a synthetic "Committed transaction" event for pacing.
+ * Prefer redacted turn timeline events when present; otherwise map each
+ * committed transaction to a synthetic "Committed transaction" event.
  */
 export type ReplayEvent = {
   id: string;
-  kind: "committed_transaction";
+  kind: string;
   summary: string;
   createdAt: string;
   status: string;
@@ -134,6 +134,41 @@ function parseTransactions(raw: Record<string, unknown>[]): TransactionRow[] {
   return rows;
 }
 
+export type TimelineRow = {
+  id: string;
+  conversationId: string;
+  turnId: string;
+  sequence: number;
+  kind: string;
+  redactedPayload?: unknown;
+  createdAt: string;
+};
+
+function parseTimelineRows(raw: Record<string, unknown>[]): TimelineRow[] {
+  const rows: TimelineRow[] = [];
+  for (const row of raw) {
+    const id = asString(row.id);
+    const conversationId = asString(row.conversationId);
+    const turnId = asString(row.turnId);
+    const kind = asString(row.kind);
+    if (!id || !conversationId || !turnId || !kind) continue;
+    const sequence =
+      typeof row.sequence === "number" && Number.isFinite(row.sequence)
+        ? row.sequence
+        : 0;
+    rows.push({
+      id,
+      conversationId,
+      turnId,
+      sequence,
+      kind,
+      redactedPayload: row.redactedPayload,
+      createdAt: asString(row.createdAt),
+    });
+  }
+  return rows;
+}
+
 /**
  * Map transaction list → chronological synthetic events for the player.
  * Honest limitation: not a true provider/form event stream — transaction commits only.
@@ -158,6 +193,61 @@ export function transactionsToReplayEvents(
       status: t.status,
       opsCount: t.opsCount,
     }));
+}
+
+const TIMELINE_KIND_LABELS: Record<string, string> = {
+  user_request: "User request",
+  provider_start: "Provider started",
+  text_checkpoint: "Text checkpoint",
+  operation_received: "Operation received",
+  operation_accepted: "Operation accepted",
+  operation_rejected: "Operation rejected",
+  preview_update: "Preview update",
+  approval: "Approval",
+  commit: "Commit",
+  failure: "Failure",
+  cancellation: "Cancellation",
+  completion: "Completion",
+};
+
+/** Map redacted timeline DTOs → display-only replay events (never apply). */
+export function timelineToReplayEvents(rows: TimelineRow[]): ReplayEvent[] {
+  return [...rows]
+    .sort((a, b) => {
+      const ta = Date.parse(a.createdAt);
+      const tb = Date.parse(b.createdAt);
+      if (!Number.isNaN(ta) && !Number.isNaN(tb) && ta !== tb) return ta - tb;
+      if (a.turnId !== b.turnId) return a.turnId.localeCompare(b.turnId);
+      return a.sequence - b.sequence;
+    })
+    .map((row) => {
+      const label = TIMELINE_KIND_LABELS[row.kind] ?? row.kind;
+      const payload =
+        row.redactedPayload && typeof row.redactedPayload === "object"
+          ? (row.redactedPayload as Record<string, unknown>)
+          : null;
+      const detail =
+        typeof payload?.summary === "string"
+          ? payload.summary
+          : typeof payload?.message === "string"
+            ? payload.message
+            : typeof payload?.reason === "string"
+              ? payload.reason
+              : typeof payload?.syncKind === "string"
+                ? payload.syncKind
+                : "";
+      const summary = redactSecretsForDisplay(
+        detail ? `${label}: ${detail}` : label,
+      );
+      return {
+        id: row.id,
+        kind: row.kind,
+        summary,
+        createdAt: row.createdAt,
+        status: row.kind,
+        opsCount: 0,
+      };
+    });
 }
 
 function formatTime(iso: string): string {
@@ -248,13 +338,16 @@ export function ReplayPlayer({ events }: { events: ReplayEvent[] }) {
     cursor == null
       ? "Live"
       : `${cursor + 1} / ${events.length}`;
+  const usesTimeline = events.some((e) => e.kind !== "committed_transaction");
 
   return (
     <div className="replay-player" aria-label="Read-only replay player">
       <p className="muted conversation-history-note">
         Read-only replay. Never reinvokes the provider, never re-applies
-        transactions, never resubmits forms. Events are synthetic from the
-        transaction list (Committed transaction), not a full history stream.
+        transactions, never resubmits forms.
+        {usesTimeline
+          ? " Showing redacted turn timeline events when available."
+          : " Events are synthetic from the transaction list (Committed transaction) when no timeline exists."}
       </p>
       <div className="conversation-history-replay-controls">
         <button
@@ -377,6 +470,7 @@ export function ConversationHistory({
   const [branches, setBranches] = useState<BranchRow[]>([]);
   const [snapshots, setSnapshots] = useState<SnapshotRow[]>([]);
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
+  const [timelineRows, setTimelineRows] = useState<TimelineRow[]>([]);
   const [diagnostics, setDiagnostics] = useState<unknown[]>([]);
   const [snapshotDetail, setSnapshotDetail] = useState<string | null>(null);
   const [branchName, setBranchName] = useState("");
@@ -413,11 +507,14 @@ export function ConversationHistory({
           if (!isCurrent()) return;
           setSnapshots(rows);
         } else if (next === "replay") {
-          const rows = parseTransactions(
-            await api.listTransactions(convId, 50),
-          );
+          const [timelineRaw, txnRaw] = await Promise.all([
+            api.listTurnTimeline(convId, null, 200).catch(() => []),
+            api.listTransactions(convId, 50),
+          ]);
           if (!isCurrent()) return;
-          setTransactions(rows);
+          const timeline = parseTimelineRows(timelineRaw);
+          setTimelineRows(timeline);
+          setTransactions(parseTransactions(txnRaw));
         } else if (next === "inspector") {
           if (!developerMode) return;
           const rows = await api.listDiagnostics(convId, 20);
@@ -442,6 +539,7 @@ export function ConversationHistory({
     setBranches([]);
     setSnapshots([]);
     setTransactions([]);
+    setTimelineRows([]);
     setDiagnostics([]);
     setSnapshotDetail(null);
     setError(null);
@@ -534,7 +632,10 @@ export function ConversationHistory({
     }
   };
 
-  const replayEvents = transactionsToReplayEvents(transactions);
+  const replayEvents =
+    timelineRows.length > 0
+      ? timelineToReplayEvents(timelineRows)
+      : transactionsToReplayEvents(transactions);
 
   return (
     <>
@@ -544,7 +645,10 @@ export function ConversationHistory({
         aria-label="Open conversation history"
         aria-expanded={open}
         aria-haspopup="dialog"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setOpen(true);
+          window.dispatchEvent(new CustomEvent("coreside:history-opened"));
+        }}
       >
         History
       </button>

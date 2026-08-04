@@ -569,6 +569,27 @@ img {
 }
 
 .panel-header h1,
+.tool-preview-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: var(--space-2);
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  color: var(--core-text-primary);
+  background: color-mix(in srgb, var(--core-accent) 22%, var(--core-surface-primary));
+  border: 1px solid color-mix(in srgb, var(--core-accent) 45%, var(--core-border));
+}
+
+.tool-preview-note {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
 .tool-canvas-header h2,
 .settings-header h1 {
   margin: 0;
@@ -1238,6 +1259,15 @@ img {
   color: var(--text-primary);
   font-family: var(--font-display);
   font-weight: 600;
+}
+
+.empty-state p {
+  margin: 0 0 var(--space-3);
+}
+
+.empty-state-actions {
+  justify-content: center;
+  margin-top: var(--space-2);
 }
 
 .empty-icon {
@@ -3995,4 +4025,135 @@ img {
 .application-details-list {
   margin: 0.35rem 0 0;
   padding-left: 1.1rem;
+}
+
+/* Onboarding / tutorial (RC3.4) */
+.tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  pointer-events: none;
+}
+
+.tutorial-spotlight {
+  position: fixed;
+  border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  border: 2px solid var(--accent-primary, #2f8f63);
+  pointer-events: none;
+  transition: top 0.2s ease, left 0.2s ease, width 0.2s ease, height 0.2s ease;
+}
+
+.tutorial-overlay.reduced-motion .tutorial-spotlight {
+  transition: none;
+}
+
+.tutorial-popover {
+  pointer-events: auto;
+  background: var(--core-modal-overlay, var(--surface));
+  color: var(--fg, var(--text-primary));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem 1.1rem 0.9rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  position: relative;
+}
+
+.tutorial-popover h3 {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.tutorial-popover p {
+  margin: 0 0 0.85rem;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.tutorial-popover-progress {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tutorial-popover-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.tutorial-popover-close {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
+}
+
+.onboarding-welcome .provider-form-actions {
+  padding: 0 1.25rem 1.25rem;
+}
+
+.contextual-hint {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.65rem 0.75rem;
+  align-items: start;
+  max-width: min(22rem, calc(100vw - 2rem));
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--core-card-overlay);
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--text-primary) 12%, transparent);
+}
+
+.contextual-hint-body strong {
+  display: block;
+  font-size: 0.9rem;
+  margin-bottom: 0.2rem;
+}
+
+.contextual-hint-body p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.contextual-hint-close {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+}
+
+.whats-new-banner {
+  position: fixed;
+  left: 50%;
+  top: 0.75rem;
+  z-index: 35;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  max-width: min(36rem, calc(100vw - 2rem));
+  padding: 0.65rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--core-card-overlay));
+}
+
+.whats-new-banner-body strong {
+  display: block;
+  font-size: 0.85rem;
+  margin-bottom: 0.1rem;
+}
+
+.whats-new-banner-body p {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
 }
