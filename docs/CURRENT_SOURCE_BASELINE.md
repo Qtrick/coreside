@@ -12,9 +12,9 @@
 | --- | --- |
 | Path | `/Users/qunyingfan/Coreside` |
 | Branch | `main` |
-| Commit | `76072ff4cfbca185d8420fc4f6da64a49aa91b17` |
+| Commit | `a491887e2a80d21619301ed6049de7f29ad9b44b` |
 | Dirty | Yes (development evidence only) |
-| Source fingerprint | `20d77510a6dbbc7509d2d3bcdbdfa57d6bb9a5e9bbe278f9a32925e78b4bb52f` |
+| Source fingerprint | `4d9e8454a5e9907e216f73252598ab544aa4f802eef1fb4e335b341b24ee4aea` |
 
 ## Uploaded archive
 
@@ -22,10 +22,10 @@
 | --- | --- |
 | Filename | `Coreside Chat AI.zip` |
 | Path | `/Users/qunyingfan/Downloads/Coreside Chat AI.zip` |
-| Expected SHA-256 | `10d7c5110a12525b53a48ee3dc66bf8d3a054c243553bc4ee9a1db27bc8b86b5` |
-| Observed SHA-256 | `10d7c5110a12525b53a48ee3dc66bf8d3a054c243553bc4ee9a1db27bc8b86b5` |
+| Expected SHA-256 | `a7d6c7ab2e5ac1c58b83b1607a49171338dbfba927b29ed549aa5d3510f0317d` |
+| Observed SHA-256 | `a7d6c7ab2e5ac1c58b83b1607a49171338dbfba927b29ed549aa5d3510f0317d` |
 | Status | **present_hash_match** |
-| Supersedes | `75946b05d7778368700c8d827007d83f1cce0006fcedad8cf69b35f37bb23d69` (prior expected / unavailable baseline) |
+| Supersedes | `10d7c5110a12525b53a48ee3dc66bf8d3a054c243553bc4ee9a1db27bc8b86b5` (prior expected / unavailable baseline) |
 
 ## Lockfiles
 
@@ -48,21 +48,21 @@
 
 | Metric | Active |
 | --- | --- |
-| `src` files | 155 |
-| Rust `.rs` | 175 |
+| `src` files | 158 |
+| Rust `.rs` | 177 |
 | Migrations | 16 |
 | E2E specs | 13 |
 | Tauri commands | 213 |
-| Fingerprint files | 613 |
+| Fingerprint files | 619 |
 
 ## Archive vs active
 
 | Metric | Count |
 | --- | --- |
 | Comparison status | compared |
-| Only in active | 3 |
+| Only in active | 6 |
 | Only in archive | 0 |
-| Changed | 17 |
+| Changed | 34 |
 
 ## Generation command
 

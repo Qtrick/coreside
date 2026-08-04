@@ -60,16 +60,9 @@ impl HostedAiProvider {
             "content": system_prompt
         })];
         for m in messages {
-            let role = match m.role.as_str() {
-                "assistant" | "model" => "assistant",
-                "system" => "system",
-                // tool_result maps to user for API shape; content is untrusted-enveloped.
-                "tool_result" => "user",
-                _ => "user",
-            };
             out.push(json!({
-                "role": role,
-                "content": m.content
+                "role": m.role.as_openai_role(),
+                "content": m.provider_text()
             }));
         }
         out

@@ -1,12 +1,13 @@
 # Attachment Lifecycle (RC3)
 
 **Product:** Coreside  
-**Status:** Partial — atomic DB claim landed; FS promote crash window remains **P1** until crash/restart suite passes  
+**Phase:** RC3.3 Phase 13 partial — authorization + periodic GC foundation  
+**Status:** Partial — atomic DB claim landed; conversation-scoped read auth + `run_attachment_gc` **Unit Verified**; FS promote crash window remains **P1** until crash/restart suite passes  
 **Access date:** 2026-08-03
 
 ## Authoritative owner
 
-SQLite `chat_attachments` (migration `016`) is authoritative for attachment truth. Opaque IDs only on public IPC.
+SQLite `chat_attachments` (migration `016`) is authoritative for attachment truth. Opaque IDs only on public IPC. Opaque IDs alone are **not** sufficient for read/download/bytes — callers must supply conversation scope.
 
 ## States in use
 
@@ -17,6 +18,24 @@ SQLite `chat_attachments` (migration `016`) is authoritative for attachment trut
 | `cancelled` | User/queue cancel |
 | `expired` | Past `expires_at`; GC marks + deletes files |
 | `attached` | Claimed to a message (DB); files may still be promoting |
+
+## Authorization (Phase 13 partial)
+
+Helper: `authorize_attachment_access(conn, attachment_id, conversation_id)`.
+
+Read paths that must authorize:
+
+- `get_chat_attachment_src` — requires `conversationId`; returns scoped opaque URL
+- Custom protocol bytes — URL shape `/attachment/{conversationId}/{attachmentId}`; calls the same helper before reading
+
+Rules:
+
+1. Conversation must exist in the caller's healthy profile DB (project ownership via conversation membership).
+2. Attachment row must be bound to that `conversation_id` (unbound staged rows are denied on scoped reads).
+3. When `message_id` is set, the message must belong to the same conversation.
+4. Wrong `conversation_id` → deny (`not_found`, no enumeration leak).
+
+Reports: `reports/attachment-authorization-results.json` → **Unit Verified**.
 
 ## Message commit (current)
 
@@ -40,16 +59,22 @@ Invariant after successful send: message with N attachments has N `attached` row
 
 ## GC
 
-`reconcile_and_sweep_attachments` (startup):
+`reconcile_and_sweep_attachments` (startup + command):
 
-- Expire staged/failed/cancelled past `expires_at` (bounded).
-- Promote attached-but-still-in-staging files.
-- Log missing durable files (no silent blanking).
+- Healthy profile only (`require_profile`).
+- Expire staged/failed/cancelled past `expires_at` (bounded, `LIMIT 200`).
+- Promote attached-but-still-in-staging files under managed roots.
+- File deletes use `remove_managed_file_no_follow` (no symlink follow).
+- Summary is counts-only (`expired` / `promotedOrphans` / `missingDurable`) — redacted.
+
+`run_attachment_gc` Tauri command wraps the same sweep for scheduler / manual invoke. **Scheduler wiring is next** (not hooked into the automation ticker in this slice).
+
+Reports: `reports/attachment-gc-results.json` → **Unit Verified**.
 
 ## Remaining P1/P2
 
-- Protocol whole-file reads (P1)
-- Protocol window/capability auth beyond opaque ID (P1)
-- Multimodal provider parts (P1)
+- Protocol whole-file reads remain bounded but still load into memory (P1)
+- Multimodal provider parts (P1) — **out of scope for this slice**
 - Parser-level image bomb budgets (P2)
-- Full productized periodic sweeper beyond startup (P2)
+- Wire `run_attachment_gc` into a periodic scheduler tick (P2)
+- Attachment crash-consistency suite (P1)

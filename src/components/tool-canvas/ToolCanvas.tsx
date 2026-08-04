@@ -226,32 +226,13 @@ export function ToolCanvas() {
       values: Record<string, unknown>;
     }) => {
       const summary = `Tool form submitted (${payload.eventName})`;
-      const structuredPayload = {
-        kind: "structuredUserInput",
-        toolId: payload.toolId,
-        componentId: payload.componentId ?? null,
-        eventName: payload.eventName,
-        values: payload.values,
-      };
-      // ponytail: keep composer/prompt payloads bounded (8 KiB compact JSON).
-      let structuredJson = JSON.stringify(structuredPayload);
-      if (structuredJson.length > 8192) {
-        structuredJson = JSON.stringify({
-          kind: "structuredUserInput",
-          toolId: payload.toolId,
-          componentId: payload.componentId ?? null,
-          eventName: payload.eventName,
-          truncated: true,
-          valueKeys: Object.keys(payload.values),
-        });
-      }
-      const structuredBlock = [
-        "[STRUCTURED_USER_INPUT trust=local_user_content]",
-        "```json",
-        structuredJson,
-        "```",
-        "[/STRUCTURED_USER_INPUT]",
-      ].join("\n");
+      // Typed StructuredUserInput is sealed in Rust via send_message.
+      // Do not put trust-bearing [STRUCTURED_USER_INPUT] markers in chat text —
+      // markers are display-only leftovers and are not authority.
+      const fields =
+        Object.keys(payload.values).length > 64
+          ? Object.fromEntries(Object.entries(payload.values).slice(0, 64))
+          : payload.values;
       void (async () => {
         if (activeConversationId) {
           try {
@@ -262,6 +243,7 @@ export function ToolCanvas() {
               visibility: "model_context_only",
               payload: {
                 toolId: payload.toolId,
+                formId: payload.toolId,
                 componentId: payload.componentId ?? null,
                 eventName: payload.eventName,
                 values: payload.values,
@@ -269,10 +251,14 @@ export function ToolCanvas() {
               summary,
             });
           } catch {
-            // Ledger is best-effort; structured block still reaches the model.
+            // Ledger is best-effort; typed send_message path still seals trust.
           }
         }
-        void sendMessage(`${summary}\n\n${structuredBlock}`);
+        void sendMessage(summary, [], [], {
+          formId: payload.toolId,
+          applicationId: payload.toolId,
+          fields,
+        });
       })();
     },
     [activeConversationId, activeProjectId, sendMessage],

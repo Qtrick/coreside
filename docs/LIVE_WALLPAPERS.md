@@ -2,7 +2,7 @@
 
 Schema-driven project and workspace backgrounds in `src-tauri/src/wallpapers/`.
 
-For Templates UI, selection fix, Live badges, and Apply-only behavior, see [WALLPAPERS.md](./WALLPAPERS.md). For surface/contrast tokens, see [READABILITY.md](./READABILITY.md).
+For Templates UI, selection fix, Live badges, and preview-first apply (durable save follows), see [WALLPAPERS.md](./WALLPAPERS.md). For surface/contrast tokens, see [READABILITY.md](./READABILITY.md).
 
 ## Schema
 

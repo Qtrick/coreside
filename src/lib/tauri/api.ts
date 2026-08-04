@@ -232,6 +232,13 @@ export const api = {
       mimeType?: string;
       byteSize?: number;
     }> | null;
+    /** Typed form fields — Rust seals trust; never rely on text markers. */
+    structuredUserInput?: {
+      formId: string;
+      applicationId?: string | null;
+      surfaceId?: string | null;
+      fields: Record<string, unknown>;
+    } | null;
     /** Per-send Channel handler — authoritative for text/action/error/operation. */
     onEvent?: (event: AgentTurnEvent) => void;
   }) => {
@@ -264,10 +271,17 @@ export const api = {
     ),
   cancelChatAttachment: (attachmentId: string) =>
     invoke<void>("cancel_chat_attachment", { attachmentId }),
-  getChatAttachmentSrc: (attachmentId: string) =>
+  getChatAttachmentSrc: (attachmentId: string, conversationId: string) =>
     invoke<{ id: string; url: string }>("get_chat_attachment_src", {
       attachmentId,
+      conversationId,
     }),
+  runAttachmentGc: () =>
+    invoke<{
+      expired: number;
+      missingDurable: number;
+      promotedOrphans: number;
+    }>("run_attachment_gc"),
   cancelRequest: (conversationId?: string) =>
     invoke<void>("cancel_request", { conversationId }),
   discardToolChange: (messageId: string) =>

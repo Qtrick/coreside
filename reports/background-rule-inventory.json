@@ -1,63 +1,2345 @@
 {
+  "schemaVersion": 1,
   "product": "Coreside",
-  "accessDate": "2026-08-02",
-  "generatedAt": "2026-08-02T21:45:00.000Z",
-  "purpose": "Classify remaining var(--surface) risk for wallpaper compositing",
-  "migratedByReviewer": [
-    {
-      "selector": ".settings-section",
-      "to": "var(--core-card-overlay)",
-      "status": "migrated"
-    },
-    {
-      "selector": ".message-bubble",
-      "to": "var(--core-card-overlay)",
-      "status": "migrated"
-    },
-    {
-      "selector": ".btn-secondary",
-      "to": "var(--core-control-overlay)",
-      "status": "migrated"
-    },
-    {
-      "selector": "panel/*",
-      "to": "var(--core-content-overlay)",
-      "status": "migrated",
-      "note": "Unified dual panel-alpha path"
-    },
-    {
-      "selector": "tint-onto-surface selected/status chrome",
-      "to": "overlay tokens",
-      "status": "migrated",
-      "note": "21 inventory risks closed 2026-08-02"
-    }
+  "purpose": "Machine-readable inventory of background / background-color / color-mix usages in src css/tsx that may bypass design tokens",
+  "generatedAt": "2026-08-04T02:01:31.248Z",
+  "commit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+  "dirty": true,
+  "method": "one-shot node grep over src/**/*.{css,ts,tsx} excluding *.test.*",
+  "patterns": [
+    "background",
+    "background-color",
+    "color-mix"
   ],
-  "intentionalOpaqueCandidates": [
+  "summary": {
+    "fileCountScanned": 127,
+    "hitCount": 258,
+    "mayBypassTokensCount": 6,
+    "usesCssVarCount": 220,
+    "hardCodedColorCount": 11
+  },
+  "hits": [
+    {
+      "file": "src/app/App.tsx",
+      "line": 19,
+      "kind": "background",
+      "text": "background: \"var(--surface-muted, #ecefe8)\",",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": true
+    },
+    {
+      "file": "src/components/CommandPalette.tsx",
+      "line": 113,
+      "kind": "background",
+      "text": "background: \"rgba(0,0,0,0.35)\",",
+      "mayBypassTokens": true,
+      "usesCssVar": false,
+      "hardCodedColor": true
+    },
+    {
+      "file": "src/components/CommandPalette.tsx",
+      "line": 125,
+      "kind": "background",
+      "text": "background: \"var(--core-modal-overlay, var(--surface))\",",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/components/CommandPalette.tsx",
+      "line": 144,
+      "kind": "background",
+      "text": "background: \"var(--core-control-overlay, var(--surface))\",",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/components/chat/ChangeProposalCard.tsx",
+      "line": 96,
+      "kind": "background",
+      "text": "background: \"var(--core-muted-overlay, var(--surface-muted, var(--surface)))\",",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/components/chat/ConflictBanner.tsx",
+      "line": 19,
+      "kind": "background",
+      "text": "background: \"var(--core-muted-overlay, var(--surface-muted, var(--surface)))\",",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/components/tool-renderer/nodes.tsx",
+      "line": 1161,
+      "kind": "background",
+      "text": "background: asString(obj.fill, \"var(--accent-primary)\"),",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/components/wallpaper/LiveWallpaper.tsx",
+      "line": 369,
+      "kind": "background",
+      "text": "style={{ background: fallback, opacity }}",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/lib/interface-transparency.ts",
+      "line": 118,
+      "kind": "color-mix",
+      "text": "`color-mix(in srgb, var(--surface) ${Math.round(tokens.panelAlpha * 100)}%, transparent)`,",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/lib/interface-transparency.ts",
+      "line": 122,
+      "kind": "color-mix",
+      "text": "`color-mix(in srgb, var(--surface) ${Math.round(tokens.sidebarAlpha * 100)}%, transparent)`,",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/lib/interface-transparency.ts",
+      "line": 127,
+      "kind": "color-mix",
+      "text": "`color-mix(in srgb, var(--surface) ${Math.round(tokens.cardAlpha * 100)}%, transparent)`,",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/lib/interface-transparency.ts",
+      "line": 131,
+      "kind": "color-mix",
+      "text": "`color-mix(in srgb, var(--surface-muted) ${Math.round(tokens.cardAlpha * 100)}%, transparent)`,",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/lib/interface-transparency.ts",
+      "line": 135,
+      "kind": "color-mix",
+      "text": "`color-mix(in srgb, var(--surface) ${Math.round(tokens.controlAlpha * 100)}%, transparent)`,",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/lib/interface-transparency.ts",
+      "line": 139,
+      "kind": "color-mix",
+      "text": "`color-mix(in srgb, var(--surface) ${Math.round(tokens.headerAlpha * 100)}%, transparent)`,",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/lib/interface-transparency.ts",
+      "line": 143,
+      "kind": "color-mix",
+      "text": "`color-mix(in srgb, var(--surface) ${Math.round(tokens.modalAlpha * 100)}%, transparent)`,",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/lib/readability/contrast.ts",
+      "line": 75,
+      "kind": "background",
+      "text": "background: string | RgbColor,",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/lib/readability/contrast.ts",
+      "line": 91,
+      "kind": "background",
+      "text": "background: string,",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/lib/tauri/mocks/index.ts",
+      "line": 1150,
+      "kind": "background",
+      "text": "background: { light: \"#f0f4f8\", dark: \"#0f1418\" },",
+      "mayBypassTokens": true,
+      "usesCssVar": false,
+      "hardCodedColor": true
+    },
+    {
+      "file": "src/lib/tauri/mocks/index.ts",
+      "line": 1157,
+      "kind": "background",
+      "text": "background: { light: \"#f5f6f1\", dark: \"#050805\" },",
+      "mayBypassTokens": true,
+      "usesCssVar": false,
+      "hardCodedColor": true
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 37,
+      "kind": "background",
+      "text": "background: var(--core-background);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 47,
+      "kind": "background",
+      "text": "background:",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 48,
+      "kind": "color-mix",
+      "text": "radial-gradient(1200px 500px at 10% -10%, color-mix(in srgb, var(--accent-primary) 12%, transparent), transparent 55%),",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 49,
+      "kind": "color-mix",
+      "text": "radial-gradient(900px 420px at 100% 0%, color-mix(in srgb, var(--accent-secondary) 10%, transparent), transparent 50%),",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 132,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 142,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--border) 80%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 142,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--border) 80%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 147,
+      "kind": "background",
+      "text": "background: var(--accent-primary);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 182,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--background) 92%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 182,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--background) 92%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 208,
+      "kind": "background",
+      "text": "background: var(--core-sidebar-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 218,
+      "kind": "background",
+      "text": "background: var(--core-content-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 242,
+      "kind": "background",
+      "text": "background: var(--core-sidebar-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 264,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 294,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 308,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 316,
+      "kind": "background",
+      "text": "background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 317,
+      "kind": "color-mix",
+      "text": "box-shadow: inset 0 0 0 1px color-mix(in srgb, white 20%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 333,
+      "kind": "background",
+      "text": "background: none;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 413,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 434,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 438,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 438,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 439,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--accent-primary) 28%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 464,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 469,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 473,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 473,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 474,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--accent-primary) 28%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 487,
+      "kind": "background",
+      "text": "background: var(--accent-primary);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 492,
+      "kind": "background",
+      "text": "background: var(--accent-primary-hover);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 496,
+      "kind": "background",
+      "text": "background: var(--core-control-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 501,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 505,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 509,
+      "kind": "background",
+      "text": "background: var(--danger-muted);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 511,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--danger) 25%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 546,
+      "kind": "background",
+      "text": "background: var(--core-content-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 609,
+      "kind": "background",
+      "text": "background: var(--core-card-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 615,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 615,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 616,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--accent-primary) 22%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 621,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--accent-primary) 18%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 625,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--danger) 35%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 626,
+      "kind": "background",
+      "text": "background: var(--danger-muted);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 669,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 70%, var(--text));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 669,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 70%, var(--text));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 737,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 744,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 766,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 773,
+      "kind": "color-mix",
+      "text": "outline: 2px solid color-mix(in srgb, var(--accent-primary) 35%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 800,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 812,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 826,
+      "kind": "background",
+      "text": "background: var(--core-header-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 836,
+      "kind": "background",
+      "text": "background: var(--core-control-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 848,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 877,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 884,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 900,
+      "kind": "background",
+      "text": "background: var(--accent-primary);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 915,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 938,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 958,
+      "kind": "background",
+      "text": "background: var(--core-card-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1025,
+      "kind": "background-color",
+      "text": "background-color: var(--surface-muted);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1046,
+      "kind": "color-mix",
+      "text": "outline: 2px solid color-mix(in srgb, var(--accent-primary) 55%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1057,
+      "kind": "color-mix",
+      "text": "border: 1px solid color-mix(in srgb, var(--accent-primary) 35%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1059,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 8%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1059,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 8%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1069,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 16%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1069,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 16%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1089,
+      "kind": "color-mix",
+      "text": "border: 1px dashed color-mix(in srgb, var(--accent-secondary) 45%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1090,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-secondary) 10%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1090,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-secondary) 10%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1168,
+      "kind": "background",
+      "text": "background: var(--core-modal-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1200,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--surface-muted) 88%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1200,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--surface-muted) 88%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1250,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1291,
+      "kind": "background",
+      "text": "background: var(--core-control-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1298,
+      "kind": "color-mix",
+      "text": "outline: 2px solid color-mix(in srgb, var(--accent-primary) 55%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1308,
+      "kind": "background",
+      "text": "background: var(--core-card-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1322,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1331,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 10%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1331,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 10%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1363,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1371,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 8%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1371,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 8%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1375,
+      "kind": "color-mix",
+      "text": "outline: 2px solid color-mix(in srgb, var(--accent-primary) 55%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1380,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--accent-primary) 35%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1381,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 12%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1381,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 12%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1447,
+      "kind": "background",
+      "text": "background: var(--core-card-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1545,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--accent-primary) 40%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1546,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1546,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1570,
+      "kind": "background",
+      "text": "background: var(--core-control-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1578,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--accent-primary) 28%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1582,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--accent-primary) 40%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1583,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1583,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1599,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1612,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1618,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--success) 14%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1618,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--success) 14%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1623,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-secondary) 16%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1623,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-secondary) 16%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1628,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--danger) 14%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1628,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--danger) 14%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1635,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1671,
+      "kind": "background",
+      "text": "background: var(--core-card-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1687,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1687,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1688,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--accent-primary) 30%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1693,
+      "kind": "background",
+      "text": "background: var(--border);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1718,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1725,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 16%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1725,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 16%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1755,
+      "kind": "background",
+      "text": "background: var(--core-control-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1797,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1826,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1832,
+      "kind": "background",
+      "text": "background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1842,
+      "kind": "background",
+      "text": "background: var(--core-card-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1857,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--success) 40%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1858,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--success) 12%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1858,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--success) 12%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1862,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--danger) 40%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1863,
+      "kind": "background",
+      "text": "background: var(--danger-muted);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1871,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1884,
+      "kind": "background",
+      "text": "background: var(--danger-muted);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1905,
+      "kind": "background",
+      "text": "background: var(--accent-primary);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1976,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, #0b0f0b 55%, transparent);",
+      "mayBypassTokens": true,
+      "usesCssVar": false,
+      "hardCodedColor": true
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1976,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, #0b0f0b 55%, transparent);",
+      "mayBypassTokens": true,
+      "usesCssVar": false,
+      "hardCodedColor": true
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 1989,
+      "kind": "background",
+      "text": "background: var(--core-modal-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2026,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2059,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2067,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--accent-primary) 35%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2068,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 8%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2068,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 8%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2081,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2109,
+      "kind": "background",
+      "text": "background: var(--core-control-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2231,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 16%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2231,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 16%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2261,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2267,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 55%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2267,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 55%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2268,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--accent-primary) 40%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
     {
       "file": "src/styles/global.css",
       "line": 2279,
-      "selectors": ".settings-toggle-thumb",
-      "classification": "intentional_opaque_exception",
-      "risk": "low_if_exception",
-      "recommendation": "Keep solid knob for contrast over translucent track"
-    }
-  ],
-  "remainingOpaqueSurfaceBackgrounds": [
+      "kind": "background",
+      "text": "background: var(--surface);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
     {
-      "line": 2279,
-      "text": "background: var(--surface);"
+      "file": "src/styles/global.css",
+      "line": 2302,
+      "kind": "background",
+      "text": "background: var(--core-modal-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2321,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2330,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2330,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2339,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2378,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2412,
+      "kind": "background",
+      "text": "background: var(--accent-primary);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2424,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2450,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--accent-primary) 40%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2451,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 10%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2451,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 10%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2463,
+      "kind": "background",
+      "text": "background: var(--core-modal-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2474,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2482,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2493,
+      "kind": "background",
+      "text": "background: var(--border);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2513,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2540,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2559,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2579,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2596,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2596,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2597,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--accent-primary) 28%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2610,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2636,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--project-marker, var(--accent-primary)) 18%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2636,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--project-marker, var(--accent-primary)) 18%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2661,
+      "kind": "background",
+      "text": "background: var(--core-content-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2695,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2739,
+      "kind": "background",
+      "text": "background: var(--core-card-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2785,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2791,
+      "kind": "color-mix",
+      "text": "border-color: color-mix(in srgb, var(--accent-primary) 35%, var(--border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2802,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2815,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2842,
+      "kind": "background",
+      "text": "background: var(--core-control-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2879,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2904,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2947,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2952,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 2992,
+      "kind": "background",
+      "text": "background: var(--core-card-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3000,
+      "kind": "color-mix",
+      "text": "box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-primary) 45%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3005,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3039,
+      "kind": "background",
+      "text": "background: linear-gradient(",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3042,
+      "kind": "color-mix",
+      "text": "color-mix(in srgb, var(--surface-muted) 70%, var(--border))",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3057,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3065,
+      "kind": "background",
+      "text": "background: var(--core-card-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3114,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, #c06d3d 14%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": true
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3114,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, #c06d3d 14%, var(--core-card-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": true
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3141,
+      "kind": "background",
+      "text": "background: var(--core-control-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3159,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3177,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--core-accent) 12%, var(--core-muted-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3177,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--core-accent) 12%, var(--core-muted-overlay));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3178,
+      "kind": "color-mix",
+      "text": "box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--core-accent) 40%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3206,
+      "kind": "background",
+      "text": "background: color-mix(in srgb, var(--core-accent) 22%, var(--core-surface-primary));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3206,
+      "kind": "color-mix",
+      "text": "background: color-mix(in srgb, var(--core-accent) 22%, var(--core-surface-primary));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3207,
+      "kind": "color-mix",
+      "text": "border: 1px solid color-mix(in srgb, var(--core-accent) 45%, var(--core-border));",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3264,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3294,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3317,
+      "kind": "background",
+      "text": "background: none;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3345,
+      "kind": "background",
+      "text": "background: var(--core-card-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3388,
+      "kind": "background",
+      "text": "background: rgba(0, 0, 0, 0.72);",
+      "mayBypassTokens": true,
+      "usesCssVar": false,
+      "hardCodedColor": true
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3406,
+      "kind": "background",
+      "text": "background: none;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3464,
+      "kind": "background",
+      "text": "background: var(--core-card-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3480,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3491,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3506,
+      "kind": "background",
+      "text": "background: var(--core-card-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3535,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3579,
+      "kind": "background",
+      "text": "background: var(--core-card-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3594,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3626,
+      "kind": "background",
+      "text": "background: var(--core-control-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3636,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3644,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3711,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3789,
+      "kind": "background",
+      "text": "background: transparent;",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3796,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3804,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3832,
+      "kind": "background",
+      "text": "background: var(--core-card-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3879,
+      "kind": "background",
+      "text": "background: var(--accent-primary);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/global.css",
+      "line": 3954,
+      "kind": "background",
+      "text": "background: var(--core-muted-overlay);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 3,
+      "kind": "background",
+      "text": "--background: #f5f6f1;",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": true
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 34,
+      "kind": "background",
+      "text": "--core-background: var(--background);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 51,
+      "kind": "color-mix",
+      "text": "--core-content-overlay: color-mix(in srgb, var(--surface) 83%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 52,
+      "kind": "color-mix",
+      "text": "--core-sidebar-overlay: color-mix(in srgb, var(--surface) 79%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 53,
+      "kind": "color-mix",
+      "text": "--core-card-overlay: color-mix(in srgb, var(--surface) 92%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 54,
+      "kind": "color-mix",
+      "text": "--core-muted-overlay: color-mix(in srgb, var(--surface-muted) 92%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 55,
+      "kind": "color-mix",
+      "text": "--core-control-overlay: color-mix(in srgb, var(--surface) 94%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 56,
+      "kind": "color-mix",
+      "text": "--core-header-overlay: color-mix(in srgb, var(--surface) 90%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 57,
+      "kind": "color-mix",
+      "text": "--core-modal-overlay: color-mix(in srgb, var(--surface) 96%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 62,
+      "kind": "background",
+      "text": "--background: #141714;",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": true
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 76,
+      "kind": "color-mix",
+      "text": "--core-content-overlay: color-mix(in srgb, var(--surface) 83%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 77,
+      "kind": "color-mix",
+      "text": "--core-sidebar-overlay: color-mix(in srgb, var(--surface) 79%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 78,
+      "kind": "color-mix",
+      "text": "--core-card-overlay: color-mix(in srgb, var(--surface) 92%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 79,
+      "kind": "color-mix",
+      "text": "--core-muted-overlay: color-mix(in srgb, var(--surface-muted) 92%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 80,
+      "kind": "color-mix",
+      "text": "--core-control-overlay: color-mix(in srgb, var(--surface) 94%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 81,
+      "kind": "color-mix",
+      "text": "--core-header-overlay: color-mix(in srgb, var(--surface) 90%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/styles/tokens.css",
+      "line": 82,
+      "kind": "color-mix",
+      "text": "--core-modal-overlay: color-mix(in srgb, var(--surface) 96%, transparent);",
+      "mayBypassTokens": false,
+      "usesCssVar": true,
+      "hardCodedColor": false
+    },
+    {
+      "file": "src/types/agent.ts",
+      "line": 72,
+      "kind": "background",
+      "text": "background: AccentVariantsSchema.optional(),",
+      "mayBypassTokens": false,
+      "usesCssVar": false,
+      "hardCodedColor": false
     }
-  ],
-  "summary": {
-    "intentionalOpaqueCandidates": 1,
-    "nestedOcclusionRiskRules": 0,
-    "opaqueVarSurfaceBackgroundCount": 1,
-    "betaReady": false,
-    "visualProof": "not_done"
-  },
-  "notes": [
-    "Parent element opacity must not be used for panel translucency",
-    "Tint mixes now target overlay tokens so nested chrome stays translucent",
-    "Visual proof still required before wallpaper assurance is beta-complete"
   ]
 }

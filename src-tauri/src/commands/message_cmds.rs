@@ -10,10 +10,13 @@ use uuid::Uuid;
 
 use super::CommandError;
 use crate::ai::{
-    build_agent_prompt_with_references, chat_with_auto, is_allowed_setting_key,
-    parse_agent_response, project_context_for_prompt, AgentCapability, AgentMessage, AgentRequest,
-    ParsedAgentResponse, ResponseType, SettingsChangePayload, SourceCitation, ToolCallRequest,
-    ToolCallResult, ToolChangePayload, ToolLoop, ToolLoopContext, PROMPT_VERSION,
+    adopt_stored_structured_input, build_agent_prompt_with_references, build_user_parts,
+    chat_with_auto, is_allowed_setting_key, parse_agent_response, project_context_for_prompt,
+    seal_from_ledger_payload, seal_local_user_submission, structured_metadata_value,
+    structured_trust_from_text, AgentCapability, AgentContentPart, AgentMessage, AgentRequest,
+    AgentRole, ParsedAgentResponse, ResponseType, SettingsChangePayload, SourceCitation,
+    StructuredUserInput, StructuredUserInputSubmission, ToolCallRequest, ToolCallResult,
+    ToolChangePayload, ToolLoop, ToolLoopContext, PROMPT_VERSION,
 };
 use crate::db::{self, Message};
 use crate::search::SearchRegistry;
@@ -224,6 +227,7 @@ fn make_text_event(
     text: String,
     previous: Option<&str>,
     sequence: &mut u64,
+    turn_id: &str,
 ) -> AgentTurnEvent {
     *sequence = sequence.saturating_add(1);
     let delta = match previous {
@@ -234,7 +238,7 @@ fn make_text_event(
     AgentTurnEvent::Text {
         conversation_id: conversation_id.to_string(),
         text,
-        turn_id: None,
+        turn_id: Some(turn_id.to_string()),
         sequence: Some(*sequence),
         delta,
     }
@@ -344,6 +348,7 @@ fn emit_live_text_delta(
     app: &AppHandle,
     on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
     conversation_id: &str,
+    turn_id: &str,
     live_text_accum: &mut String,
     last_preview: &mut String,
     text_seq: &mut u64,
@@ -358,7 +363,8 @@ fn emit_live_text_delta(
             } else {
                 Some(last_preview.as_str())
             };
-            let event = make_text_event(conversation_id, preview.clone(), previous, text_seq);
+            let event =
+                make_text_event(conversation_id, preview.clone(), previous, text_seq, turn_id);
             *last_preview = preview;
             emit_turn(app, on_event, event);
         }
@@ -370,9 +376,34 @@ fn emit_live_text_delta(
             Some(last_preview.as_str())
         };
         let text = live_text_accum.clone();
-        let event = make_text_event(conversation_id, text.clone(), previous, text_seq);
+        let event = make_text_event(conversation_id, text.clone(), previous, text_seq, turn_id);
         *last_preview = text;
         emit_turn(app, on_event, event);
+    }
+}
+
+/// Progressive op preview during live TextDelta (RC3.3 Phase 5–6).
+///
+/// Adapted from Partial Update `UpdateStreamParser` / `runModel` progressive
+/// dispatch (MIT) — preview only; durable apply stays at turn end.
+fn emit_progressive_op_previews(
+    app: &AppHandle,
+    on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
+    conversation_id: &str,
+    parser: &mut crate::runtime_v2::NdjsonFrameParser,
+    preview_txn: &mut crate::runtime_v2::PreviewTransaction,
+    delta: &str,
+) {
+    for ev in crate::runtime_v2::ingest_live_chunk(parser, preview_txn, delta) {
+        emit_turn(
+            app,
+            on_event,
+            AgentTurnEvent::Operation {
+                conversation_id: conversation_id.to_string(),
+                operation_id: ev.operation_id,
+                status: ev.status,
+            },
+        );
     }
 }
 
@@ -384,6 +415,7 @@ async fn emit_buffered_text_fluidly(
     app: &AppHandle,
     on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
     conversation_id: &str,
+    turn_id: &str,
     text: &str,
     text_seq: &mut u64,
     cancel: &CancellationToken,
@@ -413,6 +445,7 @@ async fn emit_buffered_text_fluidly(
                 emitted.clone(),
                 previous_owned.as_deref(),
                 text_seq,
+                turn_id,
             );
             emit_turn(app, on_event, event);
             since_emit = 0;
@@ -429,7 +462,13 @@ async fn emit_buffered_text_fluidly(
     emit_turn(
         app,
         on_event,
-        make_text_event(conversation_id, text.to_string(), previous, text_seq),
+        make_text_event(
+            conversation_id,
+            text.to_string(),
+            previous,
+            text_seq,
+            turn_id,
+        ),
     );
 }
 
@@ -497,6 +536,33 @@ fn mentions_from_queue_prompt(
                 CommandError::new("invalid", "Queued mentions payload is invalid")
             }),
     }
+}
+
+fn structured_from_queue_prompt(
+    prompt: &serde_json::Value,
+) -> Result<Option<StructuredUserInputSubmission>, CommandError> {
+    match prompt.get("structuredUserInput") {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => serde_json::from_value::<StructuredUserInputSubmission>(value.clone())
+            .map(Some)
+            .map_err(|_| {
+                CommandError::new("invalid", "Queued structuredUserInput payload is invalid")
+            }),
+    }
+}
+
+fn agent_role_from_db(role: &str) -> AgentRole {
+    match role {
+        "assistant" | "model" => AgentRole::Assistant,
+        "system" => AgentRole::System,
+        "tool_result" => AgentRole::ToolResult,
+        _ => AgentRole::User,
+    }
+}
+
+fn structured_from_message_metadata(meta: &Option<serde_json::Value>) -> Option<StructuredUserInput> {
+    // Re-assert trust in Rust; never honor deserialized trust_class from JSON.
+    adopt_stored_structured_input(meta.as_ref()?)
 }
 
 /// Best-effort staged-id extraction for cleanup when a queue prompt is rejected.
@@ -604,6 +670,12 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
         let Some(item) = item else {
             return;
         };
+        crate::commands::emit_queue_changed(
+            &app,
+            crate::commands::QueueChangeKind::ItemActivated,
+            &conversation_id,
+            Some(&item.id),
+        );
 
         // Lost the race to a live turn after activate: put the item back and exit.
         // The live turn's QueueDrainGuard will reschedule drain on completion.
@@ -611,6 +683,14 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
             let mut db = state.db.lock();
             if let Err(e) = crate::runtime_v2::requeue_queue_item(&mut db, &item.id) {
                 tracing::warn!(error = %e, queue_item = %item.id, "queue requeue failed");
+            } else {
+                drop(db);
+                crate::commands::emit_queue_changed(
+                    &app,
+                    crate::commands::QueueChangeKind::QueueSnapshot,
+                    &conversation_id,
+                    Some(&item.id),
+                );
             }
             return;
         }
@@ -650,6 +730,38 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
                         continue;
                     }
                 }
+                crate::commands::emit_queue_changed(
+                    &app,
+                    crate::commands::QueueChangeKind::ItemCompleted,
+                    &conversation_id,
+                    Some(&item.id),
+                );
+                release_staged_attachments_from_queue_prompt(state, &item.prompt);
+                continue;
+            }
+        };
+        let structured_user_input = match structured_from_queue_prompt(&item.prompt) {
+            Ok(v) => v,
+            Err(e) => {
+                {
+                    let mut db = state.db.lock();
+                    if let Err(complete_err) =
+                        crate::runtime_v2::complete_queue_item(&mut db, &item.id, Some(&e.message))
+                    {
+                        tracing::warn!(
+                            error = %complete_err,
+                            queue_item = %item.id,
+                            "queue complete after invalid structuredUserInput failed"
+                        );
+                        continue;
+                    }
+                }
+                crate::commands::emit_queue_changed(
+                    &app,
+                    crate::commands::QueueChangeKind::ItemCompleted,
+                    &conversation_id,
+                    Some(&item.id),
+                );
                 release_staged_attachments_from_queue_prompt(state, &item.prompt);
                 continue;
             }
@@ -670,6 +782,12 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
                         continue;
                     }
                 }
+                crate::commands::emit_queue_changed(
+                    &app,
+                    crate::commands::QueueChangeKind::ItemCompleted,
+                    &conversation_id,
+                    Some(&item.id),
+                );
                 release_staged_attachments_from_queue_prompt(state, &item.prompt);
                 continue;
             }
@@ -700,6 +818,7 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
             model,
             mentions,
             attachments,
+            structured_user_input,
             false,
             None,
         )
@@ -709,6 +828,14 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
             let mut db = state.db.lock();
             if let Err(e) = crate::runtime_v2::requeue_queue_item(&mut db, &item.id) {
                 tracing::warn!(error = %e, queue_item = %item.id, "queue requeue after busy failed");
+            } else {
+                drop(db);
+                crate::commands::emit_queue_changed(
+                    &app,
+                    crate::commands::QueueChangeKind::QueueSnapshot,
+                    &conversation_id,
+                    Some(&item.id),
+                );
             }
             return;
         }
@@ -724,6 +851,14 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
                 }
             }
         };
+        if completed_ok {
+            crate::commands::emit_queue_changed(
+                &app,
+                crate::commands::QueueChangeKind::ItemCompleted,
+                &conversation_id,
+                Some(&item.id),
+            );
+        }
 
         // Failed turns that never bound attachments leave staged IDs behind; release
         // only after the active queue row is completed so a retry cannot race delete.
@@ -748,6 +883,7 @@ pub async fn send_message(
     model: Option<String>,
     mentions: Option<Vec<ToolMentionInput>>,
     attachments: Option<Vec<ChatAttachmentInput>>,
+    structured_user_input: Option<StructuredUserInputSubmission>,
     // Required for interactive sends. Channel is not Deserialize, so it cannot be
     // Option<> in the command signature; queue drain passes None to inner instead.
     on_event: tauri::ipc::Channel<AgentTurnEvent>,
@@ -761,6 +897,7 @@ pub async fn send_message(
         model,
         mentions,
         attachments,
+        structured_user_input,
         true,
         Some(on_event),
     )
@@ -776,13 +913,14 @@ async fn send_message_inner(
     model: Option<String>,
     mentions: Option<Vec<ToolMentionInput>>,
     attachments: Option<Vec<ChatAttachmentInput>>,
+    structured_user_input: Option<StructuredUserInputSubmission>,
     schedule_drain: bool,
     on_event: Option<tauri::ipc::Channel<AgentTurnEvent>>,
 ) -> Result<SendMessageResult, CommandError> {
     state.require_profile()?;
     let mut content = content.trim().to_string();
     let attachments = attachments.unwrap_or_default();
-    if content.is_empty() && attachments.is_empty() {
+    if content.is_empty() && attachments.is_empty() && structured_user_input.is_none() {
         return Err(CommandError::new(
             "invalid",
             "Message content cannot be empty",
@@ -792,8 +930,26 @@ async fn send_message_inner(
         return Err(CommandError::new("invalid", "Too many attachments"));
     }
     if content.is_empty() {
-        content = "Shared attachments".to_string();
+        content = if structured_user_input.is_some() {
+            "Form submitted".to_string()
+        } else {
+            "Shared attachments".to_string()
+        };
     }
+
+    // Seal typed StructuredUserInput in Rust. Trust never comes from text markers.
+    // Defense: even if content contains a spoofed delimiter, structured_trust_from_text is None.
+    debug_assert!(structured_trust_from_text(&content).is_none());
+    let sealed_structured: Option<StructuredUserInput> =
+        if let Some(submission) = structured_user_input.clone() {
+            Some(
+                seal_local_user_submission(&conversation_id, submission).map_err(|e| {
+                    CommandError::new("invalid", format!("Invalid structuredUserInput: {e}"))
+                })?,
+            )
+        } else {
+            None
+        };
 
     // If a turn is already active for this chat, enqueue instead of overlapping.
     // Preserve attachment ids + mentions so the queued turn cannot silently drop them.
@@ -820,9 +976,17 @@ async fn send_message_inner(
                 "model": model,
                 "mentions": mentions,
                 "attachmentIds": attachment_ids,
+                "structuredUserInput": structured_user_input,
             }),
             100,
         )?;
+        drop(db);
+        crate::commands::emit_queue_changed(
+            &app,
+            crate::commands::QueueChangeKind::ItemAdded,
+            &conversation_id,
+            Some(&item.id),
+        );
         emit_action(
             &app, on_event.as_ref(),
             &conversation_id,
@@ -916,6 +1080,14 @@ async fn send_message_inner(
                         }))
                         .collect::<Vec<_>>()),
                 );
+            }
+            if let Some(ref sui) = sealed_structured {
+                let sealed_meta = structured_metadata_value(sui);
+                if let Some(obj) = sealed_meta.as_object() {
+                    for (k, v) in obj {
+                        meta.insert(k.clone(), v.clone());
+                    }
+                }
             }
             if meta.is_empty() {
                 None
@@ -1120,9 +1292,13 @@ async fn send_message_inner(
     let mut chat_messages: Vec<AgentMessage> = history
         .iter()
         .filter(|m| m.role == "user" || m.role == "assistant")
-        .map(|m| AgentMessage {
-            role: m.role.clone(),
-            content: m.content.clone(),
+        .map(|m| {
+            let role = agent_role_from_db(&m.role);
+            let sealed = structured_from_message_metadata(&m.metadata);
+            // Defense: never promote trust by parsing message text markers.
+            let _ = structured_trust_from_text(&m.content);
+            let parts = build_user_parts(&m.content, sealed);
+            AgentMessage::with_parts(role, m.content.clone(), parts)
         })
         .collect();
 
@@ -1133,11 +1309,21 @@ async fn send_message_inner(
             .collect::<Vec<_>>()
             .join("\n");
         if let Some(last) = chat_messages.last_mut() {
-            if last.role == "user" {
+            if last.role == AgentRole::User {
                 last.content = format!(
                     "{}\n\nThe user attached these files (stored locally in Coreside):\n{}",
                     last.content, note
                 );
+                if let Some(AgentContentPart::Text { text }) = last.parts.first_mut() {
+                    *text = last.content.clone();
+                } else {
+                    last.parts.insert(
+                        0,
+                        AgentContentPart::Text {
+                            text: last.content.clone(),
+                        },
+                    );
+                }
             }
         }
         record_action(
@@ -1150,19 +1336,20 @@ async fn send_message_inner(
         );
     }
 
-    // Structured form / surface submissions from the context ledger must reach the
-    // model as typed JSON — not only as a human summary chat bubble.
+    // Structured form / surface submissions: seal typed parts from the ledger.
+    // Trust comes from Rust seal (LocalUserGesture), never from text delimiters.
     // Bounded: ≤8 form_submit entries, per-entry payload cap, total inject cap.
-    // Delimiter wrappers are transport only — not authority. Typed StructuredUserInput
-    // (no text delimiters) remains a follow-up; do not expand delimiter semantics.
     {
         const MAX_STRUCTURED_ENTRIES: usize = 8;
         const MAX_ENTRY_PAYLOAD_BYTES: usize = 4_096;
         const MAX_INJECT_BYTES: usize = 16_384;
 
-        let last_has_structured = chat_messages
-            .last()
-            .is_some_and(|m| m.role == "user" && m.content.contains("[STRUCTURED_USER_INPUT"));
+        let last_has_typed = chat_messages.last().is_some_and(|m| {
+            m.role == AgentRole::User
+                && m.parts
+                    .iter()
+                    .any(|p| matches!(p, AgentContentPart::StructuredUserInput(_)))
+        });
 
         let db = state.db.lock();
         if let Ok(entries) = crate::runtime_v2::list_ledger_entries(
@@ -1177,15 +1364,26 @@ async fn send_message_inner(
                     e.entry_type.contains("form_submit")
                         && e.visibility == "model_context_only"
                 })
-                .filter(|e| !chat_messages.iter().any(|m| m.content.contains(&e.id)))
+                .filter(|e| {
+                    !chat_messages.iter().any(|m| {
+                        m.parts.iter().any(|p| match p {
+                            AgentContentPart::StructuredUserInput(sui) => {
+                                sui.submission_id == format!("ledger-{}", e.id)
+                                    || m.content.contains(&e.id)
+                            }
+                            _ => m.content.contains(&e.id),
+                        })
+                    })
+                })
                 .collect();
             if !structured.is_empty() {
                 let mut budget = MAX_INJECT_BYTES;
-                let mut out_entries = Vec::new();
+                let mut sealed_parts: Vec<AgentContentPart> = Vec::new();
                 let mut truncated_any = false;
                 for e in &structured {
-                    // UI already embedded this turn's form JSON — skip that sibling only.
-                    if last_has_structured
+                    // This turn already carried a typed part — skip sibling ledger echoes
+                    // that match the same human summary (avoid double-inject).
+                    if last_has_typed
                         && chat_messages
                             .last()
                             .is_some_and(|m| m.content.contains(&e.summary))
@@ -1200,44 +1398,31 @@ async fn send_message_inner(
                             "_truncated": true,
                             "originalBytes": payload_len,
                             "summary": e.summary,
+                            "values": {},
                         });
                     }
-                    let entry = serde_json::json!({
-                        "id": e.id,
-                        "entryType": e.entry_type,
-                        "summary": e.summary,
-                        "payload": payload,
-                        "createdAt": e.created_at,
-                    });
-                    let entry_bytes = serde_json::to_vec(&entry).map(|b| b.len()).unwrap_or(0);
+                    let entry_bytes = serde_json::to_vec(&payload).map(|b| b.len()).unwrap_or(0);
                     if entry_bytes + 64 > budget {
                         truncated_any = true;
                         break;
                     }
-                    budget = budget.saturating_sub(entry_bytes);
-                    out_entries.push(entry);
-                }
-                if !out_entries.is_empty() {
-                    let included = out_entries.len();
-                    let payload = serde_json::json!({
-                        "kind": "structuredUserInput",
-                        "trust": "local_user_content",
-                        "truncated": truncated_any,
-                        "entries": out_entries,
-                    });
-                    let mut serialized =
-                        serde_json::to_string(&payload).unwrap_or_else(|_| "{}".into());
-                    if serialized.len() > MAX_INJECT_BYTES {
-                        // ponytail: hard ceiling — drop bodies rather than blow the prompt.
-                        truncated_any = true;
-                        serialized = "{\"kind\":\"structuredUserInput\",\"trust\":\"local_user_content\",\"truncated\":true,\"entries\":[]}".into();
+                    match seal_from_ledger_payload(&conversation_id, &e.id, &payload) {
+                        Ok(sui) => {
+                            budget = budget.saturating_sub(entry_bytes);
+                            sealed_parts.push(AgentContentPart::StructuredUserInput(sui));
+                        }
+                        Err(err) => {
+                            tracing::warn!(error = %err, entry = %e.id, "structured ledger seal failed");
+                        }
                     }
+                }
+                if !sealed_parts.is_empty() {
+                    let included = sealed_parts.len();
                     if let Some(last) = chat_messages.last_mut() {
-                        if last.role == "user" {
-                            last.content = format!(
-                                "{}\n\n[STRUCTURED_USER_INPUT trust=local_user_content]\n```json\n{}\n```\n[/STRUCTURED_USER_INPUT]",
-                                last.content, serialized
-                            );
+                        if last.role == AgentRole::User {
+                            last.parts.extend(sealed_parts);
+                            // Display stays human-readable; provider_text() flattens typed parts.
+                            // Do not append trust-bearing text delimiters.
                         }
                     }
                     record_action(
@@ -1271,6 +1456,11 @@ async fn send_message_inner(
     let mut live_text_accum = String::new();
     let mut last_preview = String::new();
     let mut text_seq: u64 = 0;
+    // Stable id for this send_message turn's Text events (registry follow-up).
+    let turn_id = Uuid::new_v4().to_string();
+    // Progressive NDJSON op preview (RC3.3) — preview only until turn-end apply.
+    let mut progressive_parser = crate::runtime_v2::NdjsonFrameParser::new();
+    let mut preview_txn = crate::runtime_v2::PreviewTransaction::new(turn_id.clone(), None);
     let resolved = chat_with_auto(
         &config,
         &model_preference,
@@ -1320,9 +1510,18 @@ async fn send_message_inner(
                         &app_for_stream,
                         on_event.as_ref(),
                         &conversation_for_stream,
+                        &turn_id,
                         &mut live_text_accum,
                         &mut last_preview,
                         &mut text_seq,
+                        &text,
+                    );
+                    emit_progressive_op_previews(
+                        &app_for_stream,
+                        on_event.as_ref(),
+                        &conversation_for_stream,
+                        &mut progressive_parser,
+                        &mut preview_txn,
                         &text,
                     );
                 }
@@ -1337,6 +1536,9 @@ async fn send_message_inner(
     let mut resolved = match resolved {
         Ok(r) => r,
         Err(e) => {
+            if matches!(e, crate::ai::AiError::Cancelled) {
+                preview_txn.mark_interrupted();
+            }
             state.take_request(&request_key);
             if schedule_drain {
                 schedule_queued_turn_drain(&app, &conversation_id);
@@ -1474,13 +1676,10 @@ async fn send_message_inner(
         } else {
             parsed.payload.assistant_message.clone()
         };
-        chat_messages.push(AgentMessage {
-            role: "assistant".into(),
-            content: tool_use_note,
-        });
-        chat_messages.push(AgentMessage {
-            role: "tool_result".into(),
-            content: format!(
+        chat_messages.push(AgentMessage::text(AgentRole::Assistant, tool_use_note));
+        chat_messages.push(AgentMessage::text(
+            AgentRole::ToolResult,
+            format!(
                 "[UNTRUSTED_TOOL_RESULT trust=untrusted_tool_output]\n\
                  ```json\n{}\n```\n\
                  [/UNTRUSTED_TOOL_RESULT]\n\n\
@@ -1491,7 +1690,7 @@ async fn send_message_inner(
                  You may include a citations array with id, title, url, displayDomain, and optional snippet.",
                 serde_json::to_string_pretty(&tool_results).unwrap_or_else(|_| "[]".into())
             ),
-        });
+        ));
 
         let app_for_actions = app.clone();
         let conversation_for_actions = conversation_id.clone();
@@ -1503,6 +1702,10 @@ async fn send_message_inner(
         let on_event_for_actions = on_event.clone();
         let mut live_text_accum = String::new();
         let mut last_preview = String::new();
+        // Discard incomplete NDJSON buffer from the prior provider round so a
+        // trailing partial frame cannot splice with the follow-up stream.
+        // Keep preview_txn accepted ops — turn-end apply still owns commit.
+        progressive_parser = crate::runtime_v2::NdjsonFrameParser::new();
 
         let follow_up = chat_with_auto(
             &config,
@@ -1552,9 +1755,18 @@ async fn send_message_inner(
                             &app_for_stream,
                             on_event.as_ref(),
                             &conversation_for_stream,
+                            &turn_id,
                             &mut live_text_accum,
                             &mut last_preview,
                             &mut text_seq,
+                            &text,
+                        );
+                        emit_progressive_op_previews(
+                            &app_for_stream,
+                            on_event.as_ref(),
+                            &conversation_for_stream,
+                            &mut progressive_parser,
+                            &mut preview_txn,
                             &text,
                         );
                     }
@@ -1569,6 +1781,9 @@ async fn send_message_inner(
         resolved = match follow_up {
             Ok(r) => r,
             Err(e) => {
+                if matches!(e, crate::ai::AiError::Cancelled) {
+                    preview_txn.mark_interrupted();
+                }
                 state.take_request(&request_key);
                 if schedule_drain {
                     schedule_queued_turn_drain(&app, &conversation_id);
@@ -1661,6 +1876,7 @@ async fn send_message_inner(
                     parsed.payload.assistant_message.clone(),
                     None,
                     &mut text_seq,
+                    &turn_id,
                 ),
             );
         } else {
@@ -1668,6 +1884,7 @@ async fn send_message_inner(
                 &app,
                 on_event.as_ref(),
                 &conversation_id,
+                &turn_id,
                 &parsed.payload.assistant_message,
                 &mut text_seq,
                 &cancel,
@@ -1758,7 +1975,8 @@ async fn send_message_inner(
     // Runtime V2: apply multi-surface operations when present
     let mut v2_apply: Option<serde_json::Value> = None;
     if parsed.payload.schema_version == "2" {
-        // Live NDJSON path: if operations array empty, harvest NDJSON frames from raw text.
+        // Live NDJSON path: if operations array empty, prefer progressive preview
+        // ops harvested during TextDelta; else post-hoc legacy harvest from raw_text.
         let mut operations_from_payload: Option<Vec<crate::runtime_v2::AppOperation>> = None;
         if let Some(ops_val) = &parsed.payload.operations {
             if !ops_val.is_empty() {
@@ -1768,6 +1986,15 @@ async fn send_message_inner(
                     operations_from_payload = Some(ops);
                 }
             }
+        }
+        if operations_from_payload
+            .as_ref()
+            .map(|o| o.is_empty())
+            .unwrap_or(true)
+            && !preview_txn.is_empty()
+        {
+            // Progressive live previews already emitted status "preview" on Channel.
+            operations_from_payload = Some(preview_txn.accepted_operations().to_vec());
         }
         if operations_from_payload
             .as_ref()

@@ -125,8 +125,9 @@ export function WallpaperSettings() {
       </h4>
       <p>
         Choose a workspace background preset or import media from the library.
-        Project chats can override this with their own wallpaper. Clicking a
-        preset applies it immediately (Apply-only — no separate preview).
+        Project chats can override this with their own wallpaper. Preview applies
+        immediately; durable save follows (failure restores the last saved
+        wallpaper).
       </p>
 
       <label className="wallpaper-preset-search">

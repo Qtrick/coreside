@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T02:26:51.384Z",
+  "commit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+  "dirty": true,
+  "sourceFingerprint": "4d9e8454a5e9907e216f73252598ab544aa4f802eef1fb4e335b341b24ee4aea",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "exitStatus": 0,
+  "evidenceLevel": "classified-not-desktop-verified",
+  "command": "audit:readiness",
+  "baseline": {
+    "kind": "prior-coreside-archive",
+    "label": "Coreside Chat AI(10).zip",
+    "sha256": "10d7c5110a12525b53a48ee3dc66bf8d3a054c243553bc4ee9a1db27bc8b86b5",
+    "note": "Compare active tree posture vs archive 10d7c511… (not a full file diff)."
+  },
+  "advanced": [
+    {
+      "id": "wallpaper-atomic-settings",
+      "from": "Absent / fragmented settings writes",
+      "to": "Unit Verified",
+      "detail": "Atomic workspace appearance + slider coalesce."
+    },
+    {
+      "id": "channel-scoped-streaming",
+      "from": "Global agent-turn text bus",
+      "to": "Unit Verified",
+      "detail": "Interactive send uses Channel; Text kept off global bus in unit path."
+    },
+    {
+      "id": "true-streaming",
+      "from": "Buffered / incomplete live path",
+      "to": "Unit Verified",
+      "detail": "chat_with_auto → chat_stream; TextDelta unit assertions."
+    },
+    {
+      "id": "queue-ui",
+      "from": "Disconnected / missing panel",
+      "to": "Unit Verified",
+      "detail": "ConversationQueue event-driven refresh (agent-queue-changed) with conversationId filter; 20s reconcile."
+    },
+    {
+      "id": "history-replay",
+      "from": "Missing / misleading scripts",
+      "to": "Unit Verified",
+      "detail": "Paced read-only ReplayPlayer over Committed transaction summaries; full event-stream replay / desktop still open."
+    },
+    {
+      "id": "e2e-12-13",
+      "from": "Absent",
+      "to": "Scaffolded",
+      "detail": "Journey 12/13 specs added; not executed."
+    },
+    {
+      "id": "progressive-preview",
+      "from": "Absent",
+      "to": "Unit Verified",
+      "detail": "PreviewTransaction + live NDJSON preview; surface paint / JSON-blob / E2E still open."
+    },
+    {
+      "id": "structured-user-input",
+      "from": "Scaffolded",
+      "to": "Unit Verified",
+      "detail": "Typed Rust seal + trust gate; spoofed marker does not grant trust; desktop E2E not_run."
+    },
+    {
+      "id": "attachment-authorization",
+      "from": "Opaque-ID-only reads",
+      "to": "Unit Verified",
+      "detail": "Conversation-scoped authorize_attachment_access; wrong conversation_id denied."
+    },
+    {
+      "id": "attachment-gc",
+      "from": "Startup reconcile only",
+      "to": "Unit Verified",
+      "detail": "run_attachment_gc command + no-follow symlink remove + counts-only report."
+    }
+  ],
+  "unchangedOrStillOpen": [
+    {
+      "id": "attachment-crash",
+      "state": "Scaffolded"
+    },
+    {
+      "id": "hosted-ai",
+      "state": "Deliberately Deferred"
+    },
+    {
+      "id": "progressive-preview-gaps",
+      "state": "Unit Verified (partial)",
+      "detail": "No speculative surface paint, JSON-blob progressive, or desktop E2E yet."
+    },
+    {
+      "id": "desktop-packaged-proof",
+      "state": "Absent",
+      "detail": "No Desktop Verified / Packaged Verified claims."
+    }
+  ],
+  "nonClaims": [
+    "No Desktop Verified",
+    "No Packaged Verified",
+    "No Human Accepted",
+    "Public beta Not ready",
+    "Hosted private alpha Not ready"
+  ]
+}

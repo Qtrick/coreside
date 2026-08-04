@@ -171,6 +171,7 @@ permissions = [
   "allow-restore-profile-backup",
   "allow-restore-project-cmd",
   "allow-retry-open-database",
+  "allow-run-attachment-gc",
   "allow-run-automation-now",
   "allow-runtime-v2-limits",
   "allow-save-continuity-cmd",

@@ -27,6 +27,27 @@ type TransactionRow = {
   opsCount: number;
 };
 
+/**
+ * Synthetic read-only replay event.
+ *
+ * HARD RULE: Replay never reinvokes the provider, never re-applies
+ * transactions, and never resubmits forms. Events are display-only.
+ *
+ * Backend today exposes a transaction list (not a full event log), so each
+ * row is mapped to a synthetic "Committed transaction" event for pacing.
+ */
+export type ReplayEvent = {
+  id: string;
+  kind: "committed_transaction";
+  summary: string;
+  createdAt: string;
+  status: string;
+  opsCount: number;
+};
+
+/** Base delay between auto-play steps at 1x (ms). */
+export const REPLAY_STEP_MS = 800;
+
 /** Align with Rust `redact_secrets` shapes (client-side defense-in-depth). */
 const SENSITIVE_JSON_KEY =
   /^(authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|x-api-key|token)$/i;
@@ -113,11 +134,224 @@ function parseTransactions(raw: Record<string, unknown>[]): TransactionRow[] {
   return rows;
 }
 
+/**
+ * Map transaction list → chronological synthetic events for the player.
+ * Honest limitation: not a true provider/form event stream — transaction commits only.
+ */
+export function transactionsToReplayEvents(
+  transactions: TransactionRow[],
+): ReplayEvent[] {
+  return [...transactions]
+    .sort((a, b) => {
+      const ta = Date.parse(a.createdAt);
+      const tb = Date.parse(b.createdAt);
+      if (!Number.isNaN(ta) && !Number.isNaN(tb) && ta !== tb) return ta - tb;
+      return a.id.localeCompare(b.id);
+    })
+    .map((t) => ({
+      id: t.id,
+      kind: "committed_transaction" as const,
+      summary: redactSecretsForDisplay(
+        `Committed transaction: ${t.summary}`,
+      ),
+      createdAt: t.createdAt,
+      status: t.status,
+      opsCount: t.opsCount,
+    }));
+}
+
 function formatTime(iso: string): string {
   if (!iso) return "—";
   const d = Date.parse(iso);
   if (Number.isNaN(d)) return iso;
   return new Date(d).toLocaleString();
+}
+
+/**
+ * Read-only paced stepper over redacted synthetic events.
+ *
+ * HARD RULE (UI + code): Replay never reinvokes the provider, never
+ * re-applies transactions (`applyOperations` / `undoTransaction`), and
+ * never resubmits forms. Play only advances a local cursor via setTimeout.
+ */
+export function ReplayPlayer({ events }: { events: ReplayEvent[] }) {
+  // null = live (not inspecting a historical event)
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState<1 | 2>(1);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current != null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const returnToLive = useCallback(() => {
+    clearTimer();
+    setPlaying(false);
+    setCursor(null);
+  }, [clearTimer]);
+
+  useEffect(() => () => clearTimer(), [clearTimer]);
+
+  useEffect(() => {
+    if (!playing || events.length === 0) {
+      clearTimer();
+      return;
+    }
+    clearTimer();
+    timerRef.current = setTimeout(() => {
+      setCursor((cur) => {
+        const next = cur == null ? 0 : cur + 1;
+        if (next >= events.length) {
+          setPlaying(false);
+          return events.length - 1;
+        }
+        return next;
+      });
+    }, REPLAY_STEP_MS / speed);
+    return clearTimer;
+  }, [playing, cursor, speed, events.length, clearTimer]);
+
+  const stepPrev = () => {
+    if (events.length === 0) return;
+    setPlaying(false);
+    setCursor((cur) => {
+      if (cur == null) return events.length - 1;
+      return Math.max(0, cur - 1);
+    });
+  };
+
+  const stepNext = () => {
+    if (events.length === 0) return;
+    setPlaying(false);
+    setCursor((cur) => {
+      if (cur == null) return 0;
+      return Math.min(events.length - 1, cur + 1);
+    });
+  };
+
+  const togglePlay = () => {
+    if (events.length === 0) return;
+    if (playing) {
+      setPlaying(false);
+      return;
+    }
+    setCursor((cur) => (cur == null ? 0 : cur));
+    setPlaying(true);
+  };
+
+  const current = cursor != null ? events[cursor] ?? null : null;
+  const positionLabel =
+    cursor == null
+      ? "Live"
+      : `${cursor + 1} / ${events.length}`;
+
+  return (
+    <div className="replay-player" aria-label="Read-only replay player">
+      <p className="muted conversation-history-note">
+        Read-only replay. Never reinvokes the provider, never re-applies
+        transactions, never resubmits forms. Events are synthetic from the
+        transaction list (Committed transaction), not a full history stream.
+      </p>
+      <div className="conversation-history-replay-controls">
+        <button
+          type="button"
+          className="btn btn-secondary btn-compact"
+          disabled={events.length === 0}
+          aria-label="Previous replay event"
+          onClick={stepPrev}
+        >
+          Previous
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary btn-compact"
+          disabled={events.length === 0}
+          aria-label="Next replay event"
+          onClick={stepNext}
+        >
+          Next
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary btn-compact"
+          disabled={events.length === 0}
+          aria-label={playing ? "Pause replay" : "Play replay"}
+          onClick={togglePlay}
+        >
+          {playing ? "Pause" : "Play"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-compact"
+          aria-label={`Replay speed ${speed}x`}
+          aria-pressed={speed === 2}
+          disabled={events.length === 0}
+          onClick={() => setSpeed((s) => (s === 1 ? 2 : 1))}
+        >
+          {speed}x
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary btn-compact"
+          aria-label="Return to live"
+          disabled={cursor == null && !playing}
+          onClick={returnToLive}
+        >
+          Return to live
+        </button>
+        <span className="muted" aria-live="polite">
+          {positionLabel}
+        </span>
+      </div>
+
+      {events.length === 0 ? (
+        <p className="muted">No transactions yet.</p>
+      ) : (
+        <ul className="conversation-history-list" aria-label="Replay events">
+          {events.map((ev, i) => (
+            <li key={ev.id}>
+              <button
+                type="button"
+                className={`conversation-history-txn${cursor === i ? " is-selected" : ""}`}
+                aria-label={`Replay event ${ev.summary}`}
+                aria-current={cursor === i ? "step" : undefined}
+                onClick={() => {
+                  setPlaying(false);
+                  setCursor(i);
+                }}
+              >
+                <strong>{ev.summary}</strong>
+                <span className="muted">
+                  {formatTime(ev.createdAt)} · {ev.opsCount} ops · {ev.status}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div
+        className="conversation-history-detail replay-player-current"
+        aria-label="Current replay event summary"
+      >
+        {current ? (
+          <>
+            <strong>{current.summary}</strong>
+            <div className="muted">
+              {formatTime(current.createdAt)} · {current.opsCount} ops ·{" "}
+              {current.status} · read-only
+            </div>
+          </>
+        ) : (
+          <span className="muted">Live — select an event or press Play</span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function ConversationHistory({
@@ -144,7 +378,6 @@ export function ConversationHistory({
   const [snapshots, setSnapshots] = useState<SnapshotRow[]>([]);
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
   const [diagnostics, setDiagnostics] = useState<unknown[]>([]);
-  const [selectedTxnId, setSelectedTxnId] = useState<string | null>(null);
   const [snapshotDetail, setSnapshotDetail] = useState<string | null>(null);
   const [branchName, setBranchName] = useState("");
   const [snapshotDesc, setSnapshotDesc] = useState("");
@@ -210,7 +443,6 @@ export function ConversationHistory({
     setSnapshots([]);
     setTransactions([]);
     setDiagnostics([]);
-    setSelectedTxnId(null);
     setSnapshotDetail(null);
     setError(null);
     setBranchName("");
@@ -302,7 +534,7 @@ export function ConversationHistory({
     }
   };
 
-  const selectedTxn = transactions.find((t) => t.id === selectedTxnId) ?? null;
+  const replayEvents = transactionsToReplayEvents(transactions);
 
   return (
     <>
@@ -361,7 +593,6 @@ export function ConversationHistory({
                     className={`btn btn-ghost btn-compact${tab === t.id ? " is-active" : ""}`}
                     aria-selected={tab === t.id}
                     onClick={() => {
-                      setSelectedTxnId(null);
                       setSnapshotDetail(null);
                       setTab(t.id);
                     }}
@@ -492,74 +723,10 @@ export function ConversationHistory({
 
                 {tab === "replay" ? (
                   <section aria-label="Replay">
-                    <p className="muted conversation-history-note">
-                      Read-only transaction list. Operations are not re-applied.
-                    </p>
-                    <div className="conversation-history-replay-controls">
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-compact"
-                        disabled
-                        aria-label="Step previous transaction (read-only, unavailable)"
-                      >
-                        Prev
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-compact"
-                        disabled
-                        aria-label="Step next transaction (read-only, unavailable)"
-                      >
-                        Next
-                      </button>
-                      <span className="muted">Step player unavailable (read-only)</span>
-                    </div>
-                    {transactions.length === 0 ? (
-                      <p className="muted">No transactions yet.</p>
-                    ) : (
-                      <ul className="conversation-history-list">
-                        {transactions.map((t) => (
-                          <li key={t.id}>
-                            <button
-                              type="button"
-                              className={`conversation-history-txn${selectedTxnId === t.id ? " is-selected" : ""}`}
-                              aria-label={`Transaction ${t.summary}`}
-                              aria-expanded={selectedTxnId === t.id}
-                              onClick={() =>
-                                setSelectedTxnId((cur) =>
-                                  cur === t.id ? null : t.id,
-                                )
-                              }
-                            >
-                              <strong>{t.summary}</strong>
-                              <span className="muted">
-                                {formatTime(t.createdAt)} · {t.opsCount} ops ·{" "}
-                                {t.status}
-                              </span>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    {selectedTxn ? (
-                      <pre
-                        className="conversation-history-detail"
-                        aria-label="Transaction summary"
-                      >
-                        {JSON.stringify(
-                          {
-                            id: selectedTxn.id,
-                            time: selectedTxn.createdAt,
-                            status: selectedTxn.status,
-                            opsCount: selectedTxn.opsCount,
-                            summary: selectedTxn.summary,
-                            readOnly: true,
-                          },
-                          null,
-                          2,
-                        )}
-                      </pre>
-                    ) : null}
+                    <ReplayPlayer
+                      key={conversationId}
+                      events={replayEvents}
+                    />
                   </section>
                 ) : null}
 

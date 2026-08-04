@@ -16,6 +16,7 @@ mod provider;
 mod response_parser;
 mod response_schema;
 mod settings_change;
+mod structured_user_input;
 mod tool_loop;
 
 pub use access_mode::{resolve_access_presentation, AiAccessPresentation, DisclosurePolicy};
@@ -33,6 +34,14 @@ pub use prompt_builder::{build_agent_prompt_with_references, PROMPT_VERSION};
 pub use provider::{
     AgentMessage, AgentRequest, AgentResponse, AiProvider, ProviderHealth, ProviderStreamEvent,
     ProviderStreamRx, ProviderStreamTx, UsageMetadata,
+};
+#[allow(unused_imports)] // Public surface for StructuredUserInput (RC3.3 Phase 8).
+pub use structured_user_input::{
+    adopt_stored_structured_input, build_user_parts, flatten_parts_for_provider,
+    has_trusted_structured_input, provider_text_summary, seal_from_ledger_payload,
+    seal_local_user_submission, structured_metadata_value, structured_trust_from_text,
+    text_contains_structured_marker, AgentContentPart, AgentRole, InstructionEligibility,
+    StructuredUserInput, StructuredUserInputSubmission, TrustClass,
 };
 pub use response_parser::{parse_agent_response, ParsedAgentResponse};
 pub use response_schema::{

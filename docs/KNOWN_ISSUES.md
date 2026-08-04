@@ -10,14 +10,16 @@ Tracked gaps affecting release assurance. Not an exhaustive bug list.
 
 | Issue | Severity | Status |
 | --- | --- | --- |
-| Wallpaper atomic persistence + slider coalesce | P1 | **Unit landed** — desktop/packaged pixels **not_run** |
+| Wallpaper atomic persistence + slider coalesce | P1 | **Unit landed** — same-target in-flight dedupe; desktop/packaged pixels **not_run** |
 | Global `agent-turn` text eavesdrop | P1 | **Mitigated** — Channel for interactive send; eavesdropping E2E **not_run** |
 | Journey 12/13 desktop execution | P1 evidence | **Spec only / not_run** |
-| Full turn registry / delta-only IPC | P1 | **Open** |
-| Typed StructuredUserInput (not text delimiter) | P1 | **Open** |
-| Progressive preview transaction | P1 | **Open** |
-| Attachment crash suite + scoped ACL | P1 | **Open** |
+| Full turn registry / delta-only IPC | P1 | **Partial** — frontend `turnsById` + delta apply landed; reconnect / delta-only wire / concurrent UI still open |
+| Typed StructuredUserInput (not text delimiter) | P1 | **Unit Verified** — typed seal + trust gate; delimiter not authority; desktop E2E **not_run** (see [STRUCTURED_FORMS_AND_CONTEXT.md](./STRUCTURED_FORMS_AND_CONTEXT.md)) |
+| Progressive preview transaction | P1 | **Partial** — live NDJSON preview + `PreviewTransaction` landed; JSON-blob / surface paint / E2E remain open (see [PROGRESSIVE_PREVIEW_TRANSACTION.md](./PROGRESSIVE_PREVIEW_TRANSACTION.md)) |
+| Attachment crash suite + scoped ACL | P1 | **Partial** — `authorize_access` + `run_attachment_gc` **Unit Verified**; full crash suite + window ACL **open** |
 | Coherent profile restore | P1 | **Open** |
+| Global queue metadata emit | P1 | **Partial** — `agent-queue-changed` includes `conversationId` + client filter; conversation-scoped Channel still open (see [QUEUE_COORDINATION.md](./QUEUE_COORDINATION.md)) |
+| Replay player vs true event replay | P2 | **Partial** — paced read-only `ReplayPlayer` steps synthetic “Committed transaction” events from `list_transactions`; **not** true provider/form event-stream replay (see [BRANCH_SNAPSHOT_REPLAY.md](./BRANCH_SNAPSHOT_REPLAY.md)) |
 
 ## RC3.1 public-beta blockers (carry-forward)
 

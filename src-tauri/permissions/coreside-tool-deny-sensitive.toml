@@ -35,6 +35,7 @@ commands.deny = [
   "set_workspace_appearance",
   "cancel_chat_attachment",
   "get_chat_attachment_src",
+  "run_attachment_gc",
   "stage_chat_attachment",
   "store_hosted_auth_session",
   "test_provider_connection",

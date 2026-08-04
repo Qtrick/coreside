@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T02:20:00.000Z",
+  "commit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+  "dirty": true,
+  "phase": "RC3.3 Phase 9 partial — event-driven queue UI",
+  "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib queue && npx vitest run src/lib/tauri/queue-events.test.ts src/components/chat/ConversationQueue.test.tsx",
+  "exitStatus": 0,
+  "result": "Unit Verified",
+  "partial": true,
+  "partialReason": "Rust emits agent-queue-changed after SQLite mutations; ConversationQueue listens and filters by conversationId; poll reduced to 20s reconciliation + focus. recover_stale_active already existed. Queue bus remains global (P1). Desktop E2E not_run. Do not claim full Partial Update withQueueMutation parity.",
+  "assertions": [
+    "emit_queue_changed after enqueue/activate/cancel/remove/complete/requeue",
+    "QueueChangedEvent serializes camelCase kinds with conversationId",
+    "isQueueEventForConversation filters wrong conversation",
+    "isQueueEventForConversation filters empty conversationId on either side",
+    "ConversationQueue ignores other-conversation events and refreshes on match",
+    "RECONCILE_POLL_MS is 20000 (not 2s primary poll)"
+  ],
+  "levels": {
+    "unit": "Unit Verified",
+    "desktop": "not_run",
+    "packaged": "not_run"
+  },
+  "cargoTests": {
+    "filter": "queue",
+    "passed": 6,
+    "failed": 0
+  },
+  "vitest": {
+    "files": [
+      "src/lib/tauri/queue-events.test.ts",
+      "src/components/chat/ConversationQueue.test.tsx"
+    ],
+    "passed": 7,
+    "failed": 0
+  },
+  "docs": "docs/QUEUE_COORDINATION.md",
+  "publicBeta": "Not ready",
+  "doNotClaim": [
+    "Full Partial Update withQueueMutation parity",
+    "Conversation-scoped queue Channel",
+    "Desktop Verified multi-window queue refresh",
+    "Zero polling"
+  ]
+}

@@ -63,12 +63,47 @@ describe("workspace appearance store helpers", () => {
     expect(setWorkspaceAppearance).not.toHaveBeenCalled();
   });
 
-  it("applyWorkspaceWallpaper uses a single atomic invoke and updates only after success", async () => {
+  it("reuses one in-flight promise for same-target double commit (pointerup+blur)", async () => {
     const { useAppStore } = await import("@/stores/app-store");
-    useAppStore.setState({
+    useAppStore.setState({ interfaceTransparency: 20 });
+
+    let resolvePersist!: (value: {
+      interfaceTransparency: number;
+      wallpaper: { kind: string };
+      wallpaperJson: null;
+    }) => void;
+    setWorkspaceAppearance.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePersist = resolve;
+        }),
+    );
+
+    const first = useAppStore.getState().commitInterfaceTransparency(35);
+    const second = useAppStore.getState().commitInterfaceTransparency(35);
+    expect(setWorkspaceAppearance).toHaveBeenCalledTimes(1);
+
+    resolvePersist({
+      interfaceTransparency: 35,
       wallpaper: { kind: "none" },
-      globalWallpaperJson: null,
+      wallpaperJson: null,
     });
+    await Promise.all([first, second]);
+    expect(setWorkspaceAppearance).toHaveBeenCalledTimes(1);
+    expect(useAppStore.getState().interfaceTransparency).toBe(35);
+  });
+
+  it("applyWorkspaceWallpaper previews immediately, commits on success, rolls back on failure", async () => {
+    const { useAppStore } = await import("@/stores/app-store");
+
+    // Sync module committed baseline (setState alone does not).
+    setWorkspaceAppearance.mockResolvedValueOnce({
+      wallpaper: { kind: "none" },
+      wallpaperJson: null,
+      interfaceTransparency: 20,
+    });
+    await useAppStore.getState().applyWorkspaceWallpaper("");
+    expect(useAppStore.getState().globalWallpaperJson).toBeNull();
 
     const schema = JSON.stringify({
       schemaVersion: "1",
@@ -76,21 +111,158 @@ describe("workspace appearance store helpers", () => {
       preset: "aurora",
     });
 
-    setWorkspaceAppearance.mockRejectedValueOnce(new Error("apply failed"));
-    await expect(
-      useAppStore.getState().applyWorkspaceWallpaper(schema),
-    ).rejects.toThrow("apply failed");
-    expect(useAppStore.getState().globalWallpaperJson).toBeNull();
+    // Failure path: optimistic preview then restore previousCommitted.
+    let rejectPersist!: (reason?: unknown) => void;
+    setWorkspaceAppearance.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectPersist = reject;
+        }),
+    );
+    const failing = useAppStore.getState().applyWorkspaceWallpaper(schema);
+    expect(useAppStore.getState().globalWallpaperJson).toBe(schema);
     expect(setWorkspaceAppearance).toHaveBeenCalledWith({
       wallpaperJson: schema,
     });
+    rejectPersist(new Error("apply failed"));
+    await expect(failing).rejects.toThrow("apply failed");
+    expect(useAppStore.getState().globalWallpaperJson).toBeNull();
+    expect(useAppStore.getState().wallpaper).toEqual({ kind: "none" });
 
+    // Success path: preview then mark committed from settings response.
     setWorkspaceAppearance.mockResolvedValueOnce({
       wallpaper: { kind: "none" },
       wallpaperJson: schema,
       interfaceTransparency: 20,
     });
-    await useAppStore.getState().applyWorkspaceWallpaper(schema);
+    const committing = useAppStore.getState().applyWorkspaceWallpaper(schema);
     expect(useAppStore.getState().globalWallpaperJson).toBe(schema);
+    await committing;
+    expect(useAppStore.getState().globalWallpaperJson).toBe(schema);
+
+    // A later failure must roll back to the last committed wallpaper, not clear.
+    setWorkspaceAppearance.mockRejectedValueOnce(new Error("second fail"));
+    const matrix = JSON.stringify({
+      schemaVersion: "1",
+      type: "canvas-preset",
+      preset: "matrix",
+    });
+    await expect(
+      useAppStore.getState().applyWorkspaceWallpaper(matrix),
+    ).rejects.toThrow("second fail");
+    expect(useAppStore.getState().globalWallpaperJson).toBe(schema);
+  });
+
+  it("overlapping transparency commit: stale success still anchors rollback of newer failure", async () => {
+    const { useAppStore } = await import("@/stores/app-store");
+
+    setWorkspaceAppearance.mockResolvedValueOnce({
+      interfaceTransparency: 30,
+      wallpaper: { kind: "none" },
+      wallpaperJson: null,
+    });
+    await useAppStore.getState().commitInterfaceTransparency(30);
+    expect(useAppStore.getState().interfaceTransparency).toBe(30);
+
+    let resolveOlder!: (value: {
+      interfaceTransparency: number;
+      wallpaper: { kind: string };
+      wallpaperJson: null;
+    }) => void;
+    let rejectNewer!: (reason?: unknown) => void;
+
+    setWorkspaceAppearance.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOlder = resolve;
+        }),
+    );
+    const first = useAppStore.getState().commitInterfaceTransparency(40);
+    expect(useAppStore.getState().interfaceTransparency).toBe(40);
+
+    setWorkspaceAppearance.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectNewer = reject;
+        }),
+    );
+    const second = useAppStore.getState().commitInterfaceTransparency(55);
+    expect(useAppStore.getState().interfaceTransparency).toBe(55);
+
+    resolveOlder({
+      interfaceTransparency: 40,
+      wallpaper: { kind: "none" },
+      wallpaperJson: null,
+    });
+    await first;
+    // Newer preview must remain painted while still in flight.
+    expect(useAppStore.getState().interfaceTransparency).toBe(55);
+
+    rejectNewer(new Error("newer failed"));
+    await expect(second).rejects.toThrow("newer failed");
+    // Roll back to 40 (DB truth from overlapping older success), not 30.
+    expect(useAppStore.getState().interfaceTransparency).toBe(40);
+  });
+
+  it("overlapping wallpaper apply: stale success still anchors rollback of newer failure", async () => {
+    const { useAppStore } = await import("@/stores/app-store");
+
+    setWorkspaceAppearance.mockResolvedValueOnce({
+      wallpaper: { kind: "none" },
+      wallpaperJson: null,
+      interfaceTransparency: 20,
+    });
+    await useAppStore.getState().applyWorkspaceWallpaper("");
+
+    const aurora = JSON.stringify({
+      schemaVersion: "1",
+      type: "canvas-preset",
+      preset: "aurora",
+    });
+    const matrix = JSON.stringify({
+      schemaVersion: "1",
+      type: "canvas-preset",
+      preset: "matrix",
+    });
+
+    let resolveAurora!: (value: {
+      wallpaper: { kind: string };
+      wallpaperJson: string;
+      interfaceTransparency: number;
+    }) => void;
+    let rejectMatrix!: (reason?: unknown) => void;
+
+    setWorkspaceAppearance.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveAurora = resolve;
+        }),
+    );
+    const first = useAppStore.getState().applyWorkspaceWallpaper(aurora);
+    expect(useAppStore.getState().globalWallpaperJson).toBe(aurora);
+
+    setWorkspaceAppearance.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectMatrix = reject;
+        }),
+    );
+    const second = useAppStore.getState().applyWorkspaceWallpaper(matrix);
+    expect(useAppStore.getState().globalWallpaperJson).toBe(matrix);
+
+    // Older apply succeeds while newer is still in flight — must record commit
+    // truth even though it must not paint over the newer preview.
+    resolveAurora({
+      wallpaper: { kind: "none" },
+      wallpaperJson: aurora,
+      interfaceTransparency: 20,
+    });
+    await first;
+    expect(useAppStore.getState().globalWallpaperJson).toBe(matrix);
+
+    rejectMatrix(new Error("matrix failed"));
+    await expect(second).rejects.toThrow("matrix failed");
+    // Roll back to aurora (DB truth from overlapping older success), not none.
+    expect(useAppStore.getState().globalWallpaperJson).toBe(aurora);
   });
 });

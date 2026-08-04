@@ -1,8 +1,8 @@
 //! Tauri commands for Generative Interface Runtime V2.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{State, WebviewWindow};
+use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
 use super::CommandError;
 use crate::runtime_v2::packs::CapabilityPackMeta as PackMeta;
@@ -23,6 +23,45 @@ use crate::runtime_v2::{
 };
 use crate::state::AppState;
 use crate::windows;
+
+/// Global bus for queue UI refresh. Payload always includes `conversationId`;
+/// clients must filter. Conversation-scoped Channel delivery remains P1.
+pub const QUEUE_CHANGED_EVENT: &str = "agent-queue-changed";
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum QueueChangeKind {
+    ItemAdded,
+    ItemActivated,
+    ItemCancelled,
+    ItemCompleted,
+    QueueSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueChangedEvent {
+    pub kind: QueueChangeKind,
+    pub conversation_id: String,
+    pub item_id: Option<String>,
+}
+
+/// Notify listeners that Rust/SQLite queue state mutated for a conversation.
+pub fn emit_queue_changed(
+    app: &AppHandle,
+    kind: QueueChangeKind,
+    conversation_id: &str,
+    item_id: Option<&str>,
+) {
+    let _ = app.emit(
+        QUEUE_CHANGED_EVENT,
+        QueueChangedEvent {
+            kind,
+            conversation_id: conversation_id.to_string(),
+            item_id: item_id.map(|s| s.to_string()),
+        },
+    );
+}
 
 #[tauri::command]
 pub fn list_capability_packs() -> Result<Vec<PackMeta>, CommandError> {
@@ -677,6 +716,7 @@ pub fn delete_snapshot_cmd(
 
 #[tauri::command]
 pub fn enqueue_agent_turn_cmd(
+    app: AppHandle,
     state: State<'_, AppState>,
     conversation_id: String,
     prompt: Value,
@@ -684,12 +724,20 @@ pub fn enqueue_agent_turn_cmd(
 ) -> Result<QueueItem, CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
-    Ok(enqueue(
+    let item = enqueue(
         &mut db,
         &conversation_id,
         &prompt,
         priority.unwrap_or(100),
-    )?)
+    )?;
+    drop(db);
+    emit_queue_changed(
+        &app,
+        QueueChangeKind::ItemAdded,
+        &conversation_id,
+        Some(&item.id),
+    );
+    Ok(item)
 }
 
 #[tauri::command]
@@ -704,12 +752,14 @@ pub fn list_agent_queue_cmd(
 
 #[tauri::command]
 pub fn cancel_queue_item_cmd(
+    app: AppHandle,
     state: State<'_, AppState>,
     item_id: String,
 ) -> Result<QueueItem, CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
     let item = get_item(&db, &item_id).map_err(CommandError::from)?;
+    let conversation_id = item.conversation_id.clone();
     let attachment_ids: Vec<String> = item
         .prompt
         .get("attachmentIds")
@@ -730,17 +780,25 @@ pub fn cancel_queue_item_cmd(
         state.inner(),
         &attachment_ids,
     );
+    emit_queue_changed(
+        &app,
+        QueueChangeKind::ItemCancelled,
+        &conversation_id,
+        Some(&cancelled.id),
+    );
     Ok(cancelled)
 }
 
 #[tauri::command]
 pub fn remove_queue_item_cmd(
+    app: AppHandle,
     state: State<'_, AppState>,
     item_id: String,
 ) -> Result<(), CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
     let item = get_item(&db, &item_id).map_err(CommandError::from)?;
+    let conversation_id = item.conversation_id.clone();
     let attachment_ids: Vec<String> = item
         .prompt
         .get("attachmentIds")
@@ -760,28 +818,54 @@ pub fn remove_queue_item_cmd(
         state.inner(),
         &attachment_ids,
     );
+    emit_queue_changed(
+        &app,
+        QueueChangeKind::ItemCancelled,
+        &conversation_id,
+        Some(&item_id),
+    );
     Ok(())
 }
 
 #[tauri::command]
 pub fn activate_next_queue_cmd(
+    app: AppHandle,
     state: State<'_, AppState>,
     conversation_id: String,
 ) -> Result<Option<QueueItem>, CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
-    Ok(activate_next(&mut db, &conversation_id)?)
+    let item = activate_next(&mut db, &conversation_id)?;
+    drop(db);
+    if let Some(ref activated) = item {
+        emit_queue_changed(
+            &app,
+            QueueChangeKind::ItemActivated,
+            &conversation_id,
+            Some(&activated.id),
+        );
+    }
+    Ok(item)
 }
 
 #[tauri::command]
 pub fn complete_queue_item_cmd(
+    app: AppHandle,
     state: State<'_, AppState>,
     item_id: String,
     error: Option<String>,
 ) -> Result<QueueItem, CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
-    Ok(complete_queue_item(&mut db, &item_id, error.as_deref())?)
+    let completed = complete_queue_item(&mut db, &item_id, error.as_deref())?;
+    drop(db);
+    emit_queue_changed(
+        &app,
+        QueueChangeKind::ItemCompleted,
+        &completed.conversation_id,
+        Some(&completed.id),
+    );
+    Ok(completed)
 }
 
 #[tauri::command]
@@ -834,4 +918,37 @@ pub fn runtime_v2_limits() -> Result<Value, CommandError> {
         "maxEventDepth": runtime_v2::limits::MAX_EVENT_DEPTH,
         "schemaVersion": runtime_v2::SCHEMA_VERSION_V2,
     }))
+}
+
+#[cfg(test)]
+mod queue_event_tests {
+    use super::{QueueChangeKind, QueueChangedEvent};
+
+    #[test]
+    fn queue_changed_event_serializes_camel_case_kinds() {
+        let event = QueueChangedEvent {
+            kind: QueueChangeKind::ItemAdded,
+            conversation_id: "conv-1".into(),
+            item_id: Some("q-1".into()),
+        };
+        let value = serde_json::to_value(&event).unwrap();
+        assert_eq!(value["kind"], "itemAdded");
+        assert_eq!(value["conversationId"], "conv-1");
+        assert_eq!(value["itemId"], "q-1");
+
+        for (kind, expected) in [
+            (QueueChangeKind::ItemActivated, "itemActivated"),
+            (QueueChangeKind::ItemCancelled, "itemCancelled"),
+            (QueueChangeKind::ItemCompleted, "itemCompleted"),
+            (QueueChangeKind::QueueSnapshot, "queueSnapshot"),
+        ] {
+            let v = serde_json::to_value(&QueueChangedEvent {
+                kind,
+                conversation_id: "c".into(),
+                item_id: None,
+            })
+            .unwrap();
+            assert_eq!(v["kind"], expected);
+        }
+    }
 }

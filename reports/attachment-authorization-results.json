@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T02:30:00.000Z",
+  "commit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+  "dirty": true,
+  "phase": "RC3.3 Phase 13 partial — attachment authorization",
+  "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib attachment_cmds",
+  "exitStatus": 0,
+  "result": "Unit Verified",
+  "partial": true,
+  "partialReason": "authorize_attachment_access enforces conversation binding (+ message ownership when bound) on get_chat_attachment_src and protocol bytes. Opaque IDs alone denied. Wrong conversation_id unit-proven. Multimodal provider mapping not in this slice. Desktop E2E not_run. Window/capability ACL beyond conversation scope remains open.",
+  "assertions": [
+    "authorize_attachment_access denies wrong conversation_id with not_found",
+    "authorize_attachment_access allows matching conversation_id for bound attachment",
+    "get_chat_attachment_src requires conversationId and calls authorize",
+    "protocol URL is /attachment/{conversationId}/{attachmentId}",
+    "read_attachment_bytes_for_protocol calls authorize before file read"
+  ],
+  "levels": {
+    "unit": "Unit Verified",
+    "desktop": "not_run",
+    "packaged": "not_run"
+  },
+  "cargoTests": {
+    "filter": "attachment_cmds",
+    "passed": 12,
+    "failed": 0,
+    "focused": [
+      "authorize_wrong_conversation_id_denies"
+    ]
+  },
+  "docs": "docs/ATTACHMENT_LIFECYCLE.md",
+  "publicBeta": "Not ready",
+  "doNotClaim": [
+    "Multimodal provider attachment parts",
+    "Per-window capability ACL beyond conversation scope",
+    "Desktop Verified attachment preview auth",
+    "Opaque-ID-only reads remain safe"
+  ]
+}

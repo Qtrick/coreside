@@ -3776,6 +3776,12 @@ img {
   margin-bottom: 0.65rem;
 }
 
+.replay-player-current {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
 .conversation-history-txn {
   display: flex;
   flex-direction: column;

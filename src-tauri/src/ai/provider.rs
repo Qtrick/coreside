@@ -6,12 +6,52 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::errors::AiError;
+use super::structured_user_input::{
+    flatten_parts_for_provider, AgentContentPart, AgentRole,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentMessage {
-    pub role: String,
+    pub role: AgentRole,
+    /// Display / legacy flattened body. Prefer `provider_text()` when sending upstream.
     pub content: String,
+    /// Typed parts (authoritative for StructuredUserInput trust). Empty = text-only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<AgentContentPart>,
+}
+
+impl AgentMessage {
+    pub fn text(role: AgentRole, content: impl Into<String>) -> Self {
+        let content = content.into();
+        Self {
+            role,
+            content,
+            parts: Vec::new(),
+        }
+    }
+
+    pub fn with_parts(
+        role: AgentRole,
+        display_content: impl Into<String>,
+        parts: Vec<AgentContentPart>,
+    ) -> Self {
+        let content = display_content.into();
+        Self {
+            role,
+            content,
+            parts,
+        }
+    }
+
+    /// Body for BYOK providers that lack native structured parts.
+    pub fn provider_text(&self) -> String {
+        if self.parts.is_empty() {
+            self.content.clone()
+        } else {
+            flatten_parts_for_provider(&self.parts)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

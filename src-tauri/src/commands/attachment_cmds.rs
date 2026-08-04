@@ -76,14 +76,16 @@ fn attachments_paths() -> Result<(PathBuf, PathBuf), CommandError> {
     Ok((paths.attachments, paths.attachment_staging))
 }
 
-fn opaque_attachment_url(id: &str) -> String {
+fn opaque_attachment_url(conversation_id: &str, attachment_id: &str) -> String {
     #[cfg(any(windows, target_os = "android"))]
     {
-        format!("http://coreside-asset.localhost/attachment/{id}")
+        format!(
+            "http://coreside-asset.localhost/attachment/{conversation_id}/{attachment_id}"
+        )
     }
     #[cfg(not(any(windows, target_os = "android")))]
     {
-        format!("coreside-asset://localhost/attachment/{id}")
+        format!("coreside-asset://localhost/attachment/{conversation_id}/{attachment_id}")
     }
 }
 
@@ -97,6 +99,20 @@ fn is_safe_attachment_id(id: &str) -> bool {
         && id
             .chars()
             .all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
+/// Conversation / project-scope ids (`conv-…`); opaque attachment ids stay hex-only.
+fn is_safe_conversation_scope_id(id: &str) -> bool {
+    let id = id.trim();
+    !id.is_empty()
+        && id.len() <= 80
+        && !id.contains('/')
+        && !id.contains('\\')
+        && !id.contains("..")
+        && !id.contains('\0')
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// Strip CR/LF/controls so DB-corrupted mime cannot inject response headers.
@@ -450,6 +466,95 @@ fn validated_storage_file_name(storage_key: &str) -> Result<&str, CommandError> 
     Ok(name)
 }
 
+/// Delete a file under a managed attachment root without following symlinks.
+/// Returns true when a regular file was removed.
+fn remove_managed_file_no_follow(root: &Path, file_name: &str) -> bool {
+    let path = root.join(file_name);
+    // Join of a validated name must stay under root; refuse anything else.
+    if path.parent() != Some(root) {
+        return false;
+    }
+    match std::fs::symlink_metadata(&path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            tracing::warn!("attachment GC skipped symlink under managed root");
+            false
+        }
+        Ok(meta) if meta.is_file() => std::fs::remove_file(&path).is_ok(),
+        _ => false,
+    }
+}
+
+/// Authorize attachment read/download/bytes against the caller's conversation scope.
+/// Opaque attachment ids alone are insufficient: the row must be bound to
+/// `conversation_id`, and when `message_id` is set the message must belong to
+/// that conversation. Project ownership is implied by conversation membership
+/// in the caller's profile database.
+pub fn authorize_attachment_access(
+    conn: &rusqlite::Connection,
+    attachment_id: &str,
+    conversation_id: &str,
+) -> Result<(), CommandError> {
+    let attachment_id = attachment_id.trim();
+    let conversation_id = conversation_id.trim();
+    if !is_safe_attachment_id(attachment_id) {
+        return Err(CommandError::new("invalid", "Invalid attachment id"));
+    }
+    if !is_safe_conversation_scope_id(conversation_id) {
+        return Err(CommandError::new("invalid", "Invalid conversation id"));
+    }
+
+    // Uniform not_found — do not distinguish missing conversation vs attachment.
+    let denied = || CommandError::new("not_found", "Attachment not found");
+
+    let conv_ok: bool = conn
+        .query_row(
+            "SELECT 1 FROM conversations WHERE id = ?1",
+            rusqlite::params![conversation_id],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if !conv_ok {
+        return Err(denied());
+    }
+
+    let (att_conv, att_msg, state): (Option<String>, Option<String>, String) = conn
+        .query_row(
+            "SELECT conversation_id, message_id, state FROM chat_attachments
+             WHERE id = ?1 AND deleted_at IS NULL",
+            rusqlite::params![attachment_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|_| denied())?;
+
+    if matches!(
+        state.as_str(),
+        "deleted" | "expired" | "failed" | "cancelled"
+    ) {
+        return Err(CommandError::new("not_found", "Attachment not available"));
+    }
+
+    match att_conv.as_deref() {
+        Some(bound) if bound == conversation_id => {}
+        // Wrong conversation, or unbound staged — opaque id alone must not grant access.
+        _ => return Err(denied()),
+    }
+
+    if let Some(message_id) = att_msg.as_deref() {
+        let msg_conv: String = conn
+            .query_row(
+                "SELECT conversation_id FROM messages WHERE id = ?1",
+                rusqlite::params![message_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| denied())?;
+        if msg_conv != conversation_id {
+            return Err(denied());
+        }
+    }
+
+    Ok(())
+}
+
 fn promote_attachment_file(storage_key: &str) -> Result<(), CommandError> {
     let name = validated_storage_file_name(storage_key)?;
     let (durable_root, staging_root) = attachments_paths()?;
@@ -785,6 +890,7 @@ pub fn bind_attachments_to_message(
 pub fn get_chat_attachment_src(
     state: State<'_, AppState>,
     attachment_id: Option<String>,
+    conversation_id: Option<String>,
     local_filename: Option<String>,
 ) -> Result<AttachmentSrc, CommandError> {
     state.require_profile()?;
@@ -807,8 +913,18 @@ pub fn get_chat_attachment_src(
     } else {
         return Err(CommandError::new("invalid", "Attachment id required"));
     };
+    let conversation_id = conversation_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| CommandError::new("invalid", "Conversation id required"))?
+        .to_string();
+    if !is_safe_conversation_scope_id(&conversation_id) {
+        return Err(CommandError::new("invalid", "Invalid conversation id"));
+    }
 
     let db = state.db.lock();
+    authorize_attachment_access(db.conn(), &id, &conversation_id)?;
     let (state_s, _key): (String, String) = db
         .conn()
         .query_row(
@@ -825,7 +941,7 @@ pub fn get_chat_attachment_src(
     }
 
     Ok(AttachmentSrc {
-        url: opaque_attachment_url(&id),
+        url: opaque_attachment_url(&conversation_id, &id),
         id,
     })
 }
@@ -951,16 +1067,20 @@ pub fn cancel_staged_attachment_ids(
 
 /// Resolve opaque attachment ID to bytes for the custom protocol (no path leak).
 ///
-/// P1 remaining (blocked on product window/capability wiring): authorization is
-/// opaque-ID + profile-ready only — not per-window / conversation ACL. Do not
-/// claim stronger isolation until that lands. Size is bounded by `MAX_ATTACHMENT_BYTES`.
+/// Requires conversation scope in the URL (`/attachment/{conversationId}/{id}`).
+/// Size is bounded by `MAX_ATTACHMENT_BYTES`.
 pub fn read_attachment_bytes_for_protocol(
     app: &tauri::AppHandle,
+    conversation_id: &str,
     attachment_id: &str,
 ) -> Result<(Vec<u8>, String), String> {
     let id = attachment_id.trim();
+    let conversation_id = conversation_id.trim();
     if !is_safe_attachment_id(id) {
         return Err("invalid attachment id".into());
+    }
+    if !is_safe_conversation_scope_id(conversation_id) {
+        return Err("invalid conversation id".into());
     }
     let state = app
         .try_state::<AppState>()
@@ -970,6 +1090,8 @@ pub fn read_attachment_bytes_for_protocol(
     }
     let (storage_key, mime, state_s): (String, String, String) = {
         let db = state.db.lock();
+        authorize_attachment_access(db.conn(), id, conversation_id)
+            .map_err(|e| e.message)?;
         db.conn()
             .query_row(
                 "SELECT storage_key, detected_mime, state FROM chat_attachments
@@ -989,25 +1111,45 @@ pub fn read_attachment_bytes_for_protocol(
     let paths = AppPaths::resolve().map_err(|e| e.to_string())?;
     for root in [&paths.attachment_staging, &paths.attachments] {
         let candidate = root.join(name);
-        if candidate.exists() {
-            let canonical = candidate.canonicalize().map_err(|e| e.to_string())?;
-            let root_c = root.canonicalize().map_err(|e| e.to_string())?;
-            if !canonical.starts_with(&root_c) {
-                return Err("path outside attachments".into());
-            }
-            // Bound before whole-file read (protocol must not load unbounded blobs).
-            let meta = std::fs::metadata(&canonical).map_err(|e| e.to_string())?;
-            if meta.len() > MAX_ATTACHMENT_BYTES as u64 {
-                return Err("attachment exceeds size limit".into());
-            }
-            let bytes = std::fs::read(&canonical).map_err(|e| e.to_string())?;
-            if bytes.len() > MAX_ATTACHMENT_BYTES {
-                return Err("attachment exceeds size limit".into());
-            }
-            return Ok((bytes, safe_response_mime(&mime)));
+        // Do not follow symlinks for existence / metadata.
+        let meta = match std::fs::symlink_metadata(&candidate) {
+            Ok(m) if m.file_type().is_symlink() => continue,
+            Ok(m) if m.is_file() => m,
+            _ => continue,
+        };
+        let canonical = candidate.canonicalize().map_err(|e| e.to_string())?;
+        let root_c = root.canonicalize().map_err(|e| e.to_string())?;
+        if !canonical.starts_with(&root_c) {
+            return Err("path outside attachments".into());
         }
+        // Bound before whole-file read (protocol must not load unbounded blobs).
+        if meta.len() > MAX_ATTACHMENT_BYTES as u64 {
+            return Err("attachment exceeds size limit".into());
+        }
+        let bytes = std::fs::read(&canonical).map_err(|e| e.to_string())?;
+        if bytes.len() > MAX_ATTACHMENT_BYTES {
+            return Err("attachment exceeds size limit".into());
+        }
+        return Ok((bytes, safe_response_mime(&mime)));
     }
     Err("attachment file missing".into())
+}
+
+/// Bounded attachment GC entry point for scheduler / manual invoke.
+/// Healthy profile only; managed roots; row-limited; no symlink follow; counts-only summary.
+#[tauri::command]
+pub fn run_attachment_gc(
+    state: State<'_, AppState>,
+) -> Result<AttachmentSweepReport, CommandError> {
+    // require_profile is enforced inside reconcile_and_sweep_attachments.
+    let report = reconcile_and_sweep_attachments(&state)?;
+    tracing::info!(
+        expired = report.expired,
+        promoted = report.promoted_orphans,
+        missing = report.missing_durable,
+        "attachment gc completed"
+    );
+    Ok(report)
 }
 
 /// Bounded startup/periodic GC for expired staged attachments and orphaned rows.
@@ -1067,8 +1209,8 @@ pub fn reconcile_and_sweep_attachments(state: &AppState) -> Result<AttachmentSwe
                 continue;
             }
         }
-        let _ = std::fs::remove_file(staging_root.join(name));
-        let _ = std::fs::remove_file(durable_root.join(name));
+        let _ = remove_managed_file_no_follow(&staging_root, name);
+        let _ = remove_managed_file_no_follow(&durable_root, name);
         report.expired += 1;
     }
 
@@ -1095,16 +1237,27 @@ pub fn reconcile_and_sweep_attachments(state: &AppState) -> Result<AttachmentSwe
             report.missing_durable += 1;
             continue;
         };
-        let in_durable = durable_root.join(name).exists();
-        let in_staging = staging_root.join(name).exists();
+        let staging_path = staging_root.join(name);
+        let durable_path = durable_root.join(name);
+        let in_durable = match std::fs::symlink_metadata(&durable_path) {
+            Ok(m) if m.file_type().is_symlink() => false,
+            Ok(m) if m.is_file() => true,
+            _ => false,
+        };
+        let in_staging = match std::fs::symlink_metadata(&staging_path) {
+            Ok(m) if m.file_type().is_symlink() => false,
+            Ok(m) if m.is_file() => true,
+            _ => false,
+        };
         if !in_durable && !in_staging {
             report.missing_durable += 1;
             tracing::warn!(attachment_id = %id, "attached attachment file missing from managed roots");
         } else if !in_durable && in_staging {
             // Crash window after claim / before promote — heal by promoting.
-            if std::fs::rename(staging_root.join(name), durable_root.join(name)).is_ok()
-                || (std::fs::copy(staging_root.join(name), durable_root.join(name)).is_ok()
-                    && std::fs::remove_file(staging_root.join(name)).is_ok())
+            // Refuse to promote through a symlink.
+            if std::fs::rename(&staging_path, &durable_path).is_ok()
+                || (std::fs::copy(&staging_path, &durable_path).is_ok()
+                    && remove_managed_file_no_follow(&staging_root, name))
             {
                 report.promoted_orphans += 1;
             } else {
@@ -1127,6 +1280,8 @@ pub struct AttachmentSweepReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::{self, Database};
+    use tempfile::tempdir;
 
     #[test]
     fn rejects_oversized_base64_before_decode_budget() {
@@ -1179,5 +1334,94 @@ mod tests {
     #[test]
     fn text_plain_declared_accepts_json_shape() {
         assert!(mime_compatible("text/plain", "application/json"));
+    }
+
+    fn seed_bound_attachment(db: &Database, att_id: &str, conv_id: &str, msg_id: &str) {
+        let _ = db::ensure_default_workspace(db).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO conversations (id, workspace_id, title, project_id, pinned, archived)
+                 VALUES (?1, ?2, 'Auth test', NULL, 0, 0)",
+                rusqlite::params![conv_id, db::DEFAULT_WORKSPACE_ID],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO messages (id, conversation_id, role, content)
+                 VALUES (?1, ?2, 'user', 'hi')",
+                rusqlite::params![msg_id, conv_id],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO chat_attachments
+                 (id, conversation_id, message_id, storage_key, original_filename, display_name,
+                  detected_mime, detected_format, byte_size, content_hash, state, backup_eligible)
+                 VALUES (?1, ?2, ?3, ?4, 'a.png', 'a.png', 'image/png', 'image/png', 8, 'hash', 'attached', 1)",
+                rusqlite::params![
+                    att_id,
+                    conv_id,
+                    msg_id,
+                    format!("{att_id}_a.png")
+                ],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn authorize_wrong_conversation_id_denies() {
+        let dir = tempdir().unwrap();
+        let db = Database::open_path(&dir.path().join("auth.db")).unwrap();
+        let att = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        let owner = "conv-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        let other = "conv-11111111-2222-3333-4444-555555555555";
+        seed_bound_attachment(&db, att, owner, "msg-auth-1");
+        // Other conversation exists but does not own the attachment.
+        db.conn()
+            .execute(
+                "INSERT INTO conversations (id, workspace_id, title, project_id, pinned, archived)
+                 VALUES (?1, ?2, 'Other', NULL, 0, 0)",
+                rusqlite::params![other, db::DEFAULT_WORKSPACE_ID],
+            )
+            .unwrap();
+
+        let err = authorize_attachment_access(db.conn(), att, other).unwrap_err();
+        assert_eq!(err.code, "not_found");
+
+        authorize_attachment_access(db.conn(), att, owner).unwrap();
+    }
+
+    #[test]
+    fn gc_remove_skips_symlinks_and_removes_regular_files() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("managed");
+        std::fs::create_dir_all(&root).unwrap();
+        let regular = "regular-file.bin";
+        let link_name = "link-file.bin";
+        std::fs::write(root.join(regular), b"data").unwrap();
+        #[cfg(unix)]
+        {
+            let target = dir.path().join("outside-secret");
+            std::fs::write(&target, b"secret").unwrap();
+            std::os::unix::fs::symlink(&target, root.join(link_name)).unwrap();
+            assert!(!remove_managed_file_no_follow(&root, link_name));
+            assert!(target.exists());
+            assert!(root.join(link_name).symlink_metadata().unwrap().file_type().is_symlink());
+        }
+        assert!(remove_managed_file_no_follow(&root, regular));
+        assert!(!root.join(regular).exists());
+    }
+
+    #[test]
+    fn attachment_sweep_report_is_counts_only() {
+        let report = AttachmentSweepReport {
+            expired: 2,
+            missing_durable: 1,
+            promoted_orphans: 3,
+        };
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("expired"));
+        assert!(!json.contains('/'));
+        assert!(!json.contains("home"));
     }
 }

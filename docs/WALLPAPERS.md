@@ -8,11 +8,11 @@ Wallpaper templates live under **Added Settings → Templates → Wallpapers** (
 
 Selection is derived from `wallpaperJson` via `parseWallpaperJson` / `activeCanvasPresetId` (`src/lib/wallpaper.ts`). Applying a canvas preset writes schema JSON and resets legacy `wallpaper` to `none` — the UI must not read `wallpaper.kind` alone.
 
-This pass is **Apply-only**: choosing a preset applies immediately. There is no separate `previewWallpaperId` store yet.
+Preset selection is **preview-first**: Zustand (and therefore the live renderer) updates immediately; durable `set_workspace_appearance` follows. Persist failure restores the last committed wallpaper. There is no separate `previewWallpaperId` field — preview reuses the same wallpaper store fields.
 
 ## Atomic appearance writes (RC3.2 Phase 2)
 
-Workspace wallpaper + interface transparency use `set_workspace_appearance` — one transactional SQLite write for the wallpaper pair (`wallpaperJson` + `wallpaper`) and/or transparency. The frontend updates Zustand only after success, so a failed apply cannot leave half-written keys.
+Workspace wallpaper + interface transparency use `set_workspace_appearance` — one transactional SQLite write for the wallpaper pair (`wallpaperJson` + `wallpaper`) and/or transparency. Wallpaper apply is preview-first (optimistic Zustand before IPC); failure rolls back to the last persisted pair.
 
 The transparency slider previews locally on `onChange` and commits once on `pointerup` / `keyup` / `blur` (or immediately for presets/Reset). Commit failure rolls the UI back to the last persisted value.
 

@@ -18,17 +18,26 @@ function parseAttachments(raw: unknown): StagedAttachment[] {
     .map((r) => r.data);
 }
 
-function AttachmentCard({ attachment }: { attachment: StagedAttachment }) {
+function AttachmentCard({
+  attachment,
+  conversationId,
+}: {
+  attachment: StagedAttachment;
+  conversationId: string;
+}) {
   const [src, setSrc] = useState<string | null>(null);
   const isImage = attachment.mimeType.startsWith("image/");
 
   useEffect(() => {
-    if (!isImage) return;
+    if (!isImage || !conversationId) return;
     let cancelled = false;
     void (async () => {
       try {
         if (!isTauriRuntime()) return;
-        const srcResult = await api.getChatAttachmentSrc(attachment.id);
+        const srcResult = await api.getChatAttachmentSrc(
+          attachment.id,
+          conversationId,
+        );
         if (!cancelled) setSrc(srcResult.url);
       } catch {
         // Preview is best-effort.
@@ -37,7 +46,7 @@ function AttachmentCard({ attachment }: { attachment: StagedAttachment }) {
     return () => {
       cancelled = true;
     };
-  }, [attachment.id, isImage]);
+  }, [attachment.id, conversationId, isImage]);
 
   return (
     <li className="message-attachment-chip">
@@ -55,8 +64,10 @@ function AttachmentCard({ attachment }: { attachment: StagedAttachment }) {
 
 export function MessageAttachments({
   metadata,
+  conversationId,
 }: {
   metadata: Record<string, unknown> | null | undefined;
+  conversationId: string;
 }) {
   const attachments = parseAttachments(metadata?.attachments);
   if (attachments.length === 0) return null;
@@ -64,7 +75,11 @@ export function MessageAttachments({
   return (
     <ul className="message-attachments" aria-label="Attachments">
       {attachments.map((attachment) => (
-        <AttachmentCard key={attachment.id} attachment={attachment} />
+        <AttachmentCard
+          key={attachment.id}
+          attachment={attachment}
+          conversationId={conversationId}
+        />
       ))}
     </ul>
   );

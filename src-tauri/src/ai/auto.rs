@@ -529,10 +529,7 @@ mod tests {
         let cancel = CancellationToken::new();
         let request = AgentRequest {
             system_prompt: "t".into(),
-            messages: vec![AgentMessage {
-                role: "user".into(),
-                content: "hi".into(),
-            }],
+            messages: vec![AgentMessage::text(crate::ai::AgentRole::User, "hi")],
             cancel: cancel.clone(),
             idempotency_key: Some("k1".into()),
         };
@@ -616,10 +613,7 @@ mod tests {
         let cancel = CancellationToken::new();
         let request = AgentRequest {
             system_prompt: "t".into(),
-            messages: vec![AgentMessage {
-                role: "user".into(),
-                content: "hi".into(),
-            }],
+            messages: vec![AgentMessage::text(crate::ai::AgentRole::User, "hi")],
             cancel,
             idempotency_key: Some("k-fail".into()),
         };
@@ -691,10 +685,7 @@ mod tests {
         let cancel = CancellationToken::new();
         let request = AgentRequest {
             system_prompt: "t".into(),
-            messages: vec![AgentMessage {
-                role: "user".into(),
-                content: "hi".into(),
-            }],
+            messages: vec![AgentMessage::text(crate::ai::AgentRole::User, "hi")],
             cancel,
             idempotency_key: Some("k-silent".into()),
         };

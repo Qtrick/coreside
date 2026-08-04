@@ -1,7 +1,7 @@
-# Scoped Turn Streaming (RC3.2 Phase 3)
+# Scoped Turn Streaming (RC3.2 Phase 3 → RC3.3 Phase 4)
 
 **Product:** Coreside  
-**Status:** Interactive Channel slice landed — not complete  
+**Status:** Interactive Channel + minimal frontend turn registry landed — not complete  
 **Access date:** 2026-08-03
 
 ## Problem
@@ -27,6 +27,17 @@ Frontend:
 
 `AgentTurnEvent::Text` may include optional `turnId`, `sequence`, and `delta` (chunk) while `text` stays the cumulative checkpoint.
 
+### RC3.3 Phase 4 — minimal turn registry
+
+`src/lib/turn-registry.ts` + `app-store` fields `turnsById` / `activeTurnIdByConversation`:
+
+- Channel text/action/error always update the registry for that turn/conversation, even when the user has navigated away.
+- `streamingText` / `agentActions` / `sendError` remain derived live-UI views for the **active** conversation (MessageList unchanged).
+- Prefer `delta` append when `sequence === lastSequence + 1`; otherwise use cumulative `text` as checkpoint; soft-reject out-of-order sequences.
+- Navigating back to a conversation whose active turn is still `streaming` restores `streamingText` (and actions/error) from the registry.
+
+Channel privacy is unchanged: Text never rides the global `agent-turn` bus.
+
 ## What still uses the global bus
 
 - Sync / Conflict for multi-window surface reload and conflict UX
@@ -34,8 +45,8 @@ Frontend:
 
 ## Remaining gaps
 
-- Full turn registry (concurrent turns, background UI binding)
-- Delta-only efficiency (UI still paints from cumulative `text`)
+- Concurrent multi-turn UI binding beyond one active turn per conversation
+- Delta-only IPC (drop cumulative `text` on the wire when reconnect is solved)
 - Reconnect snapshot / resume from last sequence
 - Remove Sync global emit once Channel + registry cover tool windows
 - Queue-drain progress UI without global private payloads

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T02:30:00.000Z",
+  "commit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+  "dirty": true,
+  "phase": "RC3.3 Phase 13 partial — attachment periodic GC foundation",
+  "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib attachment_cmds",
+  "exitStatus": 0,
+  "result": "Unit Verified",
+  "partial": true,
+  "partialReason": "run_attachment_gc command wraps reconcile_and_sweep_attachments (healthy profile, managed roots, LIMIT 200, no symlink follow, counts-only redacted summary). Startup still calls reconcile. Scheduler wiring into automation ticker is next — not claimed here.",
+  "assertions": [
+    "remove_managed_file_no_follow skips symlinks and leaves symlink target intact",
+    "remove_managed_file_no_follow removes regular files under managed root",
+    "AttachmentSweepReport serializes counts only (no paths)",
+    "run_attachment_gc registered as Tauri command (main allow, tool deny)",
+    "startup reconcile_and_sweep_attachments retained"
+  ],
+  "levels": {
+    "unit": "Unit Verified",
+    "desktop": "not_run",
+    "packaged": "not_run"
+  },
+  "cargoTests": {
+    "filter": "attachment_cmds",
+    "passed": 12,
+    "failed": 0,
+    "focused": [
+      "gc_remove_skips_symlinks_and_removes_regular_files",
+      "attachment_sweep_report_is_counts_only"
+    ]
+  },
+  "docs": "docs/ATTACHMENT_LIFECYCLE.md",
+  "publicBeta": "Not ready",
+  "doNotClaim": [
+    "Periodic scheduler tick wiring",
+    "Full productized sweeper beyond startup + callable command",
+    "Desktop Verified GC behavior",
+    "Crash-consistency suite complete"
+  ]
+}

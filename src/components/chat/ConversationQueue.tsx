@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/lib/tauri";
+import {
+  api,
+  isQueueEventForConversation,
+  listenQueueChanged,
+} from "@/lib/tauri";
 import { useAppStore } from "@/stores/app-store";
 
 type QueueRow = {
@@ -8,7 +12,8 @@ type QueueRow = {
   preview: string;
 };
 
-const POLL_MS = 2000;
+/** Low-frequency reconciliation; primary updates come from queue events. */
+const RECONCILE_POLL_MS = 20_000;
 const PREVIEW_MAX = 80;
 
 function previewFromPrompt(prompt: unknown): string {
@@ -83,12 +88,48 @@ export function ConversationQueue({
     void refresh();
   }, [sending, refresh]);
 
-  // Lightweight poll while the conversation has queue work or a send in flight.
+  // Event-driven primary updates (filter wrong conversation on global bus).
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void listenQueueChanged((event) => {
+      if (!isQueueEventForConversation(event, conversationIdRef.current)) {
+        return;
+      }
+      void refresh();
+    }).then((stop) => {
+      if (cancelled) {
+        stop();
+        return;
+      }
+      unlisten = stop;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [refresh]);
+
+  // Focus / visibility reconciliation when the tab becomes active again.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    const onFocus = () => void refresh();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refresh]);
+
+  // Low-frequency poll while queue work or a send is in flight (missed events).
   useEffect(() => {
     if (!sending && items.length === 0) return;
     const timer = window.setInterval(() => {
       void refresh();
-    }, POLL_MS);
+    }, RECONCILE_POLL_MS);
     return () => window.clearInterval(timer);
   }, [sending, items.length, refresh]);
 

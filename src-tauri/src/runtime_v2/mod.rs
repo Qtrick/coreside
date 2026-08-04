@@ -12,6 +12,7 @@ pub mod packs;
 pub mod patch;
 pub mod patch_scheduler;
 pub mod preservation;
+pub mod preview_transaction;
 pub mod provider_conformance;
 pub mod queue;
 pub mod streaming;
@@ -75,6 +76,10 @@ pub use provider_conformance::{
 pub use queue::{
     activate_next, cancel as cancel_queue_item, complete as complete_queue_item, enqueue, get_item,
     list_queue, recover_stale_active, remove_queued, requeue as requeue_queue_item, QueueItem,
+};
+#[allow(unused_imports)]
+pub use preview_transaction::{
+    ingest_live_chunk, PreviewOpEvent, PreviewTransaction, RejectedPreviewOp,
 };
 #[allow(unused_imports)]
 pub use streaming::{NdjsonFrameParser, StreamEvent};

@@ -83,3 +83,40 @@ export async function listenApprovalsChanged(
   if (!isTauriRuntime()) return () => undefined;
   return listen("runtime-approvals-changed", () => handler());
 }
+
+/** Queue mutation kinds emitted by Rust after SQLite authoritative writes. */
+export type QueueChangeKind =
+  | "itemAdded"
+  | "itemActivated"
+  | "itemCancelled"
+  | "itemCompleted"
+  | "queueSnapshot";
+
+export type QueueChangedEvent = {
+  kind: QueueChangeKind;
+  conversationId: string;
+  itemId?: string | null;
+};
+
+/** Defense-in-depth filter: queue bus is still process-wide (P1 to scope). */
+export function isQueueEventForConversation(
+  event: QueueChangedEvent,
+  conversationId: string,
+): boolean {
+  // Empty ids must never match — avoids refreshing/leaking across an unset chat.
+  if (!conversationId || !event.conversationId) return false;
+  return event.conversationId === conversationId;
+}
+
+/**
+ * Subscribe to `agent-queue-changed`. Payload includes conversationId; callers
+ * must filter. Not conversation-scoped Channel delivery yet.
+ */
+export async function listenQueueChanged(
+  handler: (event: QueueChangedEvent) => void,
+): Promise<() => void> {
+  if (!isTauriRuntime()) return () => undefined;
+  return listen<QueueChangedEvent>("agent-queue-changed", (event) => {
+    handler(event.payload);
+  });
+}

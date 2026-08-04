@@ -1,28 +1,33 @@
-# Implementation Plan — RC3.2 Direct Partial Update Port + Wallpaper + Scoped Streaming
+# Implementation Plan — RC3.3 Direct Partial Update + Progressive UI + Wallpaper + Readiness Ladder
 
 **Product:** Coreside  
-**Status:** RC3.2 in progress; **public beta NOT READY** · **local-first NOT READY** · **Hosted AI NOT READY**  
-**Last updated:** 2026-08-03  
-**Access date:** 2026-08-03  
-**Coreside archive:** `10d7c5110a12525b53a48ee3dc66bf8d3a054c243553bc4ee9a1db27bc8b86b5`  
-**Previous Coreside archive:** `75946b05d7778368700c8d827007d83f1cce0006fcedad8cf69b35f37bb23d69`  
+**Status:** RC3.3 in progress; ladder = **Development Build** (not Automated Public-Beta Candidate) · Hosted AI **Development Build / Deliberately Deferred**  
+**Last updated:** 2026-08-04  
+**Access date:** 2026-08-04  
+**Coreside archive:** `a7d6c7ab2e5ac1c58b83b1607a49171338dbfba927b29ed549aa5d3510f0317d`  
+**Previous Coreside archive:** `10d7c5110a12525b53a48ee3dc66bf8d3a054c243553bc4ee9a1db27bc8b86b5`  
 **Partial Update archive:** `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607`  
-**Active commit:** `76072ff4cfbca185d8420fc4f6da64a49aa91b17` (dirty)  
-**Commands:** **213** (`set_workspace_appearance` added)
+**Active commit:** `a491887e2a80d21619301ed6049de7f29ad9b44b` (dirty)  
+**Commands:** **213** (recalculated; see baseline)
 
-### RC3.2 landed (this session)
+### RC3.3 landed (this session)
 
-| Workstream | Status |
+| Workstream | Evidence state |
 | --- | --- |
-| Baseline / provenance / MIT | Done (dirty) |
-| Wallpaper atomic + slider coalesce | Unit landed; desktop pixels **not_run** |
-| Channel-scoped text streaming | Landed; eavesdrop E2E **not_run** |
-| Progressive preview / typed StructuredUserInput | Open |
-| Full E2E 12/13 + packaged smoke | Open |
+| Baseline `a7d6c7ab…` + readiness ladder/delta | Done (`docs/BETA_READINESS_MODEL.md`, `audit:readiness`) |
+| Turn UUID + frontend turn registry + delta preference | Unit Verified |
+| Progressive preview (live NDJSON → Channel Operation preview) | Unit Verified (no surface paint) |
+| Wallpaper preview-first + slider dedupe + alpha curves + rollback races | Unit Verified (pixels not_run) |
+| Typed StructuredUserInput seal | Unit Verified |
+| Event-driven queue UI | Unit Verified (global emit residual P1) |
+| Paced read-only ReplayPlayer | Unit Verified (transaction stepper, not event-stream) |
+| Attachment authorize + `run_attachment_gc` | Unit Verified (crash suite Scaffolded) |
+| Journey 12/13 + packaged smoke | Scaffolded / not_run |
 
-Non-claims: specs ≠ executed E2E; unit wallpaper ≠ pixel proof; dirty ≠ release.
+Non-claims: no Desktop Verified; no Packaged Verified; no Human Accepted; no Automated Public-Beta Candidate.
 
-### Scope note (prior RC3.1 — retained)
+### Scope note (prior RC3.2 — retained)
+
 
 Production implementation is underway (not audit-only). Honest landed work this session:
 
@@ -32,12 +37,12 @@ Production implementation is underway (not audit-only). Honest landed work this 
 | Misleading npm script names | **Done** (`preservation-suite` / `transactions`; removed false parity/replay/inspector) |
 | True streaming vertical slice | **Landed** — `chat_with_auto` → `chat_stream`; OpenAI live SSE; UI TextDelta; unit TS-1; Journey 12 **written, not executed** |
 | Bounded NDJSON parser | **Landed** — canonical `StreamEvent` path + legacy harvest |
-| Queue UI | **Landed** — `ConversationQueue` |
-| Branch / snapshot / replay / inspector UI | **Landed** — `ConversationHistory` (replay read-only; paced player incomplete) |
-| Structured forms → model | **Landed** — ledger inject + structured message blocks (bounded) |
+| Queue UI | **Partial** — `ConversationQueue` + `agent-queue-changed` (20s reconcile; global emit P1) |
+| Branch / snapshot / replay / inspector UI | **Landed** — `ConversationHistory` + read-only paced `ReplayPlayer` (transaction stepper; not true event-stream replay) |
+| Structured forms → model | **Unit Verified** — typed `StructuredUserInput` seal; delimiter not authority (see STRUCTURED_FORMS_AND_CONTEXT.md) |
 | Maintenance journal startup | **Landed** — Recovery / safe pre-swap clear / skip scheduler (full restore still open) |
 | Anthropic/Gemini live SSE | **Open** |
-| Progressive preview transaction | **Open** |
+| Progressive preview transaction | **Partial** — live NDJSON Channel preview + turn-end apply; surface paint / JSON-blob progressive remain open |
 | Attachment crash-consistency suite | **Open** (P1) |
 | Desktop E2E full suite / packaged smoke | **Open** |
 
@@ -50,9 +55,9 @@ July Partial Update status claims remain **stale** for completeness. HTML/JS/CDN
 | 1 | Baseline + evidence correction | **Done** (dirty) |
 | 2 | Production true streaming slice | **Partial** — unit pass; E2E not_run |
 | 3 | Provider + frame protocol completeness | **Partial** — parser hardened; Anthropic/Gemini open |
-| 4 | Progressive preview + preservation path | **Open** |
-| 5 | Structured forms/context | **Partial** — production inject landed |
-| 6 | Queue / branch / replay / inspector UI | **Partial** — usable panels; paced replay open |
+| 4 | Progressive preview + preservation path | **Partial** — PreviewTransaction + live NDJSON preview; preservation separate |
+| 5 | Structured forms/context | **Unit Verified** — typed seal + frontend path; desktop E2E open |
+| 6 | Queue / branch / replay / inspector UI | **Partial** — usable panels; paced transaction stepper landed (not true event replay) |
 | 7 | Attachment integrity + multimodal | **Partial** — foundations + size cap; crash suite open |
 | 8 | Durable profile + restore | **Partial** — journal decisions; coherent restore open |
 | 9–13 | Media/backup/packages/authority/wallpaper/E2E/assurance | **Open** |

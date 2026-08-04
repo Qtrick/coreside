@@ -20,10 +20,10 @@ const DEFAULT_ARCHIVE =
   process.env.CORESIDE_ARCHIVE ||
   path.join(process.env.HOME || "", "Downloads", "Coreside Chat AI.zip");
 const EXPECTED_ARCHIVE_SHA256 =
-  "10d7c5110a12525b53a48ee3dc66bf8d3a054c243553bc4ee9a1db27bc8b86b5";
+  "a7d6c7ab2e5ac1c58b83b1607a49171338dbfba927b29ed549aa5d3510f0317d";
 const PREVIOUS_ARCHIVE_SHA256 =
-  "75946b05d7778368700c8d827007d83f1cce0006fcedad8cf69b35f37bb23d69";
-const PREVIOUS_ARCHIVE_LABEL = "Coreside main.zip";
+  "10d7c5110a12525b53a48ee3dc66bf8d3a054c243553bc4ee9a1db27bc8b86b5";
+const PREVIOUS_ARCHIVE_LABEL = "Coreside Chat AI(10).zip";
 const CURRENT_ARCHIVE_LABEL = "Coreside Chat AI.zip";
 
 const FINGERPRINT_ROOTS = [

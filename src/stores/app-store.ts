@@ -35,6 +35,14 @@ import type {
   UpdateProjectInput,
 } from "@/types/project";
 import type { SurfaceDraftConflict } from "@/types/runtime-v2";
+import { parseWallpaperJson } from "@/types/wallpaper";
+import {
+  applyTextDelta,
+  createTurnLiveState,
+  pendingTurnId,
+  type TurnLiveState,
+  type TurnLiveStatus,
+} from "@/lib/turn-registry";
 
 export type PendingToolChange = {
   conversationId: string;
@@ -131,7 +139,11 @@ type AppStore = {
   sendingConversationId: string | null;
   sendError: string | null;
   agentActions: string[];
+  /** Derived view of active-conversation stream text (MessageList compatibility). */
   streamingText: string | null;
+  /** Per-turn Channel accumulation — survives navigation away from the chat. */
+  turnsById: Record<string, TurnLiveState>;
+  activeTurnIdByConversation: Record<string, string>;
   testingConnection: boolean;
   connectionTestMessage: string | null;
 
@@ -209,6 +221,12 @@ type AppStore = {
     content: string,
     mentions?: ToolMention[],
     attachments?: import("@/types/attachments").StagedAttachment[],
+    structuredUserInput?: {
+      formId: string;
+      applicationId?: string | null;
+      surfaceId?: string | null;
+      fields: Record<string, unknown>;
+    } | null,
   ) => Promise<void>;
   cancelRequest: () => Promise<void>;
   retryLastFailed: () => Promise<void>;
@@ -234,6 +252,82 @@ type AppStore = {
 };
 
 let agentTurnSyncAttached = false;
+
+/** Mark a conversation's active turn terminal; no-op if none. */
+function finalizeTurnInState(
+  state: {
+    turnsById: Record<string, TurnLiveState>;
+    activeTurnIdByConversation: Record<string, string>;
+  },
+  conversationId: string,
+  status: TurnLiveStatus,
+  error: string | null = null,
+): Partial<{
+  turnsById: Record<string, TurnLiveState>;
+}> {
+  const turnId = state.activeTurnIdByConversation[conversationId];
+  if (!turnId) return {};
+  const turn = state.turnsById[turnId];
+  if (!turn) return {};
+  return {
+    turnsById: {
+      ...state.turnsById,
+      [turnId]: {
+        ...turn,
+        status,
+        error: error ?? turn.error,
+      },
+    },
+  };
+}
+
+/**
+ * Resolve the registry key for a Channel event. Prefer event.turnId; migrate
+ * from a provisional pending:* entry when the real id arrives.
+ */
+function upsertTurnFromChannel(
+  state: {
+    turnsById: Record<string, TurnLiveState>;
+    activeTurnIdByConversation: Record<string, string>;
+  },
+  conversationId: string,
+  eventTurnId: string | null | undefined,
+): {
+  turnId: string;
+  turn: TurnLiveState;
+  turnsById: Record<string, TurnLiveState>;
+  activeTurnIdByConversation: Record<string, string>;
+} {
+  const currentId =
+    state.activeTurnIdByConversation[conversationId] ?? pendingTurnId(conversationId);
+  const turnId =
+    typeof eventTurnId === "string" && eventTurnId.length > 0 ? eventTurnId : currentId;
+
+  let turnsById = state.turnsById;
+  let turn = turnsById[turnId];
+
+  if (!turn && turnId !== currentId && turnsById[currentId]) {
+    // Migrate provisional pending:* → real turnId from Channel text.
+    const pending = turnsById[currentId];
+    turnsById = { ...turnsById };
+    delete turnsById[currentId];
+    turn = { ...pending, turnId };
+    turnsById[turnId] = turn;
+  } else if (!turn) {
+    turn = createTurnLiveState(turnId, conversationId);
+    turnsById = { ...turnsById, [turnId]: turn };
+  }
+
+  return {
+    turnId,
+    turn,
+    turnsById,
+    activeTurnIdByConversation: {
+      ...state.activeTurnIdByConversation,
+      [conversationId]: turnId,
+    },
+  };
+}
 
 function attachAgentTurnSyncListener(
   get: () => {
@@ -426,6 +520,49 @@ function wallpaperFromSettings(settings: {
   };
 }
 
+/**
+ * Optimistic CSS/renderer state from a proposed wallpaperJson payload.
+ * Mirrors Rust `resolve_wallpaper_pair`: schema → wallpaperJson + none;
+ * legacy kind → wallpaper + cleared wallpaperJson; empty/none → cleared.
+ */
+function optimisticWallpaperFromJson(wallpaperJson: string): {
+  wallpaper: WallpaperConfig;
+  globalWallpaperJson: string | null;
+} {
+  const trimmed = wallpaperJson.trim();
+  if (!trimmed) {
+    return { wallpaper: { ...DEFAULT_WALLPAPER }, globalWallpaperJson: null };
+  }
+  const parsed = parseWallpaperJson(trimmed);
+  if (parsed.format === "none") {
+    return { wallpaper: { ...DEFAULT_WALLPAPER }, globalWallpaperJson: null };
+  }
+  if (parsed.format === "legacy") {
+    return { wallpaper: parsed.config, globalWallpaperJson: null };
+  }
+  return {
+    wallpaper: { ...DEFAULT_WALLPAPER },
+    globalWallpaperJson: trimmed,
+  };
+}
+
+function rememberCommittedWallpaper(input: {
+  wallpaper: WallpaperConfig;
+  globalWallpaperJson: string | null;
+}) {
+  committedWallpaper = { ...input.wallpaper };
+  committedGlobalWallpaperJson = input.globalWallpaperJson;
+}
+
+/** Bootstrap / settings reload: commit truth matches current apply generation. */
+function syncCommittedWallpaperFromSettings(input: {
+  wallpaper: WallpaperConfig;
+  globalWallpaperJson: string | null;
+}) {
+  rememberCommittedWallpaper(input);
+  wallpaperCommittedGen = wallpaperApplyGen;
+}
+
 function appearanceFromSettings(settings: Partial<AppearancePalette>): AppearancePalette {
   return {
     accentPrimaryLight:
@@ -463,6 +600,32 @@ function appearanceFromSettings(settings: Partial<AppearancePalette>): Appearanc
 let committedInterfaceTransparency = 20;
 /** Monotonic commit generation — superseded in-flight commits must not clobber newer UI. */
 let interfaceTransparencyCommitGen = 0;
+/**
+ * Highest generation that successfully persisted. Stale successes still advance this so a
+ * newer failed commit rolls back to DB-truth from an overlapping older write, not the
+ * pre-overlap snapshot (same race class as wallpaperCommittedGen).
+ */
+let interfaceTransparencyCommittedGen = 0;
+/**
+ * In-flight same-target promise reuse (pointerup + blur / duplicate preset).
+ * Different targets start a new commit; only the latest gen may paint Zustand.
+ */
+let interfaceTransparencyInFlight: {
+  value: number;
+  promise: Promise<void>;
+} | null = null;
+
+/** Last successfully persisted workspace wallpaper — rollback target for failed preview applies. */
+let committedWallpaper: WallpaperConfig = { ...DEFAULT_WALLPAPER };
+let committedGlobalWallpaperJson: string | null = null;
+/** Monotonic apply generation — stale overlapping applies must not clobber newer preview/commit. */
+let wallpaperApplyGen = 0;
+/**
+ * Highest generation that successfully persisted. Stale successes still advance this so a
+ * newer failed apply rolls back to DB-truth from an overlapping older write, not the
+ * pre-overlap snapshot.
+ */
+let wallpaperCommittedGen = 0;
 
 export const useAppStore = create<AppStore>((set, get) => ({
   bootstrapped: false,
@@ -536,6 +699,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   sendError: null,
   agentActions: [],
   streamingText: null,
+  turnsById: {},
+  activeTurnIdByConversation: {},
   testingConnection: false,
   connectionTestMessage: null,
 
@@ -576,6 +741,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
           ? Math.min(60, Math.max(0, Math.round(settings.interfaceTransparency)))
           : 20;
       committedInterfaceTransparency = interfaceTransparency;
+      interfaceTransparencyCommittedGen = interfaceTransparencyCommitGen;
+      syncCommittedWallpaperFromSettings({
+        wallpaper,
+        globalWallpaperJson: settings.wallpaperJson ?? null,
+      });
       set({
         bootstrapped: true,
         bootError: null,
@@ -705,11 +875,29 @@ export const useAppStore = create<AppStore>((set, get) => ({
     );
     const savedToolId = state.chatViewState[trimmed]?.activeToolId ?? null;
 
+    const activeTurnId = state.activeTurnIdByConversation[trimmed];
+    const activeTurn = activeTurnId ? state.turnsById[activeTurnId] : undefined;
+    const restoreLive =
+      activeTurn?.status === "streaming"
+        ? {
+            streamingText: activeTurn.text || null,
+            agentActions: activeTurn.actions,
+            sendError: activeTurn.error,
+          }
+        : {
+            // Derived live UI is conversation-scoped; clear when the target
+            // chat has no streaming turn (registry keeps background truth).
+            streamingText: null,
+            agentActions:
+              state.sendingConversationId === trimmed ? state.agentActions : [],
+          };
+
     set({
       view: { kind: "chat", conversationId: trimmed },
       activeConversationId: trimmed,
       activeProjectId:
         state.conversations.find((c) => c.id === trimmed)?.projectId ?? null,
+      ...restoreLive,
       ...(needLoad
         ? {
             messagesLoading: true,
@@ -846,13 +1034,37 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   applyWorkspaceWallpaper: async (wallpaperJson) => {
-    // Single atomic IPC: wallpaperJson + wallpaper pair, or nothing.
-    // Zustand updates only after success so a failed apply leaves UI unchanged.
-    const settings = await api.setWorkspaceAppearance({ wallpaperJson });
-    set({
-      wallpaper: wallpaperFromSettings(settings),
-      globalWallpaperJson: settings.wallpaperJson ?? null,
-    });
+    // Preview-first (same pattern as transparency): paint local CSS/renderer
+    // immediately, persist via atomic IPC, roll back to last committed on failure.
+    const preview = optimisticWallpaperFromJson(wallpaperJson);
+    const gen = ++wallpaperApplyGen;
+    set(preview);
+    try {
+      const settings = await api.setWorkspaceAppearance({ wallpaperJson });
+      const next = {
+        wallpaper: wallpaperFromSettings(settings),
+        globalWallpaperJson: settings.wallpaperJson ?? null,
+      };
+      // Record DB truth for any success that isn't older than an already-committed
+      // newer gen (overlapping A then B: A may finish after B started).
+      if (gen >= wallpaperCommittedGen) {
+        wallpaperCommittedGen = gen;
+        rememberCommittedWallpaper(next);
+      }
+      if (gen === wallpaperApplyGen) {
+        set(next);
+      }
+    } catch (err) {
+      // Roll back to live module committed — never a start-of-apply snapshot, which
+      // can be stale when an overlapping older apply already persisted.
+      if (gen === wallpaperApplyGen) {
+        set({
+          wallpaper: { ...committedWallpaper },
+          globalWallpaperJson: committedGlobalWallpaperJson,
+        });
+      }
+      throw err;
+    }
   },
 
   applyProjectWallpaper: async (projectId, wallpaperJson) => {
@@ -876,27 +1088,48 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ interfaceTransparency: next });
       return;
     }
+    if (interfaceTransparencyInFlight?.value === next) {
+      set({ interfaceTransparency: next });
+      return interfaceTransparencyInFlight.promise;
+    }
     const gen = ++interfaceTransparencyCommitGen;
     set({ interfaceTransparency: next });
-    try {
-      const settings = await api.setWorkspaceAppearance({
-        interfaceTransparency: next,
-      });
-      const saved =
-        typeof settings.interfaceTransparency === "number"
-          ? Math.min(60, Math.max(0, Math.round(settings.interfaceTransparency)))
-          : next;
-      // Always record DB truth; only the latest generation may paint Zustand.
-      committedInterfaceTransparency = saved;
-      if (gen === interfaceTransparencyCommitGen) {
-        set({ interfaceTransparency: saved });
+    const promise = (async () => {
+      try {
+        const settings = await api.setWorkspaceAppearance({
+          interfaceTransparency: next,
+        });
+        const saved =
+          typeof settings.interfaceTransparency === "number"
+            ? Math.min(
+                60,
+                Math.max(0, Math.round(settings.interfaceTransparency)),
+              )
+            : next;
+        // Record DB truth for any success that isn't older than an already-committed
+        // newer gen (overlapping A then B: A may finish after B started).
+        if (gen >= interfaceTransparencyCommittedGen) {
+          interfaceTransparencyCommittedGen = gen;
+          committedInterfaceTransparency = saved;
+        }
+        // Only the latest generation may paint Zustand over a newer preview.
+        if (gen === interfaceTransparencyCommitGen) {
+          set({ interfaceTransparency: saved });
+        }
+      } catch (err) {
+        // Roll back to live module committed — never a start-of-commit snapshot.
+        if (gen === interfaceTransparencyCommitGen) {
+          set({ interfaceTransparency: committedInterfaceTransparency });
+        }
+        throw err;
+      } finally {
+        if (interfaceTransparencyInFlight?.value === next) {
+          interfaceTransparencyInFlight = null;
+        }
       }
-    } catch (err) {
-      if (gen === interfaceTransparencyCommitGen) {
-        set({ interfaceTransparency: committedInterfaceTransparency });
-      }
-      throw err;
-    }
+    })();
+    interfaceTransparencyInFlight = { value: next, promise };
+    return promise;
   },
 
   setAdaptiveWindowSizing: async (mode) => {
@@ -1421,9 +1654,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
-  sendMessage: async (content, mentions = [], attachments = []) => {
+  sendMessage: async (
+    content,
+    mentions = [],
+    attachments = [],
+    structuredUserInput = null,
+  ) => {
     const trimmed = content.trim();
-    if (!trimmed && attachments.length === 0) return;
+    if (!trimmed && attachments.length === 0 && !structuredUserInput) return;
 
     const aiStatus = get().aiStatus?.status;
     if (aiStatus === "missing_key" || aiStatus === "unconfigured") {
@@ -1438,7 +1676,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     if (!conversationId) return;
 
-    const messageContent = trimmed || "Shared attachments";
+    const messageContent =
+      trimmed ||
+      (structuredUserInput ? "Form submitted" : "Shared attachments");
 
     const optimistic: ChatMessage = {
       id: `local-${crypto.randomUUID()}`,
@@ -1475,14 +1715,25 @@ export const useAppStore = create<AppStore>((set, get) => ({
           : null,
     };
 
-    set((state) => ({
-      messages: [...state.messages, optimistic],
-      sending: true,
-      sendingConversationId: conversationId,
-      sendError: null,
-      agentActions: [],
-      streamingText: null,
-    }));
+    set((state) => {
+      const provisionalId = pendingTurnId(conversationId);
+      return {
+        messages: [...state.messages, optimistic],
+        sending: true,
+        sendingConversationId: conversationId,
+        sendError: null,
+        agentActions: [],
+        streamingText: null,
+        turnsById: {
+          ...state.turnsById,
+          [provisionalId]: createTurnLiveState(provisionalId, conversationId),
+        },
+        activeTurnIdByConversation: {
+          ...state.activeTurnIdByConversation,
+          [conversationId]: provisionalId,
+        },
+      };
+    });
 
     const turnConversationId = conversationId;
     const onChannelEvent = (event: AgentTurnEvent) => {
@@ -1494,24 +1745,84 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (!("conversationId" in event) || event.conversationId !== turnConversationId) {
         return;
       }
-      if (get().activeConversationId !== turnConversationId) return;
+      // Always accumulate in turnsById (even when navigated away). Only mirror
+      // derived live UI fields when this conversation is on screen.
+      const isActive = get().activeConversationId === turnConversationId;
+
       if (event.kind === "operation") {
-        set((state) => ({
-          agentActions: [
-            ...state.agentActions,
-            `Operation ${event.status}: ${event.operationId.slice(0, 8)}`,
-          ].slice(-8),
-        }));
+        const shortId = event.operationId.slice(0, 8);
+        const label =
+          event.status === "preview"
+            ? `Preview: ${shortId}`
+            : `Operation ${event.status}: ${shortId}`;
+        set((state) => {
+          const upserted = upsertTurnFromChannel(state, turnConversationId, null);
+          const actions = [...upserted.turn.actions, label].slice(-8);
+          return {
+            turnsById: {
+              ...upserted.turnsById,
+              [upserted.turnId]: { ...upserted.turn, actions },
+            },
+            activeTurnIdByConversation: upserted.activeTurnIdByConversation,
+            ...(isActive
+              ? { agentActions: [...state.agentActions, label].slice(-8) }
+              : {}),
+          };
+        });
         return;
       }
       if (event.kind === "action") {
-        set((state) => ({
-          agentActions: [...state.agentActions, event.label].slice(-8),
-        }));
-      } else if (event.kind === "text") {
-        set({ streamingText: event.text });
-      } else if (event.kind === "error") {
-        set({ sendError: event.message });
+        set((state) => {
+          const upserted = upsertTurnFromChannel(state, turnConversationId, null);
+          const actions = [...upserted.turn.actions, event.label].slice(-8);
+          return {
+            turnsById: {
+              ...upserted.turnsById,
+              [upserted.turnId]: { ...upserted.turn, actions },
+            },
+            activeTurnIdByConversation: upserted.activeTurnIdByConversation,
+            ...(isActive
+              ? { agentActions: [...state.agentActions, event.label].slice(-8) }
+              : {}),
+          };
+        });
+        return;
+      }
+      if (event.kind === "text") {
+        set((state) => {
+          const upserted = upsertTurnFromChannel(
+            state,
+            turnConversationId,
+            event.turnId,
+          );
+          const next = applyTextDelta(upserted.turn, event);
+          return {
+            turnsById: {
+              ...upserted.turnsById,
+              [upserted.turnId]: next,
+            },
+            activeTurnIdByConversation: upserted.activeTurnIdByConversation,
+            ...(isActive ? { streamingText: next.text || null } : {}),
+          };
+        });
+        return;
+      }
+      if (event.kind === "error") {
+        set((state) => {
+          const upserted = upsertTurnFromChannel(state, turnConversationId, null);
+          return {
+            turnsById: {
+              ...upserted.turnsById,
+              [upserted.turnId]: {
+                ...upserted.turn,
+                error: event.message,
+                status: "failed" as const,
+              },
+            },
+            activeTurnIdByConversation: upserted.activeTurnIdByConversation,
+            ...(isActive ? { sendError: event.message } : {}),
+          };
+        });
       }
     };
 
@@ -1528,6 +1839,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         attachments: attachments.map((a) => ({
           id: a.id,
         })),
+        structuredUserInput: structuredUserInput ?? null,
         onEvent: onChannelEvent,
       });
 
@@ -1580,12 +1892,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // the turn-scoped indicators.
       const stillActive = get().activeConversationId === conversationId;
       if (!stillActive) {
-        set({
+        set((state) => ({
           sending: false,
           sendingConversationId: null,
           agentActions: [],
           streamingText: null,
-        });
+          ...finalizeTurnInState(state, conversationId, "completed"),
+        }));
         return;
       }
 
@@ -1596,6 +1909,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           agentActions: ["Message queued"],
           streamingText: null,
           sendError: null,
+          ...finalizeTurnInState(state, conversationId, "completed"),
           messages: state.messages.map((m) =>
             m.id === optimistic.id
               ? {
@@ -1619,12 +1933,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (result.settingsChange) {
         const settings = await api.getSettings();
         const theme = settings.theme ?? get().theme;
+        const wallpaper = wallpaperFromSettings(settings);
+        const globalWallpaperJson = settings.wallpaperJson ?? null;
+        syncCommittedWallpaperFromSettings({ wallpaper, globalWallpaperJson });
         themePatch = {
           theme,
           resolvedTheme: resolveTheme(theme),
           appearance: appearanceFromSettings(settings),
-          wallpaper: wallpaperFromSettings(settings),
-          globalWallpaperJson: settings.wallpaperJson ?? null,
+          wallpaper,
+          globalWallpaperJson,
         };
       }
 
@@ -1632,17 +1949,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // in the meantime. Appearance is global and still applies; the
       // conversation-scoped fields must not overwrite whichever chat is now open.
       if (get().activeConversationId !== conversationId) {
-        set({
+        set((state) => ({
           sending: false,
           sendingConversationId: null,
           agentActions: [],
           streamingText: null,
+          ...finalizeTurnInState(state, conversationId, "completed"),
           ...themePatch,
-        });
+        }));
         return;
       }
 
-      set({
+      set((state) => ({
         messages,
         sending: false,
         sendingConversationId: null,
@@ -1651,20 +1969,27 @@ export const useAppStore = create<AppStore>((set, get) => ({
         agentActions: [],
         streamingText: null,
         sendError: rv?.error ? String(rv.error) : null,
+        ...finalizeTurnInState(
+          state,
+          conversationId,
+          rv?.error ? "failed" : "completed",
+          rv?.error ? String(rv.error) : null,
+        ),
         ...themePatch,
-      });
+      }));
     } catch (error) {
       const message =
         error instanceof TauriCommandError || error instanceof Error
           ? error.message
           : "Failed to send message";
       if (get().activeConversationId !== conversationId) {
-        set({
+        set((state) => ({
           sending: false,
           sendingConversationId: null,
           agentActions: [],
           streamingText: null,
-        });
+          ...finalizeTurnInState(state, conversationId, "failed", message),
+        }));
         return;
       }
       set((state) => ({
@@ -1673,6 +1998,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         sendError: message,
         agentActions: [],
         streamingText: null,
+        ...finalizeTurnInState(state, conversationId, "failed", message),
         messages: state.messages.map((m) =>
           m.id === optimistic.id
             ? { ...m, status: "error" as const, errorMessage: message }
@@ -1685,12 +2011,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
   cancelRequest: async () => {
     const id = get().sendingConversationId ?? get().activeConversationId;
     await api.cancelRequest(id ?? undefined);
-    set({
+    set((state) => ({
       sending: false,
       sendingConversationId: null,
       agentActions: [],
       streamingText: null,
-    });
+      ...(id ? finalizeTurnInState(state, id, "cancelled") : {}),
+    }));
   },
 
   retryLastFailed: async () => {
@@ -2035,6 +2362,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         api.getAppInfo(),
       ]);
       const theme = settings.theme ?? "system";
+      const wallpaper = wallpaperFromSettings(settings);
+      const globalWallpaperJson = settings.wallpaperJson ?? null;
+      syncCommittedWallpaperFromSettings({ wallpaper, globalWallpaperJson });
       set({
         bootstrapped: true,
         bootError: null,
@@ -2043,8 +2373,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
         theme,
         resolvedTheme: resolveTheme(theme),
         appearance: appearanceFromSettings(settings),
-        wallpaper: wallpaperFromSettings(settings),
-        globalWallpaperJson: settings.wallpaperJson ?? null,
+        wallpaper,
+        globalWallpaperJson,
         activeToolId: toolId,
         activeTool: tool,
         toolState: state ?? {},

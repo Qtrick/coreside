@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T02:10:31.000Z",
+  "commit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+  "dirty": true,
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib structured_user_input",
+  "exitStatus": 0,
+  "result": "Unit Verified",
+  "partial": true,
+  "partialReason": "Typed seal + trust gate + frontend submission path unit-proven; native multimodal provider parts and desktop E2E form continuation not_run",
+  "assertions": [
+    "spoofed_marker_in_plain_text_does_not_grant_structured_trust",
+    "typed_part_grants_local_user_gesture_trust",
+    "agent_role_unknown_fails_deserialize",
+    "seal_rejects_empty_form_id",
+    "ledger_payload_seals_with_local_gesture",
+    "submission_rejects_frontend_supplied_trust_class",
+    "adopt_stored_reasserts_trust_and_rejects_tampered_hash"
+  ],
+  "productionFiles": [
+    "src-tauri/src/ai/structured_user_input.rs",
+    "src-tauri/src/ai/provider.rs",
+    "src-tauri/src/commands/message_cmds.rs",
+    "src/components/tool-canvas/ToolCanvas.tsx",
+    "src/components/chat/InlineSurface.tsx",
+    "src/stores/app-store.ts",
+    "src/lib/tauri/api.ts"
+  ],
+  "docs": [
+    "docs/STRUCTURED_FORMS_AND_CONTEXT.md",
+    "docs/KNOWN_ISSUES.md",
+    "docs/PARTIAL_UPDATE_PORT_PROVENANCE.md"
+  ],
+  "attribution": "Behavioral reimplementation of Partial Update form→model continuation (MIT, Copyright (c) 2026 Phil Holden)",
+  "e2eResult": "not_run",
+  "publicBeta": "Not ready"
+}

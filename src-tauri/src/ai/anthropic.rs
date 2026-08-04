@@ -51,15 +51,9 @@ impl AnthropicProvider {
     fn build_body(system_prompt: &str, messages: &[AgentMessage], model: &str) -> Value {
         let mut api_messages = Vec::new();
         for m in messages {
-            let role = match m.role.as_str() {
-                "assistant" | "model" => "assistant",
-                // tool_result maps to user for API shape; content is untrusted-enveloped.
-                "tool_result" => "user",
-                _ => "user",
-            };
             api_messages.push(json!({
-                "role": role,
-                "content": m.content
+                "role": m.role.as_openai_role(),
+                "content": m.provider_text()
             }));
         }
         json!({
@@ -171,10 +165,7 @@ impl AiProvider for AnthropicProvider {
     async fn health_check(&self, cancel: CancellationToken) -> Result<ProviderHealth, AiError> {
         let body = Self::build_body(
             "Reply with ok.",
-            &[AgentMessage {
-                role: "user".into(),
-                content: "ping".into(),
-            }],
+            &[AgentMessage::text(crate::ai::AgentRole::User, "ping")],
             &self.model,
         );
         // Use a tiny max_tokens override for health.

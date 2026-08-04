@@ -1,21 +1,35 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T01:00:00.000Z",
-  "commit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
+  "generatedAt": "2026-08-04T02:02:15.000Z",
+  "commit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
   "dirty": true,
-  "command": "vitest workspace-appearance + cargo settings_cmds",
+  "phase": "RC3.3 Phase 7 remaining — wallpaper preview-first vertical slice",
+  "command": "npm run typecheck && npx vitest run src/stores/workspace-appearance.test.ts src/lib/wallpaper.test.ts src/lib/interface-transparency.test.ts",
   "exitStatus": 0,
-  "result": "passed_unit",
+  "result": "Unit Verified",
   "partial": true,
-  "partialReason": "Desktop Journey 13 written and registered; not executed in this pass. Pixel sampling / packaged proof not run.",
+  "partialReason": "Store-level preview→commit→rollback unit-proven. Journey 13 written/registered with pixel-sampling TODO; desktop e2e and pixel sampling not_run. No screenshots invented.",
   "assertions": [
-    "set_workspace_appearance writes wallpaperJson+wallpaper atomically",
-    "set_setting rejects wallpaper/transparency keys",
-    "slider preview vs commit coalesce",
-    "commit failure rolls back UI to last committed transparency"
+    "applyWorkspaceWallpaper paints optimistic Zustand before set_workspace_appearance",
+    "persist failure restores previousCommitted wallpaper pair",
+    "persist success marks committed = preview (settings response)",
+    "previewInterfaceTransparency remains preview-only until commitInterfaceTransparency",
+    "set_workspace_appearance remains the atomic wallpaper+transparency write path"
   ],
+  "levels": {
+    "unit": "Unit Verified",
+    "desktop": "not_run",
+    "desktopPixelSampling": "not_run",
+    "packaged": "not_run"
+  },
   "e2eSpec": "e2e/specs/13-wallpaper-targeted-update.spec.ts",
   "e2eResult": "not_run",
-  "publicBeta": "Not ready"
+  "backgroundRuleInventory": "reports/background-rule-inventory.json",
+  "publicBeta": "Not ready",
+  "doNotClaim": [
+    "Desktop Verified",
+    "pixel screenshots",
+    "packaged WebView proof"
+  ]
 }

@@ -12,7 +12,7 @@ import {
  * Canvas preset id currently applied to the workspace.
  * Prefers `wallpaperJson` (schema) over legacy `wallpaper`; returns `null`
  * when a non-preset schema wallpaper is active (e.g. media cover).
- * This pass is Apply-only — there is no separate preview selection state.
+ * Selection UI reflects optimistic preview state while durable save is in flight.
  */
 export function activeCanvasPresetId(input: {
   globalWallpaperJson?: string | null;

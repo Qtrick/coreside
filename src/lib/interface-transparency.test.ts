@@ -39,9 +39,12 @@ describe("interface transparency", () => {
     expect(max.panelAlpha).toBeLessThan(immersive.panelAlpha);
     expect(immersive.cardAlpha).toBeGreaterThan(immersive.panelAlpha);
     expect(immersive.controlAlpha).toBeGreaterThanOrEqual(immersive.cardAlpha);
-    expect(immersive.modalAlpha).toBeGreaterThanOrEqual(0.92);
+    expect(immersive.modalAlpha).toBeGreaterThanOrEqual(0.9);
     // Nested cards must also become more translucent as the slider rises.
     expect(max.cardAlpha).toBeLessThan(balanced.cardAlpha);
+    // RC3.3: at 20% ordinary cards must not clamp to fully opaque.
+    expect(balanced.cardAlpha).toBeLessThan(1);
+    expect(balanced.cardAlpha).toBeGreaterThan(0.8);
   });
 
   it("keeps nested surface alphas strictly above panel alpha when translucent", () => {
@@ -51,7 +54,7 @@ describe("interface transparency", () => {
     expect(tokens.cardAlpha).toBeGreaterThan(tokens.panelAlpha);
     expect(tokens.controlAlpha).toBeGreaterThan(tokens.panelAlpha);
     expect(tokens.modalAlpha).toBeGreaterThan(tokens.cardAlpha);
-    expect(tokens.cardAlpha).toBeGreaterThanOrEqual(0.7);
+    expect(tokens.cardAlpha).toBeGreaterThanOrEqual(0.58);
     expect(tokens.panelAlpha).toBeLessThanOrEqual(0.55);
   });
 

@@ -1,5 +1,10 @@
-export type { AgentTurnEvent } from "./events";
-export { listenAgentTurn, listenApprovalsChanged } from "./events";
+export type { AgentTurnEvent, QueueChangedEvent, QueueChangeKind } from "./events";
+export {
+  isQueueEventForConversation,
+  listenAgentTurn,
+  listenApprovalsChanged,
+  listenQueueChanged,
+} from "./events";
 export { TauriCommandError } from "./errors";
 export { isTauriRuntime, isWebPreview } from "./runtime";
 export { api } from "./api";

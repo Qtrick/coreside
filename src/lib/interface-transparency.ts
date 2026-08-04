@@ -67,17 +67,17 @@ export function computeInterfaceTransparencyTokens(
   }
 
   const effective = Math.max(0, pref - boost);
-  // t is transparency fraction (0–0.6). Mapping tuned for monotonic wallpaper
-  // visibility: 40% must show more than 20%, 60% more than 40%.
+  // t is transparency fraction (0–0.6). At 20% ordinary cards must remain
+  // measurably translucent (not clamp to 1.0). Controls/modals stay stronger.
   const t = effective / 100;
-  const panelAlpha = clamp01(1 - t * 0.9);
-  // Keep Solid (0%) fully opaque — do not subtract from a 1.0 panel alpha.
+  const panelAlpha = clamp01(1 - t * 1.05);
   const sidebarAlpha =
-    panelAlpha >= 1 ? 1 : clamp01(panelAlpha - 0.04);
-  const cardAlpha = clamp01(Math.max(0.7, panelAlpha + 0.18));
-  const controlAlpha = clamp01(Math.max(0.82, panelAlpha + 0.28));
-  const headerAlpha = clamp01(Math.max(0.78, panelAlpha + 0.14));
-  const modalAlpha = clamp01(Math.max(0.92, panelAlpha + 0.42));
+    panelAlpha >= 1 ? 1 : clamp01(panelAlpha - 0.03);
+  // Was panel+0.18 → cardAlpha 1.0 at 20%. Soften so 20% ≈ 0.88, 40% ≈ 0.76, 60% ≈ 0.64.
+  const cardAlpha = clamp01(Math.max(0.58, panelAlpha + 0.06));
+  const controlAlpha = clamp01(Math.max(0.78, panelAlpha + 0.18));
+  const headerAlpha = clamp01(Math.max(0.72, panelAlpha + 0.08));
+  const modalAlpha = clamp01(Math.max(0.9, panelAlpha + 0.28));
   const scrimAlpha = clamp01(boost / 100 + (effective > 40 ? 0.08 : 0));
 
   return {

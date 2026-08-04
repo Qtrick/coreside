@@ -175,6 +175,7 @@ fn main() {
             "restore_profile_backup",
             "restore_project_cmd",
             "retry_open_database",
+            "run_attachment_gc",
             "run_automation_now",
             "runtime_v2_limits",
             "save_continuity_cmd",

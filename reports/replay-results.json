@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T02:15:00.000Z",
+  "commit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+  "dirty": true,
+  "phase": "RC3.3 Phase 9 — read-only ReplayPlayer",
+  "command": "npx vitest run src/components/chat/ConversationHistory.test.tsx && npm run typecheck",
+  "exitStatus": 0,
+  "result": "Unit Verified",
+  "partial": true,
+  "partialReason": "Paced Previous/Next/Play/Pause/Speed/Return-to-live player steps synthetic Committed transaction events from list_transactions. Display-only summaries. Never calls applyOperations/undoTransaction. Not a true redacted provider/form event stream. Desktop integration not verified.",
+  "assertions": [
+    "transactionsToReplayEvents sorts chronological Committed transaction events",
+    "ReplayPlayer Next/Previous advances cursor without applyOperations",
+    "ReplayPlayer Play advances via setTimeout without applyOperations or undoTransaction",
+    "Return to live clears cursor",
+    "ConversationHistory Replay tab mounts ReplayPlayer from listTransactions"
+  ],
+  "levels": {
+    "unit": "Unit Verified",
+    "desktop": "Integrated – Not Verified",
+    "packaged": "not_run"
+  },
+  "vitest": {
+    "files": ["src/components/chat/ConversationHistory.test.tsx"],
+    "passed": 9,
+    "failed": 0
+  },
+  "typecheck": "passed",
+  "productionFiles": [
+    "src/components/chat/ConversationHistory.tsx",
+    "src/styles/global.css"
+  ],
+  "docs": [
+    "docs/BRANCH_SNAPSHOT_REPLAY.md",
+    "docs/KNOWN_ISSUES.md"
+  ],
+  "doNotClaim": [
+    "True provider/form event-stream replay",
+    "Re-apply or time-travel of transactions",
+    "Desktop Verified replay UX",
+    "Full Partial Update replay-page parity"
+  ],
+  "publicBeta": "Not ready"
+}

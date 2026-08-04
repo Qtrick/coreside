@@ -1,0 +1,182 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T02:26:51.384Z",
+  "commit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+  "dirty": true,
+  "sourceFingerprint": "4d9e8454a5e9907e216f73252598ab544aa4f802eef1fb4e335b341b24ee4aea",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "command": "audit:readiness",
+  "exitStatus": 0,
+  "evidenceLevel": "classified-not-desktop-verified",
+  "phase": "RC3.3-phase-1",
+  "model": "docs/BETA_READINESS_MODEL.md",
+  "humanChecklist": "docs/HUMAN_ACCEPTANCE_CHECKLIST.md",
+  "humanChecklistSigned": false,
+  "tracks": {
+    "localFirst": {
+      "track": "local-byok",
+      "ladder": "Development Build",
+      "dirty": true,
+      "candidateNote": "Internal Alpha Candidate only after offline gates green, dirty=false, and documented residual P1s. Not claimed here.",
+      "publicBeta": "Not ready"
+    },
+    "hosted": {
+      "track": "hosted-ai",
+      "ladder": "Development Build",
+      "state": "Deliberately Deferred",
+      "publicBeta": "Not ready"
+    }
+  },
+  "features": [
+    {
+      "id": "true-streaming",
+      "name": "True streaming (chat_stream / TextDelta)",
+      "state": "Unit Verified",
+      "notes": "Unit slice passed; Journey 12 not executed.",
+      "evidence": [
+        "reports/true-streaming-results.json"
+      ]
+    },
+    {
+      "id": "channel-scoped-streaming",
+      "name": "Channel-scoped turn streaming",
+      "state": "Unit Verified",
+      "notes": "Channel privacy unit/type checks; eavesdrop E2E not_run.",
+      "evidence": [
+        "reports/scoped-streaming-results.json"
+      ]
+    },
+    {
+      "id": "wallpaper-atomic-settings",
+      "name": "Wallpaper atomic appearance writes",
+      "state": "Unit Verified",
+      "notes": "Atomic set_workspace_appearance + slider coalesce unit-proven; pixels not_run.",
+      "evidence": [
+        "reports/wallpaper-settings-results.json"
+      ]
+    },
+    {
+      "id": "progressive-preview",
+      "name": "Progressive preview transaction",
+      "state": "Unit Verified",
+      "notes": "PreviewTransaction + live NDJSON Channel preview + turn-end apply unit-proven; surface paint / JSON-blob progressive / desktop E2E remain open.",
+      "evidence": [
+        "src-tauri/src/runtime_v2/preview_transaction.rs",
+        "docs/PROGRESSIVE_PREVIEW_TRANSACTION.md"
+      ]
+    },
+    {
+      "id": "queue-ui",
+      "name": "Conversation queue UI",
+      "state": "Unit Verified",
+      "notes": "Event-driven agent-queue-changed + conversationId filter; 20s reconcile; bus still global (P1); desktop E2E not_run.",
+      "evidence": [
+        "reports/queue-product-results.json",
+        "src/lib/tauri/queue-events.test.ts",
+        "src/components/chat/ConversationQueue.test.tsx",
+        "docs/QUEUE_COORDINATION.md"
+      ]
+    },
+    {
+      "id": "history-replay",
+      "name": "History / replay / inspector UI",
+      "state": "Unit Verified",
+      "notes": "Paced read-only ReplayPlayer over transaction summaries; not full event-stream replay; desktop not_run.",
+      "evidence": [
+        "reports/replay-results.json"
+      ]
+    },
+    {
+      "id": "structured-user-input",
+      "name": "Typed StructuredUserInput",
+      "state": "Unit Verified",
+      "notes": "Rust seal + trust gate; spoofed text marker does not grant trust; desktop E2E not_run.",
+      "evidence": [
+        "reports/structured-form-results.json",
+        "docs/STRUCTURED_FORMS_AND_CONTEXT.md",
+        "src-tauri/src/ai/structured_user_input.rs"
+      ]
+    },
+    {
+      "id": "attachment-authorization",
+      "name": "Attachment authorize_access (conversation-scoped)",
+      "state": "Unit Verified",
+      "notes": "authorize_attachment_access + get_chat_attachment_src / protocol bytes unit-proven; multimodal + window ACL open; desktop not_run.",
+      "evidence": [
+        "reports/attachment-authorization-results.json",
+        "docs/ATTACHMENT_LIFECYCLE.md"
+      ]
+    },
+    {
+      "id": "attachment-gc",
+      "name": "Attachment run_attachment_gc foundation",
+      "state": "Unit Verified",
+      "notes": "run_attachment_gc wraps reconcile_and_sweep (no symlink follow, counts-only); scheduler tick wiring open; desktop not_run.",
+      "evidence": [
+        "reports/attachment-gc-results.json",
+        "docs/ATTACHMENT_LIFECYCLE.md"
+      ]
+    },
+    {
+      "id": "e2e-12-13",
+      "name": "Desktop E2E Journey 12 / 13",
+      "state": "Scaffolded",
+      "notes": "Specs written and registered; execution not_run.",
+      "evidence": [
+        "e2e/specs/12-true-streaming.spec.ts",
+        "e2e/specs/13-wallpaper-targeted-update.spec.ts"
+      ]
+    },
+    {
+      "id": "attachment-crash",
+      "name": "Attachment crash-consistency suite",
+      "state": "Scaffolded",
+      "notes": "Auth + GC foundations Unit Verified separately; full crash-consistency suite still open."
+    },
+    {
+      "id": "hosted-ai",
+      "name": "Hosted Coreside AI",
+      "state": "Deliberately Deferred",
+      "notes": "Separate track; scaffold/auth experiments must not gate local BYOK.",
+      "evidence": [
+        "reports/hosted-ai-readiness.json"
+      ]
+    },
+    {
+      "id": "raw-html-js-cdn",
+      "name": "Raw HTML/JS/CDN/iframe generative surfaces",
+      "state": "Rejected by Product Architecture",
+      "notes": "Trusted declarative surfaces only."
+    }
+  ],
+  "summary": {
+    "unitVerified": [
+      "true-streaming",
+      "channel-scoped-streaming",
+      "wallpaper-atomic-settings",
+      "progressive-preview",
+      "queue-ui",
+      "history-replay",
+      "structured-user-input",
+      "attachment-authorization",
+      "attachment-gc"
+    ],
+    "integratedNotVerified": [],
+    "scaffolded": [
+      "e2e-12-13",
+      "attachment-crash"
+    ],
+    "absent": [],
+    "deferred": [
+      "hosted-ai"
+    ],
+    "highestDesktopClaim": "none",
+    "overallLocalFirst": "Development Build",
+    "overallHosted": "Development Build"
+  }
+}

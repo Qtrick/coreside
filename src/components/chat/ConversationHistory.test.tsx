@@ -1,9 +1,12 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ConversationHistory,
+  REPLAY_STEP_MS,
+  ReplayPlayer,
   redactDiagnosticJson,
   redactSecretsForDisplay,
+  transactionsToReplayEvents,
 } from "./ConversationHistory";
 
 vi.mock("@/lib/tauri", () => ({
@@ -15,6 +18,8 @@ vi.mock("@/lib/tauri", () => ({
     branchConversation: vi.fn(),
     createSnapshot: vi.fn(),
     getSnapshot: vi.fn(),
+    applyOperations: vi.fn(),
+    undoTransaction: vi.fn(),
   },
 }));
 
@@ -38,6 +43,23 @@ vi.mock("@/stores/app-store", () => ({
 }));
 
 import { api } from "@/lib/tauri";
+
+const sampleEvents = transactionsToReplayEvents([
+  {
+    id: "txn-1",
+    summary: "Created clock",
+    status: "applied",
+    createdAt: "2026-08-03T10:00:00Z",
+    opsCount: 2,
+  },
+  {
+    id: "txn-2",
+    summary: "Updated color",
+    status: "applied",
+    createdAt: "2026-08-03T11:00:00Z",
+    opsCount: 1,
+  },
+]);
 
 describe("redactSecretsForDisplay", () => {
   it("redacts sk- and Bearer tokens", () => {
@@ -69,12 +91,115 @@ describe("redactSecretsForDisplay", () => {
   });
 });
 
+describe("transactionsToReplayEvents", () => {
+  it("maps transactions to chronological Committed transaction events", () => {
+    const events = transactionsToReplayEvents([
+      {
+        id: "b",
+        summary: "Later",
+        status: "applied",
+        createdAt: "2026-08-03T12:00:00Z",
+        opsCount: 1,
+      },
+      {
+        id: "a",
+        summary: "Earlier",
+        status: "applied",
+        createdAt: "2026-08-03T10:00:00Z",
+        opsCount: 3,
+      },
+    ]);
+    expect(events.map((e) => e.id)).toEqual(["a", "b"]);
+    expect(events[0]?.kind).toBe("committed_transaction");
+    expect(events[0]?.summary).toBe("Committed transaction: Earlier");
+  });
+});
+
+describe("ReplayPlayer", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.mocked(api.applyOperations).mockReset();
+    vi.mocked(api.undoTransaction).mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("steps next and previous without calling apply APIs", () => {
+    render(<ReplayPlayer events={sampleEvents} />);
+
+    expect(screen.getByText(/Live — select an event/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next replay event" }));
+    expect(
+      screen.getByLabelText("Current replay event summary"),
+    ).toHaveTextContent("Committed transaction: Created clock");
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next replay event" }));
+    expect(
+      screen.getByLabelText("Current replay event summary"),
+    ).toHaveTextContent("Committed transaction: Updated color");
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Previous replay event" }),
+    );
+    expect(
+      screen.getByLabelText("Current replay event summary"),
+    ).toHaveTextContent("Committed transaction: Created clock");
+
+    expect(api.applyOperations).not.toHaveBeenCalled();
+    expect(api.undoTransaction).not.toHaveBeenCalled();
+  });
+
+  it("auto-plays paced steps without calling apply APIs", () => {
+    render(<ReplayPlayer events={sampleEvents} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Play replay" }));
+    expect(
+      screen.getByLabelText("Current replay event summary"),
+    ).toHaveTextContent("Committed transaction: Created clock");
+
+    act(() => {
+      vi.advanceTimersByTime(REPLAY_STEP_MS);
+    });
+    expect(
+      screen.getByLabelText("Current replay event summary"),
+    ).toHaveTextContent("Committed transaction: Updated color");
+
+    act(() => {
+      vi.advanceTimersByTime(REPLAY_STEP_MS);
+    });
+    // Stays on last event and pauses — still read-only.
+    expect(
+      screen.getByLabelText("Current replay event summary"),
+    ).toHaveTextContent("Committed transaction: Updated color");
+    expect(screen.getByRole("button", { name: "Play replay" })).toBeInTheDocument();
+
+    expect(api.applyOperations).not.toHaveBeenCalled();
+    expect(api.undoTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns to live", () => {
+    render(<ReplayPlayer events={sampleEvents} />);
+    fireEvent.click(screen.getByRole("button", { name: "Next replay event" }));
+    fireEvent.click(screen.getByRole("button", { name: "Return to live" }));
+    expect(screen.getByText(/Live — select an event/)).toBeInTheDocument();
+    expect(screen.getByText("Live")).toBeInTheDocument();
+  });
+});
+
 describe("ConversationHistory", () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.mocked(api.listBranches).mockReset().mockResolvedValue([]);
     vi.mocked(api.listSnapshots).mockReset().mockResolvedValue([]);
     vi.mocked(api.listTransactions).mockReset().mockResolvedValue([]);
     vi.mocked(api.listDiagnostics).mockReset().mockResolvedValue([]);
+    vi.mocked(api.applyOperations).mockReset();
+    vi.mocked(api.undoTransaction).mockReset();
   });
 
   it("opens History dialog and loads branches", async () => {
@@ -103,5 +228,37 @@ describe("ConversationHistory", () => {
     expect(
       screen.getByRole("tab", { name: "Inspector" }),
     ).toBeInTheDocument();
+  });
+
+  it("loads replay player from transactions without apply APIs", async () => {
+    vi.mocked(api.listTransactions).mockResolvedValue([
+      {
+        id: "txn-1",
+        summary: "Created clock",
+        status: "applied",
+        createdAt: "2026-08-03T10:00:00Z",
+        operations: [{}, {}],
+      },
+    ]);
+
+    render(<ConversationHistory conversationId="conv-1" />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open conversation history" }),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Replay" }));
+
+    expect(
+      await screen.findByLabelText("Read-only replay player"),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(api.listTransactions).toHaveBeenCalledWith("conv-1", 50);
+    });
+    expect(
+      screen.getByText("Committed transaction: Created clock"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next replay event" }));
+    expect(api.applyOperations).not.toHaveBeenCalled();
+    expect(api.undoTransaction).not.toHaveBeenCalled();
   });
 });

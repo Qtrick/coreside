@@ -197,6 +197,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
         ) : isUser ? (
           <>
             <MessageAttachments
+              conversationId={message.conversationId}
               metadata={
                 (message.metadata as Record<string, unknown> | null | undefined) ??
                 null

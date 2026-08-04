@@ -5,7 +5,12 @@ import { waitForAppReady } from "../helpers.js";
  *
  * Navigates Settings → Added/Templates wallpapers, applies Matrix, sets
  * transparency via slider commit path, and asserts UI selection state.
- * Pixel sampling of the live wallpaper canvas is best-effort when present.
+ *
+ * TODO(pixel-sampling): Desktop Verified requires sampling live wallpaper
+ * canvas pixels (Matrix glyphs / aurora gradients vs solid None) across
+ * transparency 0/20/40/60. Not implemented in this journey — presence of
+ * `.live-wallpaper` is best-effort only. Do not claim Desktop Verified from
+ * this spec alone.
  */
 describe("Journey 13 — wallpaper targeted update", () => {
   it("applies Matrix and commits transparency without dead controls", async () => {
@@ -29,6 +34,8 @@ describe("Journey 13 — wallpaper targeted update", () => {
     await matrix.waitForExist({ timeout: 10_000 });
     await matrix.click();
 
+    // Preview-first: aria-pressed should flip from optimistic Zustand before
+    // durable save fully settles (still wait for pressed=true).
     await browser.waitUntil(
       async () => (await matrix.getAttribute("aria-pressed")) === "true",
       { timeout: 10_000, timeoutMsg: "Matrix preset not selected" },
@@ -54,6 +61,7 @@ describe("Journey 13 — wallpaper targeted update", () => {
       { timeout: 8_000, timeoutMsg: "transparency did not commit to 40" },
     );
 
+    // Best-effort DOM presence only — not pixel proof (see TODO above).
     const live = await $(".live-wallpaper");
     if (await live.isExisting()) {
       await expect(live).toBeExisting();

@@ -32,6 +32,9 @@ describe("scoped turn streaming (mock send path)", () => {
       conversationId: conversation.id,
       text: result.assistantMessage,
     });
+    expect(typeof (textEvent && textEvent.kind === "text" ? textEvent.turnId : null)).toBe(
+      "string",
+    );
   });
 
   it("documents that Sync/Conflict remain on the global listenAgentTurn path", async () => {
@@ -42,5 +45,30 @@ describe("scoped turn streaming (mock send path)", () => {
     const stop = await listenAgentTurn(() => undefined);
     stop();
     expect(typeof listenAgentTurn).toBe("function");
+  });
+
+  it("emits operation preview before text for progressive op preview fixture", async () => {
+    const conversation = await api.createConversation();
+    const events: AgentTurnEvent[] = [];
+
+    await api.sendMessage({
+      conversationId: conversation.id,
+      content: "please run progressive op preview now",
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    const previewIdx = events.findIndex(
+      (e) => e.kind === "operation" && e.status === "preview",
+    );
+    const textIdx = events.findIndex((e) => e.kind === "text");
+    expect(previewIdx).toBeGreaterThanOrEqual(0);
+    expect(textIdx).toBeGreaterThan(previewIdx);
+    expect(events[previewIdx]).toMatchObject({
+      kind: "operation",
+      operationId: "op-progressive-preview",
+      status: "preview",
+    });
   });
 });

@@ -38,12 +38,10 @@ fn resolve_wallpaper_pair(raw: &str) -> Result<(String, String), String> {
         return Ok((String::new(), default_wallpaper));
     }
 
-    let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
-        // Unparseable → clear (match frontend parseWallpaperJson).
-        return Ok((String::new(), default_wallpaper));
-    };
+    let value: Value = serde_json::from_str(trimmed)
+        .map_err(|_| "wallpaperJson must be valid JSON".to_string())?;
     let Some(obj) = value.as_object() else {
-        return Ok((String::new(), default_wallpaper));
+        return Err("wallpaperJson must be a JSON object".into());
     };
 
     let schema_version = obj.get("schemaVersion").and_then(|v| v.as_str());
@@ -65,7 +63,8 @@ fn resolve_wallpaper_pair(raw: &str) -> Result<(String, String), String> {
         return Ok((wallpaper_json, wallpaper));
     }
 
-    Ok((String::new(), default_wallpaper))
+    // Mutation path must not silently clear on unrecognized payloads.
+    Err("wallpaperJson must include schemaVersion/type or a legacy kind".into())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -599,6 +598,18 @@ mod tests {
         )
         .unwrap_err();
         assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn resolve_wallpaper_pair_rejects_unparseable_and_unrecognized() {
+        let err = resolve_wallpaper_pair("not-json").unwrap_err();
+        assert!(err.contains("valid JSON"));
+
+        let err = resolve_wallpaper_pair("[]").unwrap_err();
+        assert!(err.contains("JSON object"));
+
+        let err = resolve_wallpaper_pair(r#"{"foo":1}"#).unwrap_err();
+        assert!(err.contains("schemaVersion") || err.contains("legacy kind"));
     }
 }
 

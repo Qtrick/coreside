@@ -268,7 +268,7 @@ impl AiProvider for MockAiProvider {
             .messages
             .iter()
             .rev()
-            .find(|m| m.role == "user")
+            .find(|m| m.role == crate::ai::AgentRole::User)
             .map(|m| m.content.as_str())
             .unwrap_or("");
 
@@ -290,8 +290,9 @@ impl AiProvider for MockAiProvider {
         })
     }
 
-    /// Live stream fixture for TS-1: first TextDelta arrives before delayed completion.
-    /// Trigger with user text containing `live stream probe` (E2E / unit).
+    /// Live stream fixtures:
+    /// - `live stream probe` — text-only progressive TextDelta (TS-1)
+    /// - `progressive op preview` — NDJSON StreamEvent op frame before completion (RC3.3)
     async fn chat_stream(
         &self,
         request: AgentRequest,
@@ -301,10 +302,12 @@ impl AiProvider for MockAiProvider {
             .messages
             .iter()
             .rev()
-            .find(|m| m.role == "user")
+            .find(|m| m.role == crate::ai::AgentRole::User)
             .map(|m| m.content.as_str())
             .unwrap_or("");
-        let live = user_text.to_lowercase().contains("live stream probe");
+        let lower = user_text.to_lowercase();
+        let progressive_ops = lower.contains("progressive op preview");
+        let live = progressive_ops || lower.contains("live stream probe");
         if request.cancel.is_cancelled() {
             let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
             return Err(AiError::Cancelled);
@@ -344,6 +347,10 @@ impl AiProvider for MockAiProvider {
                 })
                 .await;
             return Ok(response);
+        }
+
+        if progressive_ops {
+            return Self::stream_progressive_op_preview(request, tx).await;
         }
 
         let raw = json!({
@@ -404,6 +411,88 @@ impl AiProvider for MockAiProvider {
     }
 }
 
+impl MockAiProvider {
+    /// NDJSON `operation.frame_completed` arrives as TextDelta before ResponseCompleted.
+    async fn stream_progressive_op_preview(
+        request: AgentRequest,
+        tx: ProviderStreamTx,
+    ) -> Result<AgentResponse, AiError> {
+        let op_frame = json!({
+            "type": "operation.frame_completed",
+            "operation": {
+                "id": "op-progressive-preview",
+                "type": "chat.status",
+                "target": {},
+                "payload": { "message": "progressive preview" }
+            }
+        })
+        .to_string()
+            + "\n";
+
+        let raw = json!({
+            // Runtime V2 apply path requires schemaVersion "2" (distinct from SCHEMA_VERSION="1").
+            "schemaVersion": "2",
+            "assistantMessage": "Progressive op preview complete",
+            "responseType": "message",
+            "operations": [],
+            "diagnostics": { "fixture": "progressive_op_preview" }
+        })
+        .to_string();
+
+        let _ = tx
+            .send(ProviderStreamEvent::ResponseStarted {
+                provider_id: "mock".into(),
+                model: "mock-fixture".into(),
+                live: true,
+            })
+            .await;
+        // Split the frame across two deltas so the parser buffers until newline.
+        let mid = op_frame.len() / 2;
+        let _ = tx
+            .send(ProviderStreamEvent::TextDelta {
+                text: op_frame[..mid].to_string(),
+            })
+            .await;
+
+        tokio::select! {
+            _ = request.cancel.cancelled() => {
+                let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
+                return Err(AiError::Cancelled);
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_millis(80)) => {}
+        }
+
+        let _ = tx
+            .send(ProviderStreamEvent::TextDelta {
+                text: op_frame[mid..].to_string(),
+            })
+            .await;
+
+        let response = AgentResponse {
+            raw_text: raw.clone(),
+            usage: UsageMetadata {
+                prompt_tokens: Some(10),
+                completion_tokens: Some(24),
+                total_tokens: Some(34),
+            },
+            model: "mock-fixture".into(),
+            provider_id: "mock".into(),
+        };
+        let _ = tx
+            .send(ProviderStreamEvent::TextCompleted {
+                text: raw.clone(),
+            })
+            .await;
+        let _ = tx
+            .send(ProviderStreamEvent::ResponseCompleted {
+                response: response.clone(),
+                buffered: false,
+            })
+            .await;
+        Ok(response)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,10 +505,10 @@ mod tests {
         let response = provider
             .chat(AgentRequest {
                 system_prompt: "test".into(),
-                messages: vec![AgentMessage {
-                    role: "user".into(),
-                    content: "Create a simple water tracker".into(),
-                }],
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Create a simple water tracker",
+                )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
             })
@@ -449,10 +538,10 @@ mod tests {
         let cancel = CancellationToken::new();
         let request = AgentRequest {
             system_prompt: "test".into(),
-            messages: vec![AgentMessage {
-                role: "user".into(),
-                content: "please run live stream probe now".into(),
-            }],
+            messages: vec![AgentMessage::text(
+                crate::ai::AgentRole::User,
+                "please run live stream probe now",
+            )],
             cancel: cancel.clone(),
             idempotency_key: Some("probe".into()),
         };
@@ -476,15 +565,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn progressive_op_preview_completes_ndjson_frame_before_response_completed() {
+        use crate::runtime_v2::{ingest_live_chunk, NdjsonFrameParser, PreviewTransaction};
+
+        let provider = MockAiProvider::new();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        let request = AgentRequest {
+            system_prompt: "test".into(),
+            messages: vec![AgentMessage::text(
+                crate::ai::AgentRole::User,
+                "please run progressive op preview now",
+            )],
+            cancel: CancellationToken::new(),
+            idempotency_key: Some("progressive".into()),
+        };
+        let join = tokio::spawn(async move { provider.chat_stream(request, tx).await });
+
+        let mut parser = NdjsonFrameParser::new();
+        let mut preview = PreviewTransaction::new("test-turn", None);
+        let mut saw_preview = false;
+        let mut preview_before_complete = false;
+
+        while let Some(ev) = rx.recv().await {
+            match ev {
+                ProviderStreamEvent::TextDelta { text } => {
+                    let events = ingest_live_chunk(&mut parser, &mut preview, &text);
+                    if events.iter().any(|e| e.status == "preview") {
+                        saw_preview = true;
+                    }
+                }
+                ProviderStreamEvent::ResponseCompleted { .. } => {
+                    preview_before_complete = saw_preview;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let response = join.await.unwrap().unwrap();
+        assert!(
+            preview_before_complete,
+            "Operation preview must fire before ResponseCompleted"
+        );
+        assert_eq!(preview.accepted_operations().len(), 1);
+        assert_eq!(
+            preview.accepted_operations()[0].id,
+            "op-progressive-preview"
+        );
+        let parsed = parse_agent_response(&response.raw_text).unwrap();
+        assert_eq!(parsed.payload.schema_version, "2");
+        assert!(parsed
+            .payload
+            .assistant_message
+            .contains("Progressive op preview complete"));
+    }
+
+    #[tokio::test]
     async fn buffered_chat_stream_has_no_fake_deltas() {
         let provider = MockAiProvider::new();
         let (tx, mut rx) = tokio::sync::mpsc::channel(16);
         let request = AgentRequest {
             system_prompt: "test".into(),
-            messages: vec![AgentMessage {
-                role: "user".into(),
-                content: "hello".into(),
-            }],
+            messages: vec![AgentMessage::text(crate::ai::AgentRole::User, "hello")],
             cancel: CancellationToken::new(),
             idempotency_key: None,
         };
@@ -512,10 +653,10 @@ mod tests {
         let response = provider
             .chat(AgentRequest {
                 system_prompt: "test".into(),
-                messages: vec![AgentMessage {
-                    role: "user".into(),
-                    content: "Create a geography quiz".into(),
-                }],
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Create a geography quiz",
+                )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
             })

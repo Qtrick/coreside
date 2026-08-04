@@ -946,6 +946,15 @@ export async function mockInvoke<T>(
       const content = String(args?.content ?? "");
       const mentions = Array.isArray(args?.mentions) ? args.mentions : [];
       const attachments = Array.isArray(args?.attachments) ? args.attachments : [];
+      const structuredUserInput =
+        args?.structuredUserInput && typeof args.structuredUserInput === "object"
+          ? (args.structuredUserInput as {
+              formId?: string;
+              applicationId?: string | null;
+              surfaceId?: string | null;
+              fields?: Record<string, unknown>;
+            })
+          : null;
       const messages = mockDb.messages.get(conversationId) ?? [];
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
@@ -955,7 +964,9 @@ export async function mockInvoke<T>(
         createdAt: now(),
         status: "ok",
         metadata:
-          mentions.length > 0 || attachments.length > 0
+          mentions.length > 0 ||
+          attachments.length > 0 ||
+          structuredUserInput
             ? {
                 ...(mentions.length > 0
                   ? {
@@ -967,8 +978,23 @@ export async function mockInvoke<T>(
                       ),
                     }
                   : {}),
-                ...(attachments.length > 0
-                  ? { attachments }
+                ...(attachments.length > 0 ? { attachments } : {}),
+                ...(structuredUserInput
+                  ? {
+                      // Mock only — production trust is sealed in Rust.
+                      structuredUserInput: {
+                        submissionId: `mock-sui-${crypto.randomUUID()}`,
+                        formId: String(structuredUserInput.formId ?? "form"),
+                        applicationId: structuredUserInput.applicationId ?? null,
+                        surfaceId: structuredUserInput.surfaceId ?? null,
+                        conversationId,
+                        fields: structuredUserInput.fields ?? {},
+                        trustClass: "localUserGesture",
+                        contentHash: "mock",
+                        instructionEligibility: "localUserContent",
+                      },
+                      structuredTrustSource: "typed_part",
+                    }
                   : {}),
               }
             : null,
@@ -1170,6 +1196,13 @@ export async function mockInvoke<T>(
               : `Set theme to ${theme}`,
           },
         };
+      } else if (lower.includes("progressive op preview")) {
+        result = {
+          messageId: assistantId,
+          assistantMessage: "Progressive op preview complete",
+          responseType: "message",
+          toolChange: null,
+        };
       } else {
         result = {
           messageId: assistantId,
@@ -1200,10 +1233,20 @@ export async function mockInvoke<T>(
       // Optional Channel callback (web/vitest): simulate scoped text delivery.
       const onEvent = args?.onEvent;
       if (typeof onEvent === "function") {
+        if (lower.includes("progressive op preview")) {
+          // Mirror Rust mock: Operation preview before final text.
+          onEvent({
+            kind: "operation",
+            conversationId,
+            operationId: "op-progressive-preview",
+            status: "preview",
+          });
+        }
         onEvent({
           kind: "text",
           conversationId,
           text: result.assistantMessage,
+          turnId: `mock-turn-${assistantMessage.id}`,
           sequence: 1,
           delta: result.assistantMessage,
         });
@@ -1524,42 +1567,49 @@ export async function mockInvoke<T>(
       if (input.wallpaperJson !== undefined) {
         // null / empty clears the pair (match api.setWorkspaceAppearance).
         const raw = String(input.wallpaperJson ?? "").trim();
-        let format: "none" | "legacy" | "schema" = "none";
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw) as {
-              kind?: unknown;
-              schemaVersion?: unknown;
-              type?: unknown;
-            };
-            if (
-              parsed &&
-              typeof parsed === "object" &&
-              parsed.schemaVersion === "1" &&
-              typeof parsed.type === "string"
-            ) {
-              format = "schema";
-            } else if (
-              parsed &&
-              typeof parsed === "object" &&
-              typeof parsed.kind === "string" &&
-              parsed.kind !== "none"
-            ) {
-              format = "legacy";
-            }
-          } catch {
-            format = "none";
-          }
-        }
-        if (format === "none") {
+        if (!raw) {
           mockDb.settings.wallpaperJson = null;
           mockDb.settings.wallpaper = { ...DEFAULT_WALLPAPER };
-        } else if (format === "legacy") {
-          mockDb.settings.wallpaper = sanitizeMockWallpaper(JSON.parse(raw));
-          mockDb.settings.wallpaperJson = null;
         } else {
-          mockDb.settings.wallpaperJson = raw;
-          mockDb.settings.wallpaper = { ...DEFAULT_WALLPAPER };
+          let parsed: {
+            kind?: unknown;
+            schemaVersion?: unknown;
+            type?: unknown;
+          };
+          try {
+            parsed = JSON.parse(raw) as typeof parsed;
+          } catch {
+            throw new TauriCommandError(
+              "wallpaperJson must be valid JSON",
+              "invalid",
+            );
+          }
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new TauriCommandError(
+              "wallpaperJson must be a JSON object",
+              "invalid",
+            );
+          }
+          if (
+            parsed.schemaVersion === "1" &&
+            typeof parsed.type === "string"
+          ) {
+            mockDb.settings.wallpaperJson = raw;
+            mockDb.settings.wallpaper = { ...DEFAULT_WALLPAPER };
+          } else if (typeof parsed.kind === "string") {
+            if (parsed.kind === "none") {
+              mockDb.settings.wallpaperJson = null;
+              mockDb.settings.wallpaper = { ...DEFAULT_WALLPAPER };
+            } else {
+              mockDb.settings.wallpaper = sanitizeMockWallpaper(parsed as never);
+              mockDb.settings.wallpaperJson = null;
+            }
+          } else {
+            throw new TauriCommandError(
+              "wallpaperJson must include schemaVersion/type or a legacy kind",
+              "invalid",
+            );
+          }
         }
       }
       if (
@@ -1940,7 +1990,14 @@ export async function mockInvoke<T>(
     case "get_chat_attachment_src":
       return {
         id: String(args?.attachmentId ?? "file"),
-        url: `coreside-asset://localhost/attachment/${String(args?.attachmentId ?? "file")}`,
+        url: `coreside-asset://localhost/attachment/${String(args?.conversationId ?? "conv")}/${String(args?.attachmentId ?? "file")}`,
+      } as T;
+
+    case "run_attachment_gc":
+      return {
+        expired: 0,
+        missingDurable: 0,
+        promotedOrphans: 0,
       } as T;
 
     case "list_search_sessions_cmd": {

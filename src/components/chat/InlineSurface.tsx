@@ -415,34 +415,12 @@ export function InlineSurfaceCard({
             }}
             onSubmitToAgent={(payload) => {
               const summary = `Surface form submitted (${payload.eventName})`;
-              const structuredPayload = {
-                kind: "structuredUserInput",
-                surfaceId: surface.id,
-                instanceId: surface.instanceId,
-                componentId: payload.componentId ?? null,
-                eventName: payload.eventName,
-                values: payload.values,
-              };
-              // ponytail: keep composer/prompt payloads bounded (8 KiB compact JSON).
-              let structuredJson = JSON.stringify(structuredPayload);
-              if (structuredJson.length > 8192) {
-                structuredJson = JSON.stringify({
-                  kind: "structuredUserInput",
-                  surfaceId: surface.id,
-                  instanceId: surface.instanceId,
-                  componentId: payload.componentId ?? null,
-                  eventName: payload.eventName,
-                  truncated: true,
-                  valueKeys: Object.keys(payload.values),
-                });
-              }
-              const structuredBlock = [
-                "[STRUCTURED_USER_INPUT trust=local_user_content]",
-                "```json",
-                structuredJson,
-                "```",
-                "[/STRUCTURED_USER_INPUT]",
-              ].join("\n");
+              // Typed StructuredUserInput is sealed in Rust via send_message.
+              // Chat text is human-readable only — not trust authority.
+              const fields =
+                Object.keys(payload.values).length > 64
+                  ? Object.fromEntries(Object.entries(payload.values).slice(0, 64))
+                  : payload.values;
               void (async () => {
                 try {
                   await api.appendContextLedger({
@@ -452,6 +430,7 @@ export function InlineSurfaceCard({
                     visibility: "model_context_only",
                     payload: {
                       surfaceId: surface.id,
+                      formId: payload.componentId ?? surface.id,
                       instanceId: surface.instanceId,
                       componentId: payload.componentId ?? null,
                       eventName: payload.eventName,
@@ -460,14 +439,18 @@ export function InlineSurfaceCard({
                     summary,
                   });
                 } catch {
-                  // Ledger is best-effort; structured block still reaches the model.
+                  // Ledger is best-effort; typed send_message path still seals trust.
                 }
                 void saveComponentDraft(
                   payload.componentId ?? "form",
                   payload.values,
                   payload.componentId ?? null,
                 );
-                void sendMessage(`${summary}\n\n${structuredBlock}`);
+                void sendMessage(summary, [], [], {
+                  formId: payload.componentId ?? surface.id,
+                  surfaceId: surface.id,
+                  fields,
+                });
               })();
             }}
           />

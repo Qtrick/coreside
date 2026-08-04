@@ -1,12 +1,28 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConversationQueue } from "./ConversationQueue";
+import type { QueueChangedEvent } from "@/lib/tauri";
+
+const queueHandlers = new Set<(event: QueueChangedEvent) => void>();
 
 vi.mock("@/lib/tauri", () => ({
   api: {
     listAgentQueue: vi.fn(),
     cancelQueueItem: vi.fn(),
   },
+  isQueueEventForConversation: (
+    event: { conversationId: string },
+    conversationId: string,
+  ) =>
+    Boolean(conversationId) &&
+    Boolean(event.conversationId) &&
+    event.conversationId === conversationId,
+  listenQueueChanged: vi.fn(async (handler: (event: QueueChangedEvent) => void) => {
+    queueHandlers.add(handler);
+    return () => {
+      queueHandlers.delete(handler);
+    };
+  }),
 }));
 
 vi.mock("@/stores/app-store", () => ({
@@ -19,8 +35,13 @@ vi.mock("@/stores/app-store", () => ({
 
 import { api } from "@/lib/tauri";
 
+function emitQueue(event: QueueChangedEvent) {
+  for (const handler of queueHandlers) handler(event);
+}
+
 describe("ConversationQueue", () => {
   beforeEach(() => {
+    queueHandlers.clear();
     vi.mocked(api.listAgentQueue).mockReset();
     vi.mocked(api.cancelQueueItem).mockReset();
   });
@@ -99,5 +120,33 @@ describe("ConversationQueue", () => {
     await waitFor(() => expect(cancel).toBeDisabled());
     resolveCancel?.();
     await waitFor(() => expect(api.cancelQueueItem).toHaveBeenCalledWith("q-1"));
+  });
+
+  it("refreshes on matching queue events and ignores other conversations", async () => {
+    vi.mocked(api.listAgentQueue).mockResolvedValue([]);
+    render(<ConversationQueue conversationId="conv-1" />);
+    await waitFor(() => expect(queueHandlers.size).toBe(1));
+    const callsAfterMount = vi.mocked(api.listAgentQueue).mock.calls.length;
+
+    emitQueue({
+      kind: "itemAdded",
+      conversationId: "conv-other",
+      itemId: "q-x",
+    });
+    await Promise.resolve();
+    expect(vi.mocked(api.listAgentQueue).mock.calls.length).toBe(
+      callsAfterMount,
+    );
+
+    emitQueue({
+      kind: "itemAdded",
+      conversationId: "conv-1",
+      itemId: "q-1",
+    });
+    await waitFor(() =>
+      expect(vi.mocked(api.listAgentQueue).mock.calls.length).toBeGreaterThan(
+        callsAfterMount,
+      ),
+    );
   });
 });

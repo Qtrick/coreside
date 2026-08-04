@@ -74,13 +74,24 @@ pub fn run() {
         .manage(scheduler_handle.clone())
         .register_uri_scheme_protocol("coreside-asset", |ctx, request| {
             let path = request.uri().path().to_string();
-            let id = path
+            // Scoped read: /attachment/{conversationId}/{attachmentId}
+            let parts: Vec<&str> = path
                 .trim_start_matches('/')
-                .strip_prefix("attachment/")
-                .unwrap_or("")
-                .trim();
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .collect();
+            let (conversation_id, attachment_id) = match parts.as_slice() {
+                ["attachment", conversation_id, attachment_id] => {
+                    (*conversation_id, *attachment_id)
+                }
+                _ => ("", ""),
+            };
             let app = ctx.app_handle();
-            match commands::attachment_cmds::read_attachment_bytes_for_protocol(app, id) {
+            match commands::attachment_cmds::read_attachment_bytes_for_protocol(
+                app,
+                conversation_id,
+                attachment_id,
+            ) {
                 Ok((bytes, mime)) => http::Response::builder()
                     .header(http::header::CONTENT_TYPE, &mime)
                     .header(http::header::CACHE_CONTROL, "private, max-age=60")
@@ -125,6 +136,7 @@ pub fn run() {
             commands::stage_chat_attachment,
             commands::cancel_chat_attachment,
             commands::get_chat_attachment_src,
+            commands::run_attachment_gc,
             commands::discard_tool_change,
             commands::discard_kernel_proposal,
             commands::set_kernel_proposal_status,
