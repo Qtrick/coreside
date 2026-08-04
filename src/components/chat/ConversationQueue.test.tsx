@@ -9,6 +9,17 @@ vi.mock("@/lib/tauri", () => ({
   api: {
     listAgentQueue: vi.fn(),
     cancelQueueItem: vi.fn(),
+    subscribeConversationQueue: vi.fn(
+      async (args: {
+        conversationId: string;
+        onEvent: (event: QueueChangedEvent) => void;
+      }) => {
+        queueHandlers.add(args.onEvent);
+        return () => {
+          queueHandlers.delete(args.onEvent);
+        };
+      },
+    ),
   },
   isQueueEventForConversation: (
     event: { conversationId: string },
@@ -17,12 +28,6 @@ vi.mock("@/lib/tauri", () => ({
     Boolean(conversationId) &&
     Boolean(event.conversationId) &&
     event.conversationId === conversationId,
-  listenQueueChanged: vi.fn(async (handler: (event: QueueChangedEvent) => void) => {
-    queueHandlers.add(handler);
-    return () => {
-      queueHandlers.delete(handler);
-    };
-  }),
 }));
 
 vi.mock("@/stores/app-store", () => ({

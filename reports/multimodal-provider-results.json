@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T03:04:12.000Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "dirty": true,
+  "phase": "RC3.3 — multimodal Image part foundation",
+  "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib -- maps_image_part_to_openai image_part_from_bytes",
+  "exitStatus": 0,
+  "result": "Integrated",
+  "partial": true,
+  "partialReason": "AgentContentPart::Image + OpenAI image_url data-URL mapping Unit Verified. Send path loads bytes after authorize_attachment_access and appends Image parts (Integrated). Anthropic/Gemini native multimodal parts not wired. Desktop E2E not_run. Paths never sent to providers.",
+  "assertions": [
+    "Image part stores attachment_id + mime_type; data_base64 filled only from authorized bytes",
+    "validate_provider_image_bytes enforces mime + byte + pixel bounds",
+    "map_image_part_to_openai_content builds data: URL image_url parts",
+    "map_image_part_to_openai_content skips missing bytes with honest reason (no filesystem paths)",
+    "openai_message_content emits multimodal content arrays when Image parts present",
+    "send_message path appends Image parts after authorize_attachment_access"
+  ],
+  "levels": {
+    "unit": "Unit Verified",
+    "integrated": "Integrated",
+    "desktop": "not_run",
+    "packaged": "not_run"
+  },
+  "cargoTests": {
+    "filter": "maps_image_part_to_openai|image_part_from_bytes",
+    "passed": 2,
+    "failed": 0,
+    "focused": [
+      "ai::openai::tests::maps_image_part_to_openai_data_url_not_filesystem_path",
+      "ai::structured_user_input::tests::image_part_from_bytes_rejects_paths_and_bounds"
+    ]
+  },
+  "docs": "docs/ATTACHMENT_LIFECYCLE.md",
+  "publicBeta": "Not ready",
+  "doNotClaim": [
+    "Anthropic/Gemini native multimodal Image parts",
+    "Desktop Verified multimodal chat",
+    "Unbounded image payloads are safe without byte/pixel caps"
+  ]
+}

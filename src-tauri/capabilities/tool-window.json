@@ -1,11 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "tool-window",
-  "description": "Generated tool-* windows: scoped app commands only; no core:default, no backup/restore/credentials.",
+  "description": "Generated tool-* windows: allowlist-only via coreside-tool-scoped (no core:default, no backup/restore/credentials). Do NOT link coreside-tool-deny-sensitive — Tauri 2.11 applies commands.deny globally and would block main.",
   "windows": ["tool-*"],
   "permissions": [
     "coreside-tool-scoped",
-    "coreside-tool-deny-sensitive",
     "core:event:default",
     "core:window:allow-close",
     "core:window:allow-set-title",
@@ -14,3 +13,4 @@
     "core:window:allow-set-focus"
   ]
 }
+

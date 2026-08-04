@@ -277,6 +277,11 @@ fn recover_connection_after_failed_restore(
 /// Restore a validated managed backup.
 /// Works from a healthy profile **or** bootstrap recovery (disaster restore).
 /// Requires explicit `confirm: true`. Main protected UI only.
+///
+/// Journal stages (persisted via `begin_maintenance` / `set_maintenance_stage`):
+/// CancellingWork → Staging → Validating → Swapping → Reopening → Rehydrating → Completed.
+/// Pre-swap failure: clean staging, clear journal, resume quiescence.
+/// Mid-swap (irreversible) failure: retain journal as RecoveryRequired, keep quiescence paused.
 #[tauri::command]
 pub fn restore_profile_backup(
     app: AppHandle,
@@ -291,38 +296,60 @@ pub fn restore_profile_backup(
         ));
     }
     // Intentionally no require_profile(): disaster recovery must restore when the profile cannot open.
-    // Block concurrent profile work; clear maintenance on every exit path.
+    // Block concurrent profile work; clear maintenance on every *safe* exit path.
     let maintenance_id = state.begin_maintenance("restore")?;
-    struct ClearMaintenanceOnDrop<'a> {
+    struct MaintenanceExitGuard<'a> {
         state: &'a AppState,
         id: String,
+        /// Mid-swap / irreversible failure: keep journal + quiescence pause for Recovery.
+        retain_for_recovery: std::rc::Rc<std::cell::Cell<bool>>,
     }
-    impl Drop for ClearMaintenanceOnDrop<'_> {
+    impl Drop for MaintenanceExitGuard<'_> {
         fn drop(&mut self) {
+            if self.retain_for_recovery.get() {
+                let _ = self.state.set_maintenance_stage(
+                    &self.id,
+                    crate::maintenance::MaintenanceStage::RecoveryRequired,
+                );
+                // Do not clear_maintenance / force_resume — Recovery must see the journal.
+                return;
+            }
             let _ = self.state.clear_maintenance(&self.id);
         }
     }
-    // Resume on every exit path (success or failure) so a failed restore cannot leave automations paused.
-    // Declare resume guard before maintenance clear guard so Drop order is:
-    // clear maintenance first, then resume scheduler (never tick while maintenance is active).
-    struct ResumeSchedulerOnDrop(Option<Arc<SchedulerHandle>>);
+    // Shared with scheduler resume: skip resume when mid-swap enters Recovery.
+    let retain_for_recovery = std::rc::Rc::new(std::cell::Cell::new(false));
+    // Resume on every safe exit path (success or pre-swap failure) so a failed restore
+    // cannot leave automations paused. Declare resume guard before maintenance clear guard
+    // so Drop order is: clear maintenance first, then resume scheduler.
+    struct ResumeSchedulerOnDrop {
+        handle: Option<Arc<SchedulerHandle>>,
+        skip: std::rc::Rc<std::cell::Cell<bool>>,
+    }
     impl Drop for ResumeSchedulerOnDrop {
         fn drop(&mut self) {
-            if let Some(handle) = self.0.take() {
+            if self.skip.get() {
+                return;
+            }
+            if let Some(handle) = self.handle.take() {
                 handle.resume();
             }
         }
     }
-    let _scheduler_guard = ResumeSchedulerOnDrop({
-        let handle = app.try_state::<Arc<SchedulerHandle>>().map(|s| s.inner().clone());
-        if let Some(ref h) = handle {
-            h.pause();
-        }
-        handle
-    });
-    let _maintenance_guard = ClearMaintenanceOnDrop {
+    let _scheduler_guard = ResumeSchedulerOnDrop {
+        handle: {
+            let handle = app.try_state::<Arc<SchedulerHandle>>().map(|s| s.inner().clone());
+            if let Some(ref h) = handle {
+                h.pause();
+            }
+            handle
+        },
+        skip: retain_for_recovery.clone(),
+    };
+    let _maintenance_guard = MaintenanceExitGuard {
         state: &state,
         id: maintenance_id.clone(),
+        retain_for_recovery: retain_for_recovery.clone(),
     };
     let _ = state.set_maintenance_stage(
         &maintenance_id,
@@ -399,6 +426,10 @@ pub fn restore_profile_backup(
     }
 
     // Validate staged database, then seal WAL so the install copy is self-contained.
+    let _ = state.set_maintenance_stage(
+        &maintenance_id,
+        crate::maintenance::MaintenanceStage::Validating,
+    );
     {
         let staged = match crate::db::Database::open_path(&staging_db) {
             Ok(db) => db,
@@ -512,18 +543,23 @@ pub fn restore_profile_backup(
     // concurrent commands cannot observe the temporary hold database or a half-swapped tree.
     // ponytail: global db lock for the filesystem swap; upgrade to a dedicated restore latch if
     // lock hold time becomes a UX problem.
-    let _ = state.set_maintenance_stage(
-        &maintenance_id,
-        crate::maintenance::MaintenanceStage::Swapping,
-    );
     let quarantined = {
         let mut db_guard = state.db.lock();
         let hold = crate::db::Database::open_path(&hold_db).map_err(|e| {
+            // Hold open failed before live tree mutation — pre-swap: clean + clear journal.
             cleanup_staging(&staging_db, Some(&hold_db));
             cleanup_asset_staging();
             CommandError::new("restore_failed", format!("Could not open hold DB: {e}"))
         })?;
         *db_guard = hold;
+
+        // Mark irreversible only once live-tree mutation is about to begin.
+        // Arm retention before quarantine so panic/early-exit cannot clear the journal.
+        let _ = state.set_maintenance_stage(
+            &maintenance_id,
+            crate::maintenance::MaintenanceStage::Swapping,
+        );
+        retain_for_recovery.set(true);
 
         let quarantined = match quarantine_db_tree(&live_path, &quarantine) {
             Ok(moved) => moved,
@@ -546,6 +582,10 @@ pub fn restore_profile_backup(
             ));
         }
 
+        let _ = state.set_maintenance_stage(
+            &maintenance_id,
+            crate::maintenance::MaintenanceStage::Reopening,
+        );
         let restored = match crate::db::Database::open_path(&live_path) {
             Ok(db) => db,
             Err(e) => {
@@ -597,7 +637,11 @@ pub fn restore_profile_backup(
     }
     cleanup_asset_staging();
 
-    // Refresh derived state now that the live profile is installed under the mutex.
+    // Finalizing (Rehydrating): refresh derived state now that the live profile is installed.
+    let _ = state.set_maintenance_stage(
+        &maintenance_id,
+        crate::maintenance::MaintenanceStage::Rehydrating,
+    );
     {
         let db = state.db.lock();
         *state.event_bus.lock() = crate::runtime_v2::EventBus::load_from_db(&db);
@@ -605,6 +649,10 @@ pub fn restore_profile_backup(
     *state.bootstrap.lock() = crate::db::BootstrapStatus::Ready;
 
     cleanup_staging(&staging_db, Some(&hold_db));
+    let _ = state.set_maintenance_stage(
+        &maintenance_id,
+        crate::maintenance::MaintenanceStage::Completed,
+    );
 
     // Recovery shells skip scheduler at setup; start it once the profile is restored.
     // ResumeSchedulerOnDrop resumes the ticker on function exit.
@@ -614,6 +662,8 @@ pub fn restore_profile_backup(
         }
     }
 
+    // Successful Completed path: allow Drop to clear journal + resume quiescence.
+    retain_for_recovery.set(false);
     Ok(RestoreApplied {
         safety_backup_path,
         restored_from: archive_path
@@ -747,5 +797,51 @@ mod tests {
         restore_quarantined_tree(&moved);
         assert!(live.exists());
         assert_eq!(fs::read(&live).unwrap(), b"main");
+    }
+
+    /// Pre-swap failure clears journal + resumes quiescence; mid-swap retains Recovery.
+    #[test]
+    fn restore_exit_paths_journal_and_quiescence() {
+        use crate::app_paths::with_test_data_dir;
+        use crate::maintenance::MaintenanceStage;
+        use crate::maintenance_journal::load_journal;
+        use crate::quiescence::QuiescedSubsystem;
+
+        let dir = tempdir().unwrap();
+        with_test_data_dir(dir.path(), |paths| {
+            let db = crate::db::Database::open_path(&paths.database).unwrap();
+            let state = AppState::new_for_test(db);
+
+            // Pre-swap: begin → Validating → clear → journal gone, quiescence resumed.
+            let id = state.begin_maintenance("restore").unwrap();
+            assert!(!state.quiescence.allows(QuiescedSubsystem::AttachmentGc));
+            state
+                .set_maintenance_stage(&id, MaintenanceStage::Validating)
+                .unwrap();
+            let journal = load_journal(&paths).unwrap().expect("journal");
+            assert_eq!(journal.stage, "validating");
+            assert!(!journal.irreversible);
+            state.clear_maintenance(&id).unwrap();
+            assert!(load_journal(&paths).unwrap().is_none());
+            assert!(state.quiescence.allows(QuiescedSubsystem::AttachmentGc));
+
+            // Mid-swap failure path: Swapping arms retention → RecoveryRequired without clear.
+            let id = state.begin_maintenance("restore").unwrap();
+            state
+                .set_maintenance_stage(&id, MaintenanceStage::Swapping)
+                .unwrap();
+            let journal = load_journal(&paths).unwrap().expect("journal");
+            assert!(journal.irreversible);
+            // Mirrors restore Drop guard when retain_for_recovery is armed at Swapping.
+            state
+                .set_maintenance_stage(&id, MaintenanceStage::RecoveryRequired)
+                .unwrap();
+            let journal = load_journal(&paths).unwrap().expect("retained");
+            assert_eq!(journal.stage, "recovery-required");
+            assert!(!state.quiescence.allows(QuiescedSubsystem::AttachmentGc));
+            assert!(state.maintenance_status().active);
+            // Must not clear_maintenance — journal stays for Recovery.
+            assert!(load_journal(&paths).unwrap().is_some());
+        });
     }
 }

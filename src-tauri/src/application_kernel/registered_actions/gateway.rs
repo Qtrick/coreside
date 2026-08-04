@@ -98,6 +98,11 @@ pub fn execute_registered_action(
 ) -> ActionOutcome {
     let started = std::time::Instant::now();
     let mut trail = DecisionTrail::default();
+    // Preserve the caller-supplied approval id on the audit trail even when the
+    // action blocks before consume() (e.g. undeclared action after Approve once).
+    if let Some(id) = approval_id {
+        trail.approval_id = Some(id.to_string());
+    }
 
     let (descriptor, outcome) = match find_action(action_name) {
         Some(d) => (Some(d), run(db, ctx, d, input, approval_id, &mut trail)),

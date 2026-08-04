@@ -1135,6 +1135,76 @@ pub fn read_attachment_bytes_for_protocol(
     Err("attachment file missing".into())
 }
 
+/// Load attachment bytes for the agent multimodal path after conversation-scoped
+/// authorization. Returns trusted bytes + mime — never a filesystem path.
+pub fn read_authorized_attachment_bytes(
+    state: &AppState,
+    conversation_id: &str,
+    attachment_id: &str,
+) -> Result<(Vec<u8>, String), CommandError> {
+    let id = attachment_id.trim();
+    let conversation_id = conversation_id.trim();
+    if !is_safe_attachment_id(id) {
+        return Err(CommandError::new("invalid", "Invalid attachment id"));
+    }
+    if !is_safe_conversation_scope_id(conversation_id) {
+        return Err(CommandError::new("invalid", "Invalid conversation id"));
+    }
+    if !state.profile_ready() {
+        return Err(CommandError::new("storage", "Profile unavailable"));
+    }
+    let (storage_key, mime, state_s): (String, String, String) = {
+        let db = state.db.lock();
+        authorize_attachment_access(db.conn(), id, conversation_id)?;
+        db.conn()
+            .query_row(
+                "SELECT storage_key, detected_mime, state FROM chat_attachments
+                 WHERE id = ?1 AND deleted_at IS NULL",
+                rusqlite::params![id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|_| CommandError::new("not_found", "Attachment not found"))?
+    };
+    if matches!(
+        state_s.as_str(),
+        "deleted" | "expired" | "failed" | "cancelled"
+    ) {
+        return Err(CommandError::new("not_found", "Attachment not available"));
+    }
+    let name = validated_storage_file_name(&storage_key)?;
+    let paths = AppPaths::resolve().map_err(|e| {
+        CommandError::new("storage", sanitize_error(&e.to_string(), None))
+    })?;
+    for root in [&paths.attachment_staging, &paths.attachments] {
+        let candidate = root.join(name);
+        let meta = match std::fs::symlink_metadata(&candidate) {
+            Ok(m) if m.file_type().is_symlink() => continue,
+            Ok(m) if m.is_file() => m,
+            _ => continue,
+        };
+        let canonical = candidate.canonicalize().map_err(|e| {
+            CommandError::new("storage", sanitize_error(&e.to_string(), None))
+        })?;
+        let root_c = root.canonicalize().map_err(|e| {
+            CommandError::new("storage", sanitize_error(&e.to_string(), None))
+        })?;
+        if !canonical.starts_with(&root_c) {
+            return Err(CommandError::new("storage", "Path outside attachments"));
+        }
+        if meta.len() > MAX_ATTACHMENT_BYTES as u64 {
+            return Err(CommandError::new("invalid", "Attachment exceeds size limit"));
+        }
+        let bytes = std::fs::read(&canonical).map_err(|e| {
+            CommandError::new("storage", sanitize_error(&e.to_string(), None))
+        })?;
+        if bytes.len() > MAX_ATTACHMENT_BYTES {
+            return Err(CommandError::new("invalid", "Attachment exceeds size limit"));
+        }
+        return Ok((bytes, safe_response_mime(&mime)));
+    }
+    Err(CommandError::new("not_found", "Attachment file missing"))
+}
+
 /// Bounded attachment GC entry point for scheduler / manual invoke.
 /// Healthy profile only; managed roots; row-limited; no symlink follow; counts-only summary.
 #[tauri::command]
@@ -1156,6 +1226,14 @@ pub fn run_attachment_gc(
 /// Does not delete committed (`attached`) message files.
 pub fn reconcile_and_sweep_attachments(state: &AppState) -> Result<AttachmentSweepReport, CommandError> {
     state.require_profile()?;
+    // Skip GC while maintenance/restore quiescence is active (healthy-profile gate above).
+    if !state
+        .quiescence
+        .allows(crate::quiescence::QuiescedSubsystem::AttachmentGc)
+    {
+        tracing::debug!("attachment gc skipped — quiescence active");
+        return Ok(AttachmentSweepReport::default());
+    }
     let (durable_root, staging_root) = attachments_paths()?;
     const MAX_ROWS: usize = 200;
     let mut report = AttachmentSweepReport::default();
@@ -1423,5 +1501,226 @@ mod tests {
         assert!(json.contains("expired"));
         assert!(!json.contains('/'));
         assert!(!json.contains("home"));
+    }
+
+    /// Seed a staged attachment row + staging file under current AppPaths roots.
+    fn seed_staged_with_file(
+        db: &Database,
+        paths: &crate::app_paths::AppPaths,
+        att_id: &str,
+        file_bytes: &[u8],
+    ) -> String {
+        let storage_key = format!("{att_id}_crash.png");
+        std::fs::write(paths.attachment_staging.join(&storage_key), file_bytes).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO chat_attachments
+                 (id, storage_key, original_filename, display_name, detected_mime, detected_format,
+                  byte_size, content_hash, state, expires_at, backup_eligible)
+                 VALUES (?1, ?2, 'a.png', 'a.png', 'image/png', 'image/png', ?3, 'hash', 'staged',
+                         datetime('now', '+24 hours'), 0)",
+                rusqlite::params![att_id, storage_key, file_bytes.len() as i64],
+            )
+            .unwrap();
+        storage_key
+    }
+
+    fn seed_conversation_only(db: &Database, conv_id: &str) {
+        let _ = db::ensure_default_workspace(db).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO conversations (id, workspace_id, title, project_id, pinned, archived)
+                 VALUES (?1, ?2, 'Crash test', NULL, 0, 0)",
+                rusqlite::params![conv_id, db::DEFAULT_WORKSPACE_ID],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn crash_after_message_insert_before_claim_rolls_back() {
+        let dir = tempdir().unwrap();
+        crate::app_paths::with_test_data_dir(dir.path(), |paths| {
+            let db = Database::open_path(&paths.database).unwrap();
+            let conv = "conv-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+            let att = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
+            seed_conversation_only(&db, conv);
+            let key = seed_staged_with_file(&db, &paths, att, b"png-bytes");
+
+            // Simulate crash mid-txn: message inserted, claim never runs, ROLLBACK.
+            db.conn().execute_batch("BEGIN IMMEDIATE").unwrap();
+            db.conn()
+                .execute(
+                    "INSERT INTO messages (id, conversation_id, role, content)
+                     VALUES ('msg-crash-1', ?1, 'user', 'hi')",
+                    rusqlite::params![conv],
+                )
+                .unwrap();
+            db.conn().execute_batch("ROLLBACK").unwrap();
+
+            let msg_count: i64 = db
+                .conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM messages WHERE id = 'msg-crash-1'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(msg_count, 0);
+
+            let (state, mid): (String, Option<String>) = db
+                .conn()
+                .query_row(
+                    "SELECT state, message_id FROM chat_attachments WHERE id = ?1",
+                    rusqlite::params![att],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(state, "staged");
+            assert!(mid.is_none());
+            assert!(paths.attachment_staging.join(&key).exists());
+            assert!(!paths.attachments.join(&key).exists());
+        });
+    }
+
+    #[test]
+    fn crash_after_claim_before_promote_healed_by_reconcile() {
+        let dir = tempdir().unwrap();
+        crate::app_paths::with_test_data_dir(dir.path(), |paths| {
+            let db = Database::open_path(&paths.database).unwrap();
+            let conv = "conv-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+            let att = "cccccccc-dddd-eeee-ffff-000000000001";
+            let msg = "msg-claim-crash-1";
+            seed_conversation_only(&db, conv);
+            let key = seed_staged_with_file(&db, &paths, att, b"png-bytes");
+            db.conn()
+                .execute(
+                    "INSERT INTO messages (id, conversation_id, role, content)
+                     VALUES (?1, ?2, 'user', 'hi')",
+                    rusqlite::params![msg, conv],
+                )
+                .unwrap();
+
+            // Claim commits; promote never runs (crash window).
+            let claimed = claim_attachments_on_db(&db, conv, msg, &[att.to_string()]).unwrap();
+            assert_eq!(claimed.promote_keys.len(), 1);
+            assert!(paths.attachment_staging.join(&key).exists());
+            assert!(!paths.attachments.join(&key).exists());
+
+            let state: String = db
+                .conn()
+                .query_row(
+                    "SELECT state FROM chat_attachments WHERE id = ?1",
+                    rusqlite::params![att],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(state, "attached");
+
+            let app = crate::state::AppState::new_for_test(db);
+            let report = reconcile_and_sweep_attachments(&app).unwrap();
+            assert_eq!(report.promoted_orphans, 1);
+            assert!(paths.attachments.join(&key).exists());
+            assert!(!paths.attachment_staging.join(&key).exists());
+
+            // Idempotent second reconcile.
+            let report2 = reconcile_and_sweep_attachments(&app).unwrap();
+            assert_eq!(report2.promoted_orphans, 0);
+            assert_eq!(report2.missing_durable, 0);
+            assert!(paths.attachments.join(&key).exists());
+        });
+    }
+
+    #[test]
+    fn visible_message_n_attachments_reconcile_idempotent() {
+        let dir = tempdir().unwrap();
+        crate::app_paths::with_test_data_dir(dir.path(), |paths| {
+            let db = Database::open_path(&paths.database).unwrap();
+            let conv = "conv-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+            let msg = "msg-n-attach-1";
+            seed_conversation_only(&db, conv);
+            db.conn()
+                .execute(
+                    "INSERT INTO messages (id, conversation_id, role, content)
+                     VALUES (?1, ?2, 'user', 'hi')",
+                    rusqlite::params![msg, conv],
+                )
+                .unwrap();
+
+            let n = 3usize;
+            let mut ids = Vec::new();
+            let mut keys = Vec::new();
+            for i in 0..n {
+                let att = format!("dddddddd-eeee-ffff-aaaa-{:012}", i + 1);
+                let key = seed_staged_with_file(&db, &paths, &att, &[b'a' + i as u8; 8]);
+                ids.push(att);
+                keys.push(key);
+            }
+
+            claim_attachments_on_db(&db, conv, msg, &ids).unwrap();
+            // Crash before promote — files still staged.
+            for key in &keys {
+                assert!(paths.attachment_staging.join(key).exists());
+                assert!(!paths.attachments.join(key).exists());
+            }
+
+            let app = crate::state::AppState::new_for_test(db);
+            let r1 = reconcile_and_sweep_attachments(&app).unwrap();
+            assert_eq!(r1.promoted_orphans, n as u64);
+            let r2 = reconcile_and_sweep_attachments(&app).unwrap();
+            assert_eq!(r2.promoted_orphans, 0);
+
+            let attached: i64 = {
+                let db = app.db.lock();
+                db.conn()
+                    .query_row(
+                        "SELECT COUNT(*) FROM chat_attachments
+                         WHERE message_id = ?1 AND state = 'attached' AND deleted_at IS NULL",
+                        rusqlite::params![msg],
+                        |r| r.get(0),
+                    )
+                    .unwrap()
+            };
+            assert_eq!(attached as usize, n);
+            for key in &keys {
+                assert!(paths.attachments.join(key).exists());
+                assert!(!paths.attachment_staging.join(key).exists());
+            }
+
+            authorize_attachment_access(
+                app.db.lock().conn(),
+                &ids[0],
+                conv,
+            )
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn wrong_conversation_authorize_still_denies_after_claim() {
+        let dir = tempdir().unwrap();
+        crate::app_paths::with_test_data_dir(dir.path(), |paths| {
+            let db = Database::open_path(&paths.database).unwrap();
+            let owner = "conv-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+            let other = "conv-11111111-2222-3333-4444-555555555555";
+            let att = "eeeeeeee-ffff-aaaa-bbbb-000000000099";
+            let msg = "msg-auth-crash";
+            seed_conversation_only(&db, owner);
+            seed_conversation_only(&db, other);
+            let key = seed_staged_with_file(&db, &paths, att, b"png-bytes");
+            db.conn()
+                .execute(
+                    "INSERT INTO messages (id, conversation_id, role, content)
+                     VALUES (?1, ?2, 'user', 'hi')",
+                    rusqlite::params![msg, owner],
+                )
+                .unwrap();
+            claim_attachments_on_db(&db, owner, msg, &[att.to_string()]).unwrap();
+            promote_claimed_attachment_files(&[key.clone()]).unwrap();
+
+            let err = authorize_attachment_access(db.conn(), att, other).unwrap_err();
+            assert_eq!(err.code, "not_found");
+            authorize_attachment_access(db.conn(), att, owner).unwrap();
+            assert!(paths.attachments.join(&key).exists());
+        });
     }
 }

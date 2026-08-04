@@ -111,6 +111,77 @@ pub enum AgentContentPart {
         text: String,
     },
     StructuredUserInput(StructuredUserInput),
+    /// Authorized image attachment. Prefer `attachment_id`; Rust loads bytes after
+    /// `authorize_attachment_access`. `data_base64` is filled only for the in-flight
+    /// provider request — never a filesystem path.
+    Image {
+        attachment_id: String,
+        mime_type: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        data_base64: Option<String>,
+    },
+}
+
+/// Max decoded image bytes allowed into a provider Image part (4 MiB).
+pub const MAX_PROVIDER_IMAGE_BYTES: usize = 4 * 1024 * 1024;
+/// Max width×height pixels for provider Image parts.
+pub const MAX_PROVIDER_IMAGE_PIXELS: u64 = 16_777_216; // 4096²
+
+/// Whether mime is a raster image eligible for multimodal Image parts.
+pub fn is_provider_image_mime(mime: &str) -> bool {
+    matches!(
+        mime.trim().to_ascii_lowercase().as_str(),
+        "image/png" | "image/jpeg" | "image/jpg" | "image/webp" | "image/gif"
+    )
+}
+
+/// Bound image bytes for provider mapping. Rejects oversized byte payloads and
+/// pixel bombs. Does not accept filesystem paths.
+pub fn validate_provider_image_bytes(mime: &str, bytes: &[u8]) -> Result<(), String> {
+    if !is_provider_image_mime(mime) {
+        return Err(format!("unsupported image mime: {mime}"));
+    }
+    if bytes.is_empty() {
+        return Err("image bytes are empty".into());
+    }
+    if bytes.len() > MAX_PROVIDER_IMAGE_BYTES {
+        return Err(format!(
+            "image exceeds {MAX_PROVIDER_IMAGE_BYTES} byte provider limit"
+        ));
+    }
+    let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| format!("image format probe failed: {e}"))?;
+    let reader = reader;
+    let (w, h) = reader
+        .into_dimensions()
+        .map_err(|e| format!("image dimensions unavailable: {e}"))?;
+    let pixels = (w as u64).saturating_mul(h as u64);
+    if pixels > MAX_PROVIDER_IMAGE_PIXELS {
+        return Err(format!(
+            "image exceeds {MAX_PROVIDER_IMAGE_PIXELS} pixel provider limit ({w}x{h})"
+        ));
+    }
+    Ok(())
+}
+
+/// Build an Image part from authorized attachment bytes (no filesystem path).
+pub fn image_part_from_authorized_bytes(
+    attachment_id: &str,
+    mime_type: &str,
+    bytes: &[u8],
+) -> Result<AgentContentPart, String> {
+    let attachment_id = attachment_id.trim();
+    if attachment_id.is_empty() {
+        return Err("attachment_id is required".into());
+    }
+    validate_provider_image_bytes(mime_type, bytes)?;
+    use base64::{engine::general_purpose::STANDARD as B64, Engine};
+    Ok(AgentContentPart::Image {
+        attachment_id: attachment_id.to_string(),
+        mime_type: mime_type.trim().to_ascii_lowercase(),
+        data_base64: Some(B64.encode(bytes)),
+    })
 }
 
 const MAX_FORM_ID_LEN: usize = 256;
@@ -255,6 +326,16 @@ pub fn flatten_parts_for_provider(parts: &[AgentContentPart]) -> String {
             }
             AgentContentPart::StructuredUserInput(sui) => {
                 chunks.push(provider_text_summary(sui));
+            }
+            AgentContentPart::Image {
+                attachment_id,
+                mime_type,
+                ..
+            } => {
+                // Never dump base64 or filesystem paths into text flatten.
+                chunks.push(format!(
+                    "[image attachmentId={attachment_id} mime={mime_type}]"
+                ));
             }
         }
     }
@@ -461,5 +542,39 @@ mod tests {
         let mut bad = meta.clone();
         bad["structuredUserInput"]["fields"] = json!({"n": 999});
         assert!(adopt_stored_structured_input(&bad).is_none());
+    }
+
+    #[test]
+    fn image_part_from_bytes_rejects_paths_and_bounds() {
+        // 1x1 PNG
+        let png: &[u8] = &[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
+            0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x08,
+            0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x05, 0xFE,
+            0xD4, 0xEF, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+        let part = image_part_from_authorized_bytes("att-1", "image/png", png).expect("ok");
+        match part {
+            AgentContentPart::Image {
+                attachment_id,
+                mime_type,
+                data_base64,
+            } => {
+                assert_eq!(attachment_id, "att-1");
+                assert_eq!(mime_type, "image/png");
+                assert!(data_base64.as_ref().is_some_and(|s| !s.is_empty()));
+            }
+            _ => panic!("expected Image part"),
+        }
+        assert!(validate_provider_image_bytes("image/png", &vec![0u8; MAX_PROVIDER_IMAGE_BYTES + 1]).is_err());
+        assert!(validate_provider_image_bytes("text/plain", png).is_err());
+        let flat = flatten_parts_for_provider(&[image_part_from_authorized_bytes(
+            "att-1", "image/png", png,
+        )
+        .unwrap()]);
+        assert!(flat.contains("attachmentId=att-1"));
+        assert!(!flat.contains("/Users/"));
+        assert!(!flat.contains("data:"));
     }
 }

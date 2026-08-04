@@ -21,7 +21,7 @@
 - **OpenAI / JSON-blob path:** Provider text is usually one JSON assistant object. Progressive ops only appear when the model emits **newline-delimited StreamEvent** frames. Single-blob JSON still harvests **after** completion via `push_legacy_compat`.
 - **No live durable apply:** Preview does not mutate surfaces mid-stream; commit remains turn-end only.
 - **No preview UI for surfaces:** Channel label only — no speculative surface paint / rollback on interrupt.
-- **Anthropic / Gemini:** Still buffered `chat_stream`; no live progressive ops there.
+- **Anthropic / Gemini:** Live text SSE `chat_stream` unit-verified; progressive NDJSON ops still depend on model emitting frames (same as OpenAI JSON-blob path).
 - **Tool-round reset:** One parser/preview bag spans the turn (including tool follow-ups); not yet a multi-attempt registry.
 - **Desktop E2E:** Fixture + unit/vitest covered; packaged Journey for progressive ops **not_run**.
 

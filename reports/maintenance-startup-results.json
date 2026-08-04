@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T03:09:55.000Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "dirty": true,
+  "phase": "RC3.3 Phase 13 partial — maintenance journal startup decisions",
+  "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib maintenance_journal",
+  "exitStatus": 0,
+  "result": "Unit Verified",
+  "partial": true,
+  "partialReason": "classify + apply_startup_decision are deterministic (clear completed/inactive, clear safe pre-swap without deleting staged trees, EnterRecovery for mid-swap). Clear failures surface as Err for Recovery — not log-only. Full restore/rollback driver remains open.",
+  "assertions": [
+    "persist/load/clear round trip",
+    "rejects paths outside managed roots and relative/dotdot traversal",
+    "accepts nonexistent leaf under product root",
+    "mid-swap classifies EnterRecovery",
+    "apply clears completed and inactive journals",
+    "apply safe rollback clears journal without deleting staged tree",
+    "apply mid-swap EnterRecovery without clearing journal"
+  ],
+  "levels": {
+    "unit": "Unit Verified",
+    "desktop": "not_run",
+    "packaged": "not_run"
+  },
+  "cargoTests": {
+    "filter": "maintenance_journal",
+    "passed": 10,
+    "failed": 0,
+    "focused": [
+      "apply_clears_completed_and_inactive_journals",
+      "apply_safe_rollback_clears_journal_without_deleting_staged_tree",
+      "apply_mid_swap_enters_recovery_without_clearing"
+    ]
+  },
+  "docs": "docs/MAINTENANCE_TRANSACTION_JOURNAL.md",
+  "publicBeta": "Not ready",
+  "doNotClaim": [
+    "Full coherent profile restore",
+    "Automated rollback resume of irreversible journals",
+    "Desktop Verified startup Recovery UX"
+  ]
+}

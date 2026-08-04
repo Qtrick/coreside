@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T04:14:08.392Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "dirty": true,
+  "platform": "darwin",
+  "architecture": "arm64",
+  "command": "e2e:journey-14-stream-eavesdropping-denial",
+  "result": "passed",
+  "evidenceLevel": "Desktop Verified",
+  "e2eSpec": "e2e/specs/14-stream-eavesdropping-denial.spec.ts",
+  "window": "tool-tool-e2e-notes",
+  "documentation": {
+    "coreEventDefaultKept": true,
+    "reason": "Sync/Conflict still use app.emit('agent-turn'); removing core:event:default would break tool Sync. Text is Channel-only and must never appear on the global bus.",
+    "proofMode": "tool window listened on agent-turn during main live stream; zero Text payloads expected and asserted"
+  },
+  "listenOk": true,
+  "eventsReceived": 0,
+  "textEventsReceived": 0,
+  "nonTextKinds": [],
+  "assertions": [
+    "tool window can listen for agent-turn (core:event:default present)",
+    "zero Text payloads with assistant conversation content",
+    "main window completed live stream probe"
+  ],
+  "publicBeta": "Not ready"
+}

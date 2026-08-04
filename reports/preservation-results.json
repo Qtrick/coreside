@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T03:01:11.567Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "dirty": true,
+  "command": "test:preservation-integration",
+  "status": "passed",
+  "evidenceLevel": "Unit Verified",
+  "note": "TypeScript + Rust preservation unit tests passed. Not Desktop/Packaged Verified.",
+  "suites": {
+    "typescript": {
+      "command": "vitest run src/lib/preservation.test.ts",
+      "exitCode": 0,
+      "passed": true,
+      "source": "src/lib/preservation.ts",
+      "test": "src/lib/preservation.test.ts"
+    },
+    "rust": {
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib runtime_v2::preservation",
+      "exitCode": 0,
+      "passed": true,
+      "source": "src-tauri/src/runtime_v2/preservation.rs"
+    }
+  },
+  "publicBeta": "Not ready"
+}

@@ -38,10 +38,12 @@ pub use provider::{
 #[allow(unused_imports)] // Public surface for StructuredUserInput (RC3.3 Phase 8).
 pub use structured_user_input::{
     adopt_stored_structured_input, build_user_parts, flatten_parts_for_provider,
-    has_trusted_structured_input, provider_text_summary, seal_from_ledger_payload,
-    seal_local_user_submission, structured_metadata_value, structured_trust_from_text,
-    text_contains_structured_marker, AgentContentPart, AgentRole, InstructionEligibility,
-    StructuredUserInput, StructuredUserInputSubmission, TrustClass,
+    has_trusted_structured_input, image_part_from_authorized_bytes, is_provider_image_mime,
+    provider_text_summary, seal_from_ledger_payload, seal_local_user_submission,
+    structured_metadata_value, structured_trust_from_text, text_contains_structured_marker,
+    validate_provider_image_bytes, AgentContentPart, AgentRole, InstructionEligibility,
+    StructuredUserInput, StructuredUserInputSubmission, TrustClass, MAX_PROVIDER_IMAGE_BYTES,
+    MAX_PROVIDER_IMAGE_PIXELS,
 };
 pub use response_parser::{parse_agent_response, ParsedAgentResponse};
 pub use response_schema::{

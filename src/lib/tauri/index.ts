@@ -1,9 +1,16 @@
-export type { AgentTurnEvent, QueueChangedEvent, QueueChangeKind } from "./events";
+export type {
+  AgentTurnEvent,
+  AgentTurnSyncMatchContext,
+  QueueChangedEvent,
+  QueueChangeKind,
+} from "./events";
 export {
   isQueueEventForConversation,
   listenAgentTurn,
   listenApprovalsChanged,
-  listenQueueChanged,
+  subscribeConversationQueue,
+  shouldApplyAgentTurnSync,
+  shouldShowAppConflict,
 } from "./events";
 export { TauriCommandError } from "./errors";
 export { isTauriRuntime, isWebPreview } from "./runtime";

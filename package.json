@@ -20,6 +20,11 @@
     "audit:readiness": "node scripts/audit-readiness.mjs",
     "audit:readiness-delta": "node scripts/audit-readiness.mjs --delta-only",
     "audit:tauri-capabilities": "node scripts/audit-tauri-capabilities.mjs",
+    "audit:interactive-controls": "node scripts/audit-interactive-controls.mjs",
+    "audit:dead-controls": "node scripts/audit-interactive-controls.mjs --dead-only",
+    "audit:application-features": "node scripts/audit-application-features.mjs",
+    "test:packaged-smoke": "node scripts/packaged-smoke.mjs",
+    "test:preservation-integration": "node scripts/preservation-integration.mjs",
     "test:watch": "vitest",
     "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
@@ -87,6 +92,8 @@
     "test:database-integrity": "cargo test --manifest-path src-tauri/Cargo.toml --lib health::",
     "test:backup": "cargo test --manifest-path src-tauri/Cargo.toml --lib backup::",
     "test:database-bootstrap": "cargo test --manifest-path src-tauri/Cargo.toml --lib bootstrap::",
+    "test:attachment-crash-consistency": "cargo test --manifest-path src-tauri/Cargo.toml --lib attachment_cmds::",
+    "test:restore-transaction": "cargo test --manifest-path src-tauri/Cargo.toml --lib maintenance_journal:: && cargo test --manifest-path src-tauri/Cargo.toml --lib commands::data_cmds::",
     "test:consumer-polish": "npm run test:layout-overflow && npm run test:wallpaper-reset && npm run test:wallpaper-compositing && npm run test:responsive-layout && npm run test:settings"
   },
   "dependencies": {

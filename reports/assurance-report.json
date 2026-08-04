@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-03T18:44:22.012Z",
-  "commit": "1f5fc88a1d569d32c14e329697964ff01acdd034",
+  "generatedAt": "2026-08-04T03:21:55.438Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
   "dirty": true,
   "command": "assurance:report",
   "exitStatus": "failed",
@@ -10,6 +10,20 @@
   "fullReleasePass": false,
   "note": "Narrow evidence validator only (presence/freshness/partial rejection). Not a full release pass. Public beta remains Not ready.",
   "findings": [
+    {
+      "severity": "P1",
+      "file": "current-source-baseline.json",
+      "status": "stale_commit",
+      "reportCommit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+      "activeCommit": "3202ca67450687760f8166e65e7c035de0eda2b8"
+    },
+    {
+      "severity": "P1",
+      "file": "current-source-fingerprint.json",
+      "status": "stale_commit",
+      "reportCommit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+      "activeCommit": "3202ca67450687760f8166e65e7c035de0eda2b8"
+    },
     {
       "severity": "P1",
       "file": "command-authority-results.json",

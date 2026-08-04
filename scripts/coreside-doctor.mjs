@@ -413,6 +413,22 @@ check(
   "tool-* windows use a separate capability without shell:allow-open",
 );
 check(
+  "capabilities.tool_window_no_global_deny",
+  (() => {
+    try {
+      const caps = JSON.parse(toolCaps);
+      const perms = Array.isArray(caps.permissions) ? caps.permissions : [];
+      return (
+        perms.includes("coreside-tool-scoped") &&
+        !perms.includes("coreside-tool-deny-sensitive")
+      );
+    } catch {
+      return false;
+    }
+  })(),
+  "tool-window must not link coreside-tool-deny-sensitive (Tauri commands.deny is global and blocks main)",
+);
+check(
   "commands.open_external_url",
   libRs.includes("open_external_url") &&
     bridge.includes("open_external_url") &&

@@ -1,5 +1,5 @@
 import { AlertTriangle, Lock, Pencil, ShieldAlert } from "lucide-react";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { api } from "@/lib/tauri";
 import type { ApprovalRequest, RememberDuration, RememberScope } from "@/types/application-kernel";
 
@@ -51,6 +51,7 @@ export function ApprovalCard({
 }: ApprovalCardProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLElement>(null);
 
   const risk = riskPresentation(approval.risk, approval.critical);
   const RiskIcon = risk.icon;
@@ -58,6 +59,15 @@ export function ApprovalCard({
   const consumed = approval.status === "consumed";
   const decided = approval.status === "approved" || approval.status === "denied";
   const inactive = expired || consumed || decided || approval.status !== "pending";
+
+  // Focus the dialog container (not Approve once) so window/session focus
+  // or an accidental Enter cannot auto-approve a pending request.
+  // useLayoutEffect runs before ModalPortal's rAF autofocus check, so the
+  // portal sees an in-dialog activeElement and skips focusing Approve once.
+  useLayoutEffect(() => {
+    if (inactive) return;
+    dialogRef.current?.focus({ preventScroll: true });
+  }, [inactive, approval.id]);
 
   const decide = async (
     approve: boolean,
@@ -83,8 +93,10 @@ export function ApprovalCard({
 
   return (
     <article
+      ref={dialogRef}
       className="approval-card settings-section"
       role="dialog"
+      tabIndex={-1}
       aria-labelledby={`approval-${approval.id}-title`}
       aria-describedby={`approval-${approval.id}-desc`}
     >

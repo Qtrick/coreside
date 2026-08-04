@@ -1,10 +1,70 @@
 /** Shared desktop E2E helpers (WebdriverIO + Tauri embedded provider). */
 
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
 export const E2E_TOOL_ID = "tool-e2e-notes";
 export const E2E_TOOL_NAME = "E2E Notes";
 export const E2E_APPROVAL_ID = "approval-e2e-1";
 export const E2E_GRANT_ID = "grant-e2e-1";
 export const E2E_NOTE_INPUT_ID = "e2e-note-input";
+
+const helpersDir = path.dirname(fileURLToPath(import.meta.url));
+export const E2E_REPO_ROOT = path.resolve(helpersDir, "..");
+
+/** Commit / dirty identity for evidence reports (prefers orchestrator env). */
+export function evidenceIdentity(): {
+  commit: string;
+  dirty: boolean;
+  platform: string;
+  arch: string;
+} {
+  const commitEnv = process.env.CORESIDE_E2E_COMMIT?.trim();
+  const dirtyEnv = process.env.CORESIDE_E2E_DIRTY;
+  let commit = commitEnv || "";
+  let dirty = dirtyEnv === "1";
+  if (!commitEnv || (dirtyEnv !== "0" && dirtyEnv !== "1")) {
+    const rev = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: E2E_REPO_ROOT,
+      encoding: "utf8",
+    });
+    const porcelain = spawnSync("git", ["status", "--porcelain"], {
+      cwd: E2E_REPO_ROOT,
+      encoding: "utf8",
+    });
+    commit = (rev.stdout || "").trim();
+    dirty = (porcelain.stdout || "").trim().length > 0;
+  }
+  return {
+    commit,
+    dirty,
+    platform: os.platform(),
+    arch: os.arch(),
+  };
+}
+
+/** SHA-256 of the E2E binary when resolvable; otherwise null. */
+export function evidenceBinaryHash(): string | null {
+  const candidates = [
+    process.env.CORESIDE_E2E_BINARY?.trim(),
+    path.join(E2E_REPO_ROOT, "src-tauri/target/debug/Coreside"),
+    path.join(E2E_REPO_ROOT, "src-tauri/target/debug/coreside"),
+  ].filter(Boolean) as string[];
+  for (const candidate of candidates) {
+    try {
+      if (!fs.existsSync(candidate)) continue;
+      const buf = fs.readFileSync(candidate);
+      return createHash("sha256").update(buf).digest("hex");
+    } catch {
+      // try next
+    }
+  }
+  return null;
+}
 
 export type TauriBrowser = WebdriverIO.Browser & {
   tauri?: {
@@ -216,7 +276,7 @@ export async function openSettingsCategory(label: string) {
   await browser.waitUntil(
     async () => {
       const title = await $(".settings-group-title");
-      return title.isExisting() && (await title.getText()) === label;
+      return (await title.isExisting()) && (await title.getText()) === label;
     },
     {
       timeout: 10_000,
@@ -302,6 +362,11 @@ export async function expectInvokeDenied(
     expect(outcome.error.length).toBeGreaterThan(0);
     // Missing IPC is not ACL denial — do not mint false-positive authority evidence.
     expect(outcome.error).not.toContain("__TAURI__.core.invoke unavailable");
+    // Allowlist denial ("not allowed") or historical explicit deny both count.
+    // Prefer allowlist; do not require coreside-tool-deny-sensitive wording.
+    expect(outcome.error.toLowerCase()).toMatch(
+      /not allowed|denied|forbidden|permission|acl|capability|cannot access/,
+    );
   }
   return outcome;
 }

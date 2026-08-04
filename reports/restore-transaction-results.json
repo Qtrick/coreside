@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T03:56:24.000Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "dirty": true,
+  "phase": "RC3.3 Phase 13 partial — coherent restore journal vertical slice",
+  "command": "npm run test:restore-transaction (maintenance_journal:: && commands::data_cmds::)",
+  "exitStatus": 0,
+  "result": "Unit Verified",
+  "partial": true,
+  "partialReason": "Restore advances persisted journal Staging→Validating→Swapping→Reopening→Rehydrating→Completed while quiescence is held. Pre-swap failure clears journal and resumes; mid-swap failure retains RecoveryRequired and keeps quiescence paused. Full packaged filesystem swap under load is not claimed.",
+  "assertions": [
+    "quiescence pause held for maintenance begin through clear (or Recovery retain)",
+    "restore stage ladder: pre-swap Validating classifies RollBack and clears",
+    "mid-swap Swapping/Reopening/Rehydrating classify EnterRecovery and retain journal",
+    "RecoveryRequired after mid-swap failure does not clear journal",
+    "Completed stage clears on startup apply",
+    "AppState restore_exit_paths_journal_and_quiescence covers clear vs retain"
+  ],
+  "levels": {
+    "unit": "Unit Verified",
+    "desktop": "not_run",
+    "packaged": "not_run"
+  },
+  "cargoTests": {
+    "filters": [
+      "maintenance_journal::",
+      "commands::data_cmds::"
+    ],
+    "passed": 15,
+    "failed": 0,
+    "focused": [
+      "restore_stage_ladder_pre_swap_clears_mid_swap_recovers",
+      "restore_completed_stage_clears_on_startup",
+      "apply_mid_swap_enters_recovery_without_clearing",
+      "restore_exit_paths_journal_and_quiescence"
+    ]
+  },
+  "docs": [
+    "docs/DURABLE_PROFILE_ARCHITECTURE.md",
+    "docs/MAINTENANCE_TRANSACTION_JOURNAL.md"
+  ],
+  "publicBeta": "Not ready",
+  "doNotClaim": [
+    "Packaged Verified profile restore under load",
+    "Automated irreversible mid-swap filesystem rollback resume",
+    "Desktop Verified restore UX"
+  ]
+}

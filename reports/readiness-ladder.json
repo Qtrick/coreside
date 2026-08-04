@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T02:26:51.384Z",
-  "commit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+  "generatedAt": "2026-08-04T04:20:36.803Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
   "dirty": true,
   "sourceFingerprint": "4d9e8454a5e9907e216f73252598ab544aa4f802eef1fb4e335b341b24ee4aea",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
@@ -22,7 +22,7 @@
       "track": "local-byok",
       "ladder": "Development Build",
       "dirty": true,
-      "candidateNote": "Internal Alpha Candidate only after offline gates green, dirty=false, and documented residual P1s. Not claimed here.",
+      "candidateNote": "Full e2e 1–14 Desktop Verified and packaged smoke Packaged Verified on this host, but dirty=true — remain Development Build until a clean commit fingerprints evidence.",
       "publicBeta": "Not ready"
     },
     "hosted": {
@@ -36,8 +36,8 @@
     {
       "id": "true-streaming",
       "name": "True streaming (chat_stream / TextDelta)",
-      "state": "Unit Verified",
-      "notes": "Unit slice passed; Journey 12 not executed.",
+      "state": "Desktop Verified",
+      "notes": "Journey 12 passed on darwin/arm64 with turnId + live stream marker.",
       "evidence": [
         "reports/true-streaming-results.json"
       ]
@@ -45,19 +45,21 @@
     {
       "id": "channel-scoped-streaming",
       "name": "Channel-scoped turn streaming",
-      "state": "Unit Verified",
-      "notes": "Channel privacy unit/type checks; eavesdrop E2E not_run.",
+      "state": "Desktop Verified",
+      "notes": "Journey 14: tool window received zero Text events during main stream.",
       "evidence": [
-        "reports/scoped-streaming-results.json"
+        "reports/scoped-streaming-results.json",
+        "reports/stream-eavesdropping-results.json"
       ]
     },
     {
       "id": "wallpaper-atomic-settings",
       "name": "Wallpaper atomic appearance writes",
-      "state": "Unit Verified",
-      "notes": "Atomic set_workspace_appearance + slider coalesce unit-proven; pixels not_run.",
+      "state": "Desktop Verified",
+      "notes": "Journey 13 Matrix + transparency 40 + canvas samples; packaged pixels not_run.",
       "evidence": [
-        "reports/wallpaper-settings-results.json"
+        "reports/wallpaper-settings-results.json",
+        "reports/wallpaper-visual-results.json"
       ]
     },
     {
@@ -74,7 +76,7 @@
       "id": "queue-ui",
       "name": "Conversation queue UI",
       "state": "Unit Verified",
-      "notes": "Event-driven agent-queue-changed + conversationId filter; 20s reconcile; bus still global (P1); desktop E2E not_run.",
+      "notes": "Conversation-scoped subscribe_conversation_queue Channel + 20s reconcile; Unit Verified; desktop E2E not_run.",
       "evidence": [
         "reports/queue-product-results.json",
         "src/lib/tauri/queue-events.test.ts",
@@ -123,20 +125,64 @@
       ]
     },
     {
+      "id": "e2e-1-14",
+      "name": "Desktop E2E Journeys 1–14",
+      "state": "Desktop Verified",
+      "notes": "Full orchestrator npm run e2e passed on darwin/arm64 (Journey 7 passed_partial by design).",
+      "evidence": [
+        "reports/e2e-results.json",
+        "reports/true-streaming-results.json",
+        "reports/wallpaper-visual-results.json",
+        "reports/stream-eavesdropping-results.json",
+        "reports/command-authority-results.json"
+      ]
+    },
+    {
       "id": "e2e-12-13",
       "name": "Desktop E2E Journey 12 / 13",
-      "state": "Scaffolded",
-      "notes": "Specs written and registered; execution not_run.",
+      "state": "Desktop Verified",
+      "notes": "Executed on darwin/arm64; Journey 13 asserts uniqueColors≥2 and lumSpan≥8 on Matrix canvas.",
       "evidence": [
-        "e2e/specs/12-true-streaming.spec.ts",
-        "e2e/specs/13-wallpaper-targeted-update.spec.ts"
+        "reports/true-streaming-results.json",
+        "reports/wallpaper-visual-results.json"
+      ]
+    },
+    {
+      "id": "e2e-14-eavesdrop",
+      "name": "Tool-window stream eavesdropping denial",
+      "state": "Desktop Verified",
+      "notes": "Journey 14 passed; zero Text events in tool window.",
+      "evidence": [
+        "reports/stream-eavesdropping-results.json"
       ]
     },
     {
       "id": "attachment-crash",
       "name": "Attachment crash-consistency suite",
-      "state": "Scaffolded",
-      "notes": "Auth + GC foundations Unit Verified separately; full crash-consistency suite still open."
+      "state": "Unit Verified",
+      "notes": "Temp-dir/rusqlite crash windows Unit Verified (rollback before claim; claim-before-promote healed; N-attach idempotent). Desktop crash-restart not claimed.",
+      "evidence": [
+        "reports/attachment-crash-results.json",
+        "docs/ATTACHMENT_LIFECYCLE.md"
+      ]
+    },
+    {
+      "id": "restore-transaction",
+      "name": "Coherent restore journal transaction",
+      "state": "Unit Verified",
+      "notes": "Staging→Validating→Swapping→Reopening→Rehydrating→Completed with quiescence; mid-swap retains Recovery. Packaged FS swap under load not claimed.",
+      "evidence": [
+        "reports/restore-transaction-results.json"
+      ]
+    },
+    {
+      "id": "packaged-smoke",
+      "name": "Normal package build + smoke launch",
+      "state": "Packaged Verified",
+      "notes": "Release .app/.dmg built; package:scan + brief launch/quit. Smoke only — not full product acceptance.",
+      "evidence": [
+        "reports/packaged-smoke-results.json"
+      ]
     },
     {
       "id": "hosted-ai",
@@ -156,26 +202,34 @@
   ],
   "summary": {
     "unitVerified": [
-      "true-streaming",
-      "channel-scoped-streaming",
-      "wallpaper-atomic-settings",
       "progressive-preview",
       "queue-ui",
       "history-replay",
       "structured-user-input",
       "attachment-authorization",
-      "attachment-gc"
+      "attachment-gc",
+      "attachment-crash",
+      "restore-transaction"
+    ],
+    "desktopVerified": [
+      "true-streaming",
+      "channel-scoped-streaming",
+      "wallpaper-atomic-settings",
+      "e2e-1-14",
+      "e2e-12-13",
+      "e2e-14-eavesdrop"
     ],
     "integratedNotVerified": [],
-    "scaffolded": [
-      "e2e-12-13",
-      "attachment-crash"
-    ],
+    "scaffolded": [],
     "absent": [],
     "deferred": [
       "hosted-ai"
     ],
-    "highestDesktopClaim": "none",
+    "highestDesktopClaim": "Desktop Verified",
+    "highestPackagedClaim": "Packaged Verified",
+    "packagedVerified": [
+      "packaged-smoke"
+    ],
     "overallLocalFirst": "Development Build",
     "overallHosted": "Development Build"
   }

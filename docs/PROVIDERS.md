@@ -28,3 +28,14 @@ Provider-specific grey placeholders come from `provider_key_hints` (for example 
 ## Development `.env`
 
 `.env` remains a developer fallback. Settings may show “Using development environment credential” without displaying the key.
+
+## Streaming honesty
+
+| Provider | `chat_stream` |
+| --- | --- |
+| OpenAI / compatible | Live SSE (`live: true`, real `TextDelta`) |
+| Anthropic | Live SSE (`stream: true` on Messages API) |
+| Gemini | Live SSE (`streamGenerateContent?alt=sse`) |
+| Hosted / trait default | Buffered only (`live: false`, no fabricated deltas) |
+
+Buffered `chat()` remains for health checks and non-stream compatibility. See [TRUE_STREAMING_RUNTIME.md](./TRUE_STREAMING_RUNTIME.md) and [PROVIDER_CONFORMANCE.md](./PROVIDER_CONFORMANCE.md).

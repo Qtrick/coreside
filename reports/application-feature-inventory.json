@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T03:01:23.107Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "dirty": true,
+  "command": "audit:application-features",
+  "evidenceLevel": "Scaffolded",
+  "note": "Static catalog of known routes/panels with readiness guesses — not Desktop/Packaged Verified.",
+  "readinessLadderPresent": true,
+  "readinessLadderCommit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+  "settingsCategories": [
+    "general",
+    "appearance",
+    "ai-access",
+    "agent",
+    "search",
+    "privacy",
+    "data",
+    "accessibility",
+    "advanced",
+    "about",
+    "added"
+  ],
+  "features": [
+    {
+      "id": "sidebar",
+      "name": "Sidebar",
+      "kind": "shell",
+      "viewKind": null,
+      "entry": "src/components/sidebar/Sidebar.tsx",
+      "entryPresent": true,
+      "readinessGuess": "Integrated – Not Verified",
+      "notes": "Present in tree; no matching readiness-ladder feature ids."
+    },
+    {
+      "id": "chat",
+      "name": "Chat",
+      "kind": "view",
+      "viewKind": "chat",
+      "entry": "src/components/chat/ChatPanel.tsx",
+      "entryPresent": true,
+      "readinessGuess": "Unit Verified",
+      "notes": "Derived from readiness-ladder: true-streaming, channel-scoped-streaming, queue-ui",
+      "linkedLadderStates": {
+        "true-streaming": "Unit Verified",
+        "channel-scoped-streaming": "Unit Verified",
+        "queue-ui": "Unit Verified"
+      }
+    },
+    {
+      "id": "projects",
+      "name": "Projects",
+      "kind": "view",
+      "viewKind": "projects",
+      "entry": "src/components/projects/ProjectList.tsx",
+      "entryPresent": true,
+      "readinessGuess": "Integrated – Not Verified",
+      "notes": "Present in tree; no matching readiness-ladder feature ids."
+    },
+    {
+      "id": "tools",
+      "name": "Tools",
+      "kind": "canvas",
+      "viewKind": "chat",
+      "entry": "src/components/tool-canvas/ToolCanvas.tsx",
+      "entryPresent": true,
+      "readinessGuess": "Unit Verified",
+      "notes": "Derived from readiness-ladder: progressive-preview, history-replay",
+      "linkedLadderStates": {
+        "progressive-preview": "Unit Verified",
+        "history-replay": "Unit Verified"
+      }
+    },
+    {
+      "id": "media",
+      "name": "Media Library",
+      "kind": "view",
+      "viewKind": "media",
+      "entry": "src/components/media/MediaLibrary.tsx",
+      "entryPresent": true,
+      "readinessGuess": "Unit Verified",
+      "notes": "Derived from readiness-ladder: attachment-authorization, attachment-gc",
+      "linkedLadderStates": {
+        "attachment-authorization": "Unit Verified",
+        "attachment-gc": "Unit Verified"
+      }
+    },
+    {
+      "id": "automations",
+      "name": "Automations",
+      "kind": "view",
+      "viewKind": "automations",
+      "entry": "src/components/automations/AutomationsPanel.tsx",
+      "entryPresent": true,
+      "readinessGuess": "Integrated – Not Verified",
+      "notes": "Present in tree; no matching readiness-ladder feature ids."
+    },
+    {
+      "id": "settings",
+      "name": "Settings",
+      "kind": "view",
+      "viewKind": "settings",
+      "entry": "src/components/settings/SettingsPanel.tsx",
+      "entryPresent": true,
+      "readinessGuess": "Unit Verified",
+      "notes": "Derived from readiness-ladder: wallpaper-atomic-settings",
+      "linkedLadderStates": {
+        "wallpaper-atomic-settings": "Unit Verified"
+      }
+    },
+    {
+      "id": "recovery",
+      "name": "Recovery",
+      "kind": "panel",
+      "viewKind": null,
+      "entry": "src/components/recovery/BootstrapRecoveryScreen.tsx",
+      "entryPresent": true,
+      "settingsEntry": "src/components/settings/RecoverySettings.tsx",
+      "settingsEntryPresent": true,
+      "readinessGuess": "Integrated – Not Verified",
+      "notes": "Present in tree; no matching readiness-ladder feature ids."
+    }
+  ]
+}

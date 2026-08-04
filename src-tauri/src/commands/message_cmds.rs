@@ -210,6 +210,10 @@ pub enum AgentTurnEvent {
     Sync {
         conversation_id: Option<String>,
         surface_ids: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tool_ids: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        application_id: Option<String>,
         revision: Option<i64>,
         #[serde(rename = "syncKind")]
         sync_kind: String,
@@ -654,6 +658,16 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
     };
 
     loop {
+        if !state
+            .quiescence
+            .allows(crate::quiescence::QuiescedSubsystem::QueueDrain)
+        {
+            tracing::debug!(
+                conversation_id = %conversation_id,
+                "queue drain stopped — quiescence active"
+            );
+            return;
+        }
         if state.active_requests.lock().contains_key(&conversation_id) {
             return;
         }
@@ -671,7 +685,7 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
             return;
         };
         crate::commands::emit_queue_changed(
-            &app,
+            state,
             crate::commands::QueueChangeKind::ItemActivated,
             &conversation_id,
             Some(&item.id),
@@ -686,7 +700,7 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
             } else {
                 drop(db);
                 crate::commands::emit_queue_changed(
-                    &app,
+                    state,
                     crate::commands::QueueChangeKind::QueueSnapshot,
                     &conversation_id,
                     Some(&item.id),
@@ -731,7 +745,7 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
                     }
                 }
                 crate::commands::emit_queue_changed(
-                    &app,
+                    state,
                     crate::commands::QueueChangeKind::ItemCompleted,
                     &conversation_id,
                     Some(&item.id),
@@ -757,7 +771,7 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
                     }
                 }
                 crate::commands::emit_queue_changed(
-                    &app,
+                    state,
                     crate::commands::QueueChangeKind::ItemCompleted,
                     &conversation_id,
                     Some(&item.id),
@@ -783,7 +797,7 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
                     }
                 }
                 crate::commands::emit_queue_changed(
-                    &app,
+                    state,
                     crate::commands::QueueChangeKind::ItemCompleted,
                     &conversation_id,
                     Some(&item.id),
@@ -831,7 +845,7 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
             } else {
                 drop(db);
                 crate::commands::emit_queue_changed(
-                    &app,
+                    state,
                     crate::commands::QueueChangeKind::QueueSnapshot,
                     &conversation_id,
                     Some(&item.id),
@@ -853,7 +867,7 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
         };
         if completed_ok {
             crate::commands::emit_queue_changed(
-                &app,
+                state,
                 crate::commands::QueueChangeKind::ItemCompleted,
                 &conversation_id,
                 Some(&item.id),
@@ -982,7 +996,7 @@ async fn send_message_inner(
         )?;
         drop(db);
         crate::commands::emit_queue_changed(
-            &app,
+            state,
             crate::commands::QueueChangeKind::ItemAdded,
             &conversation_id,
             Some(&item.id),
@@ -1323,6 +1337,40 @@ async fn send_message_inner(
                             text: last.content.clone(),
                         },
                     );
+                }
+                // Multimodal foundation: authorized image attachments → Image parts.
+                // Bytes loaded after authorize_attachment_access; never filesystem paths.
+                for att in &trusted_attachments {
+                    if !crate::ai::is_provider_image_mime(&att.mime_type) {
+                        continue;
+                    }
+                    match crate::commands::attachment_cmds::read_authorized_attachment_bytes(
+                        &state,
+                        &conversation_id,
+                        &att.id,
+                    ) {
+                        Ok((bytes, mime)) => {
+                            match crate::ai::image_part_from_authorized_bytes(
+                                &att.id, &mime, &bytes,
+                            ) {
+                                Ok(part) => last.parts.push(part),
+                                Err(err) => {
+                                    tracing::info!(
+                                        attachment_id = %att.id,
+                                        error = %err,
+                                        "skip multimodal Image part (bounds/mime)"
+                                    );
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            tracing::info!(
+                                attachment_id = %att.id,
+                                error = %err.message,
+                                "skip multimodal Image part (authorize/read failed)"
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -2033,6 +2081,15 @@ async fn send_message_inner(
 
         if let Some(operations) = operations_from_payload {
             if !operations.is_empty() {
+                if !state
+                    .quiescence
+                    .allows(crate::quiescence::QuiescedSubsystem::PatchScheduler)
+                {
+                    tracing::warn!(
+                        conversation_id = %conversation_id,
+                        "skipping agent patch apply — quiescence active"
+                    );
+                } else {
                 let silent = parsed.payload.silent.unwrap_or(false);
                 let schedule_result = {
                     let mut db = state.db.lock();
@@ -2070,11 +2127,24 @@ async fn send_message_inner(
                                     );
                                     let surface_ids: Vec<String> =
                                         result.surfaces.iter().map(|s| s.id.clone()).collect();
+                                    let mut tool_ids: Vec<String> = result
+                                        .surfaces
+                                        .iter()
+                                        .filter_map(|s| s.tool_id.clone())
+                                        .collect();
+                                    tool_ids.sort();
+                                    tool_ids.dedup();
                                     emit_turn(
                                         &app, on_event.as_ref(),
                                         AgentTurnEvent::Sync {
                                             conversation_id: Some(conversation_id.clone()),
                                             surface_ids,
+                                            tool_ids,
+                                            // Prefer first surface tool as application scope when known.
+                                            application_id: result
+                                                .surfaces
+                                                .iter()
+                                                .find_map(|s| s.tool_id.clone()),
                                             revision: result
                                                 .surfaces
                                                 .first()
@@ -2142,6 +2212,7 @@ async fn send_message_inner(
                         }));
                     }
                 }
+                } // else: patch scheduler allowed
             }
         }
     }

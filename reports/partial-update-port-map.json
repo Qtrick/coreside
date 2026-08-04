@@ -39,7 +39,7 @@
       "coresideSymbol": "activate_next / recover_stale_active",
       "securityChanges": "SQLite transactions; profile-scoped",
       "status": "partial",
-      "gap": "Conversation-scoped queue Channel; global agent-queue-changed + client filter + 20s reconcile remain"
+      "gap": "Full withQueueMutation UI parity; 20s reconcile remains; desktop E2E not_run"
     },
     {
       "partialUpdateFile": "src/index.ts",

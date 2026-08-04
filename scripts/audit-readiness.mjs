@@ -89,7 +89,7 @@ function envelope(extra) {
 
 /**
  * Honest feature classifications for the current tree (RC3.2→RC3.3).
- * Desktop / Packaged / Human Accepted are intentionally unused.
+ * Desktop Verified used only when WDIO journey reports show executed passes.
  * @returns {{ id: string, name: string, state: EvidenceState, notes: string, evidence?: string[] }[]}
  */
 function featureLadder() {
@@ -97,23 +97,29 @@ function featureLadder() {
     {
       id: "true-streaming",
       name: "True streaming (chat_stream / TextDelta)",
-      state: "Unit Verified",
-      notes: "Unit slice passed; Journey 12 not executed.",
+      state: "Desktop Verified",
+      notes: "Journey 12 passed on darwin/arm64 with turnId + live stream marker.",
       evidence: ["reports/true-streaming-results.json"],
     },
     {
       id: "channel-scoped-streaming",
       name: "Channel-scoped turn streaming",
-      state: "Unit Verified",
-      notes: "Channel privacy unit/type checks; eavesdrop E2E not_run.",
-      evidence: ["reports/scoped-streaming-results.json"],
+      state: "Desktop Verified",
+      notes: "Journey 14: tool window received zero Text events during main stream.",
+      evidence: [
+        "reports/scoped-streaming-results.json",
+        "reports/stream-eavesdropping-results.json",
+      ],
     },
     {
       id: "wallpaper-atomic-settings",
       name: "Wallpaper atomic appearance writes",
-      state: "Unit Verified",
-      notes: "Atomic set_workspace_appearance + slider coalesce unit-proven; pixels not_run.",
-      evidence: ["reports/wallpaper-settings-results.json"],
+      state: "Desktop Verified",
+      notes: "Journey 13 Matrix + transparency 40 + canvas samples; packaged pixels not_run.",
+      evidence: [
+        "reports/wallpaper-settings-results.json",
+        "reports/wallpaper-visual-results.json",
+      ],
     },
     {
       id: "progressive-preview",
@@ -131,7 +137,7 @@ function featureLadder() {
       name: "Conversation queue UI",
       state: "Unit Verified",
       notes:
-        "Event-driven agent-queue-changed + conversationId filter; 20s reconcile; bus still global (P1); desktop E2E not_run.",
+        "Conversation-scoped subscribe_conversation_queue Channel + 20s reconcile; Unit Verified; desktop E2E not_run.",
       evidence: [
         "reports/queue-product-results.json",
         "src/lib/tauri/queue-events.test.ts",
@@ -181,21 +187,63 @@ function featureLadder() {
       ],
     },
     {
+      id: "e2e-1-14",
+      name: "Desktop E2E Journeys 1–14",
+      state: "Desktop Verified",
+      notes:
+        "Full orchestrator npm run e2e passed on darwin/arm64 (Journey 7 passed_partial by design).",
+      evidence: [
+        "reports/e2e-results.json",
+        "reports/true-streaming-results.json",
+        "reports/wallpaper-visual-results.json",
+        "reports/stream-eavesdropping-results.json",
+        "reports/command-authority-results.json",
+      ],
+    },
+    {
       id: "e2e-12-13",
       name: "Desktop E2E Journey 12 / 13",
-      state: "Scaffolded",
-      notes: "Specs written and registered; execution not_run.",
+      state: "Desktop Verified",
+      notes:
+        "Executed on darwin/arm64; Journey 13 asserts uniqueColors≥2 and lumSpan≥8 on Matrix canvas.",
       evidence: [
-        "e2e/specs/12-true-streaming.spec.ts",
-        "e2e/specs/13-wallpaper-targeted-update.spec.ts",
+        "reports/true-streaming-results.json",
+        "reports/wallpaper-visual-results.json",
       ],
+    },
+    {
+      id: "e2e-14-eavesdrop",
+      name: "Tool-window stream eavesdropping denial",
+      state: "Desktop Verified",
+      notes: "Journey 14 passed; zero Text events in tool window.",
+      evidence: ["reports/stream-eavesdropping-results.json"],
     },
     {
       id: "attachment-crash",
       name: "Attachment crash-consistency suite",
-      state: "Scaffolded",
+      state: "Unit Verified",
       notes:
-        "Auth + GC foundations Unit Verified separately; full crash-consistency suite still open.",
+        "Temp-dir/rusqlite crash windows Unit Verified (rollback before claim; claim-before-promote healed; N-attach idempotent). Desktop crash-restart not claimed.",
+      evidence: [
+        "reports/attachment-crash-results.json",
+        "docs/ATTACHMENT_LIFECYCLE.md",
+      ],
+    },
+    {
+      id: "restore-transaction",
+      name: "Coherent restore journal transaction",
+      state: "Unit Verified",
+      notes:
+        "Staging→Validating→Swapping→Reopening→Rehydrating→Completed with quiescence; mid-swap retains Recovery. Packaged FS swap under load not claimed.",
+      evidence: ["reports/restore-transaction-results.json"],
+    },
+    {
+      id: "packaged-smoke",
+      name: "Normal package build + smoke launch",
+      state: "Packaged Verified",
+      notes:
+        "Release .app/.dmg built; package:scan + brief launch/quit. Smoke only — not full product acceptance.",
+      evidence: ["reports/packaged-smoke-results.json"],
     },
     {
       id: "hosted-ai",
@@ -217,10 +265,12 @@ function overallTracks(dirty) {
   return {
     localFirst: {
       track: "local-byok",
-      ladder: "Development Build",
+      // Dirty tree blocks Internal Alpha / Automated Public-Beta Candidate claims.
+      ladder: dirty ? "Development Build" : "Internal Alpha Candidate",
       dirty,
-      candidateNote:
-        "Internal Alpha Candidate only after offline gates green, dirty=false, and documented residual P1s. Not claimed here.",
+      candidateNote: dirty
+        ? "Full e2e 1–14 Desktop Verified and packaged smoke Packaged Verified on this host, but dirty=true — remain Development Build until a clean commit fingerprints evidence."
+        : "Offline gates green with clean tree — Internal Alpha Candidate. Automated Public-Beta Candidate still requires Human Accepted + residual P1 closure.",
       publicBeta: "Not ready",
     },
     hosted: {
@@ -266,7 +316,7 @@ function buildDelta(meta) {
         from: "Disconnected / missing panel",
         to: "Unit Verified",
         detail:
-          "ConversationQueue event-driven refresh (agent-queue-changed) with conversationId filter; 20s reconcile.",
+          "ConversationQueue conversation-scoped Channel refresh; 20s reconcile.",
       },
       {
         id: "history-replay",
@@ -311,7 +361,6 @@ function buildDelta(meta) {
       },
     ],
     unchangedOrStillOpen: [
-      { id: "attachment-crash", state: "Scaffolded" },
       { id: "hosted-ai", state: "Deliberately Deferred" },
       {
         id: "progressive-preview-gaps",
@@ -320,15 +369,14 @@ function buildDelta(meta) {
           "No speculative surface paint, JSON-blob progressive, or desktop E2E yet.",
       },
       {
-        id: "desktop-packaged-proof",
+        id: "human-acceptance",
         state: "Absent",
-        detail: "No Desktop Verified / Packaged Verified claims.",
+        detail: "HUMAN_ACCEPTANCE_CHECKLIST unsigned — blocks Automated Public-Beta Candidate.",
       },
     ],
     nonClaims: [
-      "No Desktop Verified",
-      "No Packaged Verified",
       "No Human Accepted",
+      "No Automated Public-Beta Candidate (dirty tree + unsigned human checklist)",
       "Public beta Not ready",
       "Hosted private alpha Not ready",
     ],
@@ -351,6 +399,7 @@ function main() {
     features,
     summary: {
       unitVerified: features.filter((f) => f.state === "Unit Verified").map((f) => f.id),
+      desktopVerified: features.filter((f) => f.state === "Desktop Verified").map((f) => f.id),
       integratedNotVerified: features
         .filter((f) => f.state === "Integrated – Not Verified")
         .map((f) => f.id),
@@ -359,7 +408,13 @@ function main() {
       deferred: features
         .filter((f) => f.state === "Deliberately Deferred")
         .map((f) => f.id),
-      highestDesktopClaim: "none",
+      highestDesktopClaim: features.some((f) => f.state === "Desktop Verified") ? "Desktop Verified" : "none",
+      highestPackagedClaim: features.some((f) => f.state === "Packaged Verified")
+        ? "Packaged Verified"
+        : "none",
+      packagedVerified: features
+        .filter((f) => f.state === "Packaged Verified")
+        .map((f) => f.id),
       overallLocalFirst: tracks.localFirst.ladder,
       overallHosted: tracks.hosted.ladder,
     },
@@ -392,7 +447,7 @@ function main() {
     `[readiness] local=${tracks.localFirst.ladder} hosted=${tracks.hosted.ladder} dirty=${base.dirty}`,
   );
   console.log(
-    `[readiness] unitVerified=${ladder.summary.unitVerified.length} scaffolded=${ladder.summary.scaffolded.length} (no Desktop Verified)`,
+    `[readiness] unitVerified=${ladder.summary.unitVerified.length} desktopVerified=${ladder.summary.desktopVerified?.length ?? 0} scaffolded=${ladder.summary.scaffolded.length}`,
   );
   process.exit(0);
 }

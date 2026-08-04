@@ -1,8 +1,8 @@
 # Attachment Lifecycle (RC3)
 
 **Product:** Coreside  
-**Phase:** RC3.3 Phase 13 partial — authorization + periodic GC foundation  
-**Status:** Partial — atomic DB claim landed; conversation-scoped read auth + `run_attachment_gc` **Unit Verified**; FS promote crash window remains **P1** until crash/restart suite passes  
+**Phase:** RC3.3 Phase 13 partial — authorization + periodic GC + crash-consistency suite  
+**Status:** Partial — atomic DB claim landed; conversation-scoped read auth + `run_attachment_gc` **Unit Verified**; crash/reconcile suite **Unit Verified** (`reports/attachment-crash-results.json`)  
 **Access date:** 2026-08-03
 
 ## Authoritative owner
@@ -49,6 +49,17 @@ Reports: `reports/attachment-authorization-results.json` → **Unit Verified**.
 
 Invariant after successful send: message with N attachments has N `attached` rows. Crash between commit and promote may leave files in staging; protocol searches both roots; startup sweep promotes orphans.
 
+## Crash-consistency suite (Unit Verified)
+
+Temp-dir + rusqlite tests (`CORESIDE_DATA_DIR` override) prove:
+
+1. Crash after message insert but before claim (txn rollback) → no message, attachment stays `staged`, no durable file.
+2. Crash after claim DB commit but before promote → startup `reconcile_and_sweep_attachments` promotes staging → durable.
+3. Visible message with N attachments → N `attached` rows + N durable files after reconcile; second reconcile is idempotent.
+4. Wrong-conversation authorize still denies after claim/promote.
+
+Command: `npm run test:attachment-crash-consistency`. Report: `reports/attachment-crash-results.json`.
+
 ## Queue
 
 - Enqueued turns store opaque attachment IDs.
@@ -74,7 +85,7 @@ Reports: `reports/attachment-gc-results.json` → **Unit Verified**.
 ## Remaining P1/P2
 
 - Protocol whole-file reads remain bounded but still load into memory (P1)
-- Multimodal provider parts (P1) — **out of scope for this slice**
+- Multimodal provider parts (P1) — **Partial**: `AgentContentPart::Image { attachment_id, mime_type, data_base64 }` after `authorize_attachment_access`; OpenAI maps to `image_url` data URLs (never filesystem paths); byte/pixel bounds enforced. Anthropic/Gemini native parts still open. Report: `reports/multimodal-provider-results.json`
 - Parser-level image bomb budgets (P2)
 - Wire `run_attachment_gc` into a periodic scheduler tick (P2)
-- Attachment crash-consistency suite (P1)
+- Desktop / packaged attachment crash proof (open)

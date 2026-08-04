@@ -1,8 +1,8 @@
 //! Tauri commands for Generative Interface Runtime V2.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, State, WebviewWindow};
+use tauri::{ipc::Channel, State, WebviewWindow};
 
 use super::CommandError;
 use crate::runtime_v2::packs::CapabilityPackMeta as PackMeta;
@@ -24,43 +24,40 @@ use crate::runtime_v2::{
 use crate::state::AppState;
 use crate::windows;
 
-/// Global bus for queue UI refresh. Payload always includes `conversationId`;
-/// clients must filter. Conversation-scoped Channel delivery remains P1.
-pub const QUEUE_CHANGED_EVENT: &str = "agent-queue-changed";
+pub use crate::state::{QueueChangeKind, QueueChangedEvent};
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum QueueChangeKind {
-    ItemAdded,
-    ItemActivated,
-    ItemCancelled,
-    ItemCompleted,
-    QueueSnapshot,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct QueueChangedEvent {
-    pub kind: QueueChangeKind,
-    pub conversation_id: String,
-    pub item_id: Option<String>,
-}
-
-/// Notify listeners that Rust/SQLite queue state mutated for a conversation.
+/// Notify conversation-scoped Channels that Rust/SQLite queue state mutated.
+/// Does not use the process-wide event bus.
 pub fn emit_queue_changed(
-    app: &AppHandle,
+    state: &AppState,
     kind: QueueChangeKind,
     conversation_id: &str,
     item_id: Option<&str>,
 ) {
-    let _ = app.emit(
-        QUEUE_CHANGED_EVENT,
-        QueueChangedEvent {
-            kind,
-            conversation_id: conversation_id.to_string(),
-            item_id: item_id.map(|s| s.to_string()),
-        },
-    );
+    state.emit_queue_changed_to_subscribers(&QueueChangedEvent {
+        kind,
+        conversation_id: conversation_id.to_string(),
+        item_id: item_id.map(|s| s.to_string()),
+    });
+}
+
+/// Register a Channel for queue mutations on one conversation (main window only).
+#[tauri::command]
+pub fn subscribe_conversation_queue(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    on_event: Channel<QueueChangedEvent>,
+) -> Result<(), CommandError> {
+    state.require_profile()?;
+    let conversation_id = conversation_id.trim().to_string();
+    if conversation_id.is_empty() {
+        return Err(CommandError::new(
+            "invalid_argument",
+            "conversation_id is required",
+        ));
+    }
+    state.subscribe_queue(conversation_id, on_event);
+    Ok(())
 }
 
 #[tauri::command]
@@ -295,6 +292,9 @@ pub fn schedule_patches_cmd(
     args: SchedulePatchesArgs,
 ) -> Result<Vec<ScheduledPatch>, CommandError> {
     state.require_profile()?;
+    state
+        .quiescence
+        .require_active(crate::quiescence::QuiescedSubsystem::PatchScheduler)?;
     let mut db = state.db.lock();
     let priority = PatchPriority::parse(&args.priority)
         .ok_or_else(|| CommandError::new("invalid", "unknown patch priority"))?;
@@ -329,6 +329,9 @@ pub fn flush_patch_scheduler_cmd(
     approval_granted: Option<bool>,
 ) -> Result<Vec<crate::application_kernel::ChangeResult>, CommandError> {
     state.require_profile()?;
+    state
+        .quiescence
+        .require_active(crate::quiescence::QuiescedSubsystem::PatchScheduler)?;
     let mut db = state.db.lock();
     let mut bus = state.event_bus.lock();
     let mut bus_opt = Some(&mut *bus);
@@ -716,7 +719,6 @@ pub fn delete_snapshot_cmd(
 
 #[tauri::command]
 pub fn enqueue_agent_turn_cmd(
-    app: AppHandle,
     state: State<'_, AppState>,
     conversation_id: String,
     prompt: Value,
@@ -732,7 +734,7 @@ pub fn enqueue_agent_turn_cmd(
     )?;
     drop(db);
     emit_queue_changed(
-        &app,
+        state.inner(),
         QueueChangeKind::ItemAdded,
         &conversation_id,
         Some(&item.id),
@@ -752,7 +754,6 @@ pub fn list_agent_queue_cmd(
 
 #[tauri::command]
 pub fn cancel_queue_item_cmd(
-    app: AppHandle,
     state: State<'_, AppState>,
     item_id: String,
 ) -> Result<QueueItem, CommandError> {
@@ -781,7 +782,7 @@ pub fn cancel_queue_item_cmd(
         &attachment_ids,
     );
     emit_queue_changed(
-        &app,
+        state.inner(),
         QueueChangeKind::ItemCancelled,
         &conversation_id,
         Some(&cancelled.id),
@@ -791,7 +792,6 @@ pub fn cancel_queue_item_cmd(
 
 #[tauri::command]
 pub fn remove_queue_item_cmd(
-    app: AppHandle,
     state: State<'_, AppState>,
     item_id: String,
 ) -> Result<(), CommandError> {
@@ -819,7 +819,7 @@ pub fn remove_queue_item_cmd(
         &attachment_ids,
     );
     emit_queue_changed(
-        &app,
+        state.inner(),
         QueueChangeKind::ItemCancelled,
         &conversation_id,
         Some(&item_id),
@@ -829,7 +829,6 @@ pub fn remove_queue_item_cmd(
 
 #[tauri::command]
 pub fn activate_next_queue_cmd(
-    app: AppHandle,
     state: State<'_, AppState>,
     conversation_id: String,
 ) -> Result<Option<QueueItem>, CommandError> {
@@ -839,7 +838,7 @@ pub fn activate_next_queue_cmd(
     drop(db);
     if let Some(ref activated) = item {
         emit_queue_changed(
-            &app,
+            state.inner(),
             QueueChangeKind::ItemActivated,
             &conversation_id,
             Some(&activated.id),
@@ -850,7 +849,6 @@ pub fn activate_next_queue_cmd(
 
 #[tauri::command]
 pub fn complete_queue_item_cmd(
-    app: AppHandle,
     state: State<'_, AppState>,
     item_id: String,
     error: Option<String>,
@@ -860,7 +858,7 @@ pub fn complete_queue_item_cmd(
     let completed = complete_queue_item(&mut db, &item_id, error.as_deref())?;
     drop(db);
     emit_queue_changed(
-        &app,
+        state.inner(),
         QueueChangeKind::ItemCompleted,
         &completed.conversation_id,
         Some(&completed.id),
@@ -922,7 +920,12 @@ pub fn runtime_v2_limits() -> Result<Value, CommandError> {
 
 #[cfg(test)]
 mod queue_event_tests {
-    use super::{QueueChangeKind, QueueChangedEvent};
+    use super::{emit_queue_changed, QueueChangeKind, QueueChangedEvent};
+    use crate::db::Database;
+    use crate::state::AppState;
+    use serde::Deserialize;
+    use std::sync::Arc;
+    use tauri::ipc::{Channel, InvokeResponseBody};
 
     #[test]
     fn queue_changed_event_serializes_camel_case_kinds() {
@@ -950,5 +953,68 @@ mod queue_event_tests {
             .unwrap();
             assert_eq!(v["kind"], expected);
         }
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct QueueEventWire {
+        conversation_id: String,
+    }
+
+    fn test_channel(sink: Arc<parking_lot::Mutex<Vec<String>>>) -> Channel<QueueChangedEvent> {
+        Channel::new(move |body| {
+            let InvokeResponseBody::Json(json) = body else {
+                return Ok(());
+            };
+            if let Ok(parsed) = serde_json::from_str::<QueueEventWire>(&json) {
+                sink.lock().push(parsed.conversation_id);
+            }
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn emit_queue_changed_only_notifies_matching_conversation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Database::open_path(&dir.path().join("queue-scope.db")).expect("db");
+        let state = AppState::new_for_test(db);
+        let hit_a = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let hit_b = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        state.subscribe_queue("conv-a".into(), test_channel(hit_a.clone()));
+        state.subscribe_queue("conv-b".into(), test_channel(hit_b.clone()));
+
+        emit_queue_changed(
+            &state,
+            QueueChangeKind::ItemAdded,
+            "conv-a",
+            Some("q-1"),
+        );
+
+        assert_eq!(hit_a.lock().as_slice(), &["conv-a".to_string()]);
+        assert!(hit_b.lock().is_empty(), "wrong conversation must get nothing");
+    }
+
+    #[test]
+    fn subscribe_queue_replaces_prior_channel_for_conversation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Database::open_path(&dir.path().join("queue-replace.db")).expect("db");
+        let state = AppState::new_for_test(db);
+        let first = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let second = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        state.subscribe_queue("conv-a".into(), test_channel(first.clone()));
+        state.subscribe_queue("conv-a".into(), test_channel(second.clone()));
+
+        emit_queue_changed(
+            &state,
+            QueueChangeKind::ItemAdded,
+            "conv-a",
+            Some("q-1"),
+        );
+
+        assert!(
+            first.lock().is_empty(),
+            "replaced Channel must not receive events"
+        );
+        assert_eq!(second.lock().as_slice(), &["conv-a".to_string()]);
     }
 }

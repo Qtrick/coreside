@@ -48,7 +48,8 @@ npm run e2e:ci
 `e2e/run.mjs` launches isolated sessions:
 
 1. **main** — empty `CORESIDE_DB_PATH` (Journeys 1, 3, 4)
-2. **existing-*** — fresh DB + `CORESIDE_E2E_SEED=existing`, one DB per journey group (2, 5–10)
+2. **existing-*** — fresh DB + `CORESIDE_E2E_SEED=existing`, one DB per journey group (2, 5–11, 14)
+3. **true-streaming** / **wallpaper-targeted** — clean DB (Journeys 12–13; `AI_PROVIDER=mock`)
 
 Each seeded journey gets its own temp database so approval/grant state does not leak between specs.
 
@@ -64,6 +65,15 @@ Single suite (advanced):
 ```bash
 CORESIDE_DB_PATH=/tmp/coreside-e2e-clean.db \
   npx wdio run e2e/wdio.conf.ts --suite main
+
+# Journey 12 — true streaming (clean DB, mock provider)
+npx wdio run e2e/wdio.conf.ts --suite true-streaming
+
+# Journey 13 — wallpaper pixel sampling (clean DB)
+npx wdio run e2e/wdio.conf.ts --suite wallpaper-targeted
+
+# Journey 14 — stream eavesdropping denial (seeded tool window)
+CORESIDE_E2E_SEED=existing npx wdio run e2e/wdio.conf.ts --suite existing-eavesdrop
 ```
 
 ## Security reminders
@@ -111,7 +121,11 @@ On suite success, `e2e/run.mjs` removes the isolated temp DB directory. Failed s
 | 7 | `07-multi-window-approval-race.spec.ts` | `existing-approval-race` | **Partial** | Opens secondary window; asserts approval stays on `main` only |
 | 8 | `08-grant-revoke.spec.ts` | `existing-grant` | **Automated** | Revokes seeded `grant-e2e-1` in App permissions |
 | 9 | `09-recovery-mode.spec.ts` | `existing-recovery` | **Automated** | Enter/exit Recovery Mode |
-| 10 | `10-secondary-window.spec.ts` | `existing-window` | **Partial** | Opens `tool-tool-e2e-notes`, switches WebDriver context; close not asserted |
+| 10 | `10-secondary-window.spec.ts` | `existing-window` | **Automated** | Opens `tool-tool-e2e-notes`, switches WebDriver context, close + reopen |
+| 11 | `11-command-authority-denial.spec.ts` | `existing-authority` | **Automated** | Tool-window sensitive invoke denials; writes `reports/command-authority-results.json` |
+| 12 | `12-true-streaming.spec.ts` | `true-streaming` | **Automated** | Mock live stream probe + turn identity; writes `reports/true-streaming-results.json` |
+| 13 | `13-wallpaper-targeted-update.spec.ts` | `wallpaper-targeted` | **Automated** | Matrix apply + transparency 40 + canvas pixel samples; writes `reports/wallpaper-visual-results.json` |
+| 14 | `14-stream-eavesdropping-denial.spec.ts` | `existing-eavesdrop` | **Automated** | Tool window listens for `agent-turn`; asserts zero Text; writes `reports/stream-eavesdropping-results.json` |
 
 ### Seed fixture (`CORESIDE_E2E_SEED=existing`)
 

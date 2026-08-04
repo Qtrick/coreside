@@ -334,6 +334,17 @@ fn first_nonempty(candidates: &[Option<String>]) -> Option<String> {
 }
 
 fn load_dotenv_files() -> Option<PathBuf> {
+    // E2E orchestrator sets AI_PROVIDER=mock (and isolated DB). Repo `.env` must
+    // not override those via from_path_override — that broke Journey 12 (openrouter
+    // Auto streamed "Coreside cannot…" instead of the live stream probe).
+    if std::env::var("CORESIDE_E2E")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        tracing::info!("dotenv loading skipped (CORESIDE_E2E=1)");
+        return None;
+    }
+
     // Production / packaged builds must not walk cwd/parents for `.env`.
     // Developer opt-in: debug build OR explicit CORESIDE_ALLOW_DOTENV=1.
     let allow = cfg!(debug_assertions)

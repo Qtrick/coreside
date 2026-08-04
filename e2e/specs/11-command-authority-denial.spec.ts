@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
 import {
   denyPendingApprovalIfPresent,
+  E2E_REPO_ROOT,
   E2E_TOOL_ID,
+  evidenceIdentity,
   expectInvokeDenied,
   invokeFromCurrentWindow,
   listTauriWindows,
@@ -17,34 +17,18 @@ import {
   waitForToolCanvas,
 } from "../helpers.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const evidencePath = path.resolve(
-  __dirname,
-  "../../reports/command-authority-results.json",
+  E2E_REPO_ROOT,
+  "reports/command-authority-results.json",
 );
-const repoRoot = path.resolve(__dirname, "../..");
 
-function evidenceIdentity() {
-  const commitEnv = process.env.CORESIDE_E2E_COMMIT?.trim();
-  const dirtyEnv = process.env.CORESIDE_E2E_DIRTY;
-  if (commitEnv && (dirtyEnv === "0" || dirtyEnv === "1")) {
-    return { commit: commitEnv, dirty: dirtyEnv === "1" };
-  }
-  const commit = spawnSync("git", ["rev-parse", "HEAD"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  });
-  const porcelain = spawnSync("git", ["status", "--porcelain"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  });
-  return {
-    commit: (commit.stdout || "").trim(),
-    dirty: (porcelain.stdout || "").trim().length > 0,
-  };
-}
-
-/** Sensitive commands that must be denied from tool-* windows before side effects. */
+/**
+ * Sensitive commands that must be denied from tool-* windows before side effects.
+ *
+ * Isolation is allowlist-only (`coreside-tool-scoped`). Do not expect
+ * `coreside-tool-deny-sensitive` / "explicitly denied" — that permission must
+ * stay unlinked (Tauri 2.11 applies denies globally and breaks main).
+ */
 const SENSITIVE_DENIALS: Array<{ command: string; args?: Record<string, unknown> }> = [
   { command: "clear_conversations" },
   { command: "clear_tools" },

@@ -1,35 +1,35 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-03T23:30:00.000Z",
-  "commit": "c520fcfba6acdeed7a14ee1e24dd9ea31f67b4c7",
+  "generatedAt": "2026-08-04T04:13:56.329Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
   "dirty": true,
-  "sourceFingerprint": "0c00ba2619c991182f134cb897c9a0d7e7294dbea338d4ef1f969a29b490b9cd",
-  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
-  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
   "architecture": "arm64",
-  "buildMode": "development",
-  "command": "npm run test:true-streaming",
-  "exitStatus": 0,
-  "result": "passed_unit",
-  "partial": true,
-  "partialReason": "Desktop E2E Journey 12 written but not executed in this evidence pass",
-  "assertions": [
-    "true_streaming_emits_delta_before_completion",
-    "chat_with_auto uses chat_stream",
-    "send_message_inner forwards TextDelta via peek_assistant_message",
-    "buffered path emits no fake TextDelta",
-    "auto fallback does not splice after meaningful delta"
-  ],
-  "productionFiles": [
-    "src-tauri/src/ai/auto.rs",
-    "src-tauri/src/ai/mock.rs",
-    "src-tauri/src/ai/openai.rs",
-    "src-tauri/src/commands/message_cmds.rs",
-    "src/components/chat/MessageList.tsx"
-  ],
+  "binaryHash": "267b91dc7817072069631a42edff66477baaae7e7e42dd83267c9429f926bf55",
+  "fingerprint": "64379627103483a3913233b0e07e9610b4d223701d9335c7e9339964678a5992",
+  "command": "e2e:journey-12-true-streaming",
+  "result": "passed",
+  "evidenceLevel": "Desktop Verified",
   "e2eSpec": "e2e/specs/12-true-streaming.spec.ts",
-  "e2eResult": "not_run",
+  "e2eResult": "passed",
+  "partial": false,
+  "assertions": [
+    "assistant-stream-text appeared before turn completion",
+    "earlyText contained live stream marker",
+    "data-turn-id non-empty",
+    "data-last-sequence / data-stream-sequence > 0",
+    "no fake-stream DOM marker",
+    "final live stream probe complete visible",
+    "no Auto/openrouter failure text"
+  ],
+  "stream": {
+    "turnId": "cf7fd074-fdd2-4e7f-9878-b4be3ee952f7",
+    "sequence": 1,
+    "earlyText": "Live stream",
+    "finalText": "Live stream probe complete",
+    "firstDeltaAt": 1785816835603,
+    "completedAt": 1785816836288
+  },
   "publicBeta": "Not ready"
 }

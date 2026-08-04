@@ -196,6 +196,7 @@ permissions = [
   "allow-stage-chat-attachment",
   "allow-store-diagnostics-cmd",
   "allow-store-hosted-auth-session",
+  "allow-subscribe-conversation-queue",
   "allow-suspend-surface-cmd",
   "allow-test-ai-connection",
   "allow-test-exa-connection",

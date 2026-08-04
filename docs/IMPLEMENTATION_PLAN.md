@@ -37,11 +37,12 @@ Production implementation is underway (not audit-only). Honest landed work this 
 | Misleading npm script names | **Done** (`preservation-suite` / `transactions`; removed false parity/replay/inspector) |
 | True streaming vertical slice | **Landed** — `chat_with_auto` → `chat_stream`; OpenAI live SSE; UI TextDelta; unit TS-1; Journey 12 **written, not executed** |
 | Bounded NDJSON parser | **Landed** — canonical `StreamEvent` path + legacy harvest |
-| Queue UI | **Partial** — `ConversationQueue` + `agent-queue-changed` (20s reconcile; global emit P1) |
+| Queue UI | **Landed** — `ConversationQueue` + conversation-scoped Channel (20s reconcile; Unit Verified) |
 | Branch / snapshot / replay / inspector UI | **Landed** — `ConversationHistory` + read-only paced `ReplayPlayer` (transaction stepper; not true event-stream replay) |
 | Structured forms → model | **Unit Verified** — typed `StructuredUserInput` seal; delimiter not authority (see STRUCTURED_FORMS_AND_CONTEXT.md) |
-| Maintenance journal startup | **Landed** — Recovery / safe pre-swap clear / skip scheduler (full restore still open) |
-| Anthropic/Gemini live SSE | **Open** |
+| Maintenance journal startup | **Landed** — `apply_startup_decision` + Recovery / safe pre-swap clear / skip scheduler (full restore still open) |
+| Subsystem quiescence | **Landed** — `QuiescenceCoordinator` generation-bound pause for queue drain / patch scheduler / attachment GC (restore transaction still open) |
+| Anthropic/Gemini live SSE | **Unit Verified** — live SSE `chat_stream`; desktop real-key **not_run** |
 | Progressive preview transaction | **Partial** — live NDJSON Channel preview + turn-end apply; surface paint / JSON-blob progressive remain open |
 | Attachment crash-consistency suite | **Open** (P1) |
 | Desktop E2E full suite / packaged smoke | **Open** |
@@ -54,12 +55,12 @@ July Partial Update status claims remain **stale** for completeness. HTML/JS/CDN
 | ---: | --- | --- |
 | 1 | Baseline + evidence correction | **Done** (dirty) |
 | 2 | Production true streaming slice | **Partial** — unit pass; E2E not_run |
-| 3 | Provider + frame protocol completeness | **Partial** — parser hardened; Anthropic/Gemini open |
+| 3 | Provider + frame protocol completeness | **Partial** — parser hardened; Anthropic/Gemini live SSE unit helpers landed |
 | 4 | Progressive preview + preservation path | **Partial** — PreviewTransaction + live NDJSON preview; preservation separate |
 | 5 | Structured forms/context | **Unit Verified** — typed seal + frontend path; desktop E2E open |
 | 6 | Queue / branch / replay / inspector UI | **Partial** — usable panels; paced transaction stepper landed (not true event replay) |
 | 7 | Attachment integrity + multimodal | **Partial** — foundations + size cap; crash suite open |
-| 8 | Durable profile + restore | **Partial** — journal decisions; coherent restore open |
+| 8 | Durable profile + restore | **Partial** — quiescence + journal decisions; coherent restore open |
 | 9–13 | Media/backup/packages/authority/wallpaper/E2E/assurance | **Open** |
 
 ## Explicit non-claims

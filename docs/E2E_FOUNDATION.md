@@ -47,8 +47,9 @@ Doctor enforces the production-side gates (`npm run doctor`).
 | 9 | `e2e/specs/09-recovery-mode.spec.ts` | Enter/exit Recovery Mode |
 | 10 | `e2e/specs/10-secondary-window.spec.ts` | **Partial** — open + switch; close not asserted |
 | 11 | `e2e/specs/11-command-authority-denial.spec.ts` | Tool-window command authority denial |
-| 12 | `e2e/specs/12-true-streaming.spec.ts` | True provider streaming (mock live probe) |
-| 13 | `e2e/specs/13-wallpaper-targeted-update.spec.ts` | Wallpaper apply + transparency commit |
+| 12 | `e2e/specs/12-true-streaming.spec.ts` | True provider streaming (mock live probe) + identity evidence |
+| 13 | `e2e/specs/13-wallpaper-targeted-update.spec.ts` | Wallpaper apply + transparency + canvas pixel sampling |
+| 14 | `e2e/specs/14-stream-eavesdropping-denial.spec.ts` | Tool-window Text eavesdropping denial |
 
 ## How to run
 

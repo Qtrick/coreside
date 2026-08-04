@@ -4,7 +4,8 @@
  *
  * Runs WDIO suites with isolated CORESIDE_DB_PATH profiles:
  * 1. main — clean DB (Journeys 1, 3, 4)
- * 2. existing-* — seeded profile, one fresh DB per journey group (2, 5–10)
+ * 2. existing-* — seeded profile, one fresh DB per journey group (2, 5–11, 14)
+ * 3. true-streaming / wallpaper-targeted — clean DB (Journeys 12–13)
  *
  * Writes reports/e2e-results.json from actual suite exits — never invents passes.
  * Journeys 7 and 10 are recorded as passed_partial when their suite exits 0
@@ -51,16 +52,53 @@ const JOURNEYS = [
     suite: "existing-authority",
     coverage: "full",
   },
+  {
+    id: 12,
+    name: "true-streaming",
+    suite: "true-streaming",
+    coverage: "full",
+  },
+  {
+    id: 13,
+    name: "wallpaper-targeted",
+    suite: "wallpaper-targeted",
+    coverage: "full",
+  },
+  {
+    id: 14,
+    name: "stream-eavesdropping-denial",
+    suite: "existing-eavesdrop",
+    coverage: "full",
+  },
 ];
 
 /** @type {Map<string, "passed" | "failed" | "not_run">} */
 const suiteOutcomes = new Map(JOURNEYS.map((j) => [j.suite, "not_run"]));
 
 function writeResults(overallStatus) {
-  const commit = spawnSync("git", ["rev-parse", "HEAD"], {
-    cwd: root,
-    encoding: "utf8",
-  });
+  const commitEnv = process.env.CORESIDE_E2E_COMMIT?.trim();
+  const dirtyEnv = process.env.CORESIDE_E2E_DIRTY;
+  const commit =
+    commitEnv ||
+    (
+      spawnSync("git", ["rev-parse", "HEAD"], {
+        cwd: root,
+        encoding: "utf8",
+      }).stdout || ""
+    ).trim() ||
+    null;
+  let dirty = null;
+  if (dirtyEnv === "0" || dirtyEnv === "1") {
+    dirty = dirtyEnv === "1";
+  } else {
+    dirty =
+      (
+        spawnSync("git", ["status", "--porcelain"], {
+          cwd: root,
+          encoding: "utf8",
+        }).stdout || ""
+      ).trim().length > 0;
+  }
   const journeys = JOURNEYS.map((j) => {
     const suiteStatus = suiteOutcomes.get(j.suite) ?? "not_run";
     let status = suiteStatus;
@@ -77,10 +115,14 @@ function writeResults(overallStatus) {
   const payload = {
     product: "Coreside",
     generatedAt: new Date().toISOString(),
-    commit: (commit.stdout || "").trim() || null,
+    commit,
+    dirty,
     command: "npm run e2e",
     status: overallStatus,
-    platform: `${os.platform()}`,
+    platform: os.platform(),
+    arch: os.arch(),
+    evidenceLevel:
+      overallStatus === "passed" ? "Desktop Verified" : "not_desktop_verified",
     journeys,
   };
   fs.mkdirSync(path.dirname(resultsPath), { recursive: true });
@@ -154,6 +196,13 @@ const existingSuites = [
 for (const suite of existingSuites) {
   runSuite(suite, { seed: "existing" });
 }
+
+// Clean-profile suites (mock AI is enough for live stream probe / wallpaper).
+runSuite("true-streaming");
+runSuite("wallpaper-targeted");
+
+// Seeded eavesdropping denial (needs tool window from existing seed).
+runSuite("existing-eavesdrop", { seed: "existing" });
 
 writeResults("passed");
 console.log("\n[e2e:run] all suites passed");

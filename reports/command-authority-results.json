@@ -1,7 +1,9 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-03T17:55:53.740Z",
+  "generatedAt": "2026-08-04T04:13:51.566Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "dirty": true,
   "command": "e2e:journey-11-command-authority",
   "status": "generated_from_e2e",
   "rawInvokeDenialTest": "passed",
@@ -10,57 +12,77 @@
     {
       "command": "clear_conversations",
       "denied": true,
-      "error": "WebDriverError: clear_conversations explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+      "error": "WebDriverError: clear_conversations not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-clear-conversations when running \"execute/sync\" with method \"POST\""
     },
     {
       "command": "clear_tools",
       "denied": true,
-      "error": "WebDriverError: clear_tools explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+      "error": "WebDriverError: clear_tools not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-clear-tools when running \"execute/sync\" with method \"POST\""
     },
     {
       "command": "create_profile_backup",
       "denied": true,
-      "error": "WebDriverError: create_profile_backup explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+      "error": "WebDriverError: create_profile_backup not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-create-profile-backup when running \"execute/sync\" with method \"POST\""
     },
     {
       "command": "list_managed_backups",
       "denied": true,
-      "error": "WebDriverError: list_managed_backups explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+      "error": "WebDriverError: list_managed_backups not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-list-managed-backups when running \"execute/sync\" with method \"POST\""
     },
     {
       "command": "preview_restore_backup",
       "denied": true,
-      "error": "WebDriverError: preview_restore_backup explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+      "error": "WebDriverError: preview_restore_backup not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-preview-restore-backup when running \"execute/sync\" with method \"POST\""
     },
     {
       "command": "restore_profile_backup",
       "denied": true,
-      "error": "WebDriverError: restore_profile_backup explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+      "error": "WebDriverError: restore_profile_backup not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-restore-profile-backup when running \"execute/sync\" with method \"POST\""
     },
     {
       "command": "provider_key_hints",
       "denied": true,
-      "error": "WebDriverError: provider_key_hints explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+      "error": "WebDriverError: provider_key_hints not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-provider-key-hints when running \"execute/sync\" with method \"POST\""
     },
     {
       "command": "store_hosted_auth_session",
       "denied": true,
-      "error": "WebDriverError: store_hosted_auth_session explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+      "error": "WebDriverError: store_hosted_auth_session not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-store-hosted-auth-session when running \"execute/sync\" with method \"POST\""
     },
     {
       "command": "kernel_grant_permission",
       "denied": true,
-      "error": "WebDriverError: kernel_grant_permission explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+      "error": "WebDriverError: kernel_grant_permission not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-kernel-grant-permission when running \"execute/sync\" with method \"POST\""
     },
     {
       "command": "kernel_export_package",
       "denied": true,
-      "error": "WebDriverError: kernel_export_package explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+      "error": "WebDriverError: kernel_export_package not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-kernel-export-package when running \"execute/sync\" with method \"POST\""
     },
     {
       "command": "send_message",
       "denied": true,
-      "error": "WebDriverError: send_message explicitly denied on origin local\n\nreferenced by: capability: tool-window, permission: coreside-tool-deny-sensitive when running \"execute/sync\" with method \"POST\""
+      "error": "WebDriverError: send_message not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-send-message when running \"execute/sync\" with method \"POST\""
+    },
+    {
+      "command": "stage_chat_attachment",
+      "denied": true,
+      "error": "WebDriverError: stage_chat_attachment not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-stage-chat-attachment when running \"execute/sync\" with method \"POST\""
+    },
+    {
+      "command": "cancel_chat_attachment",
+      "denied": true,
+      "error": "WebDriverError: cancel_chat_attachment not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-cancel-chat-attachment when running \"execute/sync\" with method \"POST\""
+    },
+    {
+      "command": "get_chat_attachment_src",
+      "denied": true,
+      "error": "WebDriverError: get_chat_attachment_src not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-get-chat-attachment-src when running \"execute/sync\" with method \"POST\""
+    },
+    {
+      "command": "run_attachment_gc",
+      "denied": true,
+      "error": "WebDriverError: run_attachment_gc not allowed on window \"tool-tool-e2e-notes\", webview \"tool-tool-e2e-notes\", URL: local\n\nallowed on: [windows: \"main\", URL: local]\n\nreferenced by: capability: default, permission: allow-run-attachment-gc when running \"execute/sync\" with method \"POST\""
     }
   ],
   "crossToolStateWriteDenied": true,

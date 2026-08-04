@@ -1,22 +1,23 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T02:20:00.000Z",
-  "commit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+  "generatedAt": "2026-08-04T03:56:38.000Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
   "dirty": true,
-  "phase": "RC3.3 Phase 9 partial — event-driven queue UI",
-  "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib queue && npx vitest run src/lib/tauri/queue-events.test.ts src/components/chat/ConversationQueue.test.tsx",
+  "phase": "RC3.3 Phase 9 — conversation-scoped queue Channel",
+  "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib queue && npx vitest run src/lib/tauri/queue-events.test.ts src/components/chat/ConversationQueue.test.tsx && npm run typecheck",
   "exitStatus": 0,
   "result": "Unit Verified",
   "partial": true,
-  "partialReason": "Rust emits agent-queue-changed after SQLite mutations; ConversationQueue listens and filters by conversationId; poll reduced to 20s reconciliation + focus. recover_stale_active already existed. Queue bus remains global (P1). Desktop E2E not_run. Do not claim full Partial Update withQueueMutation parity.",
+  "partialReason": "Queue mutations deliver only via conversation-scoped subscribe_conversation_queue Channels (no process-wide agent-queue-changed). Unit covers matching vs non-matching subscribers. ConversationQueue mounts Channel subscribe + 20s reconcile + focus. Desktop E2E not_run (not required for registry Unit Verified). Do not claim full Partial Update withQueueMutation parity.",
   "assertions": [
-    "emit_queue_changed after enqueue/activate/cancel/remove/complete/requeue",
+    "emit_queue_changed sends only to Channels registered for that conversation_id",
+    "wrong-conversation subscriber receives nothing",
     "QueueChangedEvent serializes camelCase kinds with conversationId",
-    "isQueueEventForConversation filters wrong conversation",
-    "isQueueEventForConversation filters empty conversationId on either side",
-    "ConversationQueue ignores other-conversation events and refreshes on match",
-    "RECONCILE_POLL_MS is 20000 (not 2s primary poll)"
+    "isQueueEventForConversation filters wrong/empty conversationId (defense in depth)",
+    "ConversationQueue refreshes on matching Channel events and ignores others",
+    "RECONCILE_POLL_MS is 20000 (recovery only)",
+    "subscribe_conversation_queue on coreside-main-default only (not tool-window)"
   ],
   "levels": {
     "unit": "Unit Verified",
@@ -25,7 +26,7 @@
   },
   "cargoTests": {
     "filter": "queue",
-    "passed": 6,
+    "passed": 7,
     "failed": 0
   },
   "vitest": {
@@ -33,15 +34,15 @@
       "src/lib/tauri/queue-events.test.ts",
       "src/components/chat/ConversationQueue.test.tsx"
     ],
-    "passed": 7,
+    "passed": 8,
     "failed": 0
   },
   "docs": "docs/QUEUE_COORDINATION.md",
   "publicBeta": "Not ready",
   "doNotClaim": [
     "Full Partial Update withQueueMutation parity",
-    "Conversation-scoped queue Channel",
     "Desktop Verified multi-window queue refresh",
-    "Zero polling"
+    "Zero polling",
+    "Explicit Rust unregister command"
   ]
 }

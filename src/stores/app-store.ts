@@ -15,7 +15,13 @@ import type {
   ToolState,
   ToolSummary,
 } from "@/types/tool";
-import { api, TauriCommandError, listenAgentTurn } from "@/lib/tauri";
+import {
+  api,
+  TauriCommandError,
+  listenAgentTurn,
+  shouldApplyAgentTurnSync,
+  shouldShowAppConflict,
+} from "@/lib/tauri";
 import type { AgentTurnEvent } from "@/lib/tauri";
 import type { ToolMention } from "@/lib/mentions";
 import { ensureReadableForeground } from "@/lib/readability/contrast";
@@ -332,6 +338,8 @@ function upsertTurnFromChannel(
 function attachAgentTurnSyncListener(
   get: () => {
     reloadActiveSurfaces: () => Promise<void>;
+    activeConversationId: string | null;
+    activeToolId: string | null;
   },
   set: (partial: {
     appConflict: AppConflict | null;
@@ -346,7 +354,20 @@ function attachAgentTurnSyncListener(
     if (event.kind === "text" || event.kind === "action" || event.kind === "error" || event.kind === "operation") {
       return;
     }
+    const scope = {
+      activeConversationId: get().activeConversationId,
+      activeToolId: get().activeToolId,
+    };
     if (event.kind === "conflict") {
+      // Store with conversationId; UI also filters by active conversation.
+      if (
+        !shouldShowAppConflict(
+          { conversationId: event.conversationId },
+          scope.activeConversationId,
+        )
+      ) {
+        return;
+      }
       set({
         appConflict: {
           message: event.message,
@@ -357,6 +378,9 @@ function attachAgentTurnSyncListener(
       return;
     }
     if (event.kind === "sync") {
+      if (!shouldApplyAgentTurnSync(event, scope)) {
+        return;
+      }
       void get().reloadActiveSurfaces();
     }
   });
@@ -859,6 +883,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({
         view: { kind: "chat", conversationId: null },
         activeConversationId: null,
+        appConflict: null,
       });
       return;
     }
@@ -892,11 +917,22 @@ export const useAppStore = create<AppStore>((set, get) => ({
               state.sendingConversationId === trimmed ? state.agentActions : [],
           };
 
+    // Drop conflict banners that belong to another conversation.
+    const keepConflict =
+      state.appConflict &&
+      shouldShowAppConflict(
+        { conversationId: state.appConflict.conversationId },
+        trimmed,
+      )
+        ? state.appConflict
+        : null;
+
     set({
       view: { kind: "chat", conversationId: trimmed },
       activeConversationId: trimmed,
       activeProjectId:
         state.conversations.find((c) => c.id === trimmed)?.projectId ?? null,
+      appConflict: keepConflict,
       ...restoreLive,
       ...(needLoad
         ? {
@@ -2158,14 +2194,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
       const apply = result.apply as { conflicts?: string[] } | undefined;
       if (apply?.conflicts && apply.conflicts.length > 0) {
-        set({
-          appConflict: {
-            message:
-              "This change conflicts with another window or newer revision.",
-            conflicts: apply.conflicts,
-            conversationId: pending.conversationId,
-          },
-        });
+        if (
+          shouldShowAppConflict(
+            { conversationId: pending.conversationId },
+            get().activeConversationId,
+          )
+        ) {
+          set({
+            appConflict: {
+              message:
+                "This change conflicts with another window or newer revision.",
+              conflicts: apply.conflicts,
+              conversationId: pending.conversationId,
+            },
+          });
+        }
         return;
       }
       try {
@@ -2355,15 +2398,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
         return;
       }
 
+      // Settings are best-effort: tool chrome needs allow-get-settings, but a
+      // denied/missing read must not block opening the bound tool.
       const [tool, state, settings, appInfo] = await Promise.all([
         api.getTool(toolId),
         api.getToolState(toolId),
-        api.getSettings(),
+        api.getSettings().catch(() => null),
         api.getAppInfo(),
       ]);
-      const theme = settings.theme ?? "system";
-      const wallpaper = wallpaperFromSettings(settings);
-      const globalWallpaperJson = settings.wallpaperJson ?? null;
+      const theme = settings?.theme ?? "system";
+      const wallpaper = wallpaperFromSettings(settings ?? {});
+      const globalWallpaperJson = settings?.wallpaperJson ?? null;
       syncCommittedWallpaperFromSettings({ wallpaper, globalWallpaperJson });
       set({
         bootstrapped: true,
@@ -2372,7 +2417,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         appInfo,
         theme,
         resolvedTheme: resolveTheme(theme),
-        appearance: appearanceFromSettings(settings),
+        appearance: appearanceFromSettings(settings ?? {}),
         wallpaper,
         globalWallpaperJson,
         activeToolId: toolId,

@@ -22,6 +22,13 @@ pub struct AppPaths {
 
 impl AppPaths {
     pub fn resolve() -> DbResult<Self> {
+        // Test / isolation override: point product roots at a temp (or custom) base.
+        if let Ok(override_path) = std::env::var("CORESIDE_DATA_DIR") {
+            let trimmed = override_path.trim();
+            if !trimmed.is_empty() {
+                return Ok(Self::from_base(Path::new(trimmed)));
+            }
+        }
         let base = dirs::data_dir().ok_or_else(|| {
             DbError::Invalid("Could not resolve application data directory".into())
         })?;
@@ -66,6 +73,25 @@ impl AppPaths {
     }
 }
 
+/// Serializes `CORESIDE_DATA_DIR` for unit tests that need isolated AppPaths roots.
+#[cfg(test)]
+pub(crate) fn with_test_data_dir<R>(base: &Path, f: impl FnOnce(AppPaths) -> R) -> R {
+    use std::sync::{Mutex, MutexGuard};
+    static LOCK: Mutex<()> = Mutex::new(());
+    let _guard: MutexGuard<'_, ()> = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("CORESIDE_DATA_DIR", base);
+    struct ClearEnv;
+    impl Drop for ClearEnv {
+        fn drop(&mut self) {
+            std::env::remove_var("CORESIDE_DATA_DIR");
+        }
+    }
+    let _clear = ClearEnv;
+    let paths = AppPaths::resolve().expect("CORESIDE_DATA_DIR resolve");
+    paths.ensure_dirs().expect("ensure dirs");
+    f(paths)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,5 +105,13 @@ mod tests {
         assert!(paths.media.starts_with(&paths.product_root));
         assert!(paths.backups.starts_with(&paths.product_root));
         assert_eq!(paths.product_root, dir.path().join("coreside"));
+    }
+
+    #[test]
+    fn resolve_honors_coreside_data_dir_override() {
+        let dir = tempdir().unwrap();
+        with_test_data_dir(dir.path(), |paths| {
+            assert_eq!(paths.product_root, dir.path().join("coreside"));
+        });
     }
 }

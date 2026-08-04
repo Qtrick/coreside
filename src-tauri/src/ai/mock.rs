@@ -379,7 +379,8 @@ impl AiProvider for MockAiProvider {
                 let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
                 return Err(AiError::Cancelled);
             }
-            _ = tokio::time::sleep(std::time::Duration::from_millis(120)) => {}
+            // Keep the live DOM mounted long enough for Journey 12 WebDriver.
+            _ = tokio::time::sleep(std::time::Duration::from_millis(600)) => {}
         }
 
         let _ = tx

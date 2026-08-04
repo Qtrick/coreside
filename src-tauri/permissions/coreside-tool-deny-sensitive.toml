@@ -1,9 +1,23 @@
 # Explicit denies for high-risk commands (defense in depth for tool windows).
+#
+# IMPORTANT (Tauri 2.11): `commands.deny` is applied globally for the local
+# origin — window/webview patterns on the capability are NOT consulted in
+# `RuntimeAuthority::resolve_access` when a deny entry exists. Linking this
+# permission from `tool-window` therefore also blocked `send_message` (and
+# peers) on the **main** window (Journey 12 failure 2026-08-04).
+#
+# Tool isolation relies on allowlist-only `coreside-tool-scoped` instead.
+# Keep this file as a documented deny catalog; do not re-attach until Tauri
+# scopes denies by window the same way it scopes allows.
+#
+# Regression guard: `scripts/coreside-doctor.mjs` check
+# `capabilities.tool_window_no_global_deny` fails if this identifier appears
+# in `src-tauri/capabilities/tool-window.json`.
 "$schema" = "../gen/schemas/schema.json"
 
 [[permission]]
 identifier = "coreside-tool-deny-sensitive"
-description = "Deny sensitive profile/data/credential commands from tool windows."
+description = "Deny catalog for tool windows — NOT linked in tool-window capability (Tauri global-deny hazard). Isolation = coreside-tool-scoped allowlist."
 commands.deny = [
   "clear_conversations",
   "clear_hosted_auth_session",
@@ -38,6 +52,7 @@ commands.deny = [
   "run_attachment_gc",
   "stage_chat_attachment",
   "store_hosted_auth_session",
+  "subscribe_conversation_queue",
   "test_provider_connection",
   "upsert_provider_connection"
 ]

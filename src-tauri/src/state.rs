@@ -4,13 +4,34 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use serde::Serialize;
+use tauri::ipc::Channel;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{self, AppConfig};
 use crate::crawler::CrawlerSupervisor;
 use crate::db::{BootstrapStatus, Database};
 use crate::maintenance::{MaintenanceMode, MaintenanceStage, MaintenanceStatus};
+use crate::quiescence::{PauseToken, QuiescenceCoordinator, QuiescedSubsystem};
 use crate::runtime_v2::EventBus;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum QueueChangeKind {
+    ItemAdded,
+    ItemActivated,
+    ItemCancelled,
+    ItemCompleted,
+    QueueSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueChangedEvent {
+    pub kind: QueueChangeKind,
+    pub conversation_id: String,
+    pub item_id: Option<String>,
+}
 
 pub struct AppState {
     pub config: Mutex<AppConfig>,
@@ -20,9 +41,13 @@ pub struct AppState {
     pub active_requests: Mutex<HashMap<String, CancellationToken>>,
     /// Conversations with an in-flight queue drain task (prevents concurrent drainers).
     pub queue_drain_inflight: Mutex<HashSet<String>>,
+    /// Conversation-scoped queue UI Channels (no process-wide queue bus).
+    pub queue_subscribers: Mutex<HashMap<String, Vec<Channel<QueueChangedEvent>>>>,
     pub crawler: Arc<CrawlerSupervisor>,
     pub event_bus: Mutex<EventBus>,
     pub maintenance: Mutex<MaintenanceMode>,
+    /// Pause/stop gate for profile-dependent subsystems during maintenance/restore.
+    pub quiescence: QuiescenceCoordinator,
 }
 
 impl AppState {
@@ -42,15 +67,46 @@ impl AppState {
             bootstrap: Mutex::new(bootstrap),
             active_requests: Mutex::new(HashMap::new()),
             queue_drain_inflight: Mutex::new(HashSet::new()),
+            queue_subscribers: Mutex::new(HashMap::new()),
             crawler: Arc::new(CrawlerSupervisor::new()),
             event_bus: Mutex::new(event_bus),
             maintenance: Mutex::new(MaintenanceMode::default()),
+            quiescence: QuiescenceCoordinator::default(),
+        }
+    }
+
+    /// Register a conversation-scoped Channel for queue mutation events.
+    /// Replaces any prior Channels for this conversation so UI remounts cannot
+    /// accumulate dead subscribers (ponytail: one live Channel per conversation).
+    pub fn subscribe_queue(
+        &self,
+        conversation_id: String,
+        channel: Channel<QueueChangedEvent>,
+    ) {
+        self.queue_subscribers
+            .lock()
+            .insert(conversation_id, vec![channel]);
+    }
+
+    /// Deliver a queue event only to Channels registered for that conversation.
+    /// Dead Channels (failed send) are dropped from the registry.
+    pub fn emit_queue_changed_to_subscribers(&self, event: &QueueChangedEvent) {
+        let mut registry = self.queue_subscribers.lock();
+        let Some(subs) = registry.get_mut(&event.conversation_id) else {
+            return;
+        };
+        subs.retain(|ch| ch.send(event.clone()).is_ok());
+        if subs.is_empty() {
+            registry.remove(&event.conversation_id);
         }
     }
 
     /// Claim exclusive queue-drain ownership for a conversation. Returns false if
-    /// another drain task already holds it.
+    /// another drain task already holds it, or if quiescence has paused drains.
     pub fn try_begin_queue_drain(&self, conversation_id: &str) -> bool {
+        if !self.quiescence.allows(QuiescedSubsystem::QueueDrain) {
+            return false;
+        }
         self.queue_drain_inflight
             .lock()
             .insert(conversation_id.to_string())
@@ -94,11 +150,14 @@ impl AppState {
         operation_type: &str,
     ) -> Result<String, crate::commands::CommandError> {
         let id = self.maintenance.lock().begin(operation_type)?;
+        let _pause_token: PauseToken = self.quiescence.pause();
         if let Ok(paths) = crate::app_paths::AppPaths::resolve() {
             let mut journal = crate::maintenance_journal::MaintenanceJournal::new(operation_type);
             journal.operation_id = id.clone();
+            journal.profile_generation = Some(self.quiescence.generation());
             if let Err(err) = crate::maintenance_journal::persist_journal(&paths, &journal) {
                 let _ = self.maintenance.lock().clear(&id);
+                self.quiescence.force_resume();
                 return Err(err);
             }
         }
@@ -115,6 +174,7 @@ impl AppState {
             if let Ok(Some(mut journal)) = crate::maintenance_journal::load_journal(&paths) {
                 if journal.operation_id == operation_id {
                     journal.touch_stage(stage);
+                    journal.profile_generation = Some(self.quiescence.generation());
                     let _ = crate::maintenance_journal::persist_journal(&paths, &journal);
                 }
             }
@@ -127,6 +187,9 @@ impl AppState {
         operation_id: &str,
     ) -> Result<(), crate::commands::CommandError> {
         self.maintenance.lock().clear(operation_id)?;
+        // Force resume: generation may have bumped during restore; token binding
+        // only protects against stale async resumes, not the owning clear path.
+        self.quiescence.force_resume();
         if let Ok(paths) = crate::app_paths::AppPaths::resolve() {
             if let Ok(Some(journal)) = crate::maintenance_journal::load_journal(&paths) {
                 if journal.operation_id == operation_id {
@@ -142,6 +205,8 @@ impl AppState {
         *self.event_bus.lock() = EventBus::load_from_db(&db);
         *self.db.lock() = db;
         *self.bootstrap.lock() = BootstrapStatus::Ready;
+        // Invalidate pause tokens issued against the previous profile generation.
+        let _ = self.quiescence.bump_generation();
     }
 
     /// Re-read `.env` from disk so Refresh / Test pick up keys after save.

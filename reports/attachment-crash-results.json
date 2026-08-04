@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T03:56:24.000Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "dirty": true,
+  "phase": "RC3.3 Phase 13 partial — attachment crash-consistency suite",
+  "command": "npm run test:attachment-crash-consistency",
+  "exitStatus": 0,
+  "result": "Unit Verified",
+  "partial": true,
+  "partialReason": "Temp-dir + rusqlite crash windows proven (rollback before claim; claim-before-promote healed by reconcile; N attachments idempotent; wrong-conversation deny). Desktop/packaged crash-restart proof not claimed.",
+  "assertions": [
+    "crash after message insert before claim rolls back — no orphan durable attach",
+    "crash after claim before promote — reconcile promotes staging to durable",
+    "visible message with N attachments has N rows + N durable files after reconcile (idempotent)",
+    "wrong-conversation authorize still denies after claim/promote"
+  ],
+  "levels": {
+    "unit": "Unit Verified",
+    "desktop": "not_run",
+    "packaged": "not_run"
+  },
+  "cargoTests": {
+    "filter": "attachment_cmds::",
+    "passed": 16,
+    "failed": 0,
+    "focused": [
+      "crash_after_message_insert_before_claim_rolls_back",
+      "crash_after_claim_before_promote_healed_by_reconcile",
+      "visible_message_n_attachments_reconcile_idempotent",
+      "wrong_conversation_authorize_still_denies_after_claim"
+    ]
+  },
+  "docs": "docs/ATTACHMENT_LIFECYCLE.md",
+  "publicBeta": "Not ready",
+  "doNotClaim": [
+    "Desktop Verified crash/restart of live send path",
+    "Packaged Verified attachment crash proof",
+    "Periodic GC scheduler tick wiring"
+  ]
+}

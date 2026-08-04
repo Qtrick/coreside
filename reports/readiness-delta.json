@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T02:26:51.384Z",
-  "commit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+  "generatedAt": "2026-08-04T04:20:36.803Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
   "dirty": true,
   "sourceFingerprint": "4d9e8454a5e9907e216f73252598ab544aa4f802eef1fb4e335b341b24ee4aea",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
@@ -42,7 +42,7 @@
       "id": "queue-ui",
       "from": "Disconnected / missing panel",
       "to": "Unit Verified",
-      "detail": "ConversationQueue event-driven refresh (agent-queue-changed) with conversationId filter; 20s reconcile."
+      "detail": "ConversationQueue conversation-scoped Channel refresh; 20s reconcile."
     },
     {
       "id": "history-replay",
@@ -83,10 +83,6 @@
   ],
   "unchangedOrStillOpen": [
     {
-      "id": "attachment-crash",
-      "state": "Scaffolded"
-    },
-    {
       "id": "hosted-ai",
       "state": "Deliberately Deferred"
     },
@@ -96,15 +92,14 @@
       "detail": "No speculative surface paint, JSON-blob progressive, or desktop E2E yet."
     },
     {
-      "id": "desktop-packaged-proof",
+      "id": "human-acceptance",
       "state": "Absent",
-      "detail": "No Desktop Verified / Packaged Verified claims."
+      "detail": "HUMAN_ACCEPTANCE_CHECKLIST unsigned — blocks Automated Public-Beta Candidate."
     }
   ],
   "nonClaims": [
-    "No Desktop Verified",
-    "No Packaged Verified",
     "No Human Accepted",
+    "No Automated Public-Beta Candidate (dirty tree + unsigned human checklist)",
     "Public beta Not ready",
     "Hosted private alpha Not ready"
   ]

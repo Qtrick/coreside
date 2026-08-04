@@ -13,6 +13,18 @@ export function MessageList() {
   const messagesLoading = useAppStore((s) => s.messagesLoading);
   const messagesError = useAppStore((s) => s.messagesError);
   const activeConversationId = useAppStore((s) => s.activeConversationId);
+  const activeTurnId = useAppStore((s) =>
+    s.activeConversationId
+      ? (s.activeTurnIdByConversation[s.activeConversationId] ?? null)
+      : null,
+  );
+  const streamLastSequence = useAppStore((s) => {
+    if (!s.activeConversationId) return null;
+    const turnId = s.activeTurnIdByConversation[s.activeConversationId];
+    if (!turnId) return null;
+    const seq = s.turnsById[turnId]?.lastSequence;
+    return typeof seq === "number" ? seq : null;
+  });
   const chatViewState = useAppStore((s) => s.chatViewState);
   const setChatScrollTop = useAppStore((s) => s.setChatScrollTop);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -167,6 +179,13 @@ export function MessageList() {
               aria-relevant="additions text"
               aria-label="Assistant response streaming"
               data-testid="assistant-stream-text"
+              data-turn-id={activeTurnId ?? undefined}
+              data-last-sequence={
+                streamLastSequence != null ? String(streamLastSequence) : undefined
+              }
+              data-stream-sequence={
+                streamLastSequence != null ? String(streamLastSequence) : undefined
+              }
             >
               <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>
                 {streamingText}

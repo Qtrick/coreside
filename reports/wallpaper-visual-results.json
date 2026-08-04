@@ -1,27 +1,101 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-02T21:55:00.000Z",
-  "commit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
+  "generatedAt": "2026-08-04T04:14:00.376Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
   "dirty": true,
-  "sourceFingerprint": "dirty-worktree-wallpaper-backup-trust-shell",
-  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
-  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
   "architecture": "arm64",
-  "buildMode": "dev",
-  "command": "npm run test:wallpaper-compositing",
-  "exitStatus": 0,
-  "result": "partial",
-  "levels": [0, 20, 40, 60],
+  "command": "e2e:journey-13-wallpaper-targeted",
+  "result": "passed",
+  "evidenceLevel": "Desktop Verified",
+  "e2eSpec": "e2e/specs/13-wallpaper-targeted-update.spec.ts",
   "assertions": {
-    "panelAlphaMonotonic": "passed",
-    "syntheticBlendApproachesWallpaper": "passed",
-    "zeroPercentFullyOccludes": "passed",
-    "desktopPixelSampling": "not_run",
-    "packagedWebView": "not_run",
-    "lightDark": "not_run",
-    "projectOverride": "not_run"
+    "matrixSelected": "passed",
+    "transparencyCommitted40": "passed",
+    "liveWallpaperPresent": "passed",
+    "canvasPresent": "passed",
+    "desktopPixelSampling": "passed",
+    "pixelVariance": "passed",
+    "uniqueColorsAtLeast2": "passed",
+    "lumSpanAtLeast8": "passed"
   },
-  "note": "Unit alpha/blend model proves monotonic contribution. Desktop and packaged screenshot proof remain required for wallpaper beta gate."
+  "transparency": {
+    "ariaValueNow": "40",
+    "panelAlpha": 0.58
+  },
+  "canvas": {
+    "width": 2240,
+    "height": 1344,
+    "sampleCount": 156,
+    "uniqueColors": 3,
+    "lumSpan": 97.26140000000001,
+    "samples": [
+      {
+        "a": 255,
+        "b": 70,
+        "g": 116,
+        "lum": 102.26140000000001,
+        "r": 67,
+        "x": 562,
+        "y": 340
+      },
+      {
+        "a": 255,
+        "b": 5,
+        "g": 5,
+        "lum": 4.999999999999999,
+        "r": 5,
+        "x": 4,
+        "y": 4
+      },
+      {
+        "a": 255,
+        "b": 5,
+        "g": 5,
+        "lum": 4.999999999999999,
+        "r": 5,
+        "x": 190,
+        "y": 4
+      },
+      {
+        "a": 255,
+        "b": 5,
+        "g": 5,
+        "lum": 4.999999999999999,
+        "r": 5,
+        "x": 376,
+        "y": 4
+      },
+      {
+        "a": 255,
+        "b": 5,
+        "g": 5,
+        "lum": 4.999999999999999,
+        "r": 5,
+        "x": 562,
+        "y": 4
+      },
+      {
+        "a": 255,
+        "b": 5,
+        "g": 5,
+        "lum": 4.999999999999999,
+        "r": 5,
+        "x": 748,
+        "y": 4
+      },
+      {
+        "a": 255,
+        "b": 5,
+        "g": 5,
+        "lum": 4.999999999999999,
+        "r": 5,
+        "x": 934,
+        "y": 4
+      }
+    ]
+  },
+  "screenshotHash": "e49fe098be1677b574239d10559b24a56f06b2c4d322cb6f7f85476497f2db2d",
+  "publicBeta": "Not ready"
 }

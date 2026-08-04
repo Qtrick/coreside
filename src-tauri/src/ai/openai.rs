@@ -12,12 +12,118 @@ use super::provider::{
     ProviderStreamTx, UsageMetadata,
 };
 use super::response_schema::SCHEMA_VERSION;
+use super::structured_user_input::{
+    flatten_parts_for_provider, is_provider_image_mime, AgentContentPart,
+};
 use crate::security::redact_secrets;
 use futures_util::StreamExt;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
 const MAX_STREAM_EVENTS: usize = 50_000;
 const MAX_STREAM_TEXT_BYTES: usize = super::http_limits::MAX_PROVIDER_RESPONSE_BYTES;
+
+/// Map a trusted Image part to an OpenAI `image_url` content part using a data URL
+/// built from already-authorized bytes. Never accepts filesystem paths.
+///
+/// Returns `None` (with an honest skip reason) when bytes are missing, mime is
+/// unsupported, or the payload is too heavy for the provider budget.
+pub fn map_image_part_to_openai_content(part: &AgentContentPart) -> Result<Value, String> {
+    let AgentContentPart::Image {
+        attachment_id,
+        mime_type,
+        data_base64,
+    } = part
+    else {
+        return Err("not an Image part".into());
+    };
+    if attachment_id.trim().is_empty() {
+        return Err("image part missing attachment_id".into());
+    }
+    if !is_provider_image_mime(mime_type) {
+        return Err(format!(
+            "skip image {attachment_id}: unsupported mime {mime_type}"
+        ));
+    }
+    let Some(b64) = data_base64.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+        return Err(format!(
+            "skip image {attachment_id}: no authorized bytes loaded (paths are never sent)"
+        ));
+    };
+    // Reject anything that looks like a filesystem path slipped into the field.
+    if b64.starts_with('/') || (b64.contains("://") && !b64.starts_with("data:")) {
+        return Err(format!(
+            "skip image {attachment_id}: refusing non-base64 / path-like payload"
+        ));
+    }
+    // Approx decoded size from base64 length (4 chars → 3 bytes).
+    let approx_bytes = (b64.len() / 4).saturating_mul(3);
+    if approx_bytes > super::structured_user_input::MAX_PROVIDER_IMAGE_BYTES {
+        return Err(format!(
+            "skip image {attachment_id}: exceeds provider byte budget (~{approx_bytes} bytes)"
+        ));
+    }
+    let mime = mime_type.trim().to_ascii_lowercase();
+    Ok(json!({
+        "type": "image_url",
+        "image_url": {
+            "url": format!("data:{mime};base64,{b64}")
+        }
+    }))
+}
+
+/// Build OpenAI message `content`: string when text-only; array when Image parts present.
+pub fn openai_message_content(message: &AgentMessage) -> Value {
+    let parts = if message.parts.is_empty() {
+        return json!(message.content);
+    } else {
+        &message.parts
+    };
+
+    let has_image = parts
+        .iter()
+        .any(|p| matches!(p, AgentContentPart::Image { .. }));
+    if !has_image {
+        return json!(flatten_parts_for_provider(parts));
+    }
+
+    let mut content_parts: Vec<Value> = Vec::new();
+    let text = flatten_parts_for_provider(
+        &parts
+            .iter()
+            .filter(|p| !matches!(p, AgentContentPart::Image { .. }))
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
+    if !text.trim().is_empty() {
+        content_parts.push(json!({
+            "type": "text",
+            "text": text
+        }));
+    }
+    for part in parts {
+        if matches!(part, AgentContentPart::Image { .. }) {
+            match map_image_part_to_openai_content(part) {
+                Ok(v) => content_parts.push(v),
+                Err(reason) => {
+                    tracing::info!(target: "coreside::ai::openai", "{reason}");
+                }
+            }
+        }
+    }
+    if content_parts.is_empty() {
+        return json!(message.provider_text());
+    }
+    // If every image was skipped and we only have text, keep a plain string.
+    if content_parts.len() == 1
+        && content_parts[0].get("type").and_then(|t| t.as_str()) == Some("text")
+    {
+        return content_parts[0]
+            .get("text")
+            .cloned()
+            .unwrap_or_else(|| json!(message.provider_text()));
+    }
+    Value::Array(content_parts)
+}
 
 pub struct OpenAiProvider {
     api_key: String,
@@ -80,7 +186,7 @@ impl OpenAiProvider {
         for m in messages {
             out.push(json!({
                 "role": m.role.as_openai_role(),
-                "content": m.provider_text()
+                "content": openai_message_content(m)
             }));
         }
         out
@@ -524,6 +630,7 @@ impl AiProvider for OpenAiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ai::structured_user_input::{image_part_from_authorized_bytes, AgentRole};
 
     #[test]
     fn extracts_openai_stream_delta_content() {
@@ -541,5 +648,48 @@ mod tests {
             "choices": [{ "delta": { "content": ["parts"] } }]
         });
         assert!(OpenAiProvider::stream_delta_text(&chunk).is_none());
+    }
+
+    #[test]
+    fn maps_image_part_to_openai_data_url_not_filesystem_path() {
+        let png: &[u8] = &[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
+            0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x08,
+            0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x05, 0xFE,
+            0xD4, 0xEF, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+        let part = image_part_from_authorized_bytes("att-img-1", "image/png", png).unwrap();
+        let mapped = map_image_part_to_openai_content(&part).expect("mapped");
+        assert_eq!(mapped["type"], "image_url");
+        let url = mapped["image_url"]["url"].as_str().unwrap();
+        assert!(url.starts_with("data:image/png;base64,"));
+        assert!(!url.contains("/Users/"));
+        assert!(!url.contains("file://"));
+        assert!(!url.contains("coreside-asset"));
+
+        let missing = AgentContentPart::Image {
+            attachment_id: "att-2".into(),
+            mime_type: "image/png".into(),
+            data_base64: None,
+        };
+        let err = map_image_part_to_openai_content(&missing).unwrap_err();
+        assert!(err.contains("no authorized bytes"));
+
+        let msg = AgentMessage::with_parts(
+            AgentRole::User,
+            "see image",
+            vec![
+                AgentContentPart::Text {
+                    text: "see image".into(),
+                },
+                part,
+            ],
+        );
+        let content = openai_message_content(&msg);
+        assert!(content.is_array());
+        let arr = content.as_array().unwrap();
+        assert!(arr.iter().any(|p| p["type"] == "text"));
+        assert!(arr.iter().any(|p| p["type"] == "image_url"));
     }
 }

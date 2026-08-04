@@ -252,7 +252,7 @@ pub fn clear_journal(paths: &AppPaths) -> Result<(), CommandError> {
 /// - `EnterRecovery` / irreversible rollback / unreadable → `enter_safe_startup` + skip scheduler
 ///
 /// `Resume` is reserved and not returned by classify today.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum JournalStartupAction {
     None,
@@ -272,6 +272,47 @@ pub fn classify_unfinished_journal(journal: &MaintenanceJournal) -> JournalStart
         "preparing" | "cancelling-work" | "flushing" | "safety-backup" | "staging"
         | "validating" | "awaiting-confirmation" => JournalStartupAction::RollBack,
         _ => JournalStartupAction::EnterRecovery,
+    }
+}
+
+/// Deterministic outcome of applying a startup classification (no profile-tree deletes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JournalStartupOutcome {
+    /// Stale completed/inactive or safe pre-swap journal removed.
+    Cleared,
+    /// Ordinary services must not start; caller enters Recovery.
+    EnterRecovery { reason: &'static str },
+    /// Classification was None for a non-stale stage (should not occur).
+    NoOp,
+}
+
+/// Apply startup classification with side effects limited to journal clear + outcome.
+/// Never deletes profile trees. Clear failures surface as `Err` so callers enter Recovery
+/// instead of logging-only.
+pub fn apply_startup_decision(
+    paths: &AppPaths,
+    journal: &MaintenanceJournal,
+    action: JournalStartupAction,
+) -> Result<JournalStartupOutcome, CommandError> {
+    match action {
+        JournalStartupAction::None => {
+            if journal.stage == "completed" || journal.stage == "inactive" {
+                clear_journal(paths)?;
+                Ok(JournalStartupOutcome::Cleared)
+            } else {
+                Ok(JournalStartupOutcome::NoOp)
+            }
+        }
+        JournalStartupAction::RollBack if !journal.irreversible => {
+            // Staged trees are left for Recovery inspection — never auto-deleted.
+            clear_journal(paths)?;
+            Ok(JournalStartupOutcome::Cleared)
+        }
+        JournalStartupAction::EnterRecovery
+        | JournalStartupAction::RollBack
+        | JournalStartupAction::Resume => Ok(JournalStartupOutcome::EnterRecovery {
+            reason: "unfinished maintenance journal",
+        }),
     }
 }
 
@@ -375,5 +416,163 @@ mod tests {
             classify_unfinished_journal(&j),
             JournalStartupAction::RollBack
         );
+    }
+
+    #[test]
+    fn apply_clears_completed_and_inactive_journals() {
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::from_base(dir.path());
+        paths.ensure_dirs().unwrap();
+
+        let mut completed = MaintenanceJournal::new("restore");
+        completed.stage = "completed".into();
+        persist_journal(&paths, &completed).unwrap();
+        let action = classify_unfinished_journal(&completed);
+        assert_eq!(
+            apply_startup_decision(&paths, &completed, action).unwrap(),
+            JournalStartupOutcome::Cleared
+        );
+        assert!(load_journal(&paths).unwrap().is_none());
+
+        let mut inactive = MaintenanceJournal::new("restore");
+        inactive.stage = "inactive".into();
+        persist_journal(&paths, &inactive).unwrap();
+        let action = classify_unfinished_journal(&inactive);
+        assert_eq!(
+            apply_startup_decision(&paths, &inactive, action).unwrap(),
+            JournalStartupOutcome::Cleared
+        );
+        assert!(load_journal(&paths).unwrap().is_none());
+    }
+
+    #[test]
+    fn apply_safe_rollback_clears_journal_without_deleting_staged_tree() {
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::from_base(dir.path());
+        paths.ensure_dirs().unwrap();
+        let staged = paths.product_root.join("profiles").join("staged-op");
+        fs::create_dir_all(&staged).unwrap();
+        fs::write(staged.join("marker.txt"), b"keep").unwrap();
+
+        let mut j = MaintenanceJournal::new("restore");
+        j.touch_stage(MaintenanceStage::Staging);
+        j.staged_profile = Some(staged.to_string_lossy().into_owned());
+        j.irreversible = false;
+        persist_journal(&paths, &j).unwrap();
+
+        let action = classify_unfinished_journal(&j);
+        assert_eq!(action, JournalStartupAction::RollBack);
+        assert_eq!(
+            apply_startup_decision(&paths, &j, action).unwrap(),
+            JournalStartupOutcome::Cleared
+        );
+        assert!(load_journal(&paths).unwrap().is_none());
+        assert!(staged.join("marker.txt").exists());
+    }
+
+    #[test]
+    fn apply_mid_swap_enters_recovery_without_clearing() {
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::from_base(dir.path());
+        paths.ensure_dirs().unwrap();
+        let mut j = MaintenanceJournal::new("restore");
+        j.stage = "swapping".into();
+        j.irreversible = true;
+        persist_journal(&paths, &j).unwrap();
+
+        let action = classify_unfinished_journal(&j);
+        assert_eq!(action, JournalStartupAction::EnterRecovery);
+        assert_eq!(
+            apply_startup_decision(&paths, &j, action).unwrap(),
+            JournalStartupOutcome::EnterRecovery {
+                reason: "unfinished maintenance journal",
+            }
+        );
+        assert!(load_journal(&paths).unwrap().is_some());
+    }
+
+    #[test]
+    fn restore_stage_ladder_pre_swap_clears_mid_swap_recovers() {
+        // Staging / Validating → RollBack + clear (safe).
+        for stage in [
+            MaintenanceStage::Staging,
+            MaintenanceStage::Validating,
+            MaintenanceStage::CancellingWork,
+        ] {
+            let mut j = MaintenanceJournal::new("restore");
+            j.touch_stage(stage);
+            assert!(!j.irreversible, "{stage:?} must remain reversible");
+            assert_eq!(
+                classify_unfinished_journal(&j),
+                JournalStartupAction::RollBack,
+                "{stage:?}"
+            );
+        }
+
+        // Swapping / Reopening / Rehydrating → EnterRecovery (irreversible).
+        for stage in [
+            MaintenanceStage::Swapping,
+            MaintenanceStage::Reopening,
+            MaintenanceStage::Rehydrating,
+        ] {
+            let mut j = MaintenanceJournal::new("restore");
+            j.touch_stage(stage);
+            assert!(j.irreversible, "{stage:?} must be irreversible");
+            assert_eq!(
+                classify_unfinished_journal(&j),
+                JournalStartupAction::EnterRecovery,
+                "{stage:?}"
+            );
+        }
+
+        // Explicit RecoveryRequired after mid-swap failure.
+        let mut failed = MaintenanceJournal::new("restore");
+        failed.touch_stage(MaintenanceStage::Swapping);
+        failed.touch_stage(MaintenanceStage::RecoveryRequired);
+        assert_eq!(
+            classify_unfinished_journal(&failed),
+            JournalStartupAction::EnterRecovery
+        );
+
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::from_base(dir.path());
+        paths.ensure_dirs().unwrap();
+        persist_journal(&paths, &failed).unwrap();
+        let action = classify_unfinished_journal(&failed);
+        assert_eq!(
+            apply_startup_decision(&paths, &failed, action).unwrap(),
+            JournalStartupOutcome::EnterRecovery {
+                reason: "unfinished maintenance journal",
+            }
+        );
+        assert!(load_journal(&paths).unwrap().is_some());
+
+        // Pre-swap Validating: apply clears journal.
+        let mut pre = MaintenanceJournal::new("restore");
+        pre.touch_stage(MaintenanceStage::Validating);
+        persist_journal(&paths, &pre).unwrap();
+        let action = classify_unfinished_journal(&pre);
+        assert_eq!(
+            apply_startup_decision(&paths, &pre, action).unwrap(),
+            JournalStartupOutcome::Cleared
+        );
+        assert!(load_journal(&paths).unwrap().is_none());
+    }
+
+    #[test]
+    fn restore_completed_stage_clears_on_startup() {
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::from_base(dir.path());
+        paths.ensure_dirs().unwrap();
+        let mut j = MaintenanceJournal::new("restore");
+        j.touch_stage(MaintenanceStage::Completed);
+        persist_journal(&paths, &j).unwrap();
+        let action = classify_unfinished_journal(&j);
+        assert_eq!(action, JournalStartupAction::None);
+        assert_eq!(
+            apply_startup_decision(&paths, &j, action).unwrap(),
+            JournalStartupOutcome::Cleared
+        );
+        assert!(load_journal(&paths).unwrap().is_none());
     }
 }

@@ -1,12 +1,22 @@
+import { shouldShowAppConflict } from "@/lib/tauri";
 import { useAppStore } from "@/stores/app-store";
 
 /** Multiwindow / revision conflict banner. */
 export function ConflictBanner() {
   const conflict = useAppStore((s) => s.appConflict);
+  const activeConversationId = useAppStore((s) => s.activeConversationId);
   const clear = useAppStore((s) => s.clearAppConflict);
   const reload = useAppStore((s) => s.reloadActiveSurfaces);
 
-  if (!conflict) return null;
+  if (
+    !conflict ||
+    !shouldShowAppConflict(
+      { conversationId: conflict.conversationId },
+      activeConversationId,
+    )
+  ) {
+    return null;
+  }
 
   return (
     <div

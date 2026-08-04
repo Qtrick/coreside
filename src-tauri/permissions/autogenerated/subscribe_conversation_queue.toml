@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-subscribe-conversation-queue"
+description = "Enables the subscribe_conversation_queue command without any pre-configured scope."
+commands.allow = ["subscribe_conversation_queue"]
+
+[[permission]]
+identifier = "deny-subscribe-conversation-queue"
+description = "Denies the subscribe_conversation_queue command without any pre-configured scope."
+commands.deny = ["subscribe_conversation_queue"]

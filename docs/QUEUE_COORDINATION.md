@@ -1,7 +1,7 @@
-# Queue Coordination (RC3.3 Phase 9 partial)
+# Queue Coordination (RC3.3 Phase 9)
 
 **Product:** Coreside  
-**Status:** Event-driven queue UI refresh landed — not full Partial Update parity  
+**Status:** Conversation-scoped Channel delivery for queue mutations — Unit Verified  
 **Access date:** 2026-08-03
 
 ## Authority
@@ -19,7 +19,7 @@ This is the Coreside adaptation of Partial Update `withQueueMutation`: mutations
 
 | Path | Role |
 | --- | --- |
-| `agent-queue-changed` events | Primary — emitted after enqueue / activate / cancel / remove / complete / requeue snapshot |
+| `subscribe_conversation_queue` Channel | Primary — delivered only to Channels registered for that `conversationId` after enqueue / activate / cancel / remove / complete / requeue snapshot |
 | Focus / visibility | Reconciliation when the window becomes active |
 | 20s poll | Low-frequency missed-event safety while queue work or send is in flight |
 
@@ -33,16 +33,16 @@ Event kinds (camelCase on the wire):
 
 Payload always includes `conversationId` (and optional `itemId`).
 
-## Remaining P1
+## Privacy
 
-**Queue metadata is still process-wide.** Emit uses `app.emit("agent-queue-changed", …)` today. Frontend filters with `isQueueEventForConversation`. Conversation-scoped Channel (or equivalent) delivery for queue metadata is still open — same class of issue as Sync/Conflict on the global bus (queue payloads are not assistant text, but they are still global).
+Queue metadata is **not** on the process-wide bus. `emit_queue_changed` sends only to `AppState.queue_subscribers` for the matching conversation. Main-window ACL only (`coreside-main-default`); tool windows do not get this command. Frontend still applies `isQueueEventForConversation` as defense in depth. Failed Channel sends drop dead subscribers.
 
 ## Not claimed
 
 - Full Partial Update `withQueueMutation` UI parity
-- Conversation-scoped queue Channel
 - Removal of all polling
 - Desktop E2E proof of multi-window queue refresh
+- Explicit Rust unregister command (unmount clears JS handler; dead Channels cleaned on next emit)
 
 ## Related
 

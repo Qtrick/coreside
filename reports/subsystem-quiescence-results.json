@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T03:09:55.000Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "dirty": true,
+  "phase": "RC3.3 Phase 13 partial — subsystem quiescence foundation",
+  "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib quiescence",
+  "exitStatus": 0,
+  "result": "Unit Verified",
+  "partial": true,
+  "partialReason": "QuiescenceCoordinator pauses queue drain, patch scheduler, and attachment GC with profile-generation-bound pause tokens. Full restore transaction (stage/validate/swap/rehydrate) is not implemented in this slice.",
+  "assertions": [
+    "pause then resume with matching token clears pause",
+    "resume ignored after bump_generation (stale token)",
+    "stale token cannot resume a newer pause",
+    "require_active returns maintenance_in_progress while paused",
+    "begin_maintenance pauses; clear_maintenance force_resumes; replace_profile_database bumps generation"
+  ],
+  "levels": {
+    "unit": "Unit Verified",
+    "desktop": "not_run",
+    "packaged": "not_run"
+  },
+  "cargoTests": {
+    "filter": "quiescence",
+    "passed": 4,
+    "failed": 0,
+    "focused": [
+      "pause_resume_with_matching_token",
+      "resume_ignored_after_generation_bump",
+      "stale_token_cannot_resume_new_pause",
+      "require_active_errors_while_paused"
+    ]
+  },
+  "docs": "docs/DURABLE_PROFILE_ARCHITECTURE.md",
+  "publicBeta": "Not ready",
+  "doNotClaim": [
+    "Full coherent profile restore transaction",
+    "Automated irreversible mid-swap rollback resume",
+    "Quiescence of every background subsystem",
+    "Desktop Verified restore under load"
+  ]
+}

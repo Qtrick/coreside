@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  api,
-  isQueueEventForConversation,
-  listenQueueChanged,
-} from "@/lib/tauri";
+import { api, isQueueEventForConversation } from "@/lib/tauri";
 import { useAppStore } from "@/stores/app-store";
 
 type QueueRow = {
@@ -12,7 +8,7 @@ type QueueRow = {
   preview: string;
 };
 
-/** Low-frequency reconciliation; primary updates come from queue events. */
+/** Low-frequency reconciliation; primary updates come from queue Channels. */
 const RECONCILE_POLL_MS = 20_000;
 const PREVIEW_MAX = 80;
 
@@ -88,27 +84,35 @@ export function ConversationQueue({
     void refresh();
   }, [sending, refresh]);
 
-  // Event-driven primary updates (filter wrong conversation on global bus).
+  // Conversation-scoped Channel (primary). Re-subscribe on conversation change.
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    void listenQueueChanged((event) => {
-      if (!isQueueEventForConversation(event, conversationIdRef.current)) {
-        return;
-      }
-      void refresh();
-    }).then((stop) => {
-      if (cancelled) {
-        stop();
-        return;
-      }
-      unlisten = stop;
-    });
+    void api
+      .subscribeConversationQueue({
+        conversationId,
+        onEvent: (event) => {
+          if (!isQueueEventForConversation(event, conversationIdRef.current)) {
+            return;
+          }
+          void refresh();
+        },
+      })
+      .then((stop) => {
+        if (cancelled) {
+          stop();
+          return;
+        }
+        unlisten = stop;
+      })
+      .catch(() => {
+        // Channel subscribe is best-effort; 20s reconcile poll remains.
+      });
     return () => {
       cancelled = true;
       unlisten?.();
     };
-  }, [refresh]);
+  }, [conversationId, refresh]);
 
   // Focus / visibility reconciliation when the tab becomes active again.
   useEffect(() => {

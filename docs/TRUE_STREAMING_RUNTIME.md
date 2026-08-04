@@ -10,11 +10,11 @@
 | Claim | Reality |
 | --- | --- |
 | Production send path | **`chat_with_auto` → `AiProvider::chat_stream`** (no longer `chat`-only) |
-| Live TextDelta → UI | OpenAI / compatible SSE + mock `live stream probe`; `send_message_inner` forwards peeks via `peek_assistant_message` → `AgentTurnEvent::Text` |
+| Live TextDelta → UI | OpenAI / compatible + Anthropic + Gemini SSE + mock `live stream probe`; `send_message_inner` forwards peeks via `peek_assistant_message` → `AgentTurnEvent::Text` |
 | Auto fallback | **No answer splicing** — after first non-empty `TextDelta`, failure surfaces; no Model B splice |
 | OpenAI / compatible SSE adapter | **Implemented** (`stream: true`; `stream_options` only for `openai`) |
-| Anthropic / Gemini live SSE | **Not implemented** — trait default buffered `chat_stream` |
-| Default / buffered `chat_stream` | Honest (`live: false`, **no** fabricated `TextDelta`, `buffered: true`) |
+| Anthropic / Gemini live SSE | **Unit Verified** — Anthropic `/v1/messages` `stream: true`; Gemini `streamGenerateContent?alt=sse`; desktop against real keys **not_run** |
+| Default / buffered `chat_stream` | Honest (`live: false`, **no** fabricated `TextDelta`, `buffered: true`) — still used by hosted gateway |
 | `emit_buffered_text_fluidly` | Post-hoc UI typing for **buffered** completions only; skipped when `streamed_live` |
 | Hosted gateway | Still `"stream": false` (buffered disclosure via default `chat_stream`) |
 | Channel / progressive ops streaming | **Partial** — interactive Channel for text/action/error/operation; live NDJSON → Operation `preview` before turn-end `schedule_and_apply` (see [PROGRESSIVE_PREVIEW_TRANSACTION.md](./PROGRESSIVE_PREVIEW_TRANSACTION.md)); Sync/Conflict still global |
@@ -39,12 +39,12 @@ Defined in `src-tauri/src/ai/provider.rs`:
 3. S1 delayed-completion fixture — **unit covered**; desktop E2E not claimed.
 4. ~~Relabel fake typing~~ — `emit_buffered_text_fluidly` (not marketed as provider streaming).
 5. Hosted: buffered path only until a live gateway contract exists.
-6. UTF-8 / frame split — partial (OpenAI line SSE + truncate helpers); more coverage still needed.
-7. Backpressure + cancel + oversized frame — partial (`MAX_STREAM_*` on OpenAI; cancel in select loops).
+6. UTF-8 / frame split — partial (OpenAI/Anthropic/Gemini line SSE + truncate helpers); more coverage still needed.
+7. Backpressure + cancel + oversized frame — partial (`MAX_STREAM_*` on OpenAI/Anthropic/Gemini; cancel in select loops).
 
 ## Remaining gaps (do not claim done)
 
-- Anthropic and Gemini live SSE adapters
+- Desktop / integrated verification of Anthropic and Gemini live SSE against real API keys
 - Channel / progressive application-operation streaming (interactive text Channel + NDJSON Operation `preview` landed; live durable apply + Sync-only Channel remain)
 - Full turn registry / reconnect snapshot / delta-only UI efficiency
 - Full E2E run of the live-stream probe in the desktop shell
@@ -54,4 +54,4 @@ Defined in `src-tauri/src/ai/provider.rs`:
 
 - Fake deltas from buffered text
 - Copying Partial Update delimiter HTML protocol
-- Claiming Partial Update streaming parity while Anthropic/Gemini/hosted remain buffered
+- Claiming Partial Update streaming parity while hosted remains buffered / desktop Anthropic-Gemini paths unproven

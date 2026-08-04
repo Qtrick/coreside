@@ -109,12 +109,22 @@ function CanvasWallpaper({
     if (kind === "matrix") {
       const fontSize = Math.max(12, Math.round(16 - density * 4));
       let columns = Math.ceil(viewW / fontSize);
-      let drops = Array.from({ length: columns }, () => Math.random() * -40);
+      // Seed drops across the visible height so glyphs appear immediately
+      // (avoids many frames of uniform clear before rain enters the viewport).
+      const seedDrops = (count: number) =>
+        Array.from({ length: count }, (_, i) =>
+          i % 3 === 0
+            ? Math.random() * Math.max(8, viewH / fontSize)
+            : Math.random() * -20,
+        );
+      let drops = seedDrops(columns);
 
       const rebuild = () => {
         columns = Math.max(8, Math.ceil(viewW / fontSize));
-        drops = Array.from({ length: columns }, (_, i) =>
-          drops[i] ?? Math.random() * -40,
+        const seeded = seedDrops(columns);
+        drops = Array.from(
+          { length: columns },
+          (_, i) => drops[i] ?? seeded[i]!,
         );
       };
 
@@ -132,13 +142,18 @@ function CanvasWallpaper({
         ctx.fillStyle = `rgba(0, 0, 0, ${0.05 + (1 - opacity) * 0.08})`;
         ctx.fillRect(0, 0, w, h);
         ctx.font = `${fontSize}px "IBM Plex Mono", ui-monospace, monospace`;
-        ctx.fillStyle = color;
-        ctx.globalAlpha = opacity;
+        // Bright head + dim trail so pixel samples see measurable luminance span.
+        const drawAlpha = Math.max(0.45, opacity);
         for (let i = 0; i < drops.length; i++) {
           const ch =
             MATRIX_GLYPHS[Math.floor(Math.random() * MATRIX_GLYPHS.length)]!;
           const x = i * fontSize;
           const y = drops[i]! * fontSize;
+          ctx.globalAlpha = drawAlpha * 0.35;
+          ctx.fillStyle = color;
+          ctx.fillText(ch, x, y - fontSize);
+          ctx.globalAlpha = drawAlpha;
+          ctx.fillStyle = "#b8ffb0";
           ctx.fillText(ch, x, y);
           if (y > h && Math.random() > 0.975) drops[i] = 0;
           drops[i]! += reduced ? 0.15 * speed : speed;
@@ -149,7 +164,8 @@ function CanvasWallpaper({
 
       ctx.fillStyle = "#050805";
       ctx.fillRect(0, 0, viewW, viewH);
-      raf = requestAnimationFrame(draw);
+      // Immediate first paint (before RAF) so e2e sampling is not racing clear-only frames.
+      draw();
 
       return () => {
         running = false;

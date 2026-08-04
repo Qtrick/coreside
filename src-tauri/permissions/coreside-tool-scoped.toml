@@ -15,5 +15,7 @@ permissions = [
   "allow-get-surface-state-cmd",
   "allow-save-surface-state-cmd",
   "allow-get-app-info",
-  "allow-get-bootstrap-status"
+  "allow-get-bootstrap-status",
+  # Read-only appearance/theme for tool chrome (set_setting stays denied via allowlist).
+  "allow-get-settings"
 ]

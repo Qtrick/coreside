@@ -43,6 +43,8 @@ Channel privacy is unchanged: Text never rides the global `agent-turn` bus.
 - Sync / Conflict for multi-window surface reload and conflict UX
 - Queue-drain Action / Error / Operation (temporary; no subscriber Channel)
 
+Sync payloads include `conversationId`, `surfaceIds`, `toolIds`, and optional `applicationId`. Frontend `shouldApplyAgentTurnSync` skips reloads when the target does not match the active conversation / tool / surfaces. `shouldShowAppConflict` keeps conflict banners conversation-scoped.
+
 ## Remaining gaps
 
 - Concurrent multi-turn UI binding beyond one active turn per conversation
@@ -50,6 +52,7 @@ Channel privacy is unchanged: Text never rides the global `agent-turn` bus.
 - Reconnect snapshot / resume from last sequence
 - Remove Sync global emit once Channel + registry cover tool windows
 - Queue-drain progress UI without global private payloads
+- Desktop verification of cross-window Sync skip (Application A must not reload B)
 
 ## Related
 

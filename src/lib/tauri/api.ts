@@ -61,6 +61,7 @@ import type {
 import type { ToolDefinition, ToolState, ToolSummary, ToolVersion } from "@/types/tool";
 import { Channel } from "@tauri-apps/api/core";
 import type { AgentTurnEvent } from "./events";
+import { subscribeConversationQueue as subscribeConversationQueueChannel } from "./events";
 import { invoke } from "./invoke";
 import { isTauriRuntime } from "./runtime";
 import { isToolRecord, toToolDefinition, toToolSummary, type ToolRecord } from "./tools";
@@ -841,6 +842,15 @@ export const api = {
     invoke<Record<string, unknown>[]>("list_agent_queue_cmd", {
       conversationId,
     }),
+  /**
+   * Conversation-scoped Channel for queue mutations. Keep the Channel handler
+   * alive while ConversationQueue is mounted; drop/unlisten on unmount.
+   */
+  subscribeConversationQueue: (args: {
+    conversationId: string;
+    onEvent: (event: import("./events").QueueChangedEvent) => void;
+  }) =>
+    subscribeConversationQueueChannel(args.conversationId, args.onEvent),
   cancelQueueItem: (itemId: string) =>
     invoke<Record<string, unknown>>("cancel_queue_item_cmd", { itemId }),
   removeQueueItem: (itemId: string) =>

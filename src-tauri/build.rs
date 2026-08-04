@@ -200,6 +200,7 @@ fn main() {
             "stage_chat_attachment",
             "store_diagnostics_cmd",
             "store_hosted_auth_session",
+            "subscribe_conversation_queue",
             "suspend_surface_cmd",
             "test_ai_connection",
             "test_exa_connection",

@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T02:56:30.000Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "dirty": true,
+  "phase": "RC3.3 Phase 11 — Anthropic/Gemini live chat_stream",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib anthropic::; cargo test --manifest-path src-tauri/Cargo.toml --lib gemini::; cargo check --manifest-path src-tauri/Cargo.toml",
+  "assertions": [
+    "ai::anthropic::tests::extracts_anthropic_text_delta",
+    "ai::anthropic::tests::text_delta_ignores_tool_json_delta",
+    "ai::anthropic::tests::text_delta_ignores_non_delta_events",
+    "ai::gemini::tests::extracts_gemini_stream_chunk_text",
+    "ai::gemini::tests::stream_text_delta_handles_incremental_parts",
+    "ai::gemini::tests::stream_text_delta_handles_cumulative_text",
+    "ai::gemini::tests::safety_failure_detects_block_reason"
+  ],
+  "testCounts": {
+    "anthropic": { "passed": 3, "failed": 0 },
+    "gemini": { "passed": 4, "failed": 0 }
+  },
+  "providers": {
+    "openai": {
+      "streaming": "Unit Verified",
+      "notes": "Prior Phase 2 SSE adapter; reference implementation"
+    },
+    "anthropic": {
+      "streaming": "Unit Verified",
+      "notes": "chat_stream override: Messages API stream:true; text_delta extraction + tool_use not flattened into text; desktop real-key not_run"
+    },
+    "gemini": {
+      "streaming": "Unit Verified",
+      "notes": "chat_stream override: streamGenerateContent?alt=sse; incremental/cumulative delta helper; safety → ResponseFailed; desktop real-key not_run"
+    },
+    "hosted": {
+      "streaming": "Buffered — honest default",
+      "notes": "No live gateway contract; trait default live:false"
+    }
+  },
+  "result": "passed_unit",
+  "partial": true,
+  "partialReason": "Unit helpers verified; no live desktop integration against real Anthropic/Gemini API keys",
+  "productionFiles": [
+    "src-tauri/src/ai/anthropic.rs",
+    "src-tauri/src/ai/gemini.rs",
+    "src-tauri/src/ai/provider.rs",
+    "src-tauri/src/ai/openai.rs"
+  ],
+  "docsUpdated": [
+    "docs/KNOWN_ISSUES.md",
+    "docs/TRUE_STREAMING_RUNTIME.md",
+    "docs/PROVIDER_CONFORMANCE.md",
+    "docs/PROVIDERS.md",
+    "docs/IMPLEMENTATION_PLAN.md",
+    "docs/PROGRESSIVE_PREVIEW_TRANSACTION.md"
+  ],
+  "publicBeta": "Not ready"
+}

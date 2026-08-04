@@ -24,6 +24,8 @@ export type AgentTurnEvent =
       kind: "sync";
       conversationId?: string | null;
       surfaceIds: string[];
+      toolIds?: string[];
+      applicationId?: string | null;
       revision?: number | null;
       syncKind: string;
     }
@@ -33,6 +35,94 @@ export type AgentTurnEvent =
       message: string;
       conflicts: string[];
     };
+
+/** Active UI scope used to filter process-wide Sync / Conflict events. */
+export type AgentTurnSyncMatchContext = {
+  activeConversationId: string | null;
+  activeToolId: string | null;
+  /** Optional explicit surface ids (defaults derived from activeToolId). */
+  activeSurfaceIds?: string[];
+};
+
+/**
+ * Whether a Sync event should reload surfaces in this window.
+ *
+ * - conversationId set and different from active → skip (Application A must not
+ *   reload Application B / chat B).
+ * - When surfaceIds / toolIds are present, require overlap with the active tool
+ *   or active surfaces (tool windows match by tool even without an active chat).
+ * - Unscoped Sync (no conversation / surface / tool target) is refused.
+ */
+export function shouldApplyAgentTurnSync(
+  event: {
+    conversationId?: string | null;
+    surfaceIds?: string[];
+    toolIds?: string[];
+    applicationId?: string | null;
+  },
+  ctx: AgentTurnSyncMatchContext,
+): boolean {
+  const eventConv = (event.conversationId ?? "").trim();
+  const activeConv = (ctx.activeConversationId ?? "").trim();
+  const activeTool = (ctx.activeToolId ?? "").trim();
+  const surfaceIds = (event.surfaceIds ?? []).map((s) => s.trim()).filter(Boolean);
+  const toolIds = (event.toolIds ?? []).map((s) => s.trim()).filter(Boolean);
+  const applicationId = (event.applicationId ?? "").trim();
+
+  if (eventConv && activeConv && eventConv !== activeConv) {
+    return false;
+  }
+
+  const activeSurfaces = new Set(
+    (ctx.activeSurfaceIds ?? [])
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  if (activeTool) {
+    activeSurfaces.add(activeTool);
+    activeSurfaces.add(`surf-${activeTool}`);
+  }
+
+  const hasTargeting = surfaceIds.length > 0 || toolIds.length > 0 || Boolean(applicationId);
+  if (hasTargeting) {
+    if (activeTool && toolIds.includes(activeTool)) {
+      return true;
+    }
+    if (activeTool && applicationId && applicationId === activeTool) {
+      return true;
+    }
+    if (surfaceIds.some((id) => activeSurfaces.has(id))) {
+      return true;
+    }
+    // Targeted sync for another tool/surface — do not reload this window.
+    // Chat with matching conversation but no open tool: reload is a no-op today;
+    // still accept so future surface refresh can run for the matching chat.
+    if (!activeTool && eventConv && eventConv === activeConv) {
+      return true;
+    }
+    return false;
+  }
+
+  if (eventConv) {
+    return eventConv === activeConv;
+  }
+
+  // Unscoped Sync must not reload arbitrary windows.
+  return false;
+}
+
+/**
+ * Conflict banners are conversation-scoped. Empty ids never match.
+ */
+export function shouldShowAppConflict(
+  conflict: { conversationId?: string | null },
+  activeConversationId: string | null,
+): boolean {
+  const eventConv = (conflict.conversationId ?? "").trim();
+  const activeConv = (activeConversationId ?? "").trim();
+  if (!eventConv || !activeConv) return false;
+  return eventConv === activeConv;
+}
 
 const agentTurnHandlers = new Set<(event: AgentTurnEvent) => void>();
 let agentTurnUnlisten: (() => void) | null = null;
@@ -98,7 +188,7 @@ export type QueueChangedEvent = {
   itemId?: string | null;
 };
 
-/** Defense-in-depth filter: queue bus is still process-wide (P1 to scope). */
+/** Defense-in-depth filter for conversation-scoped queue Channels. */
 export function isQueueEventForConversation(
   event: QueueChangedEvent,
   conversationId: string,
@@ -109,14 +199,29 @@ export function isQueueEventForConversation(
 }
 
 /**
- * Subscribe to `agent-queue-changed`. Payload includes conversationId; callers
- * must filter. Not conversation-scoped Channel delivery yet.
+ * Subscribe to conversation-scoped queue mutations via Tauri Channel.
+ * Does not use the process-wide event bus.
+ * Keep the returned unlisten (or Channel) alive while the UI needs events.
  */
-export async function listenQueueChanged(
+export async function subscribeConversationQueue(
+  conversationId: string,
   handler: (event: QueueChangedEvent) => void,
 ): Promise<() => void> {
-  if (!isTauriRuntime()) return () => undefined;
-  return listen<QueueChangedEvent>("agent-queue-changed", (event) => {
-    handler(event.payload);
+  if (!isTauriRuntime() || !conversationId) return () => undefined;
+  const { Channel, invoke } = await import("@tauri-apps/api/core");
+  let alive = true;
+  const channel = new Channel<QueueChangedEvent>();
+  channel.onmessage = (event) => {
+    if (!alive) return;
+    if (!isQueueEventForConversation(event, conversationId)) return;
+    handler(event);
+  };
+  await invoke("subscribe_conversation_queue", {
+    conversationId,
+    onEvent: channel,
   });
+  return () => {
+    alive = false;
+    channel.onmessage = () => undefined;
+  };
 }

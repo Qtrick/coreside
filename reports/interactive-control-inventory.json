@@ -1,0 +1,593 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T03:01:05.692Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "dirty": true,
+  "command": "audit:interactive-controls",
+  "evidenceLevel": "Scaffolded",
+  "note": "Static regex inventory only — not runtime interactivity proof.",
+  "filesScanned": 76,
+  "filesWithControls": 58,
+  "approximateTotalControls": 585,
+  "files": [
+    {
+      "file": "src/components/action-log/ActionLog.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/applications/ApplicationDetailsPanel.tsx",
+      "approximateControlCount": 12,
+      "counts": {
+        "button": 6,
+        "onClick": 6
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/applications/ApprovalCard.tsx",
+      "approximateControlCount": 8,
+      "counts": {
+        "button": 4,
+        "onClick": 4
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/applications/RuntimePermissionsSettings.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/automations/AutomationsPanel.tsx",
+      "approximateControlCount": 12,
+      "counts": {
+        "button": 6,
+        "onClick": 6
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/ChangeProposalCard.tsx",
+      "approximateControlCount": 4,
+      "counts": {
+        "button": 2,
+        "onClick": 2
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/ChatPanel.tsx",
+      "approximateControlCount": 5,
+      "counts": {
+        "button": 2,
+        "onClick": 3
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/Composer.tsx",
+      "approximateControlCount": 12,
+      "counts": {
+        "button": 5,
+        "onClick": 6,
+        "input_type": 1
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/chat/ConflictBanner.tsx",
+      "approximateControlCount": 4,
+      "counts": {
+        "button": 2,
+        "onClick": 2
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/ConversationHistory.tsx",
+      "approximateControlCount": 28,
+      "counts": {
+        "button": 14,
+        "onClick": 14
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/chat/ConversationQueue.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/DraftConflictBanner.tsx",
+      "approximateControlCount": 6,
+      "counts": {
+        "button": 3,
+        "onClick": 3
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/InlineSurface.tsx",
+      "approximateControlCount": 10,
+      "counts": {
+        "button": 5,
+        "onClick": 5
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/MentionMenu.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/MessageBubble.tsx",
+      "approximateControlCount": 10,
+      "counts": {
+        "button": 5,
+        "onClick": 5
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/MessageList.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/ModelPicker.tsx",
+      "approximateControlCount": 1,
+      "counts": {
+        "select": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/ProjectIndicator.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/ToolChangePreview.tsx",
+      "approximateControlCount": 4,
+      "counts": {
+        "button": 2,
+        "onClick": 2
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/CommandPalette.tsx",
+      "approximateControlCount": 6,
+      "counts": {
+        "button": 2,
+        "onClick": 4
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/context-menu/ChatContextMenu.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "menuitem": 2
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/context-menu/ContextMenu.tsx",
+      "approximateControlCount": 6,
+      "counts": {
+        "button": 1,
+        "onClick": 1,
+        "menuitem": 4
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/context-menu/ProjectContextMenu.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "menuitem": 2
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/export/ExportDialog.tsx",
+      "approximateControlCount": 10,
+      "counts": {
+        "button": 5,
+        "onClick": 5
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/media/MediaAssetCard.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/media/MediaDetails.tsx",
+      "approximateControlCount": 7,
+      "counts": {
+        "button": 3,
+        "onClick": 3,
+        "anchor": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/media/MediaImportDialog.tsx",
+      "approximateControlCount": 14,
+      "counts": {
+        "button": 4,
+        "onClick": 4,
+        "input_type": 6
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/media/MediaLibrary.tsx",
+      "approximateControlCount": 11,
+      "counts": {
+        "button": 5,
+        "onClick": 5,
+        "input_type": 1
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/projects/AddChatsToProjectDialog.tsx",
+      "approximateControlCount": 9,
+      "counts": {
+        "button": 4,
+        "onClick": 4,
+        "input_type": 1
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/projects/CreateProjectDialog.tsx",
+      "approximateControlCount": 9,
+      "counts": {
+        "button": 4,
+        "type_submit": 1,
+        "onClick": 3,
+        "select": 1
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/projects/DeleteProjectDialog.tsx",
+      "approximateControlCount": 11,
+      "counts": {
+        "button": 4,
+        "onClick": 4,
+        "input_type": 3
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/projects/EditProjectDialog.tsx",
+      "approximateControlCount": 9,
+      "counts": {
+        "button": 4,
+        "type_submit": 1,
+        "onClick": 3,
+        "select": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/projects/ProjectList.tsx",
+      "approximateControlCount": 8,
+      "counts": {
+        "button": 4,
+        "onClick": 4
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/projects/ProjectPage.tsx",
+      "approximateControlCount": 18,
+      "counts": {
+        "button": 9,
+        "onClick": 9
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/projects/ProjectsListPage.tsx",
+      "approximateControlCount": 6,
+      "counts": {
+        "button": 3,
+        "onClick": 3
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/projects/RenameConversationDialog.tsx",
+      "approximateControlCount": 8,
+      "counts": {
+        "button": 4,
+        "type_submit": 1,
+        "onClick": 3
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/providers/ProviderSetupDialog.tsx",
+      "approximateControlCount": 18,
+      "counts": {
+        "button": 8,
+        "type_submit": 1,
+        "onClick": 7,
+        "anchor": 1,
+        "input_type": 1
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/recovery/BootstrapRecoveryScreen.tsx",
+      "approximateControlCount": 11,
+      "counts": {
+        "button": 5,
+        "onClick": 5,
+        "select": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/search/ImageResultCard.tsx",
+      "approximateControlCount": 6,
+      "counts": {
+        "button": 2,
+        "onClick": 3,
+        "anchor": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/search/SearchHistoryPanel.tsx",
+      "approximateControlCount": 8,
+      "counts": {
+        "button": 4,
+        "onClick": 4
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/search/SearchProviderSetup.tsx",
+      "approximateControlCount": 44,
+      "counts": {
+        "button": 21,
+        "type_submit": 1,
+        "onClick": 20,
+        "input_type": 2
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/search/SearchResults.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/search/SourceList.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/search/VideoResultCard.tsx",
+      "approximateControlCount": 6,
+      "counts": {
+        "button": 3,
+        "onClick": 3
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/search/WebResultCard.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/settings/AgentBehaviorSettings.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/settings/AiProviderSettings.tsx",
+      "approximateControlCount": 23,
+      "counts": {
+        "button": 10,
+        "type_submit": 1,
+        "onClick": 9,
+        "input_type": 3
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/settings/RecoverySettings.tsx",
+      "approximateControlCount": 10,
+      "counts": {
+        "button": 5,
+        "onClick": 5
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/settings/SettingsPanel.tsx",
+      "approximateControlCount": 41,
+      "counts": {
+        "button": 20,
+        "onClick": 20,
+        "input_type": 1
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/settings/WallpaperSettings.tsx",
+      "approximateControlCount": 10,
+      "counts": {
+        "button": 4,
+        "onClick": 4,
+        "input_type": 2
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/sidebar/Sidebar.tsx",
+      "approximateControlCount": 26,
+      "counts": {
+        "button": 13,
+        "onClick": 13
+      },
+      "flags": {
+        "alert": true
+      }
+    },
+    {
+      "file": "src/components/tool-canvas/CustomizeMode.tsx",
+      "approximateControlCount": 13,
+      "counts": {
+        "button": 6,
+        "onClick": 6,
+        "input_type": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/tool-canvas/ToolCanvas.tsx",
+      "approximateControlCount": 16,
+      "counts": {
+        "button": 8,
+        "onClick": 8
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/tool-canvas/ToolHeaderActions.tsx",
+      "approximateControlCount": 23,
+      "counts": {
+        "button": 9,
+        "onClick": 9,
+        "menuitem": 5
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/tool-renderer/AppRouteShell.tsx",
+      "approximateControlCount": 6,
+      "counts": {
+        "button": 3,
+        "onClick": 3
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/tool-renderer/nodes.tsx",
+      "approximateControlCount": 36,
+      "counts": {
+        "button": 12,
+        "type_submit": 1,
+        "onClick": 10,
+        "input_type": 12,
+        "select": 1
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/tool-renderer/ToolRenderer.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/wallpaper/WallpaperProposalDialog.tsx",
+      "approximateControlCount": 12,
+      "counts": {
+        "button": 4,
+        "onClick": 4,
+        "input_type": 4
+      },
+      "flags": {}
+    }
+  ]
+}
