@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-03T23:30:00.000Z",
+  "commit": "c520fcfba6acdeed7a14ee1e24dd9ea31f67b4c7",
+  "dirty": true,
+  "sourceFingerprint": "0c00ba2619c991182f134cb897c9a0d7e7294dbea338d4ef1f969a29b490b9cd",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "command": "npm run test:true-streaming",
+  "exitStatus": 0,
+  "result": "passed_unit",
+  "partial": true,
+  "partialReason": "Desktop E2E Journey 12 written but not executed in this evidence pass",
+  "assertions": [
+    "true_streaming_emits_delta_before_completion",
+    "chat_with_auto uses chat_stream",
+    "send_message_inner forwards TextDelta via peek_assistant_message",
+    "buffered path emits no fake TextDelta",
+    "auto fallback does not splice after meaningful delta"
+  ],
+  "productionFiles": [
+    "src-tauri/src/ai/auto.rs",
+    "src-tauri/src/ai/mock.rs",
+    "src-tauri/src/ai/openai.rs",
+    "src-tauri/src/commands/message_cmds.rs",
+    "src/components/chat/MessageList.tsx"
+  ],
+  "e2eSpec": "e2e/specs/12-true-streaming.spec.ts",
+  "e2eResult": "not_run",
+  "publicBeta": "Not ready"
+}

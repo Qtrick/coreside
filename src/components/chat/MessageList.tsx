@@ -155,7 +155,14 @@ export function MessageList() {
             </p>
           )}
           {streamingText ? (
-            <div className="message-content agent-stream-text">
+            <div
+              className="message-content agent-stream-text"
+              role="status"
+              aria-live="polite"
+              aria-relevant="additions text"
+              aria-label="Assistant response streaming"
+              data-testid="assistant-stream-text"
+            >
               <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>
                 {streamingText}
                 <span className="stream-caret" aria-hidden />

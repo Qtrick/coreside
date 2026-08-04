@@ -18,11 +18,13 @@ const commandName = "audit:current-source";
 
 const DEFAULT_ARCHIVE =
   process.env.CORESIDE_ARCHIVE ||
-  path.join(process.env.HOME || "", "Downloads", "Coreside main.zip");
+  path.join(process.env.HOME || "", "Downloads", "Coreside Chat AI.zip");
 const EXPECTED_ARCHIVE_SHA256 =
-  "ec8292249b58b565abef72baf285e36adce0ddea0059931166702d4ccf9bd228";
+  "75946b05d7778368700c8d827007d83f1cce0006fcedad8cf69b35f37bb23d69";
 const PREVIOUS_ARCHIVE_SHA256 =
-  "907a21f13ccbea5d7cbf7793bb5cb53098fa72836756b8f4c9a15569ef7c88c4";
+  "ec8292249b58b565abef72baf285e36adce0ddea0059931166702d4ccf9bd228";
+const PREVIOUS_ARCHIVE_LABEL = "Coreside main.zip";
+const CURRENT_ARCHIVE_LABEL = "Coreside Chat AI.zip";
 
 const FINGERPRINT_ROOTS = [
   "src",
@@ -279,7 +281,7 @@ if (
 ) {
   archiveDiff = {
     status: "extract_stale_or_unmarked",
-    hint: "Re-extract Coreside main.zip into .reference/coreside-rc3-archive and write source.sha256 with the expected archive hash",
+    hint: "Re-extract Coreside Chat AI.zip into .reference/coreside-rc3-archive and write source.sha256 with the expected archive hash",
     expectedArchiveSha256: EXPECTED_ARCHIVE_SHA256,
     onlyInActive: [],
     onlyInArchive: [],

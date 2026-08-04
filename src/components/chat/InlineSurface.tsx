@@ -415,26 +415,60 @@ export function InlineSurfaceCard({
             }}
             onSubmitToAgent={(payload) => {
               const summary = `Surface form submitted (${payload.eventName})`;
-              void api.appendContextLedger({
-                conversationId,
-                projectId: activeProjectId,
-                entryType: "surface_form_submit",
-                visibility: "model_context_only",
-                payload: {
+              const structuredPayload = {
+                kind: "structuredUserInput",
+                surfaceId: surface.id,
+                instanceId: surface.instanceId,
+                componentId: payload.componentId ?? null,
+                eventName: payload.eventName,
+                values: payload.values,
+              };
+              // ponytail: keep composer/prompt payloads bounded (8 KiB compact JSON).
+              let structuredJson = JSON.stringify(structuredPayload);
+              if (structuredJson.length > 8192) {
+                structuredJson = JSON.stringify({
+                  kind: "structuredUserInput",
                   surfaceId: surface.id,
                   instanceId: surface.instanceId,
                   componentId: payload.componentId ?? null,
                   eventName: payload.eventName,
-                  values: payload.values,
-                },
-                summary,
-              });
-              void saveComponentDraft(
-                payload.componentId ?? "form",
-                payload.values,
-                payload.componentId ?? null,
-              );
-              void sendMessage(summary);
+                  truncated: true,
+                  valueKeys: Object.keys(payload.values),
+                });
+              }
+              const structuredBlock = [
+                "[STRUCTURED_USER_INPUT trust=local_user_content]",
+                "```json",
+                structuredJson,
+                "```",
+                "[/STRUCTURED_USER_INPUT]",
+              ].join("\n");
+              void (async () => {
+                try {
+                  await api.appendContextLedger({
+                    conversationId,
+                    projectId: activeProjectId,
+                    entryType: "surface_form_submit",
+                    visibility: "model_context_only",
+                    payload: {
+                      surfaceId: surface.id,
+                      instanceId: surface.instanceId,
+                      componentId: payload.componentId ?? null,
+                      eventName: payload.eventName,
+                      values: payload.values,
+                    },
+                    summary,
+                  });
+                } catch {
+                  // Ledger is best-effort; structured block still reaches the model.
+                }
+                void saveComponentDraft(
+                  payload.componentId ?? "form",
+                  payload.values,
+                  payload.componentId ?? null,
+                );
+                void sendMessage(`${summary}\n\n${structuredBlock}`);
+              })();
             }}
           />
         </div>

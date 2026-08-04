@@ -2380,6 +2380,52 @@ export async function mockInvoke<T>(
         updatedAt: now(),
       } satisfies RecoveryState as T;
 
+    // ponytail: web-preview stubs for History panel; real data lives in Rust/SQLite
+    case "list_branches_cmd":
+    case "list_snapshots_cmd":
+    case "list_transactions_cmd":
+    case "list_diagnostics_cmd":
+    case "list_agent_queue_cmd":
+      return [] as T;
+    case "create_snapshot_cmd": {
+      const a = (args ?? {}) as {
+        conversationId?: string;
+        projectId?: string | null;
+        description?: string | null;
+      };
+      return {
+        id: `snap-mock-${Date.now()}`,
+        conversationId: a.conversationId ?? "conv-mock",
+        projectId: a.projectId ?? null,
+        description: a.description || "Mock snapshot",
+        payload: { readOnly: true },
+        createdAt: now(),
+      } as T;
+    }
+    case "get_snapshot_cmd":
+      return {
+        id: String((args as { snapshotId?: string })?.snapshotId ?? "snap-mock"),
+        conversationId: "conv-mock",
+        projectId: null,
+        description: "Mock snapshot",
+        payload: { readOnly: true, messages: [], transactions: [] },
+        createdAt: now(),
+      } as T;
+    case "branch_conversation_cmd": {
+      const a = (args as { args?: Record<string, unknown> })?.args ?? {};
+      return [
+        {
+          id: `br-mock-${Date.now()}`,
+          sourceConversationId: a.sourceConversationId ?? "conv-mock",
+          sourceMessageId: a.sourceMessageId ?? null,
+          newConversationId: `conv-branch-${Date.now()}`,
+          branchName: a.branchName || "Branch",
+          createdAt: now(),
+        },
+        [],
+      ] as T;
+    }
+
     default:
       throw new TauriCommandError(`Unknown command: ${command}`);
   }

@@ -150,6 +150,7 @@ permissions = [
   "allow-list-projects-cmd",
   "allow-list-provider-connections",
   "allow-list-search-sessions-cmd",
+  "allow-list-snapshots-cmd",
   "allow-list-tools",
   "allow-list-transactions-cmd",
   "allow-list-unassigned-conversations-cmd",

@@ -181,6 +181,54 @@ impl OpenAiProvider {
             .map(str::to_string)
     }
 
+    /// Process one SSE `data:` payload. Returns `Ok(true)` when `[DONE]` ends the stream.
+    async fn handle_sse_data(
+        &self,
+        data: &str,
+        full_text: &mut String,
+        usage: &mut UsageMetadata,
+        model: &mut String,
+        events: &mut usize,
+        tx: &ProviderStreamTx,
+    ) -> Result<bool, AiError> {
+        let data = data.trim();
+        if data.is_empty() {
+            return Ok(false);
+        }
+        if data == "[DONE]" {
+            return Ok(true);
+        }
+        *events += 1;
+        if *events > MAX_STREAM_EVENTS {
+            return Err(AiError::Provider("stream event count exceeded".into()));
+        }
+        // Malformed JSON: skip the event (do not abort the whole stream).
+        let Ok(value) = serde_json::from_str::<Value>(data) else {
+            return Ok(false);
+        };
+        if let Some(m) = value.get("model").and_then(|v| v.as_str()) {
+            *model = m.to_string();
+        }
+        if value.get("usage").is_some() {
+            *usage = Self::extract_usage(&value);
+            let _ = tx
+                .send(ProviderStreamEvent::UsageUpdated {
+                    usage: usage.clone(),
+                })
+                .await;
+        }
+        if let Some(delta) = Self::stream_delta_text(&value) {
+            if full_text.len().saturating_add(delta.len()) > MAX_STREAM_TEXT_BYTES {
+                return Err(AiError::Provider("stream text exceeded byte limit".into()));
+            }
+            full_text.push_str(&delta);
+            let _ = tx
+                .send(ProviderStreamEvent::TextDelta { text: delta })
+                .await;
+        }
+        Ok(false)
+    }
+
     async fn consume_sse_chat_stream(
         &self,
         response: reqwest::Response,
@@ -222,42 +270,43 @@ impl OpenAiProvider {
                             continue;
                         }
                         let Some(data) = line.strip_prefix("data:") else {
+                            // Ignore non-data SSE fields (event:, id:, retry:).
                             continue;
                         };
-                        let data = data.trim();
-                        if data == "[DONE]" {
+                        if self
+                            .handle_sse_data(
+                                data,
+                                &mut full_text,
+                                &mut usage,
+                                &mut model,
+                                &mut events,
+                                tx,
+                            )
+                            .await?
+                        {
                             return Ok((full_text, usage, model));
                         }
-                        events += 1;
-                        if events > MAX_STREAM_EVENTS {
-                            return Err(AiError::Provider("stream event count exceeded".into()));
-                        }
-                        let Ok(value) = serde_json::from_str::<Value>(data) else {
-                            continue;
-                        };
-                        if let Some(m) = value.get("model").and_then(|v| v.as_str()) {
-                            model = m.to_string();
-                        }
-                        if value.get("usage").is_some() {
-                            usage = Self::extract_usage(&value);
-                            let _ = tx
-                                .send(ProviderStreamEvent::UsageUpdated {
-                                    usage: usage.clone(),
-                                })
-                                .await;
-                        }
-                        if let Some(delta) = Self::stream_delta_text(&value) {
-                            if full_text.len().saturating_add(delta.len()) > MAX_STREAM_TEXT_BYTES {
-                                return Err(AiError::Provider(
-                                    "stream text exceeded byte limit".into(),
-                                ));
-                            }
-                            full_text.push_str(&delta);
-                            let _ = tx
-                                .send(ProviderStreamEvent::TextDelta { text: delta })
-                                .await;
-                        }
                     }
+                }
+            }
+        }
+
+        // Flush a final unterminated line (providers sometimes omit trailing \n before close).
+        if !buf.is_empty() {
+            let line = String::from_utf8_lossy(&buf);
+            let line = line.trim();
+            if !line.is_empty() && !line.starts_with(':') {
+                if let Some(data) = line.strip_prefix("data:") {
+                    let _ = self
+                        .handle_sse_data(
+                            data,
+                            &mut full_text,
+                            &mut usage,
+                            &mut model,
+                            &mut events,
+                            tx,
+                        )
+                        .await?;
                 }
             }
         }
@@ -285,7 +334,15 @@ impl AiProvider for OpenAiProvider {
         };
         if let Ok(resp) = list_result {
             if resp.status().is_success() {
-                let body: Value = resp.json().await.unwrap_or(json!({}));
+                let text = super::http_limits::read_response_text_bounded(
+                    resp,
+                    &cancel,
+                    super::http_limits::MAX_PROVIDER_RESPONSE_BYTES,
+                    Some(&self.api_key),
+                )
+                .await
+                .unwrap_or_default();
+                let body: Value = serde_json::from_str(&text).unwrap_or(json!({}));
                 let models = body
                     .get("data")
                     .and_then(|m| m.as_array())
@@ -358,14 +415,17 @@ impl AiProvider for OpenAiProvider {
         }
         let messages = Self::build_messages(&request.system_prompt, &request.messages);
         let _ = SCHEMA_VERSION;
-        let body = json!({
+        // stream_options is OpenAI-specific; many compatible servers 400 on unknown fields.
+        let mut body = json!({
             "model": self.model,
             "messages": messages,
             "temperature": 0.4,
             "stream": true,
-            "stream_options": { "include_usage": true },
             "response_format": { "type": "json_object" }
         });
+        if self.provider_id == "openai" {
+            body["stream_options"] = json!({ "include_usage": true });
+        }
         let _ = tx
             .send(ProviderStreamEvent::ResponseStarted {
                 provider_id: self.provider_id().to_string(),
@@ -480,5 +540,13 @@ mod tests {
         assert_eq!(OpenAiProvider::stream_delta_text(&chunk).as_deref(), Some("Hel"));
         let empty = json!({ "choices": [{ "delta": {} }] });
         assert!(OpenAiProvider::stream_delta_text(&empty).is_none());
+    }
+
+    #[test]
+    fn stream_delta_ignores_non_string_content() {
+        let chunk = json!({
+            "choices": [{ "delta": { "content": ["parts"] } }]
+        });
+        assert!(OpenAiProvider::stream_delta_text(&chunk).is_none());
     }
 }

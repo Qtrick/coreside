@@ -1,4 +1,8 @@
 //! Shared HTTP response body budgets for provider adapters.
+//!
+//! Covers non-streaming `Response` bodies (Content-Length precheck + byte ceiling +
+//! cancel). Live SSE adapters (e.g. OpenAI `chat_stream`) enforce their own
+//! `MAX_STREAM_*` ceilings while reading `bytes_stream`.
 
 use futures_util::StreamExt;
 use tokio_util::sync::CancellationToken;

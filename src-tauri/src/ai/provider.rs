@@ -104,8 +104,15 @@ pub trait AiProvider: Send + Sync {
 
     async fn chat(&self, request: AgentRequest) -> Result<AgentResponse, AiError>;
 
-    /// True progressive streaming when the adapter supports it.
-    /// Default: honest buffered fallback via `chat` — emits no fake TextDelta events.
+    /// Progressive streaming when the adapter supports live deltas.
+    ///
+    /// Default: honest **buffered** fallback via `chat`:
+    /// - `ResponseStarted.live = false`
+    /// - **no** `TextDelta` events (do not fabricate typing from a complete body)
+    /// - `ResponseCompleted.buffered = true`
+    ///
+    /// Callers must not treat this path as live SSE. Production `chat_with_auto`
+    /// consumes `chat_stream` and only sets `streamed_live` when live deltas arrive.
     async fn chat_stream(
         &self,
         request: AgentRequest,
@@ -114,22 +121,32 @@ pub trait AiProvider: Send + Sync {
         let _ = tx
             .send(ProviderStreamEvent::ResponseStarted {
                 provider_id: self.provider_id().to_string(),
+                // Model is unknown until `chat` returns; live=false signals buffered.
                 model: String::new(),
                 live: false,
             })
             .await;
+        if request.cancel.is_cancelled() {
+            let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
+            return Err(AiError::Cancelled);
+        }
         let response = match self.chat(request).await {
             Ok(r) => r,
             Err(err) => {
-                let _ = tx
-                    .send(ProviderStreamEvent::ResponseFailed {
-                        code: err.code().to_string(),
-                        message: err.to_string(),
-                    })
-                    .await;
+                if matches!(err, AiError::Cancelled) {
+                    let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
+                } else {
+                    let _ = tx
+                        .send(ProviderStreamEvent::ResponseFailed {
+                            code: err.code().to_string(),
+                            message: err.to_string(),
+                        })
+                        .await;
+                }
                 return Err(err);
             }
         };
+        // Single completion only — never slice raw_text into fake TextDelta events.
         let _ = tx
             .send(ProviderStreamEvent::TextCompleted {
                 text: response.raw_text.clone(),

@@ -16,7 +16,7 @@ use crate::state::AppState;
 use tauri::Manager;
 
 /// Max decoded bytes per attached file (12 MiB).
-const MAX_ATTACHMENT_BYTES: usize = 12 * 1024 * 1024;
+pub const MAX_ATTACHMENT_BYTES: usize = 12 * 1024 * 1024;
 /// Encoded Base64 expands ~4/3; reject oversized wire payloads before decode.
 const MAX_BASE64_CHARS: usize = (MAX_ATTACHMENT_BYTES / 3 + 1) * 4 + 64;
 /// Max attachments per message.
@@ -950,6 +950,10 @@ pub fn cancel_staged_attachment_ids(
 }
 
 /// Resolve opaque attachment ID to bytes for the custom protocol (no path leak).
+///
+/// P1 remaining (blocked on product window/capability wiring): authorization is
+/// opaque-ID + profile-ready only — not per-window / conversation ACL. Do not
+/// claim stronger isolation until that lands. Size is bounded by `MAX_ATTACHMENT_BYTES`.
 pub fn read_attachment_bytes_for_protocol(
     app: &tauri::AppHandle,
     attachment_id: &str,
@@ -991,7 +995,15 @@ pub fn read_attachment_bytes_for_protocol(
             if !canonical.starts_with(&root_c) {
                 return Err("path outside attachments".into());
             }
+            // Bound before whole-file read (protocol must not load unbounded blobs).
+            let meta = std::fs::metadata(&canonical).map_err(|e| e.to_string())?;
+            if meta.len() > MAX_ATTACHMENT_BYTES as u64 {
+                return Err("attachment exceeds size limit".into());
+            }
             let bytes = std::fs::read(&canonical).map_err(|e| e.to_string())?;
+            if bytes.len() > MAX_ATTACHMENT_BYTES {
+                return Err("attachment exceeds size limit".into());
+            }
             return Ok((bytes, safe_response_mime(&mime)));
         }
     }

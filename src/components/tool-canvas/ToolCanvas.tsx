@@ -226,22 +226,54 @@ export function ToolCanvas() {
       values: Record<string, unknown>;
     }) => {
       const summary = `Tool form submitted (${payload.eventName})`;
-      if (activeConversationId) {
-        void api.appendContextLedger({
-          conversationId: activeConversationId,
-          projectId: activeProjectId,
-          entryType: "tool_form_submit",
-          visibility: "model_context_only",
-          payload: {
-            toolId: payload.toolId,
-            componentId: payload.componentId ?? null,
-            eventName: payload.eventName,
-            values: payload.values,
-          },
-          summary,
+      const structuredPayload = {
+        kind: "structuredUserInput",
+        toolId: payload.toolId,
+        componentId: payload.componentId ?? null,
+        eventName: payload.eventName,
+        values: payload.values,
+      };
+      // ponytail: keep composer/prompt payloads bounded (8 KiB compact JSON).
+      let structuredJson = JSON.stringify(structuredPayload);
+      if (structuredJson.length > 8192) {
+        structuredJson = JSON.stringify({
+          kind: "structuredUserInput",
+          toolId: payload.toolId,
+          componentId: payload.componentId ?? null,
+          eventName: payload.eventName,
+          truncated: true,
+          valueKeys: Object.keys(payload.values),
         });
       }
-      void sendMessage(summary);
+      const structuredBlock = [
+        "[STRUCTURED_USER_INPUT trust=local_user_content]",
+        "```json",
+        structuredJson,
+        "```",
+        "[/STRUCTURED_USER_INPUT]",
+      ].join("\n");
+      void (async () => {
+        if (activeConversationId) {
+          try {
+            await api.appendContextLedger({
+              conversationId: activeConversationId,
+              projectId: activeProjectId,
+              entryType: "tool_form_submit",
+              visibility: "model_context_only",
+              payload: {
+                toolId: payload.toolId,
+                componentId: payload.componentId ?? null,
+                eventName: payload.eventName,
+                values: payload.values,
+              },
+              summary,
+            });
+          } catch {
+            // Ledger is best-effort; structured block still reaches the model.
+          }
+        }
+        void sendMessage(`${summary}\n\n${structuredBlock}`);
+      })();
     },
     [activeConversationId, activeProjectId, sendMessage],
   );

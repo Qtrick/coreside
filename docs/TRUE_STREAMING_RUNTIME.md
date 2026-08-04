@@ -1,7 +1,7 @@
 # True Streaming Runtime (RC3)
 
 **Product:** Coreside  
-**Status:** Foundation started — **not complete**  
+**Status:** Phase 2 vertical slice landed — **not complete**  
 **Public beta:** NOT READY  
 **Access date:** 2026-08-03
 
@@ -9,12 +9,16 @@
 
 | Claim | Reality |
 | --- | --- |
-| Live provider streaming in production send path | **Not wired** — `chat_with_auto` still uses `chat()` |
-| OpenAI / compatible SSE adapter | **Implemented** (`OpenAiProvider::chat_stream`, `stream: true`) |
-| Default `chat_stream` | Honest buffered fallback (`live: false`, no fake `TextDelta`) |
-| `emit_text_fluidly` | Still used after complete parse — **not** provider streaming |
-| Hosted gateway | Still `"stream": false` |
-| `NdjsonFrameParser` | Still post-hoc on completed `raw_text` |
+| Production send path | **`chat_with_auto` → `AiProvider::chat_stream`** (no longer `chat`-only) |
+| Live TextDelta → UI | OpenAI / compatible SSE + mock `live stream probe`; `send_message_inner` forwards peeks via `peek_assistant_message` → `AgentTurnEvent::Text` |
+| Auto fallback | **No answer splicing** — after first non-empty `TextDelta`, failure surfaces; no Model B splice |
+| OpenAI / compatible SSE adapter | **Implemented** (`stream: true`; `stream_options` only for `openai`) |
+| Anthropic / Gemini live SSE | **Not implemented** — trait default buffered `chat_stream` |
+| Default / buffered `chat_stream` | Honest (`live: false`, **no** fabricated `TextDelta`, `buffered: true`) |
+| `emit_buffered_text_fluidly` | Post-hoc UI typing for **buffered** completions only; skipped when `streamed_live` |
+| Hosted gateway | Still `"stream": false` (buffered disclosure via default `chat_stream`) |
+| Channel / progressive ops streaming | **Not done** |
+| E2E execution of live probe | Fixture + unit test exist; full desktop E2E not claimed |
 
 ## Provider-neutral events
 
@@ -27,18 +31,25 @@ Defined in `src-tauri/src/ai/provider.rs`:
 - `ResponseCompleted { buffered }`
 - `ResponseCancelled` / `ResponseFailed`
 
-## Required before claiming true streaming
+## Acceptance progress
 
-1. At least one live adapter (OpenAI-compatible SSE or Anthropic SSE) emitting real `TextDelta` before completion.
-2. `send_message_inner` consumes `chat_stream`, not only `chat`.
-3. Acceptance S1: first delta reaches UI before provider completion (fixture with delayed finish).
-4. Remove or relabel `emit_text_fluidly` so product state never calls simulated typing “streaming.”
-5. Hosted: either live stream contract or explicit buffered disclosure.
-6. UTF-8 chunk split + frame split tests (partially: truncate helper fixed).
-7. Backpressure + cancel + oversized frame gates.
+1. ~~At least one live adapter emitting real `TextDelta` before completion~~ — OpenAI SSE + mock delayed fixture (`true_streaming_emits_delta_before_completion`, keyword `live stream probe`).
+2. ~~`send_message_inner` consumes `chat_stream`~~ — via `chat_with_auto`.
+3. S1 delayed-completion fixture — **unit covered**; desktop E2E not claimed.
+4. ~~Relabel fake typing~~ — `emit_buffered_text_fluidly` (not marketed as provider streaming).
+5. Hosted: buffered path only until a live gateway contract exists.
+6. UTF-8 / frame split — partial (OpenAI line SSE + truncate helpers); more coverage still needed.
+7. Backpressure + cancel + oversized frame — partial (`MAX_STREAM_*` on OpenAI; cancel in select loops).
+
+## Remaining gaps (do not claim done)
+
+- Anthropic and Gemini live SSE adapters
+- Channel / progressive application-operation streaming
+- Full E2E run of the live-stream probe in the desktop shell
+- Broader compatible-provider matrix for `stream: true` + `response_format`
 
 ## Non-goals
 
 - Fake deltas from buffered text
 - Copying Partial Update delimiter HTML protocol
-- Claiming Partial Update streaming parity while `chat` remains the production path
+- Claiming Partial Update streaming parity while Anthropic/Gemini/hosted remain buffered

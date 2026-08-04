@@ -1,51 +1,55 @@
-# Implementation Plan — RC3 Final Closure + Secure Partial Update Parity (current priority)
+# Implementation Plan — RC3.1 Secure Partial Update Runtime + Public-Beta Blockers
 
 **Product:** Coreside  
-**Status:** RC3 dependency-order execution; **public beta NOT READY** · **local-first NOT READY** · **Hosted AI NOT READY**  
+**Status:** RC3.1 dependency-order execution in progress; **public beta NOT READY** · **local-first NOT READY** · **Hosted AI NOT READY**  
 **Last updated:** 2026-08-03  
 **Access date:** 2026-08-03  
-**Coreside archive:** `ec8292249b58b565abef72baf285e36adce0ddea0059931166702d4ccf9bd228`  
+**Coreside archive:** `75946b05d7778368700c8d827007d83f1cce0006fcedad8cf69b35f37bb23d69` (`Coreside Chat AI.zip`)  
+**Previous Coreside archive:** `ec8292249b58b565abef72baf285e36adce0ddea0059931166702d4ccf9bd228`  
 **Partial Update archive:** `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607` (byte-identical to prior)  
-**Active commit:** `41fd4595db420eac8b1c5cc30723f1dd377608f4` (dirty)  
-**Source fingerprint:** `3306d5de459be8d661c52e0101b70d956c2218f841bacafdbedb6ebb6acf9f41`
+**Active commit:** `c520fcfba6acdeed7a14ee1e24dd9ea31f67b4c7` (dirty)  
 
-### Scope note (2026-08-03)
+### Scope note (2026-08-03 evening — RC3.1)
 
-- Proceed in **dependency order** below unless source analysis proves another order safer.
-- Partial Update re-audit: [PARTIAL_UPDATE_2026_REAUDIT.md](./PARTIAL_UPDATE_2026_REAUDIT.md) · [PARTIAL_UPDATE_FILE_ANALYSIS_2026.md](./PARTIAL_UPDATE_FILE_ANALYSIS_2026.md) · [PARTIAL_UPDATE_SECURE_ADOPTION_ARCHITECTURE.md](./PARTIAL_UPDATE_SECURE_ADOPTION_ARCHITECTURE.md) · `reports/partial-update-file-manifest-current.json` · `reports/partial-update-secure-parity-matrix.json` · `reports/partial-update-system-map.json` · `reports/partial-update-current-gap-audit.json`.
-- Baseline: [CURRENT_SOURCE_BASELINE.md](./CURRENT_SOURCE_BASELINE.md) · `reports/current-source-baseline.json`.
-- July Partial Update status claims are **stale** for Coreside completeness.
-- True provider streaming is **ABSENT** (`AiProvider::chat` only; `emit_text_fluidly` is fake). Forms ledger is **not** injected into prompts. Branch/replay/inspector/queue UI are **largely disconnected**. HTML/JS/CDN/iframe forms remain **rejected**.
+Production implementation is underway (not audit-only). Honest landed work this session:
 
-## RC3 phases 1–13 (dependency order; mark started)
+| Workstream | Status |
+| --- | --- |
+| Baseline vs `75946b05…` | **Done** (dirty tree labeled) |
+| Misleading npm script names | **Done** (`preservation-suite` / `transactions`; removed false parity/replay/inspector) |
+| True streaming vertical slice | **Landed** — `chat_with_auto` → `chat_stream`; OpenAI live SSE; UI TextDelta; unit TS-1; Journey 12 **written, not executed** |
+| Bounded NDJSON parser | **Landed** — canonical `StreamEvent` path + legacy harvest |
+| Queue UI | **Landed** — `ConversationQueue` |
+| Branch / snapshot / replay / inspector UI | **Landed** — `ConversationHistory` (replay read-only; paced player incomplete) |
+| Structured forms → model | **Landed** — ledger inject + structured message blocks (bounded) |
+| Maintenance journal startup | **Landed** — Recovery / safe pre-swap clear / skip scheduler (full restore still open) |
+| Anthropic/Gemini live SSE | **Open** |
+| Progressive preview transaction | **Open** |
+| Attachment crash-consistency suite | **Open** (P1) |
+| Desktop E2E full suite / packaged smoke | **Open** |
 
-| # | Scope | Status | Exit criteria (honest) |
-| ---: | --- | --- | --- |
-| 1 | Current-source and archive baseline | **Started** | Baseline docs/JSON match archives + fingerprint; dirty labeled |
-| 2 | Current Partial Update file/system re-audit | **Started** | 2026 re-audit docs + four JSON reports present; July claims marked stale |
-| 3 | Attachment message-commit atomicity | **Started** | All-or-none message+attachment commit + crash reconciliation evidenced |
-| 4 | Attachment GC, ownership, protocol auth, multimodal handoff | **Started** | GC/ownership/protocol proofs; no client-authoritative storage keys |
-| 5 | Durable-profile definition | Not started | Normative profile contents enumerated and tested |
-| 6 | Persisted maintenance journal | Not started | Intent journal survives crash across profile ops |
-| 7 | Subsystem quiescence and scheduler lifecycle | Not started | Quiesce/resume documented and test-backed |
-| 8 | Coherent full-profile restore | Not started | Restore verified end-to-end or waived in writing |
-| 9 | Media consistency | Not started | Media/attachment references consistent across backup/restore |
-| 10 | Backup provenance and archive hardening | Not started | Per-asset provenance + component ZIP validation |
-| 11 | `.coreside-app` hardening | Not started | Secure package import transaction; adversarial suite |
-| 12 | Provider endpoint and response security | **Started** | Bounded bodies/timeouts (`http_limits`); health/catalog covered |
-| 13 | Typed provider-neutral messages and context | **Started** | Stable idempotency / logical request identity; typed context path |
+July Partial Update status claims remain **stale** for completeness. HTML/JS/CDN/iframe forms remain **rejected**.
 
-Phases **14+** (true streaming, secure frames, forms/events, branch/replay/inspector, E2E, packaged assurance, release evidence) follow after 1–13 foundations. Early dirty edits to `streaming.rs` / `queue.rs` do **not** mark those later phases complete.
+## RC3.1 phases (dependency order)
+
+| # | Scope | Status |
+| ---: | --- | --- |
+| 1 | Baseline + evidence correction | **Done** (dirty) |
+| 2 | Production true streaming slice | **Partial** — unit pass; E2E not_run |
+| 3 | Provider + frame protocol completeness | **Partial** — parser hardened; Anthropic/Gemini open |
+| 4 | Progressive preview + preservation path | **Open** |
+| 5 | Structured forms/context | **Partial** — production inject landed |
+| 6 | Queue / branch / replay / inspector UI | **Partial** — usable panels; paced replay open |
+| 7 | Attachment integrity + multimodal | **Partial** — foundations + size cap; crash suite open |
+| 8 | Durable profile + restore | **Partial** — journal decisions; coherent restore open |
+| 9–13 | Media/backup/packages/authority/wallpaper/E2E/assurance | **Open** |
 
 ## Explicit non-claims
 
 - Public beta **NOT READY**. Local-first **NOT READY**. Hosted AI **NOT READY**.
-- Do not invent E2E, packaged smoke, wallpaper visual-proof, or streaming pass without evidence.
-- Not ASVS/WCAG certified.
+- Do not invent E2E, packaged smoke, wallpaper visual-proof, or full Partial Update parity without evidence.
 - Dirty worktree ≠ release snapshot.
-- Do not claim Partial Update parity for HTML/JS/CDN/iframe forms.
 
----
 
 # Implementation Plan — Release Candidate (prior RC1–RC9 track; superseded for ordering by RC3 phases 1–13 above)
 

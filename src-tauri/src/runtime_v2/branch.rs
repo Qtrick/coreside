@@ -266,6 +266,29 @@ pub fn list_branches(
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
 }
 
+/// List snapshots for a conversation. Payload is omitted (Null) for list size;
+/// call [`get_snapshot`] when full read-only payload is needed.
+pub fn list_snapshots(
+    db: &Database,
+    conversation_id: &str,
+) -> DbResult<Vec<SnapshotRecord>> {
+    let mut stmt = db.conn().prepare(
+        "SELECT id, conversation_id, project_id, description, created_at
+         FROM conversation_snapshots WHERE conversation_id = ?1 ORDER BY created_at DESC",
+    )?;
+    let rows = stmt.query_map([conversation_id], |row| {
+        Ok(SnapshotRecord {
+            id: row.get(0)?,
+            conversation_id: row.get(1)?,
+            project_id: row.get(2)?,
+            description: row.get(3)?,
+            payload: Value::Null,
+            created_at: row.get(4)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,6 +323,21 @@ mod tests {
             assert!(get_snapshot(&db, old).is_err());
         }
         assert!(get_snapshot(&db, ids.last().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn list_snapshots_returns_metadata_without_payload() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("list-snap.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "List", None).unwrap();
+        let created = create_snapshot(&mut db, &conv.id, None, "checkpoint").unwrap();
+        assert!(!created.payload.is_null());
+
+        let listed = list_snapshots(&db, &conv.id).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, created.id);
+        assert_eq!(listed[0].description, "checkpoint");
+        assert!(listed[0].payload.is_null());
     }
 
     #[test]

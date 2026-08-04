@@ -21,7 +21,7 @@ mod tool_loop;
 pub use access_mode::{resolve_access_presentation, AiAccessPresentation, DisclosurePolicy};
 
 pub use anthropic::AnthropicProvider;
-pub use auto::chat_with_auto;
+pub use auto::{chat_with_auto, peek_assistant_message};
 pub use capability_registry::{AgentCapability, ToolCallRequest, ToolCallResult};
 pub use errors::AiError;
 pub use gemini::GeminiProvider;

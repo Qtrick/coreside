@@ -777,6 +777,8 @@ export const api = {
       projectId: projectId ?? null,
       description: description ?? null,
     }),
+  listSnapshots: (conversationId: string) =>
+    invoke<Record<string, unknown>[]>("list_snapshots_cmd", { conversationId }),
   getSnapshot: (snapshotId: string) =>
     invoke<Record<string, unknown>>("get_snapshot_cmd", { snapshotId }),
   deleteSnapshot: (snapshotId: string) =>

@@ -154,6 +154,7 @@ fn main() {
             "list_projects_cmd",
             "list_provider_connections",
             "list_search_sessions_cmd",
+            "list_snapshots_cmd",
             "list_tools",
             "list_transactions_cmd",
             "list_unassigned_conversations_cmd",

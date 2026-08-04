@@ -5,7 +5,10 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 use super::errors::AiError;
-use super::provider::{AgentRequest, AgentResponse, AiProvider, ProviderHealth, UsageMetadata};
+use super::provider::{
+    AgentRequest, AgentResponse, AiProvider, ProviderHealth, ProviderStreamEvent, ProviderStreamTx,
+    UsageMetadata,
+};
 use super::response_schema::SCHEMA_VERSION;
 
 pub struct MockAiProvider;
@@ -286,6 +289,119 @@ impl AiProvider for MockAiProvider {
             provider_id: self.provider_id().to_string(),
         })
     }
+
+    /// Live stream fixture for TS-1: first TextDelta arrives before delayed completion.
+    /// Trigger with user text containing `live stream probe` (E2E / unit).
+    async fn chat_stream(
+        &self,
+        request: AgentRequest,
+        tx: ProviderStreamTx,
+    ) -> Result<AgentResponse, AiError> {
+        let user_text = request
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.role == "user")
+            .map(|m| m.content.as_str())
+            .unwrap_or("");
+        let live = user_text.to_lowercase().contains("live stream probe");
+        if request.cancel.is_cancelled() {
+            let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
+            return Err(AiError::Cancelled);
+        }
+
+        if !live {
+            // Honest buffered fallback — no fake TextDelta (same contract as trait default).
+            let _ = tx
+                .send(ProviderStreamEvent::ResponseStarted {
+                    provider_id: self.provider_id().to_string(),
+                    model: String::new(),
+                    live: false,
+                })
+                .await;
+            let response = self.chat(request).await.map_err(|err| {
+                // Best-effort terminal event; ignore send failures on closed channel.
+                let ev = if matches!(err, AiError::Cancelled) {
+                    ProviderStreamEvent::ResponseCancelled
+                } else {
+                    ProviderStreamEvent::ResponseFailed {
+                        code: err.code().to_string(),
+                        message: err.to_string(),
+                    }
+                };
+                let _ = tx.try_send(ev);
+                err
+            })?;
+            let _ = tx
+                .send(ProviderStreamEvent::TextCompleted {
+                    text: response.raw_text.clone(),
+                })
+                .await;
+            let _ = tx
+                .send(ProviderStreamEvent::ResponseCompleted {
+                    response: response.clone(),
+                    buffered: true,
+                })
+                .await;
+            return Ok(response);
+        }
+
+        let raw = json!({
+            "schemaVersion": SCHEMA_VERSION,
+            "assistantMessage": "Live stream probe complete",
+            "responseType": "message",
+            "diagnostics": { "fixture": "live_stream_probe" }
+        })
+        .to_string();
+
+        let _ = tx
+            .send(ProviderStreamEvent::ResponseStarted {
+                provider_id: self.provider_id().to_string(),
+                model: "mock-fixture".into(),
+                live: true,
+            })
+            .await;
+        let _ = tx
+            .send(ProviderStreamEvent::TextDelta {
+                text: r#"{"assistantMessage":"Live stream"#.into(),
+            })
+            .await;
+
+        tokio::select! {
+            _ = request.cancel.cancelled() => {
+                let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
+                return Err(AiError::Cancelled);
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_millis(120)) => {}
+        }
+
+        let _ = tx
+            .send(ProviderStreamEvent::TextDelta {
+                text: r#" probe complete","responseType":"message"}"#.into(),
+            })
+            .await;
+
+        let response = AgentResponse {
+            raw_text: raw.clone(),
+            usage: UsageMetadata {
+                prompt_tokens: Some(10),
+                completion_tokens: Some(20),
+                total_tokens: Some(30),
+            },
+            model: "mock-fixture".into(),
+            provider_id: self.provider_id().to_string(),
+        };
+        let _ = tx
+            .send(ProviderStreamEvent::TextCompleted { text: raw })
+            .await;
+        let _ = tx
+            .send(ProviderStreamEvent::ResponseCompleted {
+                response: response.clone(),
+                buffered: false,
+            })
+            .await;
+        Ok(response)
+    }
 }
 
 #[cfg(test)]
@@ -324,6 +440,70 @@ mod tests {
             .components
             .iter()
             .any(|c| c.component_type == "counter"));
+    }
+
+    #[tokio::test]
+    async fn live_stream_probe_emits_delta_before_completion() {
+        let provider = MockAiProvider::new();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        let cancel = CancellationToken::new();
+        let request = AgentRequest {
+            system_prompt: "test".into(),
+            messages: vec![AgentMessage {
+                role: "user".into(),
+                content: "please run live stream probe now".into(),
+            }],
+            cancel: cancel.clone(),
+            idempotency_key: Some("probe".into()),
+        };
+        let started = std::time::Instant::now();
+        let join = tokio::spawn(async move { provider.chat_stream(request, tx).await });
+        let mut first_delta_at = None;
+        while let Some(ev) = rx.recv().await {
+            if matches!(ev, ProviderStreamEvent::TextDelta { .. }) && first_delta_at.is_none() {
+                first_delta_at = Some(started.elapsed());
+            }
+            if matches!(ev, ProviderStreamEvent::ResponseCompleted { .. }) {
+                break;
+            }
+        }
+        let _ = join.await.unwrap().unwrap();
+        let first = first_delta_at.expect("expected live TextDelta");
+        assert!(
+            first < std::time::Duration::from_millis(80),
+            "probe delta should arrive before delayed completion, got {first:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn buffered_chat_stream_has_no_fake_deltas() {
+        let provider = MockAiProvider::new();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        let request = AgentRequest {
+            system_prompt: "test".into(),
+            messages: vec![AgentMessage {
+                role: "user".into(),
+                content: "hello".into(),
+            }],
+            cancel: CancellationToken::new(),
+            idempotency_key: None,
+        };
+        let join = tokio::spawn(async move { provider.chat_stream(request, tx).await });
+        let mut saw_delta = false;
+        let mut buffered_complete = false;
+        while let Some(ev) = rx.recv().await {
+            match ev {
+                ProviderStreamEvent::TextDelta { .. } => saw_delta = true,
+                ProviderStreamEvent::ResponseCompleted { buffered, .. } => {
+                    buffered_complete = buffered;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let _ = join.await.unwrap().unwrap();
+        assert!(!saw_delta, "buffered path must not fabricate TextDelta");
+        assert!(buffered_complete);
     }
 
     #[tokio::test]

@@ -1,22 +1,33 @@
 # Known Issues
 
 **Product:** Coreside v0.1.0  
-**Last updated:** 2026-08-01  
-**Evidence:** regenerate with `npm run release:evidence` — do not treat July `release-gates.json` counts as current.
+**Last updated:** 2026-08-03  
+**Evidence:** regenerate with `npm run release:evidence` — do not treat July counts as current.
 
 Tracked gaps affecting release assurance. Not an exhaustive bug list.
+
+## RC3.1 public-beta blockers (current)
+
+| Issue | Severity | Status |
+| --- | --- | --- |
+| Desktop E2E Journey 12 (true streaming) | P1 evidence | **Spec written; not_run** |
+| Full desktop E2E suite + packaged smoke | P1 | **Open** |
+| Anthropic / Gemini live SSE | P1 product | **Open** (buffered honest fallback) |
+| Progressive preview transaction on real path | P1 | **Open** |
+| Attachment commit→promote crash suite | P1 | **Open** (startup reconcile exists; suite incomplete) |
+| Attachment protocol conversation ACL | P1 | **Open** (opaque IDs + size cap; scope ACL incomplete) |
+| Coherent full-profile restore | P1 | **Open** (journal startup decisions landed) |
+| Wallpaper real pixel / packaged proof | P1 | **Open** |
+| Paced replay player | P2 | **Partial** — History lists transactions read-only |
+| Hosted AI streaming gateway | P1 hosted | **Open** (`stream: false`) |
 
 ## Assurance infrastructure
 
 | Issue | Severity | Status |
 | --- | --- | --- |
-| Desktop E2E harness | High (for beta) | **Partial** — WebdriverIO + feature-gated plugins; journeys 1–10 automated; journeys **7** and **10** honestly `passed_partial`. See `docs/E2E_EXECUTION.md` |
-| Packaged Tauri build | High (for beta) | **Partial** — local `npm run build` produced macOS `.app` + `.dmg`; packaging CI added; clean-profile packaged smoke still needs recorded evidence |
-| Manual A–AB / journeys K–P not recorded | High (for beta) | **Open** — see `docs/MANUAL_RELEASE_CHECKLIST.md` |
-| CI workflows | Medium | **Fixed** — verify + cross-compile + e2e-desktop + packaging |
-| Migration fixture testing | Medium | **Fixed** — `npm run test:migrations` |
-| Performance baselines (desktop) | Medium | **Open** — bundle sizes measured; cold-start timings still thin |
-| Stale July readiness reports | Medium | **Fixed** — `release:evidence` supersedes `release-gates.json` |
+| Desktop E2E harness | High (for beta) | **Partial** — journeys 1–11 present; 12 added not executed |
+| Packaged Tauri build | High (for beta) | **Partial** — clean-profile packaged smoke still needs recorded evidence |
+| Misleading evidence script names | Medium | **Fixed** — renamed overclaiming `parity`/`replay`/`inspector` scripts |
 
 ## Generated application runtime (2026-08-01)
 

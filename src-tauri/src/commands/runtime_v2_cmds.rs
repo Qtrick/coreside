@@ -12,7 +12,8 @@ use crate::runtime_v2::{
     delete_snapshot, enqueue, flush_scheduler, get_continuity, get_draft, get_item,
     get_provider_profile, get_route_state, get_snapshot, get_surface, get_surface_state,
     get_transaction, list_branches, list_diagnostics, list_inline_surfaces, list_ledger_entries,
-    list_queue, list_transactions, navigate_route, promote_inline_to_tool, recover_stale_active,
+    list_queue, list_snapshots, list_transactions, navigate_route, promote_inline_to_tool,
+    recover_stale_active,
     remove_queued, save_continuity, save_draft, save_surface_state, schedule_and_apply,
     schedule_patches, set_route_state, store_diagnostics, suspend_surface, undo_transaction,
     update_surface_definition, AgentResponseV2, AppOperation, AppTransactionRecord, ApplyResult,
@@ -642,6 +643,16 @@ pub fn create_snapshot_cmd(
         project_id.as_deref(),
         description.as_deref().unwrap_or(""),
     )?)
+}
+
+#[tauri::command]
+pub fn list_snapshots_cmd(
+    state: State<'_, AppState>,
+    conversation_id: String,
+) -> Result<Vec<SnapshotRecord>, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    Ok(list_snapshots(&db, &conversation_id)?)
 }
 
 #[tauri::command]

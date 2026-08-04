@@ -246,6 +246,7 @@ pub fn run() {
             commands::branch_conversation_cmd,
             commands::list_branches_cmd,
             commands::create_snapshot_cmd,
+            commands::list_snapshots_cmd,
             commands::get_snapshot_cmd,
             commands::delete_snapshot_cmd,
             commands::enqueue_agent_turn_cmd,
@@ -340,6 +341,8 @@ pub fn run() {
                         _ => {}
                     }
                 }
+
+                let mut skip_ordinary_services = false;
                 if let Ok(paths) = app_paths::AppPaths::resolve() {
                     match maintenance_journal::load_journal(&paths) {
                         Ok(Some(journal)) => {
@@ -350,28 +353,120 @@ pub fn run() {
                                 ?action,
                                 "unfinished maintenance journal detected at startup"
                             );
-                            // Never delete profile trees from a stale journal alone.
-                            if matches!(
-                                action,
+                            match action {
+                                maintenance_journal::JournalStartupAction::None => {
+                                    if journal.stage == "completed" {
+                                        if let Err(err) =
+                                            maintenance_journal::clear_journal(&paths)
+                                        {
+                                            tracing::warn!(
+                                                error = %err.message,
+                                                "failed to clear completed maintenance journal"
+                                            );
+                                        }
+                                    }
+                                }
+                                maintenance_journal::JournalStartupAction::RollBack
+                                    if !journal.irreversible =>
+                                {
+                                    // Safe pre-swap: discard staging markers and clear journal.
+                                    // Do not delete profile trees.
+                                    if let Some(staged) = journal.staged_profile.as_deref() {
+                                        let staged_path = std::path::PathBuf::from(staged);
+                                        if staged_path.exists() {
+                                            tracing::warn!(
+                                                path = %staged_path.display(),
+                                                "pre-swap rollback leaving staged tree for Recovery inspection"
+                                            );
+                                        }
+                                    }
+                                    if let Err(err) = maintenance_journal::clear_journal(&paths) {
+                                        tracing::error!(
+                                            error = %err.message,
+                                            "pre-swap journal clear failed — entering Recovery"
+                                        );
+                                        skip_ordinary_services = true;
+                                    } else {
+                                        tracing::info!(
+                                            "pre-swap maintenance journal cleared after safe rollback decision"
+                                        );
+                                    }
+                                    if skip_ordinary_services {
+                                        if let Some(state) = app.try_state::<AppState>() {
+                                            let mut db = state.db.lock();
+                                            let _ = application_kernel::recovery::enter_safe_startup(
+                                                &mut db,
+                                                "maintenance journal rollback failed",
+                                            );
+                                            *state.bootstrap.lock() =
+                                                crate::db::BootstrapStatus::recovery(
+                                                    "maintenance_journal",
+                                                    "Coreside could not clear a pre-swap maintenance journal. Use Recovery tools before continuing.",
+                                                    None,
+                                                    false,
+                                                );
+                                        }
+                                    }
+                                }
+                                // Irreversible RollBack (guard above missed) + EnterRecovery + Resume
+                                // are exclusive arms — no fall-through from the safe RollBack path.
                                 maintenance_journal::JournalStartupAction::EnterRecovery
-                            ) {
-                                tracing::error!(
-                                    "maintenance journal requires Recovery — refusing silent blank profile"
-                                );
+                                | maintenance_journal::JournalStartupAction::RollBack
+                                | maintenance_journal::JournalStartupAction::Resume => {
+                                    tracing::error!(
+                                        "maintenance journal requires Recovery — refusing ordinary service start"
+                                    );
+                                    skip_ordinary_services = true;
+                                    if let Some(state) = app.try_state::<AppState>() {
+                                        let mut db = state.db.lock();
+                                        let _ = application_kernel::recovery::enter_safe_startup(
+                                            &mut db,
+                                            "unfinished maintenance journal",
+                                        );
+                                        *state.bootstrap.lock() =
+                                            crate::db::BootstrapStatus::recovery(
+                                                "maintenance_journal",
+                                                "Coreside found an unfinished maintenance operation. Use Recovery tools before continuing.",
+                                                None,
+                                                false,
+                                            );
+                                    }
+                                }
                             }
                         }
                         Ok(None) => {}
                         Err(err) => {
                             tracing::error!(
                                 error = %err.message,
-                                "maintenance journal unreadable — Recovery may be required"
+                                "maintenance journal unreadable — entering Recovery"
                             );
+                            skip_ordinary_services = true;
+                            if let Some(state) = app.try_state::<AppState>() {
+                                let mut db = state.db.lock();
+                                let _ = application_kernel::recovery::enter_safe_startup(
+                                    &mut db,
+                                    "unreadable maintenance journal",
+                                );
+                                *state.bootstrap.lock() = crate::db::BootstrapStatus::recovery(
+                                    "maintenance_journal",
+                                    "Coreside could not read the maintenance journal. Use Recovery tools before continuing.",
+                                    None,
+                                    false,
+                                );
+                            }
                         }
                     }
                 }
-                let handle = scheduler_handle.clone();
-                let app_handle = app.handle().clone();
-                automations::spawn_scheduler(app_handle, handle);
+
+                if skip_ordinary_services {
+                    tracing::warn!(
+                        "skipping automation scheduler — maintenance Recovery required"
+                    );
+                } else {
+                    let handle = scheduler_handle.clone();
+                    let app_handle = app.handle().clone();
+                    automations::spawn_scheduler(app_handle, handle);
+                }
             } else {
                 tracing::warn!(
                     "skipping automation scheduler and job interruption — recovery shell active"

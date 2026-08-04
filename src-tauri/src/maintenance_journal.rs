@@ -245,10 +245,18 @@ pub fn clear_journal(paths: &AppPaths) -> Result<(), CommandError> {
 }
 
 /// Classify an unfinished journal without deleting profile trees.
+///
+/// Startup applies these decisions:
+/// - `None` / completed → clear stale completed journal
+/// - `RollBack` + `!irreversible` → clear journal (staging trees preserved for inspection)
+/// - `EnterRecovery` / irreversible rollback / unreadable → `enter_safe_startup` + skip scheduler
+///
+/// `Resume` is reserved and not returned by classify today.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum JournalStartupAction {
     None,
+    /// Reserved — not emitted by classify today.
     Resume,
     RollBack,
     EnterRecovery,
@@ -258,9 +266,8 @@ pub fn classify_unfinished_journal(journal: &MaintenanceJournal) -> JournalStart
     match journal.stage.as_str() {
         "completed" | "inactive" => JournalStartupAction::None,
         "failed" | "recovery-required" => JournalStartupAction::EnterRecovery,
-        "swapping" | "reopening" | "rehydrating" if journal.irreversible => {
-            JournalStartupAction::EnterRecovery
-        }
+        // Irreversible mid-swap: never auto-resume from detect-only startup.
+        "swapping" | "reopening" | "rehydrating" => JournalStartupAction::EnterRecovery,
         "rolling-back" => JournalStartupAction::RollBack,
         "preparing" | "cancelling-work" | "flushing" | "safety-backup" | "staging"
         | "validating" | "awaiting-confirmation" => JournalStartupAction::RollBack,
@@ -336,6 +343,29 @@ mod tests {
                 .into_owned(),
         );
         assert!(validate_journal_paths(&j, &paths).is_ok());
+    }
+
+    #[test]
+    fn classify_mid_swap_enters_recovery_even_without_irreversible_flag() {
+        let mut j = MaintenanceJournal::new("restore");
+        j.stage = "swapping".into();
+        j.irreversible = false;
+        assert_eq!(
+            classify_unfinished_journal(&j),
+            JournalStartupAction::EnterRecovery
+        );
+    }
+
+    #[test]
+    fn classify_rolling_back_remains_rollback_when_irreversible() {
+        // Startup match arms (not classify) send irreversible RollBack to Recovery.
+        let mut j = MaintenanceJournal::new("restore");
+        j.stage = "rolling-back".into();
+        j.irreversible = true;
+        assert_eq!(
+            classify_unfinished_journal(&j),
+            JournalStartupAction::RollBack
+        );
     }
 
     #[test]

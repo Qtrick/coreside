@@ -263,7 +263,45 @@ fn record_action(
     }));
 }
 
-async fn emit_text_fluidly(
+/// Forward live provider text to the UI. JSON protocols peek `assistantMessage`;
+/// plain text streams emit the accumulated body.
+fn emit_live_text_delta(
+    app: &AppHandle,
+    conversation_id: &str,
+    live_text_accum: &mut String,
+    last_preview: &mut String,
+    delta: &str,
+) {
+    use crate::ai::peek_assistant_message;
+    live_text_accum.push_str(delta);
+    if let Some(preview) = peek_assistant_message(live_text_accum) {
+        if preview != *last_preview {
+            *last_preview = preview.clone();
+            emit_turn(
+                app,
+                AgentTurnEvent::Text {
+                    conversation_id: conversation_id.to_string(),
+                    text: preview,
+                },
+            );
+        }
+    } else if !live_text_accum.trim_start().starts_with('{') {
+        // Plain-text live streams (non-JSON protocols / fixtures).
+        emit_turn(
+            app,
+            AgentTurnEvent::Text {
+                conversation_id: conversation_id.to_string(),
+                text: live_text_accum.clone(),
+            },
+        );
+    }
+}
+
+/// Post-hoc UI typing animation for a **complete buffered** assistant string.
+///
+/// This is **not** provider live streaming. Skip when `ResolvedChat.streamed_live`
+/// is true — live TextDelta events already reached the UI via `chat_stream`.
+async fn emit_buffered_text_fluidly(
     app: &AppHandle,
     conversation_id: &str,
     text: &str,
@@ -1017,6 +1055,111 @@ async fn send_message_inner(
         );
     }
 
+    // Structured form / surface submissions from the context ledger must reach the
+    // model as typed JSON — not only as a human summary chat bubble.
+    // Bounded: ≤8 entries, per-entry payload cap, total inject cap (compact JSON).
+    {
+        const MAX_STRUCTURED_ENTRIES: usize = 8;
+        const MAX_ENTRY_PAYLOAD_BYTES: usize = 4_096;
+        const MAX_INJECT_BYTES: usize = 16_384;
+
+        let last_has_structured = chat_messages
+            .last()
+            .is_some_and(|m| m.role == "user" && m.content.contains("[STRUCTURED_USER_INPUT"));
+
+        let db = state.db.lock();
+        if let Ok(entries) = crate::runtime_v2::list_ledger_entries(
+            &db,
+            &conversation_id,
+            project_id.as_deref(),
+            MAX_STRUCTURED_ENTRIES,
+        ) {
+            let structured: Vec<&crate::runtime_v2::ContextLedgerEntry> = entries
+                .iter()
+                .filter(|e| {
+                    e.visibility == "model_context_only"
+                        || e.entry_type.contains("form_submit")
+                })
+                .filter(|e| !chat_messages.iter().any(|m| m.content.contains(&e.id)))
+                .collect();
+            if !structured.is_empty() {
+                let mut budget = MAX_INJECT_BYTES;
+                let mut out_entries = Vec::new();
+                let mut truncated_any = false;
+                for e in &structured {
+                    // UI already embedded this turn's form JSON — skip that sibling only.
+                    if last_has_structured
+                        && chat_messages
+                            .last()
+                            .is_some_and(|m| m.content.contains(&e.summary))
+                    {
+                        continue;
+                    }
+                    let mut payload = e.payload.clone();
+                    let payload_len = serde_json::to_vec(&payload).map(|b| b.len()).unwrap_or(0);
+                    if payload_len > MAX_ENTRY_PAYLOAD_BYTES {
+                        truncated_any = true;
+                        payload = serde_json::json!({
+                            "_truncated": true,
+                            "originalBytes": payload_len,
+                            "summary": e.summary,
+                        });
+                    }
+                    let entry = serde_json::json!({
+                        "id": e.id,
+                        "entryType": e.entry_type,
+                        "summary": e.summary,
+                        "payload": payload,
+                        "createdAt": e.created_at,
+                    });
+                    let entry_bytes = serde_json::to_vec(&entry).map(|b| b.len()).unwrap_or(0);
+                    if entry_bytes + 64 > budget {
+                        truncated_any = true;
+                        break;
+                    }
+                    budget = budget.saturating_sub(entry_bytes);
+                    out_entries.push(entry);
+                }
+                if !out_entries.is_empty() {
+                    let included = out_entries.len();
+                    let payload = serde_json::json!({
+                        "kind": "structuredUserInput",
+                        "trust": "local_user_content",
+                        "truncated": truncated_any,
+                        "entries": out_entries,
+                    });
+                    let mut serialized =
+                        serde_json::to_string(&payload).unwrap_or_else(|_| "{}".into());
+                    if serialized.len() > MAX_INJECT_BYTES {
+                        // ponytail: hard ceiling — drop bodies rather than blow the prompt.
+                        truncated_any = true;
+                        serialized = "{\"kind\":\"structuredUserInput\",\"trust\":\"local_user_content\",\"truncated\":true,\"entries\":[]}".into();
+                    }
+                    if let Some(last) = chat_messages.last_mut() {
+                        if last.role == "user" {
+                            last.content = format!(
+                                "{}\n\n[STRUCTURED_USER_INPUT trust=local_user_content]\n```json\n{}\n```\n[/STRUCTURED_USER_INPUT]",
+                                last.content, serialized
+                            );
+                        }
+                    }
+                    record_action(
+                        &app,
+                        &conversation_id,
+                        &mut action_log,
+                        &format!(
+                            "Included {included} structured input(s){}",
+                            if truncated_any { " (truncated)" } else { "" }
+                        ),
+                        "structured_context_included",
+                        api_key_ref,
+                    );
+                }
+            }
+        }
+        drop(db);
+    }
+
     let cancel = CancellationToken::new();
     state.register_request(&request_key, cancel.clone());
 
@@ -1025,6 +1168,10 @@ async fn send_message_inner(
     let api_key_for_cb = api_key.clone();
     let action_log_live = std::sync::Arc::new(std::sync::Mutex::new(action_log.take()));
     let action_log_for_cb = action_log_live.clone();
+    let app_for_stream = app.clone();
+    let conversation_for_stream = conversation_id.clone();
+    let mut live_text_accum = String::new();
+    let mut last_preview = String::new();
     let resolved = chat_with_auto(
         &config,
         &model_preference,
@@ -1047,6 +1194,32 @@ async fn send_message_inner(
                 );
             }
             // When Action Log is disabled (guard holds None), skip live action emissions.
+        },
+        |event| {
+            use crate::ai::ProviderStreamEvent;
+            match event {
+                ProviderStreamEvent::ResponseStarted { live, .. } => {
+                    if live {
+                        emit_action(&app_for_stream, &conversation_for_stream, "Receiving live response");
+                    } else {
+                        emit_action(
+                            &app_for_stream,
+                            &conversation_for_stream,
+                            "Waiting for buffered response",
+                        );
+                    }
+                }
+                ProviderStreamEvent::TextDelta { text } => {
+                    emit_live_text_delta(
+                        &app_for_stream,
+                        &conversation_for_stream,
+                        &mut live_text_accum,
+                        &mut last_preview,
+                        &text,
+                    );
+                }
+                _ => {}
+            }
         },
     )
     .await;
@@ -1217,6 +1390,10 @@ async fn send_message_inner(
         let api_key_for_cb = api_key.clone();
         let action_log_live = std::sync::Arc::new(std::sync::Mutex::new(action_log.take()));
         let action_log_for_cb = action_log_live.clone();
+        let app_for_stream = app.clone();
+        let conversation_for_stream = conversation_id.clone();
+        let mut live_text_accum = String::new();
+        let mut last_preview = String::new();
 
         let follow_up = chat_with_auto(
             &config,
@@ -1238,6 +1415,36 @@ async fn send_message_inner(
                         "provider_request_started",
                         key,
                     );
+                }
+            },
+            |event| {
+                use crate::ai::ProviderStreamEvent;
+                match event {
+                    ProviderStreamEvent::ResponseStarted { live, .. } => {
+                        if live {
+                            emit_action(
+                                &app_for_stream,
+                                &conversation_for_stream,
+                                "Receiving live response",
+                            );
+                        } else {
+                            emit_action(
+                                &app_for_stream,
+                                &conversation_for_stream,
+                                "Waiting for buffered response",
+                            );
+                        }
+                    }
+                    ProviderStreamEvent::TextDelta { text } => {
+                        emit_live_text_delta(
+                            &app_for_stream,
+                            &conversation_for_stream,
+                            &mut live_text_accum,
+                            &mut last_preview,
+                            &text,
+                        );
+                    }
+                    _ => {}
                 }
             },
         )
@@ -1286,7 +1493,7 @@ async fn send_message_inner(
         parsed.payload.citations = Some(search_meta.citations.clone());
     }
 
-    // Runtime V2: resolve visible assistant text before streaming
+    // Runtime V2: resolve visible assistant text before buffered UI emit
     if parsed.payload.schema_version == "2" {
         if parsed.payload.assistant_message.trim().is_empty() {
             if let Some(msgs) = &parsed.payload.assistant_messages {
@@ -1320,18 +1527,34 @@ async fn send_message_inner(
         &app,
         &conversation_id,
         &mut action_log,
-        "Writing reply",
+        if resolved.streamed_live {
+            "Writing reply"
+        } else {
+            // Honest label: provider returned a complete body; UI may animate it.
+            "Showing buffered reply"
+        },
         "provider_response_received",
         api_key_ref,
     );
     if !parsed.payload.assistant_message.trim().is_empty() {
-        emit_text_fluidly(
-            &app,
-            &conversation_id,
-            &parsed.payload.assistant_message,
-            &cancel,
-        )
-        .await;
+        if resolved.streamed_live {
+            // Final reconciliation — live deltas already painted progressive text.
+            emit_turn(
+                &app,
+                AgentTurnEvent::Text {
+                    conversation_id: conversation_id.clone(),
+                    text: parsed.payload.assistant_message.clone(),
+                },
+            );
+        } else {
+            emit_buffered_text_fluidly(
+                &app,
+                &conversation_id,
+                &parsed.payload.assistant_message,
+                &cancel,
+            )
+            .await;
+        }
     }
 
     let diagnostics = {
@@ -1344,6 +1567,7 @@ async fn send_message_inner(
             "parseWarnings": parsed.parse_warnings,
             "autoMode": resolved.auto_mode,
             "attempts": resolved.attempts,
+            "streamedLive": resolved.streamed_live,
         });
         if let Some(extra) = &parsed.payload.diagnostics {
             d["providerDiagnostics"] = extra.clone();
@@ -1417,24 +1641,30 @@ async fn send_message_inner(
             .map(|o| o.is_empty())
             .unwrap_or(true)
         {
+            // Post-hoc buffered harvest: use legacy/compat parser so bare
+            // AppOperation / AgentResponseV2 in raw_text still harvest (not live NDJSON).
             let mut parser = crate::runtime_v2::NdjsonFrameParser::new();
-            for ev in parser.push(&resolved.response.raw_text) {
-                if let Ok(crate::runtime_v2::StreamEvent::OperationFrameCompleted { operation }) =
-                    &ev
-                {
-                    emit_turn(
-                        &app,
-                        AgentTurnEvent::Operation {
-                            conversation_id: conversation_id.clone(),
-                            operation_id: operation.id.clone(),
-                            status: "validated".into(),
-                        },
-                    );
-                }
-            }
-            for ev in parser.finish() {
-                let _ = ev;
-            }
+            let mut emit_harvest_events =
+                |events: Vec<Result<crate::runtime_v2::StreamEvent, String>>| {
+                    for ev in events {
+                        if let Ok(
+                            crate::runtime_v2::StreamEvent::OperationFrameCompleted { operation },
+                        ) = &ev
+                        {
+                            emit_turn(
+                                &app,
+                                AgentTurnEvent::Operation {
+                                    conversation_id: conversation_id.clone(),
+                                    operation_id: operation.id.clone(),
+                                    status: "validated".into(),
+                                },
+                            );
+                        }
+                    }
+                };
+            emit_harvest_events(parser.push_legacy_compat(&resolved.response.raw_text));
+            // Buffered raw_text often lacks a trailing newline — finish must emit too.
+            emit_harvest_events(parser.finish_legacy_compat());
             let harvested = parser.completed_operations().to_vec();
             if !harvested.is_empty() {
                 operations_from_payload = Some(harvested);

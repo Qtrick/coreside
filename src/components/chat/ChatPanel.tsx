@@ -1,5 +1,7 @@
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
+import { ConversationQueue } from "./ConversationQueue";
+import { ConversationHistory } from "./ConversationHistory";
 import { ProjectIndicator } from "./ProjectIndicator";
 import { useAppStore } from "@/stores/app-store";
 
@@ -34,18 +36,24 @@ export function ChatPanel() {
             </p>
           </div>
         </div>
-        {!active ? (
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => void createConversation()}
-          >
-            New chat
-          </button>
-        ) : null}
+        <div className="panel-header-actions">
+          {activeConversationId ? (
+            <ConversationHistory conversationId={activeConversationId} />
+          ) : null}
+          {!active ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void createConversation()}
+            >
+              New chat
+            </button>
+          ) : null}
+        </div>
       </header>
       {activeConversationId ? (
         <>
+          <ConversationQueue conversationId={activeConversationId} />
           <MessageList />
           <Composer />
         </>

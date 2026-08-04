@@ -2,11 +2,27 @@
 //!
 //! Incomplete JSON is never applied. Frames are buffered until a complete
 //! line/object is available, then validated before preview/apply events.
+//!
+//! Production path (`push` / `finish`) accepts only canonical `StreamEvent`
+//! envelopes. Bare `AppOperation` / `AgentResponseV2` are limited to the
+//! explicitly named legacy/compat harvest path.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::limits::{MAX_DEFINITION_JSON_BYTES, MAX_OPERATIONS_PER_TURN, MAX_PATCH_QUEUE_BYTES};
 use super::operations::{AgentResponseV2, AppOperation};
+
+/// Max bytes for one NDJSON frame (aligned with surface definition ceiling).
+pub const MAX_FRAME_BYTES: usize = MAX_DEFINITION_JSON_BYTES;
+/// Max buffered incomplete frame (one frame in flight).
+pub const MAX_INCOMPLETE_BUFFER: usize = MAX_FRAME_BYTES;
+/// Max total bytes accepted across one parser lifetime (aligned with patch queue).
+pub const MAX_TOTAL_STREAM_BYTES: usize = MAX_PATCH_QUEUE_BYTES;
+/// Max NDJSON frames/events processed by one parser.
+pub const MAX_EVENTS: usize = 512;
+/// Max harvested operations (aligned with per-turn operation ceiling).
+pub const MAX_OPERATIONS: usize = MAX_OPERATIONS_PER_TURN;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -44,9 +60,21 @@ pub enum StreamEvent {
     TurnFailed { turn_id: String, error: String },
 }
 
+#[derive(Clone, Copy)]
+enum ParseMode {
+    Canonical,
+    Legacy,
+}
+
 #[derive(Debug, Default)]
 pub struct NdjsonFrameParser {
-    buffer: String,
+    /// Byte buffer; consumed prefix tracked by `start` (amortized-linear drain).
+    buffer: Vec<u8>,
+    start: usize,
+    total_bytes: usize,
+    event_count: usize,
+    /// Once set, further push/finish calls return this error (framing lost).
+    halted: Option<String>,
     seen_operation_ids: std::collections::HashSet<String>,
     completed_operations: Vec<AppOperation>,
 }
@@ -56,33 +84,151 @@ impl NdjsonFrameParser {
         Self::default()
     }
 
-    /// Push raw stream bytes/text. Returns complete parsed events.
+    /// Production path: push raw stream text. Accepts only canonical `StreamEvent` frames.
     pub fn push(&mut self, chunk: &str) -> Vec<Result<StreamEvent, String>> {
-        self.buffer.push_str(chunk);
+        self.push_bytes(chunk.as_bytes(), ParseMode::Canonical)
+    }
+
+    /// Compatibility path for post-hoc buffered harvest (bare AppOperation /
+    /// AgentResponseV2 still accepted). Not used by live production streaming.
+    pub fn push_legacy_compat(&mut self, chunk: &str) -> Vec<Result<StreamEvent, String>> {
+        self.push_bytes(chunk.as_bytes(), ParseMode::Legacy)
+    }
+
+    /// Canonical finish: any non-whitespace leftover is an incomplete-frame error.
+    pub fn finish(&mut self) -> Vec<Result<StreamEvent, String>> {
+        self.finish_inner(ParseMode::Canonical)
+    }
+
+    /// Legacy finish: non-newline remainder may be a complete buffered JSON object
+    /// (post-hoc harvest of provider raw_text without a trailing newline).
+    pub fn finish_legacy_compat(&mut self) -> Vec<Result<StreamEvent, String>> {
+        self.finish_inner(ParseMode::Legacy)
+    }
+
+    fn push_bytes(&mut self, chunk: &[u8], mode: ParseMode) -> Vec<Result<StreamEvent, String>> {
         let mut out = Vec::new();
-        while let Some(idx) = self.buffer.find('\n') {
-            let line = self.buffer[..idx].trim().to_string();
-            self.buffer = self.buffer[idx + 1..].to_string();
+        if let Some(msg) = &self.halted {
+            out.push(Err(msg.clone()));
+            return out;
+        }
+        if chunk.is_empty() {
+            return out;
+        }
+        let next_total = self.total_bytes.saturating_add(chunk.len());
+        if next_total > MAX_TOTAL_STREAM_BYTES {
+            let msg = format!("stream exceeded max total bytes ({MAX_TOTAL_STREAM_BYTES})");
+            self.halted = Some(msg.clone());
+            out.push(Err(msg));
+            return out;
+        }
+        self.total_bytes = next_total;
+        self.buffer.extend_from_slice(chunk);
+
+        while let Some(rel) = self.buffer[self.start..].iter().position(|&b| b == b'\n') {
+            let line_end = self.start + rel;
+            let frame_len = line_end - self.start;
+            if frame_len > MAX_FRAME_BYTES {
+                self.start = line_end + 1;
+                out.push(Err(format!(
+                    "frame exceeds max size ({MAX_FRAME_BYTES} bytes)"
+                )));
+                continue;
+            }
+            let line = match std::str::from_utf8(&self.buffer[self.start..line_end]) {
+                Ok(s) => s.trim().to_string(),
+                Err(_) => {
+                    self.start = line_end + 1;
+                    out.push(Err("frame is not valid UTF-8".into()));
+                    continue;
+                }
+            };
+            self.start = line_end + 1;
             if line.is_empty() {
                 continue;
             }
-            out.push(self.parse_line(&line));
+            if self.event_count >= MAX_EVENTS {
+                let msg = format!("stream event limit exceeded (max {MAX_EVENTS})");
+                self.halted = Some(msg.clone());
+                out.push(Err(msg));
+                return out;
+            }
+            self.event_count += 1;
+            out.push(match mode {
+                ParseMode::Canonical => self.parse_line_canonical(&line),
+                ParseMode::Legacy => self.parse_line_legacy(&line),
+            });
         }
+
+        let incomplete = self.buffer.len() - self.start;
+        if incomplete > MAX_INCOMPLETE_BUFFER {
+            let msg = format!(
+                "incomplete frame exceeds max buffer ({MAX_INCOMPLETE_BUFFER} bytes)"
+            );
+            // Framing lost — halt so later chunks cannot resync mid-garbage.
+            self.halted = Some(msg.clone());
+            self.buffer.clear();
+            self.start = 0;
+            out.push(Err(msg));
+            return out;
+        }
+
+        // Amortized compact: drain consumed prefix without copying on every line.
+        self.compact_if_needed();
         out
     }
 
-    /// Flush any remaining complete JSON object (no trailing newline).
-    pub fn finish(&mut self) -> Vec<Result<StreamEvent, String>> {
-        let rem = self.buffer.trim().to_string();
+    fn finish_inner(&mut self, mode: ParseMode) -> Vec<Result<StreamEvent, String>> {
+        if let Some(msg) = &self.halted {
+            return vec![Err(msg.clone())];
+        }
+        let trimmed = trim_ascii_ws(&self.buffer[self.start..]).to_vec();
         self.buffer.clear();
-        if rem.is_empty() {
+        self.start = 0;
+        if trimmed.is_empty() {
             return vec![];
         }
-        vec![self.parse_line(&rem)]
+        match mode {
+            ParseMode::Canonical => {
+                let preview = String::from_utf8_lossy(&trimmed);
+                vec![Err(format!(
+                    "incomplete frame at end of stream: {}",
+                    truncate(&preview, 80)
+                ))]
+            }
+            ParseMode::Legacy => {
+                if trimmed.len() > MAX_FRAME_BYTES {
+                    return vec![Err(format!(
+                        "frame exceeds max size ({MAX_FRAME_BYTES} bytes)"
+                    ))];
+                }
+                let line = match std::str::from_utf8(&trimmed) {
+                    Ok(s) => s.trim().to_string(),
+                    Err(_) => return vec![Err("frame is not valid UTF-8".into())],
+                };
+                if line.is_empty() {
+                    return vec![];
+                }
+                if self.event_count >= MAX_EVENTS {
+                    let msg = format!("stream event limit exceeded (max {MAX_EVENTS})");
+                    self.halted = Some(msg.clone());
+                    return vec![Err(msg)];
+                }
+                self.event_count += 1;
+                vec![self.parse_line_legacy(&line)]
+            }
+        }
     }
 
-    fn parse_line(&mut self, line: &str) -> Result<StreamEvent, String> {
-        // Incomplete JSON should not reach here as a full line, but guard anyway.
+    fn compact_if_needed(&mut self) {
+        // Drain when half the capacity is consumed prefix — amortized O(n) overall.
+        if self.start > 0 && self.start >= self.buffer.len() / 2 {
+            self.buffer.drain(..self.start);
+            self.start = 0;
+        }
+    }
+
+    fn parse_line_canonical(&mut self, line: &str) -> Result<StreamEvent, String> {
         if !line.starts_with('{') || !line.ends_with('}') {
             return Err(format!(
                 "incomplete or invalid frame: {}",
@@ -91,28 +237,48 @@ impl NdjsonFrameParser {
         }
         let value: Value =
             serde_json::from_str(line).map_err(|e| format!("malformed frame: {e}"))?;
-        // Accept either a StreamEvent or a bare AppOperation / AgentResponseV2 fragment.
+        let ev: StreamEvent = serde_json::from_value(value)
+            .map_err(|_| "unrecognized stream frame (expected StreamEvent)".to_string())?;
+        self.record_stream_event(&ev)?;
+        Ok(ev)
+    }
+
+    /// Legacy/compat: StreamEvent, bare AppOperation, or AgentResponseV2.
+    fn parse_line_legacy(&mut self, line: &str) -> Result<StreamEvent, String> {
+        if !line.starts_with('{') || !line.ends_with('}') {
+            return Err(format!(
+                "incomplete or invalid frame: {}",
+                truncate(line, 80)
+            ));
+        }
+        let value: Value =
+            serde_json::from_str(line).map_err(|e| format!("malformed frame: {e}"))?;
         if let Ok(ev) = serde_json::from_value::<StreamEvent>(value.clone()) {
-            if let StreamEvent::OperationFrameCompleted { operation } = &ev {
-                if !self.seen_operation_ids.insert(operation.id.clone()) {
-                    return Err(format!("duplicate operation frame: {}", operation.id));
-                }
-                self.completed_operations.push(operation.clone());
-            }
+            self.record_stream_event(&ev)?;
             return Ok(ev);
         }
         if let Ok(op) = serde_json::from_value::<AppOperation>(value.clone()) {
-            if !self.seen_operation_ids.insert(op.id.clone()) {
-                return Err(format!("duplicate operation frame: {}", op.id));
-            }
-            self.completed_operations.push(op.clone());
+            self.record_operation(op.clone())?;
             return Ok(StreamEvent::OperationFrameCompleted { operation: op });
         }
         if let Ok(resp) = serde_json::from_value::<AgentResponseV2>(value) {
+            if resp.operations.len()
+                > MAX_OPERATIONS.saturating_sub(self.completed_operations.len())
+            {
+                return Err(format!("operations exceed max of {MAX_OPERATIONS}"));
+            }
+            // Validate the whole batch before mutating seen/completed sets.
+            let mut batch_ids = std::collections::HashSet::with_capacity(resp.operations.len());
+            for op in &resp.operations {
+                if !batch_ids.insert(op.id.clone()) || self.seen_operation_ids.contains(&op.id) {
+                    return Err(format!("duplicate operation frame: {}", op.id));
+                }
+            }
             for op in &resp.operations {
                 self.seen_operation_ids.insert(op.id.clone());
-                self.completed_operations.push(op.clone());
             }
+            self.completed_operations
+                .extend(resp.operations.iter().cloned());
             return Ok(StreamEvent::PreviewUpdated {
                 operations: resp.operations,
             });
@@ -120,9 +286,40 @@ impl NdjsonFrameParser {
         Err("unrecognized stream frame".into())
     }
 
+    fn record_stream_event(&mut self, ev: &StreamEvent) -> Result<(), String> {
+        if let StreamEvent::OperationFrameCompleted { operation } = ev {
+            self.record_operation(operation.clone())?;
+        }
+        Ok(())
+    }
+
+    fn record_operation(&mut self, op: AppOperation) -> Result<(), String> {
+        if self.completed_operations.len() >= MAX_OPERATIONS {
+            return Err(format!("operations exceed max of {MAX_OPERATIONS}"));
+        }
+        if !self.seen_operation_ids.insert(op.id.clone()) {
+            return Err(format!("duplicate operation frame: {}", op.id));
+        }
+        self.completed_operations.push(op);
+        Ok(())
+    }
+
     pub fn completed_operations(&self) -> &[AppOperation] {
         &self.completed_operations
     }
+}
+
+fn trim_ascii_ws(bytes: &[u8]) -> &[u8] {
+    let start = bytes
+        .iter()
+        .position(|b| !b.is_ascii_whitespace())
+        .unwrap_or(bytes.len());
+    let end = bytes
+        .iter()
+        .rposition(|b| !b.is_ascii_whitespace())
+        .map(|i| i + 1)
+        .unwrap_or(start);
+    &bytes[start..end]
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -144,6 +341,19 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn op_frame(id: &str) -> String {
+        json!({
+            "type": "operation.frame_completed",
+            "operation": {
+                "id": id,
+                "type": "component.update_props",
+                "target": {"surfaceId": "s1", "componentId": "c1"},
+                "payload": {"maximum": 10}
+            }
+        })
+        .to_string()
+    }
+
     #[test]
     fn buffers_incomplete_then_applies_complete() {
         let mut p = NdjsonFrameParser::new();
@@ -156,22 +366,69 @@ mod tests {
     }
 
     #[test]
+    fn frame_split_across_chunks() {
+        let mut p = NdjsonFrameParser::new();
+        let frame = r#"{"type":"turn.started","turn_id":"t1"}"#;
+        let mid = frame.len() / 2;
+        assert!(p.push(&frame[..mid]).is_empty());
+        let events = p.push(&format!("{}\n", &frame[mid..]));
+        assert_eq!(events.len(), 1);
+        assert!(events[0].is_ok());
+    }
+
+    #[test]
+    fn multiple_frames_one_chunk() {
+        let mut p = NdjsonFrameParser::new();
+        let chunk = format!(
+            "{}\n{}\n",
+            r#"{"type":"turn.started","turn_id":"t1"}"#,
+            r#"{"type":"assistant.delta","text":"hi"}"#
+        );
+        let events = p.push(&chunk);
+        assert_eq!(events.len(), 2);
+        assert!(events.iter().all(|e| e.is_ok()));
+    }
+
+    #[test]
+    fn rejects_oversized_frame() {
+        let mut p = NdjsonFrameParser::new();
+        let huge = format!("{{\"type\":\"assistant.delta\",\"text\":\"{}\"}}\n", "x".repeat(MAX_FRAME_BYTES));
+        let events = p.push(&huge);
+        assert_eq!(events.len(), 1);
+        assert!(events[0]
+            .as_ref()
+            .err()
+            .map(|e| e.contains("max size"))
+            .unwrap_or(false));
+    }
+
+    #[test]
+    fn leftover_incomplete_on_finish_is_error() {
+        let mut p = NdjsonFrameParser::new();
+        assert!(p
+            .push(r#"{"type":"assistant.delta","text":"partial"#)
+            .is_empty());
+        let finished = p.finish();
+        assert_eq!(finished.len(), 1);
+        assert!(finished[0]
+            .as_ref()
+            .err()
+            .map(|e| e.contains("incomplete frame"))
+            .unwrap_or(false));
+    }
+
+    #[test]
     fn rejects_duplicate_operation_frames() {
         let mut p = NdjsonFrameParser::new();
-        let line = json!({
-            "type": "operation.frame_completed",
-            "operation": {
-                "id": "op-1",
-                "type": "component.update_props",
-                "target": {"surfaceId": "s1", "componentId": "c1"},
-                "payload": {"maximum": 10}
-            }
-        })
-        .to_string()
-            + "\n";
+        let line = op_frame("op-1") + "\n";
         assert!(p.push(&line)[0].is_ok());
         let dup = p.push(&line);
         assert!(dup[0].is_err());
+        assert!(dup[0]
+            .as_ref()
+            .err()
+            .map(|e| e.contains("duplicate"))
+            .unwrap_or(false));
     }
 
     #[test]
@@ -179,6 +436,108 @@ mod tests {
         let mut p = NdjsonFrameParser::new();
         let events = p.push("{\"type\":\"turn.started\"\n");
         assert!(events[0].is_err());
+    }
+
+    #[test]
+    fn canonical_rejects_bare_app_operation() {
+        let mut p = NdjsonFrameParser::new();
+        let bare = json!({
+            "id": "op-bare",
+            "type": "component.update_props",
+            "target": {"surfaceId": "s1", "componentId": "c1"},
+            "payload": {"maximum": 10}
+        })
+        .to_string()
+            + "\n";
+        let events = p.push(&bare);
+        assert!(events[0].is_err());
+        assert!(p.completed_operations().is_empty());
+    }
+
+    #[test]
+    fn legacy_compat_harvests_bare_operation_without_newline() {
+        // message_cmds post-hoc harvest: buffered raw_text may lack trailing newline.
+        let mut p = NdjsonFrameParser::new();
+        let bare = json!({
+            "id": "op-harvest",
+            "type": "component.update_props",
+            "target": {"surfaceId": "s1", "componentId": "c1"},
+            "payload": {"maximum": 10}
+        })
+        .to_string();
+        assert!(p.push_legacy_compat(&bare).is_empty());
+        let finished = p.finish_legacy_compat();
+        assert_eq!(finished.len(), 1);
+        assert!(finished[0].is_ok());
+        assert_eq!(p.completed_operations().len(), 1);
+        assert_eq!(p.completed_operations()[0].id, "op-harvest");
+    }
+
+    #[test]
+    fn incomplete_oversize_halts_further_pushes() {
+        let mut p = NdjsonFrameParser::new();
+        let huge = "x".repeat(MAX_INCOMPLETE_BUFFER + 1);
+        let events = p.push(&huge);
+        assert!(events[0]
+            .as_ref()
+            .err()
+            .map(|e| e.contains("incomplete frame"))
+            .unwrap_or(false));
+        let again = p.push("{\"type\":\"turn.started\",\"turn_id\":\"t1\"}\n");
+        assert!(again[0]
+            .as_ref()
+            .err()
+            .map(|e| e.contains("incomplete frame"))
+            .unwrap_or(false));
+        assert!(p.completed_operations().is_empty());
+    }
+
+    #[test]
+    fn legacy_agent_response_duplicate_is_atomic() {
+        let mut p = NdjsonFrameParser::new();
+        let ok = op_frame("op-keep") + "\n";
+        assert!(p.push_legacy_compat(&ok)[0].is_ok());
+        assert_eq!(p.completed_operations().len(), 1);
+
+        let dup_batch = json!({
+            "schemaVersion": "2",
+            "assistantMessage": "x",
+            "operations": [
+                {
+                    "id": "op-new",
+                    "type": "component.update_props",
+                    "target": {"surfaceId": "s1", "componentId": "c1"},
+                    "payload": {"maximum": 1}
+                },
+                {
+                    "id": "op-keep",
+                    "type": "component.update_props",
+                    "target": {"surfaceId": "s1", "componentId": "c1"},
+                    "payload": {"maximum": 2}
+                }
+            ]
+        })
+        .to_string()
+            + "\n";
+        let events = p.push_legacy_compat(&dup_batch);
+        assert!(events[0]
+            .as_ref()
+            .err()
+            .map(|e| e.contains("duplicate"))
+            .unwrap_or(false));
+        // Failed batch must not poison op-new or drop op-keep.
+        assert_eq!(p.completed_operations().len(), 1);
+        assert_eq!(p.completed_operations()[0].id, "op-keep");
+        let retry = json!({
+            "id": "op-new",
+            "type": "component.update_props",
+            "target": {"surfaceId": "s1", "componentId": "c1"},
+            "payload": {"maximum": 3}
+        })
+        .to_string()
+            + "\n";
+        assert!(p.push_legacy_compat(&retry)[0].is_ok());
+        assert_eq!(p.completed_operations().len(), 2);
     }
 
     #[test]

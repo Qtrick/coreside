@@ -25,7 +25,7 @@ pub use app_routes::{
 #[allow(unused_imports)]
 pub use branch::{
     branch_from_message, create_snapshot, delete_snapshot, get_snapshot, list_branches,
-    ChatBranchRecord, SnapshotRecord,
+    list_snapshots, ChatBranchRecord, SnapshotRecord,
 };
 #[allow(unused_imports)]
 pub use context_ledger::{

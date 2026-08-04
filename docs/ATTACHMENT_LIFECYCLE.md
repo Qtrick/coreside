@@ -1,7 +1,7 @@
 # Attachment Lifecycle (RC3)
 
 **Product:** Coreside  
-**Status:** Partial — atomic DB claim landed; FS promote crash window remains P2  
+**Status:** Partial — atomic DB claim landed; FS promote crash window remains **P1** until crash/restart suite passes  
 **Access date:** 2026-08-03
 
 ## Authoritative owner
