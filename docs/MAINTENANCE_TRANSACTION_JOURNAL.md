@@ -25,7 +25,13 @@ If a journal exists:
 - **Never** delete a profile tree merely because a stale journal exists.
 - **Never** silently create a blank profile.
 
-Current behavior: detect + log; full Recovery UI transition and automated rollback resume remain open.
+Current startup decisions (in `lib.rs` setup):
+
+- `None` + `completed` → clear stale completed journal
+- `RollBack` + `!irreversible` → clear journal (staged trees left for Recovery inspection); clear failure → enter Recovery / skip ordinary services
+- `EnterRecovery` / irreversible `RollBack` / unreadable → `enter_safe_startup` + skip ordinary services
+
+Full coherent profile restore / automated rollback resume remain open.
 
 ## Tests
 

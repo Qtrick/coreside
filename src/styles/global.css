@@ -2106,7 +2106,7 @@ img {
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--background);
+  background: var(--core-control-overlay);
   color: var(--text-primary);
   font: inherit;
 }

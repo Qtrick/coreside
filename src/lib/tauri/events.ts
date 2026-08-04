@@ -3,7 +3,16 @@ import { isTauriRuntime } from "./runtime";
 
 export type AgentTurnEvent =
   | { kind: "action"; conversationId: string; label: string }
-  | { kind: "text"; conversationId: string; text: string }
+  | {
+      kind: "text";
+      conversationId: string;
+      /** Cumulative assistant text checkpoint (reconnect / catch-up). */
+      text: string;
+      turnId?: string | null;
+      sequence?: number | null;
+      /** New chunk since the previous checkpoint; `text` remains cumulative. */
+      delta?: string | null;
+    }
   | { kind: "error"; conversationId: string; message: string }
   | {
       kind: "operation";
@@ -28,7 +37,18 @@ export type AgentTurnEvent =
 const agentTurnHandlers = new Set<(event: AgentTurnEvent) => void>();
 let agentTurnUnlisten: (() => void) | null = null;
 
-/** Subscribe to live agent-turn events. Returns an unsubscribe fn. */
+/**
+ * Subscribe to process-wide `agent-turn` events. Returns an unsubscribe fn.
+ *
+ * The global bus must not carry private assistant text. Interactive
+ * `send_message` streams deliver text/action/error/operation on a Tauri
+ * Channel (authoritative). This listener remains for Sync/Conflict multi-window
+ * refresh — and as a temporary degradation path for queue-drain Action/Error/
+ * Operation when no Channel is present.
+ *
+ * Tool windows must ignore text/action/error/operation (eavesdropping denial).
+ * Client-side filtering is defense in depth, not authorization.
+ */
 export async function listenAgentTurn(
   handler: (event: AgentTurnEvent) => void,
 ): Promise<() => void> {

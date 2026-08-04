@@ -1,6 +1,6 @@
 //! Settings commands — Base Settings KV + Added Settings CRUD + dock icon.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, State};
 
@@ -13,6 +13,60 @@ use crate::db;
 use crate::security::{assert_not_protected, is_protected};
 use crate::settings::{AddedSettingRecord, UpsertAddedSettingInput};
 use crate::state::AppState;
+
+const DEFAULT_WALLPAPER_JSON: &str = r#"{"kind":"none"}"#;
+
+/// Atomic workspace appearance update (wallpaper pair and/or interface transparency).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetWorkspaceAppearanceInput {
+    /// `Some` applies/clears the wallpaperJson + wallpaper pair; `None` leaves both unchanged.
+    #[serde(default)]
+    pub wallpaper_json: Option<String>,
+    /// `Some` sets interface transparency; `None` leaves it unchanged.
+    #[serde(default)]
+    pub interface_transparency: Option<u8>,
+}
+
+/// Resolve wallpaperJson input into normalized `(wallpaperJson, wallpaper)` storage values.
+/// Matches frontend `applyWorkspaceWallpaper` / `parseWallpaperJson` semantics.
+fn resolve_wallpaper_pair(raw: &str) -> Result<(String, String), String> {
+    let trimmed = raw.trim();
+    let default_wallpaper = normalize_setting_kv("wallpaper", DEFAULT_WALLPAPER_JSON)?;
+
+    if trimmed.is_empty() {
+        return Ok((String::new(), default_wallpaper));
+    }
+
+    let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+        // Unparseable → clear (match frontend parseWallpaperJson).
+        return Ok((String::new(), default_wallpaper));
+    };
+    let Some(obj) = value.as_object() else {
+        return Ok((String::new(), default_wallpaper));
+    };
+
+    let schema_version = obj.get("schemaVersion").and_then(|v| v.as_str());
+    let schema_type = obj.get("type").and_then(|v| v.as_str());
+    if schema_version == Some("1") && schema_type.is_some() {
+        let wallpaper_json = normalize_setting_kv("wallpaperJson", trimmed)?;
+        if wallpaper_json.is_empty() {
+            return Ok((String::new(), default_wallpaper));
+        }
+        return Ok((wallpaper_json, default_wallpaper));
+    }
+
+    if let Some(kind) = obj.get("kind").and_then(|v| v.as_str()) {
+        if kind.eq_ignore_ascii_case("none") {
+            return Ok((String::new(), default_wallpaper));
+        }
+        let wallpaper = normalize_setting_kv("wallpaper", trimmed)?;
+        let wallpaper_json = normalize_setting_kv("wallpaperJson", "")?;
+        return Ok((wallpaper_json, wallpaper));
+    }
+
+    Ok((String::new(), default_wallpaper))
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -318,6 +372,20 @@ pub fn set_setting(
             "Use Exa budget / search profile commands; this setting cannot be changed via set_setting.",
         ));
     }
+    // Wallpaper pair + transparency must stay atomic via set_workspace_appearance.
+    if matches!(
+        key.trim(),
+        "wallpaper"
+            | "wallpaperJson"
+            | "wallpaper_json"
+            | "interfaceTransparency"
+            | "interface_transparency"
+    ) {
+        return Err(CommandError::new(
+            "forbidden",
+            "Use set_workspace_appearance; wallpaper and interface transparency cannot be changed via set_setting.",
+        ));
+    }
     let stored = value_to_storage(&value);
     // Reject values that look like provider API keys.
     let stored_lower = stored.to_lowercase();
@@ -355,6 +423,44 @@ pub fn set_setting(
         };
         let _ = db::set_setting(&mut db, "actionLogMode", mode.as_str());
     }
+    let map = db::get_settings(&db)?;
+    Ok(settings_from_map(&map))
+}
+
+#[tauri::command]
+pub fn set_workspace_appearance(
+    state: State<'_, AppState>,
+    input: SetWorkspaceAppearanceInput,
+) -> Result<AppSettings, CommandError> {
+    state.require_profile()?;
+    if input.wallpaper_json.is_none() && input.interface_transparency.is_none() {
+        return Err(CommandError::new(
+            "invalid",
+            "set_workspace_appearance requires wallpaperJson and/or interfaceTransparency",
+        ));
+    }
+
+    // Validate all proposed writes before touching the DB.
+    let mut pending: Vec<(String, String)> = Vec::new();
+    if let Some(raw) = &input.wallpaper_json {
+        let (wallpaper_json, wallpaper) = resolve_wallpaper_pair(raw)
+            .map_err(|e| CommandError::new("invalid", e))?;
+        pending.push(("wallpaperJson".into(), wallpaper_json));
+        pending.push(("wallpaper".into(), wallpaper));
+    }
+    if let Some(n) = input.interface_transparency {
+        let normalized = normalize_setting_kv("interfaceTransparency", &n.to_string())
+            .map_err(|e| CommandError::new("invalid", e))?;
+        pending.push(("interfaceTransparency".into(), normalized));
+    }
+
+    let mut db = state.db.lock();
+    db.with_transaction(|conn| {
+        for (key, value) in &pending {
+            db::set_setting_on_conn(conn, key, value)?;
+        }
+        Ok(())
+    })?;
     let map = db::get_settings(&db)?;
     Ok(settings_from_map(&map))
 }
@@ -434,3 +540,65 @@ pub fn reject_protected_ids(ids: &[&str]) -> Result<(), CommandError> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn resolve_wallpaper_pair_clear_legacy_and_schema() {
+        let (wj, wall) = resolve_wallpaper_pair("").unwrap();
+        assert_eq!(wj, "");
+        assert!(wall.contains("\"kind\":\"none\""));
+
+        let (wj, wall) = resolve_wallpaper_pair(r#"{"kind":"none"}"#).unwrap();
+        assert_eq!(wj, "");
+        assert!(wall.contains("\"kind\":\"none\""));
+
+        let (wj, wall) = resolve_wallpaper_pair(r#"{"kind":"matrix"}"#).unwrap();
+        assert_eq!(wj, "");
+        assert!(wall.contains("\"kind\":\"matrix\""));
+
+        let schema = r#"{"schemaVersion":"1","type":"canvas-preset","preset":"aurora"}"#;
+        let (wj, wall) = resolve_wallpaper_pair(schema).unwrap();
+        assert!(wj.contains("canvas-preset"));
+        assert!(wall.contains("\"kind\":\"none\""));
+    }
+
+    #[test]
+    fn wallpaper_pair_writes_atomically_in_transaction() {
+        let dir = tempdir().unwrap();
+        let mut db = db::Database::open_path(&dir.path().join("t.db")).unwrap();
+        let (wallpaper_json, wallpaper) =
+            resolve_wallpaper_pair(r#"{"schemaVersion":"1","type":"canvas-preset","preset":"matrix"}"#)
+                .unwrap();
+
+        db.with_transaction(|conn| {
+            db::set_setting_on_conn(conn, "wallpaperJson", &wallpaper_json)?;
+            db::set_setting_on_conn(conn, "wallpaper", &wallpaper)?;
+            Ok(())
+        })
+        .unwrap();
+
+        let map = db::get_settings(&db).unwrap();
+        assert!(map
+            .get("wallpaperJson")
+            .map(|s| s.contains("canvas-preset"))
+            .unwrap_or(false));
+        assert!(map
+            .get("wallpaper")
+            .map(|s| s.contains("\"kind\":\"none\""))
+            .unwrap_or(false));
+    }
+
+    #[test]
+    fn resolve_wallpaper_pair_rejects_invalid_schema() {
+        let err = resolve_wallpaper_pair(
+            r#"{"schemaVersion":"1","type":"not-a-real-wallpaper-type"}"#,
+        )
+        .unwrap_err();
+        assert!(!err.is_empty());
+    }
+}
+

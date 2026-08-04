@@ -10,8 +10,11 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 vi.mock("@/stores/app-store", () => ({
-  useAppStore: (selector: (s: { sending: boolean }) => unknown) =>
-    selector({ sending: false }),
+  useAppStore: (selector: (s: {
+    sending: boolean;
+    sendingConversationId: string | null;
+  }) => unknown) =>
+    selector({ sending: false, sendingConversationId: null }),
 }));
 
 import { api } from "@/lib/tauri";

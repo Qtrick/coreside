@@ -10,6 +10,14 @@ Selection is derived from `wallpaperJson` via `parseWallpaperJson` / `activeCanv
 
 This pass is **Apply-only**: choosing a preset applies immediately. There is no separate `previewWallpaperId` store yet.
 
+## Atomic appearance writes (RC3.2 Phase 2)
+
+Workspace wallpaper + interface transparency use `set_workspace_appearance` — one transactional SQLite write for the wallpaper pair (`wallpaperJson` + `wallpaper`) and/or transparency. The frontend updates Zustand only after success, so a failed apply cannot leave half-written keys.
+
+The transparency slider previews locally on `onChange` and commits once on `pointerup` / `keyup` / `blur` (or immediately for presets/Reset). Commit failure rolls the UI back to the last persisted value.
+
+See [WALLPAPER_TARGETED_UPDATE_ARCHITECTURE.md](./WALLPAPER_TARGETED_UPDATE_ARCHITECTURE.md).
+
 ## Built-in presets
 
 | Id | Live badge |

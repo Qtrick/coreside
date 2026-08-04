@@ -9,7 +9,6 @@ import type {
   WallpaperConfig,
 } from "@/types/agent";
 import { DEFAULT_WALLPAPER, WallpaperKindSchema } from "@/types/agent";
-import { parseWallpaperJson } from "@/types/wallpaper";
 import type { ChatMessage, Conversation } from "@/types/messages";
 import type {
   ToolDefinition,
@@ -17,6 +16,7 @@ import type {
   ToolSummary,
 } from "@/types/tool";
 import { api, TauriCommandError, listenAgentTurn } from "@/lib/tauri";
+import type { AgentTurnEvent } from "@/lib/tauri";
 import type { ToolMention } from "@/lib/mentions";
 import { ensureReadableForeground } from "@/lib/readability/contrast";
 import type { ActionLogMode } from "@/lib/action-log";
@@ -127,6 +127,8 @@ type AppStore = {
   appConflict: AppConflict | null;
   surfaceDraftConflict: SurfaceDraftConflict | null;
   sending: boolean;
+  /** Conversation that owns the in-flight turn; UI live state is scoped to this id. */
+  sendingConversationId: string | null;
   sendError: string | null;
   agentActions: string[];
   streamingText: string | null;
@@ -145,7 +147,8 @@ type AppStore = {
   navigateToAutomations: () => void;
   applyWorkspaceWallpaper: (wallpaperJson: string) => Promise<void>;
   applyProjectWallpaper: (projectId: string, wallpaperJson: string) => Promise<void>;
-  setInterfaceTransparency: (value: number) => Promise<void>;
+  previewInterfaceTransparency: (value: number) => void;
+  commitInterfaceTransparency: (value: number) => Promise<void>;
   setAdaptiveWindowSizing: (mode: "smart" | "ask" | "off") => Promise<void>;
   setChatToolSplitRatio: (ratio: number) => Promise<void>;
   setLayoutMode: (mode: "wide" | "standard" | "compact") => void;
@@ -243,6 +246,12 @@ function attachAgentTurnSyncListener(
   if (agentTurnSyncAttached) return;
   agentTurnSyncAttached = true;
   void listenAgentTurn((event) => {
+    // Tool-window / sync path: only conflict + sync. Never render or retain
+    // text/action/error/operation — those ride the per-send Channel (RC3.2 Phase 3).
+    // Global emit is not an auth boundary; this filter is eavesdropping denial.
+    if (event.kind === "text" || event.kind === "action" || event.kind === "error" || event.kind === "operation") {
+      return;
+    }
     if (event.kind === "conflict") {
       set({
         appConflict: {
@@ -450,6 +459,11 @@ function appearanceFromSettings(settings: Partial<AppearancePalette>): Appearanc
   };
 }
 
+/** Last successfully persisted transparency — used to roll back failed commits. */
+let committedInterfaceTransparency = 20;
+/** Monotonic commit generation — superseded in-flight commits must not clobber newer UI. */
+let interfaceTransparencyCommitGen = 0;
+
 export const useAppStore = create<AppStore>((set, get) => ({
   bootstrapped: false,
   bootError: null,
@@ -518,6 +532,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   appConflict: null,
   surfaceDraftConflict: null,
   sending: false,
+  sendingConversationId: null,
   sendError: null,
   agentActions: [],
   streamingText: null,
@@ -556,6 +571,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const resolved = resolveTheme(theme);
       const appearance = appearanceFromSettings(settings);
       const wallpaper = wallpaperFromSettings(settings);
+      const interfaceTransparency =
+        typeof settings.interfaceTransparency === "number"
+          ? Math.min(60, Math.max(0, Math.round(settings.interfaceTransparency)))
+          : 20;
+      committedInterfaceTransparency = interfaceTransparency;
       set({
         bootstrapped: true,
         bootError: null,
@@ -567,10 +587,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         appearance,
         wallpaper,
         globalWallpaperJson: settings.wallpaperJson ?? null,
-        interfaceTransparency:
-          typeof settings.interfaceTransparency === "number"
-            ? Math.min(60, Math.max(0, Math.round(settings.interfaceTransparency)))
-            : 20,
+        interfaceTransparency,
         adaptiveWindowSizing:
           settings.adaptiveWindowSizing === "ask" ||
           settings.adaptiveWindowSizing === "off" ||
@@ -829,23 +846,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   applyWorkspaceWallpaper: async (wallpaperJson) => {
-    const trimmed = wallpaperJson.trim();
-    const parsed = trimmed
-      ? parseWallpaperJson(trimmed)
-      : ({ format: "none" } as const);
-    let settings;
-    // Clear path: empty string OR legacy `{ kind: "none" }` — never send the
-    // latter as wallpaperJson (Rust schema requires schemaVersion).
-    if (parsed.format === "none") {
-      settings = await api.setSetting("wallpaperJson", "");
-      settings = await api.setSetting("wallpaper", DEFAULT_WALLPAPER);
-    } else if (parsed.format === "legacy") {
-      settings = await api.setSetting("wallpaper", parsed.config);
-      settings = await api.setSetting("wallpaperJson", "");
-    } else {
-      settings = await api.setSetting("wallpaperJson", trimmed);
-      settings = await api.setSetting("wallpaper", DEFAULT_WALLPAPER);
-    }
+    // Single atomic IPC: wallpaperJson + wallpaper pair, or nothing.
+    // Zustand updates only after success so a failed apply leaves UI unchanged.
+    const settings = await api.setWorkspaceAppearance({ wallpaperJson });
     set({
       wallpaper: wallpaperFromSettings(settings),
       globalWallpaperJson: settings.wallpaperJson ?? null,
@@ -861,10 +864,39 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }));
   },
 
-  setInterfaceTransparency: async (value) => {
+  previewInterfaceTransparency: (value) => {
     const next = Math.min(60, Math.max(0, Math.round(value)));
     set({ interfaceTransparency: next });
-    await api.setSetting("interfaceTransparency", next);
+  },
+
+  commitInterfaceTransparency: async (value) => {
+    const next = Math.min(60, Math.max(0, Math.round(value)));
+    // Coalesce pointerup+blur / duplicate preset clicks onto the same value.
+    if (next === committedInterfaceTransparency) {
+      set({ interfaceTransparency: next });
+      return;
+    }
+    const gen = ++interfaceTransparencyCommitGen;
+    set({ interfaceTransparency: next });
+    try {
+      const settings = await api.setWorkspaceAppearance({
+        interfaceTransparency: next,
+      });
+      const saved =
+        typeof settings.interfaceTransparency === "number"
+          ? Math.min(60, Math.max(0, Math.round(settings.interfaceTransparency)))
+          : next;
+      // Always record DB truth; only the latest generation may paint Zustand.
+      committedInterfaceTransparency = saved;
+      if (gen === interfaceTransparencyCommitGen) {
+        set({ interfaceTransparency: saved });
+      }
+    } catch (err) {
+      if (gen === interfaceTransparencyCommitGen) {
+        set({ interfaceTransparency: committedInterfaceTransparency });
+      }
+      throw err;
+    }
   },
 
   setAdaptiveWindowSizing: async (mode) => {
@@ -1446,27 +1478,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set((state) => ({
       messages: [...state.messages, optimistic],
       sending: true,
+      sendingConversationId: conversationId,
       sendError: null,
       agentActions: [],
       streamingText: null,
     }));
 
-    const activeConversationId = conversationId;
-    const stopListen = await listenAgentTurn((event) => {
-      if (event.kind === "conflict") {
-        set({
-          appConflict: {
-            message: event.message,
-            conflicts: event.conflicts,
-            conversationId: event.conversationId,
-          },
-        });
+    const turnConversationId = conversationId;
+    const onChannelEvent = (event: AgentTurnEvent) => {
+      // Sync/Conflict stay on the global bus (attachAgentTurnSyncListener).
+      if (event.kind === "sync" || event.kind === "conflict") {
         return;
       }
-      if (event.kind === "sync") {
-        void get().reloadActiveSurfaces();
+      // Defense in depth: Channel is invoke-scoped, but still require conversation match.
+      if (!("conversationId" in event) || event.conversationId !== turnConversationId) {
         return;
       }
+      if (get().activeConversationId !== turnConversationId) return;
       if (event.kind === "operation") {
         set((state) => ({
           agentActions: [
@@ -1476,7 +1504,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
         }));
         return;
       }
-      if (event.conversationId !== activeConversationId) return;
       if (event.kind === "action") {
         set((state) => ({
           agentActions: [...state.agentActions, event.label].slice(-8),
@@ -1486,7 +1513,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       } else if (event.kind === "error") {
         set({ sendError: event.message });
       }
-    });
+    };
 
     try {
       const result = await api.sendMessage({
@@ -1501,6 +1528,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         attachments: attachments.map((a) => ({
           id: a.id,
         })),
+        onEvent: onChannelEvent,
       });
 
       const messages = await api.getMessages(conversationId);
@@ -1552,13 +1580,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // the turn-scoped indicators.
       const stillActive = get().activeConversationId === conversationId;
       if (!stillActive) {
-        set({ sending: false, agentActions: [], streamingText: null });
+        set({
+          sending: false,
+          sendingConversationId: null,
+          agentActions: [],
+          streamingText: null,
+        });
         return;
       }
 
       if (result.queued) {
         set((state) => ({
           sending: false,
+          sendingConversationId: null,
           agentActions: ["Message queued"],
           streamingText: null,
           sendError: null,
@@ -1600,6 +1634,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (get().activeConversationId !== conversationId) {
         set({
           sending: false,
+          sendingConversationId: null,
           agentActions: [],
           streamingText: null,
           ...themePatch,
@@ -1610,6 +1645,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({
         messages,
         sending: false,
+        sendingConversationId: null,
         pendingToolChange: pending,
         pendingKernelProposal: kernelProposal,
         agentActions: [],
@@ -1623,11 +1659,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
           ? error.message
           : "Failed to send message";
       if (get().activeConversationId !== conversationId) {
-        set({ sending: false, agentActions: [], streamingText: null });
+        set({
+          sending: false,
+          sendingConversationId: null,
+          agentActions: [],
+          streamingText: null,
+        });
         return;
       }
       set((state) => ({
         sending: false,
+        sendingConversationId: null,
         sendError: message,
         agentActions: [],
         streamingText: null,
@@ -1637,16 +1679,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
             : m,
         ),
       }));
-    } finally {
-      stopListen();
     }
   },
 
   cancelRequest: async () => {
-    const id = get().activeConversationId;
+    const id = get().sendingConversationId ?? get().activeConversationId;
     await api.cancelRequest(id ?? undefined);
     set({
       sending: false,
+      sendingConversationId: null,
       agentActions: [],
       streamingText: null,
     });

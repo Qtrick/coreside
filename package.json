@@ -40,7 +40,7 @@
     "test:true-streaming": "cargo test --manifest-path src-tauri/Cargo.toml --lib true_streaming_emits_delta_before_completion -- --nocapture",
     "test:stream-parser": "cargo test --manifest-path src-tauri/Cargo.toml --lib runtime_v2::streaming",
     "test:runtime-v2": "cargo test --manifest-path src-tauri/Cargo.toml --lib runtime_v2",
-    "audit:runtime-v2": "cargo test --manifest-path src-tauri/Cargo.toml --lib runtime_v2",
+    "audit:runtime-v2": "npm run test:runtime-v2",
     "test:operations": "cargo test --manifest-path src-tauri/Cargo.toml --lib runtime_v2::operations",
     "test:surfaces": "cargo test --manifest-path src-tauri/Cargo.toml --lib runtime_v2::patch",
     "test:events": "cargo test --manifest-path src-tauri/Cargo.toml --lib runtime_v2::events",

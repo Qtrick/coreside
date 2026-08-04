@@ -137,6 +137,7 @@ pub fn run() {
             commands::get_tool_state,
             commands::get_settings,
             commands::set_setting,
+            commands::set_workspace_appearance,
             commands::list_added_settings,
             commands::upsert_added_setting,
             commands::delete_added_setting,

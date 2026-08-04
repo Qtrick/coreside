@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T00:50:00.000Z",
+  "commit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
+  "dirty": true,
+  "partialUpdateArchiveSha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2026 Phil Holden",
+  "ports": [
+    {
+      "partialUpdateFile": "src/index.ts",
+      "partialUpdateSymbol": "UpdateStreamParser",
+      "behavior": "Incremental protocol buffering and dispatch of complete units before model completion",
+      "classification": "direct_translated_adapted",
+      "coresideFile": "src-tauri/src/runtime_v2/streaming.rs",
+      "coresideSymbol": "NdjsonFrameParser",
+      "securityChanges": "Bounded buffers; StreamEvent-only production path; no HTML/DOM",
+      "status": "partial",
+      "gap": "Live progressive operation apply + canonical envelope only"
+    },
+    {
+      "partialUpdateFile": "src/index.ts",
+      "partialUpdateSymbol": "runModel",
+      "behavior": "Parse and broadcast updates while generation continues",
+      "classification": "behavioral_reimplementation",
+      "coresideFile": "src-tauri/src/commands/message_cmds.rs",
+      "coresideSymbol": "send_message + Channel on_event",
+      "securityChanges": "Scoped Channel replaces global text broadcast; trusted declarative ops only",
+      "status": "partial",
+      "gap": "Delta-only efficiency; turn registry; reconnect snapshot"
+    },
+    {
+      "partialUpdateFile": "src/index.ts",
+      "partialUpdateSymbol": "withQueueMutation",
+      "behavior": "Serialized queue mutation with single active item",
+      "classification": "substantially_adapted",
+      "coresideFile": "src-tauri/src/runtime_v2/queue.rs",
+      "coresideSymbol": "activate_next / recover_stale_active",
+      "securityChanges": "SQLite transactions; profile-scoped",
+      "status": "partial",
+      "gap": "Event-driven UI (still polls)"
+    },
+    {
+      "partialUpdateFile": "src/index.ts",
+      "partialUpdateSymbol": "broadcast",
+      "behavior": "Filtered update delivery by client metadata",
+      "classification": "behavioral_reimplementation",
+      "coresideFile": "docs/SCOPED_TURN_STREAMING.md",
+      "coresideSymbol": "tauri::ipc::Channel on send_message",
+      "securityChanges": "Caller-bound Channel; no tool-window text eavesdrop via global bus",
+      "status": "partial",
+      "gap": "Queue drain Action/Error still may use global; Sync/Conflict global"
+    },
+    {
+      "partialUpdateFile": "src/app.html / generated HTML",
+      "partialUpdateSymbol": "DOM/HTML execution",
+      "behavior": "Execute model HTML/JS",
+      "classification": "deliberately_rejected",
+      "coresideFile": null,
+      "coresideSymbol": null,
+      "securityChanges": "Trusted declarative components only",
+      "status": "rejected",
+      "gap": null
+    }
+  ]
+}

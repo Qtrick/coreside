@@ -53,7 +53,9 @@ export function ConversationQueue({
 }: {
   conversationId: string;
 }) {
-  const sending = useAppStore((s) => s.sending);
+  const sending = useAppStore(
+    (s) => s.sending && s.sendingConversationId === conversationId,
+  );
   const [items, setItems] = useState<QueueRow[]>([]);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const conversationIdRef = useRef(conversationId);

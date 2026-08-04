@@ -50,4 +50,4 @@ For the exhaustive 2026-07-18 audit, see:
 
 ## 4. Code copied
 
-**No Partial Update source files were copied into the Coreside application tree.** Concepts only. MIT attribution is recorded in `THIRD_PARTY_NOTICES.md`.
+Partial Update source files are **not vendored** into the Coreside tree. Valuable algorithms are **directly translated or substantially adapted** into Coreside’s trusted stack; unsafe HTML/JS/CDN/iframe execution is rejected. See `THIRD_PARTY_NOTICES.md`, `docs/PARTIAL_UPDATE_DIRECT_PORT_POLICY.md`, and `docs/PARTIAL_UPDATE_PORT_PROVENANCE.md`.

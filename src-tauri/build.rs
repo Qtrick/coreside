@@ -195,6 +195,7 @@ fn main() {
             "set_search_profile",
             "set_setting",
             "set_web_research_resource_profile",
+            "set_workspace_appearance",
             "stage_chat_attachment",
             "store_diagnostics_cmd",
             "store_hosted_auth_session",

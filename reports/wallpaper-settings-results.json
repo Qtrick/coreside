@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T01:00:00.000Z",
+  "commit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
+  "dirty": true,
+  "command": "vitest workspace-appearance + cargo settings_cmds",
+  "exitStatus": 0,
+  "result": "passed_unit",
+  "partial": true,
+  "partialReason": "Desktop Journey 13 written and registered; not executed in this pass. Pixel sampling / packaged proof not run.",
+  "assertions": [
+    "set_workspace_appearance writes wallpaperJson+wallpaper atomically",
+    "set_setting rejects wallpaper/transparency keys",
+    "slider preview vs commit coalesce",
+    "commit failure rolls back UI to last committed transparency"
+  ],
+  "e2eSpec": "e2e/specs/13-wallpaper-targeted-update.spec.ts",
+  "e2eResult": "not_run",
+  "publicBeta": "Not ready"
+}

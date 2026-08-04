@@ -17,7 +17,8 @@
 | Default / buffered `chat_stream` | Honest (`live: false`, **no** fabricated `TextDelta`, `buffered: true`) |
 | `emit_buffered_text_fluidly` | Post-hoc UI typing for **buffered** completions only; skipped when `streamed_live` |
 | Hosted gateway | Still `"stream": false` (buffered disclosure via default `chat_stream`) |
-| Channel / progressive ops streaming | **Not done** |
+| Channel / progressive ops streaming | **Partial** — interactive `send_message` uses Channel for text/action/error/operation; Sync/Conflict still global (see [SCOPED_TURN_STREAMING.md](./SCOPED_TURN_STREAMING.md)) |
+| Frontend live UI scope | **Partial** — `sendingConversationId` + active-chat guards; global `sending` lock remains (full turn registry = Phase 3) |
 | E2E execution of live probe | Fixture + unit test exist; full desktop E2E not claimed |
 
 ## Provider-neutral events
@@ -44,7 +45,8 @@ Defined in `src-tauri/src/ai/provider.rs`:
 ## Remaining gaps (do not claim done)
 
 - Anthropic and Gemini live SSE adapters
-- Channel / progressive application-operation streaming
+- Channel / progressive application-operation streaming (interactive text Channel landed; ops progressive apply + Sync-only Channel remain)
+- Full turn registry / reconnect snapshot / delta-only UI efficiency
 - Full E2E run of the live-stream probe in the desktop shell
 - Broader compatible-provider matrix for `stream: true` + `response_format`
 

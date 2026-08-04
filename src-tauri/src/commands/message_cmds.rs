@@ -180,7 +180,17 @@ pub enum AgentTurnEvent {
     #[serde(rename_all = "camelCase")]
     Text {
         conversation_id: String,
+        /// Cumulative assistant text checkpoint (reconnect / catch-up).
         text: String,
+        /// Stable turn id when known (optional; full turn registry is follow-up).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        turn_id: Option<String>,
+        /// Monotonic text-event sequence within this send.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sequence: Option<u64>,
+        /// New chunk since the previous checkpoint; `text` remains cumulative.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        delta: Option<String>,
     },
     #[serde(rename_all = "camelCase")]
     Error {
@@ -209,13 +219,77 @@ pub enum AgentTurnEvent {
     },
 }
 
-fn emit_turn(app: &AppHandle, event: AgentTurnEvent) {
-    let _ = app.emit("agent-turn", event);
+fn make_text_event(
+    conversation_id: &str,
+    text: String,
+    previous: Option<&str>,
+    sequence: &mut u64,
+) -> AgentTurnEvent {
+    *sequence = sequence.saturating_add(1);
+    let delta = match previous {
+        Some(prev) if text.starts_with(prev) => Some(text[prev.len()..].to_string()),
+        Some(_) => Some(text.clone()),
+        None => None,
+    };
+    AgentTurnEvent::Text {
+        conversation_id: conversation_id.to_string(),
+        text,
+        turn_id: None,
+        sequence: Some(*sequence),
+        delta,
+    }
 }
 
-fn emit_action(app: &AppHandle, conversation_id: &str, label: &str) {
+/// Deliver a turn event with Channel-scoped privacy for private kinds.
+///
+/// - Text / Action / Error / Operation: send on Channel when present. **Never**
+///   put Text on the process-wide `agent-turn` bus (tool windows with
+///   `core:event:default` must not see another conversation's assistant text).
+///   When Channel is None (queue drain), skip Text; Action / Error / Operation
+///   may temporarily degrade to `app.emit` so background turns are not silent.
+/// - Sync / Conflict: keep `app.emit("agent-turn")` for multi-window surface
+///   refresh (turn registry / Channel-only sync is a follow-up). Also forward
+///   on Channel when present.
+fn emit_turn(
+    app: &AppHandle,
+    on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
+    event: AgentTurnEvent,
+) {
+    match &event {
+        AgentTurnEvent::Text { .. } => {
+            if let Some(ch) = on_event {
+                let _ = ch.send(event);
+            }
+            // Never global-emit Text — privacy / eavesdropping denial.
+        }
+        AgentTurnEvent::Action { .. }
+        | AgentTurnEvent::Error { .. }
+        | AgentTurnEvent::Operation { .. } => {
+            if let Some(ch) = on_event {
+                let _ = ch.send(event);
+            } else {
+                // Queue-drain / no subscriber Channel: temporary global degradation.
+                let _ = app.emit("agent-turn", event);
+            }
+        }
+        AgentTurnEvent::Sync { .. } | AgentTurnEvent::Conflict { .. } => {
+            if let Some(ch) = on_event {
+                let _ = ch.send(event.clone());
+            }
+            let _ = app.emit("agent-turn", event);
+        }
+    }
+}
+
+fn emit_action(
+    app: &AppHandle,
+    on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
+    conversation_id: &str,
+    label: &str,
+) {
     emit_turn(
         app,
+        on_event,
         AgentTurnEvent::Action {
             conversation_id: conversation_id.to_string(),
             label: label.to_string(),
@@ -241,6 +315,7 @@ fn sanitize_action_label(label: &str, api_key: Option<&str>) -> String {
 
 fn record_action(
     app: &AppHandle,
+    on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
     conversation_id: &str,
     log: &mut Option<Vec<serde_json::Value>>,
     label: &str,
@@ -252,7 +327,7 @@ fn record_action(
         return;
     };
     let safe_label = sanitize_action_label(label, api_key);
-    emit_action(app, conversation_id, &safe_label);
+    emit_action(app, on_event, conversation_id, &safe_label);
     let sequence = events.len() as i64;
     events.push(json!({
         "id": format!("act-{sequence}"),
@@ -267,33 +342,37 @@ fn record_action(
 /// plain text streams emit the accumulated body.
 fn emit_live_text_delta(
     app: &AppHandle,
+    on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
     conversation_id: &str,
     live_text_accum: &mut String,
     last_preview: &mut String,
+    text_seq: &mut u64,
     delta: &str,
 ) {
     use crate::ai::peek_assistant_message;
     live_text_accum.push_str(delta);
     if let Some(preview) = peek_assistant_message(live_text_accum) {
         if preview != *last_preview {
-            *last_preview = preview.clone();
-            emit_turn(
-                app,
-                AgentTurnEvent::Text {
-                    conversation_id: conversation_id.to_string(),
-                    text: preview,
-                },
-            );
+            let previous = if last_preview.is_empty() {
+                None
+            } else {
+                Some(last_preview.as_str())
+            };
+            let event = make_text_event(conversation_id, preview.clone(), previous, text_seq);
+            *last_preview = preview;
+            emit_turn(app, on_event, event);
         }
     } else if !live_text_accum.trim_start().starts_with('{') {
         // Plain-text live streams (non-JSON protocols / fixtures).
-        emit_turn(
-            app,
-            AgentTurnEvent::Text {
-                conversation_id: conversation_id.to_string(),
-                text: live_text_accum.clone(),
-            },
-        );
+        let previous = if last_preview.is_empty() {
+            None
+        } else {
+            Some(last_preview.as_str())
+        };
+        let text = live_text_accum.clone();
+        let event = make_text_event(conversation_id, text.clone(), previous, text_seq);
+        *last_preview = text;
+        emit_turn(app, on_event, event);
     }
 }
 
@@ -303,8 +382,10 @@ fn emit_live_text_delta(
 /// is true — live TextDelta events already reached the UI via `chat_stream`.
 async fn emit_buffered_text_fluidly(
     app: &AppHandle,
+    on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
     conversation_id: &str,
     text: &str,
+    text_seq: &mut u64,
     cancel: &CancellationToken,
 ) {
     if text.is_empty() {
@@ -318,29 +399,37 @@ async fn emit_buffered_text_fluidly(
         if cancel.is_cancelled() {
             break;
         }
+        let previous_owned = if emitted.is_empty() {
+            None
+        } else {
+            Some(emitted.clone())
+        };
         emitted.push(ch);
         since_emit += 1;
         let boundary = ch.is_whitespace() || matches!(ch, '.' | ',' | ';' | ':' | '!' | '?');
         if since_emit >= 2 || boundary {
-            emit_turn(
-                app,
-                AgentTurnEvent::Text {
-                    conversation_id: conversation_id.to_string(),
-                    text: emitted.clone(),
-                },
+            let event = make_text_event(
+                conversation_id,
+                emitted.clone(),
+                previous_owned.as_deref(),
+                text_seq,
             );
+            emit_turn(app, on_event, event);
             since_emit = 0;
             let delay = if boundary { 18 } else { 10 };
             tokio::time::sleep(Duration::from_millis(delay)).await;
         }
     }
 
+    let previous = if emitted.is_empty() || emitted.as_str() == text {
+        None
+    } else {
+        Some(emitted.as_str())
+    };
     emit_turn(
         app,
-        AgentTurnEvent::Text {
-            conversation_id: conversation_id.to_string(),
-            text: text.to_string(),
-        },
+        on_event,
+        make_text_event(conversation_id, text.to_string(), previous, text_seq),
     );
 }
 
@@ -612,6 +701,7 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
             mentions,
             attachments,
             false,
+            None,
         )
         .await;
 
@@ -658,6 +748,9 @@ pub async fn send_message(
     model: Option<String>,
     mentions: Option<Vec<ToolMentionInput>>,
     attachments: Option<Vec<ChatAttachmentInput>>,
+    // Required for interactive sends. Channel is not Deserialize, so it cannot be
+    // Option<> in the command signature; queue drain passes None to inner instead.
+    on_event: tauri::ipc::Channel<AgentTurnEvent>,
 ) -> Result<SendMessageResult, CommandError> {
     send_message_inner(
         app,
@@ -669,6 +762,7 @@ pub async fn send_message(
         mentions,
         attachments,
         true,
+        Some(on_event),
     )
     .await
 }
@@ -683,6 +777,7 @@ async fn send_message_inner(
     mentions: Option<Vec<ToolMentionInput>>,
     attachments: Option<Vec<ChatAttachmentInput>>,
     schedule_drain: bool,
+    on_event: Option<tauri::ipc::Channel<AgentTurnEvent>>,
 ) -> Result<SendMessageResult, CommandError> {
     state.require_profile()?;
     let mut content = content.trim().to_string();
@@ -729,7 +824,7 @@ async fn send_message_inner(
             100,
         )?;
         emit_action(
-            &app,
+            &app, on_event.as_ref(),
             &conversation_id,
             "Queued your message until the current reply finishes",
         );
@@ -772,7 +867,7 @@ async fn send_message_inner(
     };
 
     record_action(
-        &app,
+        &app, on_event.as_ref(),
         &conversation_id,
         &mut action_log,
         "Preparing your request",
@@ -970,7 +1065,7 @@ async fn send_message_inner(
                 continue;
             }
             record_action(
-                &app,
+                &app, on_event.as_ref(),
                 &conversation_id,
                 &mut action_log,
                 &format!("Referenced @{label}"),
@@ -981,7 +1076,7 @@ async fn send_message_inner(
     }
 
     record_action(
-        &app,
+        &app, on_event.as_ref(),
         &conversation_id,
         &mut action_log,
         "Building agent context",
@@ -995,7 +1090,7 @@ async fn send_message_inner(
             match project_context_for_prompt(&db, pid, &content) {
                 Ok(Some(ctx)) => {
                     record_action(
-                        &app,
+                        &app, on_event.as_ref(),
                         &conversation_id,
                         &mut action_log,
                         "Loaded project context",
@@ -1046,7 +1141,7 @@ async fn send_message_inner(
             }
         }
         record_action(
-            &app,
+            &app, on_event.as_ref(),
             &conversation_id,
             &mut action_log,
             &format!("Attached {} file(s)", trusted_attachments.len()),
@@ -1057,7 +1152,9 @@ async fn send_message_inner(
 
     // Structured form / surface submissions from the context ledger must reach the
     // model as typed JSON — not only as a human summary chat bubble.
-    // Bounded: ≤8 entries, per-entry payload cap, total inject cap (compact JSON).
+    // Bounded: ≤8 form_submit entries, per-entry payload cap, total inject cap.
+    // Delimiter wrappers are transport only — not authority. Typed StructuredUserInput
+    // (no text delimiters) remains a follow-up; do not expand delimiter semantics.
     {
         const MAX_STRUCTURED_ENTRIES: usize = 8;
         const MAX_ENTRY_PAYLOAD_BYTES: usize = 4_096;
@@ -1077,8 +1174,8 @@ async fn send_message_inner(
             let structured: Vec<&crate::runtime_v2::ContextLedgerEntry> = entries
                 .iter()
                 .filter(|e| {
-                    e.visibility == "model_context_only"
-                        || e.entry_type.contains("form_submit")
+                    e.entry_type.contains("form_submit")
+                        && e.visibility == "model_context_only"
                 })
                 .filter(|e| !chat_messages.iter().any(|m| m.content.contains(&e.id)))
                 .collect();
@@ -1144,7 +1241,7 @@ async fn send_message_inner(
                         }
                     }
                     record_action(
-                        &app,
+                        &app, on_event.as_ref(),
                         &conversation_id,
                         &mut action_log,
                         &format!(
@@ -1170,8 +1267,10 @@ async fn send_message_inner(
     let action_log_for_cb = action_log_live.clone();
     let app_for_stream = app.clone();
     let conversation_for_stream = conversation_id.clone();
+    let on_event_for_actions = on_event.clone();
     let mut live_text_accum = String::new();
     let mut last_preview = String::new();
+    let mut text_seq: u64 = 0;
     let resolved = chat_with_auto(
         &config,
         &model_preference,
@@ -1186,6 +1285,7 @@ async fn send_message_inner(
             if let Ok(mut guard) = action_log_for_cb.lock() {
                 record_action(
                     &app_for_actions,
+                    on_event_for_actions.as_ref(),
                     &conversation_for_actions,
                     &mut guard,
                     label,
@@ -1200,10 +1300,16 @@ async fn send_message_inner(
             match event {
                 ProviderStreamEvent::ResponseStarted { live, .. } => {
                     if live {
-                        emit_action(&app_for_stream, &conversation_for_stream, "Receiving live response");
+                        emit_action(
+                            &app_for_stream,
+                            on_event.as_ref(),
+                            &conversation_for_stream,
+                            "Receiving live response",
+                        );
                     } else {
                         emit_action(
                             &app_for_stream,
+                            on_event.as_ref(),
                             &conversation_for_stream,
                             "Waiting for buffered response",
                         );
@@ -1212,9 +1318,11 @@ async fn send_message_inner(
                 ProviderStreamEvent::TextDelta { text } => {
                     emit_live_text_delta(
                         &app_for_stream,
+                        on_event.as_ref(),
                         &conversation_for_stream,
                         &mut live_text_accum,
                         &mut last_preview,
+                        &mut text_seq,
                         &text,
                     );
                 }
@@ -1240,7 +1348,7 @@ async fn send_message_inner(
                 "send_message provider failed"
             );
             emit_turn(
-                &app,
+                &app, on_event.as_ref(),
                 AgentTurnEvent::Error {
                     conversation_id: conversation_id.clone(),
                     message: message.clone(),
@@ -1251,7 +1359,7 @@ async fn send_message_inner(
     };
 
     record_action(
-        &app,
+        &app, on_event.as_ref(),
         &conversation_id,
         &mut action_log,
         "Parsing the response",
@@ -1268,7 +1376,7 @@ async fn send_message_inner(
             tracing::warn!(error = %sanitize_for_log(&e, api_key_ref), "send_message parse failed");
             let message = sanitize_error(&e, api_key_ref);
             emit_turn(
-                &app,
+                &app, on_event.as_ref(),
                 AgentTurnEvent::Error {
                     conversation_id: conversation_id.clone(),
                     message: message.clone(),
@@ -1297,7 +1405,7 @@ async fn send_message_inner(
 
         for call in &tool_calls {
             record_action(
-                &app,
+                &app, on_event.as_ref(),
                 &conversation_id,
                 &mut action_log,
                 action_label_for_capability(&call.capability),
@@ -1353,7 +1461,7 @@ async fn send_message_inner(
         merge_tool_results_into_metadata(&mut search_meta, &tool_results);
 
         record_action(
-            &app,
+            &app, on_event.as_ref(),
             &conversation_id,
             &mut action_log,
             "Synthesizing answer from tool results",
@@ -1392,6 +1500,7 @@ async fn send_message_inner(
         let action_log_for_cb = action_log_live.clone();
         let app_for_stream = app.clone();
         let conversation_for_stream = conversation_id.clone();
+        let on_event_for_actions = on_event.clone();
         let mut live_text_accum = String::new();
         let mut last_preview = String::new();
 
@@ -1409,6 +1518,7 @@ async fn send_message_inner(
                 if let Ok(mut guard) = action_log_for_cb.lock() {
                     record_action(
                         &app_for_actions,
+                        on_event_for_actions.as_ref(),
                         &conversation_for_actions,
                         &mut guard,
                         label,
@@ -1424,12 +1534,14 @@ async fn send_message_inner(
                         if live {
                             emit_action(
                                 &app_for_stream,
+                                on_event.as_ref(),
                                 &conversation_for_stream,
                                 "Receiving live response",
                             );
                         } else {
                             emit_action(
                                 &app_for_stream,
+                                on_event.as_ref(),
                                 &conversation_for_stream,
                                 "Waiting for buffered response",
                             );
@@ -1438,9 +1550,11 @@ async fn send_message_inner(
                     ProviderStreamEvent::TextDelta { text } => {
                         emit_live_text_delta(
                             &app_for_stream,
+                            on_event.as_ref(),
                             &conversation_for_stream,
                             &mut live_text_accum,
                             &mut last_preview,
+                            &mut text_seq,
                             &text,
                         );
                     }
@@ -1461,7 +1575,7 @@ async fn send_message_inner(
                 }
                 let message = sanitize_error(&e.to_string(), api_key_ref);
                 emit_turn(
-                    &app,
+                    &app, on_event.as_ref(),
                     AgentTurnEvent::Error {
                         conversation_id: conversation_id.clone(),
                         message: message.clone(),
@@ -1524,7 +1638,7 @@ async fn send_message_inner(
     }
 
     record_action(
-        &app,
+        &app, on_event.as_ref(),
         &conversation_id,
         &mut action_log,
         if resolved.streamed_live {
@@ -1541,16 +1655,21 @@ async fn send_message_inner(
             // Final reconciliation — live deltas already painted progressive text.
             emit_turn(
                 &app,
-                AgentTurnEvent::Text {
-                    conversation_id: conversation_id.clone(),
-                    text: parsed.payload.assistant_message.clone(),
-                },
+                on_event.as_ref(),
+                make_text_event(
+                    &conversation_id,
+                    parsed.payload.assistant_message.clone(),
+                    None,
+                    &mut text_seq,
+                ),
             );
         } else {
             emit_buffered_text_fluidly(
                 &app,
+                on_event.as_ref(),
                 &conversation_id,
                 &parsed.payload.assistant_message,
+                &mut text_seq,
                 &cancel,
             )
             .await;
@@ -1583,7 +1702,7 @@ async fn send_message_inner(
     let settings_change = parsed.payload.settings_change.clone();
     if let Some(ref sc) = settings_change {
         record_action(
-            &app,
+            &app, on_event.as_ref(),
             &conversation_id,
             &mut action_log,
             "Applying appearance preferences",
@@ -1593,27 +1712,41 @@ async fn send_message_inner(
         let pairs = sc
             .to_kv_pairs()
             .map_err(|e| CommandError::sanitized("validation", e, api_key_ref))?;
+        let mut pending: Vec<(String, String)> = Vec::with_capacity(pairs.len() + 1);
+        for (key, value) in &pairs {
+            // Base Settings like actionLogEnabled are not agent-allowlisted.
+            if !is_allowed_setting_key(key) {
+                return Err(CommandError::new(
+                    "forbidden",
+                    format!("Agent cannot change Base Setting '{key}' via settings_change"),
+                ));
+            }
+            // Defense in depth: re-normalize allowlisted appearance KVs before persist.
+            let normalized = crate::ai::normalize_setting_kv(key, value)
+                .map_err(|e| CommandError::sanitized("validation", e, api_key_ref))?;
+            pending.push((key.clone(), normalized));
+        }
+        // Legacy wallpaper write must clear schema wallpaperJson in the same
+        // transaction (match set_workspace_appearance pair semantics).
+        let writes_wallpaper = pending.iter().any(|(k, _)| k == "wallpaper");
+        let writes_wallpaper_json = pending.iter().any(|(k, _)| k == "wallpaperJson");
+        if writes_wallpaper && !writes_wallpaper_json {
+            pending.push(("wallpaperJson".into(), String::new()));
+        }
         {
             let mut db = state.db.lock();
-            for (key, value) in &pairs {
-                // Base Settings like actionLogEnabled are not agent-allowlisted.
-                if !is_allowed_setting_key(key) {
-                    return Err(CommandError::new(
-                        "forbidden",
-                        format!("Agent cannot change Base Setting '{key}' via settings_change"),
-                    ));
+            db.with_transaction(|conn| {
+                for (key, value) in &pending {
+                    db::set_setting_on_conn(conn, key, value)?;
                 }
-                // Defense in depth: re-normalize allowlisted appearance KVs before persist.
-                let normalized = crate::ai::normalize_setting_kv(key, value)
-                    .map_err(|e| CommandError::sanitized("validation", e, api_key_ref))?;
-                db::set_setting(&mut db, key, &normalized)?;
-            }
+                Ok(())
+            })?;
         }
     }
 
     if tool_change.is_some() {
         record_action(
-            &app,
+            &app, on_event.as_ref(),
             &conversation_id,
             &mut action_log,
             "Preparing tool change preview",
@@ -1652,7 +1785,7 @@ async fn send_message_inner(
                         ) = &ev
                         {
                             emit_turn(
-                                &app,
+                                &app, on_event.as_ref(),
                                 AgentTurnEvent::Operation {
                                     conversation_id: conversation_id.clone(),
                                     operation_id: operation.id.clone(),
@@ -1701,7 +1834,7 @@ async fn send_message_inner(
                             if let Some(result) = change.apply {
                                 if result.conflicts.is_empty() {
                                     record_action(
-                                        &app,
+                                        &app, on_event.as_ref(),
                                         &conversation_id,
                                         &mut action_log,
                                         "Applied application operations",
@@ -1711,7 +1844,7 @@ async fn send_message_inner(
                                     let surface_ids: Vec<String> =
                                         result.surfaces.iter().map(|s| s.id.clone()).collect();
                                     emit_turn(
-                                        &app,
+                                        &app, on_event.as_ref(),
                                         AgentTurnEvent::Sync {
                                             conversation_id: Some(conversation_id.clone()),
                                             surface_ids,
@@ -1724,7 +1857,7 @@ async fn send_message_inner(
                                     );
                                 } else {
                                     emit_turn(
-                                        &app,
+                                        &app, on_event.as_ref(),
                                         AgentTurnEvent::Conflict {
                                             conversation_id: Some(conversation_id.clone()),
                                             message: "This change conflicts with another window or newer revision.".into(),
@@ -1745,7 +1878,7 @@ async fn send_message_inner(
                                     "silent": silent,
                                 }));
                                 record_action(
-                                    &app,
+                                    &app, on_event.as_ref(),
                                     &conversation_id,
                                     &mut action_log,
                                     "Proposed a change that needs your approval",
@@ -1762,14 +1895,14 @@ async fn send_message_inner(
                         tracing::warn!(error = %e, "Patch scheduler apply failed");
                         let message = sanitize_error(&e.to_string(), api_key_ref);
                         emit_turn(
-                            &app,
+                            &app, on_event.as_ref(),
                             AgentTurnEvent::Error {
                                 conversation_id: conversation_id.clone(),
                                 message: message.clone(),
                             },
                         );
                         record_action(
-                            &app,
+                            &app, on_event.as_ref(),
                             &conversation_id,
                             &mut action_log,
                             "Could not apply application changes",

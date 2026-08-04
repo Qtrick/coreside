@@ -6,6 +6,7 @@ import { MessageBubble } from "./MessageBubble";
 export function MessageList() {
   const messages = useAppStore((s) => s.messages);
   const sending = useAppStore((s) => s.sending);
+  const sendingConversationId = useAppStore((s) => s.sendingConversationId);
   const agentActions = useAppStore((s) => s.agentActions);
   const actionLogMode = useAppStore((s) => s.actionLogMode);
   const streamingText = useAppStore((s) => s.streamingText);
@@ -20,6 +21,10 @@ export function MessageList() {
   const restoredFor = useRef<string | null>(null);
   const [showNewUpdates, setShowNewUpdates] = useState(false);
   const prevMessageCount = useRef(messages.length);
+  const liveHere =
+    sending &&
+    Boolean(activeConversationId) &&
+    sendingConversationId === activeConversationId;
 
   useEffect(() => {
     const el = listRef.current;
@@ -57,7 +62,7 @@ export function MessageList() {
       bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }
     prevMessageCount.current = messages.length;
-  }, [messages, sending, agentActions, streamingText]);
+  }, [messages, liveHere, agentActions, streamingText]);
 
   const jumpToLatest = () => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -90,7 +95,7 @@ export function MessageList() {
     );
   }
 
-  if (messages.length === 0 && !sending) {
+  if (messages.length === 0 && !liveHere) {
     return (
       <div className="message-list">
         <div className="empty-state">
@@ -128,7 +133,7 @@ export function MessageList() {
       {messages.map((message) => (
         <MessageBubble key={message.id} message={message} />
       ))}
-      {sending ? (
+      {liveHere ? (
         <div className="message-bubble assistant agent-live" aria-label="Agent is responding">
           <div className="message-meta">
             <span>Coreside agent</span>

@@ -40,14 +40,17 @@ Crawl4AI itself depends on additional open-source packages (including Playwright
 
 Exa is a third-party network service, not redistributed source code. API usage is subject to Exa’s terms and pricing. Coreside does not ship Exa credentials.
 
-## Partial Update (conceptual inspiration)
+## Partial Update (direct port + secure adaptation)
 
 - **Project:** [Partial Update](https://github.com/philholden/partialupdate)
 - **License:** MIT
 - **Copyright:** Copyright (c) 2026 Phil Holden
-- **Use in Coreside:** Architectural inspiration for Generative Interface Runtime V2 (persistent generative UI, structured interactions, targeting, silent updates). **No Partial Update source files were copied** into the Coreside application tree.
+- **Archive SHA-256:** `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607`
+- **Use in Coreside:** Valuable algorithms and interaction mechanics are **directly translated or substantially adapted** into Coreside’s trusted Tauri + Rust + React stack (incremental stream parse, queue ownership, fork/snapshot indexing, structured form continuation, filtered subscriber delivery). Unsafe HTML/JS/CSS execution, CDN injection, and hidden iframe forms are **rejected**.
+- **Policy / provenance:** `docs/PARTIAL_UPDATE_DIRECT_PORT_POLICY.md`, `docs/PARTIAL_UPDATE_PORT_PROVENANCE.md`, `reports/partial-update-port-map.json`
 - **Reference extract (not committed):** `.reference/partial-update/`
-- **Docs:** `docs/PARTIAL_UPDATE_REVIEW.md`, `docs/PARTIAL_UPDATE_EXHAUSTIVE_AUDIT.md`
+
+When Coreside source contains a substantial translation of Partial Update logic, the destination file carries an attribution comment naming the original path/symbol.
 
 ```
 MIT License

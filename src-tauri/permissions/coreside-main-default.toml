@@ -191,6 +191,7 @@ permissions = [
   "allow-set-search-profile",
   "allow-set-setting",
   "allow-set-web-research-resource-profile",
+  "allow-set-workspace-appearance",
   "allow-stage-chat-attachment",
   "allow-store-diagnostics-cmd",
   "allow-store-hosted-auth-session",

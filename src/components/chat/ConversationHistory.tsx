@@ -204,6 +204,19 @@ export function ConversationHistory({
     void loadTab(tab);
   }, [open, tab, loadTab]);
 
+  // Drop prior conversation rows immediately on switch (avoid stale flash).
+  useEffect(() => {
+    setBranches([]);
+    setSnapshots([]);
+    setTransactions([]);
+    setDiagnostics([]);
+    setSelectedTxnId(null);
+    setSnapshotDetail(null);
+    setError(null);
+    setBranchName("");
+    setSnapshotDesc("");
+  }, [conversationId]);
+
   useEffect(() => {
     if (!developerMode && tab === "inspector") setTab("branches");
   }, [developerMode, tab]);

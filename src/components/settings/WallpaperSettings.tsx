@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { WallpaperKind } from "@/types/agent";
 import {
   buildCanvasPresetProposal,
@@ -29,13 +29,20 @@ export function WallpaperSettings() {
   const globalWallpaperJson = useAppStore((s) => s.globalWallpaperJson);
   const applyWorkspaceWallpaper = useAppStore((s) => s.applyWorkspaceWallpaper);
   const interfaceTransparency = useAppStore((s) => s.interfaceTransparency);
-  const setInterfaceTransparency = useAppStore((s) => s.setInterfaceTransparency);
+  const previewInterfaceTransparency = useAppStore(
+    (s) => s.previewInterfaceTransparency,
+  );
+  const commitInterfaceTransparency = useAppStore(
+    (s) => s.commitInterfaceTransparency,
+  );
   const developerMode = useAppStore((s) => s.developerMode);
   const navigateToMedia = useAppStore((s) => s.navigateToMedia);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [techDetail, setTechDetail] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  /** Guards pointerup+blur (and keyup+blur) double-commit of the same gesture. */
+  const transparencyCommitGenRef = useRef(0);
 
   const activeId = activeCanvasPresetId({
     globalWallpaperJson,
@@ -84,12 +91,30 @@ export function WallpaperSettings() {
     } catch (err) {
       const { message, technical } = consumerErrorMessage(
         err,
-        "Coreside could not apply that wallpaper. The previous appearance was restored.",
+        "Coreside could not apply that wallpaper.",
       );
       setError(message);
       setTechDetail(technical);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const commitTransparency = async (value: number) => {
+    const gen = ++transparencyCommitGenRef.current;
+    setError(null);
+    setTechDetail(null);
+    try {
+      await commitInterfaceTransparency(value);
+    } catch (err) {
+      // Superseded gesture — do not overwrite a newer commit's error/UI state.
+      if (gen !== transparencyCommitGenRef.current) return;
+      const { message, technical } = consumerErrorMessage(
+        err,
+        "Coreside could not save interface transparency. The previous value was restored.",
+      );
+      setError(message);
+      setTechDetail(technical);
     }
   };
 
@@ -185,7 +210,16 @@ export function WallpaperSettings() {
             aria-valuetext={`${interfaceTransparency} percent`}
             disabled={busy}
             onChange={(e) =>
-              void setInterfaceTransparency(Number(e.target.value))
+              previewInterfaceTransparency(Number(e.target.value))
+            }
+            onPointerUp={(e) =>
+              void commitTransparency(Number(e.currentTarget.value))
+            }
+            onKeyUp={(e) =>
+              void commitTransparency(Number(e.currentTarget.value))
+            }
+            onBlur={(e) =>
+              void commitTransparency(Number(e.currentTarget.value))
             }
           />
         </label>
@@ -195,7 +229,7 @@ export function WallpaperSettings() {
             type="button"
             className="btn btn-ghost"
             disabled={busy || interfaceTransparency === 20}
-            onClick={() => void setInterfaceTransparency(20)}
+            onClick={() => void commitTransparency(20)}
           >
             Reset
           </button>
@@ -212,7 +246,7 @@ export function WallpaperSettings() {
               className="btn btn-secondary"
               aria-pressed={interfaceTransparency === preset.value}
               disabled={busy}
-              onClick={() => void setInterfaceTransparency(preset.value)}
+              onClick={() => void commitTransparency(preset.value)}
             >
               {preset.label}
             </button>

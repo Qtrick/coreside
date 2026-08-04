@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T01:00:00.000Z",
+  "commit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
+  "dirty": true,
+  "command": "vitest scoped-turn-streaming + cargo check",
+  "exitStatus": 0,
+  "result": "passed_unit",
+  "partial": true,
+  "partialReason": "Channel privacy unit/type checks only; Journey 12 desktop execution and formal eavesdropping E2E not_run",
+  "assertions": [
+    "send_message accepts Channel on_event",
+    "Text/Action/Error/Operation delivered on Channel when present",
+    "Text never emitted on global agent-turn bus",
+    "queue drain skips Text on global bus",
+    "tool-window listener ignores private text kinds"
+  ],
+  "e2eResult": "not_run",
+  "publicBeta": "Not ready"
+}

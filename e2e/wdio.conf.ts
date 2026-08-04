@@ -164,6 +164,7 @@ export const config: Options.Testrunner = {
       "./specs/10-secondary-window.spec.ts",
       "./specs/11-command-authority-denial.spec.ts",
       "./specs/12-true-streaming.spec.ts",
+      "./specs/13-wallpaper-targeted-update.spec.ts",
     ],
     "existing-chat": ["./specs/02-existing-profile.spec.ts"],
     "existing-tool": ["./specs/05-generated-tool-state.spec.ts"],
@@ -174,6 +175,7 @@ export const config: Options.Testrunner = {
     "existing-window": ["./specs/10-secondary-window.spec.ts"],
     "existing-authority": ["./specs/11-command-authority-denial.spec.ts"],
     "true-streaming": ["./specs/12-true-streaming.spec.ts"],
+    "wallpaper-targeted": ["./specs/13-wallpaper-targeted-update.spec.ts"],
     main: [
       "./specs/01-clean-startup.spec.ts",
       "./specs/03-settings.spec.ts",

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-03T23:28:51.537Z",
-  "commit": "c520fcfba6acdeed7a14ee1e24dd9ea31f67b4c7",
+  "generatedAt": "2026-08-04T01:04:36.277Z",
+  "commit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
   "dirty": true,
-  "sourceFingerprint": "92eb087ca187930e45dfd9091dd1fd9daac6a8eb9fe627804f47042983ba6f10",
+  "sourceFingerprint": "20d77510a6dbbc7509d2d3bcdbdfa57d6bb9a5e9bbe278f9a32925e78b4bb52f",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
@@ -12,16 +12,16 @@
   "buildMode": "development",
   "command": "audit:current-source/report-freshness",
   "exitStatus": 0,
-  "currentFingerprint": "92eb087ca187930e45dfd9091dd1fd9daac6a8eb9fe627804f47042983ba6f10",
-  "currentCommit": "c520fcfba6acdeed7a14ee1e24dd9ea31f67b4c7",
-  "archiveExpectedSha256": "75946b05d7778368700c8d827007d83f1cce0006fcedad8cf69b35f37bb23d69",
+  "currentFingerprint": "20d77510a6dbbc7509d2d3bcdbdfa57d6bb9a5e9bbe278f9a32925e78b4bb52f",
+  "currentCommit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
+  "archiveExpectedSha256": "10d7c5110a12525b53a48ee3dc66bf8d3a054c243553bc4ee9a1db27bc8b86b5",
   "inventory": [
     {
       "file": "active-versus-uploaded-coreside.json",
       "status": "current",
-      "reportFingerprint": "92eb087ca187930e45dfd9091dd1fd9daac6a8eb9fe627804f47042983ba6f10",
-      "reportCommit": "c520fcfba6acdeed7a14ee1e24dd9ea31f67b4c7",
-      "mtimeMs": 1785799731539.0981
+      "reportFingerprint": "20d77510a6dbbc7509d2d3bcdbdfa57d6bb9a5e9bbe278f9a32925e78b4bb52f",
+      "reportCommit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
+      "mtimeMs": 1785805476278.7163
     },
     {
       "file": "agent-capability-inventory.json",
@@ -103,16 +103,16 @@
     {
       "file": "current-source-baseline.json",
       "status": "current",
-      "reportFingerprint": "92eb087ca187930e45dfd9091dd1fd9daac6a8eb9fe627804f47042983ba6f10",
-      "reportCommit": "c520fcfba6acdeed7a14ee1e24dd9ea31f67b4c7",
-      "mtimeMs": 1785799731538.9631
+      "reportFingerprint": "20d77510a6dbbc7509d2d3bcdbdfa57d6bb9a5e9bbe278f9a32925e78b4bb52f",
+      "reportCommit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
+      "mtimeMs": 1785805476278.6394
     },
     {
       "file": "current-source-fingerprint.json",
       "status": "current",
-      "reportFingerprint": "92eb087ca187930e45dfd9091dd1fd9daac6a8eb9fe627804f47042983ba6f10",
-      "reportCommit": "c520fcfba6acdeed7a14ee1e24dd9ea31f67b4c7",
-      "mtimeMs": 1785799731538.7036
+      "reportFingerprint": "20d77510a6dbbc7509d2d3bcdbdfa57d6bb9a5e9bbe278f9a32925e78b4bb52f",
+      "reportCommit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
+      "mtimeMs": 1785805476278.5059
     },
     {
       "file": "database-command-classification.json",
@@ -213,6 +213,13 @@
       "mtimeMs": 1784407049420.6296
     },
     {
+      "file": "partial-update-port-map.json",
+      "status": "dirty_tree_untrusted",
+      "reportFingerprint": null,
+      "reportCommit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
+      "mtimeMs": 1785805218173.6274
+    },
+    {
       "file": "partial-update-secure-parity-matrix.json",
       "status": "stale_fingerprint",
       "reportFingerprint": "3306d5de459be8d661c52e0101b70d956c2218f841bacafdbedb6ebb6acf9f41",
@@ -278,9 +285,9 @@
     {
       "file": "report-freshness-inventory.json",
       "status": "current",
-      "reportFingerprint": "0c00ba2619c991182f134cb897c9a0d7e7294dbea338d4ef1f969a29b490b9cd",
-      "reportCommit": "c520fcfba6acdeed7a14ee1e24dd9ea31f67b4c7",
-      "mtimeMs": 1785798858885.9275
+      "reportFingerprint": "7b7fc5dac4b4386566be7b29a13615696a91172c3c8310c43292423e0d5c3614",
+      "reportCommit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
+      "mtimeMs": 1785804918960.3574
     },
     {
       "file": "runtime-v2-completion-audit.json",
@@ -288,6 +295,13 @@
       "reportFingerprint": null,
       "reportCommit": null,
       "mtimeMs": 1784403756081.73
+    },
+    {
+      "file": "scoped-streaming-results.json",
+      "status": "dirty_tree_untrusted",
+      "reportFingerprint": null,
+      "reportCommit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
+      "mtimeMs": 1785805466792.2466
     },
     {
       "file": "secret-inventory.json",
@@ -386,6 +400,13 @@
       "reportFingerprint": null,
       "reportCommit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
       "mtimeMs": 1785707511081.624
+    },
+    {
+      "file": "wallpaper-settings-results.json",
+      "status": "dirty_tree_untrusted",
+      "reportFingerprint": null,
+      "reportCommit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
+      "mtimeMs": 1785805466624.098
     },
     {
       "file": "wallpaper-visual-results.json",

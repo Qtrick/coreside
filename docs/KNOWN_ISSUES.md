@@ -6,20 +6,26 @@
 
 Tracked gaps affecting release assurance. Not an exhaustive bug list.
 
-## RC3.1 public-beta blockers (current)
+## RC3.2 public-beta blockers (current)
+
+| Issue | Severity | Status |
+| --- | --- | --- |
+| Wallpaper atomic persistence + slider coalesce | P1 | **Unit landed** — desktop/packaged pixels **not_run** |
+| Global `agent-turn` text eavesdrop | P1 | **Mitigated** — Channel for interactive send; eavesdropping E2E **not_run** |
+| Journey 12/13 desktop execution | P1 evidence | **Spec only / not_run** |
+| Full turn registry / delta-only IPC | P1 | **Open** |
+| Typed StructuredUserInput (not text delimiter) | P1 | **Open** |
+| Progressive preview transaction | P1 | **Open** |
+| Attachment crash suite + scoped ACL | P1 | **Open** |
+| Coherent profile restore | P1 | **Open** |
+
+## RC3.1 public-beta blockers (carry-forward)
 
 | Issue | Severity | Status |
 | --- | --- | --- |
 | Desktop E2E Journey 12 (true streaming) | P1 evidence | **Spec written; not_run** |
 | Full desktop E2E suite + packaged smoke | P1 | **Open** |
 | Anthropic / Gemini live SSE | P1 product | **Open** (buffered honest fallback) |
-| Progressive preview transaction on real path | P1 | **Open** |
-| Attachment commit→promote crash suite | P1 | **Open** (startup reconcile exists; suite incomplete) |
-| Attachment protocol conversation ACL | P1 | **Open** (opaque IDs + size cap; scope ACL incomplete) |
-| Coherent full-profile restore | P1 | **Open** (journal startup decisions landed) |
-| Wallpaper real pixel / packaged proof | P1 | **Open** |
-| Paced replay player | P2 | **Partial** — History lists transactions read-only |
-| Hosted AI streaming gateway | P1 hosted | **Open** (`stream: false`) |
 
 ## Assurance infrastructure
 

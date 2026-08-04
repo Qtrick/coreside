@@ -1,15 +1,28 @@
-# Implementation Plan — RC3.1 Secure Partial Update Runtime + Public-Beta Blockers
+# Implementation Plan — RC3.2 Direct Partial Update Port + Wallpaper + Scoped Streaming
 
 **Product:** Coreside  
-**Status:** RC3.1 dependency-order execution in progress; **public beta NOT READY** · **local-first NOT READY** · **Hosted AI NOT READY**  
+**Status:** RC3.2 in progress; **public beta NOT READY** · **local-first NOT READY** · **Hosted AI NOT READY**  
 **Last updated:** 2026-08-03  
 **Access date:** 2026-08-03  
-**Coreside archive:** `75946b05d7778368700c8d827007d83f1cce0006fcedad8cf69b35f37bb23d69` (`Coreside Chat AI.zip`)  
-**Previous Coreside archive:** `ec8292249b58b565abef72baf285e36adce0ddea0059931166702d4ccf9bd228`  
-**Partial Update archive:** `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607` (byte-identical to prior)  
-**Active commit:** `c520fcfba6acdeed7a14ee1e24dd9ea31f67b4c7` (dirty)  
+**Coreside archive:** `10d7c5110a12525b53a48ee3dc66bf8d3a054c243553bc4ee9a1db27bc8b86b5`  
+**Previous Coreside archive:** `75946b05d7778368700c8d827007d83f1cce0006fcedad8cf69b35f37bb23d69`  
+**Partial Update archive:** `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607`  
+**Active commit:** `76072ff4cfbca185d8420fc4f6da64a49aa91b17` (dirty)  
+**Commands:** **213** (`set_workspace_appearance` added)
 
-### Scope note (2026-08-03 evening — RC3.1)
+### RC3.2 landed (this session)
+
+| Workstream | Status |
+| --- | --- |
+| Baseline / provenance / MIT | Done (dirty) |
+| Wallpaper atomic + slider coalesce | Unit landed; desktop pixels **not_run** |
+| Channel-scoped text streaming | Landed; eavesdrop E2E **not_run** |
+| Progressive preview / typed StructuredUserInput | Open |
+| Full E2E 12/13 + packaged smoke | Open |
+
+Non-claims: specs ≠ executed E2E; unit wallpaper ≠ pixel proof; dirty ≠ release.
+
+### Scope note (prior RC3.1 — retained)
 
 Production implementation is underway (not audit-only). Honest landed work this session:
 

@@ -80,14 +80,19 @@ pub fn get_settings(db: &Database) -> DbResult<HashMap<String, String>> {
     Ok(map)
 }
 
-pub fn set_setting(db: &mut Database, key: &str, value: &str) -> DbResult<()> {
+/// Write a settings KV using an existing connection (including an open transaction).
+pub fn set_setting_on_conn(conn: &rusqlite::Connection, key: &str, value: &str) -> DbResult<()> {
     let now = now_rfc3339();
-    db.conn().execute(
+    conn.execute(
         "INSERT INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
         params![key, value, now],
     )?;
     Ok(())
+}
+
+pub fn set_setting(db: &mut Database, key: &str, value: &str) -> DbResult<()> {
+    set_setting_on_conn(db.conn(), key, value)
 }
 
 pub fn get_setting(db: &Database, key: &str) -> DbResult<Option<String>> {

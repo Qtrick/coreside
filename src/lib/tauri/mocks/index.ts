@@ -1197,6 +1197,17 @@ export async function mockInvoke<T>(
       };
       messages.push(assistantMessage);
       mockDb.messages.set(conversationId, messages);
+      // Optional Channel callback (web/vitest): simulate scoped text delivery.
+      const onEvent = args?.onEvent;
+      if (typeof onEvent === "function") {
+        onEvent({
+          kind: "text",
+          conversationId,
+          text: result.assistantMessage,
+          sequence: 1,
+          delta: result.assistantMessage,
+        });
+      }
       return result as T;
     }
 
@@ -1330,6 +1341,18 @@ export async function mockInvoke<T>(
     case "set_setting": {
       const key = String(args?.key ?? "");
       const value = args?.value;
+      if (
+        key === "wallpaper" ||
+        key === "wallpaperJson" ||
+        key === "wallpaper_json" ||
+        key === "interfaceTransparency" ||
+        key === "interface_transparency"
+      ) {
+        throw new TauriCommandError(
+          "Use set_workspace_appearance; wallpaper and interface transparency cannot be changed via set_setting.",
+          "forbidden",
+        );
+      }
       if (key === "theme" && typeof value === "string") {
         mockDb.settings.theme = value as ThemePreference;
       }
@@ -1480,6 +1503,80 @@ export async function mockInvoke<T>(
       }
       if (key === "developerMode" && typeof value === "boolean") {
         mockDb.settings.developerMode = value;
+      }
+      return { ...mockDb.settings } as T;
+    }
+
+    case "set_workspace_appearance": {
+      const input = (args?.input ?? args) as {
+        wallpaperJson?: string | null;
+        interfaceTransparency?: number | null;
+      };
+      if (
+        input?.wallpaperJson === undefined &&
+        input?.interfaceTransparency === undefined
+      ) {
+        throw new TauriCommandError(
+          "set_workspace_appearance requires wallpaperJson and/or interfaceTransparency",
+          "invalid",
+        );
+      }
+      if (input.wallpaperJson !== undefined) {
+        // null / empty clears the pair (match api.setWorkspaceAppearance).
+        const raw = String(input.wallpaperJson ?? "").trim();
+        let format: "none" | "legacy" | "schema" = "none";
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as {
+              kind?: unknown;
+              schemaVersion?: unknown;
+              type?: unknown;
+            };
+            if (
+              parsed &&
+              typeof parsed === "object" &&
+              parsed.schemaVersion === "1" &&
+              typeof parsed.type === "string"
+            ) {
+              format = "schema";
+            } else if (
+              parsed &&
+              typeof parsed === "object" &&
+              typeof parsed.kind === "string" &&
+              parsed.kind !== "none"
+            ) {
+              format = "legacy";
+            }
+          } catch {
+            format = "none";
+          }
+        }
+        if (format === "none") {
+          mockDb.settings.wallpaperJson = null;
+          mockDb.settings.wallpaper = { ...DEFAULT_WALLPAPER };
+        } else if (format === "legacy") {
+          mockDb.settings.wallpaper = sanitizeMockWallpaper(JSON.parse(raw));
+          mockDb.settings.wallpaperJson = null;
+        } else {
+          mockDb.settings.wallpaperJson = raw;
+          mockDb.settings.wallpaper = { ...DEFAULT_WALLPAPER };
+        }
+      }
+      if (
+        input.interfaceTransparency !== undefined &&
+        input.interfaceTransparency !== null
+      ) {
+        const n = Number(input.interfaceTransparency);
+        if (!Number.isFinite(n) || n < 0 || n > 60) {
+          throw new TauriCommandError(
+            "interfaceTransparency must be between 0 and 60",
+            "invalid",
+          );
+        }
+        mockDb.settings.interfaceTransparency = Math.min(
+          60,
+          Math.max(0, Math.round(n)),
+        );
       }
       return { ...mockDb.settings } as T;
     }

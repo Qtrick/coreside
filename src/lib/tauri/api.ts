@@ -59,7 +59,10 @@ import type {
   RuntimeGrant,
 } from "@/types/application-kernel";
 import type { ToolDefinition, ToolState, ToolSummary, ToolVersion } from "@/types/tool";
+import { Channel } from "@tauri-apps/api/core";
+import type { AgentTurnEvent } from "./events";
 import { invoke } from "./invoke";
+import { isTauriRuntime } from "./runtime";
 import { isToolRecord, toToolDefinition, toToolSummary, type ToolRecord } from "./tools";
 
 export type WindowExpandDirection =
@@ -229,7 +232,27 @@ export const api = {
       mimeType?: string;
       byteSize?: number;
     }> | null;
-  }) => invoke<SendMessageResult>("send_message", args),
+    /** Per-send Channel handler — authoritative for text/action/error/operation. */
+    onEvent?: (event: AgentTurnEvent) => void;
+  }) => {
+    const { onEvent, ...cmdArgs } = args;
+    if (isTauriRuntime()) {
+      // Channel is required on the Rust command; binds delivery to this invoke.
+      const channel = new Channel<AgentTurnEvent>();
+      if (onEvent) {
+        channel.onmessage = onEvent;
+      }
+      return invoke<SendMessageResult>("send_message", {
+        ...cmdArgs,
+        onEvent: channel,
+      });
+    }
+    // Web / vitest mocks: pass the callback through (no real Channel).
+    return invoke<SendMessageResult>("send_message", {
+      ...cmdArgs,
+      onEvent: onEvent ?? null,
+    });
+  },
   stageChatAttachment: (input: {
     name: string;
     mimeType: string;
@@ -287,6 +310,23 @@ export const api = {
   getSettings: () => invoke<AppSettings>("get_settings"),
   setSetting: (key: string, value: unknown) =>
     invoke<AppSettings>("set_setting", { key, value }),
+  setWorkspaceAppearance: (input: {
+    wallpaperJson?: string | null;
+    interfaceTransparency?: number | null;
+  }) => {
+    const payload: {
+      wallpaperJson?: string | null;
+      interfaceTransparency?: number | null;
+    } = {};
+    if (input.wallpaperJson !== undefined) {
+      // null means clear (same as ""); omit the key to leave wallpaper unchanged.
+      payload.wallpaperJson = input.wallpaperJson ?? "";
+    }
+    if (input.interfaceTransparency !== undefined) {
+      payload.interfaceTransparency = input.interfaceTransparency;
+    }
+    return invoke<AppSettings>("set_workspace_appearance", { input: payload });
+  },
   listAddedSettings: (ownerToolId?: string | null) =>
     invoke<AddedSetting[]>("list_added_settings", {
       ownerToolId: ownerToolId ?? null,
