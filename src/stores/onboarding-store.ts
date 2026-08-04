@@ -11,6 +11,7 @@ import {
   nextStep,
   showWelcome,
   skipTour,
+  pauseTour,
   startTour,
   type CoordinatorResult,
 } from "@/lib/onboarding/coordinator";
@@ -34,6 +35,8 @@ type OnboardingStore = CoordinatorState & {
   next: () => Promise<void>;
   back: () => Promise<void>;
   skip: () => Promise<void>;
+  /** Close / Escape — preserves in_progress resume state. */
+  pause: () => Promise<void>;
   finish: () => Promise<void>;
   dismissWelcome: () => Promise<void>;
   resetEssentials: () => Promise<void>;
@@ -132,6 +135,13 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
     set({
       ...(await persist(skipTour(get()))),
       welcomeEligible: false,
+      activeContextualId: null,
+    });
+  },
+
+  pause: async () => {
+    set({
+      ...(await persist(pauseTour(get()))),
       activeContextualId: null,
     });
   },

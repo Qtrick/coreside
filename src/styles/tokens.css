@@ -30,6 +30,20 @@
   --space-8: 2rem;
   --transition: 160ms ease;
 
+  /* Motion system (RC3.5) — prefer opacity/transform; honor reduced-motion */
+  --motion-duration-fast: 120ms;
+  --motion-duration-enter: 180ms;
+  --motion-duration-exit: 140ms;
+  --motion-duration-panel: 220ms;
+  --motion-duration-emphasized: 280ms;
+  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-enter: cubic-bezier(0, 0, 0.2, 1);
+  --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --motion-ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --motion-distance: 8px;
+  --motion-opacity-enter-from: 0;
+  --motion-duration-reduced: 1ms;
+
   /* Semantic readability tokens (mapped from theme vars) */
   --core-background: var(--background);
   --core-surface-primary: var(--surface);

@@ -138,6 +138,31 @@ export function backStep(state: CoordinatorState): CoordinatorResult {
   };
 }
 
+export function pauseTour(state: CoordinatorState): CoordinatorResult {
+  if (!state.activeTutorialId || state.phase !== "tour") {
+    return { state: { ...state, phase: "idle", activeTutorialId: null } };
+  }
+  const tutorial = getTutorial(state.activeTutorialId);
+  const step = tutorial?.steps[state.stepIndex];
+  const existing = progressFor(state, state.activeTutorialId);
+  return {
+    state: {
+      ...state,
+      phase: "idle",
+      // Keep progress in_progress; clear only the live overlay session.
+      activeTutorialId: null,
+      stepIndex: 0,
+    },
+    persist: {
+      tutorialId: state.activeTutorialId,
+      tutorialVersion: tutorial?.version ?? existing?.tutorialVersion ?? 1,
+      status: "in_progress",
+      currentStepId: step?.id ?? existing?.currentStepId ?? null,
+      completedStepIds: existing?.completedStepIds ?? [],
+    },
+  };
+}
+
 export function skipTour(state: CoordinatorState): CoordinatorResult {
   const tutorialId = state.activeTutorialId ?? ESSENTIALS_TUTORIAL_ID;
   const tutorial = getTutorial(tutorialId);

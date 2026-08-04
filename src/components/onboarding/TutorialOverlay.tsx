@@ -35,6 +35,7 @@ export function TutorialOverlay() {
   const next = useOnboardingStore((s) => s.next);
   const back = useOnboardingStore((s) => s.back);
   const skip = useOnboardingStore((s) => s.skip);
+  const pause = useOnboardingStore((s) => s.pause);
 
   const popoverRef = useRef<HTMLDivElement>(null);
   const primaryRef = useRef<HTMLButtonElement>(null);
@@ -80,7 +81,7 @@ export function TutorialOverlay() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        void skip();
+        void pause();
         return;
       }
       if (e.key !== "Tab" || !popoverRef.current) return;
@@ -104,7 +105,7 @@ export function TutorialOverlay() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [phase, skip]);
+  }, [phase, pause]);
 
   useEffect(() => {
     if (phase !== "tour") return;
@@ -126,26 +127,40 @@ export function TutorialOverlay() {
   const canBack =
     stepIndex > (tutorial.steps[0]?.kind === "welcome" ? 1 : 0);
 
-  const popoverStyle: CSSProperties = anchor
-    ? {
-        position: "fixed",
-        top: Math.min(
-          window.innerHeight - 220,
-          Math.max(16, anchor.top + anchor.height + 12),
-        ),
-        left: Math.min(
-          window.innerWidth - 360,
-          Math.max(16, anchor.left),
-        ),
-        width: 340,
-      }
-    : {
+  const popoverStyle: CSSProperties = (() => {
+    const width = Math.min(340, Math.max(240, window.innerWidth - 32));
+    const approxHeight = 220;
+    const margin = 16;
+    if (!anchor) {
+      return {
         position: "fixed",
         top: "50%",
         left: "50%",
         transform: "translate(-50%, -50%)",
-        width: 340,
+        width,
+        maxWidth: `calc(100vw - ${margin * 2}px)`,
       };
+    }
+    const below = anchor.top + anchor.height + 12;
+    const above = anchor.top - approxHeight - 12;
+    const top =
+      below + approxHeight <= window.innerHeight - margin
+        ? Math.max(margin, below)
+        : above >= margin
+          ? Math.max(margin, above)
+          : margin;
+    const left = Math.min(
+      window.innerWidth - width - margin,
+      Math.max(margin, anchor.left),
+    );
+    return {
+      position: "fixed",
+      top,
+      left,
+      width,
+      maxWidth: `calc(100vw - ${margin * 2}px)`,
+    };
+  })();
 
   // Spotlight coach-mark: dialog (not tooltip) so AT announces title/body and
   // focus stays on the tour controls. Backdrop remains non-blocking for targets.
@@ -171,7 +186,7 @@ export function TutorialOverlay() {
         className="tutorial-popover"
         style={popoverStyle}
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
         aria-labelledby="tutorial-step-title"
         aria-describedby="tutorial-step-body"
       >
@@ -208,8 +223,8 @@ export function TutorialOverlay() {
         <button
           type="button"
           className="btn-icon tutorial-popover-close"
-          aria-label="Close tour"
-          onClick={() => void skip()}
+          aria-label="Pause tour"
+          onClick={() => void pause()}
         >
           ×
         </button>

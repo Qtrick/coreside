@@ -1,0 +1,76 @@
+{
+  "product": "Coreside",
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-02T03:47:47.137Z",
+  "git": {
+    "commit": "9bc060a944019ad50a596f680b19eb5134b609b6",
+    "branch": "main",
+    "dirty": true,
+    "dirtyFileCount": 25
+  },
+  "toolchain": {
+    "node": "v24.17.0",
+    "rustc": "rustc 1.96.1 (31fca3adb 2026-06-26)",
+    "cargo": "cargo 1.96.1 (356927216 2026-06-26)",
+    "os": "darwin 25.5.0 (arm64)"
+  },
+  "mode": "quick",
+  "tracks": {
+    "localByok": {
+      "name": "Local-first BYOK Coreside",
+      "verdict": "quick_partial_full_suite_not_run",
+      "note": "Hosted AI blockers are tracked separately and must not fail this verdict."
+    },
+    "hostedAi": {
+      "name": "Hosted Coreside AI",
+      "verdict": "separate_track",
+      "note": "See reports/hosted-ai-readiness.json — not mixed into local beta."
+    }
+  },
+  "gates": [
+    {
+      "id": "doctor",
+      "command": "npm run doctor",
+      "exitCode": 0,
+      "status": "passed",
+      "durationMs": 120,
+      "summary": {
+        "checksPassed": 65,
+        "checksTotal": 65
+      },
+      "rawTail": "er grants/mints authority\nPASS  contracts.invoke_is_registered — all 150 invoked commands are registered in lib.rs\nPASS  contracts.mock_has_production_command — all 144 mocked commands exist in production\nPASS  docs.migration_inventory_complete — all 15 migrations listed in docs/MIGRATION_ASSURANCE.md\nPASS  capabilities.tool_window_no_shell — tool-* windows use a separate capability without shell:allow-open\nPASS  commands.open_external_url — external links open through the validated Rust command\nPASS  e2e.not_in_default_features — Cargo feature e2e is optional and excluded from default features\nPASS  e2e.production_config_no_wdio — production tauri.conf.json does not enable WebDriver or e2e capabilities\nPASS  e2e.production_caps_no_wdio — production capability files do not grant wdio permissions\nPASS  e2e.dedicated_config_present — tauri.e2e.conf.json gates WebDriver for E2E builds on main + tool-* windows\nPASS  e2e.lib_plugins_feature_gated — WebDriver plugins register only behind cfg(feature = \"e2e\")\nPASS  e2e.seed_not_public_ipc — E2E seed is env-only behind feature e2e — not a privileged Tauri IPC command\nPASS  e2e.harness_no_broad_pkill — E2E harness never broad-pkills Coreside; orphans cleaned only via WebDriver port + binary match\nPASS  e2e.tsconfig_isolated — Root tsconfig excludes e2e so @wdio types cannot leak into app tsc\nPASS  evidence.script_present — npm run release:evidence is available\nPASS  evidence.tracks_separated — Evidence script separates local BYOK vs hosted AI tracks\nPASS  evidence.current_commit — evidence matches HEAD 9bc060a\nPASS  docs.release_readiness_points_to_evidence — RELEASE_READINESS.md references generated evidence rather than stale July counts alone\nPASS  reports.release_gates_marked_historical — Stale release-gates.json is superseded by release-evidence pipeline\n\nAll 65 checks passed.\n\nnpm warn Unknown env config \"devdir\". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options."
+    },
+    {
+      "id": "package-json-parse",
+      "command": "node --input-type=module -e import fs from 'node:fs'; JSON.parse(fs.readFileSync('package.json','utf8')); console.log('ok');",
+      "exitCode": 0,
+      "status": "passed",
+      "durationMs": 25,
+      "summary": {
+        "exitCode": 0
+      },
+      "rawTail": "ok"
+    }
+  ],
+  "tallies": {
+    "passed": 2,
+    "failed": 0,
+    "manualVerificationRequired": 0,
+    "notRun": 0
+  },
+  "inventories": {
+    "commands": {
+      "count": 197,
+      "source": "inventory"
+    },
+    "migrations": 15
+  },
+  "supersededReports": [
+    {
+      "path": "reports/release-gates.json",
+      "assessedAt": "2026-07-19",
+      "status": "historical",
+      "note": "Superseded by reports/release-evidence.json"
+    }
+  ]
+}

@@ -4,6 +4,7 @@ import {
   completeTour,
   emptyCoordinatorState,
   nextStep,
+  pauseTour,
   showWelcome,
   skipTour,
   startTour,
@@ -48,6 +49,38 @@ describe("onboarding coordinator", () => {
     result = startTour(emptyCoordinatorState(), ESSENTIALS_TUTORIAL_ID, false);
     result = skipTour(result.state);
     expect(result.state.phase).toBe("skipped");
+  });
+
+  it("pause preserves in_progress instead of skipping", () => {
+    const started = startTour(emptyCoordinatorState(), ESSENTIALS_TUTORIAL_ID, false);
+    const paused = pauseTour(started.state);
+    expect(paused.state.phase).toBe("idle");
+    expect(paused.state.activeTutorialId).toBeNull();
+    expect(paused.persist?.status).toBe("in_progress");
+    expect(paused.persist?.currentStepId).toBeTruthy();
+
+    const resumed = startTour(
+      {
+        ...paused.state,
+        progressById: {
+          [ESSENTIALS_TUTORIAL_ID]: {
+            tutorialId: ESSENTIALS_TUTORIAL_ID,
+            tutorialVersion: 1,
+            status: "in_progress",
+            currentStepId: paused.persist?.currentStepId ?? null,
+            completedStepIds: paused.persist?.completedStepIds ?? [],
+            startedAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            completedAt: null,
+            skippedAt: null,
+            lastOpenedAt: null,
+          },
+        },
+      },
+      ESSENTIALS_TUTORIAL_ID,
+      true,
+    );
+    expect(resumed.state.phase).toBe("tour");
   });
 
   it("resumes in_progress at current step", () => {

@@ -12,11 +12,13 @@ export function ContextualHint() {
   return (
     <div
       className="contextual-hint"
-      role="status"
-      aria-live="polite"
+      role="region"
       aria-labelledby="contextual-hint-title"
       aria-describedby="contextual-hint-body"
     >
+      <div className="sr-only" role="status" aria-live="polite">
+        {tip.title}
+      </div>
       <div className="contextual-hint-body">
         <strong id="contextual-hint-title">{tip.title}</strong>
         <p id="contextual-hint-body">{tip.body}</p>

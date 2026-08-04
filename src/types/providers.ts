@@ -12,6 +12,10 @@ export const ProviderConnectionSchema = z.object({
   lastTestedAt: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  authMode: z.string().nullable().optional(),
+  endpointClass: z.string().nullable().optional(),
+  protocolFamily: z.string().nullable().optional(),
+  local: z.boolean().optional(),
 });
 
 export type ProviderConnection = z.infer<typeof ProviderConnectionSchema>;
@@ -23,6 +27,11 @@ export const ProviderHintSchema = z.object({
   defaultModel: z.string(),
   docsUrl: z.string().nullable().optional(),
   supportsBaseUrl: z.boolean(),
+  requiresApiKey: z.boolean().optional().default(true),
+  local: z.boolean().optional().default(false),
+  defaultBaseUrl: z.string().nullable().optional(),
+  authMode: z.string().optional(),
+  experimental: z.boolean().optional().default(false),
 });
 
 export type ProviderHint = z.infer<typeof ProviderHintSchema>;

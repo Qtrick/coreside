@@ -129,8 +129,8 @@ pub struct OpenAiProvider {
     api_key: String,
     model: String,
     base_url: String,
-    provider_id: &'static str,
-    display_name: &'static str,
+    provider_id: String,
+    display_name: String,
     client: reqwest::Client,
 }
 
@@ -140,15 +140,21 @@ impl OpenAiProvider {
     }
 
     pub fn new_compatible(api_key: String, model: String, base_url: String) -> Self {
-        Self::with_identity(api_key, model, base_url, "compatible", "OpenAI-compatible")
+        Self::with_identity(
+            api_key,
+            model,
+            base_url,
+            "compatible",
+            "OpenAI-compatible",
+        )
     }
 
-    fn with_identity(
+    pub fn with_identity(
         api_key: String,
         model: String,
         base_url: String,
-        provider_id: &'static str,
-        display_name: &'static str,
+        provider_id: impl Into<String>,
+        display_name: impl Into<String>,
     ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
@@ -158,8 +164,8 @@ impl OpenAiProvider {
             api_key,
             model,
             base_url: base_url.trim_end_matches('/').to_string(),
-            provider_id,
-            display_name,
+            provider_id: provider_id.into(),
+            display_name: display_name.into(),
             client,
         }
     }
@@ -416,11 +422,11 @@ impl OpenAiProvider {
 #[async_trait]
 impl AiProvider for OpenAiProvider {
     fn provider_id(&self) -> &str {
-        self.provider_id
+        self.provider_id.as_str()
     }
 
     fn display_name(&self) -> &str {
-        self.display_name
+        self.display_name.as_str()
     }
 
     async fn health_check(&self, cancel: CancellationToken) -> Result<ProviderHealth, AiError> {

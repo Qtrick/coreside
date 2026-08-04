@@ -188,7 +188,7 @@ export function ProviderSetupDialog() {
       label: defaultLabel(hint),
       apiKey: "",
       model: hint.defaultModel,
-      baseUrl: "",
+      baseUrl: hint.defaultBaseUrl ?? "",
     });
     setShowKey(false);
     setError(null);
@@ -200,12 +200,13 @@ export function ProviderSetupDialog() {
     event.preventDefault();
     if (!selected || busy) return;
     const apiKey = form.apiKey.trim();
-    if (!editId && !apiKey) {
+    const needsKey = selected.requiresApiKey !== false && !selected.local;
+    if (!editId && needsKey && !apiKey) {
       setError("Enter an API key to continue.");
       return;
     }
-    if (selected.supportsBaseUrl && !form.baseUrl.trim()) {
-      setError("Enter a base URL for this compatible endpoint.");
+    if (selected.supportsBaseUrl && !form.baseUrl.trim() && !selected.defaultBaseUrl) {
+      setError("Enter a base URL for this endpoint.");
       return;
     }
     if (!form.label.trim()) {
@@ -215,15 +216,23 @@ export function ProviderSetupDialog() {
 
     setBusy(true);
     setError(null);
-    setStatusLabel(apiKey ? "Testing connection…" : "Saving…");
+    setStatusLabel(
+      needsKey && apiKey
+        ? "Testing connection…"
+        : selected.local
+          ? "Checking local server…"
+          : "Saving…",
+    );
     try {
       await api.upsertProviderConnection({
         id: editId,
         provider: selected.id,
         label: form.label.trim(),
         apiKey: apiKey || null,
-        modelDefault: form.model.trim() || selected.defaultModel,
-        baseUrl: selected.supportsBaseUrl ? form.baseUrl.trim() : null,
+        modelDefault: form.model.trim() || selected.defaultModel || null,
+        baseUrl: selected.supportsBaseUrl
+          ? form.baseUrl.trim() || selected.defaultBaseUrl || null
+          : null,
         setActive: true,
       });
       // Wipe key from React state immediately after a successful save.
@@ -294,7 +303,7 @@ export function ProviderSetupDialog() {
             <p id={descId}>
               {step === "success"
                 ? "You can start chatting right away — no restart needed."
-                : "Use your own API key to power the Coreside agent. Your key is stored securely on this device."}
+                : "Connect a hosted provider with your own key, or Local AI without a fake secret. Keys stay in the OS keychain."}
             </p>
           </div>
           <button
@@ -310,7 +319,7 @@ export function ProviderSetupDialog() {
 
         {step === "pick" ? (
           <div className="provider-picker">
-            <p className="provider-picker-label">Choose a supported provider.</p>
+            <p className="provider-picker-label">Choose Hosted AI or Local AI.</p>
             <ul className="provider-picker-list">
               {hints.map((hint) => (
                 <li key={hint.id}>
@@ -320,7 +329,12 @@ export function ProviderSetupDialog() {
                     onClick={() => pickProvider(hint)}
                   >
                     <strong>{hint.label}</strong>
-                    <span className="muted">{hint.defaultModel}</span>
+                    <span className="muted">
+                      {hint.local
+                        ? "Local AI · no API key"
+                        : hint.defaultModel || "Hosted"}
+                      {hint.experimental ? " · experimental" : ""}
+                    </span>
                   </button>
                 </li>
               ))}
@@ -356,37 +370,44 @@ export function ProviderSetupDialog() {
               />
             </label>
 
-            <label className="field">
-              <span>API key</span>
-              <div className="provider-key-row">
-                <input
-                  ref={keyInputRef}
-                  type={showKey ? "text" : "password"}
-                  value={form.apiKey}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, apiKey: e.target.value }))
-                  }
-                  placeholder={
-                    editId && !form.apiKey
-                      ? "Leave blank to keep the saved key"
-                      : selected.keyPlaceholder
-                  }
-                  autoComplete="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  disabled={busy}
-                />
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  aria-label={showKey ? "Hide API key" : "Show API key"}
-                  onClick={() => setShowKey((v) => !v)}
-                  disabled={busy}
-                >
-                  {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-            </label>
+            {selected.requiresApiKey !== false && !selected.local ? (
+              <label className="field">
+                <span>API key</span>
+                <div className="provider-key-row">
+                  <input
+                    ref={keyInputRef}
+                    type={showKey ? "text" : "password"}
+                    value={form.apiKey}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, apiKey: e.target.value }))
+                    }
+                    placeholder={
+                      editId && !form.apiKey
+                        ? "Leave blank to keep the saved key"
+                        : selected.keyPlaceholder
+                    }
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    disabled={busy}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    aria-label={showKey ? "Hide API key" : "Show API key"}
+                    onClick={() => setShowKey((v) => !v)}
+                    disabled={busy}
+                  >
+                    {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </label>
+            ) : (
+              <p className="muted">
+                Local AI does not need an API key. Coreside talks to the server on
+                this device.
+              </p>
+            )}
 
             <label className="field">
               <span>Model</span>
@@ -395,7 +416,7 @@ export function ProviderSetupDialog() {
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, model: e.target.value }))
                 }
-                placeholder={selected.defaultModel}
+                placeholder={selected.defaultModel || "Model id from your server"}
                 autoComplete="off"
                 disabled={busy}
               />
@@ -409,7 +430,9 @@ export function ProviderSetupDialog() {
                   onChange={(e) =>
                     setForm((prev) => ({ ...prev, baseUrl: e.target.value }))
                   }
-                  placeholder="https://api.example.com/v1"
+                  placeholder={
+                    selected.defaultBaseUrl || "https://api.example.com/v1"
+                  }
                   autoComplete="off"
                   disabled={busy}
                 />
@@ -419,7 +442,9 @@ export function ProviderSetupDialog() {
             {selected.docsUrl ? (
               <p className="muted provider-docs">
                 <a href={selected.docsUrl} target="_blank" rel="noreferrer">
-                  Where to get a {selected.label} key
+                  {selected.local
+                    ? `${selected.label} documentation`
+                    : `Where to get a ${selected.label} key`}
                 </a>
               </p>
             ) : null}

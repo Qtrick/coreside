@@ -9,8 +9,10 @@ mod gemini;
 mod hosted_provider;
 mod http_limits;
 mod mock;
+pub mod ollama;
 mod openai;
 mod openrouter;
+pub mod platform;
 mod prompt_builder;
 mod provider;
 mod response_parser;
@@ -27,6 +29,7 @@ pub use capability_registry::{AgentCapability, ToolCallRequest, ToolCallResult};
 pub use errors::AiError;
 pub use gemini::GeminiProvider;
 pub use mock::MockAiProvider;
+pub use ollama::ollama_server_ready;
 pub use openai::OpenAiProvider;
 pub use openrouter::OpenRouterProvider;
 pub use prompt_builder::{build_agent_prompt_with_references, PROMPT_VERSION};
@@ -80,6 +83,12 @@ pub fn create_provider_with_model(
         if let Some(hosted) = hosted_provider::try_from_session()? {
             return Ok(hosted);
         }
+        // Authless local runners (Ollama / LM Studio / …) need no key.
+        if let Some(desc) = platform::descriptor_by_id(&provider) {
+            if !desc.default_auth_mode.requires_secret() && desc.local {
+                return create_local_or_compatible_provider(config, &provider, &model, "");
+            }
+        }
     }
 
     let key = config
@@ -93,22 +102,38 @@ pub fn create_provider_with_model(
             )
         })?;
 
-    match provider.as_str() {
+    create_local_or_compatible_provider(config, &provider, &model, &key)
+}
+
+fn create_local_or_compatible_provider(
+    config: &AppConfig,
+    provider: &str,
+    model: &str,
+    key: &str,
+) -> Result<Arc<dyn AiProvider>, AiError> {
+    match provider {
         "gemini" => Ok(Arc::new(GeminiProvider::new(
-            key,
-            model,
+            key.to_string(),
+            model.to_string(),
             config.base_url.clone(),
         ))),
         "openrouter" => Ok(Arc::new(OpenRouterProvider::new(
-            key,
-            model,
+            key.to_string(),
+            model.to_string(),
             config.base_url.clone(),
         ))),
-        "openai" => Ok(Arc::new(OpenAiProvider::new(
-            key,
-            model,
-            config.base_url.clone(),
-        ))),
+        "openai" | "kimi" | "mistral" | "lmstudio" | "vllm" | "llama_cpp" => {
+            let display = platform::descriptor_by_id(provider)
+                .map(|d| d.display_name.to_string())
+                .unwrap_or_else(|| provider.to_string());
+            Ok(Arc::new(OpenAiProvider::with_identity(
+                key.to_string(),
+                model.to_string(),
+                config.base_url.clone(),
+                provider.to_string(),
+                display,
+            )))
+        }
         "compatible" => {
             if config.base_url.trim().is_empty() {
                 return Err(AiError::Validation(
@@ -116,18 +141,35 @@ pub fn create_provider_with_model(
                 ));
             }
             Ok(Arc::new(OpenAiProvider::new_compatible(
-                key,
-                model,
+                key.to_string(),
+                model.to_string(),
                 config.base_url.clone(),
             )))
         }
         "anthropic" | "claude" => Ok(Arc::new(AnthropicProvider::new(
-            key,
-            model,
+            key.to_string(),
+            model.to_string(),
             config.base_url.clone(),
         ))),
+        "ollama" => {
+            // Temporary path: Ollama OpenAI-compat at /v1 until native adapter lands.
+            let base = if config.base_url.trim().is_empty() {
+                "http://127.0.0.1:11434/v1".into()
+            } else if config.base_url.trim_end_matches('/').ends_with("/v1") {
+                config.base_url.clone()
+            } else {
+                format!("{}/v1", config.base_url.trim_end_matches('/'))
+            };
+            Ok(Arc::new(OpenAiProvider::with_identity(
+                key.to_string(),
+                model.to_string(),
+                base,
+                "ollama".to_string(),
+                "Ollama".to_string(),
+            )))
+        }
         other => Err(AiError::Validation(format!(
-            "Unsupported AI provider: {other}. Supported: gemini, openai, anthropic, openrouter, compatible, mock."
+            "Unsupported AI provider: {other}. Choose a connection from AI connections."
         ))),
     }
 }

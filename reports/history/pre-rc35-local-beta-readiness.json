@@ -1,0 +1,16 @@
+{
+  "product": "Coreside",
+  "track": "local-byok",
+  "generatedAt": "2026-08-02T03:47:47.137Z",
+  "commit": "9bc060a944019ad50a596f680b19eb5134b609b6",
+  "dirty": true,
+  "sourceEvidence": "reports/release-evidence.json",
+  "offlineGates": {
+    "passed": 2,
+    "failed": 0,
+    "manualVerificationRequired": 0,
+    "notRun": 0
+  },
+  "verdict": "quick_partial_full_suite_not_run",
+  "mode": "quick"
+}

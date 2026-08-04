@@ -31,6 +31,13 @@ pub struct ProviderConnectionView {
     pub last_tested_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint_class: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol_family: Option<String>,
+    pub local: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,7 +53,19 @@ pub struct UpsertProviderConnectionInput {
 }
 
 fn to_view(row: ProviderConnection) -> ProviderConnectionView {
-    let has_key = credentials::has_secret(&row.keyring_account);
+    let desc = crate::ai::platform::descriptor_by_id(&row.provider);
+    let auth_mode = row
+        .auth_mode
+        .as_deref()
+        .and_then(crate::ai::platform::AuthMode::parse)
+        .or_else(|| desc.as_ref().map(|d| d.default_auth_mode));
+    let local = desc.as_ref().map(|d| d.local).unwrap_or(false)
+        || auth_mode == Some(crate::ai::platform::AuthMode::LocalAuthless);
+    let has_key = if auth_mode == Some(crate::ai::platform::AuthMode::LocalAuthless) {
+        true
+    } else {
+        credentials::has_secret(&row.keyring_account)
+    };
     ProviderConnectionView {
         id: row.id,
         provider: row.provider,
@@ -59,19 +78,21 @@ fn to_view(row: ProviderConnection) -> ProviderConnectionView {
         last_tested_at: row.last_tested_at,
         created_at: row.created_at,
         updated_at: row.updated_at,
+        auth_mode: row.auth_mode,
+        endpoint_class: row.endpoint_class,
+        protocol_family: row.protocol_family,
+        local,
     }
 }
 
 fn normalize_provider(raw: &str) -> Result<String, CommandError> {
-    let p = raw.trim().to_lowercase();
-    match p.as_str() {
-        "gemini" | "openai" | "anthropic" | "openrouter" | "compatible" => Ok(p),
-        "claude" => Ok("anthropic".into()),
-        _ => Err(CommandError::new(
+    let desc = crate::ai::platform::descriptor_by_id(raw).ok_or_else(|| {
+        CommandError::new(
             "invalid",
-            format!("Unsupported provider '{raw}'. Choose gemini, openai, anthropic, openrouter, or compatible."),
-        )),
-    }
+            format!("Unsupported provider '{raw}'. Choose a provider from AI connections."),
+        )
+    })?;
+    Ok(desc.id.to_string())
 }
 
 fn build_probe_config(
@@ -86,10 +107,19 @@ fn build_probe_config(
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .unwrap_or(default_base);
-    if provider == "compatible" && base_url.trim().is_empty() {
+    let desc = crate::ai::platform::descriptor_by_id(provider);
+    if desc
+        .as_ref()
+        .map(|d| {
+            d.endpoint_class
+                == crate::ai::platform::EndpointClass::UserConfiguredRemoteCompatible
+        })
+        .unwrap_or(false)
+        && base_url.trim().is_empty()
+    {
         return Err(CommandError::new(
             "invalid",
-            "Custom OpenAI-compatible providers require a base URL",
+            "Custom compatible providers require a base URL",
         ));
     }
     let model = model_default
@@ -97,9 +127,14 @@ fn build_probe_config(
         .filter(|s| !s.is_empty())
         .unwrap_or(default_model.as_str())
         .to_string();
+    let key = api_key.trim();
     Ok(AppConfig {
         provider: provider.to_string(),
-        api_key: Some(api_key.to_string()),
+        api_key: if key.is_empty() {
+            None
+        } else {
+            Some(key.to_string())
+        },
         model,
         base_url,
         log_level: "info".into(),
@@ -194,45 +229,110 @@ pub async fn upsert_provider_connection(
         db::get_provider_connection(&db, &id).ok()
     };
 
+    let descriptor = crate::ai::platform::descriptor_by_id(&provider).ok_or_else(|| {
+        CommandError::new("invalid", format!("Unknown provider descriptor '{provider}'"))
+    })?;
+    let auth_mode = descriptor.default_auth_mode;
+    let endpoint_class = descriptor.endpoint_class;
+
+    let resolved_base = base_url
+        .clone()
+        .or_else(|| existing.as_ref().and_then(|e| e.base_url.clone()))
+        .or_else(|| descriptor.default_endpoint.map(|s| s.to_string()));
+
+    if let Some(ref url) = resolved_base {
+        let is_override = descriptor.default_endpoint.map(|d| d != url.as_str()).unwrap_or(true);
+        crate::ai::platform::classify_and_validate_endpoint(
+            url,
+            endpoint_class,
+            descriptor.allows_endpoint_override,
+            is_override,
+        )
+        .map_err(|e| CommandError::new("invalid_endpoint", e.to_string()))?;
+    } else if descriptor.endpoint_class
+        == crate::ai::platform::EndpointClass::UserConfiguredRemoteCompatible
+        || descriptor.local
+    {
+        return Err(CommandError::new(
+            "invalid",
+            "This connection requires a base URL",
+        ));
+    }
+
     let mut last_status = existing.as_ref().and_then(|e| e.last_status.clone());
     let mut last_tested_at = existing.as_ref().and_then(|e| e.last_tested_at.clone());
     let now = chrono::Utc::now().to_rfc3339();
 
-    if let Some(ref key) = api_key {
-        // Test-then-save: never persist a new key until health_check succeeds.
-        let probe = build_probe_config(
-            &provider,
-            key,
-            base_url
-                .as_deref()
-                .or(existing.as_ref().and_then(|e| e.base_url.as_deref())),
-            model_default
-                .as_deref()
-                .or(existing.as_ref().and_then(|e| e.model_default.as_deref())),
-        )?;
-        if let Err(err) = health_check_key(&probe).await {
+    if auth_mode.requires_secret() {
+        if let Some(ref key) = api_key {
+            // Test-then-save: never persist a new key until health_check succeeds.
+            let probe = build_probe_config(
+                &provider,
+                key,
+                resolved_base.as_deref(),
+                model_default
+                    .as_deref()
+                    .or(existing.as_ref().and_then(|e| e.model_default.as_deref())),
+            )?;
+            if let Err(err) = health_check_key(&probe).await {
+                return Err(CommandError::new(
+                    "provider_test_failed",
+                    format!(
+                        "Connection test failed; API key was not saved. {}",
+                        err.message
+                    ),
+                ));
+            }
+            credentials::set_secret(&keyring_account, key)
+                .map_err(|e| CommandError::sanitized("credential_store", e, Some(key.as_str())))?;
+            last_status = Some("connected".into());
+            last_tested_at = Some(now.clone());
+        } else if existing.is_none() {
             return Err(CommandError::new(
-                "provider_test_failed",
-                format!(
-                    "Connection test failed; API key was not saved. {}",
-                    err.message
-                ),
+                "invalid",
+                "API key is required when creating a provider connection",
+            ));
+        } else if !credentials::has_secret(&keyring_account) {
+            return Err(CommandError::new(
+                "missing_key",
+                "No API key stored for this connection. Enter a key to save.",
             ));
         }
-        credentials::set_secret(&keyring_account, key)
-            .map_err(|e| CommandError::sanitized("credential_store", e, Some(key.as_str())))?;
+    } else {
+        // Authless Local AI: prefer native Ollama health when applicable.
+        if provider == "ollama" {
+            let origin = resolved_base.as_deref().unwrap_or("http://127.0.0.1:11434");
+            let cancel = CancellationToken::new();
+            if let Err(err) = crate::ai::ollama_server_ready(origin, &cancel).await {
+                return Err(CommandError::new(
+                    "provider_test_failed",
+                    format!(
+                        "Ollama did not respond at {origin}. Is the app running? {}",
+                        err
+                    ),
+                ));
+            }
+        } else {
+            let probe = build_probe_config(
+                &provider,
+                "",
+                resolved_base.as_deref(),
+                model_default
+                    .as_deref()
+                    .or(existing.as_ref().and_then(|e| e.model_default.as_deref())),
+            )?;
+            if let Err(err) = health_check_key(&probe).await {
+                return Err(CommandError::new(
+                    "provider_test_failed",
+                    format!(
+                        "Local AI server did not respond. Is it running? {}",
+                        err.message
+                    ),
+                ));
+            }
+        }
         last_status = Some("connected".into());
         last_tested_at = Some(now.clone());
-    } else if existing.is_none() {
-        return Err(CommandError::new(
-            "invalid",
-            "API key is required when creating a provider connection",
-        ));
-    } else if !credentials::has_secret(&keyring_account) {
-        return Err(CommandError::new(
-            "missing_key",
-            "No API key stored for this connection. Enter a key to save.",
-        ));
     }
 
     let set_active = input
@@ -240,11 +340,12 @@ pub async fn upsert_provider_connection(
         .unwrap_or(existing.as_ref().map(|e| e.is_active).unwrap_or(true));
     let row = ProviderConnection {
         id: id.clone(),
-        provider,
+        provider: provider.clone(),
         label: label.to_string(),
-        base_url: base_url.or_else(|| existing.as_ref().and_then(|e| e.base_url.clone())),
+        base_url: resolved_base,
         model_default: model_default
-            .or_else(|| existing.as_ref().and_then(|e| e.model_default.clone())),
+            .or_else(|| existing.as_ref().and_then(|e| e.model_default.clone()))
+            .or_else(|| descriptor.default_model_hint.map(|s| s.to_string())),
         keyring_account: keyring_account.clone(),
         is_active: false,
         last_status,
@@ -254,6 +355,20 @@ pub async fn upsert_provider_connection(
             .map(|e| e.created_at.clone())
             .unwrap_or_else(|| now.clone()),
         updated_at: now,
+        provider_descriptor_id: Some(descriptor.id.to_string()),
+        protocol_family: Some(descriptor.protocol_family.as_str().to_string()),
+        auth_mode: Some(auth_mode.as_str().to_string()),
+        endpoint_class: Some(endpoint_class.as_str().to_string()),
+        api_version: existing.as_ref().and_then(|e| e.api_version.clone()),
+        region: existing.as_ref().and_then(|e| e.region.clone()),
+        deployment: existing.as_ref().and_then(|e| e.deployment.clone()),
+        organization_id: existing.as_ref().and_then(|e| e.organization_id.clone()),
+        project_id: existing.as_ref().and_then(|e| e.project_id.clone()),
+        capability_profile_json: serde_json::to_string(&descriptor.capability_profile).ok(),
+        capability_checked_at: None,
+        model_catalog_checked_at: None,
+        provider_preset_version: Some(descriptor.preset_version.to_string()),
+        enabled: true,
     };
 
     let saved = {
@@ -385,48 +500,26 @@ pub async fn test_provider_connection(
 
 #[tauri::command]
 pub fn provider_key_hints() -> Vec<ProviderHint> {
-    vec![
-        ProviderHint {
-            id: "gemini".into(),
-            label: "Google Gemini".into(),
-            key_placeholder: "Usually starts with AIza…".into(),
-            default_model: crate::config::DEFAULT_GEMINI_MODEL.into(),
-            docs_url: Some("https://aistudio.google.com/apikey".into()),
-            supports_base_url: false,
-        },
-        ProviderHint {
-            id: "openai".into(),
-            label: "OpenAI".into(),
-            key_placeholder: "Usually starts with sk-… or sk-proj-…".into(),
-            default_model: crate::config::DEFAULT_OPENAI_MODEL.into(),
-            docs_url: Some("https://platform.openai.com/api-keys".into()),
-            supports_base_url: false,
-        },
-        ProviderHint {
-            id: "anthropic".into(),
-            label: "Anthropic".into(),
-            key_placeholder: "Usually starts with sk-ant-…".into(),
-            default_model: crate::config::DEFAULT_ANTHROPIC_MODEL.into(),
-            docs_url: Some("https://console.anthropic.com/settings/keys".into()),
-            supports_base_url: false,
-        },
-        ProviderHint {
-            id: "openrouter".into(),
-            label: "OpenRouter".into(),
-            key_placeholder: "Usually starts with sk-or-v1-…".into(),
-            default_model: crate::config::DEFAULT_OPENROUTER_MODEL.into(),
-            docs_url: Some("https://openrouter.ai/keys".into()),
-            supports_base_url: false,
-        },
-        ProviderHint {
-            id: "compatible".into(),
-            label: "Custom OpenAI-compatible".into(),
-            key_placeholder: "Enter the API key required by this endpoint".into(),
-            default_model: "gpt-4.1-mini".into(),
-            docs_url: None,
-            supports_base_url: true,
-        },
-    ]
+    crate::ai::platform::list_consumer_descriptors()
+        .into_iter()
+        .map(|d| ProviderHint {
+            id: d.id.to_string(),
+            label: d.display_name.to_string(),
+            key_placeholder: if d.default_auth_mode.requires_secret() {
+                "Paste your API key".into()
+            } else {
+                "No API key required for Local AI".into()
+            },
+            default_model: d.default_model_hint.unwrap_or("").to_string(),
+            docs_url: d.docs_url.map(|s| s.to_string()),
+            supports_base_url: d.allows_endpoint_override,
+            requires_api_key: d.default_auth_mode.requires_secret(),
+            local: d.local,
+            default_base_url: d.default_endpoint.map(|s| s.to_string()),
+            auth_mode: d.default_auth_mode.as_str().to_string(),
+            experimental: d.experimental,
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -438,6 +531,11 @@ pub struct ProviderHint {
     pub default_model: String,
     pub docs_url: Option<String>,
     pub supports_base_url: bool,
+    pub requires_api_key: bool,
+    pub local: bool,
+    pub default_base_url: Option<String>,
+    pub auth_mode: String,
+    pub experimental: bool,
 }
 
 impl From<credentials::CredentialError> for CommandError {

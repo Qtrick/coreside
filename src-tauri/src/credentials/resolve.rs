@@ -40,6 +40,12 @@ impl ResolvedCredentials {
 }
 
 pub fn defaults_for(provider: &str) -> (String, String) {
+    if let Some(desc) = crate::ai::platform::descriptor_by_id(provider) {
+        return (
+            desc.default_model_hint.unwrap_or("").to_string(),
+            desc.default_endpoint.unwrap_or("").to_string(),
+        );
+    }
     match provider {
         "openai" => (
             DEFAULT_OPENAI_MODEL.to_string(),
@@ -67,25 +73,49 @@ pub fn from_connection_with_secret(
     conn: &ProviderConnection,
     get_secret: impl FnOnce(&str) -> Result<String, CredentialError>,
 ) -> Result<ResolvedCredentials, String> {
+    let auth_mode = conn
+        .auth_mode
+        .as_deref()
+        .and_then(crate::ai::platform::AuthMode::parse)
+        .or_else(|| {
+            crate::ai::platform::descriptor_by_id(&conn.provider).map(|d| d.default_auth_mode)
+        })
+        .unwrap_or(crate::ai::platform::AuthMode::ApiKeyBearer);
+
+    let (default_model, default_base) = defaults_for(&conn.provider);
+    let model = conn
+        .model_default
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or(default_model);
+    let base_url = conn
+        .base_url
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or(default_base);
+
+    if !auth_mode.requires_secret() {
+        return Ok(ResolvedCredentials {
+            provider: conn.provider.clone(),
+            api_key: None,
+            model,
+            base_url,
+            source: "connection".into(),
+            active_connection_id: Some(conn.id.clone()),
+            env_path: None,
+        });
+    }
+
     let key = get_secret(&conn.keyring_account).map_err(|e| e.to_string())?;
     let key = key.trim().to_string();
     if key.is_empty() {
         return Err("Credential not found".into());
     }
-    let (default_model, default_base) = defaults_for(&conn.provider);
     Ok(ResolvedCredentials {
         provider: conn.provider.clone(),
         api_key: Some(key),
-        model: conn
-            .model_default
-            .clone()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or(default_model),
-        base_url: conn
-            .base_url
-            .clone()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or(default_base),
+        model,
+        base_url,
         source: "connection".into(),
         active_connection_id: Some(conn.id.clone()),
         env_path: None,
@@ -226,6 +256,20 @@ mod tests {
             last_tested_at: None,
             created_at: now.clone(),
             updated_at: now,
+            provider_descriptor_id: Some(provider.to_string()),
+            protocol_family: None,
+            auth_mode: None,
+            endpoint_class: None,
+            api_version: None,
+            region: None,
+            deployment: None,
+            organization_id: None,
+            project_id: None,
+            capability_profile_json: None,
+            capability_checked_at: None,
+            model_catalog_checked_at: None,
+            provider_preset_version: Some("1".into()),
+            enabled: true,
         }
     }
 
@@ -367,5 +411,69 @@ mod tests {
         let (model, base) = defaults_for("compatible");
         assert_eq!(model, DEFAULT_OPENAI_MODEL);
         assert!(base.is_empty());
+    }
+
+    fn ollama_authless_conn(auth_mode: Option<&str>) -> ProviderConnection {
+        ProviderConnection {
+            id: "ollama-1".into(),
+            provider: "ollama".into(),
+            label: "Local Ollama".into(),
+            base_url: Some("http://127.0.0.1:11434".into()),
+            model_default: Some("llama3.2".into()),
+            keyring_account: account_for_connection("ollama-1"),
+            is_active: true,
+            last_status: Some("connected".into()),
+            last_tested_at: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+            provider_descriptor_id: Some("ollama".into()),
+            protocol_family: Some("ollama_native_chat".into()),
+            auth_mode: auth_mode.map(str::to_string),
+            endpoint_class: Some("loopback_local".into()),
+            api_version: None,
+            region: None,
+            deployment: None,
+            organization_id: None,
+            project_id: None,
+            capability_profile_json: None,
+            capability_checked_at: None,
+            model_catalog_checked_at: None,
+            provider_preset_version: Some("1".into()),
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn authless_local_connection_resolves_without_secret() {
+        let conn = ollama_authless_conn(Some("local_authless"));
+        let resolved = from_connection_with_secret(&conn, |_| Err(CredentialError::NotFound))
+            .expect("authless resolve");
+        assert!(!resolved.has_api_key());
+        assert!(resolved.api_key.is_none());
+        assert_eq!(resolved.provider, "ollama");
+        assert_eq!(resolved.model, "llama3.2");
+        assert_eq!(resolved.base_url, "http://127.0.0.1:11434");
+        assert_eq!(resolved.source, "connection");
+    }
+
+    #[test]
+    fn authless_never_invokes_secret_lookup() {
+        let conn = ollama_authless_conn(Some("local_authless"));
+        let resolved = from_connection_with_secret(&conn, |_| {
+            panic!("authless connections must not read the keyring");
+        })
+        .expect("authless resolve");
+        assert!(resolved.api_key.is_none());
+    }
+
+    #[test]
+    fn authless_infers_mode_from_descriptor_when_auth_mode_missing() {
+        let conn = ollama_authless_conn(None);
+        let resolved = from_connection_with_secret(&conn, |_| {
+            panic!("descriptor-derived authless must not read the keyring");
+        })
+        .expect("descriptor authless resolve");
+        assert!(resolved.api_key.is_none());
+        assert_eq!(resolved.provider, "ollama");
     }
 }

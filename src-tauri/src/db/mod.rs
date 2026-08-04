@@ -98,10 +98,14 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         "018_turn_timeline_events",
         include_str!("../../migrations/018_turn_timeline_events.sql"),
     ),
+    (
+        "019_provider_platform",
+        include_str!("../../migrations/019_provider_platform.sql"),
+    ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "018_turn_timeline_events";
+pub const LATEST_MIGRATION: &str = "019_provider_platform";
 
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -572,6 +576,20 @@ mod tests {
             last_tested_at: None,
             created_at: now.clone(),
             updated_at: now,
+            provider_descriptor_id: Some("openai".into()),
+            protocol_family: Some("openai_chat_completions".into()),
+            auth_mode: Some("api_key_bearer".into()),
+            endpoint_class: Some("fixed_trusted_remote".into()),
+            api_version: None,
+            region: None,
+            deployment: None,
+            organization_id: None,
+            project_id: None,
+            capability_profile_json: None,
+            capability_checked_at: None,
+            model_catalog_checked_at: None,
+            provider_preset_version: Some("1".into()),
+            enabled: true,
         };
         let saved = upsert_provider_connection(&mut db, &row).unwrap();
         assert_eq!(saved.keyring_account, "coreside:conn-1");

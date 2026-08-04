@@ -18,13 +18,18 @@ const commandName = "audit:current-source";
 
 const DEFAULT_ARCHIVE =
   process.env.CORESIDE_ARCHIVE ||
-  path.join(process.env.HOME || "", "Downloads", "Coreside Chat AI.zip");
+  path.join(process.env.HOME || "", "Downloads", "Coreside Chat AI (1).zip");
 const EXPECTED_ARCHIVE_SHA256 =
-  "9d951b9f8ab53b24fde55bcfa49f8b4005020ccc045d0e8226be5fbbf9d0ab06";
+  "e8325a54af8a98889272a397dd8afa9523c3303531837e4eab3bbf38a930c70c";
 const PREVIOUS_ARCHIVE_SHA256 =
-  "a7d6c7ab2e5ac1c58b83b1607a49171338dbfba927b29ed549aa5d3510f0317d";
-const PREVIOUS_ARCHIVE_LABEL = "Coreside Chat AI(11).zip";
-const CURRENT_ARCHIVE_LABEL = "Coreside Chat AI.zip";
+  "9d951b9f8ab53b24fde55bcfa49f8b4005020ccc045d0e8226be5fbbf9d0ab06";
+const PREVIOUS_ARCHIVE_LABEL = "Coreside Chat AI(12).zip / prior RC3 zip";
+const CURRENT_ARCHIVE_LABEL = "Coreside Chat AI (1).zip";
+const PARTIAL_UPDATE_ARCHIVE =
+  process.env.PARTIAL_UPDATE_ARCHIVE ||
+  path.join(process.env.HOME || "", "Downloads", "Partial Update Main (1).zip");
+const EXPECTED_PARTIAL_UPDATE_SHA256 =
+  "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607";
 
 const FINGERPRINT_ROOTS = [
   "src",
@@ -116,15 +121,28 @@ function countGlob(dir, predicate) {
 }
 
 function archiveExtractRoot() {
-  const preferred = path.join(root, ".reference", "coreside-rc3-archive", "coreside-main");
-  if (fs.existsSync(preferred)) return preferred;
+  const candidates = [
+    path.join(root, ".reference", "coreside-rc3.5-archive", "coreside-main"),
+    path.join(root, ".reference", "coreside-rc3-archive", "coreside-main"),
+  ];
+  for (const preferred of candidates) {
+    if (fs.existsSync(preferred)) return preferred;
+  }
   return null;
 }
 
 function archiveExtractMatchesExpected() {
-  const marker = path.join(root, ".reference", "coreside-rc3-archive", "source.sha256");
-  if (!fs.existsSync(marker)) return false;
-  return fs.readFileSync(marker, "utf8").trim() === EXPECTED_ARCHIVE_SHA256;
+  const markers = [
+    path.join(root, ".reference", "coreside-rc3.5-archive", "source.sha256"),
+    path.join(root, ".reference", "coreside-rc3-archive", "source.sha256"),
+  ];
+  for (const marker of markers) {
+    if (!fs.existsSync(marker)) continue;
+    if (fs.readFileSync(marker, "utf8").trim() === EXPECTED_ARCHIVE_SHA256) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function compareTrees(activeRoot, archiveRoot) {
@@ -281,7 +299,7 @@ if (
 ) {
   archiveDiff = {
     status: "extract_stale_or_unmarked",
-    hint: "Re-extract Coreside Chat AI.zip into .reference/coreside-rc3-archive and write source.sha256 with the expected archive hash",
+    hint: "Re-extract Coreside Chat AI (1).zip into .reference/coreside-rc3.5-archive and write source.sha256 with the expected archive hash",
     expectedArchiveSha256: EXPECTED_ARCHIVE_SHA256,
     onlyInActive: [],
     onlyInArchive: [],
@@ -290,7 +308,7 @@ if (
 } else if (archiveStatus === "present_hash_match") {
   archiveDiff = {
     status: "archive_present_but_extract_missing",
-    hint: "Extract zip to .reference/coreside-rc3-archive/coreside-main then re-run",
+    hint: "Extract zip to .reference/coreside-rc3.5-archive/coreside-main then re-run",
     onlyInActive: [],
     onlyInArchive: [],
     changed: [],
@@ -348,7 +366,7 @@ const hostedAi = "Not ready";
 
 const baselineReport = {
   ...common,
-  phase: "RC3",
+  phase: "RC3.5",
   publicBeta,
   hostedAi,
   evidenceClass: dirty ? "development-dirty" : "development-clean",
@@ -366,13 +384,31 @@ const baselineReport = {
   ),
   archive: {
     filename: path.basename(archivePath),
+    label: CURRENT_ARCHIVE_LABEL,
     expectedPath: archivePath,
     expectedSha256: EXPECTED_ARCHIVE_SHA256,
     present: archivePresent,
     observedSha256: observedSha,
     status: archiveStatus,
     supersedes: PREVIOUS_ARCHIVE_SHA256,
+    previousLabel: PREVIOUS_ARCHIVE_LABEL,
   },
+  partialUpdateArchive: (() => {
+    const present = fs.existsSync(PARTIAL_UPDATE_ARCHIVE);
+    const observed = present ? sha256File(PARTIAL_UPDATE_ARCHIVE) : null;
+    return {
+      filename: path.basename(PARTIAL_UPDATE_ARCHIVE),
+      expectedPath: PARTIAL_UPDATE_ARCHIVE,
+      expectedSha256: EXPECTED_PARTIAL_UPDATE_SHA256,
+      present,
+      observedSha256: observed,
+      status: !present
+        ? "archive_unavailable"
+        : observed === EXPECTED_PARTIAL_UPDATE_SHA256
+          ? "present_hash_match"
+          : "present_hash_mismatch",
+    };
+  })(),
   counts: {
     srcFiles,
     rustFiles,
@@ -486,11 +522,11 @@ const freshnessReport = {
 };
 writeJson("report-freshness-inventory.json", freshnessReport);
 
-const md = `# Current Source Baseline (RC3)
+const md = `# Current Source Baseline (RC3.5)
 
 **Product:** Coreside  
 **Access date:** ${nowIso().slice(0, 10)}  
-**Phase:** Public-beta release candidate 3  
+**Phase:** Public-beta release candidate 3.5 — frontier provider platform  
 **Public beta:** **NOT READY**  
 **Hosted AI:** **NOT READY**
 
@@ -513,7 +549,8 @@ const md = `# Current Source Baseline (RC3)
 | Expected SHA-256 | \`${EXPECTED_ARCHIVE_SHA256}\` |
 | Observed SHA-256 | \`${observedSha || "n/a"}\` |
 | Status | **${archiveStatus}** |
-| Supersedes | \`${PREVIOUS_ARCHIVE_SHA256}\` (prior expected / unavailable baseline) |
+| Supersedes | \`${PREVIOUS_ARCHIVE_SHA256}\` (\`${PREVIOUS_ARCHIVE_LABEL}\`) |
+| Partial Update archive | \`${path.basename(PARTIAL_UPDATE_ARCHIVE)}\` / \`${EXPECTED_PARTIAL_UPDATE_SHA256}\` |
 
 ## Lockfiles
 

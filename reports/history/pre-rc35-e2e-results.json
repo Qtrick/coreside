@@ -1,0 +1,84 @@
+{
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T04:14:08.872Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "dirty": true,
+  "command": "npm run e2e",
+  "status": "passed_partial",
+  "platform": "darwin",
+  "arch": "arm64",
+  "evidenceLevel": "not_desktop_verified",
+  "journeys": [
+    {
+      "id": 1,
+      "name": "clean-startup",
+      "status": "passed"
+    },
+    {
+      "id": 2,
+      "name": "existing-profile",
+      "status": "passed"
+    },
+    {
+      "id": 3,
+      "name": "settings",
+      "status": "passed"
+    },
+    {
+      "id": 4,
+      "name": "conversation-draft",
+      "status": "passed"
+    },
+    {
+      "id": 5,
+      "name": "generated-tool-state",
+      "status": "passed"
+    },
+    {
+      "id": 6,
+      "name": "approval-approve-once",
+      "status": "passed"
+    },
+    {
+      "id": 7,
+      "name": "multi-window-approval-race",
+      "status": "passed_partial",
+      "note": "Secondary window opens; duplicate-approval UI on secondary not fully asserted"
+    },
+    {
+      "id": 8,
+      "name": "grant-revoke",
+      "status": "passed"
+    },
+    {
+      "id": 9,
+      "name": "recovery-mode",
+      "status": "passed"
+    },
+    {
+      "id": 10,
+      "name": "secondary-window",
+      "status": "passed"
+    },
+    {
+      "id": 11,
+      "name": "command-authority-denial",
+      "status": "passed"
+    },
+    {
+      "id": 12,
+      "name": "true-streaming",
+      "status": "passed"
+    },
+    {
+      "id": 13,
+      "name": "wallpaper-targeted",
+      "status": "passed"
+    },
+    {
+      "id": 14,
+      "name": "stream-eavesdropping-denial",
+      "status": "passed"
+    }
+  ]
+}

@@ -1,8 +1,8 @@
-# Current Source Baseline (RC3)
+# Current Source Baseline (RC3.5)
 
 **Product:** Coreside  
 **Access date:** 2026-08-04  
-**Phase:** Public-beta release candidate 3  
+**Phase:** Public-beta release candidate 3.5 — frontier provider platform  
 **Public beta:** **NOT READY**  
 **Hosted AI:** **NOT READY**
 
@@ -12,20 +12,21 @@
 | --- | --- |
 | Path | `/Users/qunyingfan/Coreside` |
 | Branch | `main` |
-| Commit | `25e6c80e8ec7c0b9f43829f4efa053b56508e257` |
+| Commit | `ea9ad672e8bc97eb60dd6d9b62ee0856807fcc8b` |
 | Dirty | Yes (development evidence only) |
-| Source fingerprint | `b6afade1134a3a70e1d0d07cd9be007e6105bea52f9592b2bccc4c0663b65ab1` |
+| Source fingerprint | `94ad9242e20ed0235002dcf89983fadc91ded3464e90a94000c2487cc5b7e16d` |
 
 ## Uploaded archive
 
 | Field | Value |
 | --- | --- |
-| Filename | `Coreside Chat AI.zip` |
-| Path | `/Users/qunyingfan/Downloads/Coreside Chat AI.zip` |
-| Expected SHA-256 | `9d951b9f8ab53b24fde55bcfa49f8b4005020ccc045d0e8226be5fbbf9d0ab06` |
-| Observed SHA-256 | `9d951b9f8ab53b24fde55bcfa49f8b4005020ccc045d0e8226be5fbbf9d0ab06` |
-| Status | **present_hash_match_extract_stale** |
-| Supersedes | `a7d6c7ab2e5ac1c58b83b1607a49171338dbfba927b29ed549aa5d3510f0317d` (prior expected / unavailable baseline) |
+| Filename | `Coreside Chat AI (1).zip` |
+| Path | `/Users/qunyingfan/Downloads/Coreside Chat AI (1).zip` |
+| Expected SHA-256 | `e8325a54af8a98889272a397dd8afa9523c3303531837e4eab3bbf38a930c70c` |
+| Observed SHA-256 | `e8325a54af8a98889272a397dd8afa9523c3303531837e4eab3bbf38a930c70c` |
+| Status | **present_hash_match** |
+| Supersedes | `9d951b9f8ab53b24fde55bcfa49f8b4005020ccc045d0e8226be5fbbf9d0ab06` (`Coreside Chat AI(12).zip / prior RC3 zip`) |
+| Partial Update archive | `Partial Update Main (1).zip` / `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607` |
 
 ## Lockfiles
 
@@ -49,20 +50,20 @@
 | Metric | Active |
 | --- | --- |
 | `src` files | 177 |
-| Rust `.rs` | 181 |
-| Migrations | 18 |
+| Rust `.rs` | 185 |
+| Migrations | 19 |
 | E2E specs | 16 |
 | Tauri commands | 222 |
-| Fingerprint files | 663 |
+| Fingerprint files | 668 |
 
 ## Archive vs active
 
 | Metric | Count |
 | --- | --- |
-| Comparison status | extract_stale_or_unmarked |
-| Only in active | 0 |
+| Comparison status | compared |
+| Only in active | 5 |
 | Only in archive | 0 |
-| Changed | 0 |
+| Changed | 15 |
 
 ## Generation command
 

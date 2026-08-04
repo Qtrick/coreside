@@ -12,13 +12,31 @@
   "platform": "darwin",
   "architecture": "arm64",
   "buildMode": "development",
-  "exitStatus": "not_run",
+  "exitStatus": "partial",
   "historicalNote": "Prior suite results in reports/history/pre-rc35-*. Current archive e8325a54; re-run required before Desktop/Packaged Verified.",
   "archiveExpectedSha256": "e8325a54af8a98889272a397dd8afa9523c3303531837e4eab3bbf38a930c70c",
-  "command": "test:packaged-smoke",
-  "evidenceLevel": "Absent",
-  "classification": "Packaged launch smoke",
-  "smokeKind": "not_run",
-  "scope": "not_run",
-  "checks": []
+  "command": "audit:provider-platform",
+  "evidenceLevel": "Unit Verified",
+  "descriptorVersion": "1",
+  "presets": [
+    "gemini",
+    "openai",
+    "anthropic",
+    "openrouter",
+    "kimi",
+    "mistral",
+    "ollama",
+    "lmstudio",
+    "vllm",
+    "llama_cpp",
+    "compatible",
+    "mock"
+  ],
+  "authlessLocal": [
+    "ollama",
+    "lmstudio",
+    "vllm",
+    "llama_cpp"
+  ],
+  "migration": "019_provider_platform"
 }

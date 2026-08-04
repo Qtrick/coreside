@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T04:20:22.465Z",
+  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "dirty": true,
+  "command": "test:packaged-smoke",
+  "launchedApp": true,
+  "status": "launch_passed",
+  "reason": "artifact_scanned_and_launched",
+  "evidenceLevel": "Integrated – Not Verified",
+  "launch": {
+    "step": "launched_and_quit",
+    "settleMs": 4000,
+    "quitStatus": 0,
+    "matchedPids": [
+      "39720"
+    ],
+    "appPath": "../../../var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/cursor-sandbox-cache/2eaa96482597db0a4709c5121d0c4731/cargo-target/release/bundle/macos/Coreside.app"
+  },
+  "rootsPresent": [
+    "../../../var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/cursor-sandbox-cache/2eaa96482597db0a4709c5121d0c4731/cargo-target/release/bundle"
+  ],
+  "artifacts": [
+    "../../../var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/cursor-sandbox-cache/2eaa96482597db0a4709c5121d0c4731/cargo-target/release/bundle/dmg/Coreside_0.1.0_aarch64.dmg",
+    "../../../var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/cursor-sandbox-cache/2eaa96482597db0a4709c5121d0c4731/cargo-target/release/bundle/macos/Coreside.app"
+  ],
+  "artifactHashes": [
+    {
+      "path": "../../../var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/cursor-sandbox-cache/2eaa96482597db0a4709c5121d0c4731/cargo-target/release/bundle/dmg/Coreside_0.1.0_aarch64.dmg",
+      "sha256": "860759dfa6fc105a019e161bc5505d69512d0c07775b3dd6472834487a022628",
+      "size": 10497758
+    },
+    {
+      "path": "../../../var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/cursor-sandbox-cache/2eaa96482597db0a4709c5121d0c4731/cargo-target/release/bundle/macos/Coreside.app",
+      "kind": "directory_bundle",
+      "note": "Directory bundle (.app) — no single-file hash."
+    }
+  ],
+  "packageScanExitCode": 0,
+  "packagingResults": {
+    "status": "passed",
+    "rootsFound": 1,
+    "filesScanned": 12,
+    "findingsCount": 0
+  },
+  "sourceIndependence": null,
+  "note": "Bundle scanned and macOS .app launched briefly then quit. Launch-only smoke — not Packaged Verified (BYOK/chat/persistence packaged proof still open).",
+  "publicBeta": "Not ready"
+}

@@ -960,6 +960,38 @@ pub struct ProviderConnection {
     pub last_tested_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub provider_descriptor_id: Option<String>,
+    #[serde(default)]
+    pub protocol_family: Option<String>,
+    #[serde(default)]
+    pub auth_mode: Option<String>,
+    #[serde(default)]
+    pub endpoint_class: Option<String>,
+    #[serde(default)]
+    pub api_version: Option<String>,
+    #[serde(default)]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub deployment: Option<String>,
+    #[serde(default)]
+    pub organization_id: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub capability_profile_json: Option<String>,
+    #[serde(default)]
+    pub capability_checked_at: Option<String>,
+    #[serde(default)]
+    pub model_catalog_checked_at: Option<String>,
+    #[serde(default)]
+    pub provider_preset_version: Option<String>,
+    #[serde(default = "default_enabled_true")]
+    pub enabled: bool,
+}
+
+fn default_enabled_true() -> bool {
+    true
 }
 
 fn map_provider_connection(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProviderConnection> {
@@ -975,12 +1007,30 @@ fn map_provider_connection(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider
         last_tested_at: row.get(8)?,
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
+        provider_descriptor_id: row.get(11)?,
+        protocol_family: row.get(12)?,
+        auth_mode: row.get(13)?,
+        endpoint_class: row.get(14)?,
+        api_version: row.get(15)?,
+        region: row.get(16)?,
+        deployment: row.get(17)?,
+        organization_id: row.get(18)?,
+        project_id: row.get(19)?,
+        capability_profile_json: row.get(20)?,
+        capability_checked_at: row.get(21)?,
+        model_catalog_checked_at: row.get(22)?,
+        provider_preset_version: row.get(23)?,
+        enabled: row.get::<_, Option<i64>>(24)?.unwrap_or(1) != 0,
     })
 }
 
 const PROVIDER_CONNECTION_COLS: &str =
     "id, provider, label, base_url, model_default, keyring_account,
-    is_active, last_status, last_tested_at, created_at, updated_at";
+    is_active, last_status, last_tested_at, created_at, updated_at,
+    provider_descriptor_id, protocol_family, auth_mode, endpoint_class,
+    api_version, region, deployment, organization_id, project_id,
+    capability_profile_json, capability_checked_at, model_catalog_checked_at,
+    provider_preset_version, enabled";
 
 pub fn list_provider_connections(db: &Database) -> DbResult<Vec<ProviderConnection>> {
     let mut stmt = db.conn().prepare(&format!(
@@ -1026,8 +1076,16 @@ pub fn upsert_provider_connection(
     db.conn().execute(
         "INSERT INTO provider_connections (
             id, provider, label, base_url, model_default, keyring_account,
-            is_active, last_status, last_tested_at, created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            is_active, last_status, last_tested_at, created_at, updated_at,
+            provider_descriptor_id, protocol_family, auth_mode, endpoint_class,
+            api_version, region, deployment, organization_id, project_id,
+            capability_profile_json, capability_checked_at, model_catalog_checked_at,
+            provider_preset_version, enabled
+         ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+            ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+            ?21, ?22, ?23, ?24, ?25
+         )
          ON CONFLICT(id) DO UPDATE SET
             provider = excluded.provider,
             label = excluded.label,
@@ -1037,7 +1095,21 @@ pub fn upsert_provider_connection(
             is_active = excluded.is_active,
             last_status = excluded.last_status,
             last_tested_at = excluded.last_tested_at,
-            updated_at = excluded.updated_at",
+            updated_at = excluded.updated_at,
+            provider_descriptor_id = excluded.provider_descriptor_id,
+            protocol_family = excluded.protocol_family,
+            auth_mode = excluded.auth_mode,
+            endpoint_class = excluded.endpoint_class,
+            api_version = excluded.api_version,
+            region = excluded.region,
+            deployment = excluded.deployment,
+            organization_id = excluded.organization_id,
+            project_id = excluded.project_id,
+            capability_profile_json = excluded.capability_profile_json,
+            capability_checked_at = excluded.capability_checked_at,
+            model_catalog_checked_at = excluded.model_catalog_checked_at,
+            provider_preset_version = excluded.provider_preset_version,
+            enabled = excluded.enabled",
         params![
             connection.id,
             connection.provider,
@@ -1050,6 +1122,20 @@ pub fn upsert_provider_connection(
             connection.last_tested_at,
             connection.created_at.clone(),
             now,
+            connection.provider_descriptor_id,
+            connection.protocol_family,
+            connection.auth_mode,
+            connection.endpoint_class,
+            connection.api_version,
+            connection.region,
+            connection.deployment,
+            connection.organization_id,
+            connection.project_id,
+            connection.capability_profile_json,
+            connection.capability_checked_at,
+            connection.model_catalog_checked_at,
+            connection.provider_preset_version,
+            if connection.enabled { 1 } else { 0 },
         ],
     )?;
     get_provider_connection(db, &connection.id)

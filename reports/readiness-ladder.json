@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T17:39:52.447Z",
-  "commit": "25e6c80e8ec7c0b9f43829f4efa053b56508e257",
+  "generatedAt": "2026-08-04T19:33:01.752Z",
+  "commit": "ea9ad672e8bc97eb60dd6d9b62ee0856807fcc8b",
   "dirty": true,
-  "sourceFingerprint": "b6afade1134a3a70e1d0d07cd9be007e6105bea52f9592b2bccc4c0663b65ab1",
+  "sourceFingerprint": "94ad9242e20ed0235002dcf89983fadc91ded3464e90a94000c2487cc5b7e16d",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
@@ -22,7 +22,7 @@
       "track": "local-byok",
       "ladder": "Development Build",
       "dirty": true,
-      "candidateNote": "Dirty tree — remain Development Build. e2e-1-14=Integrated – Not Verified; packaged-smoke=Integrated – Not Verified (launch-only ≠ Packaged Verified).",
+      "candidateNote": "Dirty tree — remain Development Build. e2e-1-14=Integrated – Not Verified; packaged-smoke=Scaffolded (launch-only ≠ Packaged Verified).",
       "publicBeta": "Not ready"
     },
     "hosted": {
@@ -128,7 +128,7 @@
       "id": "e2e-1-14",
       "name": "Desktop E2E Journeys 1–14",
       "state": "Integrated – Not Verified",
-      "notes": "Journey 7 is passed_partial (evidence commit 3202ca6); suite must not be treated as Desktop Verified.",
+      "notes": "e2e status=not_run — not a full Desktop Verified suite pass.",
       "evidence": [
         "reports/e2e-results.json",
         "reports/true-streaming-results.json",
@@ -141,7 +141,7 @@
       "id": "e2e-12-13",
       "name": "Desktop E2E Journey 12 / 13",
       "state": "Integrated – Not Verified",
-      "notes": "Journey 12/13 evidence not on HEAD. (prior evidence 3202ca6) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Journey 12/13 not both passed on this HEAD. (prior evidence 3202ca6) Re-run on HEAD to claim Desktop Verified.",
       "evidence": [
         "reports/true-streaming-results.json",
         "reports/wallpaper-visual-results.json"
@@ -178,8 +178,8 @@
     {
       "id": "packaged-smoke",
       "name": "Normal package build + smoke launch",
-      "state": "Integrated – Not Verified",
-      "notes": "Launch-only smoke recorded on 3202ca6 (not HEAD). Not Packaged Verified.",
+      "state": "Scaffolded",
+      "notes": "Packaged smoke status=unknown — not Packaged Verified.",
       "evidence": [
         "reports/packaged-smoke-results.json"
       ]
@@ -218,10 +218,11 @@
       "wallpaper-atomic-settings",
       "e2e-1-14",
       "e2e-12-13",
-      "e2e-14-eavesdrop",
+      "e2e-14-eavesdrop"
+    ],
+    "scaffolded": [
       "packaged-smoke"
     ],
-    "scaffolded": [],
     "absent": [],
     "deferred": [
       "hosted-ai"
