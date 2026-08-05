@@ -129,10 +129,27 @@ BEGIN
       AND routine_name IN (
         'reserve_hosted_ai_request',
         'settle_hosted_ai_request',
-        'fail_hosted_ai_request'
+        'fail_hosted_ai_request',
+        'reserve_hosted_search_request',
+        'settle_hosted_search_request',
+        'fail_hosted_search_request'
       )
       AND grantee IN ('PUBLIC', 'anon', 'authenticated')
-  ), 'hosted AI billing RPCs must be service_role only';
+  ), 'hosted AI/search billing RPCs must be service_role only';
+
+  ASSERT (
+    SELECT relrowsecurity
+    FROM pg_class
+    WHERE oid = 'public.hosted_search_idempotency'::regclass
+  ), 'hosted_search_idempotency must have RLS enabled';
+
+  ASSERT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'billing_stripe_webhook_events'
+      AND column_name = 'status'
+  ), 'billing_stripe_webhook_events must track processing status';
 
   RAISE NOTICE 'hosted_ai_rls expectations passed';
 END;

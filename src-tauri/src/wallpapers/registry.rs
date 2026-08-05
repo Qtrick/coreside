@@ -16,6 +16,7 @@ pub fn trusted_presets() -> Vec<WallpaperConfig> {
             muted: None,
             reduced_motion_fallback: Some("#0b0f14".into()),
             opacity: None,
+            filter: None,
             extra: None,
         },
         WallpaperConfig {
@@ -31,6 +32,7 @@ pub fn trusted_presets() -> Vec<WallpaperConfig> {
             muted: None,
             reduced_motion_fallback: Some("#0b0f14".into()),
             opacity: Some(1.0),
+            filter: None,
             extra: None,
         },
         WallpaperConfig {
@@ -46,6 +48,7 @@ pub fn trusted_presets() -> Vec<WallpaperConfig> {
             muted: None,
             reduced_motion_fallback: Some("#0b0f14".into()),
             opacity: Some(0.9),
+            filter: None,
             extra: None,
         },
         WallpaperConfig {
@@ -61,6 +64,7 @@ pub fn trusted_presets() -> Vec<WallpaperConfig> {
             muted: None,
             reduced_motion_fallback: Some("#0b0f14".into()),
             opacity: Some(0.35),
+            filter: None,
             extra: None,
         },
         WallpaperConfig {
@@ -76,6 +80,7 @@ pub fn trusted_presets() -> Vec<WallpaperConfig> {
             muted: None,
             reduced_motion_fallback: Some("#050805".into()),
             opacity: Some(0.42),
+            filter: None,
             extra: None,
         },
     ]

@@ -1,8 +1,14 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { parsePortalBody, buildStripePortalSessionBody } from "../billing-lib.ts";
+import { readBodyTextBounded } from "../_shared/read-body.ts";
+import {
+  buildStripePortalSessionBody,
+  parsePortalBody,
+  resolveBillingReturnUrl,
+} from "../billing-lib.ts";
 
 const SERVICE = "coreside-billing-portal";
 const VERSION = "1";
+const MAX_BODY_BYTES = 8 * 1024;
 
 function isAllowedOrigin(origin: string | null): boolean {
   if (!origin) return false;
@@ -81,11 +87,27 @@ Deno.serve(async (req) => {
     return json({ error: "Unauthorized" }, 401, origin);
   }
 
+  const bodyRead = await readBodyTextBounded(req, MAX_BODY_BYTES);
+  if (!bodyRead.ok) {
+    return json({ error: bodyRead.error }, bodyRead.status, origin);
+  }
+
   let body: ReturnType<typeof parsePortalBody>;
   try {
-    body = parsePortalBody(await req.json().catch(() => ({})));
+    body = parsePortalBody(bodyRead.text ? JSON.parse(bodyRead.text) : {});
   } catch {
     return json({ error: "Invalid request body" }, 400, origin);
+  }
+  if (!body) {
+    return json({ error: "Invalid billing destination" }, 400, origin);
+  }
+
+  const appBase =
+    Deno.env.get("CORESIDE_BILLING_APP_BASE_URL")?.trim() ||
+    "http://localhost:1422";
+  const returnUrl = resolveBillingReturnUrl(body.returnDestination, appBase);
+  if (!returnUrl) {
+    return json({ error: "Invalid billing destination" }, 400, origin);
   }
 
   const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY")?.trim();
@@ -122,11 +144,6 @@ Deno.serve(async (req) => {
     );
   }
 
-  const returnUrl =
-    body.returnUrl?.trim() ||
-    Deno.env.get("CORESIDE_BILLING_RETURN_URL")?.trim() ||
-    "http://localhost:1422/settings";
-
   const portalBody = buildStripePortalSessionBody({
     customerId: customerRow.stripe_customer_id,
     returnUrl,
@@ -159,7 +176,7 @@ Deno.serve(async (req) => {
       version: VERSION,
       portalUrl: session.url,
       sessionId: session.id ?? null,
-      returnUrl,
+      returnDestination: body.returnDestination,
     },
     200,
     origin,

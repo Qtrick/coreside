@@ -28,6 +28,7 @@ import type { StagedAttachment } from "@/types/attachments";
 import { MentionMenu } from "./MentionMenu";
 import { ModelPicker } from "./ModelPicker";
 import { ToolChangePreview } from "./ToolChangePreview";
+import { SettingsChangePreview } from "./SettingsChangePreview";
 import { KernelProposalPreview } from "./KernelProposalPreview";
 import { ConflictBanner } from "./ConflictBanner";
 
@@ -322,6 +323,7 @@ export function Composer() {
   return (
     <div className="composer" data-coreside-tour="chat-composer">
       <ToolChangePreview />
+      <SettingsChangePreview />
       <KernelProposalPreview />
       <ConflictBanner />
       {needsSetup ? (

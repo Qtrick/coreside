@@ -5,6 +5,9 @@
   --surface-muted: #ecefe8;
   --text-primary: #1d211c;
   --text-secondary: #687066;
+  /* Legacy aliases used by older selectors */
+  --text: var(--text-primary);
+  --text-muted: var(--text-secondary);
   --accent-primary: #2f8f63;
   --accent-primary-hover: #267752;
   --accent-secondary: #d38b3d;
@@ -15,6 +18,7 @@
   --shadow-soft: 0 10px 30px rgba(29, 33, 28, 0.06);
   --radius: 12px;
   --radius-sm: 8px;
+  --radius-md: var(--radius);
   --radius-lg: 18px;
   --sidebar-width: 272px;
   --sidebar-collapsed-width: 80px;
@@ -78,6 +82,8 @@ html[data-theme="dark"] {
   --surface-muted: #242a24;
   --text-primary: #eef2ec;
   --text-secondary: #a6afa3;
+  --text: var(--text-primary);
+  --text-muted: var(--text-secondary);
   --accent-primary: #69c994;
   --accent-primary-hover: #7ad7a3;
   --accent-secondary: #e0a158;

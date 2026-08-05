@@ -14,9 +14,6 @@ import { storeSettingsCategory } from "@/lib/settings-categories";
 
 type AnchorRect = { top: number; left: number; width: number; height: number };
 
-const FOCUSABLE =
-  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 function measureTarget(target?: string): AnchorRect | null {
   if (!target || typeof document === "undefined") return null;
   const el = document.querySelector<HTMLElement>(
@@ -55,7 +52,7 @@ export function TutorialOverlay() {
       storeSettingsCategory("ai-access");
       useAppStore.getState().navigateToSettings();
     }
-  }, [tourOpen, step?.id, step?.target]);
+  }, [tourOpen, step]);
 
   useLayoutEffect(() => {
     if (!tourOpen || !step) {
@@ -67,7 +64,7 @@ export function TutorialOverlay() {
       setAnchor(measureTarget(step.target));
     });
     return () => window.cancelAnimationFrame(id);
-  }, [tourOpen, step, stepIndex]);
+  }, [tourOpen, step]);
 
   useEffect(() => {
     if (!tourOpen) return;
@@ -78,33 +75,15 @@ export function TutorialOverlay() {
       window.removeEventListener("resize", reposition);
       window.removeEventListener("scroll", reposition, true);
     };
-  }, [tourOpen, step?.target]);
+  }, [tourOpen, step]);
 
+  // Non-modal coach-mark (aria-modal=false): Escape pauses; do not trap Tab.
   useEffect(() => {
-    if (phase !== "tour") return;
+    if (!tourOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         void pause();
-        return;
-      }
-      if (e.key !== "Tab" || !popoverRef.current) return;
-      const items = Array.from(
-        popoverRef.current.querySelectorAll<HTMLElement>(FOCUSABLE),
-      ).filter((el) => el.offsetParent !== null || el === document.activeElement);
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      const active = document.activeElement;
-      if (!popoverRef.current.contains(active)) {
-        e.preventDefault();
-        first.focus();
-      } else if (e.shiftKey && active === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
       }
     };
     window.addEventListener("keydown", onKey);

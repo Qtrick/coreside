@@ -21,6 +21,7 @@ const SUBSTANTIVE_TYPES = new Set([
   "tool_failed",
   "tool_reference_resolved",
   "change_applied",
+  "change_proposed",
   "tool_change_proposed",
   "search_started",
   "search_completed",

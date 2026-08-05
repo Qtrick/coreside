@@ -1,245 +1,109 @@
 {
-  "schemaVersion": 1,
-  "product": "Coreside",
-  "generatedAt": "2026-08-03T19:48:00Z",
-  "commit": "41fd4595db420eac8b1c5cc30723f1dd377608f4",
-  "dirty": true,
-  "sourceFingerprint": "3306d5de459be8d661c52e0101b70d956c2218f841bacafdbedb6ebb6acf9f41",
-  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
-  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
-  "platform": "darwin",
-  "architecture": "arm64",
-  "buildMode": "development",
-  "command": "manual:partial-update-system-map-2026",
-  "exitStatus": 0,
-  "accessDate": "2026-08-03",
-  "partialUpdateArchitecture": {
-    "runtime": "Cloudflare Worker + Durable Object",
-    "storage": "DO SQL + D1 auth",
-    "clientUpdate": "template for=path + <?marker> + raw HTML",
-    "forms": "POST hidden iframe c/:chatId/form",
-    "streaming": "Provider stream to UpdateStreamParser",
-    "multiuser": "client include/exclude + private messages"
-  },
-  "coresideArchitecture": {
-    "runtime": "Tauri desktop + Rust trusted boundary + React UI",
-    "storage": "SQLite local profile",
-    "clientUpdate": "Validated schema v2 operations + trusted components",
-    "forms": "submitToAgent in-process (iframe rejected)",
-    "streaming": "ABSENT true provider stream; fake emit_text_fluidly",
-    "multiuser": "Deferred"
-  },
+  "title": "Partial Update secure parity system map (RC3.7)",
+  "generatedAt": "2026-08-05T02:10:00Z",
+  "archiveSha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
+  "coresideArchiveSha256": "c38504e29ec2a8e683c952b50a2a8608e59fc2fdb830b96fb05b0932ed1d86ec",
+  "supersedes": "reports/historical/partial-update-system-map.pre-rc37-stale.json",
+  "note": "Classifications are from current Coreside source inspection. Historical map claims (native streaming absent, queue/branch UI disconnected, context-ledger injection disconnected) are obsolete and must not be repeated.",
   "systems": [
     {
-      "id": "pu.durable_object",
-      "name": "PartialUpdate Durable Object",
-      "partialUpdateFiles": [
-        "src/index.ts"
-      ],
-      "coresideFiles": [
-        "src-tauri"
-      ],
-      "relation": "rejected_product_direction",
-      "notes": "Local Tauri/SQLite replaces DO"
+      "name": "Durable Object ownership / Durable SQL",
+      "partialUpdate": "Cloudflare DO owns chat SQL state",
+      "coreside": "Local SQLite via Rust db layer",
+      "status": "Deliberately rejected (cloud DO) / Securely integrated (local SQLite)",
+      "evidence": ["src-tauri/src/db/mod.rs", "src-tauri/migrations/"]
     },
     {
-      "id": "pu.protocol",
-      "name": "Delimiter protocol",
-      "partialUpdateFiles": [
-        "spec.md",
-        "src/index.ts"
-      ],
-      "coresideFiles": [
-        "src-tauri/src/runtime_v2/operations.rs"
-      ],
-      "relation": "secure_replacement",
-      "notes": "JSON schema v2 ops"
+      "name": "Client sessions / secrets",
+      "status": "Securely integrated (OS keychain BYOK; hosted JWT in keychain)",
+      "evidence": ["src-tauri/src/credentials/", "src-tauri/src/exa/credentials.rs"]
     },
     {
-      "id": "pu.streaming",
-      "name": "Provider stream apply",
-      "partialUpdateFiles": [
-        "src/index.ts"
-      ],
-      "coresideFiles": [
-        "src-tauri/src/ai/provider.rs",
-        "src-tauri/src/runtime_v2/streaming.rs",
-        "src-tauri/src/commands/message_cmds.rs"
-      ],
-      "relation": "gap_absent_true_stream",
-      "notes": "chat-only + fake fluid typing; parser unused for live provider bytes"
+      "name": "WebSocket hibernation / reconnect / ping-pong",
+      "status": "Deliberately rejected (desktop local-first; no PU DO WebSocket)",
+      "evidence": []
     },
     {
-      "id": "pu.forms",
-      "name": "Structured forms",
-      "partialUpdateFiles": [
-        "src/initialPrompt.md",
-        "src/index.ts"
-      ],
-      "coresideFiles": [
-        "src/lib/actions.ts",
-        "src/components/chat/InlineSurface.tsx",
-        "src-tauri/src/runtime_v2/context_ledger.rs"
-      ],
-      "relation": "gap_partial_no_prompt_inject",
-      "notes": "Ledger write without prompt injection"
+      "name": "Per-chat queue / active queue recovery",
+      "status": "Partially integrated",
+      "evidence": ["src-tauri/src/runtime_v2/queue.rs", "src/components/chat/ConversationQueue.tsx"]
     },
     {
-      "id": "pu.markers",
-      "name": "Template markers",
-      "partialUpdateFiles": [
-        "src/app.html"
-      ],
-      "coresideFiles": [
-        "src-tauri/src/runtime_v2/surfaces.rs",
-        "src-tauri/src/runtime_v2/patch.rs"
-      ],
-      "relation": "secure_replacement",
-      "notes": "Stable IDs + patches"
+      "name": "Rate-limit permits / prompt admission",
+      "status": "Partially integrated (hosted RPCs; local agent bounds)",
+      "evidence": ["supabase/migrations/20260804220000_hosted_security_hardening.sql", "src-tauri/src/runtime_v2/limits.rs"]
     },
     {
-      "id": "pu.queue",
-      "name": "LLM queue",
-      "partialUpdateFiles": [
-        "src/index.ts"
-      ],
-      "coresideFiles": [
-        "src-tauri/src/runtime_v2/queue.rs"
-      ],
-      "relation": "backend_present_ui_disconnected",
-      "notes": "No queue UI components"
+      "name": "Form submission / structured form serialization",
+      "status": "Securely integrated (sealed typed StructuredUserInput + ledger)",
+      "evidence": ["src-tauri/src/ai/structured_user_input.rs", "src-tauri/src/runtime_v2/context_ledger.rs", "src-tauri/src/commands/message_cmds.rs"]
     },
     {
-      "id": "pu.fork",
-      "name": "Fork/branch",
-      "partialUpdateFiles": [
-        "src/index.ts"
-      ],
-      "coresideFiles": [
-        "src-tauri/src/runtime_v2/branch.rs"
-      ],
-      "relation": "backend_present_ui_disconnected",
-      "notes": "API wrappers only"
+      "name": "Delimiter-based provider stream parser",
+      "status": "Deliberately rejected; replaced by typed NDJSON/SSE parsers",
+      "evidence": ["src-tauri/src/ai/ollama.rs", "src-tauri/src/ai/hosted_provider.rs", "supabase/functions/ai-gateway/gateway-lib.ts"]
     },
     {
-      "id": "pu.replay",
-      "name": "Replay",
-      "partialUpdateFiles": [
-        "src/index.ts"
-      ],
-      "coresideFiles": [
-        "src-tauri/src/runtime_v2/transactions.rs"
-      ],
-      "relation": "backend_present_ui_disconnected",
-      "notes": "No replay player UI"
+      "name": "Server-only vs client-visible update properties / audiences",
+      "status": "Deferred (multi-user cloud collaboration out of scope)",
+      "evidence": []
     },
     {
-      "id": "pu.debug",
-      "name": "Debug/inspector",
-      "partialUpdateFiles": [
-        "src/debug.ts"
-      ],
-      "coresideFiles": [
-        "src/components/settings/AiProviderSettings.tsx"
-      ],
-      "relation": "backend_present_ui_disconnected",
-      "notes": "Developer Mode toggle only"
+      "name": "Template markers / targeted replacement",
+      "status": "Partially integrated (runtime-v2 AppOperation + patch/preview)",
+      "evidence": ["src-tauri/src/runtime_v2/operations.rs", "src-tauri/src/runtime_v2/patch.rs", "src-tauri/src/runtime_v2/preview_transaction.rs"]
     },
     {
-      "id": "pu.auth",
-      "name": "Better Auth",
-      "partialUpdateFiles": [
-        "src/auth/*"
-      ],
-      "coresideFiles": [],
-      "relation": "deferred_enterprise",
-      "notes": "Out of consumer scope"
+      "name": "Full-page replacement / dynamic HTML/CSS/JS / remote CDN",
+      "status": "Deliberately rejected",
+      "evidence": ["docs/", ".cursor/rules/project-context.mdc"]
     },
     {
-      "id": "pu.cdn_html_js",
-      "name": "CDN/HTML/JS injection",
-      "partialUpdateFiles": [
-        "README.md",
-        "src/initialPrompt.md"
-      ],
-      "coresideFiles": [
-        "src-tauri/src/runtime_v2/packs.rs"
-      ],
-      "relation": "deliberately_rejected",
-      "notes": "Capability packs only"
+      "name": "Silent updates",
+      "status": "Partially integrated (silent flag + action log; must remain visible/scoped)",
+      "evidence": ["src-tauri/src/commands/message_cmds.rs"]
     },
     {
-      "id": "cs.kernel",
-      "name": "Application Kernel",
-      "partialUpdateFiles": [],
-      "coresideFiles": [
-        "src-tauri/src/application_kernel"
-      ],
-      "relation": "coreside_native",
-      "notes": "Trusted mutation gateway"
+      "name": "Replay pacing / keyboard replay / debug history",
+      "status": "Partially integrated (read-only ReplayPlayer; never re-executes)",
+      "evidence": ["src/components/chat/ConversationHistory.tsx", "src/components/chat/conversation-history-utils.ts"]
     },
     {
-      "id": "cs.preservation",
-      "name": "Preservation engine",
-      "partialUpdateFiles": [],
-      "coresideFiles": [
-        "src-tauri/src/runtime_v2",
-        "src/components"
-      ],
-      "relation": "coreside_native_unverified",
-      "notes": "July complete_but_unverified; not release-claimed"
+      "name": "Fork snapshot / hard undo",
+      "status": "Partially integrated (branches/snapshots UI + runtime-v2 APIs)",
+      "evidence": ["src-tauri/src/runtime_v2/branch.rs", "src/components/chat/ConversationHistory.tsx"]
     },
     {
-      "id": "cs.patch_scheduler",
-      "name": "Patch scheduler",
-      "partialUpdateFiles": [],
-      "coresideFiles": [
-        "src-tauri/src/runtime_v2"
-      ],
-      "relation": "coreside_native_unverified",
-      "notes": "Deps/backpressure present; needs streaming integration"
+      "name": "Multi-user / private audience translation",
+      "status": "Deferred (document translation only; no cloud multi-user)",
+      "evidence": []
+    },
+    {
+      "name": "Context ledger injection into send path",
+      "status": "Securely integrated with privacy hardenings in RC3.7",
+      "evidence": ["src-tauri/src/runtime_v2/context_ledger.rs", "src-tauri/src/commands/message_cmds.rs", "src-tauri/migrations/020_context_ledger_isolation.sql"]
+    },
+    {
+      "name": "Native Ollama streaming",
+      "status": "Securely integrated (native /api/chat NDJSON; terminal contract hardened)",
+      "evidence": ["src-tauri/src/ai/ollama.rs"]
+    },
+    {
+      "name": "Provider selection",
+      "status": "Partially integrated (route fail-closed; capability platform still scaffolding in places)",
+      "evidence": ["src-tauri/src/credentials/resolve.rs", "src-tauri/src/ai/platform/"]
+    },
+    {
+      "name": "State restoration / preservation",
+      "status": "Partially integrated — Rust apply path consults PreservationPolicy on component.replace/remove; UI mergeStateForDefinitionPatch uses shouldPreserveComponent",
+      "evidence": [
+        "src-tauri/src/runtime_v2/preservation.rs",
+        "src-tauri/src/runtime_v2/transactions.rs",
+        "src/lib/surface-ops.ts",
+        "src/components/chat/InlineSurface.tsx"
+      ]
     }
   ],
-  "dataFlows": [
-    {
-      "id": "pu.form_to_llm",
-      "steps": [
-        "HTML form",
-        "iframe POST",
-        "DO",
-        "enqueue LLM",
-        "stream HTML apply"
-      ]
-    },
-    {
-      "id": "cs.form_to_llm_current",
-      "steps": [
-        "Trusted form",
-        "appendContextLedger(values)",
-        "sendMessage(summary)",
-        "build_agent_prompt WITHOUT ledger",
-        "AiProvider::chat"
-      ],
-      "gap": "values not in prompt"
-    },
-    {
-      "id": "cs.stream_current",
-      "steps": [
-        "AiProvider::chat complete body",
-        "parse response",
-        "emit_text_fluidly fake typing"
-      ],
-      "gap": "no provider bytes stream"
-    },
-    {
-      "id": "cs.stream_target",
-      "steps": [
-        "AiProvider::stream",
-        "NdjsonFrameParser",
-        "validate frame",
-        "preview/apply"
-      ],
-      "status": "not_implemented"
-    }
-  ]
+  "nextHighValueSlice": "Desktop/E2E proof of revisioned targeted updates with focus/caret/scroll/media preservation, stale-revision rejection, incomplete-stream rollback, and read-only inspector/replay on the current fingerprint. Also wire active branch_id into ledger inject when branch selection is available.",
+  "exploreAgentNote": "Findings from explore agent ecef8bfb: preserve wiring was the gap; queue/branch/replay UI and native streaming claims in pre-RC3.7 maps are obsolete."
 }

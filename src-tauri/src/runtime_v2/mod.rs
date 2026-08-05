@@ -31,7 +31,9 @@ pub use branch::{
 };
 #[allow(unused_imports)]
 pub use context_ledger::{
-    append_ledger_entry, get_ledger_entry, list_ledger_entries, ContextLedgerEntry,
+    append_ledger_entry, get_ledger_entry, ledger_submission_id, list_ledger_entries,
+    list_ledger_entries_for_inject, mark_ledger_consumed, should_consume_after_inject,
+    ContextLedgerEntry,
 };
 #[allow(unused_imports)]
 pub use continuity::{
@@ -65,7 +67,8 @@ pub use patch_scheduler::{
 };
 #[allow(unused_imports)]
 pub use preservation::{
-    get_preservation, list_preservation_for_surface, should_preserve, upsert_preservation,
+    apply_preservation_on_replace, get_preservation, invalidate_component_live_state,
+    list_preservation_for_surface, resolve_policy_for_apply, should_preserve, upsert_preservation,
     PreservationPolicy, PreservationRecord,
 };
 #[allow(unused_imports)]

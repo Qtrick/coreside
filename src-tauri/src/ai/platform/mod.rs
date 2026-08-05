@@ -13,7 +13,8 @@ pub use descriptors::{
     PROVIDER_PRESET_VERSION,
 };
 pub use endpoint_policy::{
-    classify_and_validate_endpoint, EndpointPolicyError, EndpointValidation,
+    classify_and_validate_endpoint, classify_and_validate_endpoint_with_resolver,
+    is_blocked_destination_ip, EndpointPolicyError, EndpointValidation,
 };
 pub use types::{
     AuthMode, CapabilityConfidence, CapabilityFlag, CapabilityProfile, ConnectionHealth,

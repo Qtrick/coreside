@@ -7,7 +7,8 @@ use super::CommandError;
 use crate::exa::{
     budget_status, delete_exa_api_key, list_recent_usage, load_budget_config, load_search_profile,
     resolve_exa_credentials, save_budget_config, save_search_profile, store_exa_api_key,
-    test_connection, usage_summary, BudgetStatus, SearchProfile, UsageEntry, UsageSummary,
+    test_connection, test_connection_with_key, usage_summary, BudgetStatus, SearchProfile,
+    UsageEntry, UsageSummary,
 };
 use crate::security::sanitize_error;
 use crate::state::AppState;
@@ -42,10 +43,32 @@ pub struct ConfigureExaInput {
 }
 
 #[tauri::command]
-pub fn configure_exa_connection(
+pub async fn configure_exa_connection(
     input: ConfigureExaInput,
 ) -> Result<ExaConnectionView, CommandError> {
-    store_exa_api_key(&input.api_key).map_err(map_exa_err)?;
+    let new_key = input.api_key.trim().to_string();
+    if new_key.is_empty() {
+        return Err(CommandError::new("invalid", "Exa API key is required"));
+    }
+
+    // Test-before-swap: probe the candidate key without replacing the prior secret first.
+    test_connection_with_key(&new_key)
+        .await
+        .map_err(map_exa_err)?;
+
+    let previous = resolve_exa_credentials().api_key;
+    store_exa_api_key(&new_key).map_err(map_exa_err)?;
+
+    // Compensating restore if a follow-up probe against the stored key fails.
+    if let Err(e) = test_connection().await {
+        if let Some(prev) = previous.as_deref() {
+            let _ = store_exa_api_key(prev);
+        } else {
+            let _ = delete_exa_api_key();
+        }
+        return Err(map_exa_err(e));
+    }
+
     get_exa_connection()
 }
 

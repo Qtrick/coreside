@@ -41,7 +41,7 @@ describe("onboarding coordinator", () => {
   });
 
   it("skips from welcome or tour", () => {
-    let state = showWelcome(emptyCoordinatorState());
+    const state = showWelcome(emptyCoordinatorState());
     let result = skipTour({ ...state, activeTutorialId: ESSENTIALS_TUTORIAL_ID });
     expect(result.state.phase).toBe("skipped");
     expect(result.persist?.status).toBe("skipped");

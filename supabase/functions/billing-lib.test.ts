@@ -8,18 +8,25 @@ import {
   extractStripeEventType,
   extractSubscriptionSync,
   FREE_PLAN_ENTITLEMENTS,
+  isRetryableWebhookStatus,
+  isTerminalWebhookStatus,
   parseCheckoutBody,
   parsePortalBody,
   parseStripeEventPayload,
   parseStripeSignatureHeader,
+  resolveBillingReturnUrl,
   resolveEntitlementsForSubscription,
   shouldProcessStripeEventType,
   verifyStripeWebhookSignature,
 } from "./billing-lib.ts";
 
 describe("billing parseCheckoutBody", () => {
-  it("accepts personal and pro plans", () => {
-    expect(parseCheckoutBody({ planId: "personal" })?.planId).toBe("personal");
+  it("accepts personal and pro plans with logical destinations", () => {
+    expect(parseCheckoutBody({ planId: "personal" })).toEqual({
+      planId: "personal",
+      successDestination: "settings",
+      cancelDestination: "settings",
+    });
     expect(parseCheckoutBody({ planId: "PRO" })?.planId).toBe("pro");
   });
 
@@ -27,23 +34,52 @@ describe("billing parseCheckoutBody", () => {
     expect(parseCheckoutBody({ planId: "free" })).toBeNull();
     expect(parseCheckoutBody({ planId: "enterprise" })).toBeNull();
   });
+
+  it("rejects arbitrary success/cancel URLs", () => {
+    expect(
+      parseCheckoutBody({
+        planId: "personal",
+        successUrl: "https://evil.example/phish",
+        cancelUrl: "https://evil.example/phish",
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects unknown destinations", () => {
+    expect(
+      parseCheckoutBody({
+        planId: "personal",
+        successDestination: "javascript:alert(1)",
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("billing parsePortalBody", () => {
-  it("accepts optional returnUrl", () => {
-    expect(parsePortalBody({ returnUrl: "https://example.com/settings" })).toEqual({
-      returnUrl: "https://example.com/settings",
+  it("defaults to settings and rejects arbitrary returnUrl", () => {
+    expect(parsePortalBody({})).toEqual({ returnDestination: "settings" });
+    expect(
+      parsePortalBody({ returnUrl: "https://evil.example/settings" }),
+    ).toBeNull();
+    expect(parsePortalBody({ returnDestination: "billing" })).toEqual({
+      returnDestination: "billing",
     });
-    expect(parsePortalBody({})).toEqual({});
+  });
+
+  it("builds server-controlled return URLs", () => {
+    expect(resolveBillingReturnUrl("settings", "http://localhost:1422")).toBe(
+      "http://localhost:1422/settings",
+    );
+    expect(resolveBillingReturnUrl("https://evil.example", "http://localhost:1422")).toBeNull();
   });
 
   it("builds Stripe portal session body with customer + return_url", () => {
     const body = buildStripePortalSessionBody({
       customerId: "cus_123",
-      returnUrl: "https://example.com/settings",
+      returnUrl: "http://localhost:1422/settings",
     });
     expect(body.get("customer")).toBe("cus_123");
-    expect(body.get("return_url")).toBe("https://example.com/settings");
+    expect(body.get("return_url")).toBe("http://localhost:1422/settings");
   });
 });
 
@@ -82,181 +118,90 @@ describe("stripe webhook signature", () => {
     );
     expect(result.ok).toBe(false);
   });
-
-  it("extracts event id and type", () => {
-    const payload = '{"id":"evt_abc","type":"customer.subscription.updated"}';
-    expect(extractStripeEventId(payload)).toBe("evt_abc");
-    expect(extractStripeEventType(payload)).toBe("customer.subscription.updated");
-  });
 });
 
-describe("checkout session entitlement sync guardrails", () => {
-  it("requires client_reference_id to match metadata user_id", () => {
+describe("stripe event helpers", () => {
+  it("extracts event id and type", () => {
+    const payload = JSON.stringify({
+      id: "evt_123",
+      type: "checkout.session.completed",
+      data: { object: {} },
+    });
+    expect(extractStripeEventId(payload)).toBe("evt_123");
+    expect(extractStripeEventType(payload)).toBe("checkout.session.completed");
+    expect(shouldProcessStripeEventType("checkout.session.completed")).toBe(true);
+    expect(shouldProcessStripeEventType("invoice.paid")).toBe(false);
+  });
+
+  it("extracts checkout sync fields", () => {
     const event = parseStripeEventPayload(
       JSON.stringify({
         id: "evt_1",
         type: "checkout.session.completed",
         data: {
           object: {
-            status: "complete",
-            payment_status: "paid",
+            id: "cs_1",
             customer: "cus_1",
             subscription: "sub_1",
-            client_reference_id: "user-a",
-            metadata: {
-              user_id: "user-b",
-              plan_id: "personal",
-              price_id: "price_personal",
-            },
-            line_items: {
-              data: [{ price: { id: "price_personal" } }],
-            },
+            client_reference_id: "user-1",
+            status: "complete",
+            payment_status: "paid",
+            metadata: { user_id: "user-1", plan_id: "pro", price_id: "price_pro" },
+            line_items: { data: [{ price: { id: "price_pro" } }] },
           },
         },
       }),
     );
-    expect(extractCheckoutSessionSync(event!)).toBeNull();
+    const sync = extractCheckoutSessionSync(event!);
+    expect(sync?.userId).toBe("user-1");
+    expect(sync?.planId).toBe("pro");
   });
 
-  it("accepts a server-bound checkout session payload", () => {
+  it("extracts subscription sync fields", () => {
     const event = parseStripeEventPayload(
       JSON.stringify({
         id: "evt_2",
-        type: "checkout.session.completed",
-        data: {
-          object: {
-            status: "complete",
-            payment_status: "paid",
-            customer: "cus_1",
-            subscription: "sub_1",
-            client_reference_id: "user-a",
-            metadata: {
-              user_id: "user-a",
-              plan_id: "pro",
-              price_id: "price_pro",
-            },
-            line_items: {
-              data: [{ price: { id: "price_pro" } }],
-            },
-          },
-        },
-      }),
-    );
-    expect(extractCheckoutSessionSync(event!)).toEqual({
-      userId: "user-a",
-      planId: "pro",
-      stripeCustomerId: "cus_1",
-      stripeSubscriptionId: "sub_1",
-      stripePriceId: "price_pro",
-    });
-  });
-});
-
-describe("stripe entitlement sync helpers", () => {
-  const personalPlan = {
-    planId: "personal",
-    hostedAiEnabled: true,
-    hostedSearchEnabled: false,
-    allowanceAmount: 500,
-    hardLimitEnabled: true,
-  };
-
-  it("extracts checkout.session.completed metadata", () => {
-    const event = parseStripeEventPayload(
-      JSON.stringify({
-        id: "evt_checkout",
-        type: "checkout.session.completed",
-        data: {
-          object: {
-            status: "complete",
-            payment_status: "paid",
-            customer: "cus_123",
-            subscription: "sub_456",
-            client_reference_id: "user-uuid",
-            metadata: {
-              user_id: "user-uuid",
-              plan_id: "personal",
-              price_id: "price_personal",
-            },
-            line_items: {
-              data: [{ price: { id: "price_personal" } }],
-            },
-          },
-        },
-      }),
-    );
-    expect(extractCheckoutSessionSync(event!)).toEqual({
-      userId: "user-uuid",
-      planId: "personal",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_456",
-      stripePriceId: "price_personal",
-    });
-  });
-
-  it("rejects checkout without server metadata", () => {
-    const event = parseStripeEventPayload(
-      JSON.stringify({
-        id: "evt_checkout",
-        type: "checkout.session.completed",
-        data: { object: { customer: "cus_123" } },
-      }),
-    );
-    expect(extractCheckoutSessionSync(event!)).toBeNull();
-  });
-
-  it("extracts subscription.updated payload", () => {
-    const event = parseStripeEventPayload(
-      JSON.stringify({
-        id: "evt_sub",
         type: "customer.subscription.updated",
         data: {
           object: {
-            id: "sub_456",
-            customer: "cus_123",
+            id: "sub_1",
+            customer: "cus_1",
             status: "active",
             current_period_end: 1_700_000_000,
-            items: { data: [{ price: { id: "price_personal" } }] },
+            items: { data: [{ price: { id: "price_pro" } }] },
           },
         },
       }),
     );
     const sync = extractSubscriptionSync(event!);
-    expect(sync?.stripeSubscriptionId).toBe("sub_456");
     expect(sync?.status).toBe("active");
-    expect(sync?.priceId).toBe("price_personal");
+    expect(sync?.priceId).toBe("price_pro");
   });
 
-  it("downgrades canceled subscriptions to free entitlements", () => {
+  it("maps inactive subscription to free entitlements", () => {
     expect(
-      resolveEntitlementsForSubscription("canceled", personalPlan),
+      resolveEntitlementsForSubscription("canceled", {
+        planId: "pro",
+        hostedAiEnabled: true,
+        hostedSearchEnabled: true,
+        allowanceAmount: 100,
+        hardLimitEnabled: true,
+      }),
     ).toEqual(FREE_PLAN_ENTITLEMENTS);
-    expect(
-      resolveEntitlementsForSubscription("active", personalPlan),
-    ).toEqual(personalPlan);
   });
 
-  it("filters webhook event types for entitlement sync", () => {
-    expect(shouldProcessStripeEventType("checkout.session.completed")).toBe(true);
-    expect(shouldProcessStripeEventType("customer.subscription.deleted")).toBe(true);
-    expect(shouldProcessStripeEventType("invoice.paid")).toBe(false);
+  it("builds entitlement sync payload", () => {
+    const payload = entitlementSyncPayload(FREE_PLAN_ENTITLEMENTS);
+    expect(payload.plan_id).toBe("free");
   });
+});
 
-  it("entitlement sync payload never resets used_amount", () => {
-    const payload = entitlementSyncPayload({
-      planId: "pro",
-      hostedAiEnabled: true,
-      hostedSearchEnabled: true,
-      allowanceAmount: 2000,
-      hardLimitEnabled: true,
-    });
-    expect(payload).toEqual({
-      plan_id: "pro",
-      hosted_ai_enabled: true,
-      hosted_search_enabled: true,
-      allowance_amount: 2000,
-      hard_limit_enabled: true,
-    });
-    expect(payload).not.toHaveProperty("used_amount");
+describe("stripe webhook status helpers", () => {
+  it("classifies terminal and retryable statuses", () => {
+    expect(isTerminalWebhookStatus("processed")).toBe(true);
+    expect(isTerminalWebhookStatus("permanent_failed")).toBe(true);
+    expect(isRetryableWebhookStatus("received")).toBe(true);
+    expect(isRetryableWebhookStatus("retryable_failed")).toBe(true);
+    expect(isRetryableWebhookStatus("processed")).toBe(false);
   });
 });

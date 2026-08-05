@@ -339,9 +339,58 @@ where
     }
 
     // 2. Explicit connection id (only when active is missing/unusable)
+    // Explicit selection must fail closed — never fall through to Hosted or .env.
     if let Some(conn) = sources.explicit.as_ref() {
         if let Ok(resolved) = from_connection_with_secret(conn, &get_secret) {
             return resolved;
+        }
+        if !is_authless_local_connection(conn) && !connection_is_mandatory_authless(conn) {
+            let (default_model, default_base) = defaults_for(&conn.provider);
+            let model = conn
+                .model_default
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(default_model);
+            let base_url = conn
+                .base_url
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(default_base);
+            return ResolvedCredentials {
+                provider: conn.provider.clone(),
+                api_key: None,
+                model,
+                base_url,
+                source: "connection".into(),
+                active_connection_id: Some(conn.id.clone()),
+                env_path: None,
+                missing_connection_secret: true,
+            };
+        }
+        // Explicit authless Local that failed resolution still must not fall through.
+        if is_authless_local_connection(conn) || connection_is_mandatory_authless(conn) {
+            let (default_model, default_base) = defaults_for(&conn.provider);
+            let model = conn
+                .model_default
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(default_model);
+            let base_url = conn
+                .base_url
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(default_base);
+            return ResolvedCredentials {
+                provider: conn.provider.clone(),
+                api_key: None,
+                model,
+                base_url,
+                source: "connection".into(),
+                active_connection_id: Some(conn.id.clone()),
+                env_path: None,
+                // Authless has no secret; mark unavailable so callers fail closed.
+                missing_connection_secret: true,
+            };
         }
     }
 
@@ -351,6 +400,27 @@ where
             if let Ok(resolved) = from_connection_with_secret(conn, &get_secret) {
                 return resolved;
             }
+            let (default_model, default_base) = defaults_for(&conn.provider);
+            let model = conn
+                .model_default
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(default_model);
+            let base_url = conn
+                .base_url
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(default_base);
+            return ResolvedCredentials {
+                provider: conn.provider.clone(),
+                api_key: None,
+                model,
+                base_url,
+                source: "connection".into(),
+                active_connection_id: Some(conn.id.clone()),
+                env_path: None,
+                missing_connection_secret: true,
+            };
         }
     }
 
@@ -786,6 +856,34 @@ mod tests {
         assert_eq!(resolved.source, "connection");
         assert!(resolved.missing_connection_secret);
         assert_eq!(resolved.access_route(), AiAccessRoute::Unavailable);
+        assert!(!resolved.has_api_key());
+    }
+
+    #[test]
+    fn broken_explicit_byok_blocks_hosted_fallback() {
+        let conn = sample_conn("byok-explicit", "openai", false);
+        let sources = CredentialSources {
+            active: None,
+            explicit: Some(conn),
+            hosted_adapter_connected: true,
+        };
+        let resolved = resolve_from_sources_with(
+            &sources,
+            |_| Err(CredentialError::NotFound),
+            || AppConfig {
+                provider: "gemini".into(),
+                api_key: Some("env-key".into()),
+                model: DEFAULT_GEMINI_MODEL.into(),
+                base_url: DEFAULT_GEMINI_BASE_URL.into(),
+                log_level: "info".into(),
+                env_path: None,
+            },
+        );
+        assert_eq!(resolved.provider, "openai");
+        assert_eq!(resolved.source, "connection");
+        assert!(resolved.missing_connection_secret);
+        assert_eq!(resolved.access_route(), AiAccessRoute::Unavailable);
+        assert_ne!(resolved.provider, "coreside_hosted");
         assert!(!resolved.has_api_key());
     }
 }

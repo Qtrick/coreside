@@ -229,17 +229,32 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchEntry[] = [
 
 export type SettingsSearchHit = SettingsSearchEntry & { score: number };
 
+/** Stable DOM id for scrolling/focus after selecting a search hit. */
+export function settingsTargetDomId(entryId: string): string {
+  return `settings-target-${entryId}`;
+}
+
 export function matchSettingsSearch(
   query: string,
   entries: readonly SettingsSearchEntry[] = SETTINGS_SEARCH_INDEX,
+  categories: readonly SettingsCategory[] = SETTINGS_CATEGORIES,
 ): SettingsSearchHit[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
 
   const parts = q.split(/\s+/).filter(Boolean);
   const hits: SettingsSearchHit[] = [];
+  const seen = new Set<string>();
+
   for (const entry of entries) {
-    const haystack = [entry.label, ...entry.keywords, entry.categoryId]
+    const category = categories.find((c) => c.id === entry.categoryId);
+    const haystack = [
+      entry.label,
+      ...entry.keywords,
+      entry.categoryId,
+      category?.label ?? "",
+      category?.description ?? "",
+    ]
       .join(" ")
       .toLowerCase();
     const fullMatch = haystack.includes(q);
@@ -251,8 +266,35 @@ export function matchSettingsSearch(
     let score = tokenMatch ? 1 : 2;
     if (entry.label.toLowerCase().includes(q)) score += 10;
     if (entry.keywords.some((k) => k.toLowerCase().includes(q))) score += 5;
+    if (category?.label.toLowerCase().includes(q)) score += 4;
+    if (category?.description.toLowerCase().includes(q)) score += 3;
     if (entry.categoryId.includes(q.replace(/\s+/g, "-"))) score += 2;
     hits.push({ ...entry, score });
+    seen.add(entry.id);
+  }
+
+  // Category name/description-only matches (no duplicate setting rows).
+  for (const category of categories) {
+    const haystack = [category.label, category.description, category.id]
+      .join(" ")
+      .toLowerCase();
+    const fullMatch = haystack.includes(q);
+    const tokenMatch =
+      !fullMatch && parts.length > 1 && parts.every((part) => haystack.includes(part));
+    if (!fullMatch && !tokenMatch) continue;
+    const syntheticId = `category-${category.id}`;
+    if (seen.has(syntheticId)) continue;
+    if (hits.some((h) => h.categoryId === category.id)) continue;
+    let score = tokenMatch ? 1 : 2;
+    if (category.label.toLowerCase().includes(q)) score += 8;
+    if (category.description.toLowerCase().includes(q)) score += 4;
+    hits.push({
+      id: syntheticId,
+      categoryId: category.id,
+      label: category.label,
+      keywords: [],
+      score,
+    });
   }
 
   return hits.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));

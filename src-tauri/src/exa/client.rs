@@ -25,6 +25,7 @@ fn http_client() -> Result<&'static Client, ExaError> {
     }
     let built = Client::builder()
         .timeout(REQUEST_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
         .user_agent("Coreside/0.1 (+https://coreside.local)")
         .build()
         .map_err(|e| ExaError::Other(e.to_string()))?;
@@ -200,9 +201,22 @@ pub async fn search(
     })
 }
 
-/// Lightweight connectivity check (1 result, fast).
+/// Lightweight connectivity check (1 result, fast) using the currently resolved key.
 pub async fn test_connection() -> Result<String, ExaError> {
     let (api_key, source) = require_exa_api_key()?;
+    test_connection_with_key(&api_key).await?;
+    Ok(format!(
+        "Exa Search OK (credential source: {})",
+        source.as_str()
+    ))
+}
+
+/// Probe Exa with an explicit key without requiring keyring persistence first.
+pub async fn test_connection_with_key(api_key: &str) -> Result<(), ExaError> {
+    let key = api_key.trim();
+    if key.is_empty() {
+        return Err(ExaError::NotConfigured("Exa API key is required".into()));
+    }
     let request = ExaSearchRequest {
         query: "coreside connectivity probe".into(),
         search_type: "fast".into(),
@@ -210,11 +224,8 @@ pub async fn test_connection() -> Result<String, ExaError> {
         include_domains: None,
         contents: super::models::ExaContentsRequest { highlights: true },
     };
-    let _ = search_http(&api_key, &request).await?;
-    Ok(format!(
-        "Exa Search OK (credential source: {})",
-        source.as_str()
-    ))
+    let _ = search_http(key, &request).await?;
+    Ok(())
 }
 
 async fn search_http(

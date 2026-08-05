@@ -27,6 +27,7 @@ import type { ToolMention } from "@/lib/mentions";
 import { ensureReadableForeground } from "@/lib/readability/contrast";
 import type { ActionLogMode } from "@/lib/action-log";
 import { validateToolDefinition } from "@/lib/tool-schema";
+import { normalizeCanonicalHex } from "@/lib/wallpaper-hex";
 import {
   applyPreviewSurfaceOverlay,
   clearPreviewOverlaysForConversation,
@@ -60,6 +61,12 @@ export type PendingToolChange = {
   conversationId: string;
   messageId: string;
   toolChange: ToolChange;
+};
+
+export type PendingSettingsChange = {
+  conversationId: string;
+  messageId: string;
+  settingsChange: import("@/types/agent").SettingsChange;
 };
 
 export type PendingKernelProposal = {
@@ -145,6 +152,7 @@ type AppStore = {
   previewSurfacesByKey: Record<string, PreviewSurfaceOverlay>;
 
   pendingToolChange: PendingToolChange | null;
+  pendingSettingsChange: PendingSettingsChange | null;
   pendingKernelProposal: PendingKernelProposal | null;
   appConflict: AppConflict | null;
   surfaceDraftConflict: SurfaceDraftConflict | null;
@@ -247,6 +255,8 @@ type AppStore = {
   editAndResendMessage: (messageId: string, content: string) => Promise<void>;
   applyPendingToolChange: () => Promise<void>;
   discardPendingToolChange: () => Promise<void>;
+  applyPendingSettingsChange: () => Promise<void>;
+  discardPendingSettingsChange: () => Promise<void>;
   applyPendingKernelProposal: () => Promise<void>;
   discardPendingKernelProposal: () => Promise<void>;
   clearAppConflict: () => void;
@@ -816,6 +826,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   previewSurfacesByKey: {},
 
   pendingToolChange: null,
+  pendingSettingsChange: null,
   pendingKernelProposal: null,
   appConflict: null,
   surfaceDraftConflict: null,
@@ -2102,31 +2113,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
         return true;
       }
 
-      let themePatch: Partial<{
-        theme: ThemePreference;
-        resolvedTheme: "light" | "dark";
-        appearance: AppearancePalette;
-        wallpaper: WallpaperConfig;
-        globalWallpaperJson: string | null;
-      }> = {};
-      if (result.settingsChange) {
-        const settings = await api.getSettings();
-        const theme = settings.theme ?? get().theme;
-        const wallpaper = wallpaperFromSettings(settings);
-        const globalWallpaperJson = settings.wallpaperJson ?? null;
-        syncCommittedWallpaperFromSettings({ wallpaper, globalWallpaperJson });
-        themePatch = {
-          theme,
-          resolvedTheme: resolveTheme(theme),
-          appearance: appearanceFromSettings(settings),
-          wallpaper,
-          globalWallpaperJson,
-        };
-      }
+      // settingsChange is a proposal only — do not treat as already applied.
+      const pendingSettings: PendingSettingsChange | null = result.settingsChange
+        ? {
+            conversationId,
+            messageId: result.messageId,
+            settingsChange: result.settingsChange,
+          }
+        : null;
 
-      // Loading settings is a second await, so the user may have navigated away
-      // in the meantime. Appearance is global and still applies; the
-      // conversation-scoped fields must not overwrite whichever chat is now open.
+      // The user may have navigated away while the turn finished. Conversation-scoped
+      // fields must not overwrite whichever chat is now open.
       if (get().activeConversationId !== conversationId) {
         set((state) => ({
           sending: false,
@@ -2134,7 +2131,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           agentActions: [],
           streamingText: null,
           ...finalizeTurnInState(state, conversationId, "completed"),
-          ...themePatch,
+          ...(pendingSettings ? { pendingSettingsChange: pendingSettings } : {}),
         }));
         return true;
       }
@@ -2144,6 +2141,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         sending: false,
         sendingConversationId: null,
         pendingToolChange: pending,
+        pendingSettingsChange: pendingSettings ?? state.pendingSettingsChange,
         pendingKernelProposal: kernelProposal,
         agentActions: [],
         streamingText: null,
@@ -2154,7 +2152,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
           rv?.error ? "failed" : "completed",
           rv?.error ? String(rv.error) : null,
         ),
-        ...themePatch,
       }));
       return true;
     } catch (error) {
@@ -2314,6 +2311,98 @@ export const useAppStore = create<AppStore>((set, get) => ({
                 pending: false,
                 discarded: true,
                 toolChangeStatus: "discarded",
+              },
+            }
+          : m,
+      ),
+    });
+  },
+
+  applyPendingSettingsChange: async () => {
+    const pending = get().pendingSettingsChange;
+    if (!pending) return;
+    const sc = pending.settingsChange;
+    try {
+      // Expand pair roots → allowlisted *Light/*Dark hex keys (Rust rejects pair roots).
+      const colorPairFields = [
+        "accentPrimary",
+        "accentSecondary",
+        "background",
+        "surface",
+        "surfaceMuted",
+        "border",
+        "textPrimary",
+        "textSecondary",
+      ] as const;
+      for (const field of colorPairFields) {
+        const variants = sc[field];
+        if (!variants) continue;
+        for (const mode of ["light", "dark"] as const) {
+          const raw = variants[mode];
+          if (raw == null || raw === "") continue;
+          const hex = normalizeCanonicalHex(raw);
+          if (!hex) {
+            throw new Error(`Invalid ${field}.${mode} color`);
+          }
+          const key = `${field}${mode === "light" ? "Light" : "Dark"}`;
+          await api.setSetting(key, hex);
+        }
+      }
+      if (sc.wallpaper) {
+        const wallpaperJson = JSON.stringify(sc.wallpaper);
+        await get().applyWorkspaceWallpaper(wallpaperJson);
+      }
+      if (sc.theme) {
+        await get().setTheme(sc.theme);
+      }
+      const settings = await api.getSettings();
+      const theme = settings.theme ?? get().theme;
+      const wallpaper = wallpaperFromSettings(settings);
+      const globalWallpaperJson = settings.wallpaperJson ?? null;
+      syncCommittedWallpaperFromSettings({ wallpaper, globalWallpaperJson });
+      set({
+        pendingSettingsChange: null,
+        sendError: null,
+        theme,
+        resolvedTheme: resolveTheme(theme),
+        appearance: appearanceFromSettings(settings),
+        wallpaper,
+        globalWallpaperJson,
+        messages: get().messages.map((m) =>
+          m.id === pending.messageId
+            ? {
+                ...m,
+                metadata: {
+                  ...(m.metadata ?? {}),
+                  settingsChange: sc,
+                  settingsChangeStatus: "applied",
+                  pending: false,
+                },
+              }
+            : m,
+        ),
+      });
+    } catch (error) {
+      const message =
+        error instanceof TauriCommandError || error instanceof Error
+          ? error.message
+          : "Failed to apply appearance change";
+      set({ sendError: message });
+    }
+  },
+
+  discardPendingSettingsChange: async () => {
+    const pending = get().pendingSettingsChange;
+    set({
+      pendingSettingsChange: null,
+      messages: get().messages.map((m) =>
+        pending && m.id === pending.messageId
+          ? {
+              ...m,
+              metadata: {
+                ...(m.metadata ?? {}),
+                pending: false,
+                settingsChangeStatus: "discarded",
               },
             }
           : m,

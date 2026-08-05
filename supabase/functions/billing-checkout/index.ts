@@ -1,5 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { buildStripeCheckoutSessionBody, parseCheckoutBody } from "../billing-lib.ts";
+import {
+  buildStripeCheckoutSessionBody,
+  parseCheckoutBody,
+  resolveBillingReturnUrl,
+} from "../billing-lib.ts";
+import { readBodyTextBounded } from "../_shared/read-body.ts";
 
 const SERVICE = "coreside-billing-checkout";
 const VERSION = "1";
@@ -45,14 +50,9 @@ function json(
   });
 }
 
-function defaultBillingUrl(
-  explicit: string | undefined,
-  envKey: string,
-): string {
-  if (explicit) return explicit;
-  const fromEnv = Deno.env.get(envKey)?.trim();
-  if (fromEnv) return fromEnv;
-  return "http://localhost:1422/settings";
+function defaultAppBaseUrl(): string {
+  return (Deno.env.get("CORESIDE_APP_BASE_URL")?.trim() || "http://localhost:1422")
+    .replace(/\/$/, "");
 }
 
 Deno.serve(async (req) => {
@@ -93,7 +93,11 @@ Deno.serve(async (req) => {
 
   let body: ReturnType<typeof parseCheckoutBody>;
   try {
-    body = parseCheckoutBody(await req.json());
+    const bodyRead = await readBodyTextBounded(req, 64 * 1024);
+    if (!bodyRead.ok) {
+      return json({ error: "Request body too large" }, 413, origin);
+    }
+    body = parseCheckoutBody(JSON.parse(bodyRead.text));
   } catch {
     return json({ error: "Invalid request body" }, 400, origin);
   }
@@ -143,12 +147,24 @@ Deno.serve(async (req) => {
     .eq("user_id", user.id)
     .maybeSingle();
 
+  const successUrl = resolveBillingReturnUrl(
+    body.successDestination,
+    defaultAppBaseUrl(),
+  );
+  const cancelUrl = resolveBillingReturnUrl(
+    body.cancelDestination,
+    defaultAppBaseUrl(),
+  );
+  if (!successUrl || !cancelUrl) {
+    return json({ error: "Invalid billing return destination" }, 400, origin);
+  }
+
   const sessionBody = buildStripeCheckoutSessionBody({
     userId: user.id,
     planId: body.planId,
     priceId,
-    successUrl: defaultBillingUrl(body.successUrl, "CORESIDE_BILLING_SUCCESS_URL"),
-    cancelUrl: defaultBillingUrl(body.cancelUrl, "CORESIDE_BILLING_CANCEL_URL"),
+    successUrl,
+    cancelUrl,
     customerId: existingCustomer?.stripe_customer_id ?? undefined,
   });
 

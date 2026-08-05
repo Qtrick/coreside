@@ -348,8 +348,13 @@ pub fn seal_from_ledger_payload(
         fields,
     };
     let mut sealed = seal_local_user_submission(conversation_id, submission)?;
-    // Stable id tied to ledger entry for dedupe across inject.
-    sealed.submission_id = format!("ledger-{entry_id}");
+    // Stable id tied to ledger entry for dedupe — normalize prefix exactly once.
+    let trimmed = entry_id.trim();
+    sealed.submission_id = if trimmed.starts_with("ledger-") {
+        trimmed.to_string()
+    } else {
+        format!("ledger-{trimmed}")
+    };
     Ok(sealed)
 }
 
@@ -556,9 +561,20 @@ mod tests {
             }),
         )
         .unwrap();
-        assert_eq!(sealed.submission_id, "ledger-ledger-abc");
+        assert_eq!(sealed.submission_id, "ledger-abc");
         assert_eq!(sealed.form_id, "tool-1");
         assert_eq!(sealed.trust_class, TrustClass::LocalUserGesture);
+
+        let sealed_raw = seal_from_ledger_payload(
+            "conv-9",
+            "abc",
+            &json!({
+                "toolId": "tool-1",
+                "values": { "q": 1 }
+            }),
+        )
+        .unwrap();
+        assert_eq!(sealed_raw.submission_id, "ledger-abc");
     }
 
     #[test]

@@ -7,6 +7,10 @@ use uuid::Uuid;
 use super::operations::{validate_operations, AppOperation};
 use super::packs::validate_definition_components;
 use super::patch::apply_component_op;
+use super::preservation::{
+    apply_preservation_on_replace, invalidate_component_live_state, resolve_policy_for_apply,
+    upsert_preservation,
+};
 use super::surfaces::{
     archive_surface, create_inline_surface, delete_surface, get_surface, restore_surface,
     update_surface_definition, DeleteSurfaceOptions, SurfaceRecord,
@@ -294,16 +298,63 @@ fn apply_one(
                 .and_then(|v| serde_json::from_value(v).ok())
                 .unwrap_or_default();
             if op.op_type.starts_with("component.") {
+                let cid = op.target.component_id.as_deref();
+                let policy = resolve_policy_for_apply(db, sid, cid, &op.payload);
+                let old_comp = cid.and_then(|id| find_component(&components, id).cloned());
                 apply_component_op(
                     &mut components,
                     &op.op_type,
-                    op.target.component_id.as_deref(),
+                    cid,
                     op.target.parent_id.as_deref(),
                     op.base_revision,
                     surface.current_revision,
                     &op.payload,
                 )
                 .map_err(|e| e.to_string())?;
+                if op.op_type == "component.replace" {
+                    if let (Some(old), Some(id)) = (old_comp.as_ref(), cid) {
+                        if let Some(new) = find_component_mut(&mut components, id) {
+                            let preserved =
+                                apply_preservation_on_replace(old, new, policy);
+                            if !preserved {
+                                let _ = invalidate_component_live_state(db, sid, id);
+                            } else {
+                                let _ = upsert_preservation(
+                                    db,
+                                    sid,
+                                    id,
+                                    policy,
+                                    prop_preservation_key(new),
+                                    &new.component_type,
+                                    None,
+                                );
+                            }
+                        }
+                    }
+                } else if op.op_type == "component.remove" {
+                    if let Some(id) = cid {
+                        // Removed components must not keep live state/drafts.
+                        let _ = invalidate_component_live_state(db, sid, id);
+                    }
+                } else if let Some(id) = cid {
+                    // Record policy for future replaces when payload declares one.
+                    if op.payload.get("preservationPolicy").is_some()
+                        || op.payload.get("policy").is_some()
+                    {
+                        let ctype = find_component(&components, id)
+                            .map(|c| c.component_type.clone())
+                            .unwrap_or_else(|| "unknown".into());
+                        let _ = upsert_preservation(
+                            db,
+                            sid,
+                            id,
+                            policy,
+                            find_component(&components, id).and_then(prop_preservation_key),
+                            &ctype,
+                            None,
+                        );
+                    }
+                }
                 if let Some(obj) = def_value.as_object_mut() {
                     obj.insert(
                         "components".into(),
@@ -765,4 +816,46 @@ mod tests {
         let restored = get_surface(&db, &surface2.id).unwrap();
         assert!(!restored.archived);
     }
+}
+
+fn find_component<'a>(nodes: &'a [ToolComponent], id: &str) -> Option<&'a ToolComponent> {
+    for n in nodes {
+        if n.id == id {
+            return Some(n);
+        }
+        if let Some(ch) = &n.children {
+            if let Some(found) = find_component(ch, id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn find_component_mut<'a>(
+    nodes: &'a mut [ToolComponent],
+    id: &str,
+) -> Option<&'a mut ToolComponent> {
+    for n in nodes {
+        if n.id == id {
+            return Some(n);
+        }
+        if let Some(ch) = n.children.as_mut() {
+            if let Some(found) = find_component_mut(ch, id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn prop_preservation_key(comp: &ToolComponent) -> Option<&str> {
+    comp.props
+        .as_ref()
+        .and_then(|p| {
+            p.get("preservationKey")
+                .or_else(|| p.get("preservation_key"))
+        })
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
 }

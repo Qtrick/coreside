@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   DEFAULT_SETTINGS_CATEGORY,
   matchSettingsSearch,
   normalizeSettingsCategoryId,
   SETTINGS_CATEGORIES,
   SETTINGS_SEARCH_INDEX,
+  settingsTargetDomId,
 } from "./settings-categories";
 
 describe("settings categories", () => {
@@ -50,6 +53,16 @@ describe("settings categories", () => {
     );
   });
 
+  it("matches category names and descriptions", () => {
+    expect(matchSettingsSearch("Everyday window")[0]?.categoryId).toBe(
+      "general",
+    );
+    expect(matchSettingsSearch("Web research")[0]?.categoryId).toBe("search");
+    expect(matchSettingsSearch("inclusive use")[0]?.categoryId).toBe(
+      "accessibility",
+    );
+  });
+
   it("returns no hits for blank queries and scores token matches", () => {
     expect(matchSettingsSearch("   ")).toEqual([]);
     const hits = matchSettingsSearch("dock tile");
@@ -61,6 +74,17 @@ describe("settings categories", () => {
     const known = new Set(SETTINGS_CATEGORIES.map((c) => c.id));
     for (const entry of SETTINGS_SEARCH_INDEX) {
       expect(known.has(entry.categoryId)).toBe(true);
+      expect(settingsTargetDomId(entry.id)).toBe(`settings-target-${entry.id}`);
     }
+  });
+
+  it("keeps settings CSS token contract for search shell radius", () => {
+    const tokens = readFileSync(
+      resolve(__dirname, "../styles/tokens.css"),
+      "utf8",
+    );
+    expect(tokens).toMatch(/--radius-md:\s*var\(--radius\)/);
+    expect(tokens).toMatch(/--text:\s*var\(--text-primary\)/);
+    expect(tokens).toMatch(/--text-muted:\s*var\(--text-secondary\)/);
   });
 });

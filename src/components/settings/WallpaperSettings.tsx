@@ -1,11 +1,15 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { WallpaperKind } from "@/types/agent";
 import {
   buildCanvasPresetProposal,
+  buildStaticColorProposal,
   CANVAS_PRESETS,
   parseWallpaperJson,
   schemaWallpaperToJson,
+  WALLPAPER_FILTER_PRESETS,
+  type WallpaperFilterConfig,
 } from "@/types/wallpaper";
+import { normalizeCanonicalHex } from "@/lib/wallpaper-hex";
 import { activeCanvasPresetId } from "@/lib/wallpaper";
 import { consumerErrorMessage } from "@/lib/consumer-errors";
 import {
@@ -23,6 +27,27 @@ const LIVE_PRESET_IDS = new Set<WallpaperKind>([
   "rain",
   "pulse",
 ]);
+
+const DEFAULT_SOLID = "#141714";
+
+function readCommittedSolid(globalWallpaperJson: string | null | undefined): {
+  color: string;
+  filterPreset: NonNullable<WallpaperFilterConfig["preset"]>;
+} {
+  if (!globalWallpaperJson?.trim()) {
+    return { color: DEFAULT_SOLID, filterPreset: "none" };
+  }
+  const parsed = parseWallpaperJson(globalWallpaperJson);
+  if (parsed.format === "schema" && parsed.config.type === "static-color") {
+    const color = normalizeCanonicalHex(parsed.config.color ?? "") ?? DEFAULT_SOLID;
+    const preset = parsed.config.filter?.preset ?? "none";
+    return {
+      color,
+      filterPreset: preset,
+    };
+  }
+  return { color: DEFAULT_SOLID, filterPreset: "none" };
+}
 
 export function WallpaperSettings() {
   const wallpaper = useAppStore((s) => s.wallpaper);
@@ -43,6 +68,28 @@ export function WallpaperSettings() {
   const [query, setQuery] = useState("");
   /** Guards pointerup+blur (and keyup+blur) double-commit of the same gesture. */
   const transparencyCommitGenRef = useRef(0);
+
+  const committedSolid = useMemo(
+    () => readCommittedSolid(globalWallpaperJson),
+    [globalWallpaperJson],
+  );
+  const [draftHex, setDraftHex] = useState(committedSolid.color);
+  const [draftFilter, setDraftFilter] = useState(committedSolid.filterPreset);
+
+  useEffect(() => {
+    setDraftHex(committedSolid.color);
+    setDraftFilter(committedSolid.filterPreset);
+  }, [committedSolid.color, committedSolid.filterPreset]);
+
+  const draftCanonical = normalizeCanonicalHex(draftHex);
+  const draftDirty =
+    (draftCanonical ?? draftHex.toLowerCase()) !== committedSolid.color ||
+    draftFilter !== committedSolid.filterPreset;
+  const solidActive = useMemo(() => {
+    if (!globalWallpaperJson?.trim()) return false;
+    const parsed = parseWallpaperJson(globalWallpaperJson);
+    return parsed.format === "schema" && parsed.config.type === "static-color";
+  }, [globalWallpaperJson]);
 
   const activeId = activeCanvasPresetId({
     globalWallpaperJson,
@@ -92,6 +139,64 @@ export function WallpaperSettings() {
       const { message, technical } = consumerErrorMessage(
         err,
         "Coreside could not apply that wallpaper.",
+      );
+      setError(message);
+      setTechDetail(technical);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const applySolidDraft = async () => {
+    if (!draftCanonical) {
+      setError("Enter a valid #RRGGBB color.");
+      setTechDetail(null);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setTechDetail(null);
+    try {
+      const filter: WallpaperFilterConfig | null =
+        draftFilter === "none" ? null : { preset: draftFilter };
+      const proposal = buildStaticColorProposal(draftCanonical, filter);
+      if (!proposal) {
+        setError("Enter a valid #RRGGBB color.");
+        return;
+      }
+      await applyWorkspaceWallpaper(schemaWallpaperToJson(proposal));
+    } catch (err) {
+      const { message, technical } = consumerErrorMessage(
+        err,
+        "Coreside could not apply that solid color.",
+      );
+      setError(message);
+      setTechDetail(technical);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancelSolidDraft = () => {
+    setDraftHex(committedSolid.color);
+    setDraftFilter(committedSolid.filterPreset);
+    setError(null);
+    setTechDetail(null);
+  };
+
+  const resetSolid = async () => {
+    setDraftHex(DEFAULT_SOLID);
+    setDraftFilter("none");
+    if (!solidActive) return;
+    setBusy(true);
+    setError(null);
+    setTechDetail(null);
+    try {
+      await applyWorkspaceWallpaper("");
+    } catch (err) {
+      const { message, technical } = consumerErrorMessage(
+        err,
+        "Coreside could not reset the solid color.",
       );
       setError(message);
       setTechDetail(technical);
@@ -170,6 +275,90 @@ export function WallpaperSettings() {
       {filteredPresets.length === 0 ? (
         <p className="muted">No presets match “{query.trim()}”.</p>
       ) : null}
+
+      <div className="wallpaper-solid-color" aria-labelledby="wallpaper-solid-heading">
+        <h4 className="settings-subheading" id="wallpaper-solid-heading">
+          Solid color
+        </h4>
+        <p>
+          Pick a workspace solid color. Draft changes preview locally below;
+          Apply saves. Filters affect only the wallpaper layer.
+        </p>
+        <div className="wallpaper-solid-row">
+          <label className="wallpaper-solid-swatch">
+            <span className="sr-only">Solid color</span>
+            <input
+              type="color"
+              value={draftCanonical ?? committedSolid.color}
+              disabled={busy}
+              onChange={(e) => setDraftHex(e.target.value)}
+            />
+          </label>
+          <label className="wallpaper-solid-hex">
+            <span className="sr-only">Hex color</span>
+            <input
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="#RRGGBB"
+              value={draftHex}
+              disabled={busy}
+              aria-invalid={draftHex.trim().length > 0 && !draftCanonical}
+              onChange={(e) => setDraftHex(e.target.value)}
+            />
+          </label>
+          <div
+            className="wallpaper-solid-preview"
+            style={{ background: draftCanonical ?? "transparent" }}
+            aria-hidden
+            title="Draft preview"
+          />
+        </div>
+        <div
+          className="wallpaper-filter-presets"
+          role="group"
+          aria-label="Wallpaper filter presets"
+        >
+          {WALLPAPER_FILTER_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className="btn btn-secondary"
+              aria-pressed={draftFilter === preset.id}
+              disabled={busy}
+              onClick={() => setDraftFilter(preset.id)}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <div className="button-row">
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy || !draftDirty || !draftCanonical}
+            onClick={() => void applySolidDraft()}
+          >
+            Apply
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={busy || !draftDirty}
+            onClick={cancelSolidDraft}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={busy}
+            onClick={() => void resetSolid()}
+          >
+            Reset
+          </button>
+        </div>
+      </div>
 
       <div className="button-row">
         <button

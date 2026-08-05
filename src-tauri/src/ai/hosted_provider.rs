@@ -44,10 +44,12 @@ pub fn try_from_session() -> Result<Option<Arc<dyn AiProvider>>, AiError> {
 impl HostedAiProvider {
     pub fn new(publishable_key: String, supabase_url: String) -> Self {
         let base = supabase_url.trim_end_matches('/');
+        // Fail closed: never fall back to Client::new() (default follows redirects).
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .expect("reqwest Client");
         Self {
             publishable_key,
             gateway_url: format!("{base}/functions/v1/ai-gateway"),
@@ -164,11 +166,13 @@ impl HostedAiProvider {
         let mut buf: Vec<u8> = Vec::new();
         let mut full_text = String::new();
         let mut events = 0usize;
+        let mut total_raw = 0usize;
         let mut stream = response.bytes_stream();
 
         loop {
             let next = tokio::select! {
                 _ = cancel.cancelled() => {
+                    drop(stream);
                     let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
                     return Err(AiError::Cancelled);
                 }
@@ -177,18 +181,28 @@ impl HostedAiProvider {
             match next {
                 None => break,
                 Some(Err(e)) => {
+                    drop(stream);
                     return Err(AiError::Http(redact_secrets(&e.to_string(), redact)));
                 }
                 Some(Ok(chunk)) => {
-                    if buf.len().saturating_add(chunk.len()) > MAX_STREAM_TEXT_BYTES {
+                    total_raw = total_raw.saturating_add(chunk.len());
+                    if total_raw > MAX_STREAM_TEXT_BYTES.saturating_mul(2) {
+                        drop(stream);
+                        return Err(AiError::Provider("stream body exceeded byte limit".into()));
+                    }
+                    if buf.len().saturating_add(chunk.len()) > MAX_STREAM_TEXT_BYTES.saturating_mul(2)
+                    {
+                        drop(stream);
                         return Err(AiError::Provider("stream body exceeded byte limit".into()));
                     }
                     buf.extend_from_slice(&chunk);
                     while let Some(pos) = buf.iter().position(|b| *b == b'\n') {
                         let line_bytes: Vec<u8> = buf.drain(..=pos).collect();
-                        let line = String::from_utf8_lossy(&line_bytes);
-                        let trimmed = line.trim();
-                        if trimmed.is_empty() {
+                        let line = std::str::from_utf8(&line_bytes).map_err(|_| {
+                            AiError::Parse("Coreside AI stream contained invalid UTF-8".into())
+                        })?;
+                        let trimmed = line.trim().trim_end_matches('\r');
+                        if trimmed.is_empty() || trimmed.starts_with(':') {
                             continue;
                         }
                         let Some(data) = trimmed.strip_prefix("data:") else {
@@ -197,16 +211,37 @@ impl HostedAiProvider {
                         if Self::handle_sse_data(data, &mut full_text, &mut events, tx, redact)
                             .await?
                         {
+                            drop(stream);
+                            if full_text.trim().is_empty() {
+                                return Err(AiError::Parse("Empty Coreside AI stream".into()));
+                            }
                             return Ok(full_text);
                         }
                     }
                 }
             }
         }
-        if full_text.trim().is_empty() {
-            return Err(AiError::Parse("Empty Coreside AI stream".into()));
+
+        drop(stream);
+        // Process final line without trailing newline.
+        if !buf.is_empty() {
+            let line = std::str::from_utf8(&buf).map_err(|_| {
+                AiError::Parse("Coreside AI stream contained invalid UTF-8".into())
+            })?;
+            let trimmed = line.trim().trim_end_matches('\r');
+            if let Some(data) = trimmed.strip_prefix("data:") {
+                if Self::handle_sse_data(data, &mut full_text, &mut events, tx, redact).await? {
+                    if full_text.trim().is_empty() {
+                        return Err(AiError::Parse("Empty Coreside AI stream".into()));
+                    }
+                    return Ok(full_text);
+                }
+            }
         }
-        Ok(full_text)
+
+        Err(AiError::Parse(
+            "Coreside AI stream ended without a [DONE] terminal event".into(),
+        ))
     }
 
     async fn post_gateway_json(
@@ -539,5 +574,12 @@ mod hosted_admission_tests {
             HostedAiProvider::parse_completed_json(&payload).expect("text"),
             "ok"
         );
+    }
+
+    #[test]
+    fn hosted_sse_done_marker_is_terminal() {
+        // handle_sse_data returns Ok(true) only for [DONE] — EOF without it must fail.
+        let chunk = json!({ "choices": [{ "delta": { "content": "x" } }] });
+        assert!(HostedAiProvider::stream_delta_text(&chunk).is_some());
     }
 }

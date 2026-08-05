@@ -1,4 +1,5 @@
 import { api } from "@/lib/tauri";
+import { shouldPreserveComponent, type PreservationPolicy } from "@/lib/preservation";
 import type { AppOperation } from "@/types/runtime-v2";
 import type { ToolComponent } from "@/types/tool";
 
@@ -102,20 +103,63 @@ export function collectComponentIds(components: ToolComponent[]): Set<string> {
   return new Set(flattenComponents(components).map((row) => row.component.id));
 }
 
+function componentById(
+  components: ToolComponent[],
+  id: string,
+): ToolComponent | undefined {
+  return flattenComponents(components).find((row) => row.component.id === id)
+    ?.component;
+}
+
+function policyFromProps(
+  component: ToolComponent | undefined,
+): PreservationPolicy {
+  const raw = component?.props?.preservationPolicy;
+  if (
+    typeof raw === "string" &&
+    [
+      "replace",
+      "preserve_instance",
+      "preserve_state",
+      "preserve_user_input",
+      "preserve_media_state",
+      "preserve_scroll",
+      "preserve_focus",
+      "preserve_selection",
+      "preserve_if_compatible",
+      "reset_explicitly",
+    ].includes(raw)
+  ) {
+    return raw as PreservationPolicy;
+  }
+  return "preserve_if_compatible";
+}
+
+/** Keep live state for components that survive a definition patch under policy. */
 export function mergeStateForDefinitionPatch(args: {
   previousComponents: ToolComponent[];
   nextComponents: ToolComponent[];
   previousState: Record<string, unknown>;
   hydratedState: Record<string, unknown>;
 }): Record<string, unknown> {
-  const prevIds = collectComponentIds(args.previousComponents);
   const nextIds = collectComponentIds(args.nextComponents);
   const merged = { ...args.hydratedState };
   for (const [key, value] of Object.entries(args.previousState)) {
-    const ownerStillPresent = [...nextIds].some((id) => key === id || key.startsWith(`${id}:`));
-    if (ownerStillPresent || prevIds.has(key)) {
-      if (!(key in merged)) merged[key] = value;
+    const ownerId = [...nextIds].find(
+      (id) => key === id || key.startsWith(`${id}:`),
+    );
+    if (!ownerId) continue;
+    const prev = componentById(args.previousComponents, ownerId);
+    const next = componentById(args.nextComponents, ownerId);
+    if (!next) continue;
+    const policy =
+      policyFromProps(next) !== "preserve_if_compatible"
+        ? policyFromProps(next)
+        : policyFromProps(prev);
+    if (!shouldPreserveComponent(policy, prev?.type ?? "", next.type)) {
+      continue;
     }
+    if (!(key in merged)) merged[key] = value;
   }
   return merged;
 }

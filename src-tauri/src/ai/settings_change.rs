@@ -418,11 +418,15 @@ pub fn normalize_setting_kv(key: &str, value: &str) -> Result<String, String> {
             || k.starts_with("border")
             || k.starts_with("text") =>
         {
-            // Accept camelCase appearance color keys only when they are allowlisted.
+            // Fail closed: only allowlisted Light/Dark appearance keys accept hex.
+            // Reject pair roots (accentPrimary) and unknown keys so CSS/token injection
+            // cannot land via set_setting with a lookalike key.
             if ALLOWED_SETTING_KEYS.contains(&k) || is_appearance_color_key(k) {
                 normalize_hex(value)
             } else {
-                Ok(value.to_string())
+                Err(format!(
+                    "appearance color key '{k}' is not allowlisted; use *Light/*Dark hex keys"
+                ))
             }
         }
         _ => Ok(value.to_string()),
@@ -615,6 +619,12 @@ mod tests {
     fn normalize_setting_kv_rejects_bad_wallpaper_and_hex() {
         assert!(normalize_setting_kv("wallpaper", r#"{"kind":"shadertoy"}"#).is_err());
         assert!(normalize_setting_kv("accentPrimaryLight", "red").is_err());
+        assert!(normalize_setting_kv(
+            "accentPrimary",
+            r##"{"light":"#aabbcc","dark":"#112233"}"##
+        )
+        .is_err());
+        assert!(normalize_setting_kv("accentPrimary", "#aabbcc").is_err());
         assert_eq!(
             normalize_setting_kv("accentPrimaryLight", "#ABC").unwrap(),
             "#aabbcc"

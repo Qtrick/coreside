@@ -1,5 +1,5 @@
-import { useEffect, useId, useMemo, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Search, Trash2, X } from "lucide-react";
 import dockDarkUrl from "@/assets/branding/coreside-dock-dark.png";
 import dockLightUrl from "@/assets/branding/coreside-dock-light.png";
 import { CoresideLogo } from "@/components/branding/CoresideLogo";
@@ -21,8 +21,10 @@ import {
   normalizeSettingsCategoryId,
   readStoredSettingsCategory,
   SETTINGS_CATEGORIES,
+  settingsTargetDomId,
   storeSettingsCategory,
   type SettingsCategoryId,
+  type SettingsSearchHit,
 } from "@/lib/settings-categories";
 import type { DockIconPreference, ThemePreference } from "@/types/agent";
 import type { AddedSetting } from "@/types/settings";
@@ -128,6 +130,9 @@ export function SettingsPanel() {
     reducedMotion: paneReducedMotion,
   } = usePresence(paneStable);
   const [searchQuery, setSearchQuery] = useState("");
+  const [pendingFocusTarget, setPendingFocusTarget] = useState<string | null>(
+    null,
+  );
   const [confirmClearChats, setConfirmClearChats] = useState(false);
   const [confirmClearTools, setConfirmClearTools] = useState(false);
   const [addedSettings, setAddedSettings] = useState<AddedSetting[]>([]);
@@ -152,8 +157,10 @@ export function SettingsPanel() {
   const [backupMessage, setBackupMessage] = useState<string | null>(null);
   const searchInputId = useId();
   const searchResultsId = useId();
+  const searchStatusId = useId();
   const navId = useId();
   const categoryHeadingId = useId();
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     storeSettingsCategory(category);
@@ -222,6 +229,7 @@ export function SettingsPanel() {
     () => matchSettingsSearch(searchQuery),
     [searchQuery],
   );
+  const searchActive = searchQuery.trim().length > 0;
 
   const summaryCtx = {
     theme,
@@ -252,6 +260,21 @@ export function SettingsPanel() {
   const coresideCats = SETTINGS_CATEGORIES.filter((c) => c.group === "coreside");
   const addedCats = SETTINGS_CATEGORIES.filter((c) => c.group === "added");
 
+  useEffect(() => {
+    if (!pendingFocusTarget || categoryTransitioning) return;
+    const el = document.getElementById(pendingFocusTarget);
+    if (!el) {
+      setPendingFocusTarget(null);
+      return;
+    }
+    el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (el instanceof HTMLElement) {
+      if (!el.hasAttribute("tabindex")) el.tabIndex = -1;
+      el.focus({ preventScroll: true });
+    }
+    setPendingFocusTarget(null);
+  }, [pendingFocusTarget, categoryTransitioning, displayCategory]);
+
   const themes: Array<{ id: ThemePreference; label: string }> = [
     { id: "system", label: "System" },
     { id: "light", label: "Light" },
@@ -273,6 +296,22 @@ export function SettingsPanel() {
     setSearchQuery("");
     setConfirmClearChats(false);
     setConfirmClearTools(false);
+  };
+
+  const selectSearchHit = (hit: SettingsSearchHit) => {
+    const targetId = hit.id.startsWith("category-")
+      ? categoryHeadingId
+      : settingsTargetDomId(hit.id);
+    setPendingFocusTarget(targetId);
+    setCategory(hit.categoryId);
+    setSearchQuery("");
+    setConfirmClearChats(false);
+    setConfirmClearTools(false);
+  };
+
+  const clearSearch = () => {
+    setSearchQuery("");
+    searchInputRef.current?.focus();
   };
 
   return (
@@ -310,29 +349,57 @@ export function SettingsPanel() {
             <label className="visually-hidden" htmlFor={searchInputId}>
               Search settings
             </label>
-            <input
-              id={searchInputId}
-              type="search"
-              className="settings-search-input"
-              placeholder="Search settings"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape" && searchQuery) {
-                  e.preventDefault();
-                  setSearchQuery("");
-                }
-              }}
-              autoComplete="off"
-              aria-controls={
-                searchHits.length > 0 ? searchResultsId : undefined
-              }
-              aria-expanded={searchHits.length > 0}
-            />
+            <div className="settings-search-shell">
+              <Search
+                className="settings-search-icon"
+                size={18}
+                aria-hidden
+              />
+              <input
+                ref={searchInputRef}
+                id={searchInputId}
+                type="search"
+                className="settings-search-input"
+                placeholder="Search settings"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape" && searchActive) {
+                    e.preventDefault();
+                    clearSearch();
+                  }
+                }}
+                autoComplete="off"
+                aria-describedby={searchActive ? searchStatusId : undefined}
+              />
+              {searchActive ? (
+                <button
+                  type="button"
+                  className="settings-search-clear"
+                  aria-label="Clear search"
+                  onClick={clearSearch}
+                >
+                  <X size={16} aria-hidden />
+                </button>
+              ) : null}
+            </div>
+            <div
+              id={searchStatusId}
+              className="visually-hidden"
+              role="status"
+              aria-live="polite"
+            >
+              {searchActive
+                ? searchHits.length === 0
+                  ? "No matching settings"
+                  : `${searchHits.length} matching setting${searchHits.length === 1 ? "" : "s"}`
+                : ""}
+            </div>
             {searchHits.length > 0 ? (
               <ul
                 id={searchResultsId}
                 className="settings-search-results"
+                role="region"
                 aria-label="Matching settings"
               >
                 {searchHits.map((hit) => (
@@ -340,7 +407,7 @@ export function SettingsPanel() {
                     <button
                       type="button"
                       className="settings-search-hit"
-                      onClick={() => selectCategory(hit.categoryId)}
+                      onClick={() => selectSearchHit(hit)}
                     >
                       <span className="settings-search-hit-label">
                         {hit.label}
@@ -357,7 +424,7 @@ export function SettingsPanel() {
                 ))}
               </ul>
             ) : null}
-            {searchQuery.trim() && searchHits.length === 0 ? (
+            {searchActive && searchHits.length === 0 ? (
               <p className="muted settings-search-empty" role="status">
                 No matching settings.
               </p>
@@ -446,7 +513,10 @@ export function SettingsPanel() {
               <h3 id="general-heading" className="visually-hidden">
                 General
               </h3>
-              <h4 className="settings-subheading" id="adaptive-window-heading">
+              <h4
+                className="settings-subheading"
+                id={settingsTargetDomId("adaptive-window")}
+              >
                 Adaptive window sizing
               </h4>
               <p>
@@ -456,7 +526,7 @@ export function SettingsPanel() {
               <div
                 className="theme-options"
                 role="group"
-                aria-labelledby="adaptive-window-heading"
+                aria-labelledby={settingsTargetDomId("adaptive-window")}
               >
                 {(
                   [
@@ -504,9 +574,9 @@ export function SettingsPanel() {
             <div className="settings-group">
             <section
               className="settings-section"
-              aria-labelledby="appearance-heading"
+              aria-labelledby={settingsTargetDomId("theme")}
             >
-              <h3 id="appearance-heading">Theme</h3>
+              <h3 id={settingsTargetDomId("theme")}>Theme</h3>
               <p>
                 Choose how Coreside looks. Wallpapers and panel transparency are
                 below.
@@ -525,7 +595,7 @@ export function SettingsPanel() {
                 ))}
               </div>
 
-              <h4 className="settings-subheading" id="dock-icon-heading">
+              <h4 className="settings-subheading" id={settingsTargetDomId("dock-icon")}>
                 Dock icon
               </h4>
               <p>
@@ -535,7 +605,7 @@ export function SettingsPanel() {
               <div
                 className="dock-icon-options"
                 role="group"
-                aria-labelledby="dock-icon-heading"
+                aria-labelledby={settingsTargetDomId("dock-icon")}
               >
                 {dockOptions.map((option) => (
                   <button
@@ -565,9 +635,9 @@ export function SettingsPanel() {
             </section>
             <section
               className="settings-section"
-              aria-labelledby="wallpapers-heading"
+              aria-labelledby={settingsTargetDomId("wallpaper-link")}
             >
-              <h3 id="wallpapers-heading">Wallpapers</h3>
+              <h3 id={settingsTargetDomId("wallpaper-link")}>Wallpapers</h3>
               <p>
                 Workspace wallpaper presets. Readability stays enforced for
                 protected UI.
@@ -577,19 +647,34 @@ export function SettingsPanel() {
             </div>
           ) : null}
 
-          {displayCategory === "ai-access" ? <AiProviderSettings /> : null}
+          {displayCategory === "ai-access" ? (
+            <div id={settingsTargetDomId("ai-provider")}>
+              <div id={settingsTargetDomId("api-key")} className="visually-hidden" tabIndex={-1}>
+                API key
+              </div>
+              <AiProviderSettings />
+            </div>
+          ) : null}
 
-          {displayCategory === "agent" ? <AgentBehaviorSettings /> : null}
+          {displayCategory === "agent" ? (
+            <div id={settingsTargetDomId("action-log")}>
+              <AgentBehaviorSettings />
+            </div>
+          ) : null}
 
-          {displayCategory === "search" ? <SearchSettingsSection /> : null}
+          {displayCategory === "search" ? (
+            <div id={settingsTargetDomId("exa")}>
+              <SearchSettingsSection />
+            </div>
+          ) : null}
 
           {displayCategory === "privacy" ? (
             <div className="settings-group">
               <section
                 className="settings-section"
-                aria-labelledby="privacy-heading"
+                aria-labelledby={settingsTargetDomId("privacy")}
               >
-                <h3 id="privacy-heading">Your data</h3>
+                <h3 id={settingsTargetDomId("privacy")}>Your data</h3>
                 <p>
                   Chats, apps, and most research caches stay on this computer.
                   Provider keys use the operating system credential store when
@@ -685,8 +770,8 @@ export function SettingsPanel() {
                 )}
               </section>
 
-              <section className="settings-section" aria-labelledby="backup-heading">
-                <h3 id="backup-heading">Backup</h3>
+              <section className="settings-section" aria-labelledby={settingsTargetDomId("backup")}>
+                <h3 id={settingsTargetDomId("backup")}>Backup</h3>
                 <p>
                   Create a verified local profile backup archive. Current backups
                   include a consistent database snapshot. Media and attachments
@@ -841,9 +926,9 @@ export function SettingsPanel() {
           {displayCategory === "accessibility" ? (
             <section
               className="settings-section"
-              aria-labelledby="accessibility-heading"
+              aria-labelledby={settingsTargetDomId("reduced-motion")}
             >
-              <h3 id="accessibility-heading">Accessibility</h3>
+              <h3 id={settingsTargetDomId("reduced-motion")}>Accessibility</h3>
               <p>
                 Coreside respects your system preference for reduced motion. When
                 reduced motion is enabled, non-essential animations are minimized.
@@ -856,8 +941,12 @@ export function SettingsPanel() {
 
           {displayCategory === "advanced" ? (
             <div className="settings-group">
-              <RecoverySettings />
-              <RuntimePermissionsSettings />
+              <div id={settingsTargetDomId("recovery")}>
+                <RecoverySettings />
+              </div>
+              <div id={settingsTargetDomId("runtime-permissions")}>
+                <RuntimePermissionsSettings />
+              </div>
             </div>
           ) : null}
 
@@ -882,9 +971,9 @@ export function SettingsPanel() {
               </section>
               <section
                 className="settings-section"
-                aria-labelledby="help-learning-heading"
+                aria-labelledby={settingsTargetDomId("help-learning")}
               >
-                <h3 id="help-learning-heading">Tours</h3>
+                <h3 id={settingsTargetDomId("help-learning")}>Tours</h3>
                 <p>
                   Learn Coreside offline. Tours do not require an AI provider.
                 </p>
@@ -960,8 +1049,8 @@ export function SettingsPanel() {
           ) : null}
 
           {displayCategory === "about" ? (
-            <section className="settings-section" aria-labelledby="about-heading">
-              <h3 id="about-heading">About</h3>
+            <section className="settings-section" aria-labelledby={settingsTargetDomId("version")}>
+              <h3 id={settingsTargetDomId("version")}>About</h3>
               <div className="settings-about-brand">
                 <CoresideLogo appearance={resolvedTheme} size={40} />
                 <div>
@@ -982,7 +1071,10 @@ export function SettingsPanel() {
 
           {displayCategory === "added" ? (
             <div className="settings-group">
-              <section className="settings-section settings-section-added">
+              <section
+                className="settings-section settings-section-added"
+                id={settingsTargetDomId("app-settings")}
+              >
                 <h3>App settings</h3>
                 {addedLoading ? (
                   <p className="muted">Loading…</p>

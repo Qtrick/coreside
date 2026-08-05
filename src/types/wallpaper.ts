@@ -1,6 +1,22 @@
 import { z } from "zod";
 import type { WallpaperConfig, WallpaperKind } from "@/types/agent";
 import { DEFAULT_WALLPAPER, WallpaperKindSchema } from "@/types/agent";
+import {
+  WallpaperFilterConfigSchema,
+  type WallpaperFilterConfig,
+} from "@/lib/wallpaper-filter";
+import { normalizeCanonicalHex } from "@/lib/wallpaper-hex";
+
+export type { WallpaperFilterConfig };
+export {
+  WALLPAPER_FILTER_PRESETS,
+  cssFilterFromConfig,
+  WallpaperFilterConfigSchema,
+} from "@/lib/wallpaper-filter";
+export {
+  isCanonicalHexColor,
+  normalizeCanonicalHex,
+} from "@/lib/wallpaper-hex";
 
 export const SchemaWallpaperTypeSchema = z.enum([
   "static-color",
@@ -16,19 +32,38 @@ export const SchemaWallpaperTypeSchema = z.enum([
 
 export type SchemaWallpaperType = z.infer<typeof SchemaWallpaperTypeSchema>;
 
+const optionalHexColor = z
+  .string()
+  .optional()
+  .nullable()
+  .superRefine((v, ctx) => {
+    if (v == null || v === "") return;
+    if (normalizeCanonicalHex(v) == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "expected #RRGGBB hex color",
+      });
+    }
+  })
+  .transform((v) => {
+    if (v == null || v === "") return v;
+    return normalizeCanonicalHex(v) ?? v;
+  });
+
 export const SchemaWallpaperConfigSchema = z.object({
   schemaVersion: z.string().default("1"),
   type: SchemaWallpaperTypeSchema,
-  color: z.string().optional().nullable(),
-  secondaryColor: z.string().optional().nullable(),
+  color: optionalHexColor,
+  secondaryColor: optionalHexColor,
   gradientAngle: z.number().optional().nullable(),
   assetId: z.string().optional().nullable(),
   preset: z.string().optional().nullable(),
   slideAssetIds: z.array(z.string()).optional().nullable(),
   intervalMs: z.number().optional().nullable(),
   muted: z.boolean().optional().nullable(),
-  reducedMotionFallback: z.string().optional().nullable(),
+  reducedMotionFallback: optionalHexColor,
   opacity: z.number().optional().nullable(),
+  filter: WallpaperFilterConfigSchema.optional().nullable(),
   extra: z
     .object({
       fit: z.enum(["cover", "contain"]).optional(),
@@ -101,6 +136,22 @@ export function schemaWallpaperToJson(config: SchemaWallpaperConfig): string {
   });
 }
 
+export function buildStaticColorProposal(
+  color: string,
+  filter?: WallpaperFilterConfig | null,
+): SchemaWallpaperConfig | null {
+  const hex = normalizeCanonicalHex(color);
+  if (!hex) return null;
+  return {
+    schemaVersion: "1",
+    type: "static-color",
+    color: hex,
+    opacity: 1,
+    filter: filter ?? undefined,
+    reducedMotionFallback: hex,
+  };
+}
+
 export function buildMediaWallpaperProposal(input: {
   assetId: string;
   category: string;
@@ -114,13 +165,15 @@ export function buildMediaWallpaperProposal(input: {
       : input.category === "animated"
         ? "animated-image"
         : "image-cover";
+  const fallback =
+    normalizeCanonicalHex(input.reducedMotionFallback ?? "#141714") ?? "#141714";
   return {
     schemaVersion: "1",
     type,
     assetId: input.assetId,
     opacity: input.opacity ?? 0.85,
     muted: type === "video-loop" ? true : undefined,
-    reducedMotionFallback: input.reducedMotionFallback ?? "#141714",
+    reducedMotionFallback: fallback,
     extra:
       type === "image-cover"
         ? { fit: input.fit ?? "cover" }

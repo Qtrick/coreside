@@ -148,32 +148,33 @@ fn create_provider_with_route(
             create_local_or_compatible_provider(config, &provider, &model, &key)
         }
         crate::credentials::AiAccessRoute::Unavailable => {
-            if access
-                .map(|a| a.credentials.source == "connection")
-                .unwrap_or(false)
-            {
+            // Resolved access that is Unavailable must never fall through to Hosted
+            // (or any other trust class). Hosted requires AiAccessRoute::CoresideHosted.
+            if access.is_some() {
+                let connection_scoped = access
+                    .map(|a| {
+                        a.credentials.source == "connection"
+                            || a.credentials.active_connection_id.is_some()
+                            || a.credentials.missing_connection_secret
+                    })
+                    .unwrap_or(false);
                 return Err(AiError::NotConfigured(
-                    "Your active AI connection is not ready. Re-enter its API key in Settings."
-                        .into(),
+                    if connection_scoped {
+                        "Your active AI connection is not ready. Re-enter its API key in Settings."
+                            .into()
+                    } else {
+                        "AI access is unavailable for the selected route.".into()
+                    },
                 ));
             }
+            // Legacy create_provider_with_model (no ResolvedAiAccess): authless Local only.
             if !config.has_api_key() {
-                // Legacy inference path — authless Local AI before Hosted (P0 privacy).
                 if crate::credentials::is_authless_local_provider(&provider) {
                     return create_local_or_compatible_provider(config, &provider, &model, "");
                 }
                 if let Some(desc) = platform::descriptor_by_id(&provider) {
                     if !desc.default_auth_mode.requires_secret() && desc.local {
                         return create_local_or_compatible_provider(config, &provider, &model, "");
-                    }
-                }
-                // Hosted only when no explicit connection row is active (never from LocalAuthless callers).
-                let has_active_connection = access
-                    .and_then(|a| a.credentials.active_connection_id.as_ref())
-                    .is_some();
-                if !has_active_connection {
-                    if let Some(hosted) = hosted_provider::try_from_session()? {
-                        return Ok(hosted);
                     }
                 }
             }
@@ -826,6 +827,31 @@ mod provider_factory_tests {
             }
             Ok(provider) => panic!(
                 "broken BYOK must not fall back to hosted, got {:?}",
+                provider.provider_id()
+            ),
+        }
+    }
+
+    #[test]
+    fn unavailable_without_connection_source_never_falls_back_to_hosted() {
+        let access = ResolvedAiAccess {
+            credentials: ResolvedCredentials {
+                provider: "openai".into(),
+                api_key: None,
+                model: "gpt-4.1-mini".into(),
+                base_url: String::new(),
+                source: "none".into(),
+                active_connection_id: None,
+                env_path: None,
+                missing_connection_secret: false,
+            },
+            route: AiAccessRoute::Unavailable,
+        };
+        let result = create_provider_for_access(&access, None);
+        match result {
+            Err(err) => assert_eq!(err.code(), "not_configured"),
+            Ok(provider) => panic!(
+                "Unavailable must not fall back to hosted, got {:?}",
                 provider.provider_id()
             ),
         }

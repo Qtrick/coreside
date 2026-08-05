@@ -1,16 +1,22 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-
-interface SearchRequestBody {
-  query: string;
-  idempotencyKey: string;
-  numResults?: number;
-}
+import { readBodyTextBounded } from "../_shared/read-body.ts";
+import {
+  boundSearchResults,
+  DEFAULT_RESULTS,
+  MAX_SEARCH_BODY_BYTES,
+  MAX_UPSTREAM_RESPONSE_BYTES,
+  parseSearchBody,
+  parseSearchReserveRpcResult,
+  parseSearchSettleRpcResult,
+  type SearchRequestBody,
+} from "./search-lib.ts";
 
 const SERVICE = "coreside-search-gateway";
 const VERSION = "1";
-const MAX_RESULTS = 10;
-const DEFAULT_RESULTS = 5;
 const RATE_LIMIT_PER_MINUTE = 20;
+const MAX_CONCURRENT = 3;
+const IDEMPOTENCY_TTL_HOURS = 24;
+const UPSTREAM_TIMEOUT_MS = 30_000;
 
 function isAllowedOrigin(origin: string | null): boolean {
   if (!origin) return false;
@@ -22,7 +28,6 @@ function isAllowedOrigin(origin: string | null): boolean {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       return false;
     }
-    // Host equality only — never prefix-match (blocks localhost.evil.com).
     return parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
   } catch {
     return false;
@@ -62,34 +67,55 @@ function consumerError(
   return json({ error: message }, status, origin);
 }
 
-function parseBody(raw: unknown): SearchRequestBody | null {
-  if (!raw || typeof raw !== "object") return null;
-  const body = raw as Record<string, unknown>;
-  if (typeof body.query !== "string" || typeof body.idempotencyKey !== "string") {
-    return null;
-  }
-  const query = body.query.trim();
-  if (!query || body.idempotencyKey.trim() === "") return null;
-
-  let numResults = DEFAULT_RESULTS;
-  if (body.numResults !== undefined) {
-    if (typeof body.numResults !== "number" || body.numResults < 1) return null;
-    numResults = Math.min(Math.floor(body.numResults), MAX_RESULTS);
-  }
-
-  return {
-    query,
-    idempotencyKey: body.idempotencyKey.trim(),
-    numResults,
-  };
-}
-
 async function sha256(input: string): Promise<string> {
   const data = new TextEncoder().encode(input);
   const hash = await crypto.subtle.digest("SHA-256", data);
   return Array.from(new Uint8Array(hash))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+type AdminClient = ReturnType<typeof createClient>;
+
+async function readUpstreamJsonBounded(
+  response: Response,
+  maxBytes: number,
+): Promise<unknown | null> {
+  const cl = response.headers.get("content-length");
+  if (cl) {
+    const n = Number(cl);
+    if (Number.isFinite(n) && n > maxBytes) return null;
+  }
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      try {
+        await reader.cancel();
+      } catch {
+        // ignore
+      }
+      return null;
+    }
+    chunks.push(value);
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(merged));
+  } catch {
+    return null;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -146,7 +172,7 @@ Deno.serve(async (req) => {
   const userClient = createClient(supabaseUrl, supabaseAnonKey, {
     global: { headers: { Authorization: authHeader } },
   });
-  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  const adminClient: AdminClient = createClient(supabaseUrl, serviceRoleKey);
 
   const {
     data: { user },
@@ -156,9 +182,14 @@ Deno.serve(async (req) => {
     return consumerError("Unauthorized", 401, origin);
   }
 
+  const bodyRead = await readBodyTextBounded(req, MAX_SEARCH_BODY_BYTES);
+  if (!bodyRead.ok) {
+    return consumerError(bodyRead.error, bodyRead.status, origin);
+  }
+
   let body: SearchRequestBody | null;
   try {
-    body = parseBody(await req.json());
+    body = parseSearchBody(bodyRead.text ? JSON.parse(bodyRead.text) : null);
   } catch {
     return consumerError("Invalid request body", 400, origin);
   }
@@ -166,119 +197,203 @@ Deno.serve(async (req) => {
     return consumerError("Invalid request body", 400, origin);
   }
 
-  const { data: entitlement, error: entitlementError } = await userClient
-    .from("ai_entitlements")
-    .select(
-      "hosted_search_enabled, allowance_amount, used_amount, hard_limit_enabled",
-    )
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const requestId = crypto.randomUUID();
+  const { data: reserveData, error: reserveError } = await adminClient.rpc(
+    "reserve_hosted_search_request",
+    {
+      p_user_id: user.id,
+      p_request_id: requestId,
+      p_idempotency_key: body.idempotencyKey,
+      p_ttl_hours: IDEMPOTENCY_TTL_HOURS,
+      p_rate_limit_per_minute: RATE_LIMIT_PER_MINUTE,
+      p_max_concurrent: MAX_CONCURRENT,
+    },
+  );
+  const reserve = reserveError
+    ? parseSearchReserveRpcResult({ outcome: "error", reason: "rpc_error" })
+    : parseSearchReserveRpcResult(reserveData);
 
-  if (entitlementError || !entitlement) {
-    return consumerError("Coreside Search is unavailable", 403, origin);
-  }
-
-  if (!entitlement.hosted_search_enabled) {
-    return consumerError(
-      "Coreside Search is not enabled for this account",
-      403,
+  if (reserve.kind === "idempotent" && reserve.status === "completed") {
+    const cachedResults = Array.isArray(reserve.resultReference)
+      ? reserve.resultReference
+      : [];
+    return json(
+      {
+        requestId: reserve.requestId,
+        results: cachedResults,
+        status: "completed",
+        idempotent: true,
+      },
+      200,
       origin,
     );
   }
-
-  const usedAmount = Number(entitlement.used_amount);
-  const allowanceAmount = Number(entitlement.allowance_amount);
-  const hardLimitEnabled = Boolean(entitlement.hard_limit_enabled);
-
-  if (hardLimitEnabled && usedAmount >= allowanceAmount) {
-    return consumerError("Coreside Search allowance exceeded", 402, origin);
+  if (reserve.kind === "conflict") {
+    return consumerError("Coreside Search request is already in progress", 409, origin);
   }
-
-  const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
-  const { count: recentCount, error: rateError } = await adminClient
-    .from("hosted_search_usage")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", user.id)
-    .gte("created_at", oneMinuteAgo);
-
-  if (rateError) {
+  if (reserve.kind === "denied") {
+    const status =
+      reserve.reason === "allowance_exceeded"
+        ? 402
+        : reserve.reason === "rate_limited" ||
+            reserve.reason === "concurrency_limited"
+          ? 429
+          : 403;
+    const message =
+      reserve.reason === "allowance_exceeded"
+        ? "Coreside Search allowance exceeded"
+        : reserve.reason === "hosted_disabled"
+          ? "Coreside Search is not enabled for this account"
+          : reserve.reason === "rate_limited"
+            ? "Rate limit exceeded"
+            : "Coreside Search is unavailable";
+    return consumerError(message, status, origin);
+  }
+  if (reserve.kind !== "reserved") {
     return consumerError("Coreside Search is unavailable", 503, origin);
-  }
-  if ((recentCount ?? 0) >= RATE_LIMIT_PER_MINUTE) {
-    return consumerError("Rate limit exceeded", 429, origin);
   }
 
   const numResults = body.numResults ?? DEFAULT_RESULTS;
-  const cacheParams = { query: body.query, numResults };
-  const fingerprint = await sha256(JSON.stringify(cacheParams));
+  // Fingerprint is per-user cache key material — never log raw query.
+  const fingerprint = await sha256(
+    JSON.stringify({ query: body.query, numResults }),
+  );
 
   const { data: cached } = await adminClient
     .from("hosted_search_cache")
     .select("result_json, expires_at")
+    .eq("user_id", user.id)
     .eq("fingerprint", fingerprint)
     .maybeSingle();
 
   if (cached && new Date(cached.expires_at).getTime() > Date.now()) {
-    return json({ cached: true, results: cached.result_json }, 200, origin);
+    const results = boundSearchResults(cached.result_json, numResults);
+    const { data: settleData, error: settleError } = await adminClient.rpc(
+      "settle_hosted_search_request",
+      {
+        p_user_id: user.id,
+        p_request_id: requestId,
+        p_idempotency_key: body.idempotencyKey,
+        p_result_reference: results,
+        p_provider_usage: { fingerprint, numResults, cache_hit: true },
+      },
+    );
+    if (settleError || !parseSearchSettleRpcResult(settleData)) {
+      await adminClient.rpc("fail_hosted_search_request", {
+        p_user_id: user.id,
+        p_request_id: requestId,
+        p_idempotency_key: body.idempotencyKey,
+        p_failure_reason: "settle_failed",
+      });
+      return consumerError("Coreside Search is unavailable", 503, origin);
+    }
+    return json({ requestId, results, status: "completed" }, 200, origin);
   }
 
-  // Reserve shared allowance before Exa spend (optimistic lock).
-  const { data: reserved } = await adminClient
-    .from("ai_entitlements")
-    .update({ used_amount: usedAmount + 1 })
-    .eq("user_id", user.id)
-    .eq("used_amount", usedAmount)
-    .select("user_id")
-    .maybeSingle();
-  if (!reserved) {
-    return consumerError("Coreside Search allowance exceeded", 402, origin);
+  if (req.signal.aborted) {
+    await adminClient.rpc("fail_hosted_search_request", {
+      p_user_id: user.id,
+      p_request_id: requestId,
+      p_idempotency_key: body.idempotencyKey,
+      p_failure_reason: "client_aborted",
+    });
+    return consumerError("Coreside Search request failed", 499, origin);
   }
 
-  const requestId = crypto.randomUUID();
+  const upstreamAbort = new AbortController();
+  const onAbort = () => upstreamAbort.abort();
+  req.signal.addEventListener("abort", onAbort);
+  const timeout = setTimeout(() => upstreamAbort.abort(), UPSTREAM_TIMEOUT_MS);
 
-  const upstream = await fetch("https://api.exa.ai/search", {
-    method: "POST",
-    headers: {
-      "x-api-key": exaKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      query: body.query,
-      numResults,
-      type: "auto",
-      contents: { highlights: { maxCharacters: 1000 } },
-    }),
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch("https://api.exa.ai/search", {
+      method: "POST",
+      headers: {
+        "x-api-key": exaKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: body.query,
+        numResults,
+        type: "auto",
+        contents: { highlights: { maxCharacters: 1000 } },
+      }),
+      signal: upstreamAbort.signal,
+    });
+  } catch {
+    clearTimeout(timeout);
+    req.signal.removeEventListener("abort", onAbort);
+    await adminClient.rpc("fail_hosted_search_request", {
+      p_user_id: user.id,
+      p_request_id: requestId,
+      p_idempotency_key: body.idempotencyKey,
+      p_failure_reason: req.signal.aborted ? "client_aborted" : "upstream_timeout",
+    });
+    return consumerError("Coreside Search request failed", 502, origin);
+  } finally {
+    clearTimeout(timeout);
+    req.signal.removeEventListener("abort", onAbort);
+  }
 
   if (!upstream.ok) {
-    await adminClient
-      .from("ai_entitlements")
-      .update({ used_amount: usedAmount })
-      .eq("user_id", user.id)
-      .eq("used_amount", usedAmount + 1);
+    await adminClient.rpc("fail_hosted_search_request", {
+      p_user_id: user.id,
+      p_request_id: requestId,
+      p_idempotency_key: body.idempotencyKey,
+      p_failure_reason: "upstream_error",
+    });
     return consumerError("Coreside Search request failed", 502, origin);
   }
 
-  const payload = await upstream.json();
-  const results = Array.isArray(payload.results) ? payload.results.slice(0, numResults) : [];
+  const payload = await readUpstreamJsonBounded(
+    upstream,
+    MAX_UPSTREAM_RESPONSE_BYTES,
+  );
+  if (!payload || typeof payload !== "object") {
+    await adminClient.rpc("fail_hosted_search_request", {
+      p_user_id: user.id,
+      p_request_id: requestId,
+      p_idempotency_key: body.idempotencyKey,
+      p_failure_reason: "upstream_response_too_large",
+    });
+    return consumerError("Coreside Search request failed", 502, origin);
+  }
+
+  const results = boundSearchResults(
+    (payload as { results?: unknown }).results,
+    numResults,
+  );
 
   const cacheExpires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
   await adminClient.from("hosted_search_cache").upsert({
+    user_id: user.id,
     fingerprint,
-    params_json: cacheParams,
+    params_json: { numResults },
     result_json: results,
     expires_at: cacheExpires,
     hit_count: 0,
   });
 
-  await adminClient.from("hosted_search_usage").insert({
-    user_id: user.id,
-    request_id: requestId,
-    request_type: "exa_search",
-    query_fingerprint: fingerprint,
-    provider_usage_json: { numResults },
-    status: "completed",
-  });
+  const { data: settleData, error: settleError } = await adminClient.rpc(
+    "settle_hosted_search_request",
+    {
+      p_user_id: user.id,
+      p_request_id: requestId,
+      p_idempotency_key: body.idempotencyKey,
+      p_result_reference: results,
+      p_provider_usage: { fingerprint, numResults, cache_hit: false },
+    },
+  );
+  if (settleError || !parseSearchSettleRpcResult(settleData)) {
+    // Allowance already consumed; mark reconciliation if settle fails after spend.
+    await adminClient
+      .from("hosted_search_idempotency")
+      .update({ status: "reconciliation_required" })
+      .eq("user_id", user.id)
+      .eq("idempotency_key", body.idempotencyKey);
+    return consumerError("Coreside Search is unavailable", 503, origin);
+  }
 
-  return json({ cached: false, requestId, results }, 200, origin);
+  return json({ requestId, results, status: "completed" }, 200, origin);
 });

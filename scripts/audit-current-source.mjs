@@ -20,16 +20,19 @@ const DEFAULT_ARCHIVE =
   process.env.CORESIDE_ARCHIVE ||
   path.join(process.env.HOME || "", "Downloads", "Coreside Chat AI.zip");
 const EXPECTED_ARCHIVE_SHA256 =
-  "724cd17ca7249f5fd94b5711d840b8bb1cc6ffaccec14559e85d1f0e93836c7a";
+  "c38504e29ec2a8e683c952b50a2a8608e59fc2fdb830b96fb05b0932ed1d86ec";
 const PREVIOUS_ARCHIVE_SHA256 =
-  "e8325a54af8a98889272a397dd8afa9523c3303531837e4eab3bbf38a930c70c";
-const PREVIOUS_ARCHIVE_LABEL = "Coreside Chat AI (1).zip / RC3.5 archive";
+  "724cd17ca7249f5fd94b5711d840b8bb1cc6ffaccec14559e85d1f0e93836c7a";
+const PREVIOUS_ARCHIVE_LABEL = "Coreside Chat AI.zip / prior RC3.6 archive (724cd17c…)";
 const CURRENT_ARCHIVE_LABEL = "Coreside Chat AI.zip";
 const PARTIAL_UPDATE_ARCHIVE =
   process.env.PARTIAL_UPDATE_ARCHIVE ||
   path.join(process.env.HOME || "", "Downloads", "Partial Update Main (1).zip");
 const EXPECTED_PARTIAL_UPDATE_SHA256 =
   "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607";
+const OLDER_ARCHIVE_SHA256 =
+  "e8325a54af8a98889272a397dd8afa9523c3303531837e4eab3bbf38a930c70c";
+const OLDER_ARCHIVE_LABEL = "Coreside Chat AI (1).zip / RC3.5 archive";
 
 const FINGERPRINT_ROOTS = [
   "src",

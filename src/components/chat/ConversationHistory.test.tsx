@@ -1,14 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  ConversationHistory,
   REPLAY_STEP_MS,
-  ReplayPlayer,
   redactDiagnosticJson,
   redactSecretsForDisplay,
   timelineToReplayEvents,
   transactionsToReplayEvents,
-} from "./ConversationHistory";
+} from "./conversation-history-utils";
+import { ConversationHistory, ReplayPlayer } from "./ConversationHistory";
 
 vi.mock("@/lib/tauri", () => ({
   api: {

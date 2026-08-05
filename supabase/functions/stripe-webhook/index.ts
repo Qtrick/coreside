@@ -1,11 +1,14 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { readBodyTextBounded } from "../_shared/read-body.ts";
 import {
   entitlementSyncPayload,
   extractCheckoutSessionSync,
+  extractStripeEventCreated,
   extractStripeEventId,
   extractStripeEventType,
   extractSubscriptionSync,
-  FREE_PLAN_ENTITLEMENTS,
+  isRetryableWebhookStatus,
+  isTerminalWebhookStatus,
   type PlanEntitlementDefaults,
   parseStripeEventPayload,
   resolveEntitlementsForSubscription,
@@ -16,6 +19,7 @@ import {
 
 const SERVICE = "coreside-stripe-webhook";
 const VERSION = "1";
+const MAX_BODY_BYTES = 256 * 1024;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -106,24 +110,29 @@ async function resolveUserIdByCustomer(
 async function syncCheckoutCompleted(
   adminClient: AdminClient,
   payload: string,
-): Promise<{ synced: boolean; reason?: string }> {
+  eventCreated: number | null,
+): Promise<{ synced: boolean; reason?: string; permanent?: boolean }> {
   const event = parseStripeEventPayload(payload);
-  if (!event) return { synced: false, reason: "invalid_event" };
+  if (!event) return { synced: false, reason: "invalid_event", permanent: true };
   const checkout = extractCheckoutSessionSync(event);
-  if (!checkout) return { synced: false, reason: "missing_checkout_metadata" };
+  if (!checkout) {
+    return { synced: false, reason: "missing_checkout_metadata", permanent: true };
+  }
 
   const planDefaults = await loadPlanDefaults(adminClient, checkout.planId);
-  if (!planDefaults) return { synced: false, reason: "unknown_plan" };
+  if (!planDefaults) {
+    return { synced: false, reason: "unknown_plan", permanent: true };
+  }
 
   if (!checkout.stripePriceId) {
-    return { synced: false, reason: "missing_price_id" };
+    return { synced: false, reason: "missing_price_id", permanent: true };
   }
   const planFromPrice = await loadPlanByPriceId(
     adminClient,
     checkout.stripePriceId,
   );
   if (!planFromPrice || planFromPrice.planId !== checkout.planId) {
-    return { synced: false, reason: "price_plan_mismatch" };
+    return { synced: false, reason: "unknown_price", permanent: true };
   }
 
   await adminClient.from("billing_stripe_customers").upsert({
@@ -132,12 +141,29 @@ async function syncCheckoutCompleted(
   });
 
   if (checkout.stripeSubscriptionId) {
+    const { data: existingSub } = await adminClient
+      .from("billing_subscriptions")
+      .select("last_event_created_at")
+      .eq("stripe_subscription_id", checkout.stripeSubscriptionId)
+      .maybeSingle();
+    if (
+      eventCreated !== null &&
+      existingSub?.last_event_created_at &&
+      new Date(existingSub.last_event_created_at).getTime() / 1000 > eventCreated
+    ) {
+      return { synced: true, reason: "stale_event_ignored" };
+    }
+
     await adminClient.from("billing_subscriptions").upsert({
       user_id: checkout.userId,
       stripe_subscription_id: checkout.stripeSubscriptionId,
       stripe_customer_id: checkout.stripeCustomerId,
       plan_id: checkout.planId,
       status: "active",
+      last_event_created_at:
+        eventCreated !== null
+          ? new Date(eventCreated * 1000).toISOString()
+          : null,
     });
   }
 
@@ -148,11 +174,14 @@ async function syncCheckoutCompleted(
 async function syncSubscriptionEvent(
   adminClient: AdminClient,
   payload: string,
-): Promise<{ synced: boolean; reason?: string }> {
+  eventCreated: number | null,
+): Promise<{ synced: boolean; reason?: string; permanent?: boolean }> {
   const event = parseStripeEventPayload(payload);
-  if (!event) return { synced: false, reason: "invalid_event" };
+  if (!event) return { synced: false, reason: "invalid_event", permanent: true };
   const subscription = extractSubscriptionSync(event);
-  if (!subscription) return { synced: false, reason: "invalid_subscription" };
+  if (!subscription) {
+    return { synced: false, reason: "invalid_subscription", permanent: true };
+  }
 
   let userId = await resolveUserIdByCustomer(
     adminClient,
@@ -162,29 +191,45 @@ async function syncSubscriptionEvent(
   if (!userId) {
     const { data: existing } = await adminClient
       .from("billing_subscriptions")
-      .select("user_id, plan_id")
+      .select("user_id, plan_id, last_event_created_at")
       .eq("stripe_subscription_id", subscription.stripeSubscriptionId)
       .maybeSingle();
     userId = existing?.user_id ?? null;
   }
 
-  if (!userId) return { synced: false, reason: "unknown_customer" };
+  if (!userId) {
+    return { synced: false, reason: "unknown_customer", permanent: false };
+  }
 
+  const { data: existingSub } = await adminClient
+    .from("billing_subscriptions")
+    .select("last_event_created_at, plan_id")
+    .eq("stripe_subscription_id", subscription.stripeSubscriptionId)
+    .maybeSingle();
+
+  if (
+    eventCreated !== null &&
+    existingSub?.last_event_created_at &&
+    new Date(existingSub.last_event_created_at).getTime() / 1000 > eventCreated
+  ) {
+    return { synced: true, reason: "stale_event_ignored" };
+  }
+
+  const active = new Set(["active", "trialing"]);
   let planDefaults: PlanEntitlementDefaults | null = null;
+
   if (subscription.priceId) {
     planDefaults = await loadPlanByPriceId(adminClient, subscription.priceId);
-  }
-  if (!planDefaults) {
-    const { data: subRow } = await adminClient
-      .from("billing_subscriptions")
-      .select("plan_id")
-      .eq("stripe_subscription_id", subscription.stripeSubscriptionId)
-      .maybeSingle();
-    if (subRow?.plan_id) {
-      planDefaults = await loadPlanDefaults(adminClient, subRow.plan_id);
+    if (!planDefaults && active.has(subscription.status)) {
+      // Unknown price while active → fail closed (do not invent entitlements).
+      return { synced: false, reason: "unknown_price", permanent: true };
     }
+  } else if (active.has(subscription.status)) {
+    return { synced: false, reason: "missing_price_id", permanent: true };
   }
 
+  // Unknown price while active already failed above. Do not revive a paid plan
+  // from a prior row when the current event has no mapped price.
   const entitlements = resolveEntitlementsForSubscription(
     subscription.status,
     planDefaults,
@@ -197,6 +242,10 @@ async function syncSubscriptionEvent(
     plan_id: entitlements.planId,
     status: subscription.status,
     current_period_end: subscription.currentPeriodEnd,
+    last_event_created_at:
+      eventCreated !== null
+        ? new Date(eventCreated * 1000).toISOString()
+        : null,
   });
 
   await applyEntitlements(adminClient, userId, entitlements);
@@ -207,17 +256,37 @@ async function dispatchEntitlementSync(
   adminClient: AdminClient,
   eventType: string,
   payload: string,
-): Promise<{ synced: boolean; reason?: string }> {
+  eventCreated: number | null,
+): Promise<{ synced: boolean; reason?: string; permanent?: boolean }> {
   if (eventType === "checkout.session.completed") {
-    return syncCheckoutCompleted(adminClient, payload);
+    return syncCheckoutCompleted(adminClient, payload, eventCreated);
   }
   if (
     eventType === "customer.subscription.updated" ||
     eventType === "customer.subscription.deleted"
   ) {
-    return syncSubscriptionEvent(adminClient, payload);
+    return syncSubscriptionEvent(adminClient, payload, eventCreated);
   }
-  return { synced: false, reason: "ignored_event_type" };
+  return { synced: false, reason: "ignored_event_type", permanent: true };
+}
+
+async function markWebhookStatus(
+  adminClient: AdminClient,
+  eventId: string,
+  status: string,
+  lastError?: string | null,
+): Promise<void> {
+  const patch: Record<string, unknown> = {
+    status,
+    last_error: lastError ?? null,
+  };
+  if (status === "processed") {
+    patch.processed_at = new Date().toISOString();
+  }
+  await adminClient
+    .from("billing_stripe_webhook_events")
+    .update(patch)
+    .eq("event_id", eventId);
 }
 
 Deno.serve(async (req) => {
@@ -233,7 +302,12 @@ Deno.serve(async (req) => {
     return json({ error: "Webhook is not configured", stub: true }, 503);
   }
 
-  const payload = await req.text();
+  const bodyRead = await readBodyTextBounded(req, MAX_BODY_BYTES);
+  if (!bodyRead.ok) {
+    return json({ error: bodyRead.error }, bodyRead.status);
+  }
+  const payload = bodyRead.text;
+
   const signatureHeader = req.headers.get("Stripe-Signature");
   const verified = await verifyStripeWebhookSignature(
     payload,
@@ -246,6 +320,7 @@ Deno.serve(async (req) => {
 
   const eventId = extractStripeEventId(payload);
   const eventType = extractStripeEventType(payload);
+  const eventCreated = extractStripeEventCreated(payload);
   if (!eventId || !eventType) {
     return json({ error: "Invalid event payload" }, 400);
   }
@@ -253,39 +328,92 @@ Deno.serve(async (req) => {
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
   const payloadHash = await sha256Hex(payload);
 
-  const { error: insertError } = await adminClient
+  const { data: existing } = await adminClient
     .from("billing_stripe_webhook_events")
-    .insert({
-      event_id: eventId,
-      event_type: eventType,
-      payload_sha256: payloadHash,
-    });
+    .select("event_id, payload_sha256, status")
+    .eq("event_id", eventId)
+    .maybeSingle();
 
-  if (insertError) {
-    if (insertError.code === "23505") {
-      const { data: existing, error: lookupError } = await adminClient
-        .from("billing_stripe_webhook_events")
-        .select("payload_sha256")
-        .eq("event_id", eventId)
-        .maybeSingle();
-      if (lookupError || !existing) {
-        return json({ error: "Failed to verify webhook idempotency" }, 500);
-      }
-      if (existing.payload_sha256 !== payloadHash) {
-        return json({ error: "Event payload mismatch" }, 409);
-      }
+  if (existing) {
+    if (existing.payload_sha256 !== payloadHash) {
+      return json({ error: "Event payload mismatch" }, 409);
+    }
+    if (isTerminalWebhookStatus(existing.status)) {
       return json({
         ok: true,
         service: SERVICE,
         version: VERSION,
         eventId,
         duplicate: true,
+        status: existing.status,
       });
     }
-    return json({ error: "Failed to record webhook event" }, 500);
+    if (existing.status === "processing") {
+      return json({
+        ok: true,
+        service: SERVICE,
+        version: VERSION,
+        eventId,
+        duplicate: true,
+        status: "processing",
+      });
+    }
+    if (!isRetryableWebhookStatus(existing.status)) {
+      return json({ error: "Webhook event not retryable", status: existing.status }, 409);
+    }
+  } else {
+    const { error: insertError } = await adminClient
+      .from("billing_stripe_webhook_events")
+      .insert({
+        event_id: eventId,
+        event_type: eventType,
+        payload_sha256: payloadHash,
+        status: "received",
+        processed_at: null,
+        attempt_count: 0,
+      });
+
+    if (insertError) {
+      if (insertError.code === "23505") {
+        return json({
+          ok: true,
+          service: SERVICE,
+          version: VERSION,
+          eventId,
+          duplicate: true,
+        });
+      }
+      return json({ error: "Failed to record webhook event" }, 500);
+    }
   }
 
+  // Claim for processing — do not mark processed before entitlement sync.
+  const { data: claimed, error: claimError } = await adminClient
+    .from("billing_stripe_webhook_events")
+    .update({ status: "processing" })
+    .eq("event_id", eventId)
+    .in("status", ["received", "retryable_failed"])
+    .select("event_id, attempt_count")
+    .maybeSingle();
+
+  if (claimError || !claimed) {
+    return json({
+      ok: true,
+      service: SERVICE,
+      version: VERSION,
+      eventId,
+      duplicate: true,
+      status: "processing",
+    });
+  }
+
+  await adminClient
+    .from("billing_stripe_webhook_events")
+    .update({ attempt_count: (claimed.attempt_count ?? 0) + 1 })
+    .eq("event_id", eventId);
+
   if (!shouldProcessStripeEventType(eventType)) {
+    await markWebhookStatus(adminClient, eventId, "processed", null);
     return json({
       ok: true,
       service: SERVICE,
@@ -296,11 +424,50 @@ Deno.serve(async (req) => {
     });
   }
 
-  const entitlementSync = await dispatchEntitlementSync(
-    adminClient,
-    eventType,
-    payload,
-  );
+  let entitlementSync: {
+    synced: boolean;
+    reason?: string;
+    permanent?: boolean;
+  };
+  try {
+    entitlementSync = await dispatchEntitlementSync(
+      adminClient,
+      eventType,
+      payload,
+      eventCreated,
+    );
+  } catch {
+    await markWebhookStatus(
+      adminClient,
+      eventId,
+      "retryable_failed",
+      "sync_exception",
+    );
+    return json({ error: "Entitlement sync failed", eventId }, 500);
+  }
+
+  if (!entitlementSync.synced) {
+    const permanent = entitlementSync.permanent === true;
+    await markWebhookStatus(
+      adminClient,
+      eventId,
+      permanent ? "permanent_failed" : "retryable_failed",
+      entitlementSync.reason ?? "sync_failed",
+    );
+    if (permanent) {
+      return json({
+        ok: false,
+        service: SERVICE,
+        version: VERSION,
+        eventId,
+        eventType,
+        entitlementSync,
+      }, 422);
+    }
+    return json({ error: "Entitlement sync failed", eventId, entitlementSync }, 500);
+  }
+
+  await markWebhookStatus(adminClient, eventId, "processed", null);
 
   return json({
     ok: true,

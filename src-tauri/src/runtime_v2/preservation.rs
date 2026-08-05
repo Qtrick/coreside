@@ -1,6 +1,7 @@
 //! Component preservation policies — trusted Partial Update adaptation.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::db::{now_rfc3339, Database, DbError, DbResult};
@@ -94,6 +95,127 @@ pub fn should_preserve(
             }
         }
     }
+}
+
+/// Prop keys treated as live user input / media / selection (not agent layout).
+const PRESERVED_PROP_KEYS: &[&str] = &[
+    "value",
+    "checked",
+    "selected",
+    "selectedIndex",
+    "selectedIndices",
+    "text",
+    "draft",
+    "selectionStart",
+    "selectionEnd",
+    "currentTime",
+    "scrollTop",
+    "scrollLeft",
+    "paused",
+    "muted",
+    "volume",
+];
+
+fn prop_key<'a>(props: Option<&'a Value>, key: &str) -> Option<&'a str> {
+    props
+        .and_then(|p| p.get(key))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+}
+
+/// Resolve policy from op payload, then DB, then default PreserveIfCompatible.
+pub fn resolve_policy_for_apply(
+    db: &Database,
+    surface_id: &str,
+    component_id: Option<&str>,
+    payload: &Value,
+) -> PreservationPolicy {
+    if let Some(s) = payload
+        .get("preservationPolicy")
+        .or_else(|| payload.get("policy"))
+        .and_then(|v| v.as_str())
+    {
+        if let Some(p) = PreservationPolicy::parse(s) {
+            return p;
+        }
+    }
+    if let Some(cid) = component_id {
+        if let Ok(rec) = get_preservation(db, surface_id, cid) {
+            return rec.policy;
+        }
+    }
+    PreservationPolicy::PreserveIfCompatible
+}
+
+/// On replace: merge live user-input props from old → new when policy allows.
+/// Returns whether preservation was applied.
+pub fn apply_preservation_on_replace(
+    old: &crate::ai::ToolComponent,
+    new: &mut crate::ai::ToolComponent,
+    policy: PreservationPolicy,
+) -> bool {
+    let incoming_key = prop_key(new.props.as_ref(), "preservationKey")
+        .or_else(|| prop_key(new.props.as_ref(), "preservation_key"));
+    let stored_key = prop_key(old.props.as_ref(), "preservationKey")
+        .or_else(|| prop_key(old.props.as_ref(), "preservation_key"));
+    let compatible = old.component_type == new.component_type;
+    if !should_preserve(policy, incoming_key, stored_key, compatible) {
+        return false;
+    }
+    let Some(old_props) = old.props.as_ref().and_then(|v| v.as_object()) else {
+        return true; // keep instance id / type continuity without props
+    };
+    let mut merged = match new.props.take() {
+        Some(Value::Object(m)) => m,
+        Some(_) | None => serde_json::Map::new(),
+    };
+    for key in PRESERVED_PROP_KEYS {
+        if let Some(v) = old_props.get(*key) {
+            // Prefer existing live value; do not overwrite agent-set keys already present
+            // only when policy is PreserveIfCompatible and agent explicitly sent the key.
+            // For PreserveUserInput / PreserveState / etc., live values win.
+            let agent_set = merged.contains_key(*key);
+            let live_wins = matches!(
+                policy,
+                PreservationPolicy::PreserveUserInput
+                    | PreservationPolicy::PreserveState
+                    | PreservationPolicy::PreserveInstance
+                    | PreservationPolicy::PreserveMediaState
+                    | PreservationPolicy::PreserveScroll
+                    | PreservationPolicy::PreserveFocus
+                    | PreservationPolicy::PreserveSelection
+            );
+            if live_wins || !agent_set {
+                merged.insert((*key).to_string(), v.clone());
+            }
+        }
+    }
+    new.props = Some(Value::Object(merged));
+    true
+}
+
+/// Drop surface_state and drafts for a component when policy does not preserve.
+pub fn invalidate_component_live_state(
+    db: &mut Database,
+    surface_id: &str,
+    component_id: &str,
+) -> DbResult<()> {
+    let _ = super::drafts::delete_draft(db, surface_id, component_id, "main");
+    let mut state = super::surfaces::get_surface_state(db, surface_id)?;
+    if let Some(obj) = state.as_object_mut() {
+        let keys: Vec<String> = obj
+            .keys()
+            .filter(|k| *k == component_id || k.starts_with(&format!("{component_id}:")))
+            .cloned()
+            .collect();
+        if !keys.is_empty() {
+            for k in keys {
+                obj.remove(&k);
+            }
+            super::surfaces::save_surface_state(db, surface_id, &state)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn upsert_preservation(
@@ -263,6 +385,56 @@ mod tests {
             None,
             false
         ));
+    }
+
+    #[test]
+    fn replace_merges_user_input_when_compatible() {
+        use crate::ai::ToolComponent;
+        use serde_json::json;
+        let old = ToolComponent {
+            id: "field".into(),
+            component_type: "text_input".into(),
+            props: Some(json!({"value": "typed", "label": "Name", "maximum": 8})),
+            children: None,
+        };
+        let mut new = ToolComponent {
+            id: "field".into(),
+            component_type: "text_input".into(),
+            props: Some(json!({"label": "Full name", "maximum": 12})),
+            children: None,
+        };
+        assert!(apply_preservation_on_replace(
+            &old,
+            &mut new,
+            PreservationPolicy::PreserveUserInput
+        ));
+        assert_eq!(new.props.as_ref().unwrap()["value"], "typed");
+        assert_eq!(new.props.as_ref().unwrap()["label"], "Full name");
+        assert_eq!(new.props.as_ref().unwrap()["maximum"], 12);
+    }
+
+    #[test]
+    fn replace_does_not_merge_when_reset() {
+        use crate::ai::ToolComponent;
+        use serde_json::json;
+        let old = ToolComponent {
+            id: "field".into(),
+            component_type: "text_input".into(),
+            props: Some(json!({"value": "typed"})),
+            children: None,
+        };
+        let mut new = ToolComponent {
+            id: "field".into(),
+            component_type: "text_input".into(),
+            props: Some(json!({"value": ""})),
+            children: None,
+        };
+        assert!(!apply_preservation_on_replace(
+            &old,
+            &mut new,
+            PreservationPolicy::ResetExplicitly
+        ));
+        assert_eq!(new.props.as_ref().unwrap()["value"], "");
     }
 
     #[test]

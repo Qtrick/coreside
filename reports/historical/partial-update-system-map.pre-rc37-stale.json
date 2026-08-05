@@ -1,0 +1,245 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-03T19:48:00Z",
+  "commit": "41fd4595db420eac8b1c5cc30723f1dd377608f4",
+  "dirty": true,
+  "sourceFingerprint": "3306d5de459be8d661c52e0101b70d956c2218f841bacafdbedb6ebb6acf9f41",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "command": "manual:partial-update-system-map-2026",
+  "exitStatus": 0,
+  "accessDate": "2026-08-03",
+  "partialUpdateArchitecture": {
+    "runtime": "Cloudflare Worker + Durable Object",
+    "storage": "DO SQL + D1 auth",
+    "clientUpdate": "template for=path + <?marker> + raw HTML",
+    "forms": "POST hidden iframe c/:chatId/form",
+    "streaming": "Provider stream to UpdateStreamParser",
+    "multiuser": "client include/exclude + private messages"
+  },
+  "coresideArchitecture": {
+    "runtime": "Tauri desktop + Rust trusted boundary + React UI",
+    "storage": "SQLite local profile",
+    "clientUpdate": "Validated schema v2 operations + trusted components",
+    "forms": "submitToAgent in-process (iframe rejected)",
+    "streaming": "ABSENT true provider stream; fake emit_text_fluidly",
+    "multiuser": "Deferred"
+  },
+  "systems": [
+    {
+      "id": "pu.durable_object",
+      "name": "PartialUpdate Durable Object",
+      "partialUpdateFiles": [
+        "src/index.ts"
+      ],
+      "coresideFiles": [
+        "src-tauri"
+      ],
+      "relation": "rejected_product_direction",
+      "notes": "Local Tauri/SQLite replaces DO"
+    },
+    {
+      "id": "pu.protocol",
+      "name": "Delimiter protocol",
+      "partialUpdateFiles": [
+        "spec.md",
+        "src/index.ts"
+      ],
+      "coresideFiles": [
+        "src-tauri/src/runtime_v2/operations.rs"
+      ],
+      "relation": "secure_replacement",
+      "notes": "JSON schema v2 ops"
+    },
+    {
+      "id": "pu.streaming",
+      "name": "Provider stream apply",
+      "partialUpdateFiles": [
+        "src/index.ts"
+      ],
+      "coresideFiles": [
+        "src-tauri/src/ai/provider.rs",
+        "src-tauri/src/runtime_v2/streaming.rs",
+        "src-tauri/src/commands/message_cmds.rs"
+      ],
+      "relation": "gap_absent_true_stream",
+      "notes": "chat-only + fake fluid typing; parser unused for live provider bytes"
+    },
+    {
+      "id": "pu.forms",
+      "name": "Structured forms",
+      "partialUpdateFiles": [
+        "src/initialPrompt.md",
+        "src/index.ts"
+      ],
+      "coresideFiles": [
+        "src/lib/actions.ts",
+        "src/components/chat/InlineSurface.tsx",
+        "src-tauri/src/runtime_v2/context_ledger.rs"
+      ],
+      "relation": "gap_partial_no_prompt_inject",
+      "notes": "Ledger write without prompt injection"
+    },
+    {
+      "id": "pu.markers",
+      "name": "Template markers",
+      "partialUpdateFiles": [
+        "src/app.html"
+      ],
+      "coresideFiles": [
+        "src-tauri/src/runtime_v2/surfaces.rs",
+        "src-tauri/src/runtime_v2/patch.rs"
+      ],
+      "relation": "secure_replacement",
+      "notes": "Stable IDs + patches"
+    },
+    {
+      "id": "pu.queue",
+      "name": "LLM queue",
+      "partialUpdateFiles": [
+        "src/index.ts"
+      ],
+      "coresideFiles": [
+        "src-tauri/src/runtime_v2/queue.rs"
+      ],
+      "relation": "backend_present_ui_disconnected",
+      "notes": "No queue UI components"
+    },
+    {
+      "id": "pu.fork",
+      "name": "Fork/branch",
+      "partialUpdateFiles": [
+        "src/index.ts"
+      ],
+      "coresideFiles": [
+        "src-tauri/src/runtime_v2/branch.rs"
+      ],
+      "relation": "backend_present_ui_disconnected",
+      "notes": "API wrappers only"
+    },
+    {
+      "id": "pu.replay",
+      "name": "Replay",
+      "partialUpdateFiles": [
+        "src/index.ts"
+      ],
+      "coresideFiles": [
+        "src-tauri/src/runtime_v2/transactions.rs"
+      ],
+      "relation": "backend_present_ui_disconnected",
+      "notes": "No replay player UI"
+    },
+    {
+      "id": "pu.debug",
+      "name": "Debug/inspector",
+      "partialUpdateFiles": [
+        "src/debug.ts"
+      ],
+      "coresideFiles": [
+        "src/components/settings/AiProviderSettings.tsx"
+      ],
+      "relation": "backend_present_ui_disconnected",
+      "notes": "Developer Mode toggle only"
+    },
+    {
+      "id": "pu.auth",
+      "name": "Better Auth",
+      "partialUpdateFiles": [
+        "src/auth/*"
+      ],
+      "coresideFiles": [],
+      "relation": "deferred_enterprise",
+      "notes": "Out of consumer scope"
+    },
+    {
+      "id": "pu.cdn_html_js",
+      "name": "CDN/HTML/JS injection",
+      "partialUpdateFiles": [
+        "README.md",
+        "src/initialPrompt.md"
+      ],
+      "coresideFiles": [
+        "src-tauri/src/runtime_v2/packs.rs"
+      ],
+      "relation": "deliberately_rejected",
+      "notes": "Capability packs only"
+    },
+    {
+      "id": "cs.kernel",
+      "name": "Application Kernel",
+      "partialUpdateFiles": [],
+      "coresideFiles": [
+        "src-tauri/src/application_kernel"
+      ],
+      "relation": "coreside_native",
+      "notes": "Trusted mutation gateway"
+    },
+    {
+      "id": "cs.preservation",
+      "name": "Preservation engine",
+      "partialUpdateFiles": [],
+      "coresideFiles": [
+        "src-tauri/src/runtime_v2",
+        "src/components"
+      ],
+      "relation": "coreside_native_unverified",
+      "notes": "July complete_but_unverified; not release-claimed"
+    },
+    {
+      "id": "cs.patch_scheduler",
+      "name": "Patch scheduler",
+      "partialUpdateFiles": [],
+      "coresideFiles": [
+        "src-tauri/src/runtime_v2"
+      ],
+      "relation": "coreside_native_unverified",
+      "notes": "Deps/backpressure present; needs streaming integration"
+    }
+  ],
+  "dataFlows": [
+    {
+      "id": "pu.form_to_llm",
+      "steps": [
+        "HTML form",
+        "iframe POST",
+        "DO",
+        "enqueue LLM",
+        "stream HTML apply"
+      ]
+    },
+    {
+      "id": "cs.form_to_llm_current",
+      "steps": [
+        "Trusted form",
+        "appendContextLedger(values)",
+        "sendMessage(summary)",
+        "build_agent_prompt WITHOUT ledger",
+        "AiProvider::chat"
+      ],
+      "gap": "values not in prompt"
+    },
+    {
+      "id": "cs.stream_current",
+      "steps": [
+        "AiProvider::chat complete body",
+        "parse response",
+        "emit_text_fluidly fake typing"
+      ],
+      "gap": "no provider bytes stream"
+    },
+    {
+      "id": "cs.stream_target",
+      "steps": [
+        "AiProvider::stream",
+        "NdjsonFrameParser",
+        "validate frame",
+        "preview/apply"
+      ],
+      "status": "not_implemented"
+    }
+  ]
+}

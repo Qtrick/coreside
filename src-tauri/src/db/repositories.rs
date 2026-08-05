@@ -1273,6 +1273,7 @@ pub fn action_events_are_substantive(events: &[serde_json::Value]) -> bool {
         "tool_failed",
         "tool_reference_resolved",
         "change_applied",
+        "change_proposed",
         "tool_change_proposed",
         "search_started",
         "search_completed",

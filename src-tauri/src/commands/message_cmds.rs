@@ -1574,6 +1574,8 @@ async fn send_message_inner(
     // Structured form / surface submissions: seal typed parts from the ledger.
     // Trust comes from Rust seal (LocalUserGesture), never from text delimiters.
     // Bounded: ≤8 form_submit entries, per-entry payload cap, total inject cap.
+    // Consume only after the turn durably succeeds (assistant message commit).
+    let mut pending_ledger_consume: Vec<String> = Vec::new();
     {
         const MAX_STRUCTURED_ENTRIES: usize = 8;
         const MAX_ENTRY_PAYLOAD_BYTES: usize = 4_096;
@@ -1587,11 +1589,13 @@ async fn send_message_inner(
         });
 
         let db = state.db.lock();
-        if let Ok(entries) = crate::runtime_v2::list_ledger_entries(
+        if let Ok(entries) = crate::runtime_v2::list_ledger_entries_for_inject(
             &db,
             &conversation_id,
             project_id.as_deref(),
+            None, // conversation-global + unbranched; branch-scoped requires active branch id
             MAX_STRUCTURED_ENTRIES,
+            true,
         ) {
             let structured: Vec<&crate::runtime_v2::ContextLedgerEntry> = entries
                 .iter()
@@ -1600,13 +1604,14 @@ async fn send_message_inner(
                         && e.visibility == "model_context_only"
                 })
                 .filter(|e| {
+                    let expected_id = crate::runtime_v2::ledger_submission_id(&e.id);
                     !chat_messages.iter().any(|m| {
                         m.parts.iter().any(|p| match p {
                             AgentContentPart::StructuredUserInput(sui) => {
-                                sui.submission_id == format!("ledger-{}", e.id)
-                                    || m.content.contains(&e.id)
+                                sui.submission_id == expected_id
+                                    || sui.submission_id == e.id
                             }
-                            _ => m.content.contains(&e.id),
+                            _ => false,
                         })
                     })
                 })
@@ -1645,6 +1650,12 @@ async fn send_message_inner(
                         Ok(sui) => {
                             budget = budget.saturating_sub(entry_bytes);
                             sealed_parts.push(AgentContentPart::StructuredUserInput(sui));
+                            if crate::runtime_v2::should_consume_after_inject(
+                                &e.expiration_class,
+                                &e.entry_type,
+                            ) {
+                                pending_ledger_consume.push(e.id.clone());
+                            }
                         }
                         Err(err) => {
                             tracing::warn!(error = %err, entry = %e.id, "structured ledger seal failed");
@@ -1674,7 +1685,6 @@ async fn send_message_inner(
                 }
             }
         }
-        drop(db);
     }
 
     if let Err(e) = crate::ai::validate_provider_send(&access.credentials.provider, &chat_messages) {
@@ -2236,13 +2246,17 @@ async fn send_message_inner(
     }
 
     let settings_change = parsed.payload.settings_change.clone();
+    // Appearance / wallpaper proposals must not silently commit. Validate and
+    // normalize here; return the proposal for explicit user Apply/Discard.
+    // Durable writes happen only through set_workspace_appearance / project wallpaper
+    // commands after approval.
     if let Some(ref sc) = settings_change {
         record_action(
             &app, on_event.as_ref(),
             &conversation_id,
             &mut action_log,
-            "Applying appearance preferences",
-            "change_applied",
+            "Proposing appearance preferences",
+            "change_proposed",
             api_key_ref,
         );
         let pairs = sc
@@ -2250,34 +2264,23 @@ async fn send_message_inner(
             .map_err(|e| CommandError::sanitized("validation", e, api_key_ref))?;
         let mut pending: Vec<(String, String)> = Vec::with_capacity(pairs.len() + 1);
         for (key, value) in &pairs {
-            // Base Settings like actionLogEnabled are not agent-allowlisted.
             if !is_allowed_setting_key(key) {
                 return Err(CommandError::new(
                     "forbidden",
                     format!("Agent cannot change Base Setting '{key}' via settings_change"),
                 ));
             }
-            // Defense in depth: re-normalize allowlisted appearance KVs before persist.
             let normalized = crate::ai::normalize_setting_kv(key, value)
                 .map_err(|e| CommandError::sanitized("validation", e, api_key_ref))?;
             pending.push((key.clone(), normalized));
         }
-        // Legacy wallpaper write must clear schema wallpaperJson in the same
-        // transaction (match set_workspace_appearance pair semantics).
         let writes_wallpaper = pending.iter().any(|(k, _)| k == "wallpaper");
         let writes_wallpaper_json = pending.iter().any(|(k, _)| k == "wallpaperJson");
         if writes_wallpaper && !writes_wallpaper_json {
             pending.push(("wallpaperJson".into(), String::new()));
         }
-        {
-            let mut db = state.db.lock();
-            db.with_transaction(|conn| {
-                for (key, value) in &pending {
-                    db::set_setting_on_conn(conn, key, value)?;
-                }
-                Ok(())
-            })?;
-        }
+        // Validated. Do not write SQLite here — frontend must Apply via trusted commands.
+        let _ = pending;
     }
 
     if tool_change.is_some() {
@@ -2520,8 +2523,9 @@ async fn send_message_inner(
         "responseType": parsed.payload.response_type.as_str(),
         "toolChange": tool_change,
         "settingsChange": settings_change,
+        "settingsChangeStatus": if settings_change.is_some() { "pending" } else { "none" },
         "toolChangeStatus": if tool_change.is_some() { "pending" } else { "none" },
-        "pending": tool_change.is_some(),
+        "pending": tool_change.is_some() || settings_change.is_some(),
         "recovered": parsed.recovered,
         "diagnostics": diagnostics,
         "actionEvents": action_events,
@@ -2563,13 +2567,22 @@ async fn send_message_inner(
                 );
             }
         }
-        db::insert_message(
+        let assistant = db::insert_message(
             &mut db,
             &conversation_id,
             "assistant",
             &parsed.payload.assistant_message,
             Some(&metadata),
-        )?
+        )?;
+        // Consume single-use ledger entries only after durable turn success.
+        for id in &pending_ledger_consume {
+            let _ = crate::runtime_v2::mark_ledger_consumed(
+                &mut db,
+                id,
+                Some(&assistant.id),
+            );
+        }
+        assistant
     };
 
     note_timeline(

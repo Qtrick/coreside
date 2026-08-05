@@ -18,6 +18,22 @@ pub enum WallpaperType {
     CanvasPreset,
 }
 
+/// Typed wallpaper-layer filter — never a raw CSS filter string.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WallpaperFilterConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contrast: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saturate: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blur_px: Option<f64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WallpaperConfig {
@@ -34,6 +50,8 @@ pub struct WallpaperConfig {
     pub muted: Option<bool>,
     pub reduced_motion_fallback: Option<String>,
     pub opacity: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<WallpaperFilterConfig>,
     pub extra: Option<Value>,
 }
 
@@ -52,6 +70,7 @@ impl WallpaperConfig {
             muted: None,
             reduced_motion_fallback: None,
             opacity: None,
+            filter: None,
             extra: None,
         }
     }

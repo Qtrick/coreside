@@ -16,7 +16,9 @@ pub use budget::{
     BudgetConfig, BudgetStatus, BudgetThreshold,
 };
 pub use cache::{fingerprint, normalize_query, ExaSearchCache};
-pub use client::{peek_cached_search, search, test_connection, ExaSearchOutcome};
+pub use client::{
+    peek_cached_search, search, test_connection, test_connection_with_key, ExaSearchOutcome,
+};
 pub use credentials::{
     delete_exa_api_key, exa_keyring_account, has_exa_key, require_exa_api_key,
     resolve_exa_credentials, store_exa_api_key, ExaCredentialSource, ResolvedExaCredentials,

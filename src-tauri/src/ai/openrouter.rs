@@ -24,10 +24,12 @@ pub struct OpenRouterProvider {
 
 impl OpenRouterProvider {
     pub fn new(api_key: String, model: String, base_url: String) -> Self {
+        // Fail closed: never fall back to Client::new() (default follows redirects).
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .expect("reqwest Client");
         Self {
             api_key,
             model,

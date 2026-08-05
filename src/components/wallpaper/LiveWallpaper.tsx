@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { WallpaperConfig } from "@/types/agent";
 import { WallpaperKindSchema } from "@/types/agent";
 import type { ResolvedWallpaper, SchemaWallpaperConfig } from "@/types/wallpaper";
+import { cssFilterFromConfig } from "@/lib/wallpaper-filter";
+import { normalizeCanonicalHex } from "@/lib/wallpaper-hex";
 import { resolveMediaAssetUrl } from "@/lib/media";
 
 type LiveWallpaperProps = {
@@ -33,8 +35,12 @@ function resolveKind(raw: string | undefined) {
 }
 
 function hexColor(raw: string | null | undefined, fallback: string) {
-  if (!raw) return fallback;
-  return /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(raw) ? raw : fallback;
+  return normalizeCanonicalHex(raw ?? "") ?? fallback;
+}
+
+function wallpaperLayerStyle(config?: SchemaWallpaperConfig | null): CSSProperties | undefined {
+  const filter = cssFilterFromConfig(config?.filter);
+  return filter ? { filter } : undefined;
 }
 
 function schemaToLegacyKind(config: SchemaWallpaperConfig): string {
@@ -500,7 +506,7 @@ export function LiveWallpaper({ wallpaper }: LiveWallpaperProps) {
     config.type === "ambient-gradient"
   ) {
     return (
-      <div className="live-wallpaper" aria-hidden>
+      <div className="live-wallpaper" style={wallpaperLayerStyle(config)} aria-hidden>
         <CssWallpaper config={config} />
       </div>
     );
@@ -513,7 +519,7 @@ export function LiveWallpaper({ wallpaper }: LiveWallpaperProps) {
     const density = clamp(config.extra?.density ?? 0.55, 0.1, 1);
     const opacity = clamp(config.opacity ?? 0.35, 0.05, 0.85);
     return (
-      <div className="live-wallpaper" aria-hidden>
+      <div className="live-wallpaper" style={wallpaperLayerStyle(config)} aria-hidden>
         <CanvasWallpaper
           kind={kind}
           color={hexColor(config.color, "#6ab0d4")}
@@ -528,7 +534,7 @@ export function LiveWallpaper({ wallpaper }: LiveWallpaperProps) {
 
   if (config.type === "slideshow") {
     return (
-      <div className="live-wallpaper" aria-hidden>
+      <div className="live-wallpaper" style={wallpaperLayerStyle(config)} aria-hidden>
         <SlideshowWallpaper config={config} />
       </div>
     );
@@ -540,7 +546,7 @@ export function LiveWallpaper({ wallpaper }: LiveWallpaperProps) {
     config.type === "animated-image"
   ) {
     return (
-      <div className="live-wallpaper" aria-hidden>
+      <div className="live-wallpaper" style={wallpaperLayerStyle(config)} aria-hidden>
         <MediaWallpaperLayer config={config} />
       </div>
     );

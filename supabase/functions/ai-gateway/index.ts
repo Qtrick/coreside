@@ -1,20 +1,25 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { readBodyTextBounded } from "../_shared/read-body.ts";
 import {
   type AiProfile,
   type AiRequestBody,
-  appendBoundedAssistantText,
+  BoundedSseParser,
   boundAssistantText,
   extractAssistantText,
   parseBody,
+  parseFailRpcResult,
   parseReserveRpcResult,
+  parseSettleRpcResult,
+  resolveUpstreamChatUrl,
 } from "./gateway-lib.ts";
 
 const SERVICE = "coreside-ai-gateway";
 const VERSION = "1";
 const MAX_OUTPUT_TOKENS = 4096;
 const MAX_BODY_BYTES = 256 * 1024;
-const RATE_LIMIT_PER_MINUTE = 20;
 const IDEMPOTENCY_TTL_HOURS = 24;
+const RATE_LIMIT_PER_MINUTE = 20;
+const MAX_CONCURRENT = 3;
 
 const PROFILE_MAX_TOKENS: Record<AiProfile, number> = {
   fast: 1024,
@@ -78,16 +83,6 @@ function resolveMaxTokens(profile: AiProfile | undefined, override?: number): nu
   return Math.min(override, profileCap, MAX_OUTPUT_TOKENS);
 }
 
-function upstreamChatUrl(): string {
-  const explicit = Deno.env.get("CORESIDE_AI_BASE_URL")?.trim();
-  if (explicit) return `${explicit.replace(/\/$/, "")}/chat/completions`;
-  const provider = (Deno.env.get("CORESIDE_AI_PROVIDER") ?? "openai").toLowerCase();
-  if (provider === "openrouter") {
-    return "https://openrouter.ai/api/v1/chat/completions";
-  }
-  return "https://api.openai.com/v1/chat/completions";
-}
-
 type AdminClient = ReturnType<typeof createClient>;
 
 async function reserveHostedRequest(
@@ -101,6 +96,8 @@ async function reserveHostedRequest(
     p_request_id: requestId,
     p_idempotency_key: idempotencyKey,
     p_ttl_hours: IDEMPOTENCY_TTL_HOURS,
+    p_rate_limit_per_minute: RATE_LIMIT_PER_MINUTE,
+    p_max_concurrent: MAX_CONCURRENT,
   });
   if (error) {
     return parseReserveRpcResult({ outcome: "error", reason: "rpc_error" });
@@ -118,7 +115,7 @@ async function settleHostedRequest(
   resultText: string,
   streamed: boolean,
 ): Promise<boolean> {
-  const { error } = await adminClient.rpc("settle_hosted_ai_request", {
+  const { data, error } = await adminClient.rpc("settle_hosted_ai_request", {
     p_user_id: userId,
     p_request_id: requestId,
     p_idempotency_key: idempotencyKey,
@@ -126,7 +123,8 @@ async function settleHostedRequest(
     p_result_reference: boundAssistantText(resultText),
     p_provider_usage: { streamed, max_tokens: maxTokens },
   });
-  return !error;
+  if (error) return false;
+  return parseSettleRpcResult(data);
 }
 
 async function failHostedRequest(
@@ -136,13 +134,14 @@ async function failHostedRequest(
   idempotencyKey: string,
   failureReason: string,
 ): Promise<boolean> {
-  const { error } = await adminClient.rpc("fail_hosted_ai_request", {
+  const { data, error } = await adminClient.rpc("fail_hosted_ai_request", {
     p_user_id: userId,
     p_request_id: requestId,
     p_idempotency_key: idempotencyKey,
     p_failure_reason: failureReason,
   });
-  return !error;
+  if (error) return false;
+  return parseFailRpcResult(data);
 }
 
 async function settleHostedRequestWithRetry(
@@ -183,6 +182,7 @@ async function settleHostedRequestWithRetry(
 
 function deniedStatus(reason: string): number {
   if (reason === "allowance_exceeded") return 402;
+  if (reason === "rate_limited" || reason === "concurrency_limited") return 429;
   return 403;
 }
 
@@ -231,6 +231,15 @@ Deno.serve(async (req) => {
     return consumerError("Coreside AI is not configured", 503, origin);
   }
 
+  const upstreamResolved = resolveUpstreamChatUrl({
+    provider: Deno.env.get("CORESIDE_AI_PROVIDER"),
+    baseUrl: Deno.env.get("CORESIDE_AI_BASE_URL"),
+    allowDevBaseUrl: Deno.env.get("CORESIDE_AI_ALLOW_DEV_BASE_URL"),
+  });
+  if (!upstreamResolved.ok) {
+    return consumerError("Coreside AI is not configured", 503, origin);
+  }
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -251,32 +260,19 @@ Deno.serve(async (req) => {
     return consumerError("Unauthorized", 401, origin);
   }
 
+  const bodyRead = await readBodyTextBounded(req, MAX_BODY_BYTES);
+  if (!bodyRead.ok) {
+    return consumerError(bodyRead.error, bodyRead.status, origin);
+  }
+
   let body: AiRequestBody | null;
   try {
-    const raw = await req.text();
-    if (new TextEncoder().encode(raw).length > MAX_BODY_BYTES) {
-      return consumerError("Request body too large", 413, origin);
-    }
-    body = parseBody(raw ? JSON.parse(raw) : null);
+    body = parseBody(bodyRead.text ? JSON.parse(bodyRead.text) : null);
   } catch {
     return consumerError("Invalid request body", 400, origin);
   }
   if (!body) {
     return consumerError("Invalid request body", 400, origin);
-  }
-
-  const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
-  const { count: recentCount, error: rateError } = await adminClient
-    .from("ai_usage_ledger")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", user.id)
-    .gte("created_at", oneMinuteAgo);
-
-  if (rateError) {
-    return consumerError("Coreside AI is unavailable", 503, origin);
-  }
-  if ((recentCount ?? 0) >= RATE_LIMIT_PER_MINUTE) {
-    return consumerError("Rate limit exceeded", 429, origin);
   }
 
   const requestId = crypto.randomUUID();
@@ -310,7 +306,11 @@ Deno.serve(async (req) => {
         ? "Coreside AI allowance exceeded"
         : reserve.reason === "hosted_disabled"
           ? "Coreside AI is not enabled for this account"
-          : "Coreside AI is unavailable";
+          : reserve.reason === "rate_limited"
+            ? "Rate limit exceeded"
+            : reserve.reason === "concurrency_limited"
+              ? "Too many concurrent Coreside AI requests"
+              : "Coreside AI is unavailable";
     return consumerError(message, deniedStatus(reserve.reason), origin);
   }
   if (reserve.kind !== "reserved") {
@@ -320,7 +320,7 @@ Deno.serve(async (req) => {
   const profile = body.profile ?? "balanced";
   const maxTokens = resolveMaxTokens(profile, body.maxOutputTokens);
   const wantStream = body.stream !== false;
-  const upstream = await fetch(upstreamChatUrl(), {
+  const upstream = await fetch(upstreamResolved.url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${providerKey}`,
@@ -370,7 +370,7 @@ Deno.serve(async (req) => {
       );
       return consumerError("Coreside AI request failed", 502, origin);
     }
-    await settleHostedRequestWithRetry(
+    const settled = await settleHostedRequestWithRetry(
       adminClient,
       user.id,
       requestId,
@@ -380,6 +380,9 @@ Deno.serve(async (req) => {
       text,
       false,
     );
+    if (!settled) {
+      return consumerError("Coreside AI request failed", 503, origin);
+    }
     return json(
       { requestId, text, status: "completed" },
       200,
@@ -387,9 +390,8 @@ Deno.serve(async (req) => {
     );
   }
 
-  const decoder = new TextDecoder();
   const reader = upstream.body.getReader();
-  let assistantText = "";
+  const parser = new BoundedSseParser();
   type TerminalState = "open" | "settled" | "failed";
   let terminal: TerminalState = "open";
 
@@ -408,7 +410,7 @@ Deno.serve(async (req) => {
     }
   };
 
-  const settleIfOpen = async () => {
+  const settleIfOpen = async (text: string) => {
     if (terminal !== "open") return;
     if (
       await settleHostedRequestWithRetry(
@@ -418,7 +420,7 @@ Deno.serve(async (req) => {
         body.idempotencyKey,
         profile,
         maxTokens,
-        assistantText || "[streamed]",
+        text || "[streamed]",
         true,
       )
     ) {
@@ -436,7 +438,6 @@ Deno.serve(async (req) => {
 
   const stream = new ReadableStream({
     async start(controller) {
-      const encoder = new TextEncoder();
       try {
         while (true) {
           if (req.signal.aborted) {
@@ -444,28 +445,22 @@ Deno.serve(async (req) => {
           }
           const { done, value } = await reader.read();
           if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          for (const line of chunk.split("\n")) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith("data:")) continue;
-            const data = trimmed.slice(5).trim();
-            if (!data || data === "[DONE]") continue;
-            try {
-              const parsed = JSON.parse(data) as {
-                choices?: Array<{ delta?: { content?: unknown } }>;
-              };
-              const delta = parsed.choices?.[0]?.delta?.content;
-              if (typeof delta === "string") {
-                assistantText = appendBoundedAssistantText(assistantText, delta);
-              }
-            } catch {
-              // ignore malformed SSE lines
-            }
+          if (!value) continue;
+          const feed = parser.feed(value);
+          controller.enqueue(value);
+          if (!feed.ok) {
+            throw new Error(feed.reason);
           }
-          controller.enqueue(encoder.encode(chunk));
+          if (feed.done) {
+            break;
+          }
+        }
+        const finished = parser.finish();
+        if (!finished.ok) {
+          throw new Error(finished.reason);
         }
         controller.close();
-        await settleIfOpen();
+        await settleIfOpen(finished.text);
       } catch {
         try {
           controller.error(new Error("stream_failed"));

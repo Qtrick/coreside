@@ -2,10 +2,13 @@
 
 export const BILLING_PLAN_IDS = new Set(["personal", "pro"]);
 
+/** Logical in-app destinations only — never accept arbitrary client URLs. */
+export const BILLING_DESTINATIONS = new Set(["settings", "billing"]);
+
 export interface CheckoutBody {
   planId: string;
-  successUrl?: string;
-  cancelUrl?: string;
+  successDestination: string;
+  cancelDestination: string;
 }
 
 export function parseCheckoutBody(raw: unknown): CheckoutBody | null {
@@ -15,30 +18,91 @@ export function parseCheckoutBody(raw: unknown): CheckoutBody | null {
   const planId = body.planId.trim().toLowerCase();
   if (!BILLING_PLAN_IDS.has(planId)) return null;
 
-  const successUrl =
-    typeof body.successUrl === "string" && body.successUrl.trim()
-      ? body.successUrl.trim()
-      : undefined;
-  const cancelUrl =
-    typeof body.cancelUrl === "string" && body.cancelUrl.trim()
-      ? body.cancelUrl.trim()
-      : undefined;
+  // Reject legacy arbitrary URL fields — open-redirect surface.
+  if (body.successUrl !== undefined || body.cancelUrl !== undefined) {
+    return null;
+  }
 
-  return { planId, successUrl, cancelUrl };
+  const successDestination = normalizeBillingDestination(
+    body.successDestination,
+    "settings",
+  );
+  const cancelDestination = normalizeBillingDestination(
+    body.cancelDestination,
+    "settings",
+  );
+  if (!successDestination || !cancelDestination) return null;
+
+  return { planId, successDestination, cancelDestination };
 }
 
 export interface PortalBody {
-  returnUrl?: string;
+  returnDestination: string;
 }
 
-export function parsePortalBody(raw: unknown): PortalBody {
-  if (!raw || typeof raw !== "object") return {};
+export function parsePortalBody(raw: unknown): PortalBody | null {
+  if (!raw || typeof raw !== "object") return { returnDestination: "settings" };
   const body = raw as Record<string, unknown>;
-  const returnUrl =
-    typeof body.returnUrl === "string" && body.returnUrl.trim()
-      ? body.returnUrl.trim()
-      : undefined;
-  return { returnUrl };
+  if (body.returnUrl !== undefined) return null;
+  const returnDestination = normalizeBillingDestination(
+    body.returnDestination,
+    "settings",
+  );
+  if (!returnDestination) return null;
+  return { returnDestination };
+}
+
+export function normalizeBillingDestination(
+  value: unknown,
+  fallback: string,
+): string | null {
+  const raw =
+    typeof value === "string" && value.trim()
+      ? value.trim().toLowerCase()
+      : fallback;
+  if (!BILLING_DESTINATIONS.has(raw)) return null;
+  return raw;
+}
+
+/** Server constructs Stripe return URLs from logical destinations + env base. */
+export function resolveBillingReturnUrl(
+  destination: string,
+  appBaseUrl?: string | null,
+): string | null {
+  const dest = normalizeBillingDestination(destination, "");
+  if (!dest) return null;
+  const base = (appBaseUrl?.trim() || "http://localhost:1422").replace(/\/$/, "");
+  try {
+    const parsed = new URL(base);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    if (
+      parsed.hostname !== "localhost" &&
+      parsed.hostname !== "127.0.0.1" &&
+      parsed.protocol !== "https:"
+    ) {
+      return null;
+    }
+    return `${base}/${dest}`;
+  } catch {
+    return null;
+  }
+}
+
+export type WebhookEventStatus =
+  | "received"
+  | "processing"
+  | "processed"
+  | "retryable_failed"
+  | "permanent_failed";
+
+export function isTerminalWebhookStatus(status: string): boolean {
+  return status === "processed" || status === "permanent_failed";
+}
+
+export function isRetryableWebhookStatus(status: string): boolean {
+  return status === "received" || status === "retryable_failed";
 }
 
 /** Stripe-Signature: t=timestamp,v1=hex,... */
@@ -128,6 +192,18 @@ export function extractStripeEventType(payload: string): string | null {
   try {
     const parsed = JSON.parse(payload) as { type?: unknown };
     return typeof parsed.type === "string" ? parsed.type : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Stripe event.created (unix seconds) for out-of-order protection. */
+export function extractStripeEventCreated(payload: string): number | null {
+  try {
+    const parsed = JSON.parse(payload) as { created?: unknown };
+    return typeof parsed.created === "number" && Number.isFinite(parsed.created)
+      ? parsed.created
+      : null;
   } catch {
     return null;
   }

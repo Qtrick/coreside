@@ -87,7 +87,7 @@ impl AgentMessage {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageMetadata {
     pub prompt_tokens: Option<u32>,

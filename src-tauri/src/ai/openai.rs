@@ -160,10 +160,12 @@ impl OpenAiProvider {
         provider_id: impl Into<String>,
         display_name: impl Into<String>,
     ) -> Self {
+        // Fail closed: never fall back to Client::new() (default follows redirects).
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .expect("reqwest Client");
         Self {
             api_key,
             model,
