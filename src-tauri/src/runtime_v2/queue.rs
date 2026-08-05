@@ -227,7 +227,9 @@ mod tests {
         let restored = requeue(&mut db, &a.id).unwrap();
         assert_eq!(restored.status, "queued");
 
-        let again = activate_next(&mut db, &conv.id).unwrap().expect("after requeue");
+        let again = activate_next(&mut db, &conv.id)
+            .unwrap()
+            .expect("after requeue");
         assert_eq!(again.id, a.id);
     }
 

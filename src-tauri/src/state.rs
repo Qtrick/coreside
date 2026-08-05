@@ -12,7 +12,7 @@ use crate::config::{self, AppConfig};
 use crate::crawler::CrawlerSupervisor;
 use crate::db::{BootstrapStatus, Database};
 use crate::maintenance::{MaintenanceMode, MaintenanceStage, MaintenanceStatus};
-use crate::quiescence::{PauseToken, QuiescenceCoordinator, QuiescedSubsystem};
+use crate::quiescence::{PauseToken, QuiescedSubsystem, QuiescenceCoordinator};
 use crate::runtime_v2::EventBus;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -84,12 +84,10 @@ impl AppState {
         Self::new_with_bootstrap(config, db, BootstrapStatus::Ready)
     }
 
-    pub fn new_with_bootstrap(
-        config: AppConfig,
-        db: Database,
-        bootstrap: BootstrapStatus,
-    ) -> Self {
-        let event_bus = EventBus::load_from_db(&db);
+    pub fn new_with_bootstrap(config: AppConfig, db: Database, bootstrap: BootstrapStatus) -> Self {
+        let mut event_bus = EventBus::load_from_db(&db);
+        // Drain post-commit effects left pending after a crash between COMMIT and flush.
+        let _ = crate::runtime_v2::outbox::flush_pending_outbox(&db, Some(&mut event_bus));
         Self {
             config: Mutex::new(config),
             db: Arc::new(Mutex::new(db)),
@@ -108,11 +106,7 @@ impl AppState {
     /// Register a conversation-scoped Channel for queue mutation events.
     /// Replaces any prior Channels for this conversation so UI remounts cannot
     /// accumulate dead subscribers (ponytail: one live Channel per conversation).
-    pub fn subscribe_queue(
-        &self,
-        conversation_id: String,
-        channel: Channel<QueueChangedEvent>,
-    ) {
+    pub fn subscribe_queue(&self, conversation_id: String, channel: Channel<QueueChangedEvent>) {
         self.queue_subscribers
             .lock()
             .insert(conversation_id, vec![channel]);
@@ -291,7 +285,9 @@ impl AppState {
 
     /// Replace the active database after a successful retry or restore.
     pub fn replace_profile_database(&self, db: Database) {
-        *self.event_bus.lock() = EventBus::load_from_db(&db);
+        let mut event_bus = EventBus::load_from_db(&db);
+        let _ = crate::runtime_v2::outbox::flush_pending_outbox(&db, Some(&mut event_bus));
+        *self.event_bus.lock() = event_bus;
         *self.db.lock() = db;
         *self.bootstrap.lock() = BootstrapStatus::Ready;
         // Invalidate pause tokens issued against the previous profile generation.

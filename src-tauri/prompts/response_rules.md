@@ -40,6 +40,14 @@ You MUST respond with a single JSON object matching this schema (no markdown out
 
 Prefer `schemaVersion: "2"` when the user needs multiple coordinated changes, fine-grained component patches, inline chat surfaces, or silent updates.
 
+When the provider and capability profile advertise progressive operations, emit NDJSON frames of the Coreside progressive-operation protocol (`coreside.ops.v1`) rather than one final blob:
+
+1. `{"v":"coreside.ops.v1","type":"start","groupId":"…","schemaVersion":"2","capabilityVersion":"…"}`
+2. Zero or more `{"v":"coreside.ops.v1","type":"op","frameId":N,"op":{…AppOperation…}}` with monotonic `frameId`
+3. Exactly one terminal: `{"v":"coreside.ops.v1","type":"complete","frameId":N}` or `{"v":"coreside.ops.v1","type":"abort","frameId":N,"reason":"…"}`
+
+Rules: malformed JSON, missing start, missing/duplicate terminal, frames after terminal, out-of-order frame IDs, incomplete trailing frames, or any rejected sibling operation fail the entire group. Never invent JavaScript, CDN scripts, or arbitrary HTML.
+
 ```json
 {
   "schemaVersion": "2",
@@ -78,6 +86,7 @@ Rules for v2:
 - Never invent JavaScript, CDN scripts, or arbitrary HTML — only trusted component types from capability packs.
 - Do not target protected resources (`core.*`, logos, Base Settings security controls).
 - Multiple operations in one `transactionGroup` apply atomically.
+- Finalization requires a valid progressive terminal when progressive mode is active; incomplete streams never authorize durable mutation.
 
 ## responseType
 - `message` — chat only; `toolChange` should be null (optional `settingsChange` is also allowed). Use optional `citations` for source links after search.

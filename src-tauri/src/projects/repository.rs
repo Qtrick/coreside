@@ -421,8 +421,8 @@ pub fn set_project_wallpaper(
     let stored: Option<String> = match wallpaper_json {
         None => None,
         Some(raw) => {
-            let normalized = crate::ai::normalize_setting_kv("wallpaperJson", raw)
-                .map_err(DbError::Invalid)?;
+            let normalized =
+                crate::ai::normalize_setting_kv("wallpaperJson", raw).map_err(DbError::Invalid)?;
             if normalized.is_empty() {
                 None
             } else {

@@ -268,10 +268,7 @@ pub fn list_branches(
 
 /// List snapshots for a conversation. Payload is omitted (Null) for list size;
 /// call [`get_snapshot`] when full read-only payload is needed.
-pub fn list_snapshots(
-    db: &Database,
-    conversation_id: &str,
-) -> DbResult<Vec<SnapshotRecord>> {
+pub fn list_snapshots(db: &Database, conversation_id: &str) -> DbResult<Vec<SnapshotRecord>> {
     let mut stmt = db.conn().prepare(
         "SELECT id, conversation_id, project_id, description, created_at
          FROM conversation_snapshots WHERE conversation_id = ?1 ORDER BY created_at DESC",

@@ -30,7 +30,7 @@ pub use access_mode::{resolve_access_presentation, AiAccessPresentation, Disclos
 pub use anthropic::AnthropicProvider;
 pub use auto::{chat_with_auto, peek_assistant_message};
 pub use capability_registry::{
-    hash_tool_results, AgentCapability, seal_tool_result_envelope, tool_result_display_summary,
+    hash_tool_results, seal_tool_result_envelope, tool_result_display_summary, AgentCapability,
     ToolCallRequest, ToolCallResult,
 };
 pub use errors::AiError;
@@ -40,11 +40,20 @@ pub use ollama::{ollama_server_ready, OllamaProvider};
 pub use openai::OpenAiProvider;
 pub use openrouter::OpenRouterProvider;
 pub use prompt_builder::{build_agent_prompt_with_references, PROMPT_VERSION};
-pub use provider_send::validate_provider_send;
 #[allow(unused_imports)] // Stream types are the public foundation for Phase 7 wiring.
 pub use provider::{
     AgentMessage, AgentRequest, AgentResponse, AiProvider, ProviderHealth, ProviderStreamEvent,
     ProviderStreamRx, ProviderStreamTx, UsageMetadata,
+};
+pub use provider_send::validate_provider_send;
+pub use response_parser::{parse_agent_response, ParsedAgentResponse};
+pub use response_schema::{
+    layout_type_string, ResponseType, SourceCitation, ToolAction, ToolChangePayload, ToolComponent,
+    ToolDefinition,
+};
+pub use settings_change::{
+    is_allowed_setting_key, normalize_hex_or_none, normalize_setting_kv, parse_wallpaper_setting,
+    SettingsChangePayload, WallpaperConfig,
 };
 #[allow(unused_imports)] // Public surface for StructuredUserInput (RC3.3 Phase 8).
 pub use structured_user_input::{
@@ -55,15 +64,6 @@ pub use structured_user_input::{
     validate_provider_image_bytes, AgentContentPart, AgentRole, InstructionEligibility,
     StructuredUserInput, StructuredUserInputSubmission, TrustClass, MAX_PROVIDER_IMAGE_BYTES,
     MAX_PROVIDER_IMAGE_PIXELS,
-};
-pub use response_parser::{parse_agent_response, ParsedAgentResponse};
-pub use response_schema::{
-    layout_type_string, ResponseType, SourceCitation, ToolAction, ToolChangePayload, ToolComponent,
-    ToolDefinition,
-};
-pub use settings_change::{
-    is_allowed_setting_key, normalize_hex_or_none, normalize_setting_kv, parse_wallpaper_setting,
-    SettingsChangePayload, WallpaperConfig,
 };
 pub use tool_loop::{project_context_for_prompt, ToolLoop, ToolLoopContext};
 
@@ -121,12 +121,9 @@ fn create_provider_with_route(
     }
 
     match route {
-        crate::credentials::AiAccessRoute::LocalAuthless => create_local_or_compatible_provider(
-            config,
-            &provider,
-            &model,
-            "",
-        ),
+        crate::credentials::AiAccessRoute::LocalAuthless => {
+            create_local_or_compatible_provider(config, &provider, &model, "")
+        }
         crate::credentials::AiAccessRoute::CoresideHosted => hosted_provider::try_from_session()?
             .ok_or_else(|| {
                 AiError::NotConfigured(
@@ -158,14 +155,12 @@ fn create_provider_with_route(
                             || a.credentials.missing_connection_secret
                     })
                     .unwrap_or(false);
-                return Err(AiError::NotConfigured(
-                    if connection_scoped {
-                        "Your active AI connection is not ready. Re-enter its API key in Settings."
-                            .into()
-                    } else {
-                        "AI access is unavailable for the selected route.".into()
-                    },
-                ));
+                return Err(AiError::NotConfigured(if connection_scoped {
+                    "Your active AI connection is not ready. Re-enter its API key in Settings."
+                        .into()
+                } else {
+                    "AI access is unavailable for the selected route.".into()
+                }));
             }
             // Legacy create_provider_with_model (no ResolvedAiAccess): authless Local only.
             if !config.has_api_key() {
@@ -229,7 +224,8 @@ fn create_provider_for_descriptor(
             config.base_url.clone(),
         ))),
         platform::ProtocolFamily::MockDeterministic => Ok(Arc::new(MockAiProvider::new())),
-        platform::ProtocolFamily::OpenAiChatCompletions | platform::ProtocolFamily::OpenAiResponses => {
+        platform::ProtocolFamily::OpenAiChatCompletions
+        | platform::ProtocolFamily::OpenAiResponses => {
             if desc.id == "openrouter" {
                 return Ok(Arc::new(OpenRouterProvider::new(
                     key.to_string(),
@@ -503,9 +499,7 @@ mod provider_factory_tests {
     use crate::config::{
         AppConfig, DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_OPENAI_BASE_URL, DEFAULT_OPENROUTER_BASE_URL,
     };
-    use crate::credentials::{
-        AiAccessRoute, ResolvedAiAccess, ResolvedCredentials,
-    };
+    use crate::credentials::{AiAccessRoute, ResolvedAiAccess, ResolvedCredentials};
 
     fn ollama_authless_config() -> AppConfig {
         AppConfig {
@@ -563,13 +557,9 @@ mod provider_factory_tests {
             env_path: None,
         };
         let desc = platform::descriptor_by_id("gemini").expect("gemini descriptor");
-        let provider = create_provider_for_descriptor(
-            &config,
-            &desc,
-            "gemini-2.5-flash",
-            "test-gemini-key",
-        )
-        .expect("gemini via protocol family");
+        let provider =
+            create_provider_for_descriptor(&config, &desc, "gemini-2.5-flash", "test-gemini-key")
+                .expect("gemini via protocol family");
         assert_eq!(provider.provider_id(), "gemini");
         assert_eq!(provider.display_name(), "Google Gemini");
     }
@@ -585,8 +575,8 @@ mod provider_factory_tests {
             env_path: None,
         };
         let desc = platform::descriptor_by_id("openai").expect("openai descriptor");
-        let provider =
-            create_provider_for_descriptor(&config, &desc, "gpt-4.1-mini", "sk-test").expect("openai");
+        let provider = create_provider_for_descriptor(&config, &desc, "gpt-4.1-mini", "sk-test")
+            .expect("openai");
         assert_eq!(provider.provider_id(), "openai");
     }
 
@@ -601,13 +591,9 @@ mod provider_factory_tests {
             env_path: None,
         };
         let desc = platform::descriptor_by_id("anthropic").expect("anthropic descriptor");
-        let provider = create_provider_for_descriptor(
-            &config,
-            &desc,
-            "claude-sonnet-4-5",
-            "sk-ant",
-        )
-        .expect("anthropic");
+        let provider =
+            create_provider_for_descriptor(&config, &desc, "claude-sonnet-4-5", "sk-ant")
+                .expect("anthropic");
         assert_eq!(provider.provider_id(), "anthropic");
     }
 
@@ -622,13 +608,9 @@ mod provider_factory_tests {
             env_path: None,
         };
         let desc = platform::descriptor_by_id("openrouter").expect("openrouter descriptor");
-        let provider = create_provider_for_descriptor(
-            &config,
-            &desc,
-            "google/gemini-2.5-flash",
-            "or-test",
-        )
-        .expect("openrouter");
+        let provider =
+            create_provider_for_descriptor(&config, &desc, "google/gemini-2.5-flash", "or-test")
+                .expect("openrouter");
         assert_eq!(provider.provider_id(), "openrouter");
     }
 
@@ -643,13 +625,9 @@ mod provider_factory_tests {
             env_path: None,
         };
         let desc = platform::descriptor_by_id("mistral").expect("mistral descriptor");
-        let provider = create_provider_for_descriptor(
-            &config,
-            &desc,
-            "mistral-large-latest",
-            "m-test",
-        )
-        .expect("mistral");
+        let provider =
+            create_provider_for_descriptor(&config, &desc, "mistral-large-latest", "m-test")
+                .expect("mistral");
         assert_eq!(provider.provider_id(), "mistral");
     }
 
@@ -682,7 +660,10 @@ mod provider_factory_tests {
             },
             "auto",
         );
-        assert!(mistral.options.iter().any(|o| o.id == "mistral-large-latest"));
+        assert!(mistral
+            .options
+            .iter()
+            .any(|o| o.id == "mistral-large-latest"));
         assert!(!mistral.options.iter().any(|o| o.id.contains("gemini")));
 
         let ollama = model_catalog(
@@ -736,12 +717,8 @@ mod provider_factory_tests {
     #[test]
     fn unknown_provider_without_descriptor_returns_validation() {
         let config = ollama_authless_config();
-        let result = create_local_or_compatible_provider(
-            &config,
-            "not-a-real-provider",
-            "some-model",
-            "",
-        );
+        let result =
+            create_local_or_compatible_provider(&config, "not-a-real-provider", "some-model", "");
         match result {
             Err(AiError::Validation(msg)) => {
                 assert!(msg.contains("Unsupported AI provider"));

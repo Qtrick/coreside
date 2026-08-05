@@ -8,6 +8,7 @@ pub mod drafts;
 pub mod events;
 pub mod limits;
 pub mod operations;
+pub mod outbox;
 pub mod packs;
 pub mod patch;
 pub mod patch_scheduler;
@@ -18,6 +19,7 @@ pub mod queue;
 pub mod streaming;
 pub mod surfaces;
 pub mod transactions;
+pub mod turn_journal;
 pub mod turn_timeline;
 
 #[allow(unused_imports)]
@@ -51,6 +53,7 @@ pub use operations::{
     tool_change_to_operations, validate_operations, AgentResponseV2, AppOperation,
     SCHEMA_VERSION_V2,
 };
+pub use outbox::{flush_pending_outbox, CommitOutcome, DeferredBusEffect};
 #[allow(unused_imports)]
 pub use packs::{
     agent_pack_catalog_markdown, bundled_packs, validate_component_type_allowed,
@@ -72,6 +75,11 @@ pub use preservation::{
     PreservationPolicy, PreservationRecord,
 };
 #[allow(unused_imports)]
+pub use preview_transaction::{
+    ingest_live_chunk, ingest_live_chunk_with_seed, PreviewOpEvent, PreviewPaintEvent,
+    PreviewSurfaceModel, PreviewTransaction, RejectedPreviewOp,
+};
+#[allow(unused_imports)]
 pub use provider_conformance::{
     get_provider_profile, seed_provider_profiles, select_application_profile,
     ProviderConformanceRecord, ProviderProfile,
@@ -80,11 +88,6 @@ pub use provider_conformance::{
 pub use queue::{
     activate_next, cancel as cancel_queue_item, complete as complete_queue_item, enqueue, get_item,
     list_queue, recover_stale_active, remove_queued, requeue as requeue_queue_item, QueueItem,
-};
-#[allow(unused_imports)]
-pub use preview_transaction::{
-    ingest_live_chunk, ingest_live_chunk_with_seed, PreviewOpEvent, PreviewPaintEvent,
-    PreviewSurfaceModel, PreviewTransaction, RejectedPreviewOp,
 };
 #[allow(unused_imports)]
 pub use streaming::{NdjsonFrameParser, StreamEvent, StreamParseError, StreamParseErrorKind};

@@ -135,6 +135,27 @@ pub fn apply_transaction_with_bus(
     transaction_id: &str,
     mut bus: Option<&mut super::events::EventBus>,
 ) -> DbResult<ApplyResult> {
+    let mut deferred: Vec<super::outbox::DeferredBusEffect> = Vec::new();
+    let result = apply_transaction_deferred(db, transaction_id, &mut deferred)?;
+    // Only mutate the live EventBus after the authoritative SQLite work succeeded.
+    if result.transaction.status == "applied" && result.conflicts.is_empty() {
+        for effect in &deferred {
+            if let Some(bus) = bus.as_deref_mut() {
+                super::outbox::apply_deferred_effect(bus, effect);
+            }
+        }
+    }
+    Ok(result)
+}
+
+/// Apply surface operations collecting EventBus effects for post-commit dispatch.
+/// On conflict/failure, returns ApplyResult with status `failed` and populated conflicts —
+/// callers MUST treat that as non-success and roll back any outer transaction.
+pub fn apply_transaction_deferred(
+    db: &mut Database,
+    transaction_id: &str,
+    deferred: &mut Vec<super::outbox::DeferredBusEffect>,
+) -> DbResult<ApplyResult> {
     let txn = get_transaction(db, transaction_id)?;
     if txn.status == "applied" {
         return Ok(ApplyResult {
@@ -154,7 +175,6 @@ pub fn apply_transaction_with_bus(
     let mut surfaces = Vec::new();
     let mut conflicts = Vec::new();
 
-    // Snapshot affected surfaces first
     for op in &txn.operations {
         if let Some(sid) = op.target.surface_id.as_ref() {
             if let Ok(s) = get_surface(db, sid) {
@@ -172,11 +192,10 @@ pub fn apply_transaction_with_bus(
 
     let mut failed = false;
     for op in &txn.operations {
-        match apply_one(db, op, &txn, bus.as_deref_mut()) {
+        match apply_one(db, op, &txn, deferred) {
             Ok(Some(s)) => surfaces.push(s),
             Ok(None) => {}
             Err(e) => {
-                // Stale revision → structured conflict for multiwindow UX
                 let msg = if e.contains("revision") || e.contains("stale") {
                     format!("revision_conflict:{}:{e}", op.id)
                 } else {
@@ -190,12 +209,16 @@ pub fn apply_transaction_with_bus(
     }
 
     if failed {
+        // Surface mutations roll back; mark failed only after savepoint release so
+        // the status write is not undone by ROLLBACK TO. Outer kernel BEGIN still
+        // rolls this back on Conflicted (caller must not treat ApplyResult alone as success).
         db.conn()
             .execute_batch(
                 "ROLLBACK TO SAVEPOINT runtime_v2_apply; RELEASE SAVEPOINT runtime_v2_apply",
             )
             .map_err(DbError::Sqlite)?;
         surfaces.clear();
+        deferred.clear();
         db.conn().execute(
             "UPDATE app_transactions SET status = 'failed', previous_snapshot_json = ?1 WHERE id = ?2",
             params![previous.to_string(), transaction_id],
@@ -234,7 +257,7 @@ fn apply_one(
     db: &mut Database,
     op: &AppOperation,
     txn: &AppTransactionRecord,
-    bus: Option<&mut super::events::EventBus>,
+    deferred: &mut Vec<super::outbox::DeferredBusEffect>,
 ) -> Result<Option<SurfaceRecord>, String> {
     match op.op_type.as_str() {
         "chat.inline_surface_create" => {
@@ -314,8 +337,7 @@ fn apply_one(
                 if op.op_type == "component.replace" {
                     if let (Some(old), Some(id)) = (old_comp.as_ref(), cid) {
                         if let Some(new) = find_component_mut(&mut components, id) {
-                            let preserved =
-                                apply_preservation_on_replace(old, new, policy);
+                            let preserved = apply_preservation_on_replace(old, new, policy);
                             if !preserved {
                                 let _ = invalidate_component_live_state(db, sid, id);
                             } else {
@@ -444,32 +466,33 @@ fn apply_one(
                 .unwrap_or(false);
             let deleted = delete_surface(db, sid, DeleteSurfaceOptions { delete_linked_tool })
                 .map_err(|e| e.to_string())?;
-            if let Some(bus) = bus {
-                bus.remove_subscriptions_for_surface(sid);
-                let ev = super::events::SurfaceEvent {
-                    id: format!("evt-{}", Uuid::new_v4()),
-                    event_type: "surface.deleted".into(),
-                    scope: "surface".into(),
-                    source: super::events::EventRef {
-                        surface_id: Some(sid.into()),
-                        tool_id: deleted.tool_id.clone(),
-                        conversation_id: deleted
-                            .conversation_id
-                            .clone()
-                            .or_else(|| op.target.conversation_id.clone()),
-                        project_id: deleted
-                            .project_id
-                            .clone()
-                            .or_else(|| op.target.project_id.clone()),
-                        component_id: None,
-                    },
-                    target: Default::default(),
-                    payload: json!({ "surfaceId": sid }),
-                    idempotency_key: op.idempotency_key.clone(),
-                };
-                // Cross-window reconciliation: best-effort; do not fail the delete.
-                let _ = bus.dispatch(&ev, 0);
-            }
+            deferred.push(
+                super::outbox::DeferredBusEffect::RemoveSubscriptionsForSurface {
+                    surface_id: sid.into(),
+                },
+            );
+            let ev = super::events::SurfaceEvent {
+                id: format!("evt-{}", Uuid::new_v4()),
+                event_type: "surface.deleted".into(),
+                scope: "surface".into(),
+                source: super::events::EventRef {
+                    surface_id: Some(sid.into()),
+                    tool_id: deleted.tool_id.clone(),
+                    conversation_id: deleted
+                        .conversation_id
+                        .clone()
+                        .or_else(|| op.target.conversation_id.clone()),
+                    project_id: deleted
+                        .project_id
+                        .clone()
+                        .or_else(|| op.target.project_id.clone()),
+                    component_id: None,
+                },
+                target: Default::default(),
+                payload: json!({ "surfaceId": sid }),
+                idempotency_key: op.idempotency_key.clone(),
+            };
+            deferred.push(super::outbox::DeferredBusEffect::Dispatch(ev));
             Ok(Some(deleted))
         }
         "surface.archive" => {
@@ -583,10 +606,7 @@ fn apply_one(
                 target: target.clone(),
                 enabled: true,
             };
-            if let Some(bus) = bus {
-                bus.add_subscription(sub.clone())
-                    .map_err(|e| e.to_string())?;
-            }
+            deferred.push(super::outbox::DeferredBusEffect::AddSubscription(sub));
             db.conn()
                 .execute(
                     "INSERT OR REPLACE INTO surface_subscriptions (
@@ -614,9 +634,8 @@ fn apply_one(
                 db.conn()
                     .execute("DELETE FROM surface_subscriptions WHERE id = ?1", [sid])
                     .map_err(|e| e.to_string())?;
-                if let Some(bus) = bus {
-                    bus.remove_subscription(sid);
-                }
+                deferred
+                    .push(super::outbox::DeferredBusEffect::RemoveSubscription { id: sid.into() });
             } else {
                 let enabled = op
                     .payload
@@ -629,9 +648,10 @@ fn apply_one(
                         params![sid, if enabled { 1 } else { 0 }],
                     )
                     .map_err(|e| e.to_string())?;
-                if let Some(bus) = bus {
-                    bus.set_subscription_enabled(sid, enabled);
-                }
+                deferred.push(super::outbox::DeferredBusEffect::SetSubscriptionEnabled {
+                    id: sid.into(),
+                    enabled,
+                });
             }
             Ok(None)
         }
@@ -662,15 +682,13 @@ fn apply_one(
                 payload: op.payload.get("payload").cloned().unwrap_or(json!({})),
                 idempotency_key: op.idempotency_key.clone(),
             };
-            if let Some(bus) = bus {
-                let _matched = bus.dispatch(&ev, 0).map_err(|e| e.to_string())?;
-            }
+            deferred.push(super::outbox::DeferredBusEffect::Dispatch(ev.clone()));
             db.conn()
                 .execute(
                     "INSERT INTO surface_events (
                         id, source_json, target_json, scope, event_type, payload_json,
                         idempotency_key, status, created_at, processed_at
-                     ) VALUES (?1,?2,'{}',?3,?4,?5,?6,'processed',datetime('now'),datetime('now'))",
+                     ) VALUES (?1,?2,'{}',?3,?4,?5,?6,'pending',datetime('now'),NULL)",
                     params![
                         ev.id,
                         serde_json::to_string(&ev.source).unwrap_or_else(|_| "{}".into()),

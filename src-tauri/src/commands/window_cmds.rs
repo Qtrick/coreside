@@ -6,9 +6,7 @@ use super::CommandError;
 use crate::windows::{self, ExpandDirection, ExpansionDecision, OrchestratorInspect};
 
 #[tauri::command]
-pub fn window_orchestrator_inspect(
-    app: AppHandle,
-) -> Result<OrchestratorInspect, CommandError> {
+pub fn window_orchestrator_inspect(app: AppHandle) -> Result<OrchestratorInspect, CommandError> {
     windows::inspect(&app)
 }
 

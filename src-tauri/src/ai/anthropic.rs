@@ -61,6 +61,18 @@ impl AnthropicProvider {
             .header("Content-Type", "application/json")
     }
 
+    fn request_client(&self) -> Result<reqwest::Client, AiError> {
+        super::platform::validate_and_build_credential_client(
+            &self.base_url,
+            super::platform::EndpointClass::FixedTrustedRemote,
+            false,
+            false,
+            REQUEST_TIMEOUT,
+        )
+        .map(|(_, c)| c)
+        .map_err(|e| AiError::Validation(e.to_string()))
+    }
+
     fn build_body(system_prompt: &str, messages: &[AgentMessage], model: &str) -> Value {
         let api_messages: Vec<Value> = messages
             .iter()
@@ -80,8 +92,9 @@ impl AnthropicProvider {
         body: Value,
         cancel: CancellationToken,
     ) -> Result<Value, AiError> {
+        let client = self.request_client()?;
         let request = self
-            .auth_headers(self.client.post(self.messages_url()))
+            .auth_headers(client.post(self.messages_url()))
             .json(&body);
         let response = tokio::select! {
             _ = cancel.cancelled() => return Err(AiError::Cancelled),
@@ -516,8 +529,9 @@ impl AiProvider for AnthropicProvider {
             })
             .await;
 
+        let client = self.request_client()?;
         let http_req = self
-            .auth_headers(self.client.post(self.messages_url()))
+            .auth_headers(client.post(self.messages_url()))
             .json(&body);
         let response = tokio::select! {
             _ = request.cancel.cancelled() => {
@@ -596,9 +610,7 @@ impl AiProvider for AnthropicProvider {
             provider_id: self.provider_id().to_string(),
         };
         let _ = tx
-            .send(ProviderStreamEvent::TextCompleted {
-                text: raw_text,
-            })
+            .send(ProviderStreamEvent::TextCompleted { text: raw_text })
             .await;
         let _ = tx
             .send(ProviderStreamEvent::ResponseCompleted {

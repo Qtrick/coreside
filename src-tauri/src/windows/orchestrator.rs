@@ -8,9 +8,7 @@ use std::time::{Duration, Instant};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use tauri::{
-    AppHandle, LogicalPosition, LogicalSize, Manager, Position, Size, WebviewWindow,
-};
+use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Position, Size, WebviewWindow};
 use tokio_util::sync::CancellationToken;
 
 use crate::commands::CommandError;
@@ -293,9 +291,8 @@ pub fn compute_expansion(
 }
 
 fn main_window(app: &AppHandle) -> Result<WebviewWindow, CommandError> {
-    app.get_webview_window(MAIN_LABEL).ok_or_else(|| {
-        CommandError::new("window", "Main window is not available.")
-    })
+    app.get_webview_window(MAIN_LABEL)
+        .ok_or_else(|| CommandError::new("window", "Main window is not available."))
 }
 
 fn read_logical_outer(window: &WebviewWindow) -> Result<(WindowBounds, f64), CommandError> {
@@ -326,7 +323,10 @@ fn read_logical_outer(window: &WebviewWindow) -> Result<(WindowBounds, f64), Com
     ))
 }
 
-fn read_work_area_logical(window: &WebviewWindow, scale: f64) -> Result<WindowBounds, CommandError> {
+fn read_work_area_logical(
+    window: &WebviewWindow,
+    scale: f64,
+) -> Result<WindowBounds, CommandError> {
     let monitor = window
         .current_monitor()
         .map_err(|e| CommandError::new("window", format!("current_monitor failed: {e}")))?
@@ -389,7 +389,8 @@ fn begin_animation(app: AppHandle, from: WindowBounds, to: WindowBounds, reduced
                 RUNTIME.lock().animating = false;
                 return;
             };
-            chrome_delta_logical(&window, window.scale_factor().unwrap_or(1.0)).unwrap_or((0.0, 0.0))
+            chrome_delta_logical(&window, window.scale_factor().unwrap_or(1.0))
+                .unwrap_or((0.0, 0.0))
         };
 
         if reduced_motion {
@@ -551,7 +552,13 @@ pub fn restore(app: &AppHandle, reduced_motion: bool) -> Result<ExpansionDecisio
     let fullscreen = window.is_fullscreen().unwrap_or(false);
     let minimized = window.is_minimized().unwrap_or(false);
     let (from, scale) = read_logical_outer(&window)?;
-    let snapshot = { RUNTIME.lock().snapshot.as_ref().map(|s| (s.bounds, s.tool_id.clone())) };
+    let snapshot = {
+        RUNTIME
+            .lock()
+            .snapshot
+            .as_ref()
+            .map(|s| (s.bounds, s.tool_id.clone()))
+    };
 
     let Some((to, tool_id)) = snapshot else {
         return Ok(ExpansionDecision::NoOp {
@@ -670,8 +677,14 @@ mod tests {
     #[test]
     fn right_expansion_keeps_left_edge_when_space_allows() {
         let current = at(100.0, 80.0, 1000.0, 700.0);
-        let plan = compute_expansion(current, area(1920.0, 1080.0), 200.0, 0.0, ExpandDirection::Right)
-            .unwrap();
+        let plan = compute_expansion(
+            current,
+            area(1920.0, 1080.0),
+            200.0,
+            0.0,
+            ExpandDirection::Right,
+        )
+        .unwrap();
         assert_eq!(plan.direction, ExpandDirection::Right);
         assert!((plan.to.x - 100.0).abs() < 0.01);
         assert!((plan.to.width - 1200.0).abs() < 0.01);
@@ -683,8 +696,7 @@ mod tests {
         let work = area(1440.0, 900.0);
         let usable = work.inset(WORK_AREA_MARGIN);
         let current = at(usable.right() - 1000.0, 40.0, 1000.0, 700.0);
-        let plan =
-            compute_expansion(current, work, 300.0, 0.0, ExpandDirection::Right).unwrap();
+        let plan = compute_expansion(current, work, 300.0, 0.0, ExpandDirection::Right).unwrap();
         assert!(plan.to.right() <= usable.right() + 0.01);
         assert!(plan.to.x >= usable.x - 0.01);
         assert!(plan.to.width > current.width);
@@ -693,9 +705,14 @@ mod tests {
     #[test]
     fn balanced_grows_around_center() {
         let current = at(200.0, 100.0, 1000.0, 700.0);
-        let plan =
-            compute_expansion(current, area(1920.0, 1080.0), 200.0, 100.0, ExpandDirection::Balanced)
-                .unwrap();
+        let plan = compute_expansion(
+            current,
+            area(1920.0, 1080.0),
+            200.0,
+            100.0,
+            ExpandDirection::Balanced,
+        )
+        .unwrap();
         let cx = current.x + current.width / 2.0;
         let cy = current.y + current.height / 2.0;
         let nx = plan.to.x + plan.to.width / 2.0;
@@ -709,7 +726,8 @@ mod tests {
         let work = area(920.0, 620.0);
         let usable = work.inset(WORK_AREA_MARGIN);
         let current = at(usable.x, usable.y, usable.width, usable.height);
-        let err = compute_expansion(current, work, 100.0, 100.0, ExpandDirection::Right).unwrap_err();
+        let err =
+            compute_expansion(current, work, 100.0, 100.0, ExpandDirection::Right).unwrap_err();
         assert_eq!(err, "no_room_to_expand");
     }
 
@@ -729,9 +747,14 @@ mod tests {
     #[test]
     fn clamps_to_protected_minimum() {
         let current = at(50.0, 50.0, 800.0, 500.0);
-        let plan =
-            compute_expansion(current, area(1920.0, 1080.0), 50.0, 50.0, ExpandDirection::Right)
-                .unwrap();
+        let plan = compute_expansion(
+            current,
+            area(1920.0, 1080.0),
+            50.0,
+            50.0,
+            ExpandDirection::Right,
+        )
+        .unwrap();
         assert!(plan.to.width >= MIN_WIDTH - 0.01);
         assert!(plan.to.height >= MIN_HEIGHT - 0.01);
     }
@@ -739,9 +762,14 @@ mod tests {
     #[test]
     fn automatic_prefers_side_with_more_space() {
         let current = at(20.0, 40.0, 1000.0, 700.0);
-        let plan =
-            compute_expansion(current, area(1920.0, 1080.0), 200.0, 0.0, ExpandDirection::Automatic)
-                .unwrap();
+        let plan = compute_expansion(
+            current,
+            area(1920.0, 1080.0),
+            200.0,
+            0.0,
+            ExpandDirection::Automatic,
+        )
+        .unwrap();
         assert_eq!(plan.direction, ExpandDirection::Right);
     }
 }

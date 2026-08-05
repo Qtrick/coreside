@@ -6,9 +6,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::errors::AiError;
-use super::structured_user_input::{
-    flatten_parts_for_provider, AgentContentPart, AgentRole,
-};
+use super::structured_user_input::{flatten_parts_for_provider, AgentContentPart, AgentRole};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -259,11 +257,8 @@ mod tests {
             pending_approval: None,
         }];
         let envelope = seal_tool_result_envelope(&results);
-        let msg = AgentMessage::with_parts(
-            AgentRole::ToolResult,
-            "Tool results (1)",
-            vec![envelope],
-        );
+        let msg =
+            AgentMessage::with_parts(AgentRole::ToolResult, "Tool results (1)", vec![envelope]);
         let upstream = msg.tool_result_upstream_content();
         assert!(upstream.contains("untrusted_tool_output"));
         assert!(upstream.contains("envelopeHash"));

@@ -1,6 +1,7 @@
 //! Coreside Tauri library entrypoint.
 
 mod ai;
+mod app_paths;
 mod application_kernel;
 mod automations;
 mod branding;
@@ -8,15 +9,14 @@ mod commands;
 mod config;
 mod crawler;
 mod credentials;
-mod app_paths;
 mod db;
 mod exa;
 mod exports;
-mod media;
 mod maintenance;
 mod maintenance_journal;
-mod quiescence;
+mod media;
 mod projects;
+mod quiescence;
 mod research;
 mod runtime_v2;
 mod search;
@@ -33,8 +33,8 @@ use std::sync::Arc;
 
 use automations::SchedulerHandle;
 use state::AppState;
-use tauri::Manager;
 use tauri::http;
+use tauri::Manager;
 use tracing_subscriber::{fmt, EnvFilter};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

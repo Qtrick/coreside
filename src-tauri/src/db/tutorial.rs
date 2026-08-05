@@ -71,12 +71,17 @@ const PROGRESS_SELECT: &str = "SELECT tutorial_id, tutorial_version, status, cur
      FROM tutorial_progress";
 
 pub fn list_tutorial_progress(db: &Database) -> DbResult<Vec<TutorialProgress>> {
-    let mut stmt = db.conn().prepare(&format!("{PROGRESS_SELECT} ORDER BY tutorial_id"))?;
+    let mut stmt = db
+        .conn()
+        .prepare(&format!("{PROGRESS_SELECT} ORDER BY tutorial_id"))?;
     let rows = stmt.query_map([], map_progress_row)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
-pub fn get_tutorial_progress(db: &Database, tutorial_id: &str) -> DbResult<Option<TutorialProgress>> {
+pub fn get_tutorial_progress(
+    db: &Database,
+    tutorial_id: &str,
+) -> DbResult<Option<TutorialProgress>> {
     db.conn()
         .query_row(
             &format!("{PROGRESS_SELECT} WHERE tutorial_id = ?1"),
@@ -91,7 +96,9 @@ fn validate_status(status: &str) -> DbResult<()> {
     if VALID_STATUSES.contains(&status) {
         Ok(())
     } else {
-        Err(DbError::Invalid(format!("invalid tutorial status: {status}")))
+        Err(DbError::Invalid(format!(
+            "invalid tutorial status: {status}"
+        )))
     }
 }
 
@@ -111,14 +118,12 @@ pub fn upsert_tutorial_progress(
     validate_status(&input.status)?;
     let now = now_rfc3339();
     let existing = get_tutorial_progress(db, &input.tutorial_id)?;
-    let completed_ids = input
-        .completed_step_ids
-        .unwrap_or_else(|| {
-            existing
-                .as_ref()
-                .map(|e| e.completed_step_ids.clone())
-                .unwrap_or_default()
-        });
+    let completed_ids = input.completed_step_ids.unwrap_or_else(|| {
+        existing
+            .as_ref()
+            .map(|e| e.completed_step_ids.clone())
+            .unwrap_or_default()
+    });
     let completed_json = serde_json::to_string(&completed_ids)?;
 
     let started_at = match existing.as_ref().and_then(|e| e.started_at.clone()) {
@@ -205,9 +210,7 @@ pub fn welcome_eligible(
     // in_progress must not re-open Welcome — Continue lives in Help & learning.
     // Re-showing Welcome would let "Explore on my own" mark the tour skipped.
     match essentials_status {
-        Some("completed") | Some("skipped") | Some("superseded") | Some("in_progress") => {
-            false
-        }
+        Some("completed") | Some("skipped") | Some("superseded") | Some("in_progress") => false,
         _ => true,
     }
 }
@@ -245,10 +248,7 @@ pub fn has_meaningful_prior_activity(db: &Database) -> DbResult<bool> {
     Ok(tool_count > 0)
 }
 
-pub fn get_onboarding_state(
-    db: &Database,
-    is_secondary_window: bool,
-) -> DbResult<OnboardingState> {
+pub fn get_onboarding_state(db: &Database, is_secondary_window: bool) -> DbResult<OnboardingState> {
     let onboarding_disabled = onboarding_disabled_from_env();
     let recovery_mode = recovery::get_recovery_state(db)
         .map(|s| s.recovery_mode)
@@ -361,10 +361,7 @@ pub fn cleanup_tutorial_sample(db: &mut Database) -> DbResult<u64> {
         // Cascade deletes versions/state via FK when tools row is removed.
         let n = db
             .conn()
-            .execute(
-                "DELETE FROM tools WHERE id = ?1",
-                [TUTORIAL_SAMPLE_TOOL_ID],
-            )?;
+            .execute("DELETE FROM tools WHERE id = ?1", [TUTORIAL_SAMPLE_TOOL_ID])?;
         removed += n as u64;
     }
     Ok(removed)
@@ -410,10 +407,7 @@ mod tests {
                 tutorial_version: 1,
                 status: "completed".into(),
                 current_step_id: None,
-                completed_step_ids: Some(vec![
-                    "welcome".into(),
-                    "chat-composer".into(),
-                ]),
+                completed_step_ids: Some(vec!["welcome".into(), "chat-composer".into()]),
             },
         )
         .unwrap();
@@ -472,8 +466,20 @@ mod tests {
         assert!(!welcome_eligible(true, false, false, None, false));
         assert!(!welcome_eligible(false, true, false, None, false));
         assert!(!welcome_eligible(false, false, true, None, false));
-        assert!(!welcome_eligible(false, false, false, Some("completed"), false));
-        assert!(!welcome_eligible(false, false, false, Some("skipped"), false));
+        assert!(!welcome_eligible(
+            false,
+            false,
+            false,
+            Some("completed"),
+            false
+        ));
+        assert!(!welcome_eligible(
+            false,
+            false,
+            false,
+            Some("skipped"),
+            false
+        ));
         assert!(!welcome_eligible(false, false, false, None, true));
     }
 

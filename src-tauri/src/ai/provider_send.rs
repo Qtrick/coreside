@@ -45,9 +45,7 @@ pub fn validate_provider_send(provider_id: &str, messages: &[AgentMessage]) -> R
         }
     }
 
-    let has_tool_results = messages
-        .iter()
-        .any(|m| m.role == AgentRole::ToolResult);
+    let has_tool_results = messages.iter().any(|m| m.role == AgentRole::ToolResult);
     if has_tool_results && !profile.supports(CapabilityFlag::NativeToolResults) {
         let display = platform::descriptor_by_id(provider_id)
             .map(|d| d.display_name.to_string())

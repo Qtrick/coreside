@@ -23,6 +23,7 @@ const MAX_STREAM_TEXT_BYTES: usize = super::http_limits::MAX_PROVIDER_RESPONSE_B
 
 pub struct HostedAiProvider {
     publishable_key: String,
+    supabase_base: String,
     gateway_url: String,
     client: reqwest::Client,
 }
@@ -43,7 +44,7 @@ pub fn try_from_session() -> Result<Option<Arc<dyn AiProvider>>, AiError> {
 
 impl HostedAiProvider {
     pub fn new(publishable_key: String, supabase_url: String) -> Self {
-        let base = supabase_url.trim_end_matches('/');
+        let base = supabase_url.trim_end_matches('/').to_string();
         // Fail closed: never fall back to Client::new() (default follows redirects).
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
@@ -52,9 +53,22 @@ impl HostedAiProvider {
             .expect("reqwest Client");
         Self {
             publishable_key,
+            supabase_base: base.clone(),
             gateway_url: format!("{base}/functions/v1/ai-gateway"),
             client,
         }
+    }
+
+    fn request_client(&self) -> Result<reqwest::Client, AiError> {
+        super::platform::validate_and_build_credential_client(
+            &self.supabase_base,
+            super::platform::EndpointClass::HostedCoresideGateway,
+            false,
+            false,
+            REQUEST_TIMEOUT,
+        )
+        .map(|(_, c)| c)
+        .map_err(|e| AiError::Validation(e.to_string()))
     }
 
     async fn access_token(&self) -> Result<String, AiError> {
@@ -116,6 +130,8 @@ impl HostedAiProvider {
         if data.is_empty() {
             return Ok(false);
         }
+        // Gateway contract: `data: [DONE]` is emitted only after successful settlement.
+        // Treat it as the stream terminal; connection close should follow immediately.
         if data == "[DONE]" {
             return Ok(true);
         }
@@ -190,7 +206,8 @@ impl HostedAiProvider {
                         drop(stream);
                         return Err(AiError::Provider("stream body exceeded byte limit".into()));
                     }
-                    if buf.len().saturating_add(chunk.len()) > MAX_STREAM_TEXT_BYTES.saturating_mul(2)
+                    if buf.len().saturating_add(chunk.len())
+                        > MAX_STREAM_TEXT_BYTES.saturating_mul(2)
                     {
                         drop(stream);
                         return Err(AiError::Provider("stream body exceeded byte limit".into()));
@@ -225,9 +242,8 @@ impl HostedAiProvider {
         drop(stream);
         // Process final line without trailing newline.
         if !buf.is_empty() {
-            let line = std::str::from_utf8(&buf).map_err(|_| {
-                AiError::Parse("Coreside AI stream contained invalid UTF-8".into())
-            })?;
+            let line = std::str::from_utf8(&buf)
+                .map_err(|_| AiError::Parse("Coreside AI stream contained invalid UTF-8".into()))?;
             let trimmed = line.trim().trim_end_matches('\r');
             if let Some(data) = trimmed.strip_prefix("data:") {
                 if Self::handle_sse_data(data, &mut full_text, &mut events, tx, redact).await? {
@@ -250,8 +266,8 @@ impl HostedAiProvider {
         cancel: CancellationToken,
     ) -> Result<Value, AiError> {
         let access_token = self.access_token().await?;
-        let request = self
-            .client
+        let client = self.request_client()?;
+        let request = client
             .post(&self.gateway_url)
             .bearer_auth(access_token.trim())
             .header("apikey", self.publishable_key.trim())
@@ -310,8 +326,8 @@ impl HostedAiProvider {
         tx: &ProviderStreamTx,
     ) -> Result<String, AiError> {
         let access_token = self.access_token().await?;
-        let request = self
-            .client
+        let client = self.request_client()?;
+        let request = client
             .post(&self.gateway_url)
             .bearer_auth(access_token.trim())
             .header("apikey", self.publishable_key.trim())
@@ -371,9 +387,8 @@ impl HostedAiProvider {
                 Some(&access_token),
             )
             .await?;
-            let payload: Value = serde_json::from_str(&text).map_err(|e| {
-                AiError::Parse(format!("Invalid Coreside AI JSON: {e}"))
-            })?;
+            let payload: Value = serde_json::from_str(&text)
+                .map_err(|e| AiError::Parse(format!("Invalid Coreside AI JSON: {e}")))?;
             return Self::parse_completed_json(&payload);
         }
 
@@ -394,8 +409,8 @@ impl AiProvider for HostedAiProvider {
 
     async fn health_check(&self, cancel: CancellationToken) -> Result<ProviderHealth, AiError> {
         let access_token = self.access_token().await?;
-        let request = self
-            .client
+        let client = self.request_client()?;
+        let request = client
             .get(&self.gateway_url)
             .bearer_auth(access_token.trim())
             .header("apikey", self.publishable_key.trim())
@@ -475,9 +490,7 @@ impl AiProvider for HostedAiProvider {
             model: "auto".into(),
             provider_id: "coreside_hosted".into(),
         };
-        let _ = tx
-            .send(ProviderStreamEvent::TextCompleted { text })
-            .await;
+        let _ = tx.send(ProviderStreamEvent::TextCompleted { text }).await;
         let _ = tx
             .send(ProviderStreamEvent::ResponseCompleted {
                 response: response.clone(),
@@ -503,9 +516,7 @@ mod hosted_admission_tests {
     fn gateway_contract_documents_free_plan_production_defaults() {
         let contract: Value =
             serde_json::from_str(GATEWAY_CONTRACT).expect("gateway contract json");
-        let entitlements = contract
-            .get("entitlements")
-            .expect("entitlements section");
+        let entitlements = contract.get("entitlements").expect("entitlements section");
         assert_eq!(
             entitlements.get("defaultPlan").and_then(|v| v.as_str()),
             Some("free")
@@ -514,9 +525,7 @@ mod hosted_admission_tests {
             .get("productionDefaults")
             .expect("productionDefaults");
         assert_eq!(
-            defaults
-                .get("hosted_ai_enabled")
-                .and_then(|v| v.as_bool()),
+            defaults.get("hosted_ai_enabled").and_then(|v| v.as_bool()),
             Some(false)
         );
         assert_eq!(

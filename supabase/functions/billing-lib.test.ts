@@ -21,26 +21,40 @@ import {
 } from "./billing-lib.ts";
 
 describe("billing parseCheckoutBody", () => {
-  it("accepts personal and pro plans with logical destinations", () => {
-    expect(parseCheckoutBody({ planId: "personal" })).toEqual({
+  it("accepts personal and pro plans with monthly/annual intervals", () => {
+    expect(parseCheckoutBody({ planId: "personal", interval: "monthly" })).toEqual({
       planId: "personal",
+      interval: "monthly",
       successDestination: "settings",
       cancelDestination: "settings",
     });
-    expect(parseCheckoutBody({ planId: "PRO" })?.planId).toBe("pro");
+    expect(parseCheckoutBody({ planId: "PRO", interval: "annual" })?.planId).toBe("pro");
+    expect(parseCheckoutBody({ planId: "pro", interval: "ANNUAL" })?.interval).toBe(
+      "annual",
+    );
   });
 
-  it("rejects free and unknown plans", () => {
-    expect(parseCheckoutBody({ planId: "free" })).toBeNull();
-    expect(parseCheckoutBody({ planId: "enterprise" })).toBeNull();
+  it("rejects free, unknown plans, and missing interval", () => {
+    expect(parseCheckoutBody({ planId: "free", interval: "monthly" })).toBeNull();
+    expect(parseCheckoutBody({ planId: "enterprise", interval: "monthly" })).toBeNull();
+    expect(parseCheckoutBody({ planId: "personal" })).toBeNull();
+    expect(parseCheckoutBody({ planId: "personal", interval: "weekly" })).toBeNull();
   });
 
-  it("rejects arbitrary success/cancel URLs", () => {
+  it("rejects arbitrary success/cancel URLs and client price IDs", () => {
     expect(
       parseCheckoutBody({
         planId: "personal",
+        interval: "monthly",
         successUrl: "https://evil.example/phish",
         cancelUrl: "https://evil.example/phish",
+      }),
+    ).toBeNull();
+    expect(
+      parseCheckoutBody({
+        planId: "personal",
+        interval: "monthly",
+        priceId: "price_attacker",
       }),
     ).toBeNull();
   });
@@ -49,9 +63,69 @@ describe("billing parseCheckoutBody", () => {
     expect(
       parseCheckoutBody({
         planId: "personal",
+        interval: "monthly",
         successDestination: "javascript:alert(1)",
       }),
     ).toBeNull();
+  });
+
+  it("encodes exact annual and monthly catalog cents", async () => {
+    const { EXPECTED_PRICE_CENTS, CREDIT_MICRO_USD_PER_PERIOD } = await import(
+      "./billing-lib.ts"
+    );
+    expect(EXPECTED_PRICE_CENTS["personal:monthly"]).toBe(1999);
+    expect(EXPECTED_PRICE_CENTS["personal:annual"]).toBe(19188);
+    expect(EXPECTED_PRICE_CENTS["pro:monthly"]).toBe(4999);
+    expect(EXPECTED_PRICE_CENTS["pro:annual"]).toBe(49188);
+    expect(CREDIT_MICRO_USD_PER_PERIOD.personal).toBe(20_000_000);
+    expect(CREDIT_MICRO_USD_PER_PERIOD.pro).toBe(50_000_000);
+    // Superseded annual figures must not appear as active truth.
+    expect(Object.values(EXPECTED_PRICE_CENTS)).not.toContain(1699);
+    expect(Object.values(EXPECTED_PRICE_CENTS)).not.toContain(4199);
+  });
+
+  it("resolves env price IDs only for allowlisted plan+interval", async () => {
+    const {
+      resolveCheckoutPriceIdFromEnv,
+      expectedStripeRecurringInterval,
+      isSafeStripePriceId,
+    } = await import("./billing-lib.ts");
+    const env = {
+      get(key: string) {
+        const map: Record<string, string> = {
+          STRIPE_PRICE_PERSONAL_MONTHLY: "price_abc123",
+          STRIPE_PRICE_PRO_ANNUAL: "price_evil/../customers",
+        };
+        return map[key];
+      },
+    };
+    expect(resolveCheckoutPriceIdFromEnv("personal", "monthly", env)).toBe(
+      "price_abc123",
+    );
+    expect(resolveCheckoutPriceIdFromEnv("free", "monthly", env)).toBeNull();
+    expect(resolveCheckoutPriceIdFromEnv("pro", "annual", env)).toBeNull();
+    expect(isSafeStripePriceId("price_abc123")).toBe(true);
+    expect(isSafeStripePriceId("price_evil/../customers")).toBe(false);
+    expect(isSafeStripePriceId("price_has_underscore")).toBe(false);
+    expect(expectedStripeRecurringInterval("monthly")).toBe("month");
+    expect(expectedStripeRecurringInterval("annual")).toBe("year");
+    expect(expectedStripeRecurringInterval("weekly")).toBeNull();
+  });
+
+  it("maps allowlisted env price IDs back to plan ids", async () => {
+    const { planIdForAllowlistedPriceId } = await import("./billing-lib.ts");
+    const env = {
+      get(key: string) {
+        const map: Record<string, string> = {
+          STRIPE_PRICE_PERSONAL_MONTHLY: "price_personalM1",
+          STRIPE_PRICE_PRO_ANNUAL: "price_proA1",
+        };
+        return map[key];
+      },
+    };
+    expect(planIdForAllowlistedPriceId("price_personalM1", env)).toBe("personal");
+    expect(planIdForAllowlistedPriceId("price_proA1", env)).toBe("pro");
+    expect(planIdForAllowlistedPriceId("price_unknown", env)).toBeNull();
   });
 });
 

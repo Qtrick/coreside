@@ -14,25 +14,20 @@ use super::errors::ExaError;
 use super::models::{estimate_search_cost, ExaSearchRequest, ExaSearchResponse};
 use super::profiles::SearchProfile;
 
-const EXA_SEARCH_URL: &str = "https://api.exa.ai/search";
+const EXA_SEARCH_ORIGIN: &str = "https://api.exa.ai";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_RETRIES: u32 = 2;
 
-fn http_client() -> Result<&'static Client, ExaError> {
-    static CLIENT: OnceLock<Client> = OnceLock::new();
-    if let Some(c) = CLIENT.get() {
-        return Ok(c);
-    }
-    let built = Client::builder()
-        .timeout(REQUEST_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent("Coreside/0.1 (+https://coreside.local)")
-        .build()
-        .map_err(|e| ExaError::Other(e.to_string()))?;
-    let _ = CLIENT.set(built);
-    CLIENT
-        .get()
-        .ok_or_else(|| ExaError::Other("http client init failed".into()))
+fn credential_client() -> Result<Client, ExaError> {
+    crate::ai::platform::validate_and_build_credential_client(
+        EXA_SEARCH_ORIGIN,
+        crate::ai::platform::EndpointClass::FixedTrustedRemote,
+        false,
+        false,
+        REQUEST_TIMEOUT,
+    )
+    .map(|(_, client)| client)
+    .map_err(|e| ExaError::Other(e.to_string()))
 }
 
 fn shared_cache() -> &'static ExaSearchCache {
@@ -232,11 +227,12 @@ async fn search_http(
     api_key: &str,
     request: &ExaSearchRequest,
 ) -> Result<ExaSearchResponse, ExaError> {
-    let client = http_client()?;
+    let client = credential_client()?;
+    let search_url = format!("{EXA_SEARCH_ORIGIN}/search");
     let mut attempt = 0u32;
     loop {
         let fut = client
-            .post(EXA_SEARCH_URL)
+            .post(&search_url)
             .header("x-api-key", api_key)
             .header("content-type", "application/json")
             .json(request)

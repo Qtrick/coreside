@@ -4,8 +4,7 @@ use super::errors::MediaError;
 use crate::app_paths::AppPaths;
 
 pub fn media_root() -> Result<PathBuf, MediaError> {
-    let paths =
-        AppPaths::resolve().map_err(|e| MediaError::Storage(format!("app paths: {e}")))?;
+    let paths = AppPaths::resolve().map_err(|e| MediaError::Storage(format!("app paths: {e}")))?;
     Ok(paths.media)
 }
 
@@ -43,8 +42,8 @@ pub fn write_asset_bytes(local_filename: &str, bytes: &[u8]) -> Result<PathBuf, 
     let parent = path
         .parent()
         .ok_or_else(|| MediaError::Storage("invalid media destination".into()))?;
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)
-        .map_err(|e| MediaError::Storage(e.to_string()))?;
+    let mut tmp =
+        tempfile::NamedTempFile::new_in(parent).map_err(|e| MediaError::Storage(e.to_string()))?;
     use std::io::Write;
     tmp.write_all(bytes)
         .map_err(|e| MediaError::Storage(e.to_string()))?;

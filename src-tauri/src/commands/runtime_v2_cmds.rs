@@ -12,15 +12,14 @@ use crate::runtime_v2::{
     delete_snapshot, enqueue, flush_scheduler, get_continuity, get_draft, get_item,
     get_provider_profile, get_route_state, get_snapshot, get_surface, get_surface_state,
     get_transaction, list_branches, list_diagnostics, list_inline_surfaces, list_ledger_entries,
-    list_queue, list_snapshots, list_transactions, navigate_route, promote_inline_to_tool,
-    recover_stale_active,
-    remove_queued, save_continuity, save_draft, save_surface_state, schedule_and_apply,
-    schedule_patches, set_route_state, store_diagnostics, suspend_surface, undo_transaction,
-    update_surface_definition, AgentResponseV2, AppOperation, AppTransactionRecord, ApplyResult,
-    ChatBranchRecord, ContextLedgerEntry, ContinuitySnapshot, NavigateResult, PatchPriority,
-    ProviderConformanceRecord, QueueItem, RouteState, ScheduleRequest, ScheduledPatch,
-    SnapshotRecord, SurfaceDraft, SurfaceRecord, SuspensionState, TurnTimelineEvent,
-    list_turn_timeline_events,
+    list_queue, list_snapshots, list_transactions, list_turn_timeline_events, navigate_route,
+    promote_inline_to_tool, recover_stale_active, remove_queued, save_continuity, save_draft,
+    save_surface_state, schedule_and_apply, schedule_patches, set_route_state, store_diagnostics,
+    suspend_surface, undo_transaction, update_surface_definition, AgentResponseV2, AppOperation,
+    AppTransactionRecord, ApplyResult, ChatBranchRecord, ContextLedgerEntry, ContinuitySnapshot,
+    NavigateResult, PatchPriority, ProviderConformanceRecord, QueueItem, RouteState,
+    ScheduleRequest, ScheduledPatch, SnapshotRecord, SurfaceDraft, SurfaceRecord, SuspensionState,
+    TurnTimelineEvent,
 };
 use crate::state::AppState;
 use crate::windows;
@@ -107,11 +106,7 @@ pub fn get_surface_cmd(
     state.require_profile()?;
     let db = state.db.lock();
     let surface = get_surface(&db, &surface_id)?;
-    windows::enforce_caller_surface_scope(
-        &window,
-        surface.tool_id.as_deref(),
-        &surface.id,
-    )?;
+    windows::enforce_caller_surface_scope(&window, surface.tool_id.as_deref(), &surface.id)?;
     Ok(surface)
 }
 
@@ -194,11 +189,7 @@ pub fn save_surface_state_cmd(
     state.require_profile()?;
     let mut db = state.db.lock();
     let surface = get_surface(&db, &surface_id)?;
-    windows::enforce_caller_surface_scope(
-        &window,
-        surface.tool_id.as_deref(),
-        &surface.id,
-    )?;
+    windows::enforce_caller_surface_scope(&window, surface.tool_id.as_deref(), &surface.id)?;
     Ok(save_surface_state(&mut db, &surface_id, &state_json)?)
 }
 
@@ -211,11 +202,7 @@ pub fn get_surface_state_cmd(
     state.require_profile()?;
     let db = state.db.lock();
     let surface = get_surface(&db, &surface_id)?;
-    windows::enforce_caller_surface_scope(
-        &window,
-        surface.tool_id.as_deref(),
-        &surface.id,
-    )?;
+    windows::enforce_caller_surface_scope(&window, surface.tool_id.as_deref(), &surface.id)?;
     Ok(get_surface_state(&db, &surface_id)?)
 }
 
@@ -608,14 +595,26 @@ pub fn apply_operations_cmd(
         },
     )
     .map_err(|e| CommandError::new(e.category(), e.user_message()))?;
-    result.apply.ok_or_else(|| {
-        CommandError::new(
+    if result.is_committed() {
+        return result.apply.ok_or_else(|| {
+            CommandError::new("apply_failed", "Committed outcome missing apply payload")
+        });
+    }
+    if result.proposal_id.is_some() {
+        return Err(CommandError::new(
             "approval_required",
             result
                 .proposal_id
                 .unwrap_or_else(|| "Change requires approval".into()),
-        )
-    })
+        ));
+    }
+    if !result.conflicts.is_empty() {
+        return Err(CommandError::new("conflict", result.conflicts.join("; ")));
+    }
+    Err(CommandError::new(
+        "apply_failed",
+        format!("Change was not committed ({:?})", result.outcome),
+    ))
 }
 
 #[tauri::command]
@@ -749,12 +748,7 @@ pub fn enqueue_agent_turn_cmd(
 ) -> Result<QueueItem, CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
-    let item = enqueue(
-        &mut db,
-        &conversation_id,
-        &prompt,
-        priority.unwrap_or(100),
-    )?;
+    let item = enqueue(&mut db, &conversation_id, &prompt, priority.unwrap_or(100))?;
     drop(db);
     emit_queue_changed(
         state.inner(),
@@ -1024,15 +1018,13 @@ mod queue_event_tests {
         state.subscribe_queue("conv-a".into(), test_channel(hit_a.clone()));
         state.subscribe_queue("conv-b".into(), test_channel(hit_b.clone()));
 
-        emit_queue_changed(
-            &state,
-            QueueChangeKind::ItemAdded,
-            "conv-a",
-            Some("q-1"),
-        );
+        emit_queue_changed(&state, QueueChangeKind::ItemAdded, "conv-a", Some("q-1"));
 
         assert_eq!(hit_a.lock().as_slice(), &["conv-a".to_string()]);
-        assert!(hit_b.lock().is_empty(), "wrong conversation must get nothing");
+        assert!(
+            hit_b.lock().is_empty(),
+            "wrong conversation must get nothing"
+        );
     }
 
     #[test]
@@ -1045,12 +1037,7 @@ mod queue_event_tests {
         state.subscribe_queue("conv-a".into(), test_channel(first.clone()));
         state.subscribe_queue("conv-a".into(), test_channel(second.clone()));
 
-        emit_queue_changed(
-            &state,
-            QueueChangeKind::ItemAdded,
-            "conv-a",
-            Some("q-1"),
-        );
+        emit_queue_changed(&state, QueueChangeKind::ItemAdded, "conv-a", Some("q-1"));
 
         assert!(
             first.lock().is_empty(),
@@ -1073,28 +1060,24 @@ mod sync_event_tests {
     #[serde(tag = "kind", rename_all = "camelCase")]
     enum SyncWire {
         #[serde(rename_all = "camelCase")]
-        Sync {
-            conversation_id: Option<String>,
-        },
+        Sync { conversation_id: Option<String> },
         #[serde(rename_all = "camelCase")]
-        Conflict {
-            conversation_id: Option<String>,
-        },
+        Conflict { conversation_id: Option<String> },
     }
 
-    fn sync_test_channel(
-        sink: Arc<parking_lot::Mutex<Vec<String>>>,
-    ) -> Channel<SyncScopedEvent> {
+    fn sync_test_channel(sink: Arc<parking_lot::Mutex<Vec<String>>>) -> Channel<SyncScopedEvent> {
         Channel::new(move |body| {
             let InvokeResponseBody::Json(json) = body else {
                 return Ok(());
             };
             if let Ok(parsed) = serde_json::from_str::<SyncWire>(&json) {
                 let cid = match parsed {
-                    SyncWire::Sync { conversation_id, .. }
-                    | SyncWire::Conflict { conversation_id, .. } => {
-                        conversation_id.unwrap_or_default()
+                    SyncWire::Sync {
+                        conversation_id, ..
                     }
+                    | SyncWire::Conflict {
+                        conversation_id, ..
+                    } => conversation_id.unwrap_or_default(),
                 };
                 sink.lock().push(cid);
             }
@@ -1126,7 +1109,10 @@ mod sync_event_tests {
 
         assert_eq!(n, 1);
         assert_eq!(hit_a.lock().as_slice(), &["conv-a".to_string()]);
-        assert!(hit_b.lock().is_empty(), "wrong conversation must get nothing");
+        assert!(
+            hit_b.lock().is_empty(),
+            "wrong conversation must get nothing"
+        );
     }
 
     #[test]

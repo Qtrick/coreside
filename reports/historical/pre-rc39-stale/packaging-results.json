@@ -1,0 +1,24 @@
+{
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T04:20:22.561Z",
+  "rootsFound": 1,
+  "filesScanned": 12,
+  "findings": [],
+  "status": "passed",
+  "localMacosBuild": {
+    "status": "passed",
+    "assessedAt": "2026-08-01T23:28:41Z",
+    "artifacts": [
+      {
+        "path": "macos/Coreside.app",
+        "sizeApprox": "23M"
+      },
+      {
+        "path": "dmg/Coreside_0.1.0_aarch64.dmg",
+        "sizeApprox": "9.5M"
+      }
+    ],
+    "signing": "ad-hoc / unsigned CI path",
+    "e2eWebDriverInProductionBinary": "not detected in package:scan"
+  }
+}

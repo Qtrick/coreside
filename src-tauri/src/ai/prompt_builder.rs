@@ -85,7 +85,10 @@ pub fn prompt_integrity_report() -> PromptIntegrityReport {
         ("tool_builder.md", bundle.tool_builder.as_str()),
         ("tool_editor.md", bundle.tool_editor.as_str()),
         ("response_rules.md", bundle.response_rules.as_str()),
-        ("protected_resources.md", bundle.protected_resources.as_str()),
+        (
+            "protected_resources.md",
+            bundle.protected_resources.as_str(),
+        ),
     ]
     .into_iter()
     .map(|(name, body)| PromptIntegrityEntry {

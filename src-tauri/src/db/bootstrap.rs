@@ -63,26 +63,26 @@ pub(crate) fn classify_open_error(err: &DbError) -> (&'static str, String) {
             "Coreside could not finish updating local data. Your previous database was preserved when possible."
                 .into(),
         )
-    } else if lower.contains("permission") || lower.contains("read-only") || lower.contains("writable") {
+    } else if lower.contains("permission")
+        || lower.contains("read-only")
+        || lower.contains("writable")
+    {
         (
             "storage_unavailable",
-            "Coreside could not write to its application data folder."
-                .into(),
+            "Coreside could not write to its application data folder.".into(),
         )
     } else {
         (
             "database_unavailable",
-            "Coreside could not open local data. Recovery tools are available."
-                .into(),
+            "Coreside could not open local data. Recovery tools are available.".into(),
         )
     }
 }
 
 /// Path for the ephemeral shell database used only when the profile DB fails.
 pub fn shell_database_path() -> DbResult<PathBuf> {
-    let base = dirs::data_dir().ok_or_else(|| {
-        DbError::Invalid("Could not resolve application data directory".into())
-    })?;
+    let base = dirs::data_dir()
+        .ok_or_else(|| DbError::Invalid("Could not resolve application data directory".into()))?;
     let dir = product_data_dir(&base).join("recovery");
     std::fs::create_dir_all(&dir)
         .map_err(|e| DbError::Invalid(format!("Failed to create recovery directory: {e}")))?;

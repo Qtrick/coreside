@@ -44,7 +44,11 @@ pub fn map_image_part_to_openai_content(part: &AgentContentPart) -> Result<Value
             "skip image {attachment_id}: unsupported mime {mime_type}"
         ));
     }
-    let Some(b64) = data_base64.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+    let Some(b64) = data_base64
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    else {
         return Err(format!(
             "skip image {attachment_id}: no authorized bytes loaded (paths are never sent)"
         ));
@@ -144,13 +148,7 @@ impl OpenAiProvider {
     }
 
     pub fn new_compatible(api_key: String, model: String, base_url: String) -> Self {
-        Self::with_identity(
-            api_key,
-            model,
-            base_url,
-            "compatible",
-            "OpenAI-compatible",
-        )
+        Self::with_identity(api_key, model, base_url, "compatible", "OpenAI-compatible")
     }
 
     pub fn with_identity(
@@ -233,9 +231,7 @@ impl OpenAiProvider {
 
     async fn post_chat(&self, body: Value, cancel: CancellationToken) -> Result<Value, AiError> {
         let client = self.request_client()?;
-        let request = self
-            .auth_headers(client.post(self.chat_url()))
-            .json(&body);
+        let request = self.auth_headers(client.post(self.chat_url())).json(&body);
         let response = tokio::select! {
             _ = cancel.cancelled() => return Err(AiError::Cancelled),
             result = request.send() => {
@@ -392,7 +388,10 @@ impl OpenAiProvider {
             match next {
                 None => break,
                 Some(Err(e)) => {
-                    return Err(AiError::Http(redact_secrets(&e.to_string(), Some(&self.api_key))));
+                    return Err(AiError::Http(redact_secrets(
+                        &e.to_string(),
+                        Some(&self.api_key),
+                    )));
                 }
                 Some(Ok(chunk)) => {
                     if buf.len().saturating_add(chunk.len()) > MAX_STREAM_TEXT_BYTES {
@@ -575,9 +574,7 @@ impl AiProvider for OpenAiProvider {
             .await;
 
         let client = self.request_client()?;
-        let http_req = self
-            .auth_headers(client.post(self.chat_url()))
-            .json(&body);
+        let http_req = self.auth_headers(client.post(self.chat_url())).json(&body);
         let response = tokio::select! {
             _ = request.cancel.cancelled() => {
                 let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
@@ -655,9 +652,7 @@ impl AiProvider for OpenAiProvider {
             provider_id: self.provider_id().to_string(),
         };
         let _ = tx
-            .send(ProviderStreamEvent::TextCompleted {
-                text: raw_text,
-            })
+            .send(ProviderStreamEvent::TextCompleted { text: raw_text })
             .await;
         let _ = tx
             .send(ProviderStreamEvent::ResponseCompleted {
@@ -679,7 +674,10 @@ mod tests {
         let chunk = json!({
             "choices": [{ "delta": { "content": "Hel" } }]
         });
-        assert_eq!(OpenAiProvider::stream_delta_text(&chunk).as_deref(), Some("Hel"));
+        assert_eq!(
+            OpenAiProvider::stream_delta_text(&chunk).as_deref(),
+            Some("Hel")
+        );
         let empty = json!({ "choices": [{ "delta": {} }] });
         assert!(OpenAiProvider::stream_delta_text(&empty).is_none());
     }

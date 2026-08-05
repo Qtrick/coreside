@@ -63,7 +63,9 @@ impl MaintenanceJournal {
     pub fn touch_stage(&mut self, stage: MaintenanceStage) {
         if matches!(
             stage,
-            MaintenanceStage::Swapping | MaintenanceStage::Reopening | MaintenanceStage::Rehydrating
+            MaintenanceStage::Swapping
+                | MaintenanceStage::Reopening
+                | MaintenanceStage::Rehydrating
         ) {
             self.irreversible = true;
         }
@@ -158,7 +160,10 @@ fn path_is_under_managed_root(candidate: &Path, root: &Path) -> bool {
 }
 
 /// Validate journal path references stay inside AppPaths-managed roots.
-pub fn validate_journal_paths(journal: &MaintenanceJournal, paths: &AppPaths) -> Result<(), CommandError> {
+pub fn validate_journal_paths(
+    journal: &MaintenanceJournal,
+    paths: &AppPaths,
+) -> Result<(), CommandError> {
     for (label, value) in [
         ("source_profile", journal.source_profile.as_deref()),
         ("staged_profile", journal.staged_profile.as_deref()),
@@ -188,13 +193,15 @@ pub fn load_journal(paths: &AppPaths) -> Result<Option<MaintenanceJournal>, Comm
     if !path.exists() {
         return Ok(None);
     }
-    let bytes = fs::read(&path).map_err(|e| {
-        CommandError::new("storage", sanitize_error(&e.to_string(), None))
-    })?;
+    let bytes = fs::read(&path)
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
     let journal: MaintenanceJournal = serde_json::from_slice(&bytes).map_err(|e| {
         CommandError::new(
             "recovery_required",
-            format!("Unreadable maintenance journal: {}", sanitize_error(&e.to_string(), None)),
+            format!(
+                "Unreadable maintenance journal: {}",
+                sanitize_error(&e.to_string(), None)
+            ),
         )
     })?;
     if journal.schema_version == 0 || journal.schema_version > JOURNAL_SCHEMA_VERSION {
@@ -208,36 +215,31 @@ pub fn load_journal(paths: &AppPaths) -> Result<Option<MaintenanceJournal>, Comm
 }
 
 pub fn persist_journal(paths: &AppPaths, journal: &MaintenanceJournal) -> Result<(), CommandError> {
-    paths.ensure_dirs().map_err(|e| {
-        CommandError::new("storage", sanitize_error(&e.to_string(), None))
-    })?;
+    paths
+        .ensure_dirs()
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
     validate_journal_paths(journal, paths)?;
     let path = journal_path(paths);
     let tmp = path.with_extension("json.tmp");
-    let json = serde_json::to_vec_pretty(journal).map_err(|e| {
-        CommandError::new("storage", sanitize_error(&e.to_string(), None))
-    })?;
+    let json = serde_json::to_vec_pretty(journal)
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
     {
-        let mut f = fs::File::create(&tmp).map_err(|e| {
-            CommandError::new("storage", sanitize_error(&e.to_string(), None))
-        })?;
-        f.write_all(&json).map_err(|e| {
-            CommandError::new("storage", sanitize_error(&e.to_string(), None))
-        })?;
+        let mut f = fs::File::create(&tmp)
+            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+        f.write_all(&json)
+            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
         f.sync_all().ok();
     }
-    fs::rename(&tmp, &path).map_err(|e| {
-        CommandError::new("storage", sanitize_error(&e.to_string(), None))
-    })?;
+    fs::rename(&tmp, &path)
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
     Ok(())
 }
 
 pub fn clear_journal(paths: &AppPaths) -> Result<(), CommandError> {
     let path = journal_path(paths);
     if path.exists() {
-        fs::remove_file(&path).map_err(|e| {
-            CommandError::new("storage", sanitize_error(&e.to_string(), None))
-        })?;
+        fs::remove_file(&path)
+            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
     }
     let tmp = path.with_extension("json.tmp");
     let _ = fs::remove_file(tmp);
@@ -269,8 +271,13 @@ pub fn classify_unfinished_journal(journal: &MaintenanceJournal) -> JournalStart
         // Irreversible mid-swap: never auto-resume from detect-only startup.
         "swapping" | "reopening" | "rehydrating" => JournalStartupAction::EnterRecovery,
         "rolling-back" => JournalStartupAction::RollBack,
-        "preparing" | "cancelling-work" | "flushing" | "safety-backup" | "staging"
-        | "validating" | "awaiting-confirmation" => JournalStartupAction::RollBack,
+        "preparing"
+        | "cancelling-work"
+        | "flushing"
+        | "safety-backup"
+        | "staging"
+        | "validating"
+        | "awaiting-confirmation" => JournalStartupAction::RollBack,
         _ => JournalStartupAction::EnterRecovery,
     }
 }

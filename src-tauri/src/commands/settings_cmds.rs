@@ -442,8 +442,8 @@ pub fn set_workspace_appearance(
     // Validate all proposed writes before touching the DB.
     let mut pending: Vec<(String, String)> = Vec::new();
     if let Some(raw) = &input.wallpaper_json {
-        let (wallpaper_json, wallpaper) = resolve_wallpaper_pair(raw)
-            .map_err(|e| CommandError::new("invalid", e))?;
+        let (wallpaper_json, wallpaper) =
+            resolve_wallpaper_pair(raw).map_err(|e| CommandError::new("invalid", e))?;
         pending.push(("wallpaperJson".into(), wallpaper_json));
         pending.push(("wallpaper".into(), wallpaper));
     }
@@ -569,9 +569,10 @@ mod tests {
     fn wallpaper_pair_writes_atomically_in_transaction() {
         let dir = tempdir().unwrap();
         let mut db = db::Database::open_path(&dir.path().join("t.db")).unwrap();
-        let (wallpaper_json, wallpaper) =
-            resolve_wallpaper_pair(r#"{"schemaVersion":"1","type":"canvas-preset","preset":"matrix"}"#)
-                .unwrap();
+        let (wallpaper_json, wallpaper) = resolve_wallpaper_pair(
+            r#"{"schemaVersion":"1","type":"canvas-preset","preset":"matrix"}"#,
+        )
+        .unwrap();
 
         db.with_transaction(|conn| {
             db::set_setting_on_conn(conn, "wallpaperJson", &wallpaper_json)?;
@@ -593,10 +594,9 @@ mod tests {
 
     #[test]
     fn resolve_wallpaper_pair_rejects_invalid_schema() {
-        let err = resolve_wallpaper_pair(
-            r#"{"schemaVersion":"1","type":"not-a-real-wallpaper-type"}"#,
-        )
-        .unwrap_err();
+        let err =
+            resolve_wallpaper_pair(r#"{"schemaVersion":"1","type":"not-a-real-wallpaper-type"}"#)
+                .unwrap_err();
         assert!(!err.is_empty());
     }
 
@@ -612,4 +612,3 @@ mod tests {
         assert!(err.contains("schemaVersion") || err.contains("legacy kind"));
     }
 }
-

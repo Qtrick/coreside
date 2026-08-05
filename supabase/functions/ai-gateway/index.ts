@@ -320,6 +320,18 @@ Deno.serve(async (req) => {
   const profile = body.profile ?? "balanced";
   const maxTokens = resolveMaxTokens(profile, body.maxOutputTokens);
   const wantStream = body.stream !== false;
+  const upstreamAbort = new AbortController();
+  if (req.signal.aborted) {
+    await failHostedRequest(
+      adminClient,
+      user.id,
+      requestId,
+      body.idempotencyKey,
+      "client_aborted",
+    );
+    return consumerError("Coreside AI request failed", 499, origin);
+  }
+
   const upstream = await fetch(upstreamResolved.url, {
     method: "POST",
     headers: {
@@ -332,6 +344,7 @@ Deno.serve(async (req) => {
       max_tokens: maxTokens,
       stream: wantStream,
     }),
+    signal: upstreamAbort.signal,
   });
 
   if (!upstream.ok || !upstream.body) {
@@ -392,6 +405,8 @@ Deno.serve(async (req) => {
 
   const reader = upstream.body.getReader();
   const parser = new BoundedSseParser();
+  const sseEncoder = new TextEncoder();
+  const coresideDoneFrame = sseEncoder.encode("data: [DONE]\n\n");
   type TerminalState = "open" | "settled" | "failed";
   let terminal: TerminalState = "open";
 
@@ -428,45 +443,60 @@ Deno.serve(async (req) => {
     }
   };
 
-  if (req.signal.aborted) {
-    await failIfOpen("client_aborted");
-    return consumerError("Coreside AI request failed", 499, origin);
-  }
-  req.signal.addEventListener("abort", () => {
-    void failIfOpen("client_aborted");
-  });
+  const abortUpstream = () => {
+    upstreamAbort.abort();
+    void reader.cancel().catch(() => {
+      // Reader may already be closed.
+    });
+  };
+
+  req.signal.addEventListener(
+    "abort",
+    () => {
+      abortUpstream();
+      void failIfOpen("client_aborted");
+    },
+    { once: true },
+  );
 
   const stream = new ReadableStream({
     async start(controller) {
       try {
         while (true) {
           if (req.signal.aborted) {
+            abortUpstream();
             throw new Error("client_aborted");
           }
           const { done, value } = await reader.read();
           if (done) break;
           if (!value) continue;
+
           const feed = parser.feed(value);
-          controller.enqueue(value);
           if (!feed.ok) {
             throw new Error(feed.reason);
           }
-          if (feed.done) {
-            break;
+          for (const frame of feed.forwardFrames) {
+            controller.enqueue(sseEncoder.encode(frame));
           }
         }
+
         const finished = parser.finish();
         if (!finished.ok) {
           throw new Error(finished.reason);
         }
-        // Settle before closing so clients never observe success without
-        // durable settlement / reconciliation.
+        for (const frame of finished.forwardFrames) {
+          controller.enqueue(sseEncoder.encode(frame));
+        }
+
         await settleIfOpen(finished.text);
         if (terminal !== "settled") {
           throw new Error("settlement_failed");
         }
+
+        controller.enqueue(coresiteDoneFrame);
         controller.close();
       } catch {
+        abortUpstream();
         try {
           controller.error(new Error("stream_failed"));
         } catch {
@@ -484,6 +514,7 @@ Deno.serve(async (req) => {
       }
     },
     async cancel() {
+      abortUpstream();
       await failIfOpen("client_disconnected");
     },
   });

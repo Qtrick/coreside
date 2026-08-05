@@ -638,7 +638,10 @@ mod tests {
 
         let done = r#"{"type":"turn.completed","turn_id":"turn-4"}"#.to_string() + "\n";
         let after = ingest_live_chunk(&mut parser, &mut preview, &done);
-        assert!(after.is_empty(), "turn.completed must not fabricate op previews");
+        assert!(
+            after.is_empty(),
+            "turn.completed must not fabricate op previews"
+        );
         assert_eq!(preview.accepted_operations().len(), 1);
     }
 
@@ -712,7 +715,10 @@ mod tests {
         let mut preview = PreviewTransaction::new("turn-cancel", None);
         preview.seed_surface(seed_s1());
         assert!(preview.accept(sample_op("op-c")).is_ok());
-        assert!(preview.paint_op(&sample_op("op-c"), |_| None).unwrap().is_some());
+        assert!(preview
+            .paint_op(&sample_op("op-c"), |_| None)
+            .unwrap()
+            .is_some());
         assert!(!preview.surfaces.is_empty());
         assert!(!preview.is_empty());
 

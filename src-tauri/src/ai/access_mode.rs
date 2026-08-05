@@ -69,8 +69,8 @@ pub fn resolve_access_presentation(
     developer_mode: bool,
     is_local_endpoint: bool,
 ) -> AiAccessPresentation {
-    let authless_local_active = source == "connection"
-        && (is_local_endpoint || is_local_provider(provider));
+    let authless_local_active =
+        source == "connection" && (is_local_endpoint || is_local_provider(provider));
 
     // Hosted takes precedence only when a real adapter reports connected and
     // explicit authless Local AI is not the active connection route.
@@ -95,8 +95,8 @@ pub fn resolve_access_presentation(
         };
     }
 
-    let local_connection = source == "connection"
-        && (has_key || is_local_endpoint || is_local_provider(provider));
+    let local_connection =
+        source == "connection" && (has_key || is_local_endpoint || is_local_provider(provider));
 
     if local_connection {
         if is_local_endpoint || is_local_provider(provider) || !has_key {

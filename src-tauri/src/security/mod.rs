@@ -6,6 +6,18 @@ pub use protected_resources::{
     assert_not_protected, is_protected, list_protected_ids, PROTECTED_IDS,
 };
 
+/// Placeholder for `Debug` on secret-bearing fields.
+#[derive(Clone, Copy)]
+pub struct RedactedSecret;
+
+impl std::fmt::Debug for RedactedSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("[REDACTED]")
+    }
+}
+
+pub const REDACTED_SECRET: RedactedSecret = RedactedSecret;
+
 use once_cell::sync::Lazy;
 use regex::Regex;
 

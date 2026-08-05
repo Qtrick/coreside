@@ -1,11 +1,11 @@
 //! Resolve effective AI credentials: secure connection → .env fallback.
 
+use crate::ai::platform::{self, AuthMode};
 use crate::config::{
     self, AppConfig, DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_ANTHROPIC_MODEL, DEFAULT_GEMINI_BASE_URL,
     DEFAULT_GEMINI_MODEL, DEFAULT_OPENAI_BASE_URL, DEFAULT_OPENAI_MODEL,
     DEFAULT_OPENROUTER_BASE_URL, DEFAULT_OPENROUTER_MODEL,
 };
-use crate::ai::platform::{self, AuthMode};
 use crate::credentials::{self, CredentialError};
 use crate::db::{self, Database, ProviderConnection};
 
@@ -21,13 +21,22 @@ pub enum AiAccessRoute {
     Unavailable,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ResolvedAiAccess {
     pub credentials: ResolvedCredentials,
     pub route: AiAccessRoute,
 }
 
-#[derive(Debug, Clone)]
+impl std::fmt::Debug for ResolvedAiAccess {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedAiAccess")
+            .field("credentials", &self.credentials)
+            .field("route", &self.route)
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub struct ResolvedCredentials {
     pub provider: String,
     pub api_key: Option<String>,
@@ -38,6 +47,27 @@ pub struct ResolvedCredentials {
     pub env_path: Option<String>,
     /// Active BYOK row exists but the keyring secret is missing/invalid.
     pub missing_connection_secret: bool,
+}
+
+impl std::fmt::Debug for ResolvedCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedCredentials")
+            .field("provider", &self.provider)
+            .field(
+                "api_key",
+                &self
+                    .api_key
+                    .as_ref()
+                    .map(|_| crate::security::REDACTED_SECRET),
+            )
+            .field("model", &self.model)
+            .field("base_url", &self.base_url)
+            .field("source", &self.source)
+            .field("active_connection_id", &self.active_connection_id)
+            .field("env_path", &self.env_path)
+            .field("missing_connection_secret", &self.missing_connection_secret)
+            .finish()
+    }
 }
 
 impl ResolvedCredentials {
@@ -124,10 +154,7 @@ fn route_for_credentials(creds: &ResolvedCredentials) -> AiAccessRoute {
 pub fn resolve_ai_access(sources: &CredentialSources) -> ResolvedAiAccess {
     let credentials = resolve_from_sources(sources);
     let route = route_for_credentials(&credentials);
-    ResolvedAiAccess {
-        credentials,
-        route,
-    }
+    ResolvedAiAccess { credentials, route }
 }
 
 pub fn defaults_for(provider: &str) -> (String, String) {
@@ -722,11 +749,8 @@ mod tests {
             log_level: "info".into(),
             env_path: None,
         };
-        let resolved = resolve_from_sources_with(
-            &sources,
-            |_| Err(CredentialError::NotFound),
-            || env_cfg,
-        );
+        let resolved =
+            resolve_from_sources_with(&sources, |_| Err(CredentialError::NotFound), || env_cfg);
         assert_eq!(resolved.provider, "ollama");
         assert_eq!(resolved.access_route(), AiAccessRoute::LocalAuthless);
         assert_eq!(resolved.source, "connection");
@@ -796,10 +820,8 @@ mod tests {
     #[test]
     fn byok_connection_route_is_user_byok_not_hosted() {
         let conn = sample_conn("byok-1", "openai", true);
-        let secrets = HashMap::from([(
-            account_for_connection("byok-1"),
-            "sk-byok-key".to_string(),
-        )]);
+        let secrets =
+            HashMap::from([(account_for_connection("byok-1"), "sk-byok-key".to_string())]);
         let resolved = from_connection_with_secret(&conn, |account| {
             secrets
                 .get(account)
@@ -885,5 +907,26 @@ mod tests {
         assert_eq!(resolved.access_route(), AiAccessRoute::Unavailable);
         assert_ne!(resolved.provider, "coreside_hosted");
         assert!(!resolved.has_api_key());
+    }
+
+    #[test]
+    fn debug_does_not_leak_api_key() {
+        let creds = ResolvedCredentials {
+            provider: "openai".into(),
+            api_key: Some("sentinel-api-key-xyz".into()),
+            model: "gpt-4".into(),
+            base_url: "https://api.openai.com/v1".into(),
+            source: "env".into(),
+            active_connection_id: None,
+            env_path: None,
+            missing_connection_secret: false,
+        };
+        let access = ResolvedAiAccess {
+            credentials: creds,
+            route: AiAccessRoute::DeveloperEnv,
+        };
+        let debug = format!("{access:?}");
+        assert!(!debug.contains("sentinel-api-key-xyz"));
+        assert!(debug.contains("[REDACTED]"));
     }
 }

@@ -1,11 +1,11 @@
 //! SQLite database access for Coreside.
 
-pub mod bootstrap;
 pub mod backup;
-pub mod profile_archive;
+pub mod bootstrap;
 pub mod health;
 #[cfg(test)]
 mod migration_fixtures;
+pub mod profile_archive;
 mod repositories;
 mod tutorial;
 
@@ -106,10 +106,14 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         "020_context_ledger_isolation",
         include_str!("../../migrations/020_context_ledger_isolation.sql"),
     ),
+    (
+        "021_atomic_commit_outbox",
+        include_str!("../../migrations/021_atomic_commit_outbox.sql"),
+    ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "020_context_ledger_isolation";
+pub const LATEST_MIGRATION: &str = "021_atomic_commit_outbox";
 
 #[derive(Debug, Error)]
 pub enum DbError {

@@ -204,7 +204,11 @@ pub fn validate_image_part_for_provider_send(part: &AgentContentPart) -> Result<
             "unsupported mime {mime_type} for attachment {attachment_id}"
         ));
     }
-    let Some(b64) = data_base64.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+    let Some(b64) = data_base64
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    else {
         return Err(format!(
             "no authorized bytes loaded for attachment {attachment_id} (paths are never sent)"
         ));
@@ -361,8 +365,7 @@ pub fn seal_from_ledger_payload(
 /// Provider-facing text summary for BYOK adapters that lack native structured parts.
 /// Trust / eligibility remain on the typed part — this string is transport only.
 pub fn provider_text_summary(input: &StructuredUserInput) -> String {
-    let fields_json =
-        serde_json::to_string(&input.fields).unwrap_or_else(|_| "{}".to_string());
+    let fields_json = serde_json::to_string(&input.fields).unwrap_or_else(|_| "{}".to_string());
     format!(
         "Structured user input (typed; trust=local_user_gesture; eligibility=local_user_content)\n\
          submissionId={}\nformId={}\nconversationId={}\ncontentHash={}\n\
@@ -647,10 +650,16 @@ mod tests {
             }
             _ => panic!("expected Image part"),
         }
-        assert!(validate_provider_image_bytes("image/png", &vec![0u8; MAX_PROVIDER_IMAGE_BYTES + 1]).is_err());
+        assert!(validate_provider_image_bytes(
+            "image/png",
+            &vec![0u8; MAX_PROVIDER_IMAGE_BYTES + 1]
+        )
+        .is_err());
         assert!(validate_provider_image_bytes("text/plain", png).is_err());
         let flat = flatten_parts_for_provider(&[image_part_from_authorized_bytes(
-            "att-1", "image/png", png,
+            "att-1",
+            "image/png",
+            png,
         )
         .unwrap()]);
         assert!(flat.contains("attachmentId=att-1"));

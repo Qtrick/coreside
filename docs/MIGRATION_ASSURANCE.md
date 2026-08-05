@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 20 forward migrations (001–020; includes `020_context_ledger_isolation.sql`)
+**Count:** 21 forward migrations (001–021; includes `021_atomic_commit_outbox.sql`)
 
 ## Inventory
 
@@ -28,6 +28,7 @@
 | 018 | `018_turn_timeline_events.sql` | Turn timeline / inspector event storage |
 | 019 | `019_provider_platform.sql` | Provider platform metadata columns (non-secret) |
 | 020 | `020_context_ledger_isolation.sql` | Context ledger consume/isolation columns and indexes |
+| 021 | `021_atomic_commit_outbox.sql` | Commit event outbox, apply idempotency, turn journal, conversation event log |
 
 ## What is verified
 
@@ -70,4 +71,4 @@ Fixtures are built programmatically (no committed user databases):
 
 ## Honest assessment
 
-Forward migrations are fixture-tested for common upgrade stops (006, 011–015) and fresh installs through `020_context_ledger_isolation`. Large-volume and export-after-upgrade assurance remain open.
+Forward migrations are fixture-tested for common upgrade stops (006, 011–015) and fresh installs through `021_atomic_commit_outbox`. Large-volume and export-after-upgrade assurance remain open.

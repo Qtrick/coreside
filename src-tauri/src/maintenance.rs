@@ -101,17 +101,26 @@ impl MaintenanceMode {
         Ok(id)
     }
 
-    pub fn set_stage(&mut self, operation_id: &str, stage: MaintenanceStage) -> Result<(), CommandError> {
+    pub fn set_stage(
+        &mut self,
+        operation_id: &str,
+        stage: MaintenanceStage,
+    ) -> Result<(), CommandError> {
         let op = self
             .active
             .as_mut()
             .ok_or_else(|| CommandError::new("invalid", "No maintenance operation is active."))?;
         if op.id != operation_id {
-            return Err(CommandError::new("invalid", "Maintenance operation id mismatch."));
+            return Err(CommandError::new(
+                "invalid",
+                "Maintenance operation id mismatch.",
+            ));
         }
         if matches!(
             stage,
-            MaintenanceStage::Swapping | MaintenanceStage::Reopening | MaintenanceStage::Rehydrating
+            MaintenanceStage::Swapping
+                | MaintenanceStage::Reopening
+                | MaintenanceStage::Rehydrating
         ) {
             op.irreversible = true;
         }
@@ -119,13 +128,20 @@ impl MaintenanceMode {
         Ok(())
     }
 
-    pub fn fail(&mut self, operation_id: &str, safe_error: impl Into<String>) -> Result<(), CommandError> {
+    pub fn fail(
+        &mut self,
+        operation_id: &str,
+        safe_error: impl Into<String>,
+    ) -> Result<(), CommandError> {
         let op = self
             .active
             .as_mut()
             .ok_or_else(|| CommandError::new("invalid", "No maintenance operation is active."))?;
         if op.id != operation_id {
-            return Err(CommandError::new("invalid", "Maintenance operation id mismatch."));
+            return Err(CommandError::new(
+                "invalid",
+                "Maintenance operation id mismatch.",
+            ));
         }
         op.stage = MaintenanceStage::Failed;
         op.safe_error = Some(safe_error.into());
@@ -138,7 +154,10 @@ impl MaintenanceMode {
                 self.active = None;
                 Ok(())
             }
-            Some(_) => Err(CommandError::new("invalid", "Maintenance operation id mismatch.")),
+            Some(_) => Err(CommandError::new(
+                "invalid",
+                "Maintenance operation id mismatch.",
+            )),
             None => Ok(()),
         }
     }

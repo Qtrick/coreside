@@ -67,10 +67,8 @@ pub fn append_turn_timeline_event(
     let sequence = next_sequence(db, conversation_id, turn_id)?;
     let id = format!("tle-{}", Uuid::new_v4());
     let now = now_rfc3339();
-    let payload_json =
-        crate::security::redact_secrets(&redacted_payload.to_string(), None);
-    let stored_payload: Value =
-        serde_json::from_str(&payload_json).unwrap_or_else(|_| json!({}));
+    let payload_json = crate::security::redact_secrets(&redacted_payload.to_string(), None);
+    let stored_payload: Value = serde_json::from_str(&payload_json).unwrap_or_else(|_| json!({}));
     db.conn().execute(
         "INSERT INTO turn_timeline_events (
             id, conversation_id, turn_id, sequence, kind, redacted_payload_json, created_at
@@ -104,13 +102,9 @@ pub fn try_append_turn_timeline_event(
     kind: &str,
     redacted_payload: Value,
 ) {
-    if let Err(err) = append_turn_timeline_event(
-        db,
-        conversation_id,
-        turn_id,
-        kind,
-        &redacted_payload,
-    ) {
+    if let Err(err) =
+        append_turn_timeline_event(db, conversation_id, turn_id, kind, &redacted_payload)
+    {
         tracing::debug!(
             error = %err,
             conversation_id,
@@ -199,14 +193,7 @@ mod tests {
             &json!({ "summary": "Applied change" }),
         )
         .unwrap();
-        append_turn_timeline_event(
-            &db,
-            "c1",
-            "turn-1",
-            "completion",
-            &json!({}),
-        )
-        .unwrap();
+        append_turn_timeline_event(&db, "c1", "turn-1", "completion", &json!({})).unwrap();
         append_turn_timeline_event(
             &db,
             "c1",
@@ -237,7 +224,8 @@ mod tests {
                 [crate::db::DEFAULT_WORKSPACE_ID],
             )
             .unwrap();
-        let err = append_turn_timeline_event(&db, "c1", "t1", "raw_provider", &json!({})).unwrap_err();
+        let err =
+            append_turn_timeline_event(&db, "c1", "t1", "raw_provider", &json!({})).unwrap_err();
         assert!(matches!(err, DbError::Invalid(_)));
     }
 
@@ -264,6 +252,9 @@ mod tests {
             !stored.contains("sk-abcdefghijklmnopqrstuvwxyz0123456789"),
             "raw key must not persist: {stored}"
         );
-        assert!(stored.contains("[REDACTED]"), "expected redaction marker: {stored}");
+        assert!(
+            stored.contains("[REDACTED]"),
+            "expected redaction marker: {stored}"
+        );
     }
 }

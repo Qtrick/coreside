@@ -6,9 +6,8 @@
 fn main() {
     println!("cargo:rerun-if-changed=commands.list");
     println!("cargo:rerun-if-changed=permissions");
-    tauri_build::try_build(
-        tauri_build::Attributes::new().app_manifest(
-            tauri_build::AppManifest::new().commands(&[
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
             "activate_next_queue_cmd",
             "append_context_ledger_cmd",
             "apply_operations_cmd",
@@ -230,9 +229,8 @@ fn main() {
             "window_orchestrator_cancel",
             "window_orchestrator_expand",
             "window_orchestrator_inspect",
-            "window_orchestrator_restore"
-            ]),
-        ),
-    )
+            "window_orchestrator_restore",
+        ]),
+    ))
     .expect("failed to run tauri-build with AppManifest");
 }

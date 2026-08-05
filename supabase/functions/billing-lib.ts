@@ -1,12 +1,28 @@
 /** Shared billing + Stripe webhook helpers (Edge Function scaffolding). */
 
 export const BILLING_PLAN_IDS = new Set(["personal", "pro"]);
+export const BILLING_INTERVALS = new Set(["monthly", "annual"]);
 
 /** Logical in-app destinations only — never accept arbitrary client URLs. */
 export const BILLING_DESTINATIONS = new Set(["settings", "billing"]);
 
+/** Expected Stripe unit amounts (cents). Annual display ≠ monthly×12 intentionally. */
+export const EXPECTED_PRICE_CENTS: Record<string, number> = {
+  "personal:monthly": 1999,
+  "personal:annual": 19188,
+  "pro:monthly": 4999,
+  "pro:annual": 49188,
+};
+
+/** Micro-USD (1 USD = 1_000_000). Included hosted AI credits per monthly benefit period. */
+export const CREDIT_MICRO_USD_PER_PERIOD: Record<string, number> = {
+  personal: 20_000_000,
+  pro: 50_000_000,
+};
+
 export interface CheckoutBody {
   planId: string;
+  interval: string;
   successDestination: string;
   cancelDestination: string;
 }
@@ -18,8 +34,16 @@ export function parseCheckoutBody(raw: unknown): CheckoutBody | null {
   const planId = body.planId.trim().toLowerCase();
   if (!BILLING_PLAN_IDS.has(planId)) return null;
 
+  if (typeof body.interval !== "string") return null;
+  const interval = body.interval.trim().toLowerCase();
+  if (!BILLING_INTERVALS.has(interval)) return null;
+
   // Reject legacy arbitrary URL fields — open-redirect surface.
   if (body.successUrl !== undefined || body.cancelUrl !== undefined) {
+    return null;
+  }
+  // Desktop must never choose an arbitrary Stripe Price ID.
+  if (body.priceId !== undefined || body.stripePriceId !== undefined) {
     return null;
   }
 
@@ -33,7 +57,70 @@ export function parseCheckoutBody(raw: unknown): CheckoutBody | null {
   );
   if (!successDestination || !cancelDestination) return null;
 
-  return { planId, successDestination, cancelDestination };
+  return { planId, interval, successDestination, cancelDestination };
+}
+
+export function checkoutVariantKey(planId: string, interval: string): string {
+  return `${planId}:${interval}`;
+}
+
+/** Stripe Price IDs only — rejects path/query injection into `/v1/prices/{id}`. */
+const SAFE_STRIPE_PRICE_ID = /^price_[A-Za-z0-9]+$/;
+
+export function isSafeStripePriceId(value: string): boolean {
+  return SAFE_STRIPE_PRICE_ID.test(value);
+}
+
+/**
+ * Resolve Stripe Price ID from server env only.
+ * Keys: STRIPE_PRICE_PERSONAL_MONTHLY, STRIPE_PRICE_PERSONAL_ANNUAL,
+ *       STRIPE_PRICE_PRO_MONTHLY, STRIPE_PRICE_PRO_ANNUAL.
+ */
+export function resolveCheckoutPriceIdFromEnv(
+  planId: string,
+  interval: string,
+  env: { get(key: string): string | undefined } = Deno.env,
+): string | null {
+  if (!BILLING_PLAN_IDS.has(planId) || !BILLING_INTERVALS.has(interval)) {
+    return null;
+  }
+  const key = `STRIPE_PRICE_${planId.toUpperCase()}_${interval.toUpperCase()}`;
+  const value = env.get(key)?.trim();
+  if (!value || !isSafeStripePriceId(value)) return null;
+  return value;
+}
+
+export function expectedPriceCents(planId: string, interval: string): number | null {
+  const cents = EXPECTED_PRICE_CENTS[checkoutVariantKey(planId, interval)];
+  return typeof cents === "number" ? cents : null;
+}
+
+/** Maps Coreside checkout interval → Stripe Price `recurring.interval`. */
+export function expectedStripeRecurringInterval(
+  interval: string,
+): "month" | "year" | null {
+  if (interval === "monthly") return "month";
+  if (interval === "annual") return "year";
+  return null;
+}
+
+/**
+ * Map a Stripe Price ID back to an allowlisted plan via server env.
+ * Prefer this over catalog columns so checkout + webhook share one source of truth.
+ */
+export function planIdForAllowlistedPriceId(
+  priceId: string,
+  env: { get(key: string): string | undefined } = Deno.env,
+): string | null {
+  if (!isSafeStripePriceId(priceId)) return null;
+  for (const planId of BILLING_PLAN_IDS) {
+    for (const interval of BILLING_INTERVALS) {
+      if (resolveCheckoutPriceIdFromEnv(planId, interval, env) === priceId) {
+        return planId;
+      }
+    }
+  }
+  return null;
 }
 
 export interface PortalBody {
@@ -416,6 +503,7 @@ export function shouldProcessStripeEventType(eventType: string): boolean {
 export interface CheckoutSessionParams {
   userId: string;
   planId: string;
+  interval?: string;
   priceId: string;
   successUrl: string;
   cancelUrl: string;
@@ -433,6 +521,9 @@ export function buildStripeCheckoutSessionBody(
   body.set("metadata[user_id]", params.userId);
   body.set("metadata[plan_id]", params.planId);
   body.set("metadata[price_id]", params.priceId);
+  if (params.interval) {
+    body.set("metadata[interval]", params.interval);
+  }
   body.set("success_url", params.successUrl);
   body.set("cancel_url", params.cancelUrl);
   if (params.customerId) {

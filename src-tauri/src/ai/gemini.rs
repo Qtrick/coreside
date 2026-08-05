@@ -57,6 +57,18 @@ impl GeminiProvider {
         format!("{}/models", self.base_url)
     }
 
+    fn request_client(&self) -> Result<reqwest::Client, AiError> {
+        super::platform::validate_and_build_credential_client(
+            &self.base_url,
+            super::platform::EndpointClass::FixedTrustedRemote,
+            false,
+            false,
+            REQUEST_TIMEOUT,
+        )
+        .map(|(_, c)| c)
+        .map_err(|e| AiError::Validation(e.to_string()))
+    }
+
     fn response_schema() -> Value {
         // Keep this conservative: Gemini rejects many OpenAPI features
         // (`nullable`, complex `anyOf`) which previously caused opaque 400s.
@@ -225,8 +237,8 @@ impl GeminiProvider {
         cancel: CancellationToken,
     ) -> Result<Value, AiError> {
         let url = self.generate_url();
-        let request = self
-            .client
+        let client = self.request_client()?;
+        let request = client
             .post(&url)
             .header("x-goog-api-key", &self.api_key)
             .header("Content-Type", "application/json")
@@ -530,8 +542,8 @@ impl AiProvider for GeminiProvider {
     async fn health_check(&self, cancel: CancellationToken) -> Result<ProviderHealth, AiError> {
         // Prefer listing models; fall back to a minimal generate.
         let list_url = self.list_models_url();
-        let list_req = self
-            .client
+        let client = self.request_client()?;
+        let list_req = client
             .get(&list_url)
             .header("x-goog-api-key", &self.api_key)
             .timeout(Duration::from_secs(20));
@@ -678,9 +690,9 @@ impl AiProvider for GeminiProvider {
             .await;
 
         let url = self.stream_generate_url();
+        let client = self.request_client()?;
         let response = {
-            let http_req = self
-                .client
+            let http_req = client
                 .post(&url)
                 .header("x-goog-api-key", &self.api_key)
                 .header("Content-Type", "application/json")
@@ -739,8 +751,7 @@ impl AiProvider for GeminiProvider {
                         obj.remove("responseSchema");
                     }
                 }
-                let retry_req = self
-                    .client
+                let retry_req = client
                     .post(&url)
                     .header("x-goog-api-key", &self.api_key)
                     .header("Content-Type", "application/json")
@@ -823,9 +834,7 @@ impl AiProvider for GeminiProvider {
             provider_id: self.provider_id().to_string(),
         };
         let _ = tx
-            .send(ProviderStreamEvent::TextCompleted {
-                text: raw_text,
-            })
+            .send(ProviderStreamEvent::TextCompleted { text: raw_text })
             .await;
         let _ = tx
             .send(ProviderStreamEvent::ResponseCompleted {

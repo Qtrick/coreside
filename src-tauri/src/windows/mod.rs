@@ -182,9 +182,7 @@ pub fn cancel_animation() -> Result<(), CommandError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        is_safe_tool_window_id, surface_allowed_for_bound_tool, TOOL_WINDOW_PREFIX,
-    };
+    use super::{is_safe_tool_window_id, surface_allowed_for_bound_tool, TOOL_WINDOW_PREFIX};
 
     #[test]
     fn tool_window_ids_reject_path_and_empty() {
@@ -219,13 +217,13 @@ mod tests {
             "surf-notes"
         ));
         assert!(surface_allowed_for_bound_tool("notes", None, "surf-notes"));
-        assert!(!surface_allowed_for_bound_tool(
-            "notes",
-            None,
-            "surf-other"
-        ));
+        assert!(!surface_allowed_for_bound_tool("notes", None, "surf-other"));
         assert!(!surface_allowed_for_bound_tool("", None, "surf-"));
         assert!(!surface_allowed_for_bound_tool("../x", None, "surf-../x"));
-        assert!(!surface_allowed_for_bound_tool("bad/id", Some("bad/id"), "x"));
+        assert!(!surface_allowed_for_bound_tool(
+            "bad/id",
+            Some("bad/id"),
+            "x"
+        ));
     }
 }

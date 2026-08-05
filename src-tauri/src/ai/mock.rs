@@ -480,9 +480,7 @@ impl MockAiProvider {
             provider_id: "mock".into(),
         };
         let _ = tx
-            .send(ProviderStreamEvent::TextCompleted {
-                text: raw.clone(),
-            })
+            .send(ProviderStreamEvent::TextCompleted { text: raw.clone() })
             .await;
         let _ = tx
             .send(ProviderStreamEvent::ResponseCompleted {

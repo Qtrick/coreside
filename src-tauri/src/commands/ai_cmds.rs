@@ -41,9 +41,7 @@ pub fn get_ai_status(state: State<'_, AppState>) -> PublicAiStatus {
             model: "none".into(),
             key_detected: false,
             status: "database_unavailable".into(),
-            message: Some(
-                "Coreside needs Recovery before AI status is available.".into(),
-            ),
+            message: Some("Coreside needs Recovery before AI status is available.".into()),
             base_url: String::new(),
             env_path: None,
             source: "none".into(),
@@ -73,8 +71,8 @@ pub fn get_ai_status(state: State<'_, AppState>) -> PublicAiStatus {
     let hosted_connected = sources.hosted_adapter_connected();
 
     let has_key = resolved.has_api_key();
-    let is_local =
-        resolved.is_authless_local() || crate::credentials::is_authless_local_provider(&resolved.provider);
+    let is_local = resolved.is_authless_local()
+        || crate::credentials::is_authless_local_provider(&resolved.provider);
     let presentation = crate::ai::resolve_access_presentation(
         &resolved.source,
         &resolved.provider,

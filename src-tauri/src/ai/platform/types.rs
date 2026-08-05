@@ -203,10 +203,7 @@ impl CapabilityProfile {
             .filter(|f| other.flags.contains(f))
             .collect();
         let confidence = min_confidence(self.confidence, other.confidence);
-        Self {
-            flags,
-            confidence,
-        }
+        Self { flags, confidence }
     }
 }
 

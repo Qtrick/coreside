@@ -29,8 +29,7 @@ impl Database {
         }
         // Validate snapshot independently.
         dest_conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        let quick: String =
-            dest_conn.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+        let quick: String = dest_conn.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
         if quick != "ok" {
             let _ = std::fs::remove_file(dest);
             return Err(DbError::Invalid(format!(

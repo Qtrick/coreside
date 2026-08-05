@@ -167,25 +167,43 @@ describe("ai-gateway upstream URL registry", () => {
 describe("BoundedSseParser fragmented fixtures", () => {
   it("reassembles deltas split across chunk boundaries", () => {
     const parser = new BoundedSseParser();
-    expect(parser.feed('data: {"choices":[{"delta":{"content":"hel').ok).toBe(
-      true,
-    );
+    const first = parser.feed('data: {"choices":[{"delta":{"content":"hel');
+    expect(first.ok).toBe(true);
+    if (first.ok) {
+      expect(first.forwardFrames).toEqual([]);
+    }
     const mid = parser.feed('lo"}}]}\n\n');
     expect(mid.ok).toBe(true);
-    if (mid.ok) expect(mid.text).toBe("hello");
+    if (mid.ok) {
+      expect(mid.text).toBe("hello");
+      expect(mid.forwardFrames).toHaveLength(1);
+      expect(mid.forwardFrames[0]).toContain('"hello"');
+    }
     const done = parser.feed("data: [DONE]\n\n");
-    expect(done).toEqual({ ok: true, done: true, text: "hello" });
-    expect(parser.finish()).toEqual({ ok: true, done: true, text: "hello" });
+    expect(done).toEqual({
+      ok: true,
+      done: true,
+      text: "hello",
+      forwardFrames: [],
+    });
+    expect(parser.upstreamTerminalSeen).toBe(true);
+    expect(parser.finish()).toEqual({
+      ok: true,
+      done: true,
+      text: "hello",
+      forwardFrames: [],
+    });
   });
 
-  it("handles CRLF, comments, and multiline data", () => {
+  it("handles CRLF and SSE comments", () => {
     const parser = new BoundedSseParser();
     parser.feed(": OPENROUTER PROCESSING\r\n");
     parser.feed('data: {"choices":[{"delta":{"content":"a"}}]}\r\n\r\n');
-    parser.feed("data: line1\n");
-    parser.feed("data: line2\n\n");
     const done = parser.feed("data: [DONE]\r\n\r\n");
     expect(done.ok && done.done).toBe(true);
+    if (done.ok) {
+      expect(done.forwardFrames).toEqual([]);
+    }
     expect(parser.assistantText).toBe("a");
   });
 
@@ -210,5 +228,112 @@ describe("BoundedSseParser fragmented fixtures", () => {
     expect(parser.feed('data: {"choices":[{"delta":{"content":"c"}}]}\n\n')).toEqual(
       { ok: false, reason: "event_count_exceeded" },
     );
+  });
+
+  it("decodes UTF-8 split across chunk boundaries", () => {
+    const parser = new BoundedSseParser();
+    const emoji = "😀";
+    const bytes = new TextEncoder().encode(
+      `data: {"choices":[{"delta":{"content":"${emoji}"}}]}\n\n`,
+    );
+    const split = Math.max(1, Math.floor(bytes.length / 2));
+    const first = parser.feed(bytes.slice(0, split));
+    const second = parser.feed(bytes.slice(split));
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    if (second.ok) expect(second.text).toBe(emoji);
+    const done = parser.feed(new TextEncoder().encode("data: [DONE]\n\n"));
+    expect(done.ok && done.done).toBe(true);
+    expect(parser.assistantText).toBe(emoji);
+  });
+
+  it("rejects invalid UTF-8 byte sequences", () => {
+    const parser = new BoundedSseParser();
+    const invalid = new Uint8Array([0xff, 0xfe, 0x80]);
+    expect(parser.feed(invalid)).toEqual({ ok: false, reason: "invalid_utf8" });
+  });
+
+  it("fails closed on malformed JSON before assistant output", () => {
+    const parser = new BoundedSseParser();
+    expect(parser.feed("data: {not-json}\n\n")).toEqual({
+      ok: false,
+      reason: "malformed_json",
+    });
+  });
+
+  it("fails closed on malformed JSON after assistant output", () => {
+    const parser = new BoundedSseParser();
+    parser.feed('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n');
+    expect(parser.feed("data: not-json\n\n")).toEqual({
+      ok: false,
+      reason: "malformed_json",
+    });
+  });
+
+  it("rejects trailing events in the same chunk after upstream terminal", () => {
+    const parser = new BoundedSseParser();
+    const result = parser.feed(
+      'data: [DONE]\n\ndata: {"choices":[{"delta":{"content":"late"}}]}\n\n',
+    );
+    expect(result).toEqual({ ok: false, reason: "data_after_terminal" });
+  });
+
+  it("rejects duplicate terminal events", () => {
+    const parser = new BoundedSseParser();
+    parser.feed("data: [DONE]\n\n");
+    expect(parser.feed("data: [DONE]\n\n")).toEqual({
+      ok: false,
+      reason: "data_after_terminal",
+    });
+  });
+
+  it("rejects output after upstream terminal", () => {
+    const parser = new BoundedSseParser();
+    parser.feed('data: {"choices":[{"delta":{"content":"x"}}]}\n\n');
+    parser.feed("data: [DONE]\n\n");
+    expect(
+      parser.feed('data: {"choices":[{"delta":{"content":"late"}}]}\n\n'),
+    ).toEqual({ ok: false, reason: "data_after_terminal" });
+  });
+
+  it("detects upstream done without client-forwardable [DONE] frame", () => {
+    const parser = new BoundedSseParser();
+    const result = parser.feed("data: [DONE]\n\n");
+    expect(result.ok && result.done).toBe(true);
+    if (result.ok) {
+      expect(result.forwardFrames).toEqual([]);
+      expect(result.forwardFrames.some((f) => f.includes("[DONE]"))).toBe(
+        false,
+      );
+    }
+    expect(parser.upstreamTerminalSeen).toBe(true);
+  });
+
+  it("tracks raw bytes from Uint8Array chunks without re-encoding", () => {
+    const parser = new BoundedSseParser({ maxRawBytes: 10 });
+    const chunk = new Uint8Array(11);
+    expect(parser.feed(chunk)).toEqual({ ok: false, reason: "raw_bytes_exceeded" });
+  });
+
+  it("splits CRLF across chunk boundaries", () => {
+    const parser = new BoundedSseParser();
+    parser.feed('data: {"choices":[{"delta":{"content":"a"}}]}\r');
+    const result = parser.feed('\n\r\ndata: [DONE]\r\n\r\n');
+    expect(result.ok && result.done).toBe(true);
+    expect(parser.assistantText).toBe("a");
+  });
+});
+
+describe("BoundedSseParser settlement ordering", () => {
+  it("requires upstream terminal before finish succeeds (settle gate)", () => {
+    const parser = new BoundedSseParser();
+    parser.feed('data: {"choices":[{"delta":{"content":"billable"}}]}\n\n');
+    expect(parser.finish()).toEqual({ ok: false, reason: "eof_without_done" });
+    expect(parser.completed).toBe(false);
+
+    const terminal = parser.feed("data: [DONE]\n\n");
+    expect(terminal.ok && terminal.done).toBe(true);
+    expect(parser.completed).toBe(true);
+    expect(parser.finish().ok).toBe(true);
   });
 });

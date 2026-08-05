@@ -4,20 +4,15 @@
 //! `role=tool` + `tool_call_id` with sealed JSON envelope content — never flattened
 //! into user text.
 
-use sha2::{Digest, Sha256};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use super::openai::map_image_part_to_openai_content;
 use super::provider::AgentMessage;
-use super::structured_user_input::{
-    flatten_parts_for_provider, AgentContentPart, AgentRole,
-};
+use super::structured_user_input::{flatten_parts_for_provider, AgentContentPart, AgentRole};
 
 /// Build OpenAI-compatible chat `messages` array including system prompt.
-pub fn build_openai_chat_messages(
-    system_prompt: &str,
-    messages: &[AgentMessage],
-) -> Vec<Value> {
+pub fn build_openai_chat_messages(system_prompt: &str, messages: &[AgentMessage]) -> Vec<Value> {
     let mut out = vec![json!({
         "role": "system",
         "content": system_prompt
@@ -47,7 +42,8 @@ fn is_trusted_openai_tool_call_id(id: &str) -> bool {
     if id.is_empty() || id.len() > MAX_OPENAI_TOOL_CALL_ID_LEN {
         return false;
     }
-    id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    id.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 /// Native Chat Completions tool result — envelope JSON in `content`, not user flatten.
@@ -146,9 +142,7 @@ fn text_parts_for_openai_family(parts: &[AgentContentPart]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::capability_registry::{
-        seal_tool_result_envelope, ToolCallResult,
-    };
+    use crate::ai::capability_registry::{seal_tool_result_envelope, ToolCallResult};
     use crate::ai::structured_user_input::image_part_from_authorized_bytes;
 
     #[test]
@@ -161,11 +155,8 @@ mod tests {
             pending_approval: None,
         }];
         let envelope = seal_tool_result_envelope(&results);
-        let msg = AgentMessage::with_parts(
-            AgentRole::ToolResult,
-            "Tool results (1)",
-            vec![envelope],
-        );
+        let msg =
+            AgentMessage::with_parts(AgentRole::ToolResult, "Tool results (1)", vec![envelope]);
         let mut msg = msg;
         msg.tool_call_id = Some("call_web_search_1".into());
         let mapped = openai_family_message_json(&msg);
@@ -218,7 +209,9 @@ mod tests {
         );
         let mapped = openai_family_message_json(&msg);
         assert_eq!(mapped["role"], "tool");
-        assert!(mapped["tool_call_id"].as_str().is_some_and(|id| id.starts_with("coreside-")));
+        assert!(mapped["tool_call_id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("coreside-")));
         assert!(mapped.get("name").is_none());
         assert_eq!(
             mapped["content"].as_str(),
@@ -237,11 +230,8 @@ mod tests {
             pending_approval: None,
         }];
         let envelope = seal_tool_result_envelope(&results);
-        let msg = AgentMessage::with_parts(
-            AgentRole::ToolResult,
-            "Tool results (1)",
-            vec![envelope],
-        );
+        let msg =
+            AgentMessage::with_parts(AgentRole::ToolResult, "Tool results (1)", vec![envelope]);
         let mut msg = msg;
         msg.tool_call_id = Some("call_inject\"; DROP TABLE--".into());
         let mapped = openai_family_message_json(&msg);
@@ -263,11 +253,8 @@ mod tests {
             pending_approval: None,
         }];
         let envelope = seal_tool_result_envelope(&results);
-        let msg = AgentMessage::with_parts(
-            AgentRole::ToolResult,
-            "Tool results (1)",
-            vec![envelope],
-        );
+        let msg =
+            AgentMessage::with_parts(AgentRole::ToolResult, "Tool results (1)", vec![envelope]);
         let a = openai_family_message_json(&msg);
         let b = openai_family_message_json(&msg);
         assert_eq!(a["tool_call_id"], b["tool_call_id"]);
@@ -288,7 +275,10 @@ mod tests {
         let system_json = openai_family_message_json(&system);
         assert_eq!(system_json["role"], "system");
         assert!(system_json.get("name").is_none());
-        assert_eq!(system_json["content"].as_str(), Some("Follow safety rules."));
+        assert_eq!(
+            system_json["content"].as_str(),
+            Some("Follow safety rules.")
+        );
     }
 
     #[test]
@@ -339,7 +329,11 @@ mod tests {
         assert!(content.is_array());
         let arr = content.as_array().unwrap();
         assert!(arr.iter().any(|p| {
-            p["type"] == "text" && p["text"].as_str().unwrap_or("").contains("not sent to model")
+            p["type"] == "text"
+                && p["text"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("not sent to model")
         }));
     }
 }

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T22:04:41.474Z",
+  "generatedAtLocal": "Tue Aug 04 2026 18:04:41 GMT-0400 (Eastern Daylight Time)",
+  "timezone": "America/New_York",
+  "commit": "2b502278ede0d0db57fe16f77ef1e282a92fd0d1",
+  "dirty": true,
+  "sourceFingerprint": "f5922bfb542f59b2bab4cbe3e14f217219527b0dc4c5ed5aff45d3e93de3579f",
+  "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "exitStatus": "not_run",
+  "evidenceLevel": "Absent",
+  "currentOrHistorical": "historical",
+  "historicalNote": "RC3.6 archive 724cd17c; suite not re-run on current tree. Absent until Desktop/Packaged gates execute.",
+  "archiveExpectedSha256": "724cd17ca7249f5fd94b5711d840b8bb1cc6ffaccec14559e85d1f0e93836c7a",
+  "command": "release:evidence",
+  "status": "historical",
+  "gates": [],
+  "summary": {
+    "notRun": 0,
+    "passed": 0,
+    "failed": 0
+  }
+}

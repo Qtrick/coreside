@@ -121,7 +121,11 @@ pub fn map_image_part_to_anthropic_block(part: &AgentContentPart) -> Result<Valu
             "skip image {attachment_id}: unsupported mime {mime_type}"
         ));
     }
-    let Some(b64) = data_base64.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+    let Some(b64) = data_base64
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    else {
         return Err(format!(
             "skip image {attachment_id}: no authorized bytes loaded (paths are never sent)"
         ));
@@ -164,11 +168,8 @@ mod tests {
             pending_approval: None,
         }];
         let envelope = seal_tool_result_envelope(&results);
-        let msg = AgentMessage::with_parts(
-            AgentRole::ToolResult,
-            "Tool results (1)",
-            vec![envelope],
-        );
+        let msg =
+            AgentMessage::with_parts(AgentRole::ToolResult, "Tool results (1)", vec![envelope]);
         let mapped = anthropic_message_json(&msg);
         assert_eq!(mapped["role"], "user");
         let blocks = mapped["content"].as_array().expect("multipart content");
@@ -202,11 +203,15 @@ mod tests {
         let content = anthropic_message_content(&msg);
         let blocks = content.as_array().expect("multipart");
         assert!(blocks.iter().any(|b| b["type"] == "image"));
-        assert!(blocks.iter().any(|b| {
-            b.pointer("/source/type").and_then(|v| v.as_str()) == Some("base64")
-        }));
+        assert!(blocks
+            .iter()
+            .any(|b| { b.pointer("/source/type").and_then(|v| v.as_str()) == Some("base64") }));
         assert!(!blocks.iter().any(|b| {
-            b["type"] == "text" && b["text"].as_str().unwrap_or("").contains("[image attachmentId=")
+            b["type"] == "text"
+                && b["text"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("[image attachmentId=")
         }));
     }
 

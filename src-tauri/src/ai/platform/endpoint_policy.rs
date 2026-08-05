@@ -284,12 +284,8 @@ pub fn validate_and_build_credential_client(
     is_override: bool,
     timeout: std::time::Duration,
 ) -> Result<(EndpointValidation, reqwest::Client), EndpointPolicyError> {
-    let validation = classify_and_validate_endpoint(
-        raw_url,
-        endpoint_class,
-        allows_override,
-        is_override,
-    )?;
+    let validation =
+        classify_and_validate_endpoint(raw_url, endpoint_class, allows_override, is_override)?;
     let client = build_redirect_free_pinned_client(&validation, timeout)?;
     Ok((validation, client))
 }
@@ -548,7 +544,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(v.pinned_addrs.len(), 1);
-        assert_eq!(v.pinned_addrs[0].ip(), IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)));
+        assert_eq!(
+            v.pinned_addrs[0].ip(),
+            IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))
+        );
     }
 
     #[test]
@@ -595,19 +594,20 @@ mod tests {
 
     #[test]
     fn documentation_range_blocked() {
-        assert!(is_blocked_destination_ip(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))));
-        assert!(is_blocked_destination_ip(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1))));
-        assert!(is_blocked_destination_ip(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 1))));
+        assert!(is_blocked_destination_ip(IpAddr::V4(Ipv4Addr::new(
+            192, 0, 2, 1
+        ))));
+        assert!(is_blocked_destination_ip(IpAddr::V4(Ipv4Addr::new(
+            198, 51, 100, 1
+        ))));
+        assert!(is_blocked_destination_ip(IpAddr::V4(Ipv4Addr::new(
+            203, 0, 113, 1
+        ))));
     }
 
     #[test]
     fn link_local_ipv6_blocked() {
-        let addr = SocketAddr::V6(SocketAddrV6::new(
-            "fe80::1".parse().unwrap(),
-            443,
-            0,
-            0,
-        ));
+        let addr = SocketAddr::V6(SocketAddrV6::new("fe80::1".parse().unwrap(), 443, 0, 0));
         let resolve = move |_h: &str, _p: u16| Ok(vec![addr]);
         let err = classify_and_validate_endpoint_with_resolver(
             "https://ll.example/v1",

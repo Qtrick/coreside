@@ -214,8 +214,7 @@ pub async fn chat_with_auto(
         };
 
         on_action("Generating a response");
-        match chat_stream_with_rate_limit_retry(provider.as_ref(), &attempt, &mut on_stream).await
-        {
+        match chat_stream_with_rate_limit_retry(provider.as_ref(), &attempt, &mut on_stream).await {
             Ok((response, streamed_live)) => {
                 on_action("Reading the response");
                 return Ok(ResolvedChat {
@@ -509,9 +508,7 @@ mod tests {
                 provider_id: self.provider_id().to_string(),
             };
             let _ = tx
-                .send(ProviderStreamEvent::TextCompleted {
-                    text: raw.into(),
-                })
+                .send(ProviderStreamEvent::TextCompleted { text: raw.into() })
                 .await;
             let _ = tx
                 .send(ProviderStreamEvent::ResponseCompleted {
@@ -537,9 +534,7 @@ mod tests {
 
         let started = std::time::Instant::now();
         let mut first_delta_at = None;
-        let join = tokio::spawn(async move {
-            provider.chat_stream(request, tx).await
-        });
+        let join = tokio::spawn(async move { provider.chat_stream(request, tx).await });
 
         while let Some(ev) = rx.recv().await {
             if matches!(ev, ProviderStreamEvent::TextDelta { .. }) && first_delta_at.is_none() {
@@ -619,16 +614,11 @@ mod tests {
             idempotency_key: Some("k-fail".into()),
         };
         let mut saw_delta = false;
-        let result = run_chat_stream(
-            &provider,
-            &request,
-            "k-fail",
-            &mut |ev| {
-                if matches!(ev, ProviderStreamEvent::TextDelta { .. }) {
-                    saw_delta = true;
-                }
-            },
-        )
+        let result = run_chat_stream(&provider, &request, "k-fail", &mut |ev| {
+            if matches!(ev, ProviderStreamEvent::TextDelta { .. }) {
+                saw_delta = true;
+            }
+        })
         .await;
         assert!(saw_delta, "expected TextDelta before failure");
         match result {

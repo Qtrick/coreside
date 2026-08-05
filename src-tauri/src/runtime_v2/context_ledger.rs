@@ -96,7 +96,9 @@ fn validate_append_bounds(
     summary: &str,
 ) -> DbResult<()> {
     if conversation_id.trim().is_empty() || conversation_id.len() > MAX_LEDGER_CONVERSATION_ID_LEN {
-        return Err(DbError::Invalid("invalid conversation id for ledger".into()));
+        return Err(DbError::Invalid(
+            "invalid conversation id for ledger".into(),
+        ));
     }
     if let Some(pid) = project_id {
         if pid.trim().is_empty() || pid.len() > MAX_LEDGER_PROJECT_ID_LEN {
@@ -117,7 +119,9 @@ fn validate_append_bounds(
     if summary.chars().count() > MAX_LEDGER_SUMMARY_CHARS {
         return Err(DbError::Invalid("ledger summary too long".into()));
     }
-    let payload_bytes = serde_json::to_vec(payload).map(|b| b.len()).unwrap_or(usize::MAX);
+    let payload_bytes = serde_json::to_vec(payload)
+        .map(|b| b.len())
+        .unwrap_or(usize::MAX);
     if payload_bytes > MAX_LEDGER_PAYLOAD_BYTES {
         return Err(DbError::Invalid(format!(
             "ledger payload too large: max {MAX_LEDGER_PAYLOAD_BYTES} bytes"
@@ -458,9 +462,15 @@ mod tests {
         )
         .unwrap();
 
-        let on_b1 =
-            list_ledger_entries_for_inject(&db, "conv-1", Some("proj-a"), Some("branch-1"), 10, true)
-                .unwrap();
+        let on_b1 = list_ledger_entries_for_inject(
+            &db,
+            "conv-1",
+            Some("proj-a"),
+            Some("branch-1"),
+            10,
+            true,
+        )
+        .unwrap();
         assert_eq!(on_b1.len(), 2);
         assert!(on_b1.iter().any(|e| e.summary == "b1"));
         assert!(on_b1.iter().any(|e| e.summary == "global"));

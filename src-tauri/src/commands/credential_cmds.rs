@@ -111,8 +111,7 @@ fn build_probe_config(
     if desc
         .as_ref()
         .map(|d| {
-            d.endpoint_class
-                == crate::ai::platform::EndpointClass::UserConfiguredRemoteCompatible
+            d.endpoint_class == crate::ai::platform::EndpointClass::UserConfiguredRemoteCompatible
         })
         .unwrap_or(false)
         && base_url.trim().is_empty()
@@ -154,10 +153,7 @@ fn access_from_probe_config(config: &AppConfig) -> ResolvedAiAccess {
         missing_connection_secret: false,
     };
     let route = credentials.access_route();
-    ResolvedAiAccess {
-        credentials,
-        route,
-    }
+    ResolvedAiAccess { credentials, route }
 }
 
 async fn health_check_key(config: &AppConfig) -> Result<(), CommandError> {
@@ -249,7 +245,10 @@ pub async fn upsert_provider_connection(
     };
 
     let descriptor = crate::ai::platform::descriptor_by_id(&provider).ok_or_else(|| {
-        CommandError::new("invalid", format!("Unknown provider descriptor '{provider}'"))
+        CommandError::new(
+            "invalid",
+            format!("Unknown provider descriptor '{provider}'"),
+        )
     })?;
     let auth_mode = descriptor.default_auth_mode;
     let endpoint_class = descriptor.endpoint_class;
@@ -260,7 +259,10 @@ pub async fn upsert_provider_connection(
         .or_else(|| descriptor.default_endpoint.map(|s| s.to_string()));
 
     if let Some(ref url) = resolved_base {
-        let is_override = descriptor.default_endpoint.map(|d| d != url.as_str()).unwrap_or(true);
+        let is_override = descriptor
+            .default_endpoint
+            .map(|d| d != url.as_str())
+            .unwrap_or(true);
         crate::ai::platform::classify_and_validate_endpoint(
             url,
             endpoint_class,
@@ -491,10 +493,7 @@ pub async fn test_provider_connection(
             let credentials = credentials::resolve_connection_secret(&conn)
                 .map_err(|e| CommandError::new("not_found", sanitize_error(&e, None)))?;
             let route = credentials.access_route();
-            ResolvedAiAccess {
-                credentials,
-                route,
-            }
+            ResolvedAiAccess { credentials, route }
         }
         Lookup::Effective(sources) => credentials::resolve_ai_access(&sources),
     };

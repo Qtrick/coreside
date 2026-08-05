@@ -11,12 +11,12 @@ use uuid::Uuid;
 use super::CommandError;
 use crate::ai::{
     adopt_stored_structured_input, build_agent_prompt_with_references, build_user_parts,
-    chat_with_auto, is_allowed_setting_key, parse_agent_response, project_context_for_prompt,
-    seal_from_ledger_payload, seal_local_user_submission, structured_metadata_value,
-    structured_trust_from_text, AgentCapability, AgentContentPart, AgentMessage, AgentRequest,
+    chat_with_auto, hash_tool_results, is_allowed_setting_key, parse_agent_response,
+    project_context_for_prompt, seal_from_ledger_payload, seal_local_user_submission,
+    seal_tool_result_envelope, structured_metadata_value, structured_trust_from_text,
+    tool_result_display_summary, AgentCapability, AgentContentPart, AgentMessage, AgentRequest,
     AgentRole, ParsedAgentResponse, ResponseType, SettingsChangePayload, SourceCitation,
-    StructuredUserInput, StructuredUserInputSubmission, seal_tool_result_envelope,
-    tool_result_display_summary, hash_tool_results, ToolCallRequest, ToolCallResult,
+    StructuredUserInput, StructuredUserInputSubmission, ToolCallRequest, ToolCallResult,
     ToolChangePayload, ToolLoop, ToolLoopContext, PROMPT_VERSION,
 };
 use crate::db::{self, Message};
@@ -33,13 +33,7 @@ fn note_timeline(
     payload: serde_json::Value,
 ) {
     let db = state.db.lock();
-    crate::runtime_v2::try_append_turn_timeline_event(
-        &db,
-        conversation_id,
-        turn_id,
-        kind,
-        payload,
-    );
+    crate::runtime_v2::try_append_turn_timeline_event(&db, conversation_id, turn_id, kind, payload);
 }
 
 const MAX_TOOL_USE_ROUNDS: usize = 6;
@@ -283,15 +277,10 @@ fn make_text_event(
         &delta,
         Some(d) if previous.is_some() && d.as_str() == text.as_str()
     );
-    let include_checkpoint =
-        previous.is_none() || non_prefix_replace || (*sequence % 32 == 0);
+    let include_checkpoint = previous.is_none() || non_prefix_replace || (*sequence % 32 == 0);
     AgentTurnEvent::Text {
         conversation_id: conversation_id.to_string(),
-        text: if include_checkpoint {
-            Some(text)
-        } else {
-            None
-        },
+        text: if include_checkpoint { Some(text) } else { None },
         turn_id: Some(turn_id.to_string()),
         sequence: Some(*sequence),
         delta,
@@ -489,8 +478,13 @@ fn emit_live_text_delta(
             } else {
                 Some(last_preview.as_str())
             };
-            let event =
-                make_text_event(conversation_id, preview.clone(), previous, text_seq, turn_id);
+            let event = make_text_event(
+                conversation_id,
+                preview.clone(),
+                previous,
+                text_seq,
+                turn_id,
+            );
             *last_preview = preview;
             emit_turn(app, on_event, event);
         }
@@ -524,11 +518,8 @@ fn emit_progressive_op_previews(
 ) {
     use crate::runtime_v2::{get_surface, get_surface_state, PreviewSurfaceModel};
 
-    let events = crate::runtime_v2::ingest_live_chunk_with_seed(
-        parser,
-        preview_txn,
-        delta,
-        |surface_id| {
+    let events =
+        crate::runtime_v2::ingest_live_chunk_with_seed(parser, preview_txn, delta, |surface_id| {
             let db = state.db.lock();
             let surface = get_surface(&db, surface_id).ok()?;
             let state_json = get_surface_state(&db, surface_id).unwrap_or_else(|_| json!({}));
@@ -541,8 +532,7 @@ fn emit_progressive_op_previews(
                 base_revision: surface.current_revision,
                 preview_revision: surface.current_revision,
             })
-        },
-    );
+        });
 
     for ev in events {
         let status = ev.status.clone();
@@ -722,9 +712,7 @@ fn mentions_from_queue_prompt(
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(value) => serde_json::from_value::<Vec<ToolMentionInput>>(value.clone())
             .map(Some)
-            .map_err(|_| {
-                CommandError::new("invalid", "Queued mentions payload is invalid")
-            }),
+            .map_err(|_| CommandError::new("invalid", "Queued mentions payload is invalid")),
     }
 }
 
@@ -750,7 +738,9 @@ fn agent_role_from_db(role: &str) -> AgentRole {
     }
 }
 
-fn structured_from_message_metadata(meta: &Option<serde_json::Value>) -> Option<StructuredUserInput> {
+fn structured_from_message_metadata(
+    meta: &Option<serde_json::Value>,
+) -> Option<StructuredUserInput> {
     // Re-assert trust in Rust; never honor deserialized trust_class from JSON.
     adopt_stored_structured_input(meta.as_ref()?)
 }
@@ -784,9 +774,10 @@ fn release_staged_attachments_from_queue_prompt(state: &AppState, prompt: &serde
 }
 
 fn delete_orphaned_user_message(db: &mut crate::db::Database, message_id: &str) {
-    let _ = db
-        .conn()
-        .execute("DELETE FROM message_fts WHERE message_id = ?1", [message_id]);
+    let _ = db.conn().execute(
+        "DELETE FROM message_fts WHERE message_id = ?1",
+        [message_id],
+    );
     let _ = db
         .conn()
         .execute("DELETE FROM messages WHERE id = ?1", [message_id]);
@@ -1162,10 +1153,7 @@ async fn send_message_inner(
             ));
         }
         let attachment_ids: Vec<String> = attachments.iter().map(|a| a.id.clone()).collect();
-        crate::commands::attachment_cmds::assert_staged_attachments_ready(
-            state,
-            &attachment_ids,
-        )?;
+        crate::commands::attachment_cmds::assert_staged_attachments_ready(state, &attachment_ids)?;
         let mut db = state.db.lock();
         let item = crate::runtime_v2::enqueue(
             &mut db,
@@ -1188,7 +1176,8 @@ async fn send_message_inner(
             Some(&item.id),
         );
         emit_action(
-            &app, on_event.as_ref(),
+            &app,
+            on_event.as_ref(),
             &conversation_id,
             "Queued your message until the current reply finishes",
         );
@@ -1232,7 +1221,8 @@ async fn send_message_inner(
     };
 
     record_action(
-        &app, on_event.as_ref(),
+        &app,
+        on_event.as_ref(),
         &conversation_id,
         &mut action_log,
         "Preparing your request",
@@ -1257,12 +1247,17 @@ async fn send_message_inner(
         }
     };
 
-    let (user_message, history, active_tool, referenced_tools, request_key, project_id, trusted_attachments) = {
+    let (
+        user_message,
+        history,
+        active_tool,
+        referenced_tools,
+        request_key,
+        project_id,
+        trusted_attachments,
+    ) = {
         let attachment_ids: Vec<String> = attachments.iter().map(|a| a.id.clone()).collect();
-        crate::commands::attachment_cmds::assert_staged_attachments_ready(
-            state,
-            &attachment_ids,
-        )?;
+        crate::commands::attachment_cmds::assert_staged_attachments_ready(state, &attachment_ids)?;
 
         let mut db = state.db.lock();
         let conv = db::get_conversation(&db, &conversation_id)?;
@@ -1438,7 +1433,8 @@ async fn send_message_inner(
                 continue;
             }
             record_action(
-                &app, on_event.as_ref(),
+                &app,
+                on_event.as_ref(),
                 &conversation_id,
                 &mut action_log,
                 &format!("Referenced @{label}"),
@@ -1449,7 +1445,8 @@ async fn send_message_inner(
     }
 
     record_action(
-        &app, on_event.as_ref(),
+        &app,
+        on_event.as_ref(),
         &conversation_id,
         &mut action_log,
         "Building agent context",
@@ -1463,7 +1460,8 @@ async fn send_message_inner(
             match project_context_for_prompt(&db, pid, &content) {
                 Ok(Some(ctx)) => {
                     record_action(
-                        &app, on_event.as_ref(),
+                        &app,
+                        on_event.as_ref(),
                         &conversation_id,
                         &mut action_log,
                         "Loaded project context",
@@ -1562,7 +1560,8 @@ async fn send_message_inner(
             }
         }
         record_action(
-            &app, on_event.as_ref(),
+            &app,
+            on_event.as_ref(),
             &conversation_id,
             &mut action_log,
             &format!("Attached {} file(s)", trusted_attachments.len()),
@@ -1609,16 +1608,14 @@ async fn send_message_inner(
             let structured: Vec<&crate::runtime_v2::ContextLedgerEntry> = entries
                 .iter()
                 .filter(|e| {
-                    e.entry_type.contains("form_submit")
-                        && e.visibility == "model_context_only"
+                    e.entry_type.contains("form_submit") && e.visibility == "model_context_only"
                 })
                 .filter(|e| {
                     let expected_id = crate::runtime_v2::ledger_submission_id(&e.id);
                     !chat_messages.iter().any(|m| {
                         m.parts.iter().any(|p| match p {
                             AgentContentPart::StructuredUserInput(sui) => {
-                                sui.submission_id == expected_id
-                                    || sui.submission_id == e.id
+                                sui.submission_id == expected_id || sui.submission_id == e.id
                             }
                             _ => false,
                         })
@@ -1681,7 +1678,8 @@ async fn send_message_inner(
                         }
                     }
                     record_action(
-                        &app, on_event.as_ref(),
+                        &app,
+                        on_event.as_ref(),
                         &conversation_id,
                         &mut action_log,
                         &format!(
@@ -1696,7 +1694,8 @@ async fn send_message_inner(
         }
     }
 
-    if let Err(e) = crate::ai::validate_provider_send(&access.credentials.provider, &chat_messages) {
+    if let Err(e) = crate::ai::validate_provider_send(&access.credentials.provider, &chat_messages)
+    {
         let attachment_ids: Vec<String> =
             trusted_attachments.iter().map(|a| a.id.clone()).collect();
         let mut db = state.db.lock();
@@ -1735,8 +1734,7 @@ async fn send_message_inner(
     let mut text_seq: u64 = 0;
     // Stable id for this send_message turn's Text events (registry follow-up).
     let turn_id = Uuid::new_v4().to_string();
-    let progressive_ops_enabled =
-        provider_supports_progressive_ops(&access.credentials.provider);
+    let progressive_ops_enabled = provider_supports_progressive_ops(&access.credentials.provider);
     // Progressive NDJSON op preview (RC3.3) — preview only until turn-end apply.
     let mut progressive_parser = crate::runtime_v2::NdjsonFrameParser::new();
     let mut preview_txn = crate::runtime_v2::PreviewTransaction::new(turn_id.clone(), None);
@@ -1820,13 +1818,7 @@ async fn send_message_inner(
         Err(e) => {
             if matches!(e, crate::ai::AiError::Cancelled) {
                 preview_txn.mark_interrupted();
-                note_timeline(
-                    state,
-                    &conversation_id,
-                    &turn_id,
-                    "cancellation",
-                    json!({}),
-                );
+                note_timeline(state, &conversation_id, &turn_id, "cancellation", json!({}));
                 emit_turn(
                     &app,
                     on_event.as_ref(),
@@ -1857,7 +1849,8 @@ async fn send_message_inner(
                 );
             }
             emit_turn(
-                &app, on_event.as_ref(),
+                &app,
+                on_event.as_ref(),
                 AgentTurnEvent::Error {
                     conversation_id: conversation_id.clone(),
                     message: message.clone(),
@@ -1868,7 +1861,8 @@ async fn send_message_inner(
     };
 
     record_action(
-        &app, on_event.as_ref(),
+        &app,
+        on_event.as_ref(),
         &conversation_id,
         &mut action_log,
         "Parsing the response",
@@ -1892,7 +1886,8 @@ async fn send_message_inner(
                 json!({ "code": "parse" }),
             );
             emit_turn(
-                &app, on_event.as_ref(),
+                &app,
+                on_event.as_ref(),
                 AgentTurnEvent::Error {
                     conversation_id: conversation_id.clone(),
                     message: message.clone(),
@@ -1921,7 +1916,8 @@ async fn send_message_inner(
 
         for call in &tool_calls {
             record_action(
-                &app, on_event.as_ref(),
+                &app,
+                on_event.as_ref(),
                 &conversation_id,
                 &mut action_log,
                 action_label_for_capability(&call.capability),
@@ -1977,7 +1973,8 @@ async fn send_message_inner(
         merge_tool_results_into_metadata(&mut search_meta, &tool_results);
 
         record_action(
-            &app, on_event.as_ref(),
+            &app,
+            on_event.as_ref(),
             &conversation_id,
             &mut action_log,
             "Synthesizing answer from tool results",
@@ -2096,13 +2093,7 @@ async fn send_message_inner(
             Err(e) => {
                 if matches!(e, crate::ai::AiError::Cancelled) {
                     preview_txn.mark_interrupted();
-                    note_timeline(
-                        state,
-                        &conversation_id,
-                        &turn_id,
-                        "cancellation",
-                        json!({}),
-                    );
+                    note_timeline(state, &conversation_id, &turn_id, "cancellation", json!({}));
                     emit_turn(
                         &app,
                         on_event.as_ref(),
@@ -2128,7 +2119,8 @@ async fn send_message_inner(
                     );
                 }
                 emit_turn(
-                    &app, on_event.as_ref(),
+                    &app,
+                    on_event.as_ref(),
                     AgentTurnEvent::Error {
                         conversation_id: conversation_id.clone(),
                         message: message.clone(),
@@ -2191,7 +2183,8 @@ async fn send_message_inner(
     }
 
     record_action(
-        &app, on_event.as_ref(),
+        &app,
+        on_event.as_ref(),
         &conversation_id,
         &mut action_log,
         if resolved.streamed_live {
@@ -2261,7 +2254,8 @@ async fn send_message_inner(
     // commands after approval.
     if let Some(ref sc) = settings_change {
         record_action(
-            &app, on_event.as_ref(),
+            &app,
+            on_event.as_ref(),
             &conversation_id,
             &mut action_log,
             "Proposing appearance preferences",
@@ -2294,7 +2288,8 @@ async fn send_message_inner(
 
     if tool_change.is_some() {
         record_action(
-            &app, on_event.as_ref(),
+            &app,
+            on_event.as_ref(),
             &conversation_id,
             &mut action_log,
             "Preparing tool change preview",
@@ -2343,12 +2338,13 @@ async fn send_message_inner(
             let mut emit_harvest_events =
                 |events: Vec<Result<crate::runtime_v2::StreamEvent, String>>| {
                     for ev in events {
-                        if let Ok(
-                            crate::runtime_v2::StreamEvent::OperationFrameCompleted { operation },
-                        ) = &ev
+                        if let Ok(crate::runtime_v2::StreamEvent::OperationFrameCompleted {
+                            operation,
+                        }) = &ev
                         {
                             emit_turn(
-                                &app, on_event.as_ref(),
+                                &app,
+                                on_event.as_ref(),
                                 AgentTurnEvent::Operation {
                                     conversation_id: conversation_id.clone(),
                                     operation_id: operation.id.clone(),
@@ -2378,12 +2374,12 @@ async fn send_message_inner(
                         "skipping agent patch apply — quiescence active"
                     );
                 } else {
-                let silent = parsed.payload.silent.unwrap_or(false);
-                let schedule_result = {
-                    let mut db = state.db.lock();
-                    let mut bus = state.event_bus.lock();
-                    let mut bus_opt = Some(&mut *bus);
-                    crate::runtime_v2::patch_scheduler::schedule_and_apply(
+                    let silent = parsed.payload.silent.unwrap_or(false);
+                    let schedule_result = {
+                        let mut db = state.db.lock();
+                        let mut bus = state.event_bus.lock();
+                        let mut bus_opt = Some(&mut *bus);
+                        crate::runtime_v2::patch_scheduler::schedule_and_apply(
                         &mut db,
                         &mut bus_opt,
                         crate::runtime_v2::patch_scheduler::ScheduleRequest {
@@ -2397,16 +2393,18 @@ async fn send_message_inner(
                         },
                         false,
                     )
-                };
-                match schedule_result {
-                    Ok(scheduled) => {
-                        // Prefer last applied ChangeResult for UI metadata; proposals use first pending.
-                        let mut handled = false;
-                        for change in scheduled.applied {
-                            if let Some(result) = change.apply {
-                                if result.conflicts.is_empty() {
+                    };
+                    match schedule_result {
+                        Ok(scheduled) => {
+                            // Prefer last applied ChangeResult for UI metadata; proposals use first pending.
+                            let mut handled = false;
+                            for change in scheduled.applied {
+                                if change.is_committed() {
+                                    let result = change.apply.expect("committed requires apply");
+                                    // is_committed() already requires empty conflicts + applied status.
                                     record_action(
-                                        &app, on_event.as_ref(),
+                                        &app,
+                                        on_event.as_ref(),
                                         &conversation_id,
                                         &mut action_log,
                                         "Applied application operations",
@@ -2423,7 +2421,8 @@ async fn send_message_inner(
                                     tool_ids.sort();
                                     tool_ids.dedup();
                                     emit_turn(
-                                        &app, on_event.as_ref(),
+                                        &app,
+                                        on_event.as_ref(),
                                         AgentTurnEvent::Sync {
                                             conversation_id: Some(conversation_id.clone()),
                                             surface_ids,
@@ -2449,15 +2448,17 @@ async fn send_message_inner(
                                     );
                                     // Durable commit succeeded — drop speculative paint model.
                                     preview_txn.mark_committed();
-                                } else {
+                                    v2_apply = serde_json::to_value(&result).ok();
+                                    handled = true;
+                                } else if !change.conflicts.is_empty() {
                                     emit_turn(
-                                        &app, on_event.as_ref(),
-                                        AgentTurnEvent::Conflict {
-                                            conversation_id: Some(conversation_id.clone()),
-                                            message: "This change conflicts with another window or newer revision.".into(),
-                                            conflicts: result.conflicts.clone(),
-                                        },
-                                    );
+                                    &app, on_event.as_ref(),
+                                    AgentTurnEvent::Conflict {
+                                        conversation_id: Some(conversation_id.clone()),
+                                        message: "This change conflicts with another window or newer revision.".into(),
+                                        conflicts: change.conflicts.clone(),
+                                    },
+                                );
                                     note_timeline(
                                         state,
                                         &conversation_id,
@@ -2465,57 +2466,80 @@ async fn send_message_inner(
                                         "failure",
                                         json!({ "reason": "conflict" }),
                                     );
+                                    v2_apply = serde_json::to_value(&change).ok();
+                                    handled = true;
+                                } else if change.proposal_id.is_some() {
+                                    // Only treat as approval-needed when a proposal was actually returned.
+                                    v2_apply = Some(json!({
+                                        "proposalId": change.proposal_id,
+                                        "risk": change.risk,
+                                        "impactSummary": change.impact_summary,
+                                        "summary": change.summary,
+                                        "operations": change.operations,
+                                        "status": "pending",
+                                        "silent": silent,
+                                    }));
+                                    record_action(
+                                        &app,
+                                        on_event.as_ref(),
+                                        &conversation_id,
+                                        &mut action_log,
+                                        "Proposed a change that needs your approval",
+                                        "change_proposed",
+                                        api_key_ref,
+                                    );
+                                    handled = true;
+                                } else if !handled {
+                                    // Non-commit without proposal/conflicts — do not claim pending approval.
+                                    let message = format!(
+                                        "Application change was not committed ({:?})",
+                                        change.outcome
+                                    );
+                                    emit_turn(
+                                        &app,
+                                        on_event.as_ref(),
+                                        AgentTurnEvent::Error {
+                                            conversation_id: conversation_id.clone(),
+                                            message: message.clone(),
+                                        },
+                                    );
+                                    v2_apply = Some(json!({
+                                        "error": message,
+                                        "outcome": change.outcome,
+                                        "category": "commit",
+                                    }));
+                                    handled = true;
                                 }
-                                v2_apply = serde_json::to_value(result).ok();
-                                handled = true;
-                            } else if !handled {
-                                v2_apply = Some(json!({
-                                    "proposalId": change.proposal_id,
-                                    "risk": change.risk,
-                                    "impactSummary": change.impact_summary,
-                                    "summary": change.summary,
-                                    "operations": change.operations,
-                                    "status": "pending",
-                                    "silent": silent,
-                                }));
-                                record_action(
-                                    &app, on_event.as_ref(),
-                                    &conversation_id,
-                                    &mut action_log,
-                                    "Proposed a change that needs your approval",
-                                    "change_proposed",
-                                    api_key_ref,
-                                );
-                                handled = true;
                             }
+                            let _ = scheduled.scheduled;
+                            let _ = scheduled.superseded;
                         }
-                        let _ = scheduled.scheduled;
-                        let _ = scheduled.superseded;
+                        Err(e) => {
+                            tracing::warn!(error = %e, "Patch scheduler apply failed");
+                            let message = sanitize_error(&e.to_string(), api_key_ref);
+                            emit_turn(
+                                &app,
+                                on_event.as_ref(),
+                                AgentTurnEvent::Error {
+                                    conversation_id: conversation_id.clone(),
+                                    message: message.clone(),
+                                },
+                            );
+                            record_action(
+                                &app,
+                                on_event.as_ref(),
+                                &conversation_id,
+                                &mut action_log,
+                                "Could not apply application changes",
+                                "change_failed",
+                                api_key_ref,
+                            );
+                            v2_apply = Some(json!({
+                                "error": message,
+                                "category": "scheduler",
+                            }));
+                        }
                     }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "Patch scheduler apply failed");
-                        let message = sanitize_error(&e.to_string(), api_key_ref);
-                        emit_turn(
-                            &app, on_event.as_ref(),
-                            AgentTurnEvent::Error {
-                                conversation_id: conversation_id.clone(),
-                                message: message.clone(),
-                            },
-                        );
-                        record_action(
-                            &app, on_event.as_ref(),
-                            &conversation_id,
-                            &mut action_log,
-                            "Could not apply application changes",
-                            "change_failed",
-                            api_key_ref,
-                        );
-                        v2_apply = Some(json!({
-                            "error": message,
-                            "category": "scheduler",
-                        }));
-                    }
-                }
                 } // else: patch scheduler allowed
             }
         }
@@ -2589,10 +2613,9 @@ async fn send_message_inner(
             )
             .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
             for id in &pending_ledger_consume {
-                crate::runtime_v2::mark_ledger_consumed(&mut db, id, Some(&assistant.id))
-                    .map_err(|e| {
-                        CommandError::new("storage", sanitize_error(&e.to_string(), None))
-                    })?;
+                crate::runtime_v2::mark_ledger_consumed(&mut db, id, Some(&assistant.id)).map_err(
+                    |e| CommandError::new("storage", sanitize_error(&e.to_string(), None)),
+                )?;
             }
             Ok(assistant)
         })();
@@ -2614,13 +2637,7 @@ async fn send_message_inner(
         }
     };
 
-    note_timeline(
-        state,
-        &conversation_id,
-        &turn_id,
-        "completion",
-        json!({}),
-    );
+    note_timeline(state, &conversation_id, &turn_id, "completion", json!({}));
 
     // Bind inline surfaces created this turn to the assistant message when unset,
     // so InlineSurfacesForMessage can render them under the correct bubble.
@@ -2738,7 +2755,9 @@ mod queue_attachment_tests {
     #[test]
     fn queue_prompt_without_attachments_is_empty() {
         let prompt = json!({ "content": "hi" });
-        assert!(attachment_ids_from_queue_prompt(&prompt).unwrap().is_empty());
+        assert!(attachment_ids_from_queue_prompt(&prompt)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

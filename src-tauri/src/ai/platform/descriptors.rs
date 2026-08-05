@@ -351,10 +351,7 @@ mod tests {
         assert_eq!(ollama.default_auth_mode, AuthMode::LocalAuthless);
         assert!(!ollama.default_auth_mode.requires_secret());
         assert_eq!(ollama.endpoint_class, EndpointClass::LoopbackLocal);
-        assert_eq!(
-            ollama.protocol_family,
-            ProtocolFamily::OllamaNativeChat
-        );
+        assert_eq!(ollama.protocol_family, ProtocolFamily::OllamaNativeChat);
     }
 
     #[test]

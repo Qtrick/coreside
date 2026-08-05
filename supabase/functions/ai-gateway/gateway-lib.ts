@@ -30,15 +30,19 @@ export type SseLimits = {
 };
 
 export type SseFeedResult =
-  | { ok: true; done: boolean; text: string }
+  | { ok: true; done: boolean; text: string; forwardFrames: string[] }
   | { ok: false; reason: string };
 
 /**
  * Stateful SSE parser: retains partial lines across chunks, honors LF/CRLF,
- * blank-line event boundaries, comments, multiline data, [DONE], and midstream
- * OpenRouter/OpenAI error events. Settlement must wait for terminal success.
+ * blank-line event boundaries, comments, multiline data, upstream [DONE], and
+ * midstream OpenRouter/OpenAI error events.
+ *
+ * Upstream [DONE] is detected for settlement gating but is never included in
+ * `forwardFrames` — the gateway emits its own post-settle terminal frame.
  */
 export class BoundedSseParser {
+  private readonly decoder = new TextDecoder("utf-8", { fatal: true });
   private carry = "";
   private rawBytes = 0;
   private eventCount = 0;
@@ -60,14 +64,33 @@ export class BoundedSseParser {
     return this.sawDone && this.fatal === null;
   }
 
+  /** True once upstream `data: [DONE]` was parsed (not client-forwardable). */
+  get upstreamTerminalSeen(): boolean {
+    return this.sawDone;
+  }
+
   feed(chunk: string | Uint8Array): SseFeedResult {
     if (this.fatal) return { ok: false, reason: this.fatal };
-    if (this.sawDone) return { ok: true, done: true, text: this.text };
+    if (this.sawDone) {
+      this.fatal = "data_after_terminal";
+      return { ok: false, reason: this.fatal };
+    }
 
-    const asText =
-      typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
-    const byteLen = new TextEncoder().encode(asText).length;
-    this.rawBytes += byteLen;
+    const forwardFrames: string[] = [];
+    let asText: string;
+    try {
+      if (typeof chunk === "string") {
+        this.rawBytes += new TextEncoder().encode(chunk).length;
+        asText = chunk;
+      } else {
+        this.rawBytes += chunk.byteLength;
+        asText = this.decoder.decode(chunk, { stream: true });
+      }
+    } catch {
+      this.fatal = "invalid_utf8";
+      return { ok: false, reason: this.fatal };
+    }
+
     if (this.rawBytes > this.limits.maxRawBytes) {
       this.fatal = "raw_bytes_exceeded";
       return { ok: false, reason: this.fatal };
@@ -84,58 +107,82 @@ export class BoundedSseParser {
         this.fatal = "line_bytes_exceeded";
         return { ok: false, reason: this.fatal };
       }
-      const result = this.handleLine(line);
-      if (!result.ok || result.done) return result;
+      const result = this.handleLine(line, forwardFrames);
+      if (!result.ok) return result;
+      if (result.done) {
+        if (this.carry.trim().length > 0 || this.pendingData.length > 0) {
+          this.fatal = "data_after_terminal";
+          return { ok: false, reason: this.fatal };
+        }
+        return { ok: true, done: true, text: this.text, forwardFrames };
+      }
     }
 
     if (new TextEncoder().encode(this.carry).length > this.limits.maxLineBytes) {
       this.fatal = "line_bytes_exceeded";
       return { ok: false, reason: this.fatal };
     }
-    return { ok: true, done: false, text: this.text };
+    return { ok: true, done: false, text: this.text, forwardFrames };
   }
 
-  /** Flush remainder and require a terminal [DONE] before success. */
+  /** Flush remainder and require a terminal upstream [DONE] before success. */
   finish(): SseFeedResult {
     if (this.fatal) return { ok: false, reason: this.fatal };
+    try {
+      const flushed = this.decoder.decode();
+      if (flushed) this.carry += flushed;
+    } catch {
+      return { ok: false, reason: "invalid_utf8" };
+    }
+    const forwardFrames: string[] = [];
     if (this.carry.length > 0) {
       let line = this.carry;
       this.carry = "";
       if (line.endsWith("\r")) line = line.slice(0, -1);
-      const result = this.handleLine(line);
+      const result = this.handleLine(line, forwardFrames);
       if (!result.ok) return result;
+      if (result.done) {
+        return { ok: true, done: true, text: this.text, forwardFrames };
+      }
     }
     if (this.pendingData.length > 0) {
-      const result = this.dispatchEvent();
+      const result = this.dispatchEvent(forwardFrames);
       if (!result.ok) return result;
+      if (result.done) {
+        return { ok: true, done: true, text: this.text, forwardFrames };
+      }
     }
     if (!this.sawDone) {
       return { ok: false, reason: "eof_without_done" };
     }
-    return { ok: true, done: true, text: this.text };
+    return { ok: true, done: true, text: this.text, forwardFrames };
   }
 
-  private handleLine(line: string): SseFeedResult {
+  private handleLine(line: string, forwardFrames: string[]): SseFeedResult {
+    if (this.sawDone) {
+      this.fatal = "data_after_terminal";
+      return { ok: false, reason: this.fatal };
+    }
     if (line === "") {
       if (this.pendingData.length === 0) {
-        return { ok: true, done: this.sawDone, text: this.text };
+        return { ok: true, done: this.sawDone, text: this.text, forwardFrames };
       }
-      return this.dispatchEvent();
+      return this.dispatchEvent(forwardFrames);
     }
     // SSE comments (e.g. `: OPENROUTER PROCESSING`)
     if (line.startsWith(":")) {
-      return { ok: true, done: false, text: this.text };
+      return { ok: true, done: false, text: this.text, forwardFrames };
     }
     if (line.startsWith("data:")) {
       const raw = line.slice(5);
       this.pendingData.push(raw.startsWith(" ") ? raw.slice(1) : raw);
-      return { ok: true, done: false, text: this.text };
+      return { ok: true, done: false, text: this.text, forwardFrames };
     }
     // Ignore event:/id:/retry: and other fields.
-    return { ok: true, done: false, text: this.text };
+    return { ok: true, done: false, text: this.text, forwardFrames };
   }
 
-  private dispatchEvent(): SseFeedResult {
+  private dispatchEvent(forwardFrames: string[]): SseFeedResult {
     this.eventCount += 1;
     if (this.eventCount > this.limits.maxEvents) {
       this.fatal = "event_count_exceeded";
@@ -145,26 +192,38 @@ export class BoundedSseParser {
     const data = this.pendingData.join("\n");
     this.pendingData = [];
     if (data === "[DONE]") {
-      this.sawDone = true;
-      return { ok: true, done: true, text: this.text };
-    }
-    try {
-      const parsed = JSON.parse(data) as {
-        error?: unknown;
-        choices?: Array<{ delta?: { content?: unknown } }>;
-      };
-      if (parsed && typeof parsed === "object" && parsed.error != null) {
-        this.fatal = "upstream_error_event";
+      if (this.sawDone) {
+        this.fatal = "duplicate_terminal";
         return { ok: false, reason: this.fatal };
       }
-      const delta = parsed.choices?.[0]?.delta?.content;
-      if (typeof delta === "string" && delta) {
-        this.text = appendBoundedAssistantText(this.text, delta);
-      }
-    } catch {
-      // ignore malformed SSE data lines
+      this.sawDone = true;
+      return { ok: true, done: true, text: this.text, forwardFrames };
     }
-    return { ok: true, done: this.sawDone, text: this.text };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      this.fatal = "malformed_json";
+      return { ok: false, reason: this.fatal };
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      this.fatal = "malformed_json";
+      return { ok: false, reason: this.fatal };
+    }
+    const record = parsed as {
+      error?: unknown;
+      choices?: Array<{ delta?: { content?: unknown } }>;
+    };
+    if (record.error != null) {
+      this.fatal = "upstream_error_event";
+      return { ok: false, reason: this.fatal };
+    }
+    const delta = record.choices?.[0]?.delta?.content;
+    if (typeof delta === "string" && delta) {
+      this.text = appendBoundedAssistantText(this.text, delta);
+    }
+    forwardFrames.push(`data: ${JSON.stringify(parsed)}\n\n`);
+    return { ok: true, done: this.sawDone, text: this.text, forwardFrames };
   }
 }
 

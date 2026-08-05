@@ -619,11 +619,10 @@ mod tests {
     fn normalize_setting_kv_rejects_bad_wallpaper_and_hex() {
         assert!(normalize_setting_kv("wallpaper", r#"{"kind":"shadertoy"}"#).is_err());
         assert!(normalize_setting_kv("accentPrimaryLight", "red").is_err());
-        assert!(normalize_setting_kv(
-            "accentPrimary",
-            r##"{"light":"#aabbcc","dark":"#112233"}"##
-        )
-        .is_err());
+        assert!(
+            normalize_setting_kv("accentPrimary", r##"{"light":"#aabbcc","dark":"#112233"}"##)
+                .is_err()
+        );
         assert!(normalize_setting_kv("accentPrimary", "#aabbcc").is_err());
         assert_eq!(
             normalize_setting_kv("accentPrimaryLight", "#ABC").unwrap(),

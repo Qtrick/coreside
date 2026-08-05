@@ -53,7 +53,7 @@ fn read_env_any(keys: &[&str]) -> Option<String> {
     None
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AppConfig {
     pub provider: String,
     pub api_key: Option<String>,
@@ -62,6 +62,25 @@ pub struct AppConfig {
     pub log_level: String,
     /// Absolute path of the `.env` that was loaded, if any.
     pub env_path: Option<String>,
+}
+
+impl std::fmt::Debug for AppConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppConfig")
+            .field("provider", &self.provider)
+            .field(
+                "api_key",
+                &self
+                    .api_key
+                    .as_ref()
+                    .map(|_| crate::security::REDACTED_SECRET),
+            )
+            .field("model", &self.model)
+            .field("base_url", &self.base_url)
+            .field("log_level", &self.log_level)
+            .field("env_path", &self.env_path)
+            .finish()
+    }
 }
 
 impl AppConfig {
@@ -551,6 +570,21 @@ mod tests {
         assert!(status.key_detected);
         // Without a presentation policy, env_path is omitted (not a consumer surface).
         assert!(status.env_path.is_none());
+    }
+
+    #[test]
+    fn debug_does_not_leak_api_key() {
+        let cfg = AppConfig {
+            provider: "gemini".into(),
+            api_key: Some("sentinel-api-key-xyz".into()),
+            model: DEFAULT_GEMINI_MODEL.into(),
+            base_url: DEFAULT_GEMINI_BASE_URL.into(),
+            log_level: "info".into(),
+            env_path: None,
+        };
+        let debug = format!("{cfg:?}");
+        assert!(!debug.contains("sentinel-api-key-xyz"));
+        assert!(debug.contains("[REDACTED]"));
     }
 
     #[test]

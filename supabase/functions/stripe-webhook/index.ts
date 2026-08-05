@@ -9,8 +9,10 @@ import {
   extractSubscriptionSync,
   isRetryableWebhookStatus,
   isTerminalWebhookStatus,
+  isSafeStripePriceId,
   type PlanEntitlementDefaults,
   parseStripeEventPayload,
+  planIdForAllowlistedPriceId,
   resolveEntitlementsForSubscription,
   sha256Hex,
   shouldProcessStripeEventType,
@@ -55,14 +57,34 @@ async function loadPlanByPriceId(
   adminClient: AdminClient,
   priceId: string,
 ): Promise<PlanEntitlementDefaults | null> {
+  // Primary: env allowlist (same source as billing-checkout).
+  const envPlanId = planIdForAllowlistedPriceId(priceId);
+  if (envPlanId) {
+    return loadPlanDefaults(adminClient, envPlanId);
+  }
+
+  // Legacy catalog columns require a safe Price ID (no PostgREST filter injection).
+  if (!isSafeStripePriceId(priceId)) return null;
+
   const { data, error } = await adminClient
     .from("ai_plan_catalog")
     .select(
-      "plan_id, hosted_ai_enabled, hosted_search_enabled, default_allowance_amount, hard_limit_enabled",
+      "plan_id, hosted_ai_enabled, hosted_search_enabled, default_allowance_amount, hard_limit_enabled, stripe_checkout_price_id, stripe_price_monthly_id, stripe_price_annual_id",
     )
-    .eq("stripe_checkout_price_id", priceId)
+    .or(
+      [
+        `stripe_checkout_price_id.eq.${priceId}`,
+        `stripe_price_monthly_id.eq.${priceId}`,
+        `stripe_price_annual_id.eq.${priceId}`,
+      ].join(","),
+    )
     .maybeSingle();
   if (error || !data) return null;
+  const matched =
+    data.stripe_checkout_price_id === priceId ||
+    data.stripe_price_monthly_id === priceId ||
+    data.stripe_price_annual_id === priceId;
+  if (!matched) return null;
   return {
     planId: data.plan_id,
     hostedAiEnabled: Boolean(data.hosted_ai_enabled),

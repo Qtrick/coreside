@@ -12,7 +12,9 @@ use crate::db::{preview_profile_archive, DatabaseHealthReport, RestorePreview};
 use crate::state::AppState;
 
 #[tauri::command]
-pub fn get_database_health(state: State<'_, AppState>) -> Result<DatabaseHealthReport, CommandError> {
+pub fn get_database_health(
+    state: State<'_, AppState>,
+) -> Result<DatabaseHealthReport, CommandError> {
     state.require_profile()?;
     let db = state.db.lock();
     Ok(db.health_report()?)
@@ -31,12 +33,11 @@ pub struct BackupCreated {
 pub fn create_profile_backup(state: State<'_, AppState>) -> Result<BackupCreated, CommandError> {
     state.require_profile()?;
     let db = state.db.lock();
-    let paths = AppPaths::resolve().map_err(|e| {
-        CommandError::new("storage_unavailable", e.to_string())
-    })?;
-    paths.ensure_dirs().map_err(|e| {
-        CommandError::new("storage_unavailable", e.to_string())
-    })?;
+    let paths =
+        AppPaths::resolve().map_err(|e| CommandError::new("storage_unavailable", e.to_string()))?;
+    paths
+        .ensure_dirs()
+        .map_err(|e| CommandError::new("storage_unavailable", e.to_string()))?;
     let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
     let dest = paths
         .backups
@@ -48,14 +49,12 @@ pub fn create_profile_backup(state: State<'_, AppState>) -> Result<BackupCreated
         Some(&paths.media),
         Some(&paths.attachments),
     )?;
-    let archive_bytes = std::fs::metadata(&dest)
-        .map(|m| m.len())
-        .map_err(|e| {
-            CommandError::new(
-                "export_failed",
-                format!("Backup written but unreadable: {e}"),
-            )
-        })?;
+    let archive_bytes = std::fs::metadata(&dest).map(|m| m.len()).map_err(|e| {
+        CommandError::new(
+            "export_failed",
+            format!("Backup written but unreadable: {e}"),
+        )
+    })?;
     Ok(BackupCreated {
         path: dest
             .file_name()
@@ -75,10 +74,12 @@ pub fn preview_restore_backup(
 ) -> Result<RestorePreview, CommandError> {
     // Recovery-safe: preview must work when the profile cannot open.
     let (_paths, resolved_canon) = resolve_managed_backup(&path)?;
-    Ok(preview_profile_archive(&resolved_canon).map_err(|e| match e {
-        crate::db::DbError::Invalid(msg) => CommandError::new("archive_invalid", msg),
-        other => CommandError::from(other),
-    })?)
+    Ok(
+        preview_profile_archive(&resolved_canon).map_err(|e| match e {
+            crate::db::DbError::Invalid(msg) => CommandError::new("archive_invalid", msg),
+            other => CommandError::from(other),
+        })?,
+    )
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -93,12 +94,11 @@ pub struct ManagedBackupEntry {
 pub fn list_managed_backups(
     _state: State<'_, AppState>,
 ) -> Result<Vec<ManagedBackupEntry>, CommandError> {
-    let paths = AppPaths::resolve().map_err(|e| {
-        CommandError::new("storage_unavailable", e.to_string())
-    })?;
-    paths.ensure_dirs().map_err(|e| {
-        CommandError::new("storage_unavailable", e.to_string())
-    })?;
+    let paths =
+        AppPaths::resolve().map_err(|e| CommandError::new("storage_unavailable", e.to_string()))?;
+    paths
+        .ensure_dirs()
+        .map_err(|e| CommandError::new("storage_unavailable", e.to_string()))?;
     let mut out = Vec::new();
     let entries = std::fs::read_dir(&paths.backups).map_err(|e| {
         CommandError::new("storage_unavailable", format!("Cannot read backups: {e}"))
@@ -127,12 +127,11 @@ pub fn list_managed_backups(
 fn resolve_managed_backup(
     path: &str,
 ) -> Result<(crate::app_paths::AppPaths, std::path::PathBuf), CommandError> {
-    let paths = AppPaths::resolve().map_err(|e| {
-        CommandError::new("storage_unavailable", e.to_string())
-    })?;
-    paths.ensure_dirs().map_err(|e| {
-        CommandError::new("storage_unavailable", e.to_string())
-    })?;
+    let paths =
+        AppPaths::resolve().map_err(|e| CommandError::new("storage_unavailable", e.to_string()))?;
+    paths
+        .ensure_dirs()
+        .map_err(|e| CommandError::new("storage_unavailable", e.to_string()))?;
     if path.trim().is_empty() {
         return Err(CommandError::new(
             "archive_invalid",
@@ -154,9 +153,9 @@ fn resolve_managed_backup(
             format!("Backups folder is unavailable: {e}"),
         )
     })?;
-    let resolved_canon = resolved.canonicalize().map_err(|_| {
-        CommandError::new("archive_invalid", "Backup file could not be opened.")
-    })?;
+    let resolved_canon = resolved
+        .canonicalize()
+        .map_err(|_| CommandError::new("archive_invalid", "Backup file could not be opened."))?;
     if !resolved_canon.starts_with(&backups_canon) {
         return Err(CommandError::new(
             "permission_denied",
@@ -219,10 +218,7 @@ fn restore_quarantined_tree(moved: &[(std::path::PathBuf, std::path::PathBuf)]) 
     }
 }
 
-fn try_reopen_live_into(
-    db_guard: &mut crate::db::Database,
-    live_path: &std::path::Path,
-) -> bool {
+fn try_reopen_live_into(db_guard: &mut crate::db::Database, live_path: &std::path::Path) -> bool {
     match crate::db::Database::open_path(live_path) {
         Ok(orig) => {
             *db_guard = orig;
@@ -338,7 +334,9 @@ pub fn restore_profile_backup(
     }
     let _scheduler_guard = ResumeSchedulerOnDrop {
         handle: {
-            let handle = app.try_state::<Arc<SchedulerHandle>>().map(|s| s.inner().clone());
+            let handle = app
+                .try_state::<Arc<SchedulerHandle>>()
+                .map(|s| s.inner().clone());
             if let Some(ref h) = handle {
                 h.pause();
             }
@@ -400,9 +398,7 @@ pub fn restore_profile_backup(
     };
 
     let staging_db = paths.restore_staging.join(format!("restore-{stamp}.db"));
-    let asset_media_staging = paths
-        .restore_staging
-        .join(format!("assets-media-{stamp}"));
+    let asset_media_staging = paths.restore_staging.join(format!("assets-media-{stamp}"));
     let asset_att_staging = paths.restore_staging.join(format!("assets-att-{stamp}"));
     let cleanup_staging = |staging: &std::path::Path, hold: Option<&std::path::Path>| {
         let _ = std::fs::remove_file(staging);
@@ -473,7 +469,10 @@ pub fn restore_profile_backup(
                 "Staged database failed foreign_key_check.",
             ));
         }
-        if let Err(e) = staged.conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE);") {
+        if let Err(e) = staged
+            .conn()
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        {
             drop(staged);
             cleanup_staging(&staging_db, None);
             return Err(CommandError::new(
@@ -510,7 +509,10 @@ pub fn restore_profile_backup(
     let quarantine = paths.quarantine.join(format!("pre-restore-{stamp}"));
     std::fs::create_dir_all(&quarantine).map_err(|e| {
         cleanup_staging(&staging_db, None);
-        CommandError::new("restore_failed", format!("Could not create quarantine: {e}"))
+        CommandError::new(
+            "restore_failed",
+            format!("Could not create quarantine: {e}"),
+        )
     })?;
 
     // Hold connection on a *copy* of the sealed staged DB so live files unlock for rename.
@@ -644,7 +646,9 @@ pub fn restore_profile_backup(
     );
     {
         let db = state.db.lock();
-        *state.event_bus.lock() = crate::runtime_v2::EventBus::load_from_db(&db);
+        let mut bus = crate::runtime_v2::EventBus::load_from_db(&db);
+        let _ = crate::runtime_v2::outbox::flush_pending_outbox(&db, Some(&mut bus));
+        *state.event_bus.lock() = bus;
     }
     *state.bootstrap.lock() = crate::db::BootstrapStatus::Ready;
 

@@ -184,12 +184,13 @@ impl OllamaNdjsonParser {
             return Ok(OllamaNdjsonFeedOutcome::Continue(Vec::new()));
         }
         if self.buf.len() > MAX_LINE_BYTES {
-            return Err(AiError::Parse("Ollama NDJSON line exceeded size limit".into()));
+            return Err(AiError::Parse(
+                "Ollama NDJSON line exceeded size limit".into(),
+            ));
         }
         let line_bytes = std::mem::take(&mut self.buf);
-        let line = std::str::from_utf8(&line_bytes).map_err(|_| {
-            AiError::Parse("Ollama stream contained invalid UTF-8".into())
-        })?;
+        let line = std::str::from_utf8(&line_bytes)
+            .map_err(|_| AiError::Parse("Ollama stream contained invalid UTF-8".into()))?;
         let line = line.trim().trim_end_matches('\r');
         if line.is_empty() {
             return Ok(OllamaNdjsonFeedOutcome::Continue(Vec::new()));
@@ -229,11 +230,12 @@ impl OllamaNdjsonParser {
                 line_bytes.pop();
             }
             if line_bytes.len() > MAX_LINE_BYTES {
-                return Err(AiError::Parse("Ollama NDJSON line exceeded size limit".into()));
+                return Err(AiError::Parse(
+                    "Ollama NDJSON line exceeded size limit".into(),
+                ));
             }
-            let line = std::str::from_utf8(&line_bytes).map_err(|_| {
-                AiError::Parse("Ollama stream contained invalid UTF-8".into())
-            })?;
+            let line = std::str::from_utf8(&line_bytes)
+                .map_err(|_| AiError::Parse("Ollama stream contained invalid UTF-8".into()))?;
             let line = line.trim();
             if line.is_empty() {
                 continue;
@@ -266,7 +268,9 @@ impl OllamaNdjsonParser {
             }
         }
         if self.buf.len() > MAX_LINE_BYTES {
-            return Err(AiError::Parse("Ollama NDJSON line exceeded size limit".into()));
+            return Err(AiError::Parse(
+                "Ollama NDJSON line exceeded size limit".into(),
+            ));
         }
         Ok(OllamaNdjsonFeedOutcome::Continue(pending))
     }
@@ -343,10 +347,7 @@ impl OllamaNdjsonParser {
             events.push(OllamaNdjsonParseEvent::TextDelta(content.clone()));
         }
         // Ignore thinking content intentionally (do not render chain-of-thought).
-        let _ = parsed
-            .message
-            .as_ref()
-            .and_then(|m| m.thinking.as_ref());
+        let _ = parsed.message.as_ref().and_then(|m| m.thinking.as_ref());
         let _ = parsed.done_reason;
 
         if parsed.done {
@@ -505,7 +506,10 @@ impl OllamaProvider {
                     out.skip_notes.push(note);
                     continue;
                 }
-                let Some(b64) = data_base64.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty())
+                let Some(b64) = data_base64
+                    .as_ref()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
                 else {
                     let note = format!(
                         "[image not sent to model: skip image {attachment_id}: no authorized bytes loaded]"
@@ -571,8 +575,8 @@ impl OllamaProvider {
                 resp.status()
             )));
         }
-        let text = read_response_text_bounded(resp, cancel, MAX_PROVIDER_RESPONSE_BYTES, None)
-            .await?;
+        let text =
+            read_response_text_bounded(resp, cancel, MAX_PROVIDER_RESPONSE_BYTES, None).await?;
         let parsed: TagsResponse =
             serde_json::from_str(&text).map_err(|e| AiError::Parse(e.to_string()))?;
         let mut names: Vec<String> = parsed.models.into_iter().map(|m| m.name).collect();
@@ -589,13 +593,12 @@ impl OllamaProvider {
         base_url: &str,
         cancel: &CancellationToken,
     ) -> Result<bool, AiError> {
-        Self::list_ollama_models(base_url, cancel).await.map(|_| true)
+        Self::list_ollama_models(base_url, cancel)
+            .await
+            .map(|_| true)
     }
 
-    async fn post_chat_non_stream(
-        &self,
-        request: &AgentRequest,
-    ) -> Result<AgentResponse, AiError> {
+    async fn post_chat_non_stream(&self, request: &AgentRequest) -> Result<AgentResponse, AiError> {
         if request.cancel.is_cancelled() {
             return Err(AiError::Cancelled);
         }
@@ -641,17 +644,11 @@ impl OllamaProvider {
         })
     }
 
-    async fn emit_ndjson_events(
-        &self,
-        events: &[OllamaNdjsonParseEvent],
-        tx: &ProviderStreamTx,
-    ) {
+    async fn emit_ndjson_events(&self, events: &[OllamaNdjsonParseEvent], tx: &ProviderStreamTx) {
         for event in events {
             let OllamaNdjsonParseEvent::TextDelta(text) = event;
             let _ = tx
-                .send(ProviderStreamEvent::TextDelta {
-                    text: text.clone(),
-                })
+                .send(ProviderStreamEvent::TextDelta { text: text.clone() })
                 .await;
         }
     }
@@ -781,10 +778,7 @@ impl AiProvider for OllamaProvider {
         };
 
         if !response.status().is_success() {
-            let err = AiError::Provider(format!(
-                "Ollama /api/chat returned {}",
-                response.status()
-            ));
+            let err = AiError::Provider(format!("Ollama /api/chat returned {}", response.status()));
             let _ = tx
                 .send(ProviderStreamEvent::ResponseFailed {
                     code: err.code().to_string(),
@@ -820,9 +814,7 @@ impl AiProvider for OllamaProvider {
             provider_id: self.provider_id().to_string(),
         };
         let _ = tx
-            .send(ProviderStreamEvent::TextCompleted {
-                text: full_text,
-            })
+            .send(ProviderStreamEvent::TextCompleted { text: full_text })
             .await;
         let _ = tx
             .send(ProviderStreamEvent::ResponseCompleted {
@@ -871,9 +863,7 @@ mod tests {
     }
 
     fn line(content: &str, done: bool) -> String {
-        format!(
-            r#"{{"message":{{"content":"{content}"}},"done":{done}}}"#
-        )
+        format!(r#"{{"message":{{"content":"{content}"}},"done":{done}}}"#)
     }
 
     #[test]
@@ -893,14 +883,14 @@ mod tests {
         let out2 = parser.feed_chunk(chunk2.as_bytes()).expect("chunk2");
         match out2 {
             OllamaNdjsonFeedOutcome::Done {
-                full_text, model, events, ..
+                full_text,
+                model,
+                events,
+                ..
             } => {
                 assert_eq!(full_text, "hello");
                 assert_eq!(model, "llama3.2");
-                assert_eq!(
-                    events,
-                    vec![OllamaNdjsonParseEvent::TextDelta("lo".into())]
-                );
+                assert_eq!(events, vec![OllamaNdjsonParseEvent::TextDelta("lo".into())]);
             }
             other => panic!("expected Done, got {other:?}"),
         }
@@ -909,10 +899,7 @@ mod tests {
     #[test]
     fn ndjson_parser_skips_malformed_preamble_until_done() {
         let mut parser = OllamaNdjsonParser::new("llama3.2".into());
-        let payload = format!(
-            "not-json\n\n{}\n",
-            line("recovered", true)
-        );
+        let payload = format!("not-json\n\n{}\n", line("recovered", true));
         let out = parser.feed_chunk(payload.as_bytes()).expect("feed");
         match out {
             OllamaNdjsonFeedOutcome::Done { full_text, .. } => {
@@ -926,7 +913,9 @@ mod tests {
     fn ndjson_parser_rejects_malformed_after_output_started() {
         let mut parser = OllamaNdjsonParser::new("llama3.2".into());
         let payload = format!("{}\nbad-json\n", line("hi", false));
-        let err = parser.feed_chunk(payload.as_bytes()).expect_err("after output");
+        let err = parser
+            .feed_chunk(payload.as_bytes())
+            .expect_err("after output");
         assert!(matches!(err, AiError::Parse(_)));
         assert!(err.to_string().contains("after output"));
     }
@@ -937,9 +926,7 @@ mod tests {
         parser
             .feed_chunk(format!("{}\n", line("a", false)).as_bytes())
             .unwrap();
-        let err = parser
-            .feed_chunk(b"not-json\n")
-            .expect_err("alternating");
+        let err = parser.feed_chunk(b"not-json\n").expect_err("alternating");
         assert!(err.to_string().contains("after output"));
     }
 
@@ -1028,12 +1015,7 @@ mod tests {
             0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x05, 0xFE,
             0xD4, 0xEF, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
         ];
-        let image = image_part_from_authorized_bytes(
-            "att-1",
-            "image/png",
-            png,
-        )
-        .unwrap();
+        let image = image_part_from_authorized_bytes("att-1", "image/png", png).unwrap();
         let msg = AgentMessage::with_parts(
             AgentRole::User,
             "see image",
@@ -1052,9 +1034,7 @@ mod tests {
 
     #[test]
     fn ollama_tool_result_uses_json_envelope_not_markdown_wrapper() {
-        use crate::ai::capability_registry::{
-            seal_tool_result_envelope, ToolCallResult,
-        };
+        use crate::ai::capability_registry::{seal_tool_result_envelope, ToolCallResult};
         use serde_json::json;
         let results = vec![ToolCallResult {
             capability: "web_search".into(),

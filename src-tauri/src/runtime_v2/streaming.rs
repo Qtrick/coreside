@@ -299,7 +299,10 @@ impl NdjsonFrameParser {
                 let preview = String::from_utf8_lossy(&trimmed);
                 vec![Err(stream_err(
                     StreamParseErrorKind::Incomplete,
-                    format!("incomplete frame at end of stream: {}", truncate(&preview, 80)),
+                    format!(
+                        "incomplete frame at end of stream: {}",
+                        truncate(&preview, 80)
+                    ),
                 ))]
             }
             ParseMode::Legacy => {
@@ -350,8 +353,12 @@ impl NdjsonFrameParser {
                 format!("incomplete or invalid frame: {}", truncate(line, 80)),
             ));
         }
-        let value: Value = serde_json::from_str(line)
-            .map_err(|e| stream_err(StreamParseErrorKind::Malformed, format!("malformed frame: {e}")))?;
+        let value: Value = serde_json::from_str(line).map_err(|e| {
+            stream_err(
+                StreamParseErrorKind::Malformed,
+                format!("malformed frame: {e}"),
+            )
+        })?;
         let ev: StreamEvent = serde_json::from_value(value).map_err(|_| {
             stream_err(
                 StreamParseErrorKind::Unrecognized,
@@ -370,8 +377,12 @@ impl NdjsonFrameParser {
                 format!("incomplete or invalid frame: {}", truncate(line, 80)),
             ));
         }
-        let value: Value = serde_json::from_str(line)
-            .map_err(|e| stream_err(StreamParseErrorKind::Malformed, format!("malformed frame: {e}")))?;
+        let value: Value = serde_json::from_str(line).map_err(|e| {
+            stream_err(
+                StreamParseErrorKind::Malformed,
+                format!("malformed frame: {e}"),
+            )
+        })?;
         if let Ok(ev) = serde_json::from_value::<StreamEvent>(value.clone()) {
             self.record_stream_event(&ev)?;
             return Ok(ev);
@@ -526,7 +537,10 @@ mod tests {
     #[test]
     fn rejects_oversized_frame() {
         let mut p = NdjsonFrameParser::new();
-        let huge = format!("{{\"type\":\"assistant.delta\",\"text\":\"{}\"}}\n", "x".repeat(MAX_FRAME_BYTES));
+        let huge = format!(
+            "{{\"type\":\"assistant.delta\",\"text\":\"{}\"}}\n",
+            "x".repeat(MAX_FRAME_BYTES)
+        );
         let events = p.push(&huge);
         assert_eq!(events.len(), 1);
         assert!(events[0]

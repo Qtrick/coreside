@@ -55,13 +55,26 @@ impl OpenRouterProvider {
             .header("X-Title", "Coreside")
     }
 
+    fn request_client(&self) -> Result<reqwest::Client, AiError> {
+        super::platform::validate_and_build_credential_client(
+            &self.base_url,
+            super::platform::EndpointClass::VettedRemoteProviderPreset,
+            false,
+            false,
+            REQUEST_TIMEOUT,
+        )
+        .map(|(_, c)| c)
+        .map_err(|e| AiError::Validation(e.to_string()))
+    }
+
     fn build_messages(system_prompt: &str, messages: &[AgentMessage]) -> Vec<Value> {
         super::openai_family::build_openai_chat_messages(system_prompt, messages)
     }
 
     async fn post_chat(&self, body: Value, cancel: CancellationToken) -> Result<Value, AiError> {
         let url = self.chat_url();
-        let request = self.auth_headers(self.client.post(&url)).json(&body);
+        let client = self.request_client()?;
+        let request = self.auth_headers(client.post(&url)).json(&body);
 
         let response = tokio::select! {
             _ = cancel.cancelled() => return Err(AiError::Cancelled),
@@ -185,8 +198,9 @@ impl AiProvider for OpenRouterProvider {
 
     async fn health_check(&self, cancel: CancellationToken) -> Result<ProviderHealth, AiError> {
         let list_url = self.models_url();
+        let client = self.request_client()?;
         let list_req = self
-            .auth_headers(self.client.get(&list_url))
+            .auth_headers(client.get(&list_url))
             .timeout(Duration::from_secs(20));
 
         let list_result = tokio::select! {

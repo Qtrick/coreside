@@ -7,18 +7,28 @@ use once_cell::sync::Lazy;
 
 use super::{get_secret, set_secret, CredentialError};
 
-static REFRESH_LOCK: Lazy<tokio::sync::Mutex<()>> =
-    Lazy::new(|| tokio::sync::Mutex::new(()));
+static REFRESH_LOCK: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
 
 pub const KEYRING_ACCOUNT: &str = "coreside:hosted-auth";
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredHostedSession {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_at: f64,
     pub user_id: String,
+}
+
+impl std::fmt::Debug for StoredHostedSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoredHostedSession")
+            .field("access_token", &crate::security::REDACTED_SECRET)
+            .field("refresh_token", &crate::security::REDACTED_SECRET)
+            .field("expires_at", &self.expires_at)
+            .field("user_id", &self.user_id)
+            .finish()
+    }
 }
 
 /// Read-only plan presentation (server is authoritative; desktop never writes plans).
@@ -145,22 +155,14 @@ pub async fn refresh_session_if_needed() -> Result<Option<StoredHostedSession>, 
     };
     let base = supabase_url.trim_end_matches('/');
     let url = format!("{base}/auth/v1/token?grant_type=refresh_token");
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| CredentialError::Other(e.to_string()))?;
-    // Pin Supabase auth origin when DNS resolves publicly.
-    let client = match crate::ai::platform::validate_and_build_credential_client(
+    let (_, client) = crate::ai::platform::validate_and_build_credential_client(
         base,
         crate::ai::platform::EndpointClass::HostedCoresideGateway,
         false,
         false,
         std::time::Duration::from_secs(20),
-    ) {
-        Ok((_, pinned)) => pinned,
-        Err(_) => client,
-    };
+    )
+    .map_err(|e| CredentialError::Other(e.to_string()))?;
     let response = client
         .post(&url)
         .header("apikey", publishable_key.trim())
@@ -267,10 +269,7 @@ fn plan_presentation_from_entitlement_row(row: EntitlementRestRow) -> HostedPlan
         plan_id,
         display_name,
         hosted_ai_enabled: row.hosted_ai_enabled,
-        allowance_amount: row
-            .allowance_amount
-            .map(|n| n.max(0.0) as u32)
-            .unwrap_or(0),
+        allowance_amount: row.allowance_amount.map(|n| n.max(0.0) as u32).unwrap_or(0),
         source: "server".into(),
     }
 }
@@ -278,27 +277,22 @@ fn plan_presentation_from_entitlement_row(row: EntitlementRestRow) -> HostedPlan
 /// Read the signed-in user's entitlements from Supabase (RLS: own row only).
 pub async fn fetch_server_plan_presentation() -> Result<HostedPlanPresentation, CredentialError> {
     let access_token = ensure_fresh_access_token().await?;
-    let (supabase_url, publishable_key) = crate::config::supabase_publishable_config()
-        .ok_or_else(|| CredentialError::Other("Supabase publishable config is not available".into()))?;
+    let (supabase_url, publishable_key) =
+        crate::config::supabase_publishable_config().ok_or_else(|| {
+            CredentialError::Other("Supabase publishable config is not available".into())
+        })?;
     let base = supabase_url.trim_end_matches('/');
     let url = format!(
         "{base}/rest/v1/ai_entitlements?select=plan_id,hosted_ai_enabled,allowance_amount,ai_plan_catalog(display_name)&limit=1"
     );
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| CredentialError::Other(e.to_string()))?;
-    let client = match crate::ai::platform::validate_and_build_credential_client(
+    let (_, client) = crate::ai::platform::validate_and_build_credential_client(
         base,
         crate::ai::platform::EndpointClass::HostedCoresideGateway,
         false,
         false,
         std::time::Duration::from_secs(15),
-    ) {
-        Ok((_, pinned)) => pinned,
-        Err(_) => client,
-    };
+    )
+    .map_err(|e| CredentialError::Other(e.to_string()))?;
     let response = client
         .get(&url)
         .header("apikey", publishable_key.trim())
@@ -386,6 +380,16 @@ pub fn clear_session() -> Result<(), CredentialError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Serializes all hosted_session keyring tests (parallel `cargo test` safe).
+    static HOSTED_KEYRING_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn keyring_test_guard() -> MutexGuard<'static, ()> {
+        HOSTED_KEYRING_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
 
     #[test]
     fn parses_camel_case_session() {
@@ -407,8 +411,12 @@ mod tests {
     fn contract_catalog_includes_personal_and_pro() {
         let rows = contract_plan_catalog_summaries();
         assert_eq!(rows.len(), 3);
-        assert!(rows.iter().any(|p| p.plan_id == "personal" && p.hosted_ai_enabled));
-        assert!(rows.iter().any(|p| p.plan_id == "pro" && p.allowance_amount == 2000));
+        assert!(rows
+            .iter()
+            .any(|p| p.plan_id == "personal" && p.hosted_ai_enabled));
+        assert!(rows
+            .iter()
+            .any(|p| p.plan_id == "pro" && p.allowance_amount == 2000));
     }
 
     #[test]
@@ -439,7 +447,22 @@ mod tests {
     }
 
     #[test]
+    fn debug_does_not_leak_session_tokens() {
+        let session = StoredHostedSession {
+            access_token: "sentinel-access-token-xyz".into(),
+            refresh_token: "sentinel-refresh-token-xyz".into(),
+            expires_at: 9_999_999_999_999.0,
+            user_id: "u1".into(),
+        };
+        let debug = format!("{session:?}");
+        assert!(!debug.contains("sentinel-access-token-xyz"));
+        assert!(!debug.contains("sentinel-refresh-token-xyz"));
+        assert!(debug.contains("[REDACTED]"));
+    }
+
+    #[test]
     fn persist_roundtrip_keeps_camel_case_fields() {
+        let _guard = keyring_test_guard();
         let session = StoredHostedSession {
             access_token: "a".into(),
             refresh_token: "r".into(),
@@ -460,10 +483,7 @@ mod tests {
         use super::*;
         use crate::credentials::account_for_connection;
         use crate::db::{self, Database, ProviderConnection};
-        use std::sync::{Mutex, MutexGuard};
         use tempfile::tempdir;
-
-        static ENV_LOCK: Mutex<()> = Mutex::new(());
 
         struct EnvVars {
             keys: Vec<String>,
@@ -474,10 +494,7 @@ mod tests {
                 std::env::set_var("SUPABASE_URL", "https://test.supabase.co");
                 std::env::set_var("SUPABASE_ANON_KEY", "test-anon-key");
                 Self {
-                    keys: vec![
-                        "SUPABASE_URL".into(),
-                        "SUPABASE_ANON_KEY".into(),
-                    ],
+                    keys: vec!["SUPABASE_URL".into(), "SUPABASE_ANON_KEY".into()],
                 }
             }
         }
@@ -553,16 +570,15 @@ mod tests {
 
         /// Serializes env + keyring for adapter_connected tests (parallel-safe).
         struct HostedAdapterScope {
-            _guard: MutexGuard<'static, ()>,
+            _guard: super::MutexGuard<'static, ()>,
             _env: EnvVars,
         }
 
         impl HostedAdapterScope {
             fn enter() -> Option<Self> {
-                let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+                let guard = super::keyring_test_guard();
                 let env = EnvVars::hosted_supabase();
-                let session =
-                    r#"{"accessToken":"tok","refreshToken":"ref","expiresAt":9999999999999,"userId":"u1"}"#;
+                let session = r#"{"accessToken":"tok","refreshToken":"ref","expiresAt":9999999999999,"userId":"u1"}"#;
                 if store_session_json(session).is_err() {
                     return None;
                 }

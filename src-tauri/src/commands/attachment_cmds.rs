@@ -58,16 +58,16 @@ pub struct StageAttachmentInput {
 }
 
 fn attachments_paths() -> Result<(PathBuf, PathBuf), CommandError> {
-    let paths = AppPaths::resolve().map_err(|e| {
-        CommandError::new("storage", sanitize_error(&e.to_string(), None))
-    })?;
-    paths.ensure_dirs().map_err(|e| {
-        CommandError::new("storage", sanitize_error(&e.to_string(), None))
-    })?;
+    let paths = AppPaths::resolve()
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+    paths
+        .ensure_dirs()
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&paths.attachments, std::fs::Permissions::from_mode(0o700));
+        let _ =
+            std::fs::set_permissions(&paths.attachments, std::fs::Permissions::from_mode(0o700));
         let _ = std::fs::set_permissions(
             &paths.attachment_staging,
             std::fs::Permissions::from_mode(0o700),
@@ -79,9 +79,7 @@ fn attachments_paths() -> Result<(PathBuf, PathBuf), CommandError> {
 fn opaque_attachment_url(conversation_id: &str, attachment_id: &str) -> String {
     #[cfg(any(windows, target_os = "android"))]
     {
-        format!(
-            "http://coreside-asset.localhost/attachment/{conversation_id}/{attachment_id}"
-        )
+        format!("http://coreside-asset.localhost/attachment/{conversation_id}/{attachment_id}")
     }
     #[cfg(not(any(windows, target_os = "android")))]
     {
@@ -96,9 +94,7 @@ fn is_safe_attachment_id(id: &str) -> bool {
         && !id.contains('/')
         && !id.contains('\\')
         && !id.contains("..")
-        && id
-            .chars()
-            .all(|c| c.is_ascii_hexdigit() || c == '-')
+        && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
 
 /// Conversation / project-scope ids (`conv-…`); opaque attachment ids stay hex-only.
@@ -207,7 +203,9 @@ fn detect_format(bytes: &[u8]) -> Result<&'static str, CommandError> {
         ));
     }
     // Archives
-    if b.starts_with(b"PK\x03\x04") || b.starts_with(b"Rar!") || b.starts_with(b"7z\xBC\xAF\x27\x1C")
+    if b.starts_with(b"PK\x03\x04")
+        || b.starts_with(b"Rar!")
+        || b.starts_with(b"7z\xBC\xAF\x27\x1C")
     {
         return Err(CommandError::new(
             "invalid",
@@ -261,9 +259,8 @@ fn detect_format(bytes: &[u8]) -> Result<&'static str, CommandError> {
             "Unrecognized or binary attachment type",
         ));
     }
-    let text = String::from_utf8(b.to_vec()).map_err(|_| {
-        CommandError::new("invalid", "Text attachments must be valid UTF-8")
-    })?;
+    let text = String::from_utf8(b.to_vec())
+        .map_err(|_| CommandError::new("invalid", "Text attachments must be valid UTF-8"))?;
     let trimmed = text.trim_start();
     if trimmed.starts_with('{') || trimmed.starts_with('[') {
         return Ok("application/json");
@@ -294,9 +291,9 @@ fn mime_compatible(declared: &str, detected: &str) -> bool {
 }
 
 fn atomic_write(final_path: &Path, bytes: &[u8]) -> Result<(), CommandError> {
-    let parent = final_path.parent().ok_or_else(|| {
-        CommandError::new("storage", "Invalid attachment destination")
-    })?;
+    let parent = final_path
+        .parent()
+        .ok_or_else(|| CommandError::new("storage", "Invalid attachment destination"))?;
     let mut tmp = NamedTempFile::new_in(parent)
         .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
     tmp.write_all(bytes)
@@ -461,7 +458,10 @@ fn validated_storage_file_name(storage_key: &str) -> Result<&str, CommandError> 
         || name.contains('\\')
         || name.contains('\0')
     {
-        return Err(CommandError::new("invalid", "Invalid attachment storage key"));
+        return Err(CommandError::new(
+            "invalid",
+            "Invalid attachment storage key",
+        ));
     }
     Ok(name)
 }
@@ -575,7 +575,8 @@ fn promote_attachment_file(storage_key: &str) -> Result<(), CommandError> {
     }
     std::fs::rename(&staging_path, &durable_path)
         .or_else(|_| {
-            std::fs::copy(&staging_path, &durable_path).and_then(|_| std::fs::remove_file(&staging_path))
+            std::fs::copy(&staging_path, &durable_path)
+                .and_then(|_| std::fs::remove_file(&staging_path))
         })
         .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
     #[cfg(unix)]
@@ -604,7 +605,8 @@ fn demote_attachment_file(storage_key: &str) -> Result<(), CommandError> {
     }
     std::fs::rename(&durable_path, &staging_path)
         .or_else(|_| {
-            std::fs::copy(&durable_path, &staging_path).and_then(|_| std::fs::remove_file(&durable_path))
+            std::fs::copy(&durable_path, &staging_path)
+                .and_then(|_| std::fs::remove_file(&durable_path))
         })
         .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
     Ok(())
@@ -800,12 +802,7 @@ pub fn claim_attachments_on_conn(
         if !seen.insert(id.to_string()) {
             return Err(CommandError::new("invalid", "Duplicate attachment id"));
         }
-        claimed.push(claim_attachment_row(
-            conn,
-            conversation_id,
-            message_id,
-            id,
-        )?);
+        claimed.push(claim_attachment_row(conn, conversation_id, message_id, id)?);
     }
 
     let mut promote_keys = Vec::new();
@@ -841,9 +838,10 @@ pub fn claim_attachments_on_db(
     message_id: &str,
     attachment_ids: &[String],
 ) -> Result<AttachmentClaimResult, CommandError> {
-    let tx = db.conn().unchecked_transaction().map_err(|e| {
-        CommandError::new("storage", sanitize_error(&e.to_string(), None))
-    })?;
+    let tx = db
+        .conn()
+        .unchecked_transaction()
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
     let claimed = claim_attachments_on_conn(&tx, conversation_id, message_id, attachment_ids)?;
     tx.commit()
         .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
@@ -1090,8 +1088,7 @@ pub fn read_attachment_bytes_for_protocol(
     }
     let (storage_key, mime, state_s): (String, String, String) = {
         let db = state.db.lock();
-        authorize_attachment_access(db.conn(), id, conversation_id)
-            .map_err(|e| e.message)?;
+        authorize_attachment_access(db.conn(), id, conversation_id).map_err(|e| e.message)?;
         db.conn()
             .query_row(
                 "SELECT storage_key, detected_mime, state FROM chat_attachments
@@ -1172,9 +1169,8 @@ pub fn read_authorized_attachment_bytes(
         return Err(CommandError::new("not_found", "Attachment not available"));
     }
     let name = validated_storage_file_name(&storage_key)?;
-    let paths = AppPaths::resolve().map_err(|e| {
-        CommandError::new("storage", sanitize_error(&e.to_string(), None))
-    })?;
+    let paths = AppPaths::resolve()
+        .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
     for root in [&paths.attachment_staging, &paths.attachments] {
         let candidate = root.join(name);
         let meta = match std::fs::symlink_metadata(&candidate) {
@@ -1182,23 +1178,28 @@ pub fn read_authorized_attachment_bytes(
             Ok(m) if m.is_file() => m,
             _ => continue,
         };
-        let canonical = candidate.canonicalize().map_err(|e| {
-            CommandError::new("storage", sanitize_error(&e.to_string(), None))
-        })?;
-        let root_c = root.canonicalize().map_err(|e| {
-            CommandError::new("storage", sanitize_error(&e.to_string(), None))
-        })?;
+        let canonical = candidate
+            .canonicalize()
+            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+        let root_c = root
+            .canonicalize()
+            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
         if !canonical.starts_with(&root_c) {
             return Err(CommandError::new("storage", "Path outside attachments"));
         }
         if meta.len() > MAX_ATTACHMENT_BYTES as u64 {
-            return Err(CommandError::new("invalid", "Attachment exceeds size limit"));
+            return Err(CommandError::new(
+                "invalid",
+                "Attachment exceeds size limit",
+            ));
         }
-        let bytes = std::fs::read(&canonical).map_err(|e| {
-            CommandError::new("storage", sanitize_error(&e.to_string(), None))
-        })?;
+        let bytes = std::fs::read(&canonical)
+            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
         if bytes.len() > MAX_ATTACHMENT_BYTES {
-            return Err(CommandError::new("invalid", "Attachment exceeds size limit"));
+            return Err(CommandError::new(
+                "invalid",
+                "Attachment exceeds size limit",
+            ));
         }
         return Ok((bytes, safe_response_mime(&mime)));
     }
@@ -1224,7 +1225,9 @@ pub fn run_attachment_gc(
 
 /// Bounded startup/periodic GC for expired staged attachments and orphaned rows.
 /// Does not delete committed (`attached`) message files.
-pub fn reconcile_and_sweep_attachments(state: &AppState) -> Result<AttachmentSweepReport, CommandError> {
+pub fn reconcile_and_sweep_attachments(
+    state: &AppState,
+) -> Result<AttachmentSweepReport, CommandError> {
     state.require_profile()?;
     // Skip GC while maintenance/restore quiescence is active (healthy-profile gate above).
     if !state
@@ -1484,7 +1487,12 @@ mod tests {
             std::os::unix::fs::symlink(&target, root.join(link_name)).unwrap();
             assert!(!remove_managed_file_no_follow(&root, link_name));
             assert!(target.exists());
-            assert!(root.join(link_name).symlink_metadata().unwrap().file_type().is_symlink());
+            assert!(root
+                .join(link_name)
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink());
         }
         assert!(remove_managed_file_no_follow(&root, regular));
         assert!(!root.join(regular).exists());
@@ -1686,12 +1694,7 @@ mod tests {
                 assert!(!paths.attachment_staging.join(key).exists());
             }
 
-            authorize_attachment_access(
-                app.db.lock().conn(),
-                &ids[0],
-                conv,
-            )
-            .unwrap();
+            authorize_attachment_access(app.db.lock().conn(), &ids[0], conv).unwrap();
         });
     }
 

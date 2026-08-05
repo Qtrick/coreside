@@ -18,22 +18,22 @@ const commandName = "audit:current-source";
 
 const DEFAULT_ARCHIVE =
   process.env.CORESIDE_ARCHIVE ||
-  path.join(process.env.HOME || "", "Downloads", "Coreside Chat AI (1).zip");
+  path.join(process.env.HOME || "", "Downloads", "Coreside Chat AI.zip");
 const EXPECTED_ARCHIVE_SHA256 =
-  "21fb56d11bacff5b6b611c6624ee3849bc2cfec9803723f80f24c02479b835a2";
+  "2914751c9e4fdfb48e776dbff50807cd0e32fa5dd5f9f942e19e1394ff88ec98";
 const PREVIOUS_ARCHIVE_SHA256 =
-  "c38504e29ec2a8e683c952b50a2a8608e59fc2fdb830b96fb05b0932ed1d86ec";
+  "21fb56d11bacff5b6b611c6624ee3849bc2cfec9803723f80f24c02479b835a2";
 const PREVIOUS_ARCHIVE_LABEL =
-  "Coreside Chat AI.zip / prior RC3.7 archive (c38504e…)";
-const CURRENT_ARCHIVE_LABEL = "Coreside Chat AI (1).zip";
+  "Coreside Chat AI (1).zip / prior RC3.8 archive (21fb56d1…)";
+const CURRENT_ARCHIVE_LABEL = "Coreside Chat AI.zip";
 const PARTIAL_UPDATE_ARCHIVE =
   process.env.PARTIAL_UPDATE_ARCHIVE ||
   path.join(process.env.HOME || "", "Downloads", "Partial Update Main (1).zip");
 const EXPECTED_PARTIAL_UPDATE_SHA256 =
   "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607";
 const OLDER_ARCHIVE_SHA256 =
-  "724cd17ca7249f5fd94b5711d840b8bb1cc6ffaccec14559e85d1f0e93836c7a";
-const OLDER_ARCHIVE_LABEL = "Coreside Chat AI.zip / prior RC3.6 archive (724cd17c…)";
+  "c38504e29ec2a8e683c952b50a2a8608e59fc2fdb830b96fb05b0932ed1d86ec";
+const OLDER_ARCHIVE_LABEL = "Coreside Chat AI.zip / prior RC3.7 archive (c38504e…)";
 
 const FINGERPRINT_ROOTS = [
   "src",
@@ -126,6 +126,8 @@ function countGlob(dir, predicate) {
 
 function archiveExtractRoot() {
   const candidates = [
+    path.join(root, ".reference", "coreside-rc3.9-archive", "coreside-main"),
+    path.join(root, ".reference", "coreside-rc3.8-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-rc3.6-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-rc3.5-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-rc3-archive", "coreside-main"),
@@ -138,6 +140,8 @@ function archiveExtractRoot() {
 
 function archiveExtractMatchesExpected() {
   const markers = [
+    path.join(root, ".reference", "coreside-rc3.9-archive", "source.sha256"),
+    path.join(root, ".reference", "coreside-rc3.8-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-rc3.6-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-rc3.5-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-rc3-archive", "source.sha256"),
@@ -305,7 +309,7 @@ if (
 ) {
   archiveDiff = {
     status: "extract_stale_or_unmarked",
-    hint: "Re-extract Coreside Chat AI.zip into .reference/coreside-rc3.6-archive and write source.sha256 with the expected archive hash",
+    hint: "Re-extract Coreside Chat AI.zip into .reference/coreside-rc3.9-archive and write source.sha256 with the expected archive hash",
     expectedArchiveSha256: EXPECTED_ARCHIVE_SHA256,
     onlyInActive: [],
     onlyInArchive: [],
@@ -314,7 +318,7 @@ if (
 } else if (archiveStatus === "present_hash_match") {
   archiveDiff = {
     status: "archive_present_but_extract_missing",
-    hint: "Extract zip to .reference/coreside-rc3.6-archive/coreside-main then re-run",
+    hint: "Extract zip to .reference/coreside-rc3.9-archive/coreside-main then re-run",
     onlyInActive: [],
     onlyInArchive: [],
     changed: [],
@@ -372,7 +376,7 @@ const hostedAi = "Not ready";
 
 const baselineReport = {
   ...common,
-  phase: "RC3.6",
+  phase: "RC3.9",
   publicBeta,
   hostedAi,
   evidenceClass: dirty ? "development-dirty" : "development-clean",
@@ -472,7 +476,7 @@ writeJson("current-source-baseline.json", baselineReport);
 writeJson("active-versus-uploaded-coreside.json", compareReport);
 
 const HISTORICAL_NOTE =
-  "RC3.6 archive 724cd17c; suite not re-run on current tree. Absent until Desktop/Packaged gates execute.";
+  "RC3.9 archive 2914751c; suite not re-run on current tree. Absent until Desktop/Packaged gates execute.";
 
 /** Restamp gate reports that must not claim passes on a dirty or stale fingerprint. */
 function restampAbsentGateReports() {
@@ -676,7 +680,7 @@ const freshnessReport = {
 };
 writeJson("report-freshness-inventory.json", freshnessReport);
 
-const md = `# Current Source Baseline (RC3.6)
+const md = `# Current Source Baseline (RC3.9)
 
 **Product:** Coreside  
 **Access date:** ${nowIso().slice(0, 10)}  

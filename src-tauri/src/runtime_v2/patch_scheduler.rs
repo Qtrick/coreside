@@ -381,10 +381,14 @@ pub fn topological_order(ops: &[AppOperation]) -> Result<Vec<usize>, String> {
     for (i, op) in ops.iter().enumerate() {
         if let Some(deps) = &op.depends_on {
             for dep in deps {
-                if let Some(&j) = id_to_idx.get(dep.as_str()) {
-                    adj[j].push(i);
-                    in_degree[i] += 1;
-                }
+                let Some(&j) = id_to_idx.get(dep.as_str()) else {
+                    return Err(format!(
+                        "missing depends_on reference '{dep}' from operation '{}'",
+                        op.id
+                    ));
+                };
+                adj[j].push(i);
+                in_degree[i] += 1;
             }
         }
     }
@@ -458,7 +462,7 @@ pub fn flush_scheduler(
         )
         .map_err(|e| DbError::Invalid(e.user_message()))?;
 
-        if result.apply.is_some() {
+        if result.is_committed() {
             db.conn().execute(
                 "UPDATE patch_scheduler_items SET status = 'applied', applied_at = ?1,
                  transaction_id = ?2 WHERE id = ?3",
@@ -479,9 +483,16 @@ pub fn flush_scheduler(
                 );
             }
             applied.push(result);
-        } else {
+        } else if result.proposal_id.is_some() {
             db.conn().execute(
                 "UPDATE patch_scheduler_items SET status = 'pending_approval', failed_at = ?1 WHERE id = ?2",
+                params![now, patch_id],
+            )?;
+            applied.push(result);
+        } else {
+            db.conn().execute(
+                "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
+                 error_category = 'apply' WHERE id = ?2",
                 params![now, patch_id],
             )?;
             applied.push(result);
@@ -562,7 +573,7 @@ pub fn schedule_and_apply(
         }
     };
 
-    if change_result.apply.is_some() {
+    if change_result.is_committed() {
         let txn_id = change_result
             .apply
             .as_ref()
@@ -575,9 +586,7 @@ pub fn schedule_and_apply(
             )?;
         }
         if source_type == "user" || source_type == "direct_manipulation" {
-            let surface_id = scheduled
-                .first()
-                .and_then(|p| p.surface_id.as_deref());
+            let surface_id = scheduled.first().and_then(|p| p.surface_id.as_deref());
             let _ = record_manual_edit_provenance(
                 db,
                 txn_id,
@@ -587,12 +596,20 @@ pub fn schedule_and_apply(
                 &op_ids,
             );
         }
-    } else {
+    } else if change_result.proposal_id.is_some() {
         for patch in &scheduled {
             db.conn().execute(
                 "UPDATE patch_scheduler_items SET status = 'pending_approval' WHERE id = ?1",
                 params![patch.id],
             )?;
+        }
+    } else {
+        for patch in &scheduled {
+            let _ = db.conn().execute(
+                "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
+                 error_category = 'apply' WHERE id = ?2",
+                params![now, patch.id],
+            );
         }
     }
 

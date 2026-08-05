@@ -462,7 +462,8 @@ pub fn kernel_invoke_registered_action(
         }
         if let Some(ref surface_id) = request.surface_id {
             let db = state.db.lock();
-            let surface = crate::runtime_v2::get_surface(&db, surface_id).map_err(CommandError::from)?;
+            let surface =
+                crate::runtime_v2::get_surface(&db, surface_id).map_err(CommandError::from)?;
             crate::windows::enforce_caller_surface_scope(
                 &window,
                 surface.tool_id.as_deref(),

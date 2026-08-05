@@ -1,8 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import {
   buildStripeCheckoutSessionBody,
+  expectedPriceCents,
+  expectedStripeRecurringInterval,
   parseCheckoutBody,
   resolveBillingReturnUrl,
+  resolveCheckoutPriceIdFromEnv,
 } from "../billing-lib.ts";
 import { readBodyTextBounded } from "../_shared/read-body.ts";
 
@@ -113,28 +116,64 @@ Deno.serve(async (req) => {
         service: SERVICE,
         version: VERSION,
         planId: body.planId,
+        interval: body.interval,
         checkoutUrl: null,
         message:
-          "Stripe checkout scaffolding. Set STRIPE_SECRET_KEY and stripe_checkout_price_id on the plan catalog to enable.",
+          "Stripe checkout scaffolding. Set STRIPE_SECRET_KEY and STRIPE_PRICE_* env for plan+interval variants.",
       },
       503,
       origin,
     );
   }
 
-  const { data: planRow, error: planError } = await userClient
-    .from("ai_plan_catalog")
-    .select("plan_id, stripe_checkout_price_id")
-    .eq("plan_id", body.planId)
-    .maybeSingle();
-
-  const priceId = planRow?.stripe_checkout_price_id?.trim();
-  if (planError || !priceId) {
+  // Server resolves Price ID from allowlisted env — never from the desktop.
+  const priceId = resolveCheckoutPriceIdFromEnv(body.planId, body.interval);
+  if (!priceId) {
     return json(
       {
-        error: "Plan is not available for checkout",
+        error: "Plan interval is not configured for checkout",
         planId: body.planId,
+        interval: body.interval,
         stub: true,
+      },
+      503,
+      origin,
+    );
+  }
+
+  const expectedCents = expectedPriceCents(body.planId, body.interval);
+  const expectedRecurring = expectedStripeRecurringInterval(body.interval);
+  if (expectedCents == null || expectedRecurring == null) {
+    return json({ error: "Unknown plan interval" }, 400, origin);
+  }
+
+  // Verify live Stripe amount + recurring interval (fail closed on drift).
+  // priceId is allowlisted `price_[A-Za-z0-9]+` — safe path segment.
+  const priceVerify = await fetch(`https://api.stripe.com/v1/prices/${priceId}`, {
+    headers: { Authorization: `Bearer ${stripeSecret}` },
+  });
+  if (!priceVerify.ok) {
+    return json({ error: "Could not verify checkout price" }, 503, origin);
+  }
+  const priceJson = await priceVerify.json() as {
+    unit_amount?: number;
+    active?: boolean;
+    currency?: string;
+    type?: string;
+    recurring?: { interval?: string } | null;
+  };
+  if (
+    !priceJson.active ||
+    priceJson.currency !== "usd" ||
+    priceJson.type !== "recurring" ||
+    priceJson.unit_amount !== expectedCents ||
+    priceJson.recurring?.interval !== expectedRecurring
+  ) {
+    return json(
+      {
+        error: "Checkout price failed amount verification",
+        planId: body.planId,
+        interval: body.interval,
       },
       503,
       origin,
@@ -162,6 +201,7 @@ Deno.serve(async (req) => {
   const sessionBody = buildStripeCheckoutSessionBody({
     userId: user.id,
     planId: body.planId,
+    interval: body.interval,
     priceId,
     successUrl,
     cancelUrl,

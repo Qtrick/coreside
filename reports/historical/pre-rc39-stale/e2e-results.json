@@ -1,0 +1,107 @@
+{
+  "product": "Coreside",
+  "generatedAt": "2026-08-04T22:02:45.703Z",
+  "commit": "2b502278ede0d0db57fe16f77ef1e282a92fd0d1",
+  "dirty": true,
+  "sourceFingerprint": "3c3fa498fa75b2aade48f3d127a45066df532598526258c60051d6c0cb5252dd",
+  "command": "npm run e2e",
+  "status": "passed_partial",
+  "platform": "darwin",
+  "arch": "arm64",
+  "evidenceLevel": "not_desktop_verified",
+  "journeys": [
+    {
+      "id": 1,
+      "name": "clean-startup",
+      "status": "passed"
+    },
+    {
+      "id": 2,
+      "name": "existing-profile",
+      "status": "passed"
+    },
+    {
+      "id": 3,
+      "name": "settings",
+      "status": "passed"
+    },
+    {
+      "id": 4,
+      "name": "conversation-draft",
+      "status": "passed"
+    },
+    {
+      "id": 5,
+      "name": "generated-tool-state",
+      "status": "passed"
+    },
+    {
+      "id": 6,
+      "name": "approval-approve-once",
+      "status": "passed"
+    },
+    {
+      "id": 7,
+      "name": "multi-window-approval-race",
+      "status": "passed_partial",
+      "note": "Single-window WebDriver: secondary absence asserted; concurrent cross-window approve race not exercised"
+    },
+    {
+      "id": 8,
+      "name": "grant-revoke",
+      "status": "passed"
+    },
+    {
+      "id": 9,
+      "name": "recovery-mode",
+      "status": "passed"
+    },
+    {
+      "id": 10,
+      "name": "secondary-window",
+      "status": "passed"
+    },
+    {
+      "id": 11,
+      "name": "command-authority-denial",
+      "status": "passed"
+    },
+    {
+      "id": 12,
+      "name": "true-streaming",
+      "status": "passed"
+    },
+    {
+      "id": 13,
+      "name": "wallpaper-targeted",
+      "status": "passed"
+    },
+    {
+      "id": 14,
+      "name": "stream-eavesdropping-denial",
+      "status": "passed"
+    },
+    {
+      "id": 15,
+      "name": "first-run-welcome",
+      "status": "passed"
+    },
+    {
+      "id": 16,
+      "name": "core-tutorial",
+      "status": "passed"
+    },
+    {
+      "id": 17,
+      "name": "local-ai-privacy",
+      "status": "not_run",
+      "note": "Spec present; not executed — requires Local AI desktop profile"
+    },
+    {
+      "id": 18,
+      "name": "hosted-free-chat",
+      "status": "not_run",
+      "note": "Spec present; not executed — requires hosted Supabase + Coreside AI session"
+    }
+  ]
+}
