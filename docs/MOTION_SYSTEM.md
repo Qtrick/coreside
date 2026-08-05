@@ -21,4 +21,4 @@
 
 ## Integration backlog
 
-Welcome, tutorial, Settings, Help, App panel, Queue, wallpaper preview, progressive preview — wire presence + tokens without delaying required actions.
+Welcome, tutorial — wired. Settings category body (including Help & learning) — wired with `usePresence` + panel motion tokens. App panel, Queue, wallpaper preview, progressive preview — wire presence + tokens without delaying required actions.

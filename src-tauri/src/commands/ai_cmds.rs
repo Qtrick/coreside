@@ -5,9 +5,9 @@ use tauri::State;
 use tokio_util::sync::CancellationToken;
 
 use super::CommandError;
-use crate::ai::{create_provider, model_catalog, ModelCatalog};
+use crate::ai::{create_provider_for_access, model_catalog, ModelCatalog};
 use crate::config::PublicAiStatus;
-use crate::credentials::{read_credential_sources, resolve_from_sources};
+use crate::credentials::{complete_credential_sources, read_credential_sources, resolve_ai_access};
 use crate::db;
 use crate::state::AppState;
 
@@ -55,13 +55,13 @@ pub fn get_ai_status(state: State<'_, AppState>) -> PublicAiStatus {
         };
     }
     let _ = state.reload_config();
-    // Read the database half under the lock, then release it: the keychain
-    // lookup inside `resolve_from_sources` is a blocking OS call.
-    let sources = {
+    // Read DB rows under the lock; keychain lookups happen after it is released.
+    let sources = complete_credential_sources({
         let db = state.db.lock();
         read_credential_sources(&db, None)
-    };
-    let resolved = resolve_from_sources(&sources);
+    });
+    let access = resolve_ai_access(&sources);
+    let resolved = &access.credentials;
     let developer_mode = {
         let db = state.db.lock();
         db::get_settings(&db)
@@ -70,19 +70,18 @@ pub fn get_ai_status(state: State<'_, AppState>) -> PublicAiStatus {
             .map(|v| v == "true" || v == "1" || v.eq_ignore_ascii_case("yes"))
             .unwrap_or(false)
     };
-    let hosted_connected = {
-        let db = state.db.lock();
-        crate::credentials::adapter_connected(&db)
-    };
+    let hosted_connected = sources.hosted_adapter_connected();
 
     let has_key = resolved.has_api_key();
+    let is_local =
+        resolved.is_authless_local() || crate::credentials::is_authless_local_provider(&resolved.provider);
     let presentation = crate::ai::resolve_access_presentation(
         &resolved.source,
         &resolved.provider,
-        has_key || resolved.provider.eq_ignore_ascii_case("mock"),
+        has_key,
         hosted_connected,
         developer_mode,
-        false,
+        is_local,
     );
 
     let (status, message) = if presentation.available {
@@ -117,11 +116,12 @@ pub fn get_model_catalog(state: State<'_, AppState>) -> Result<ModelCatalog, Com
     state.require_profile()?;
     // Read the database half under the lock, then release it: the keychain
     // lookup inside `resolve_from_sources` is a blocking OS call.
-    let sources = {
+    let sources = complete_credential_sources({
         let db = state.db.lock();
         read_credential_sources(&db, None)
-    };
-    let resolved = resolve_from_sources(&sources);
+    });
+    let access = resolve_ai_access(&sources);
+    let resolved = &access.credentials;
     let developer_mode = {
         let db = state.db.lock();
         db::get_settings(&db)
@@ -130,17 +130,15 @@ pub fn get_model_catalog(state: State<'_, AppState>) -> Result<ModelCatalog, Com
             .map(|v| v == "true" || v == "1" || v.eq_ignore_ascii_case("yes"))
             .unwrap_or(false)
     };
-    let hosted_connected = {
-        let db = state.db.lock();
-        crate::credentials::adapter_connected(&db)
-    };
+    let hosted_connected = sources.hosted_adapter_connected();
     let presentation = crate::ai::resolve_access_presentation(
         &resolved.source,
         &resolved.provider,
-        resolved.has_api_key() || resolved.provider.eq_ignore_ascii_case("mock"),
+        resolved.has_api_key(),
         hosted_connected,
         developer_mode,
-        false,
+        resolved.is_authless_local()
+            || crate::credentials::is_authless_local_provider(&resolved.provider),
     );
     let selected = {
         let db = state.db.lock();
@@ -163,15 +161,16 @@ pub async fn test_ai_connection(
     state.require_profile()?;
     // Read the database half under the lock, then release it: the keychain
     // lookup inside `resolve_from_sources` is a blocking OS call.
-    let sources = {
+    let sources = complete_credential_sources({
         let db = state.db.lock();
         read_credential_sources(&db, None)
-    };
-    let resolved = resolve_from_sources(&sources);
+    });
+    let access = resolve_ai_access(&sources);
+    let resolved = &access.credentials;
     let key = resolved.api_key.clone();
-    let config = resolved.to_app_config();
+    let _config = resolved.to_app_config();
 
-    let provider = create_provider(&config)
+    let provider = create_provider_for_access(&access, None)
         .map_err(|e| CommandError::sanitized(e.code(), e, key.as_deref()))?;
 
     let cancel = CancellationToken::new();
@@ -187,17 +186,15 @@ pub async fn test_ai_connection(
             .map(|v| v == "true" || v == "1" || v.eq_ignore_ascii_case("yes"))
             .unwrap_or(false)
     };
-    let hosted_connected = {
-        let db = state.db.lock();
-        crate::credentials::adapter_connected(&db)
-    };
+    let hosted_connected = sources.hosted_adapter_connected();
     let presentation = crate::ai::resolve_access_presentation(
         &resolved.source,
         &resolved.provider,
-        resolved.has_api_key() || resolved.provider.eq_ignore_ascii_case("mock"),
+        resolved.has_api_key(),
         hosted_connected,
         developer_mode,
-        false,
+        resolved.is_authless_local()
+            || crate::credentials::is_authless_local_provider(&resolved.provider),
     );
     if presentation.disclosure.show_provider_identity {
         let provider_name = crate::ai::AiProvider::display_name(provider.as_ref());

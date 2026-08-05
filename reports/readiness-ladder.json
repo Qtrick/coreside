@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T19:33:01.752Z",
-  "commit": "ea9ad672e8bc97eb60dd6d9b62ee0856807fcc8b",
+  "generatedAt": "2026-08-04T22:04:37.094Z",
+  "commit": "2b502278ede0d0db57fe16f77ef1e282a92fd0d1",
   "dirty": true,
-  "sourceFingerprint": "94ad9242e20ed0235002dcf89983fadc91ded3464e90a94000c2487cc5b7e16d",
+  "sourceFingerprint": "3c3fa498fa75b2aade48f3d127a45066df532598526258c60051d6c0cb5252dd",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
@@ -13,7 +13,7 @@
   "command": "audit:readiness",
   "exitStatus": 0,
   "evidenceLevel": "classified-not-desktop-verified",
-  "phase": "RC3.4",
+  "phase": "RC3.6",
   "model": "docs/BETA_READINESS_MODEL.md",
   "humanChecklist": "docs/HUMAN_ACCEPTANCE_CHECKLIST.md",
   "humanChecklistSigned": false,
@@ -36,8 +36,8 @@
     {
       "id": "true-streaming",
       "name": "True streaming (chat_stream / TextDelta)",
-      "state": "Integrated – Not Verified",
-      "notes": "True streaming desktop claim withheld. (prior evidence 3202ca6) Re-run on HEAD to claim Desktop Verified.",
+      "state": "Desktop Verified",
+      "notes": "Journey 12 passed on this HEAD (e2e-results) with turnId + live stream marker.",
       "evidence": [
         "reports/true-streaming-results.json"
       ]
@@ -45,8 +45,8 @@
     {
       "id": "channel-scoped-streaming",
       "name": "Channel-scoped turn streaming",
-      "state": "Integrated – Not Verified",
-      "notes": "Channel-scoped streaming desktop claim withheld. (prior evidence 3202ca6) Re-run on HEAD to claim Desktop Verified.",
+      "state": "Desktop Verified",
+      "notes": "Journey 14: tool window received zero Text events during main stream on this HEAD (e2e-results).",
       "evidence": [
         "reports/scoped-streaming-results.json",
         "reports/stream-eavesdropping-results.json"
@@ -55,8 +55,8 @@
     {
       "id": "wallpaper-atomic-settings",
       "name": "Wallpaper atomic appearance writes",
-      "state": "Integrated – Not Verified",
-      "notes": "Wallpaper atomic settings desktop claim withheld. (prior evidence 3202ca6) Re-run on HEAD to claim Desktop Verified.",
+      "state": "Desktop Verified",
+      "notes": "Journey 13 Matrix + transparency + canvas samples on this HEAD (e2e-results); packaged pixels not_run.",
       "evidence": [
         "reports/wallpaper-settings-results.json",
         "reports/wallpaper-visual-results.json"
@@ -66,7 +66,7 @@
       "id": "progressive-preview",
       "name": "Progressive preview transaction",
       "state": "Unit Verified",
-      "notes": "PreviewTransaction + live NDJSON Channel preview + turn-end apply unit-proven; surface paint / JSON-blob progressive / desktop E2E remain open.",
+      "notes": "PreviewTransaction + live NDJSON Channel preview + speculative surface paint unit-proven; JSON-blob progressive / desktop E2E remain open.",
       "evidence": [
         "src-tauri/src/runtime_v2/preview_transaction.rs",
         "docs/PROGRESSIVE_PREVIEW_TRANSACTION.md"
@@ -108,7 +108,7 @@
       "id": "attachment-authorization",
       "name": "Attachment authorize_access (conversation-scoped)",
       "state": "Unit Verified",
-      "notes": "authorize_attachment_access + get_chat_attachment_src / protocol bytes unit-proven; multimodal + window ACL open; desktop not_run.",
+      "notes": "authorize_attachment_access + get_chat_attachment_src / protocol bytes unit-proven; multimodal send path wired; desktop E2E not_run.",
       "evidence": [
         "reports/attachment-authorization-results.json",
         "docs/ATTACHMENT_LIFECYCLE.md"
@@ -128,7 +128,7 @@
       "id": "e2e-1-14",
       "name": "Desktop E2E Journeys 1–14",
       "state": "Integrated – Not Verified",
-      "notes": "e2e status=not_run — not a full Desktop Verified suite pass.",
+      "notes": "Orchestrator finished on this HEAD but Journey 7 is passed_partial — not a full Desktop Verified suite pass.",
       "evidence": [
         "reports/e2e-results.json",
         "reports/true-streaming-results.json",
@@ -140,8 +140,8 @@
     {
       "id": "e2e-12-13",
       "name": "Desktop E2E Journey 12 / 13",
-      "state": "Integrated – Not Verified",
-      "notes": "Journey 12/13 not both passed on this HEAD. (prior evidence 3202ca6) Re-run on HEAD to claim Desktop Verified.",
+      "state": "Desktop Verified",
+      "notes": "Journeys 12/13 passed on this HEAD (e2e-results); Journey 13 asserts uniqueColors≥2 and lumSpan≥8 on Matrix canvas.",
       "evidence": [
         "reports/true-streaming-results.json",
         "reports/wallpaper-visual-results.json"
@@ -150,10 +150,52 @@
     {
       "id": "e2e-14-eavesdrop",
       "name": "Tool-window stream eavesdropping denial",
-      "state": "Integrated – Not Verified",
-      "notes": "Journey 14 eavesdrop desktop claim withheld. (prior evidence 3202ca6) Re-run on HEAD to claim Desktop Verified.",
+      "state": "Desktop Verified",
+      "notes": "Journey 14 passed on this HEAD (e2e-results); zero Text events in tool window.",
       "evidence": [
         "reports/stream-eavesdropping-results.json"
+      ]
+    },
+    {
+      "id": "command-authority-j11",
+      "name": "Tool-window raw-invoke ACL denial (Journey 11)",
+      "state": "Desktop Verified",
+      "notes": "Journey 11 raw-invoke denial passed on this HEAD (isolated suite only; 15 sensitive commands + cross-tool write denied). Full orchestrator passed_partial (J7) — not a Desktop Verified suite pass.",
+      "evidence": [
+        "reports/command-authority-results.json"
+      ]
+    },
+    {
+      "id": "multimodal-provider-send",
+      "name": "Multimodal image + native tool-result send path",
+      "state": "Unit Verified",
+      "notes": "OpenAI/Ollama/Anthropic/Gemini family adapters + validate_provider_send unit-proven; Desktop E2E multimodal chat not_run.",
+      "evidence": [
+        "reports/multimodal-provider-results.json",
+        "docs/ATTACHMENT_LIFECYCLE.md",
+        "src-tauri/src/ai/provider_send.rs"
+      ]
+    },
+    {
+      "id": "local-ai-privacy",
+      "name": "Local AI privacy routing (user_local)",
+      "state": "Integrated – Not Verified",
+      "notes": "access_mode.rs + Composer disclosure landed; Journey 17 spec registered; harness not_run (requires Local AI desktop profile).",
+      "evidence": [
+        "src-tauri/src/ai/access_mode.rs",
+        "src/lib/ai-access-disclosure.test.ts",
+        "e2e/specs/17-local-ai-privacy.spec.ts"
+      ]
+    },
+    {
+      "id": "hosted-ai-gateway",
+      "name": "Hosted Coreside AI gateway + billing scaffold",
+      "state": "Scaffolded",
+      "notes": "Supabase ai-gateway + billing Edge Functions + entitlements migrations unit-tested; private alpha not ready; separate track from local BYOK.",
+      "evidence": [
+        "supabase/functions/ai-gateway/gateway-lib.test.ts",
+        "supabase/functions/billing-lib.test.ts",
+        "reports/hosted-ai-readiness.json"
       ]
     },
     {
@@ -208,26 +250,31 @@
       "structured-user-input",
       "attachment-authorization",
       "attachment-gc",
+      "multimodal-provider-send",
       "attachment-crash",
       "restore-transaction"
     ],
-    "desktopVerified": [],
-    "integratedNotVerified": [
+    "desktopVerified": [
       "true-streaming",
       "channel-scoped-streaming",
       "wallpaper-atomic-settings",
-      "e2e-1-14",
       "e2e-12-13",
-      "e2e-14-eavesdrop"
+      "e2e-14-eavesdrop",
+      "command-authority-j11"
+    ],
+    "integratedNotVerified": [
+      "e2e-1-14",
+      "local-ai-privacy"
     ],
     "scaffolded": [
+      "hosted-ai-gateway",
       "packaged-smoke"
     ],
     "absent": [],
     "deferred": [
       "hosted-ai"
     ],
-    "highestDesktopClaim": "none",
+    "highestDesktopClaim": "Desktop Verified (partial feature evidence)",
     "highestPackagedClaim": "none",
     "packagedVerified": [],
     "overallLocalFirst": "Development Build",

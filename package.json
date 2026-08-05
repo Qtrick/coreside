@@ -14,6 +14,8 @@
     "test": "vitest run",
     "test:ai-access": "vitest run src/lib/ai-access-disclosure.test.ts && cargo test --manifest-path src-tauri/Cargo.toml --lib ai::access_mode",
     "test:hosted-auth": "vitest run src/lib/hosted",
+    "test:ai-gateway": "vitest run supabase/functions/ai-gateway/gateway-lib.test.ts",
+    "test:billing-lib": "vitest run supabase/functions/billing-lib.test.ts",
     "test:typescript-6": "tsc --version && npm run typecheck",
     "assurance:report": "node scripts/assurance-report.mjs",
     "audit:current-source": "node scripts/audit-current-source.mjs",

@@ -1,9 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T04:14:08.392Z",
-  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "generatedAt": "2026-08-04T22:02:39.093Z",
+  "commit": "2b502278ede0d0db57fe16f77ef1e282a92fd0d1",
   "dirty": true,
+  "sourceFingerprint": "3c3fa498fa75b2aade48f3d127a45066df532598526258c60051d6c0cb5252dd",
   "platform": "darwin",
   "architecture": "arm64",
   "command": "e2e:journey-14-stream-eavesdropping-denial",

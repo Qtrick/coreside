@@ -123,7 +123,7 @@ On suite success, `e2e/run.mjs` removes the isolated temp DB directory. Failed s
 | 4 | `04-new-conversation-draft.spec.ts` | `main` | **Automated** | New chat + composer draft |
 | 5 | `05-generated-tool-state.spec.ts` | `existing-tool` | **Automated** | Seeded `tool-e2e-notes` text input persists |
 | 6 | `06-approval-approve-once.spec.ts` | `existing-approval` | **Automated** | `approval-e2e-1` → Approve once |
-| 7 | `07-multi-window-approval-race.spec.ts` | `existing-approval-race` | **Partial** | Opens secondary window; asserts approval stays on `main` only |
+| 7 | `07-multi-window-approval-race.spec.ts` | `existing-approval-race` | **Partial** | Secondary absence asserted; concurrent cross-window approve race not exercised |
 | 8 | `08-grant-revoke.spec.ts` | `existing-grant` | **Automated** | Revokes seeded `grant-e2e-1` in App permissions |
 | 9 | `09-recovery-mode.spec.ts` | `existing-recovery` | **Automated** | Enter/exit Recovery Mode |
 | 10 | `10-secondary-window.spec.ts` | `existing-window` | **Automated** | Opens `tool-tool-e2e-notes`, switches WebDriver context, close + reopen |
@@ -131,6 +131,10 @@ On suite success, `e2e/run.mjs` removes the isolated temp DB directory. Failed s
 | 12 | `12-true-streaming.spec.ts` | `true-streaming` | **Automated** | Mock live stream probe + turn identity; writes `reports/true-streaming-results.json` |
 | 13 | `13-wallpaper-targeted-update.spec.ts` | `wallpaper-targeted` | **Automated** | Matrix apply + transparency 40 + canvas pixel samples; writes `reports/wallpaper-visual-results.json` |
 | 14 | `14-stream-eavesdropping-denial.spec.ts` | `existing-eavesdrop` | **Automated** | Tool window listens for `agent-turn`; asserts zero Text; writes `reports/stream-eavesdropping-results.json` |
+| 15 | `15-first-run-welcome.spec.ts` | `first-run-welcome` | **Automated** | Clean profile + `CORESIDE_E2E_ALLOW_ONBOARDING=1`; Welcome dialog |
+| 16 | `16-core-tutorial.spec.ts` | `core-tutorial` | **Automated** | Essentials tour from Welcome; advances at least one overlay step |
+| 17 | `17-local-ai-privacy.spec.ts` | `local-ai-privacy` | **Not run** | Requires dedicated Local AI desktop profile |
+| 18 | `18-hosted-free-chat.spec.ts` | `hosted-free-chat` | **Not run** | Requires hosted Supabase + Coreside AI session |
 
 ### Seed fixture (`CORESIDE_E2E_SEED=existing`)
 
@@ -150,5 +154,5 @@ Seed is compile-gated (`e2e` feature) and env-gated — not a public Tauri comma
 ### Multi-window limitations
 
 - `browser.tauri.listWindows()` / `switchWindow()` work with the embedded provider.
-- Journey 7 does **not** assert duplicate approval UI in the secondary window (WebDriver session targets one window at a time).
+- Journey 7 asserts the secondary tool window does **not** show duplicate approval UI, but WebDriver targets one window at a time — concurrent cross-window approve races are **not** exercised (suite records `passed_partial`).
 - Journey 10 verifies open + `browser.tauri.switchWindow()` + `browser.closeWindow()` + reopen (full coverage).

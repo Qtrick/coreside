@@ -247,6 +247,10 @@ export function Composer() {
       tools.map((t) => ({ id: t.id, name: t.name })),
     );
     const structured = mergeResolvedMentions(resolved, pendingMentions);
+    const draftContent = content;
+    const savedMentions = pendingMentions;
+    const savedFiles = pendingFiles;
+
     setValue("");
     if (activeConversationId) {
       setChatDraft(activeConversationId, "");
@@ -260,7 +264,26 @@ export function Composer() {
       return [];
     });
     setStaging(false);
-    await sendMessage(content || "Shared attachments", structured, staged);
+    const ok = await sendMessage(
+      content || "Shared attachments",
+      structured,
+      staged,
+    );
+    if (!ok) {
+      setValue(draftContent);
+      if (activeConversationId) {
+        setChatDraft(activeConversationId, draftContent);
+      }
+      setPendingMentions(savedMentions);
+      setPendingFiles(savedFiles);
+      for (const saved of staged) {
+        try {
+          await api.cancelChatAttachment(saved.id);
+        } catch {
+          // Best-effort release of staged files when send is rejected preflight.
+        }
+      }
+    }
     textareaRef.current?.focus();
   };
 

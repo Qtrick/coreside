@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T19:33:01.752Z",
-  "commit": "ea9ad672e8bc97eb60dd6d9b62ee0856807fcc8b",
+  "generatedAt": "2026-08-04T22:04:37.094Z",
+  "commit": "2b502278ede0d0db57fe16f77ef1e282a92fd0d1",
   "dirty": true,
-  "sourceFingerprint": "94ad9242e20ed0235002dcf89983fadc91ded3464e90a94000c2487cc5b7e16d",
+  "sourceFingerprint": "3c3fa498fa75b2aade48f3d127a45066df532598526258c60051d6c0cb5252dd",
   "packageLockHash": "f32e3db1ed083c4c69903b536cb15edbb1ba616e8f8affd75c113cd7004e3be6",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
@@ -23,19 +23,19 @@
     {
       "id": "wallpaper-atomic-settings",
       "from": "Absent / fragmented settings writes",
-      "to": "Integrated – Not Verified",
+      "to": "Desktop Verified",
       "detail": "Atomic workspace appearance + slider coalesce; desktop only when Journey 13 evidence is on HEAD."
     },
     {
       "id": "channel-scoped-streaming",
       "from": "Global agent-turn text bus",
-      "to": "Integrated – Not Verified",
+      "to": "Desktop Verified",
       "detail": "Interactive send uses Channel; Text kept off global bus; desktop when Journey 14 evidence is on HEAD."
     },
     {
       "id": "true-streaming",
       "from": "Buffered / incomplete live path",
-      "to": "Integrated – Not Verified",
+      "to": "Desktop Verified",
       "detail": "chat_with_auto → chat_stream; desktop when Journey 12 evidence is on HEAD."
     },
     {
@@ -53,7 +53,7 @@
     {
       "id": "e2e-12-13",
       "from": "Absent",
-      "to": "Integrated – Not Verified",
+      "to": "Desktop Verified",
       "detail": "Journey 12/13 specs exist; Desktop Verified only when both pass on HEAD."
     },
     {
@@ -87,6 +87,30 @@
       "detail": "Launch-only scan+quit recorded when present — not Packaged Verified until BYOK/chat/persistence packaged proof."
     },
     {
+      "id": "command-authority-j11",
+      "from": "Absent / manual",
+      "to": "Desktop Verified",
+      "detail": "Journey 11 E2E denies 15 sensitive invokes + cross-tool save_tool_state from tool-* windows."
+    },
+    {
+      "id": "multimodal-provider-send",
+      "from": "Text-only flatten",
+      "to": "Unit Verified",
+      "detail": "Native image + tool-result envelopes per provider family; validate_provider_send fail-closed."
+    },
+    {
+      "id": "local-ai-privacy",
+      "from": "Absent",
+      "to": "Integrated – Not Verified",
+      "detail": "Rust access_mode + UI disclosure; Journey 17 spec not executed in default harness."
+    },
+    {
+      "id": "hosted-ai-gateway",
+      "from": "Absent",
+      "to": "Scaffolded",
+      "detail": "ai-gateway + Stripe billing scaffold + entitlements SQL; hosted track Deliberately Deferred."
+    },
+    {
       "id": "e2e-1-14",
       "from": "Absent",
       "to": "Integrated – Not Verified",
@@ -101,7 +125,7 @@
     {
       "id": "progressive-preview-gaps",
       "state": "Unit Verified (partial)",
-      "detail": "No speculative surface paint, JSON-blob progressive, or desktop E2E yet."
+      "detail": "Speculative surface paint + conversation-scoped overlay clear landed; JSON-blob progressive + desktop E2E still open."
     },
     {
       "id": "packaged-smoke-full",

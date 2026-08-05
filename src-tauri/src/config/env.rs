@@ -211,6 +211,11 @@ pub fn load_config() -> AppConfig {
 }
 
 fn resolve_api_key(provider: &str) -> Option<String> {
+    if let Some(desc) = crate::ai::platform::descriptor_by_id(provider) {
+        if !desc.default_auth_mode.requires_secret() {
+            return None;
+        }
+    }
     // Prefer the active provider's alias, then the neutral AI_API_KEY.
     // This lets several keys live in `.env` while AI_PROVIDER selects which one is used.
     let mut candidates: Vec<Option<String>> = Vec::new();
@@ -222,13 +227,19 @@ fn resolve_api_key(provider: &str) -> Option<String> {
             candidates.push(env::var("CLAUDE_API_KEY").ok());
         }
         "openrouter" => candidates.push(env::var("OPENROUTER_API_KEY").ok()),
+        "kimi" | "moonshot" => candidates.push(env::var("KIMI_API_KEY").ok()),
+        "mistral" => candidates.push(env::var("MISTRAL_API_KEY").ok()),
         "mock" => {}
         _ => {
-            candidates.push(env::var("GEMINI_API_KEY").ok());
-            candidates.push(env::var("OPENAI_API_KEY").ok());
-            candidates.push(env::var("ANTHROPIC_API_KEY").ok());
-            candidates.push(env::var("CLAUDE_API_KEY").ok());
-            candidates.push(env::var("OPENROUTER_API_KEY").ok());
+            if crate::ai::platform::descriptor_by_id(provider).is_none() {
+                candidates.push(env::var("GEMINI_API_KEY").ok());
+                candidates.push(env::var("OPENAI_API_KEY").ok());
+                candidates.push(env::var("ANTHROPIC_API_KEY").ok());
+                candidates.push(env::var("CLAUDE_API_KEY").ok());
+                candidates.push(env::var("OPENROUTER_API_KEY").ok());
+                candidates.push(env::var("KIMI_API_KEY").ok());
+                candidates.push(env::var("MISTRAL_API_KEY").ok());
+            }
         }
     }
     candidates.push(env::var("AI_API_KEY").ok());
@@ -236,6 +247,38 @@ fn resolve_api_key(provider: &str) -> Option<String> {
 }
 
 fn resolve_model(provider: &str) -> String {
+    if let Some(desc) = crate::ai::platform::descriptor_by_id(provider) {
+        let default = desc.default_model_hint.unwrap_or("");
+        let mut candidates: Vec<Option<String>> = Vec::new();
+        match desc.id {
+            "openai" | "compatible" => {
+                candidates.push(env::var("OPENAI_MODEL").ok());
+            }
+            "anthropic" => {
+                candidates.push(env::var("ANTHROPIC_MODEL").ok());
+                candidates.push(env::var("CLAUDE_MODEL").ok());
+            }
+            "openrouter" => {
+                candidates.push(env::var("OPENROUTER_MODEL").ok());
+                if let Ok(m) = env::var("AI_MODEL") {
+                    if m.contains('/') {
+                        candidates.push(Some(m));
+                    }
+                }
+            }
+            "kimi" => candidates.push(env::var("KIMI_MODEL").ok()),
+            "mistral" => candidates.push(env::var("MISTRAL_MODEL").ok()),
+            "gemini" => candidates.push(env::var("GEMINI_MODEL").ok()),
+            "mock" => {
+                candidates.push(env::var("AI_MODEL").ok());
+                candidates.push(env::var("GEMINI_MODEL").ok());
+            }
+            _ => {}
+        }
+        candidates.push(env::var("AI_MODEL").ok());
+        return first_nonempty(&candidates).unwrap_or_else(|| default.to_string());
+    }
+
     let mut candidates: Vec<Option<String>> = Vec::new();
     let default = match provider {
         "openai" | "compatible" => {
@@ -264,17 +307,50 @@ fn resolve_model(provider: &str) -> String {
             candidates.push(env::var("GEMINI_MODEL").ok());
             "mock-fixture"
         }
-        // gemini (default) and anything else
-        _ => {
+        "gemini" => {
             candidates.push(env::var("GEMINI_MODEL").ok());
             candidates.push(env::var("AI_MODEL").ok());
             DEFAULT_GEMINI_MODEL
+        }
+        // Unknown providers: no silent Gemini default.
+        _ => {
+            candidates.push(env::var("AI_MODEL").ok());
+            ""
         }
     };
     first_nonempty(&candidates).unwrap_or_else(|| default.to_string())
 }
 
 fn resolve_base_url(provider: &str) -> String {
+    if let Some(desc) = crate::ai::platform::descriptor_by_id(provider) {
+        let default = desc.default_endpoint.unwrap_or("");
+        let mut candidates: Vec<Option<String>> = Vec::new();
+        match desc.id {
+            "openai" => {
+                candidates.push(env::var("OPENAI_BASE_URL").ok());
+            }
+            "compatible" => {
+                candidates.push(env::var("OPENAI_BASE_URL").ok());
+            }
+            "anthropic" => {
+                candidates.push(env::var("ANTHROPIC_BASE_URL").ok());
+            }
+            "openrouter" => {
+                candidates.push(env::var("OPENROUTER_BASE_URL").ok());
+            }
+            "kimi" => candidates.push(env::var("KIMI_BASE_URL").ok()),
+            "mistral" => candidates.push(env::var("MISTRAL_BASE_URL").ok()),
+            "gemini" => candidates.push(env::var("GEMINI_BASE_URL").ok()),
+            "mock" => {
+                candidates.push(env::var("AI_BASE_URL").ok());
+                candidates.push(env::var("GEMINI_BASE_URL").ok());
+            }
+            _ => {}
+        }
+        candidates.push(env::var("AI_BASE_URL").ok());
+        return first_nonempty(&candidates).unwrap_or_else(|| default.to_string());
+    }
+
     let mut candidates: Vec<Option<String>> = Vec::new();
     let default = match provider {
         "openai" => {
@@ -303,10 +379,14 @@ fn resolve_base_url(provider: &str) -> String {
             candidates.push(env::var("GEMINI_BASE_URL").ok());
             "mock://local"
         }
-        _ => {
+        "gemini" => {
             candidates.push(env::var("GEMINI_BASE_URL").ok());
             candidates.push(env::var("AI_BASE_URL").ok());
             DEFAULT_GEMINI_BASE_URL
+        }
+        _ => {
+            candidates.push(env::var("AI_BASE_URL").ok());
+            ""
         }
     };
     first_nonempty(&candidates).unwrap_or_else(|| default.to_string())
@@ -411,6 +491,36 @@ pub fn dotenv_loading_allowed() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn descriptor_first_model_for_kimi_and_mistral() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("AI_PROVIDER", "kimi");
+        std::env::remove_var("KIMI_MODEL");
+        std::env::remove_var("AI_MODEL");
+        assert_eq!(resolve_model("kimi"), "kimi-k3");
+        assert_eq!(resolve_base_url("kimi"), "https://api.moonshot.ai/v1");
+
+        std::env::set_var("AI_PROVIDER", "mistral");
+        std::env::remove_var("MISTRAL_MODEL");
+        std::env::remove_var("AI_MODEL");
+        assert_eq!(resolve_model("mistral"), "mistral-large-latest");
+        assert_eq!(resolve_base_url("mistral"), "https://api.mistral.ai/v1");
+        std::env::remove_var("AI_PROVIDER");
+    }
+
+    #[test]
+    fn unknown_provider_env_does_not_default_to_gemini() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("AI_MODEL");
+        std::env::remove_var("GEMINI_MODEL");
+        std::env::remove_var("GEMINI_BASE_URL");
+        assert_eq!(resolve_model("not-a-provider"), "");
+        assert_eq!(resolve_base_url("not-a-provider"), "");
+    }
 
     #[test]
     fn has_api_key_false_when_empty() {

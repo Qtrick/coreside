@@ -15,7 +15,7 @@
 | Parser failures | Incomplete buffer noise stays silent; oversized/halted/fatal → rejected list + optional `Error`; invalid paint target → rejected |
 | Interrupt / cancel | Clears speculative surfaces **and accepted ops**; emits `Operation { status: "interrupted" }`; turn-end harvest skips interrupted bags |
 | Durable commit | Turn-end path still one `schedule_and_apply`; on Sync success `mark_committed()` clears preview model |
-| Frontend overlay | `previewSurfacesByKey` + `src/lib/preview/surface-overlay.ts`; ToolCanvas paints overlay with **Preview** badge when conversation matches; Sync / Conflict (even background) / error / interrupt / turn finalize clears per conversation or tool |
+| Frontend overlay | `previewSurfacesByKey` + `src/lib/preview/surface-overlay.ts`; ToolCanvas paints overlay with **Preview** badge when conversation matches; Sync / Conflict (even background) / error / interrupt / turn finalize clears per conversation or tool; **tool/surface clears require non-empty `conversationId`** (unscoped Sync cannot wipe unrelated chats) |
 | Mock fixture | Keyword `progressive op preview` streams NDJSON `operation.frame_completed` before `ResponseCompleted` (`chat.status` — label only, no surface paint) |
 | Attribution | MIT note on Partial Update `UpdateStreamParser` / `runModel` progressive dispatch |
 

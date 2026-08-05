@@ -197,6 +197,20 @@ export const api = {
       userId?: string | null;
       expiresAt?: number | null;
       configured: boolean;
+      plan?: {
+        planId: string;
+        displayName: string;
+        hostedAiEnabled: boolean;
+        allowanceAmount: number;
+        source: string;
+      };
+      availablePlans?: Array<{
+        planId: string;
+        displayName: string;
+        hostedAiEnabled: boolean;
+        allowanceAmount: number;
+        source: string;
+      }>;
     }>("store_hosted_auth_session", { sessionJson }),
   clearHostedAuthSession: () =>
     invoke<{
@@ -205,6 +219,20 @@ export const api = {
       userId?: string | null;
       expiresAt?: number | null;
       configured: boolean;
+      plan?: {
+        planId: string;
+        displayName: string;
+        hostedAiEnabled: boolean;
+        allowanceAmount: number;
+        source: string;
+      };
+      availablePlans?: Array<{
+        planId: string;
+        displayName: string;
+        hostedAiEnabled: boolean;
+        allowanceAmount: number;
+        source: string;
+      }>;
     }>("clear_hosted_auth_session"),
   getHostedAuthStatus: () =>
     invoke<{
@@ -213,6 +241,20 @@ export const api = {
       userId?: string | null;
       expiresAt?: number | null;
       configured: boolean;
+      plan?: {
+        planId: string;
+        displayName: string;
+        hostedAiEnabled: boolean;
+        allowanceAmount: number;
+        source: string;
+      };
+      availablePlans?: Array<{
+        planId: string;
+        displayName: string;
+        hostedAiEnabled: boolean;
+        allowanceAmount: number;
+        source: string;
+      }>;
     }>("get_hosted_auth_status"),
   listConversations: () => invoke<Conversation[]>("list_conversations"),
   createConversation: () => invoke<Conversation>("create_conversation"),

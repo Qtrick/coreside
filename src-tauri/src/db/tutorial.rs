@@ -213,6 +213,12 @@ pub fn welcome_eligible(
 }
 
 pub fn onboarding_disabled_from_env() -> bool {
+    if matches!(
+        std::env::var("CORESIDE_E2E_ALLOW_ONBOARDING").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes")
+    ) {
+        return false;
+    }
     matches!(
         std::env::var("CORESIDE_DISABLE_ONBOARDING").as_deref(),
         Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes")

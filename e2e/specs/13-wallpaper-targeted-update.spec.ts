@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import {
   E2E_REPO_ROOT,
+  ensureWebDriverPaintProbe,
   evidenceIdentity,
   openSettings,
   openSettingsCategory,
@@ -28,23 +29,17 @@ describe("Journey 13 — wallpaper targeted update", () => {
   it("applies Matrix and commits transparency with non-uniform canvas pixels", async () => {
     await waitForAppReady();
     await openSettings();
+    await openSettingsCategory("Appearance");
 
-    // Reliable path: Appearance → "Open wallpaper templates" → Added/Templates.
-    try {
-      await openSettingsCategory("Appearance");
-    } catch {
-      // Fall through.
-    }
-    const openTemplates = await $("button*=Open wallpaper templates");
-    await openTemplates.waitForExist({ timeout: 10_000 });
-    await openTemplates.click();
-
-    const wallpapersHeading = await $("#wallpaper-heading");
+    const wallpapersHeading = await $("#wallpapers-heading");
     await wallpapersHeading.waitForExist({
       timeout: 15_000,
-      timeoutMsg: "wallpaper-heading not found after Open wallpaper templates",
+      timeoutMsg: "wallpapers-heading not found in Appearance",
     });
     await wallpapersHeading.scrollIntoView();
+
+    // Matrix canvas mounts after this — WebKit must expose the automation probe first.
+    await ensureWebDriverPaintProbe();
 
     const matrix = await $("button.wallpaper-preset-card*=Matrix");
     await matrix.waitForExist({ timeout: 10_000 });
@@ -209,11 +204,22 @@ describe("Journey 13 — wallpaper targeted update", () => {
       generatedAt: new Date().toISOString(),
       commit: identity.commit,
       dirty: identity.dirty,
+      ...(identity.sourceFingerprint
+        ? { sourceFingerprint: identity.sourceFingerprint }
+        : {}),
       platform: identity.platform,
       architecture: identity.arch,
       command: "e2e:journey-13-wallpaper-targeted",
       result: "passed",
       evidenceLevel: "Desktop Verified",
+      suiteScope: "journey-13-isolated",
+      doNotClaim: [
+        "Desktop Verified for journeys 1–16 suite",
+        "Full npm run e2e suite pass",
+        "Packaged Verified",
+        "Human Accepted",
+      ],
+      webDriverPaintProbe: true,
       e2eSpec: "e2e/specs/13-wallpaper-targeted-update.spec.ts",
       assertions: {
         matrixSelected: "passed",

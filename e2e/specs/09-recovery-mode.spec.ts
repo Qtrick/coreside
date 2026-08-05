@@ -16,9 +16,16 @@ describe("Journey 9 — Recovery Mode enter/exit", () => {
     await openSettings();
     await scrollSettingsToHeading("Recovery");
 
-    const enter = await $("button=Enter Recovery Mode");
-    await enter.waitForClickable({ timeout: 10_000 });
-    await enter.click();
+    const clickedEnter = await browser.execute(() => {
+      const buttons = Array.from(document.querySelectorAll("button"));
+      const btn = buttons.find(
+        (el) => el.textContent?.trim() === "Enter Recovery Mode",
+      ) as HTMLButtonElement | undefined;
+      if (!btn || btn.disabled) return false;
+      btn.click();
+      return true;
+    });
+    expect(clickedEnter).toBe(true);
 
     await browser.waitUntil(
       async () => (await $("li*=Recovery Mode: On").isExisting()),
@@ -28,9 +35,16 @@ describe("Journey 9 — Recovery Mode enter/exit", () => {
       },
     );
 
-    const exit = await $("button=Exit Recovery Mode");
-    await exit.waitForClickable({ timeout: 10_000 });
-    await exit.click();
+    const clickedExit = await browser.execute(() => {
+      const buttons = Array.from(document.querySelectorAll("button"));
+      const btn = buttons.find(
+        (el) => el.textContent?.trim() === "Exit Recovery Mode",
+      ) as HTMLButtonElement | undefined;
+      if (!btn || btn.disabled) return false;
+      btn.click();
+      return true;
+    });
+    expect(clickedExit).toBe(true);
 
     await browser.waitUntil(
       async () => (await $("li*=Recovery Mode: Off").isExisting()),

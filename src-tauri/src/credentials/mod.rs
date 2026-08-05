@@ -6,12 +6,22 @@ mod hosted_session;
 mod resolve;
 
 pub use hosted_session::{
-    access_token, adapter_connected, clear_session, load_valid_session, store_session_json,
+    access_token, adapter_connected, clear_session, contract_default_plan_presentation,
+    contract_plan_catalog_summaries, ensure_fresh_access_token, fetch_server_plan_presentation,
+    has_stored_session, hosted_adapter_effective, load_valid_session, refresh_session_if_needed,
+    store_session_json, HostedPlanPresentation,
 };
 pub use resolve::{
-    defaults_for, read_connection, read_credential_sources, resolve_connection_secret,
-    resolve_from_sources, CredentialSources,
+    connection_is_mandatory_authless, defaults_for, is_authless_local_connection,
+    is_authless_local_provider, read_connection, read_credential_sources, resolve_ai_access,
+    resolve_connection_secret, resolve_from_sources, AiAccessRoute, CredentialSources,
+    ResolvedAiAccess, ResolvedCredentials,
 };
+
+/// Finish credential resolution after releasing the database lock (keyring-safe).
+pub fn complete_credential_sources(sources: CredentialSources) -> CredentialSources {
+    sources.with_hosted_adapter_effective()
+}
 
 use thiserror::Error;
 

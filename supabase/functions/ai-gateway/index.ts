@@ -1,24 +1,18 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-
-type AiProfile = "fast" | "balanced" | "best";
-
-interface ChatMessage {
-  role: string;
-  content: string;
-}
-
-interface AiRequestBody {
-  messages: ChatMessage[];
-  profile?: AiProfile;
-  idempotencyKey: string;
-  maxOutputTokens?: number;
-  /** Desktop prefers false (JSON). Streaming remains available for future UI. */
-  stream?: boolean;
-}
+import {
+  type AiProfile,
+  type AiRequestBody,
+  appendBoundedAssistantText,
+  boundAssistantText,
+  extractAssistantText,
+  parseBody,
+  parseReserveRpcResult,
+} from "./gateway-lib.ts";
 
 const SERVICE = "coreside-ai-gateway";
 const VERSION = "1";
 const MAX_OUTPUT_TOKENS = 4096;
+const MAX_BODY_BYTES = 256 * 1024;
 const RATE_LIMIT_PER_MINUTE = 20;
 const IDEMPOTENCY_TTL_HOURS = 24;
 
@@ -78,55 +72,6 @@ function consumerError(
   return json({ error: message }, status, origin);
 }
 
-function parseBody(raw: unknown): AiRequestBody | null {
-  if (!raw || typeof raw !== "object") return null;
-  const body = raw as Record<string, unknown>;
-  if (!Array.isArray(body.messages) || typeof body.idempotencyKey !== "string") {
-    return null;
-  }
-  const allowedRoles = new Set(["system", "user", "assistant"]);
-  const messages = body.messages.filter(
-    (m): m is ChatMessage =>
-      !!m &&
-      typeof m === "object" &&
-      typeof (m as ChatMessage).role === "string" &&
-      allowedRoles.has((m as ChatMessage).role) &&
-      typeof (m as ChatMessage).content === "string",
-  );
-  if (messages.length === 0 || body.idempotencyKey.trim() === "") return null;
-
-  const profile = body.profile;
-  if (
-    profile !== undefined &&
-    profile !== "fast" &&
-    profile !== "balanced" &&
-    profile !== "best"
-  ) {
-    return null;
-  }
-
-  let maxOutputTokens: number | undefined;
-  if (body.maxOutputTokens !== undefined) {
-    if (typeof body.maxOutputTokens !== "number" || body.maxOutputTokens < 1) {
-      return null;
-    }
-    maxOutputTokens = Math.min(
-      Math.floor(body.maxOutputTokens),
-      MAX_OUTPUT_TOKENS,
-    );
-  }
-
-  const stream = body.stream === undefined ? true : body.stream === true;
-
-  return {
-    messages,
-    profile,
-    idempotencyKey: body.idempotencyKey.trim(),
-    maxOutputTokens,
-    stream,
-  };
-}
-
 function resolveMaxTokens(profile: AiProfile | undefined, override?: number): number {
   const profileCap = PROFILE_MAX_TOKENS[profile ?? "balanced"];
   if (override === undefined) return profileCap;
@@ -143,46 +88,28 @@ function upstreamChatUrl(): string {
   return "https://api.openai.com/v1/chat/completions";
 }
 
-function extractAssistantText(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") return null;
-  const content = (payload as { choices?: Array<{ message?: { content?: unknown } }> })
-    .choices?.[0]?.message?.content;
-  return typeof content === "string" && content.trim() ? content : null;
-}
+type AdminClient = ReturnType<typeof createClient>;
 
-/** Optimistic-lock reserve before upstream so concurrent requests cannot overspend. */
-async function tryReserveEntitlement(
-  adminClient: ReturnType<typeof createClient>,
+async function reserveHostedRequest(
+  adminClient: AdminClient,
   userId: string,
-  usedAmount: number,
-  hardLimitEnabled: boolean,
-  allowanceAmount: number,
-): Promise<boolean> {
-  if (hardLimitEnabled && usedAmount >= allowanceAmount) return false;
-  const { data } = await adminClient
-    .from("ai_entitlements")
-    .update({ used_amount: usedAmount + 1 })
-    .eq("user_id", userId)
-    .eq("used_amount", usedAmount)
-    .select("user_id")
-    .maybeSingle();
-  return !!data;
+  requestId: string,
+  idempotencyKey: string,
+) {
+  const { data, error } = await adminClient.rpc("reserve_hosted_ai_request", {
+    p_user_id: userId,
+    p_request_id: requestId,
+    p_idempotency_key: idempotencyKey,
+    p_ttl_hours: IDEMPOTENCY_TTL_HOURS,
+  });
+  if (error) {
+    return parseReserveRpcResult({ outcome: "error", reason: "rpc_error" });
+  }
+  return parseReserveRpcResult(data);
 }
 
-async function releaseEntitlement(
-  adminClient: ReturnType<typeof createClient>,
-  userId: string,
-  reservedFrom: number,
-): Promise<void> {
-  await adminClient
-    .from("ai_entitlements")
-    .update({ used_amount: reservedFrom })
-    .eq("user_id", userId)
-    .eq("used_amount", reservedFrom + 1);
-}
-
-async function recordSuccess(
-  adminClient: ReturnType<typeof createClient>,
+async function settleHostedRequest(
+  adminClient: AdminClient,
   userId: string,
   requestId: string,
   idempotencyKey: string,
@@ -190,25 +117,73 @@ async function recordSuccess(
   maxTokens: number,
   resultText: string,
   streamed: boolean,
-): Promise<void> {
-  await adminClient.from("ai_usage_ledger").insert({
-    user_id: userId,
-    request_id: requestId,
-    request_type: "chat_completion",
-    profile,
-    provider_usage_json: { streamed, max_tokens: maxTokens },
-    estimated_cost: null,
-    actual_cost: null,
-    status: "completed",
+): Promise<boolean> {
+  const { error } = await adminClient.rpc("settle_hosted_ai_request", {
+    p_user_id: userId,
+    p_request_id: requestId,
+    p_idempotency_key: idempotencyKey,
+    p_profile: profile,
+    p_result_reference: boundAssistantText(resultText),
+    p_provider_usage: { streamed, max_tokens: maxTokens },
   });
-  await adminClient
-    .from("ai_request_idempotency")
-    .update({
-      status: "completed",
-      result_reference: resultText.slice(0, 16_384),
-    })
-    .eq("user_id", userId)
-    .eq("idempotency_key", idempotencyKey);
+  return !error;
+}
+
+async function failHostedRequest(
+  adminClient: AdminClient,
+  userId: string,
+  requestId: string,
+  idempotencyKey: string,
+  failureReason: string,
+): Promise<boolean> {
+  const { error } = await adminClient.rpc("fail_hosted_ai_request", {
+    p_user_id: userId,
+    p_request_id: requestId,
+    p_idempotency_key: idempotencyKey,
+    p_failure_reason: failureReason,
+  });
+  return !error;
+}
+
+async function settleHostedRequestWithRetry(
+  adminClient: AdminClient,
+  userId: string,
+  requestId: string,
+  idempotencyKey: string,
+  profile: AiProfile,
+  maxTokens: number,
+  resultText: string,
+  streamed: boolean,
+): Promise<boolean> {
+  if (
+    await settleHostedRequest(
+      adminClient,
+      userId,
+      requestId,
+      idempotencyKey,
+      profile,
+      maxTokens,
+      resultText,
+      streamed,
+    )
+  ) {
+    return true;
+  }
+  return settleHostedRequest(
+    adminClient,
+    userId,
+    requestId,
+    idempotencyKey,
+    profile,
+    maxTokens,
+    resultText,
+    streamed,
+  );
+}
+
+function deniedStatus(reason: string): number {
+  if (reason === "allowance_exceeded") return 402;
+  return 403;
 }
 
 Deno.serve(async (req) => {
@@ -278,65 +253,16 @@ Deno.serve(async (req) => {
 
   let body: AiRequestBody | null;
   try {
-    body = parseBody(await req.json());
+    const raw = await req.text();
+    if (new TextEncoder().encode(raw).length > MAX_BODY_BYTES) {
+      return consumerError("Request body too large", 413, origin);
+    }
+    body = parseBody(raw ? JSON.parse(raw) : null);
   } catch {
     return consumerError("Invalid request body", 400, origin);
   }
   if (!body) {
     return consumerError("Invalid request body", 400, origin);
-  }
-
-  const { data: prior } = await adminClient
-    .from("ai_request_idempotency")
-    .select("request_id, status, result_reference, expires_at")
-    .eq("user_id", user.id)
-    .eq("idempotency_key", body.idempotencyKey)
-    .maybeSingle();
-
-  if (prior && new Date(prior.expires_at).getTime() > Date.now()) {
-    if (prior.status === "completed") {
-      const text =
-        typeof prior.result_reference === "string" ? prior.result_reference : "";
-      return json(
-        {
-          idempotent: true,
-          requestId: prior.request_id,
-          status: "completed",
-          text,
-          resultReference: prior.result_reference,
-        },
-        200,
-        origin,
-      );
-    }
-    if (prior.status === "processing") {
-      return consumerError("Coreside AI request is already in progress", 409, origin);
-    }
-    // failed within TTL: fall through and retry
-  }
-
-  const { data: entitlement, error: entitlementError } = await userClient
-    .from("ai_entitlements")
-    .select(
-      "hosted_ai_enabled, allowance_amount, used_amount, hard_limit_enabled",
-    )
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (entitlementError || !entitlement) {
-    return consumerError("Coreside AI is unavailable", 403, origin);
-  }
-
-  if (!entitlement.hosted_ai_enabled) {
-    return consumerError("Coreside AI is not enabled for this account", 403, origin);
-  }
-
-  const usedAmount = Number(entitlement.used_amount);
-  const allowanceAmount = Number(entitlement.allowance_amount);
-  const hardLimitEnabled = Boolean(entitlement.hard_limit_enabled);
-
-  if (hardLimitEnabled && usedAmount >= allowanceAmount) {
-    return consumerError("Coreside AI allowance exceeded", 402, origin);
   }
 
   const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
@@ -353,33 +279,46 @@ Deno.serve(async (req) => {
     return consumerError("Rate limit exceeded", 429, origin);
   }
 
-  const reserved = await tryReserveEntitlement(
+  const requestId = crypto.randomUUID();
+  const reserve = await reserveHostedRequest(
     adminClient,
     user.id,
-    usedAmount,
-    hardLimitEnabled,
-    allowanceAmount,
+    requestId,
+    body.idempotencyKey,
   );
-  if (!reserved) {
-    return consumerError("Coreside AI allowance exceeded", 402, origin);
+
+  if (reserve.kind === "idempotent" && reserve.status === "completed") {
+    const text = reserve.resultReference ?? "";
+    return json(
+      {
+        idempotent: true,
+        requestId: reserve.requestId,
+        status: "completed",
+        text,
+        resultReference: reserve.resultReference,
+      },
+      200,
+      origin,
+    );
+  }
+  if (reserve.kind === "conflict") {
+    return consumerError("Coreside AI request is already in progress", 409, origin);
+  }
+  if (reserve.kind === "denied") {
+    const message =
+      reserve.reason === "allowance_exceeded"
+        ? "Coreside AI allowance exceeded"
+        : reserve.reason === "hosted_disabled"
+          ? "Coreside AI is not enabled for this account"
+          : "Coreside AI is unavailable";
+    return consumerError(message, deniedStatus(reserve.reason), origin);
+  }
+  if (reserve.kind !== "reserved") {
+    return consumerError("Coreside AI is unavailable", 503, origin);
   }
 
-  const requestId = crypto.randomUUID();
   const profile = body.profile ?? "balanced";
   const maxTokens = resolveMaxTokens(profile, body.maxOutputTokens);
-  const expiresAt = new Date(
-    Date.now() + IDEMPOTENCY_TTL_HOURS * 60 * 60 * 1000,
-  ).toISOString();
-
-  await adminClient.from("ai_request_idempotency").upsert({
-    user_id: user.id,
-    idempotency_key: body.idempotencyKey,
-    request_id: requestId,
-    status: "processing",
-    result_reference: null,
-    expires_at: expiresAt,
-  });
-
   const wantStream = body.stream !== false;
   const upstream = await fetch(upstreamChatUrl(), {
     method: "POST",
@@ -396,13 +335,13 @@ Deno.serve(async (req) => {
   });
 
   if (!upstream.ok || !upstream.body) {
-    await releaseEntitlement(adminClient, user.id, usedAmount);
-    await adminClient
-      .from("ai_request_idempotency")
-      .update({ status: "failed", result_reference: "upstream_error" })
-      .eq("user_id", user.id)
-      .eq("idempotency_key", body.idempotencyKey);
-
+    await failHostedRequest(
+      adminClient,
+      user.id,
+      requestId,
+      body.idempotencyKey,
+      "upstream_error",
+    );
     return consumerError("Coreside AI request failed", 502, origin);
   }
 
@@ -411,25 +350,27 @@ Deno.serve(async (req) => {
     try {
       payload = await upstream.json();
     } catch {
-      await releaseEntitlement(adminClient, user.id, usedAmount);
-      await adminClient
-        .from("ai_request_idempotency")
-        .update({ status: "failed", result_reference: "parse_error" })
-        .eq("user_id", user.id)
-        .eq("idempotency_key", body.idempotencyKey);
+      await failHostedRequest(
+        adminClient,
+        user.id,
+        requestId,
+        body.idempotencyKey,
+        "parse_error",
+      );
       return consumerError("Coreside AI request failed", 502, origin);
     }
     const text = extractAssistantText(payload);
     if (!text) {
-      await releaseEntitlement(adminClient, user.id, usedAmount);
-      await adminClient
-        .from("ai_request_idempotency")
-        .update({ status: "failed", result_reference: "empty_response" })
-        .eq("user_id", user.id)
-        .eq("idempotency_key", body.idempotencyKey);
+      await failHostedRequest(
+        adminClient,
+        user.id,
+        requestId,
+        body.idempotencyKey,
+        "empty_response",
+      );
       return consumerError("Coreside AI request failed", 502, origin);
     }
-    await recordSuccess(
+    await settleHostedRequestWithRetry(
       adminClient,
       user.id,
       requestId,
@@ -449,16 +390,61 @@ Deno.serve(async (req) => {
   const decoder = new TextDecoder();
   const reader = upstream.body.getReader();
   let assistantText = "";
+  type TerminalState = "open" | "settled" | "failed";
+  let terminal: TerminalState = "open";
+
+  const failIfOpen = async (reason: string) => {
+    if (terminal !== "open") return;
+    if (
+      await failHostedRequest(
+        adminClient,
+        user.id,
+        requestId,
+        body.idempotencyKey,
+        reason,
+      )
+    ) {
+      terminal = "failed";
+    }
+  };
+
+  const settleIfOpen = async () => {
+    if (terminal !== "open") return;
+    if (
+      await settleHostedRequestWithRetry(
+        adminClient,
+        user.id,
+        requestId,
+        body.idempotencyKey,
+        profile,
+        maxTokens,
+        assistantText || "[streamed]",
+        true,
+      )
+    ) {
+      terminal = "settled";
+    }
+  };
+
+  if (req.signal.aborted) {
+    await failIfOpen("client_aborted");
+    return consumerError("Coreside AI request failed", 499, origin);
+  }
+  req.signal.addEventListener("abort", () => {
+    void failIfOpen("client_aborted");
+  });
 
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
       try {
         while (true) {
+          if (req.signal.aborted) {
+            throw new Error("client_aborted");
+          }
           const { done, value } = await reader.read();
           if (done) break;
           const chunk = decoder.decode(value, { stream: true });
-          // Extract delta content from SSE so ledger/idempotency store text, not raw frames.
           for (const line of chunk.split("\n")) {
             const trimmed = line.trim();
             if (!trimmed.startsWith("data:")) continue;
@@ -469,7 +455,9 @@ Deno.serve(async (req) => {
                 choices?: Array<{ delta?: { content?: unknown } }>;
               };
               const delta = parsed.choices?.[0]?.delta?.content;
-              if (typeof delta === "string") assistantText += delta;
+              if (typeof delta === "string") {
+                assistantText = appendBoundedAssistantText(assistantText, delta);
+              }
             } catch {
               // ignore malformed SSE lines
             }
@@ -477,26 +465,26 @@ Deno.serve(async (req) => {
           controller.enqueue(encoder.encode(chunk));
         }
         controller.close();
-
-        await recordSuccess(
-          adminClient,
-          user.id,
-          requestId,
-          body.idempotencyKey,
-          profile,
-          maxTokens,
-          assistantText || "[streamed]",
-          true,
-        );
+        await settleIfOpen();
       } catch {
-        controller.error(new Error("stream_failed"));
-        await releaseEntitlement(adminClient, user.id, usedAmount);
-        await adminClient
-          .from("ai_request_idempotency")
-          .update({ status: "failed", result_reference: "stream_error" })
-          .eq("user_id", user.id)
-          .eq("idempotency_key", body.idempotencyKey);
+        try {
+          controller.error(new Error("stream_failed"));
+        } catch {
+          // Client may already have disconnected.
+        }
+        await failIfOpen(
+          req.signal.aborted ? "client_aborted" : "stream_error",
+        );
+      } finally {
+        try {
+          reader.releaseLock();
+        } catch {
+          // Reader may already be released.
+        }
       }
+    },
+    async cancel() {
+      await failIfOpen("client_disconnected");
     },
   });
 

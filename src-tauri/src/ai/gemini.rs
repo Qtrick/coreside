@@ -213,12 +213,7 @@ impl GeminiProvider {
     fn build_contents(messages: &[super::provider::AgentMessage]) -> Vec<Value> {
         messages
             .iter()
-            .map(|m| {
-                json!({
-                    "role": m.role.as_gemini_role(),
-                    "parts": [{ "text": m.provider_text() }]
-                })
-            })
+            .map(super::gemini_family::gemini_content_entry)
             .collect()
     }
 

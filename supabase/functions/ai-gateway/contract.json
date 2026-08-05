@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CoresideAiGatewayContract",
+  "description": "Portable gateway contract between Coreside desktop and ai-gateway Edge Function. Upstream provider API keys stay server-side only (CORESIDE_AI_PROVIDER_API_KEY); never sent to or stored on desktop.",
+  "version": "1",
+  "service": "coreside-ai-gateway",
+  "auth": {
+    "type": "supabase_user_jwt",
+    "headers": ["Authorization: Bearer <access_token>", "apikey: <publishable_key>"]
+  },
+  "endpoints": {
+    "health": {
+      "method": "GET",
+      "path": "/functions/v1/ai-gateway",
+      "response": { "ok": true, "service": "coreside-ai-gateway", "version": "1" }
+    },
+    "chat": {
+      "method": "POST",
+      "path": "/functions/v1/ai-gateway",
+      "body": {
+        "messages": [{ "role": "system|user|assistant", "content": "string" }],
+        "profile": "fast|balanced|best",
+        "idempotencyKey": "string",
+        "maxOutputTokens": "optional number",
+        "stream": "optional boolean (desktop default false)"
+      },
+      "successJson": {
+        "requestId": "uuid",
+        "text": "assistant text",
+        "status": "completed"
+      },
+      "errors": {
+        "401": "Unauthorized",
+        "402": "Coreside AI allowance exceeded",
+        "403": "Coreside AI is not enabled for this account",
+        "409": "Request already in progress",
+        "413": "Request body too large",
+        "429": "Rate limit exceeded",
+        "502": "Upstream failure",
+        "503": "Not configured"
+      }
+    }
+  },
+  "entitlements": {
+    "table": "ai_entitlements",
+    "planCatalog": "ai_plan_catalog",
+    "defaultPlan": "free",
+    "productionDefaults": {
+      "hosted_ai_enabled": false,
+      "allowance_amount": 0
+    }
+  },
+  "limits": {
+    "maxBodyBytes": 262144
+  }
+}

@@ -5,25 +5,25 @@ export type WhatsNewItem = {
   body: string;
 };
 
-/** Static RC3.4 release notes for Help & learning / upgrade banner. */
-export const WHATS_NEW_VERSION_LABEL = "RC3.4";
+/** Static RC3.6 release notes for Help & learning / upgrade banner. */
+export const WHATS_NEW_VERSION_LABEL = "RC3.6";
 
 export const WHATS_NEW_ITEMS: readonly WhatsNewItem[] = [
   {
-    title: "Apps terminology",
-    body: "Personal tools are called Apps in the sidebar and empty states — clearer for everyday use.",
+    title: "AI connections",
+    body: "Settings → AI connections explains Coreside AI, Local AI, and bring-your-own-key — with a dedicated tour under Help & learning.",
   },
   {
-    title: "Help & learning",
-    body: "Restart the essentials tour and open learning modules from Settings → Help & learning.",
+    title: "Multimodal send safety",
+    body: "Image attachments fail closed when bytes are missing instead of silently skipping on providers that claim multimodal support.",
   },
   {
-    title: "Progressive preview",
-    body: "Proposed app changes can appear as a live preview before you accept them.",
+    title: "Progressive app preview",
+    body: "Generated-app-capable providers feed live NDJSON operation previews during streaming — with typed parser errors when frames are invalid.",
   },
   {
-    title: "Wallpapers in Appearance",
-    body: "Find and apply wallpapers under Appearance — readability stays protected.",
+    title: "Provider tool results",
+    body: "OpenAI-family adapters send sealed tool-result envelopes with native role=tool messages instead of flattening trust into user text.",
   },
 ] as const;
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * RC3.4 — honest readiness ladder + delta vs prior archive.
+ * RC3.6 — honest readiness ladder + delta vs prior archive.
  *
  * Usage:
  *   npm run audit:readiness
@@ -103,6 +103,19 @@ function reportMatchesCommit(report, headCommit) {
   );
 }
 
+function reportMatchesFingerprint(report, activeFingerprint) {
+  const reportFp =
+    (typeof report?.sourceFingerprint === "string" && report.sourceFingerprint) ||
+    (typeof report?.fingerprint === "string" && report.fingerprint) ||
+    null;
+  return (
+    typeof activeFingerprint === "string" &&
+    activeFingerprint.length > 0 &&
+    typeof reportFp === "string" &&
+    reportFp === activeFingerprint
+  );
+}
+
 function unitFeature(id, name, notes, evidence) {
   const missing = evidence.filter((e) => !pathExists(e));
   if (missing.length > 0) {
@@ -125,10 +138,18 @@ function unitFeature(id, name, notes, evidence) {
 
 /**
  * Classify a desktop journey feature from a results report.
- * Stale commit or missing file → not Desktop Verified.
+ * Stale commit/fingerprint or missing file → not Desktop Verified.
  * @returns {{ state: EvidenceState, notes: string }}
  */
-function desktopClaim(rel, report, passed, passNote, staleOrFailNote, headCommit) {
+function desktopClaim(
+  rel,
+  report,
+  passed,
+  passNote,
+  staleOrFailNote,
+  headCommit,
+  activeFingerprint,
+) {
   if (!pathExists(rel)) {
     return {
       state: "Integrated – Not Verified",
@@ -144,6 +165,16 @@ function desktopClaim(rel, report, passed, passNote, staleOrFailNote, headCommit
       notes: `${staleOrFailNote}${prior} Re-run on HEAD to claim Desktop Verified.`,
     };
   }
+  if (!reportMatchesFingerprint(report, activeFingerprint)) {
+    const priorFp =
+      report?.sourceFingerprint || report?.fingerprint
+        ? ` (prior fingerprint ${String(report.sourceFingerprint || report.fingerprint).slice(0, 12)}…)`
+        : "";
+    return {
+      state: "Integrated – Not Verified",
+      notes: `${staleOrFailNote}${priorFp} Re-run on current source fingerprint to claim Desktop Verified.`,
+    };
+  }
   if (!passed) {
     return {
       state: "Integrated – Not Verified",
@@ -154,12 +185,12 @@ function desktopClaim(rel, report, passed, passNote, staleOrFailNote, headCommit
 }
 
 /**
- * Honest feature classifications for the current tree (RC3.4).
+ * Honest feature classifications for the current tree (RC3.6).
  * Desktop / Packaged Verified only when matching artifacts exist on HEAD commit.
  * @param {string} headCommit
  * @returns {{ id: string, name: string, state: EvidenceState, notes: string, evidence?: string[] }[]}
  */
-function featureLadder(headCommit) {
+function featureLadder(headCommit, activeFingerprint) {
   const e2e = readJsonSafe("reports/e2e-results.json");
   const packaged = readJsonSafe("reports/packaged-smoke-results.json");
   const trueStream = readJsonSafe("reports/true-streaming-results.json");
@@ -167,65 +198,79 @@ function featureLadder(headCommit) {
   const wallpaperVisual = readJsonSafe("reports/wallpaper-visual-results.json");
   const wallpaperSettings = readJsonSafe("reports/wallpaper-settings-results.json");
   const scoped = readJsonSafe("reports/scoped-streaming-results.json");
+  const commandAuthority = readJsonSafe("reports/command-authority-results.json");
+  const multimodal = readJsonSafe("reports/multimodal-provider-results.json");
 
   const e2eFresh = reportMatchesCommit(e2e, headCommit);
+  const e2eFingerprintFresh =
+    e2eFresh && reportMatchesFingerprint(e2e, activeFingerprint);
   const e2eJourneys = Array.isArray(e2e?.journeys) ? e2e.journeys : [];
   const journey = (n) => e2eJourneys.find((j) => j.id === n);
   const journeyPassed = (n) => journey(n)?.status === "passed";
   const journey7Partial =
     journey(7)?.status === "passed_partial" || e2e?.status === "passed_partial";
-  const e2eFullPass = e2eFresh && e2e?.status === "passed" && !journey7Partial;
+  const e2eFullPass =
+    e2eFingerprintFresh && e2e?.status === "passed" && !journey7Partial;
 
   // Prefer fresh e2e-results journey rows; fall back to dedicated reports on HEAD.
+  const streamingPassedOnE2e = e2eFresh && journeyPassed(12);
   const streamingState =
-    e2eFresh && journeyPassed(12)
+    e2eFingerprintFresh && journeyPassed(12)
       ? {
           state: /** @type {EvidenceState} */ ("Desktop Verified"),
           notes:
             "Journey 12 passed on this HEAD (e2e-results) with turnId + live stream marker.",
         }
       : desktopClaim(
-          "reports/true-streaming-results.json",
-          trueStream,
-          reportMatchesCommit(trueStream, headCommit) &&
-            trueStream?.evidenceLevel === "Desktop Verified",
-          "Journey 12 passed on this HEAD with turnId + live stream marker.",
-          "True streaming desktop claim withheld.",
+          "reports/e2e-results.json",
+          e2e,
+          streamingPassedOnE2e,
+          "",
+          streamingPassedOnE2e
+            ? "Journey 12 passed in e2e-results but fingerprint stale — re-run e2e to claim Desktop Verified."
+            : "True streaming desktop claim withheld.",
           headCommit,
+          activeFingerprint,
         );
 
+  const scopedPassedOnE2e = e2eFresh && journeyPassed(14);
   const scopedState =
-    e2eFresh && journeyPassed(14)
+    e2eFingerprintFresh && journeyPassed(14)
       ? {
           state: /** @type {EvidenceState} */ ("Desktop Verified"),
           notes:
             "Journey 14: tool window received zero Text events during main stream on this HEAD (e2e-results).",
         }
       : desktopClaim(
-          "reports/stream-eavesdropping-results.json",
-          eavesdrop ?? scoped,
-          reportMatchesCommit(eavesdrop, headCommit) &&
-            eavesdrop?.evidenceLevel === "Desktop Verified",
-          "Journey 14: tool window received zero Text events during main stream on this HEAD.",
-          "Channel-scoped streaming desktop claim withheld.",
+          "reports/e2e-results.json",
+          e2e,
+          scopedPassedOnE2e,
+          "",
+          scopedPassedOnE2e
+            ? "Journey 14 passed in e2e-results but fingerprint stale — re-run e2e to claim Desktop Verified."
+            : "Channel-scoped streaming desktop claim withheld.",
           headCommit,
+          activeFingerprint,
         );
 
+  const wallpaperPassedOnE2e = e2eFresh && journeyPassed(13);
   const wallpaperState =
-    e2eFresh && journeyPassed(13)
+    e2eFingerprintFresh && journeyPassed(13)
       ? {
           state: /** @type {EvidenceState} */ ("Desktop Verified"),
           notes:
             "Journey 13 Matrix + transparency + canvas samples on this HEAD (e2e-results); packaged pixels not_run.",
         }
       : desktopClaim(
-          "reports/wallpaper-visual-results.json",
-          wallpaperVisual ?? wallpaperSettings,
-          reportMatchesCommit(wallpaperVisual, headCommit) &&
-            wallpaperVisual?.evidenceLevel === "Desktop Verified",
-          "Journey 13 Matrix + transparency + canvas samples on this HEAD; packaged pixels not_run.",
-          "Wallpaper atomic settings desktop claim withheld.",
+          "reports/e2e-results.json",
+          e2e,
+          wallpaperPassedOnE2e,
+          "",
+          wallpaperPassedOnE2e
+            ? "Journey 13 passed in e2e-results but fingerprint stale — re-run e2e to claim Desktop Verified."
+            : "Wallpaper atomic settings desktop claim withheld.",
           headCommit,
+          activeFingerprint,
         );
 
   const e2e114Evidence = [
@@ -258,38 +303,69 @@ function featureLadder(headCommit) {
     e2e114Notes = `e2e status=${e2e?.status ?? "unknown"} — not a full Desktop Verified suite pass.`;
   }
 
+  const e21213PassedOnE2e =
+    e2eFresh && journeyPassed(12) && journeyPassed(13);
   const e21213State =
-    e2eFresh && journeyPassed(12) && journeyPassed(13)
+    e2eFingerprintFresh && journeyPassed(12) && journeyPassed(13)
       ? {
           state: /** @type {EvidenceState} */ ("Desktop Verified"),
           notes:
             "Journeys 12/13 passed on this HEAD (e2e-results); Journey 13 asserts uniqueColors≥2 and lumSpan≥8 on Matrix canvas.",
         }
       : desktopClaim(
-          "reports/true-streaming-results.json",
-          trueStream,
-          false,
+          "reports/e2e-results.json",
+          e2e,
+          e21213PassedOnE2e,
           "",
-          e2eFresh
-            ? "Journey 12/13 not both passed on this HEAD."
-            : "Journey 12/13 evidence not on HEAD.",
+          e21213PassedOnE2e
+            ? "Journeys 12/13 passed in e2e-results but fingerprint stale — re-run e2e to claim Desktop Verified."
+            : e2eFresh
+              ? "Journey 12/13 not both passed on this HEAD."
+              : "Journey 12/13 evidence not on HEAD.",
           headCommit,
+          activeFingerprint,
         );
 
+  const e214PassedOnE2e = e2eFresh && journeyPassed(14);
   const e214State =
-    e2eFresh && journeyPassed(14)
+    e2eFingerprintFresh && journeyPassed(14)
       ? {
           state: /** @type {EvidenceState} */ ("Desktop Verified"),
           notes:
             "Journey 14 passed on this HEAD (e2e-results); zero Text events in tool window.",
         }
       : desktopClaim(
-          "reports/stream-eavesdropping-results.json",
-          eavesdrop,
+          "reports/e2e-results.json",
+          e2e,
+          e214PassedOnE2e,
+          "",
+          e214PassedOnE2e
+            ? "Journey 14 passed in e2e-results but fingerprint stale — re-run e2e to claim Desktop Verified."
+            : "Journey 14 eavesdrop desktop claim withheld.",
+          headCommit,
+          activeFingerprint,
+        );
+
+  const journey11State =
+    commandAuthority?.rawInvokeDenialTest === "passed" &&
+    commandAuthority?.status === "generated_from_e2e" &&
+    commandAuthority?.isolatedSuiteOnly === true &&
+    commandAuthority?.evidenceLevel === "Isolated Desktop Verified" &&
+    reportMatchesCommit(commandAuthority, headCommit) &&
+    reportMatchesFingerprint(commandAuthority, activeFingerprint)
+      ? {
+          state: /** @type {EvidenceState} */ ("Desktop Verified"),
+          notes:
+            "Journey 11 raw-invoke denial passed on this HEAD (isolated suite only; 15 sensitive commands + cross-tool write denied). Full orchestrator passed_partial (J7) — not a Desktop Verified suite pass.",
+        }
+      : desktopClaim(
+          "reports/command-authority-results.json",
+          commandAuthority,
           false,
           "",
-          "Journey 14 eavesdrop desktop claim withheld.",
+          "Journey 11 command-authority desktop claim withheld.",
           headCommit,
+          activeFingerprint,
         );
 
   // Packaged: never mint Packaged Verified from launch-only smoke.
@@ -345,7 +421,7 @@ function featureLadder(headCommit) {
     unitFeature(
       "progressive-preview",
       "Progressive preview transaction",
-      "PreviewTransaction + live NDJSON Channel preview + turn-end apply unit-proven; surface paint / JSON-blob progressive / desktop E2E remain open.",
+      "PreviewTransaction + live NDJSON Channel preview + speculative surface paint unit-proven; JSON-blob progressive / desktop E2E remain open.",
       [
         "src-tauri/src/runtime_v2/preview_transaction.rs",
         "docs/PROGRESSIVE_PREVIEW_TRANSACTION.md",
@@ -381,7 +457,7 @@ function featureLadder(headCommit) {
     unitFeature(
       "attachment-authorization",
       "Attachment authorize_access (conversation-scoped)",
-      "authorize_attachment_access + get_chat_attachment_src / protocol bytes unit-proven; multimodal + window ACL open; desktop not_run.",
+      "authorize_attachment_access + get_chat_attachment_src / protocol bytes unit-proven; multimodal send path wired; desktop E2E not_run.",
       [
         "reports/attachment-authorization-results.json",
         "docs/ATTACHMENT_LIFECYCLE.md",
@@ -416,6 +492,49 @@ function featureLadder(headCommit) {
       state: e214State.state,
       notes: e214State.notes,
       evidence: ["reports/stream-eavesdropping-results.json"],
+    },
+    {
+      id: "command-authority-j11",
+      name: "Tool-window raw-invoke ACL denial (Journey 11)",
+      state: journey11State.state,
+      notes: journey11State.notes,
+      evidence: ["reports/command-authority-results.json"],
+    },
+    unitFeature(
+      "multimodal-provider-send",
+      "Multimodal image + native tool-result send path",
+      "OpenAI/Ollama/Anthropic/Gemini family adapters + validate_provider_send unit-proven; Desktop E2E multimodal chat not_run.",
+      [
+        "reports/multimodal-provider-results.json",
+        "docs/ATTACHMENT_LIFECYCLE.md",
+        "src-tauri/src/ai/provider_send.rs",
+      ],
+    ),
+    {
+      id: "local-ai-privacy",
+      name: "Local AI privacy routing (user_local)",
+      state: pathExists("e2e/specs/17-local-ai-privacy.spec.ts")
+        ? /** @type {EvidenceState} */ ("Integrated – Not Verified")
+        : /** @type {EvidenceState} */ ("Absent"),
+      notes:
+        "access_mode.rs + Composer disclosure landed; Journey 17 spec registered; harness not_run (requires Local AI desktop profile).",
+      evidence: [
+        "src-tauri/src/ai/access_mode.rs",
+        "src/lib/ai-access-disclosure.test.ts",
+        "e2e/specs/17-local-ai-privacy.spec.ts",
+      ],
+    },
+    {
+      id: "hosted-ai-gateway",
+      name: "Hosted Coreside AI gateway + billing scaffold",
+      state: /** @type {EvidenceState} */ ("Scaffolded"),
+      notes:
+        "Supabase ai-gateway + billing Edge Functions + entitlements migrations unit-tested; private alpha not ready; separate track from local BYOK.",
+      evidence: [
+        "supabase/functions/ai-gateway/gateway-lib.test.ts",
+        "supabase/functions/billing-lib.test.ts",
+        "reports/hosted-ai-readiness.json",
+      ],
     },
     unitFeature(
       "attachment-crash",
@@ -570,6 +689,34 @@ function buildDelta(meta, features) {
           "Launch-only scan+quit recorded when present — not Packaged Verified until BYOK/chat/persistence packaged proof.",
       },
       {
+        id: "command-authority-j11",
+        from: "Absent / manual",
+        to: stateOf("command-authority-j11", "Integrated – Not Verified"),
+        detail:
+          "Journey 11 E2E denies 15 sensitive invokes + cross-tool save_tool_state from tool-* windows.",
+      },
+      {
+        id: "multimodal-provider-send",
+        from: "Text-only flatten",
+        to: stateOf("multimodal-provider-send", "Unit Verified"),
+        detail:
+          "Native image + tool-result envelopes per provider family; validate_provider_send fail-closed.",
+      },
+      {
+        id: "local-ai-privacy",
+        from: "Absent",
+        to: stateOf("local-ai-privacy", "Integrated – Not Verified"),
+        detail:
+          "Rust access_mode + UI disclosure; Journey 17 spec not executed in default harness.",
+      },
+      {
+        id: "hosted-ai-gateway",
+        from: "Absent",
+        to: stateOf("hosted-ai-gateway", "Scaffolded"),
+        detail:
+          "ai-gateway + Stripe billing scaffold + entitlements SQL; hosted track Deliberately Deferred.",
+      },
+      {
         id: "e2e-1-14",
         from: "Absent",
         to: stateOf("e2e-1-14", "Integrated – Not Verified"),
@@ -583,7 +730,7 @@ function buildDelta(meta, features) {
         id: "progressive-preview-gaps",
         state: "Unit Verified (partial)",
         detail:
-          "No speculative surface paint, JSON-blob progressive, or desktop E2E yet.",
+          "Speculative surface paint + conversation-scoped overlay clear landed; JSON-blob progressive + desktop E2E still open.",
       },
       {
         id: "packaged-smoke-full",
@@ -609,15 +756,26 @@ function buildDelta(meta, features) {
   };
 }
 
+function summarizeHighestDesktopClaim(features) {
+  const desktop = features.filter((f) => f.state === "Desktop Verified");
+  if (desktop.length === 0) return "none";
+  const ids = new Set(desktop.map((f) => f.id));
+  if (ids.has("e2e-1-14")) return "Desktop Verified (journeys 1–14 suite)";
+  if (ids.size === 1 && ids.has("command-authority-j11")) {
+    return "Desktop Verified (isolated Journey 11 only)";
+  }
+  return "Desktop Verified (partial feature evidence)";
+}
+
 function main() {
   ensureReportsDir();
   const base = envelope({});
-  const features = featureLadder(base.commit);
+  const features = featureLadder(base.commit, base.sourceFingerprint);
   const tracks = overallTracks(base.dirty, features);
 
   const ladder = {
     ...base,
-    phase: "RC3.4",
+    phase: "RC3.6",
     model: "docs/BETA_READINESS_MODEL.md",
     humanChecklist: "docs/HUMAN_ACCEPTANCE_CHECKLIST.md",
     humanChecklistSigned: false,
@@ -636,9 +794,7 @@ function main() {
       deferred: features
         .filter((f) => f.state === "Deliberately Deferred")
         .map((f) => f.id),
-      highestDesktopClaim: features.some((f) => f.state === "Desktop Verified")
-        ? "Desktop Verified"
-        : "none",
+      highestDesktopClaim: summarizeHighestDesktopClaim(features),
       highestPackagedClaim: features.some((f) => f.state === "Packaged Verified")
         ? "Packaged Verified"
         : "none",

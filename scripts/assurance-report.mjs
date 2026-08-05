@@ -235,9 +235,90 @@ for (const file of [
         });
         failed = true;
         rawInvokePending = true;
+      } else if (d.isolatedSuiteOnly !== true) {
+        findings.push({
+          severity: "P1",
+          file: "command-authority-results.json",
+          status: "journey11_missing_isolated_scope",
+          detail: "Journey 11 evidence must set isolatedSuiteOnly: true",
+        });
+        failed = true;
+        rawInvokePending = true;
+      } else if (d.evidenceLevel === "Desktop Verified") {
+        findings.push({
+          severity: "P1",
+          file: "command-authority-results.json",
+          status: "journey11_suite_overclaim",
+          detail:
+            "Isolated Journey 11 must use evidenceLevel Isolated Desktop Verified, not bare Desktop Verified",
+        });
+        failed = true;
+        rawInvokePending = true;
+      } else if (d.evidenceLevel !== "Isolated Desktop Verified") {
+        findings.push({
+          severity: "P1",
+          file: "command-authority-results.json",
+          status: "journey11_evidence_level_mismatch",
+          detail: "Journey 11 passed evidence must set evidenceLevel to Isolated Desktop Verified",
+        });
+        failed = true;
+        rawInvokePending = true;
       } else {
-        rawInvokePending = false;
+        const fp = readJson("current-source-fingerprint.json");
+        const activeFingerprint = fp.data?.sourceFingerprint;
+        if (
+          typeof activeFingerprint !== "string" ||
+          typeof d.sourceFingerprint !== "string" ||
+          d.sourceFingerprint !== activeFingerprint
+        ) {
+          findings.push({
+            severity: "P1",
+            file: "command-authority-results.json",
+            status: "stale_or_missing_source_fingerprint",
+            reportFingerprint:
+              typeof d.sourceFingerprint === "string" ? d.sourceFingerprint : null,
+            activeFingerprint:
+              typeof activeFingerprint === "string" ? activeFingerprint : null,
+          });
+          failed = true;
+          rawInvokePending = true;
+        } else {
+          rawInvokePending = false;
+        }
       }
+    } else if (
+      d.status === "not_run" ||
+      d.rawInvokeDenialTest === "not_run" ||
+      d.evidenceLevel === "Absent"
+    ) {
+      const fp = readJson("current-source-fingerprint.json");
+      if (!fp.missing && fp.data?.sourceFingerprint) {
+        if (
+          typeof d.sourceFingerprint !== "string" ||
+          d.sourceFingerprint !== fp.data.sourceFingerprint
+        ) {
+          findings.push({
+            severity: "P1",
+            file: "command-authority-results.json",
+            status: "stale_or_missing_source_fingerprint",
+            reportFingerprint:
+              typeof d.sourceFingerprint === "string" ? d.sourceFingerprint : null,
+            activeFingerprint: fp.data.sourceFingerprint,
+          });
+          failed = true;
+        }
+        if (typeof d.commit === "string" && d.commit && d.commit !== commit) {
+          findings.push({
+            severity: "P1",
+            file: "command-authority-results.json",
+            status: "stale_commit",
+            reportCommit: d.commit,
+            activeCommit: commit,
+          });
+          failed = true;
+        }
+      }
+      rawInvokePending = true;
     } else {
       rawInvokePending = true;
     }

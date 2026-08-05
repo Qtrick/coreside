@@ -10,9 +10,9 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::CommandError;
-use crate::ai::{create_provider, AiProvider};
+use crate::ai::{create_provider_for_access, AiProvider};
 use crate::config::AppConfig;
-use crate::credentials::{self, defaults_for};
+use crate::credentials::{self, defaults_for, ResolvedAiAccess, ResolvedCredentials};
 use crate::db::{self, ProviderConnection};
 use crate::security::sanitize_error;
 use crate::state::AppState;
@@ -142,9 +142,28 @@ fn build_probe_config(
     })
 }
 
+fn access_from_probe_config(config: &AppConfig) -> ResolvedAiAccess {
+    let credentials = ResolvedCredentials {
+        provider: config.provider.clone(),
+        api_key: config.api_key.clone(),
+        model: config.model.clone(),
+        base_url: config.base_url.clone(),
+        source: "connection".into(),
+        active_connection_id: None,
+        env_path: None,
+        missing_connection_secret: false,
+    };
+    let route = credentials.access_route();
+    ResolvedAiAccess {
+        credentials,
+        route,
+    }
+}
+
 async fn health_check_key(config: &AppConfig) -> Result<(), CommandError> {
     let key = config.api_key.clone();
-    let provider = create_provider(config)
+    let access = access_from_probe_config(config);
+    let provider = create_provider_for_access(&access, None)
         .map_err(|e| CommandError::sanitized(e.code(), e, key.as_deref()))?;
     let cancel = CancellationToken::new();
     provider
@@ -308,7 +327,7 @@ pub async fn upsert_provider_connection(
                     "provider_test_failed",
                     format!(
                         "Ollama did not respond at {origin}. Is the app running? {}",
-                        err
+                        sanitize_error(&err.to_string(), None)
                     ),
                 ));
             }
@@ -461,14 +480,27 @@ pub async fn test_provider_connection(
             None => Lookup::Effective(Box::new(credentials::read_credential_sources(&db, None))),
         }
     };
-    let resolved = match lookup {
-        Lookup::One(conn) => credentials::resolve_connection_secret(&conn)
-            .map_err(|e| CommandError::new("not_found", sanitize_error(&e, None)))?,
-        Lookup::Effective(sources) => credentials::resolve_from_sources(&sources),
+    let lookup = match lookup {
+        Lookup::Effective(sources) => {
+            Lookup::Effective(Box::new(credentials::complete_credential_sources(*sources)))
+        }
+        other => other,
     };
+    let access = match lookup {
+        Lookup::One(conn) => {
+            let credentials = credentials::resolve_connection_secret(&conn)
+                .map_err(|e| CommandError::new("not_found", sanitize_error(&e, None)))?;
+            let route = credentials.access_route();
+            ResolvedAiAccess {
+                credentials,
+                route,
+            }
+        }
+        Lookup::Effective(sources) => credentials::resolve_ai_access(&sources),
+    };
+    let resolved = &access.credentials;
     let key = resolved.api_key.clone();
-    let config = resolved.to_app_config();
-    let provider = create_provider(&config)
+    let provider = create_provider_for_access(&access, None)
         .map_err(|e| CommandError::sanitized(e.code(), e, key.as_deref()))?;
     let cancel = CancellationToken::new();
     let health = provider.health_check(cancel).await;
@@ -552,28 +584,35 @@ pub struct HostedAuthStatus {
     pub user_id: Option<String>,
     pub expires_at: Option<f64>,
     pub configured: bool,
+    /// Read-only plan presentation (server when available; no client plan writes).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<credentials::HostedPlanPresentation>,
+    /// Read-only catalog summaries for Settings UI (server is authoritative).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub available_plans: Vec<credentials::HostedPlanPresentation>,
 }
 
 /// Persist Supabase Auth session JSON in OS keyring (never SQLite / localStorage).
 #[tauri::command]
 pub fn store_hosted_auth_session(session_json: String) -> Result<HostedAuthStatus, CommandError> {
     credentials::store_session_json(&session_json)?;
-    Ok(hosted_auth_status_inner())
+    // Sync path: plan will refresh on next async status read.
+    Ok(hosted_auth_status_sync_fallback())
 }
 
 #[tauri::command]
 pub fn clear_hosted_auth_session() -> Result<HostedAuthStatus, CommandError> {
     credentials::clear_session()?;
-    Ok(hosted_auth_status_inner())
+    Ok(hosted_auth_status_sync_fallback())
 }
 
-#[tauri::command]
-pub fn get_hosted_auth_status() -> HostedAuthStatus {
-    hosted_auth_status_inner()
-}
-
-fn hosted_auth_status_inner() -> HostedAuthStatus {
+fn hosted_auth_status_sync_fallback() -> HostedAuthStatus {
     let configured = crate::config::supabase_publishable_config().is_some();
+    let catalog = if configured {
+        credentials::contract_plan_catalog_summaries()
+    } else {
+        Vec::new()
+    };
     match credentials::load_valid_session(None) {
         Some(session) => HostedAuthStatus {
             signed_in: true,
@@ -581,13 +620,56 @@ fn hosted_auth_status_inner() -> HostedAuthStatus {
             user_id: Some(session.user_id),
             expires_at: Some(session.expires_at),
             configured,
+            plan: None,
+            available_plans: catalog,
         },
         None => HostedAuthStatus {
-            signed_in: false,
+            signed_in: credentials::has_stored_session(),
             adapter_ready: false,
             user_id: None,
             expires_at: None,
             configured,
+            plan: None,
+            available_plans: catalog,
+        },
+    }
+}
+
+#[tauri::command]
+pub async fn get_hosted_auth_status() -> HostedAuthStatus {
+    hosted_auth_status_inner().await
+}
+
+async fn hosted_auth_status_inner() -> HostedAuthStatus {
+    let configured = crate::config::supabase_publishable_config().is_some();
+    let catalog = if configured {
+        credentials::contract_plan_catalog_summaries()
+    } else {
+        Vec::new()
+    };
+
+    async fn resolve_plan() -> Option<credentials::HostedPlanPresentation> {
+        credentials::fetch_server_plan_presentation().await.ok()
+    }
+
+    match credentials::load_valid_session(None) {
+        Some(session) => HostedAuthStatus {
+            signed_in: true,
+            adapter_ready: configured,
+            user_id: Some(session.user_id),
+            expires_at: Some(session.expires_at),
+            configured,
+            plan: resolve_plan().await,
+            available_plans: catalog,
+        },
+        None => HostedAuthStatus {
+            signed_in: credentials::has_stored_session(),
+            adapter_ready: false,
+            user_id: None,
+            expires_at: None,
+            configured,
+            plan: None,
+            available_plans: catalog,
         },
     }
 }

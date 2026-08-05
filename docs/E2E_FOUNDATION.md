@@ -42,7 +42,7 @@ Doctor enforces the production-side gates (`npm run doctor`).
 | 4 | `e2e/specs/04-new-conversation-draft.spec.ts` | New chat + draft without live provider |
 | 5 | `e2e/specs/05-generated-tool-state.spec.ts` | Seeded tool text input persists |
 | 6 | `e2e/specs/06-approval-approve-once.spec.ts` | Approve once dismisses pending approval |
-| 7 | `e2e/specs/07-multi-window-approval-race.spec.ts` | **Partial** — secondary window open; approval stays on main |
+| 7 | `e2e/specs/07-multi-window-approval-race.spec.ts` | **Partial** — secondary absence asserted; concurrent cross-window race not exercised |
 | 8 | `e2e/specs/08-grant-revoke.spec.ts` | Revoke seeded remembered grant |
 | 9 | `e2e/specs/09-recovery-mode.spec.ts` | Enter/exit Recovery Mode |
 | 10 | `e2e/specs/10-secondary-window.spec.ts` | **Partial** — open + switch; close not asserted |

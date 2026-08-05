@@ -5,8 +5,27 @@ use crate::config::{
     DEFAULT_GEMINI_MODEL, DEFAULT_OPENAI_BASE_URL, DEFAULT_OPENAI_MODEL,
     DEFAULT_OPENROUTER_BASE_URL, DEFAULT_OPENROUTER_MODEL,
 };
+use crate::ai::platform::{self, AuthMode};
 use crate::credentials::{self, CredentialError};
 use crate::db::{self, Database, ProviderConnection};
+
+/// Trusted runtime route for AI access. Prevents silent Hosted fallthrough when
+/// explicit authless Local AI is active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiAccessRoute {
+    LocalAuthless,
+    UserByok,
+    CoresideHosted,
+    DeveloperEnv,
+    Mock,
+    Unavailable,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedAiAccess {
+    pub credentials: ResolvedCredentials,
+    pub route: AiAccessRoute,
+}
 
 #[derive(Debug, Clone)]
 pub struct ResolvedCredentials {
@@ -17,6 +36,8 @@ pub struct ResolvedCredentials {
     pub source: String, // "connection" | "env" | "none"
     pub active_connection_id: Option<String>,
     pub env_path: Option<String>,
+    /// Active BYOK row exists but the keyring secret is missing/invalid.
+    pub missing_connection_secret: bool,
 }
 
 impl ResolvedCredentials {
@@ -36,6 +57,76 @@ impl ResolvedCredentials {
             log_level: "info".into(),
             env_path: self.env_path.clone(),
         }
+    }
+
+    pub fn access_route(&self) -> AiAccessRoute {
+        route_for_credentials(self)
+    }
+
+    pub fn is_authless_local(&self) -> bool {
+        self.access_route() == AiAccessRoute::LocalAuthless
+    }
+}
+
+pub fn connection_auth_mode(conn: &ProviderConnection) -> AuthMode {
+    conn.auth_mode
+        .as_deref()
+        .and_then(AuthMode::parse)
+        .or_else(|| platform::descriptor_by_id(&conn.provider).map(|d| d.default_auth_mode))
+        .unwrap_or(AuthMode::ApiKeyBearer)
+}
+
+pub fn is_authless_local_connection(conn: &ProviderConnection) -> bool {
+    connection_auth_mode(conn) == AuthMode::LocalAuthless
+}
+
+pub fn is_authless_local_provider(provider: &str) -> bool {
+    platform::descriptor_by_id(provider)
+        .map(|d| d.local && !d.default_auth_mode.requires_secret())
+        .unwrap_or(false)
+}
+
+/// Provider presets that only support authless local access (e.g. Ollama).
+pub fn connection_is_mandatory_authless(conn: &ProviderConnection) -> bool {
+    platform::descriptor_by_id(&conn.provider)
+        .map(|d| {
+            !d.auth_modes.is_empty()
+                && d.auth_modes
+                    .iter()
+                    .all(|mode| *mode == AuthMode::LocalAuthless)
+        })
+        .unwrap_or(false)
+}
+
+fn route_for_credentials(creds: &ResolvedCredentials) -> AiAccessRoute {
+    if creds.provider.eq_ignore_ascii_case("mock") {
+        return AiAccessRoute::Mock;
+    }
+    if creds.source == "connection" {
+        if creds.missing_connection_secret {
+            return AiAccessRoute::Unavailable;
+        }
+        if creds.has_api_key() {
+            return AiAccessRoute::UserByok;
+        }
+        // Connection resolved without a secret (Ollama, loopback compatible, …).
+        return AiAccessRoute::LocalAuthless;
+    }
+    if creds.provider == "coreside_hosted" {
+        return AiAccessRoute::CoresideHosted;
+    }
+    if creds.source == "env" && creds.has_api_key() {
+        return AiAccessRoute::DeveloperEnv;
+    }
+    AiAccessRoute::Unavailable
+}
+
+pub fn resolve_ai_access(sources: &CredentialSources) -> ResolvedAiAccess {
+    let credentials = resolve_from_sources(sources);
+    let route = route_for_credentials(&credentials);
+    ResolvedAiAccess {
+        credentials,
+        route,
     }
 }
 
@@ -61,10 +152,12 @@ pub fn defaults_for(provider: &str) -> (String, String) {
             DEFAULT_OPENROUTER_MODEL.to_string(),
             DEFAULT_OPENROUTER_BASE_URL.to_string(),
         ),
-        _ => (
+        "gemini" => (
             DEFAULT_GEMINI_MODEL.to_string(),
             DEFAULT_GEMINI_BASE_URL.to_string(),
         ),
+        // Unknown providers: no silent Gemini default (descriptor path handles presets).
+        _ => (String::new(), String::new()),
     }
 }
 
@@ -73,7 +166,7 @@ pub fn from_connection_with_secret(
     conn: &ProviderConnection,
     get_secret: impl FnOnce(&str) -> Result<String, CredentialError>,
 ) -> Result<ResolvedCredentials, String> {
-    let auth_mode = conn
+    let mut auth_mode = conn
         .auth_mode
         .as_deref()
         .and_then(crate::ai::platform::AuthMode::parse)
@@ -81,6 +174,10 @@ pub fn from_connection_with_secret(
             crate::ai::platform::descriptor_by_id(&conn.provider).map(|d| d.default_auth_mode)
         })
         .unwrap_or(crate::ai::platform::AuthMode::ApiKeyBearer);
+    // Privacy P0: mandatory-authless presets (Ollama, etc.) never read the keyring.
+    if connection_is_mandatory_authless(conn) {
+        auth_mode = AuthMode::LocalAuthless;
+    }
 
     let (default_model, default_base) = defaults_for(&conn.provider);
     let model = conn
@@ -103,6 +200,7 @@ pub fn from_connection_with_secret(
             source: "connection".into(),
             active_connection_id: Some(conn.id.clone()),
             env_path: None,
+            missing_connection_secret: false,
         });
     }
 
@@ -119,6 +217,7 @@ pub fn from_connection_with_secret(
         source: "connection".into(),
         active_connection_id: Some(conn.id.clone()),
         env_path: None,
+        missing_connection_secret: false,
     })
 }
 
@@ -134,11 +233,26 @@ fn from_connection(conn: &ProviderConnection) -> Result<ResolvedCredentials, Str
 /// the single shared SQLite connection is locked.
 #[derive(Debug, Clone, Default)]
 pub struct CredentialSources {
-    active: Option<ProviderConnection>,
-    explicit: Option<ProviderConnection>,
-    hosted_adapter_connected: bool,
+    pub(crate) active: Option<ProviderConnection>,
+    pub(crate) explicit: Option<ProviderConnection>,
+    pub(crate) hosted_adapter_connected: bool,
 }
 
+impl CredentialSources {
+    pub fn hosted_adapter_connected(&self) -> bool {
+        self.hosted_adapter_connected
+    }
+
+    pub fn with_hosted_adapter_effective(mut self) -> Self {
+        self.hosted_adapter_connected =
+            super::hosted_session::hosted_adapter_effective(self.active.as_ref());
+        self
+    }
+}
+
+/// Database snapshot only — safe while the SQLite lock is held.
+/// Call [`complete_credential_sources`] after releasing the lock so keyring
+/// lookups for hosted-adapter gating never run under the database mutex.
 pub fn read_credential_sources(db: &Database, connection_id: Option<&str>) -> CredentialSources {
     CredentialSources {
         active: db::get_active_provider_connection(db).ok().flatten(),
@@ -146,7 +260,7 @@ pub fn read_credential_sources(db: &Database, connection_id: Option<&str>) -> Cr
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .and_then(|id| db::get_provider_connection(db, id).ok()),
-        hosted_adapter_connected: credentials::adapter_connected(db),
+        hosted_adapter_connected: false,
     }
 }
 
@@ -180,7 +294,8 @@ pub fn resolve_from_sources(sources: &CredentialSources) -> ResolvedCredentials 
 /// Convenience for callers that are not holding the database lock (tests, and
 /// paths where the lock is already scoped away).
 pub fn resolve_credentials(db: &Database, connection_id: Option<&str>) -> ResolvedCredentials {
-    resolve_from_sources(&read_credential_sources(db, connection_id))
+    let sources = read_credential_sources(db, connection_id);
+    resolve_from_sources(&super::complete_credential_sources(sources))
 }
 
 fn resolve_from_sources_with<F, E>(
@@ -197,12 +312,45 @@ where
         if let Ok(resolved) = from_connection_with_secret(conn, &get_secret) {
             return resolved;
         }
+        // Active BYOK with missing/invalid secret must not fall through to Hosted or .env.
+        if !is_authless_local_connection(conn) && !connection_is_mandatory_authless(conn) {
+            let (default_model, default_base) = defaults_for(&conn.provider);
+            let model = conn
+                .model_default
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(default_model);
+            let base_url = conn
+                .base_url
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(default_base);
+            return ResolvedCredentials {
+                provider: conn.provider.clone(),
+                api_key: None,
+                model,
+                base_url,
+                source: "connection".into(),
+                active_connection_id: Some(conn.id.clone()),
+                env_path: None,
+                missing_connection_secret: true,
+            };
+        }
     }
 
     // 2. Explicit connection id (only when active is missing/unusable)
     if let Some(conn) = sources.explicit.as_ref() {
         if let Ok(resolved) = from_connection_with_secret(conn, &get_secret) {
             return resolved;
+        }
+    }
+
+    // Active authless Local AI is authoritative — never fall through to Hosted or .env.
+    if let Some(conn) = sources.active.as_ref() {
+        if is_authless_local_connection(conn) || connection_is_mandatory_authless(conn) {
+            if let Ok(resolved) = from_connection_with_secret(conn, &get_secret) {
+                return resolved;
+            }
         }
     }
 
@@ -216,6 +364,7 @@ where
             source: "none".into(),
             active_connection_id: None,
             env_path: None,
+            missing_connection_secret: false,
         };
     }
 
@@ -230,6 +379,7 @@ where
         source: source.into(),
         active_connection_id: None,
         env_path: env.env_path,
+        missing_connection_secret: false,
     }
 }
 
@@ -475,5 +625,167 @@ mod tests {
         .expect("descriptor authless resolve");
         assert!(resolved.api_key.is_none());
         assert_eq!(resolved.provider, "ollama");
+    }
+
+    #[test]
+    fn authless_local_route_never_hosted() {
+        let conn = ollama_authless_conn(Some("local_authless"));
+        let resolved = from_connection_with_secret(&conn, |_| Err(CredentialError::NotFound))
+            .expect("authless resolve");
+        assert_eq!(resolved.access_route(), AiAccessRoute::LocalAuthless);
+        assert!(resolved.is_authless_local());
+    }
+
+    #[test]
+    fn authless_active_beats_hosted_adapter_in_resolution() {
+        let conn = ollama_authless_conn(Some("local_authless"));
+        let sources = CredentialSources {
+            active: Some(conn),
+            explicit: None,
+            hosted_adapter_connected: true,
+        };
+        let env_cfg = AppConfig {
+            provider: "gemini".into(),
+            api_key: Some("env-key".into()),
+            model: DEFAULT_GEMINI_MODEL.into(),
+            base_url: DEFAULT_GEMINI_BASE_URL.into(),
+            log_level: "info".into(),
+            env_path: None,
+        };
+        let resolved = resolve_from_sources_with(
+            &sources,
+            |_| Err(CredentialError::NotFound),
+            || env_cfg,
+        );
+        assert_eq!(resolved.provider, "ollama");
+        assert_eq!(resolved.access_route(), AiAccessRoute::LocalAuthless);
+        assert_eq!(resolved.source, "connection");
+    }
+
+    #[test]
+    fn resolve_ai_access_wraps_route() {
+        let conn = ollama_authless_conn(Some("local_authless"));
+        let sources = CredentialSources {
+            active: Some(conn),
+            explicit: None,
+            hosted_adapter_connected: true,
+        };
+        let access = resolve_ai_access(&sources);
+        assert_eq!(access.route, AiAccessRoute::LocalAuthless);
+        assert_eq!(access.credentials.provider, "ollama");
+    }
+
+    #[test]
+    fn mandatory_authless_ollama_blocks_hosted_despite_wrong_auth_mode() {
+        let mut conn = ollama_authless_conn(Some("api_key_bearer"));
+        conn.auth_mode = Some("api_key_bearer".into());
+        let sources = CredentialSources {
+            active: Some(conn),
+            explicit: None,
+            hosted_adapter_connected: true,
+        };
+        let resolved = resolve_from_sources_with(
+            &sources,
+            |_| Err(CredentialError::NotFound),
+            || AppConfig {
+                provider: "gemini".into(),
+                api_key: Some("env-key".into()),
+                model: DEFAULT_GEMINI_MODEL.into(),
+                base_url: DEFAULT_GEMINI_BASE_URL.into(),
+                log_level: "info".into(),
+                env_path: None,
+            },
+        );
+        assert_eq!(resolved.provider, "ollama");
+        assert_eq!(resolved.access_route(), AiAccessRoute::LocalAuthless);
+        assert_eq!(resolved.source, "connection");
+    }
+
+    #[test]
+    fn connection_is_mandatory_authless_for_ollama() {
+        let conn = ollama_authless_conn(None);
+        assert!(connection_is_mandatory_authless(&conn));
+    }
+
+    #[test]
+    fn connection_authless_route_for_compatible_local() {
+        let creds = ResolvedCredentials {
+            provider: "compatible".into(),
+            api_key: None,
+            model: "gpt-4o-mini".into(),
+            base_url: "http://127.0.0.1:8080/v1".into(),
+            source: "connection".into(),
+            active_connection_id: Some("compat-1".into()),
+            env_path: None,
+            missing_connection_secret: false,
+        };
+        assert_eq!(creds.access_route(), AiAccessRoute::LocalAuthless);
+        assert!(creds.is_authless_local());
+    }
+
+    #[test]
+    fn byok_connection_route_is_user_byok_not_hosted() {
+        let conn = sample_conn("byok-1", "openai", true);
+        let secrets = HashMap::from([(
+            account_for_connection("byok-1"),
+            "sk-byok-key".to_string(),
+        )]);
+        let resolved = from_connection_with_secret(&conn, |account| {
+            secrets
+                .get(account)
+                .cloned()
+                .ok_or(CredentialError::NotFound)
+        })
+        .expect("byok resolve");
+        assert_eq!(resolved.access_route(), AiAccessRoute::UserByok);
+        assert_ne!(resolved.access_route(), AiAccessRoute::CoresideHosted);
+    }
+
+    #[test]
+    fn defaults_for_kimi_and_mistral_use_descriptor_hints_not_gemini() {
+        let (kimi_model, kimi_base) = defaults_for("kimi");
+        assert_eq!(kimi_model, "kimi-k3");
+        assert_eq!(kimi_base, "https://api.moonshot.ai/v1");
+        assert_ne!(kimi_model, DEFAULT_GEMINI_MODEL);
+        assert_ne!(kimi_base, DEFAULT_GEMINI_BASE_URL);
+
+        let (mistral_model, mistral_base) = defaults_for("mistral");
+        assert_eq!(mistral_model, "mistral-large-latest");
+        assert_eq!(mistral_base, "https://api.mistral.ai/v1");
+        assert_ne!(mistral_model, DEFAULT_GEMINI_MODEL);
+    }
+
+    #[test]
+    fn defaults_for_unknown_provider_does_not_fall_back_to_gemini() {
+        let (model, base) = defaults_for("not-a-real-provider");
+        assert!(model.is_empty());
+        assert!(base.is_empty());
+    }
+
+    #[test]
+    fn broken_active_byok_blocks_hosted_fallback() {
+        let conn = sample_conn("byok-1", "openai", true);
+        let sources = CredentialSources {
+            active: Some(conn),
+            explicit: None,
+            hosted_adapter_connected: true,
+        };
+        let resolved = resolve_from_sources_with(
+            &sources,
+            |_| Err(CredentialError::NotFound),
+            || AppConfig {
+                provider: "gemini".into(),
+                api_key: Some("env-key".into()),
+                model: DEFAULT_GEMINI_MODEL.into(),
+                base_url: DEFAULT_GEMINI_BASE_URL.into(),
+                log_level: "info".into(),
+                env_path: None,
+            },
+        );
+        assert_eq!(resolved.provider, "openai");
+        assert_eq!(resolved.source, "connection");
+        assert!(resolved.missing_connection_secret);
+        assert_eq!(resolved.access_route(), AiAccessRoute::Unavailable);
+        assert!(!resolved.has_api_key());
     }
 }

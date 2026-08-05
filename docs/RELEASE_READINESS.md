@@ -1,9 +1,31 @@
 # Release Readiness
 
 **Product:** Coreside v0.1.0  
-**Source of truth:** `reports/release-evidence.json` (generate with `npm run release:evidence`)
+**Phase:** RC3.6 — hosted AI scaffold + local privacy + multimodal send path  
+**Source of truth:** `reports/readiness-ladder.json`, `reports/assurance-report.json` (regenerate below)
 
-Do **not** copy test counts into this document by hand. Prefer summarizing the evidence file.
+Do **not** copy test counts into this document by hand. Prefer summarizing the evidence files.
+
+## RC3.6 checkpoint (2026-08-04)
+
+| Track | Ladder | Public beta | Notes |
+| --- | --- | --- | --- |
+| Local-first BYOK | **Development Build** | **Not ready** | Dirty tree; Journey 11 **Isolated Desktop Verified**; `e2e-results` **passed_partial** (J7) — not a suite Desktop Verified pass |
+| Hosted Coreside AI | **Development Build** | **Not ready** | Gateway + billing scaffold unit-tested; private alpha deliberately deferred |
+
+**Narrow assurance:** `npm run assurance:report` → **passed**, 0 findings (narrow validator; Journey 11 isolated on current fingerprint). **Not** a full release pass — J7 partial blocks suite Desktop Verified.
+
+**Do not claim:** Desktop Verified for journeys 1–14, Packaged Verified, Human Accepted, or public beta readiness.
+
+Regenerate:
+
+```bash
+npm run audit:current-source
+npm run audit:readiness
+npm run assurance:report
+# Optional isolated ACL proof (already recorded on current fingerprint):
+# npx wdio run e2e/wdio.conf.ts --suite existing-authority  # CORESIDE_E2E_SEED=existing
+```
 
 ## Tracks (kept separate)
 
@@ -27,9 +49,9 @@ npm run build && npm run package:scan
 
 | Stage | Eligible? |
 | --- | --- |
-| Internal alpha (BYOK + local) | **Yes** when offline gates in release-evidence are green |
-| Local public beta | **Needs** packaged smoke + honest E2E matrix (see `docs/E2E_EXECUTION.md`) |
-| Hosted Coreside AI private alpha | **No** — see hosted-ai-readiness |
+| Internal alpha (BYOK + local) | **No (dirty tree)** — re-run on clean commit + fuller E2E |
+| Local public beta | **No** — needs full E2E matrix + packaged smoke (see `docs/E2E_EXECUTION.md`) |
+| Hosted Coreside AI private alpha | **No** — gateway/billing scaffold only; see `reports/hosted-ai-readiness.json` |
 | Consumer launch | **No** until local beta checklist is Complete |
 
 Historical July 2026 `reports/release-gates.json` values are **superseded**. The evidence script marks them historical.

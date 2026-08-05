@@ -69,8 +69,12 @@ pub fn resolve_access_presentation(
     developer_mode: bool,
     is_local_endpoint: bool,
 ) -> AiAccessPresentation {
-    // Hosted takes precedence only when a real adapter reports connected.
-    if hosted_connected {
+    let authless_local_active = source == "connection"
+        && (is_local_endpoint || is_local_provider(provider));
+
+    // Hosted takes precedence only when a real adapter reports connected and
+    // explicit authless Local AI is not the active connection route.
+    if hosted_connected && !authless_local_active {
         return AiAccessPresentation {
             access_mode: AiAccessMode::CoresideHosted,
             available: true,
@@ -91,8 +95,11 @@ pub fn resolve_access_presentation(
         };
     }
 
-    if source == "connection" && has_key {
-        if is_local_endpoint || is_local_provider(provider) {
+    let local_connection = source == "connection"
+        && (has_key || is_local_endpoint || is_local_provider(provider));
+
+    if local_connection {
+        if is_local_endpoint || is_local_provider(provider) || !has_key {
             return AiAccessPresentation {
                 access_mode: AiAccessMode::UserLocal,
                 available: true,
@@ -252,5 +259,34 @@ mod tests {
         let p = resolve_access_presentation("env", "openrouter", true, false, true, false);
         assert!(p.disclosure.show_provider_identity);
         assert!(p.disclosure.allow_developer_details);
+    }
+
+    #[test]
+    fn authless_local_shows_without_key() {
+        let p = resolve_access_presentation("connection", "ollama", false, true, false, true);
+        assert_eq!(p.access_mode, AiAccessMode::UserLocal);
+        assert!(p.available);
+        assert_eq!(p.consumer_display_name, "Local AI");
+    }
+
+    #[test]
+    fn authless_local_beats_hosted_presentation() {
+        let p = resolve_access_presentation("connection", "ollama", false, false, false, true);
+        assert_eq!(p.access_mode, AiAccessMode::UserLocal);
+        assert_ne!(p.access_mode, AiAccessMode::CoresideHosted);
+    }
+
+    #[test]
+    fn authless_ollama_provider_beats_hosted_without_endpoint_flag() {
+        let p = resolve_access_presentation("connection", "ollama", false, true, false, false);
+        assert_eq!(p.access_mode, AiAccessMode::UserLocal);
+        assert_ne!(p.access_mode, AiAccessMode::CoresideHosted);
+    }
+
+    #[test]
+    fn authless_local_beats_hosted_with_misleading_has_key_param() {
+        let p = resolve_access_presentation("connection", "ollama", true, true, false, true);
+        assert_eq!(p.access_mode, AiAccessMode::UserLocal);
+        assert_ne!(p.access_mode, AiAccessMode::CoresideHosted);
     }
 }

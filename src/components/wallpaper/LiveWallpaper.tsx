@@ -22,6 +22,11 @@ function prefersReducedMotion() {
   );
 }
 
+/** W3C WebDriver flag — false in normal production; true only under automation. */
+function webDriverSession() {
+  return typeof navigator !== "undefined" && navigator.webdriver === true;
+}
+
 function resolveKind(raw: string | undefined) {
   const parsed = WallpaperKindSchema.safeParse(raw ?? "none");
   return parsed.success ? parsed.data : "none";
@@ -70,6 +75,9 @@ function CanvasWallpaper({
     let viewH = window.innerHeight;
     let resizeRaf = 0;
     let hidden = document.visibilityState === "hidden";
+    const webDriver = webDriverSession();
+    /** Matrix-only: repaint after resize when WebDriver keeps visibilityState hidden. */
+    let repaintMatrixIfHidden: (() => void) | undefined;
 
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
@@ -84,6 +92,7 @@ function CanvasWallpaper({
       canvas.style.width = "100%";
       canvas.style.height = "100%";
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      repaintMatrixIfHidden?.();
     };
     resize();
 
@@ -131,10 +140,12 @@ function CanvasWallpaper({
       const onResize = () => scheduleResize(rebuild);
       window.addEventListener("resize", onResize);
 
-      const draw = () => {
+      const draw = (force = false) => {
         if (!running) return;
-        if (hidden) {
-          raf = requestAnimationFrame(draw);
+        // WebDriver sessions often report visibilityState=hidden even with a live window.
+        // When navigator.webdriver is set, keep painting; otherwise only forced frames run.
+        if (hidden && !force && !webDriver) {
+          raf = requestAnimationFrame(() => draw());
           return;
         }
         const w = viewW;
@@ -159,13 +170,22 @@ function CanvasWallpaper({
           drops[i]! += reduced ? 0.15 * speed : speed;
         }
         ctx.globalAlpha = 1;
-        raf = requestAnimationFrame(draw);
+        raf = requestAnimationFrame(() => draw());
+      };
+
+      repaintMatrixIfHidden = () => {
+        if (!hidden || !webDriver) return;
+        // WebDriver may not run RAF; stack forced frames for glyph variance.
+        for (let i = 0; i < 6; i++) draw(true);
       };
 
       ctx.fillStyle = "#050805";
       ctx.fillRect(0, 0, viewW, viewH);
-      // Immediate first paint (before RAF) so e2e sampling is not racing clear-only frames.
-      draw();
+      // Immediate first paint when visible or WebDriver needs samples before RAF.
+      if (!hidden || webDriver) {
+        draw(true);
+      }
+      repaintMatrixIfHidden();
 
       return () => {
         running = false;

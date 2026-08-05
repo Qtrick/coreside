@@ -19,6 +19,9 @@ pub struct AgentMessage {
     /// Typed parts (authoritative for StructuredUserInput trust). Empty = text-only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<AgentContentPart>,
+    /// OpenAI-family native tool result id (`role=tool`). Sealed per tool round.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl AgentMessage {
@@ -28,6 +31,7 @@ impl AgentMessage {
             role,
             content,
             parts: Vec::new(),
+            tool_call_id: None,
         }
     }
 
@@ -41,11 +45,40 @@ impl AgentMessage {
             role,
             content,
             parts,
+            tool_call_id: None,
         }
+    }
+
+    /// Tool-result turn for provider follow-ups (display summary + sealed envelope).
+    pub fn tool_result(
+        display_summary: impl Into<String>,
+        parts: Vec<AgentContentPart>,
+        tool_call_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            role: AgentRole::ToolResult,
+            content: display_summary.into(),
+            parts,
+            tool_call_id: Some(tool_call_id.into()),
+        }
+    }
+
+    /// Upstream provider body for tool-result turns (JSON envelope, not display summary).
+    pub fn tool_result_upstream_content(&self) -> String {
+        for part in &self.parts {
+            if let AgentContentPart::ToolResultEnvelope { envelope_json } = part {
+                return envelope_json.clone();
+            }
+        }
+        self.content.clone()
     }
 
     /// Body for BYOK providers that lack native structured parts.
     pub fn provider_text(&self) -> String {
+        if self.role == AgentRole::ToolResult {
+            // Display summary only — upstream uses ToolResultEnvelope JSON.
+            return self.content.clone();
+        }
         if self.parts.is_empty() {
             self.content.clone()
         } else {
@@ -207,5 +240,79 @@ pub trait AiProvider: Send + Sync {
     async fn probe(&self, cancel: CancellationToken) -> Result<(), AiError> {
         let _ = cancel;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::capability_registry::{seal_tool_result_envelope, ToolCallResult};
+    use serde_json::json;
+
+    #[test]
+    fn tool_result_upstream_content_returns_envelope_json() {
+        let results = vec![ToolCallResult {
+            capability: "web_search".into(),
+            ok: true,
+            output: json!({"hits": 1}),
+            error: None,
+            pending_approval: None,
+        }];
+        let envelope = seal_tool_result_envelope(&results);
+        let msg = AgentMessage::with_parts(
+            AgentRole::ToolResult,
+            "Tool results (1)",
+            vec![envelope],
+        );
+        let upstream = msg.tool_result_upstream_content();
+        assert!(upstream.contains("untrusted_tool_output"));
+        assert!(upstream.contains("envelopeHash"));
+        assert_ne!(upstream, msg.content);
+    }
+
+    #[test]
+    fn provider_text_for_tool_result_uses_display_content_not_envelope_flatten() {
+        let results = vec![ToolCallResult {
+            capability: "web_search".into(),
+            ok: true,
+            output: json!({"hits": 3}),
+            error: None,
+            pending_approval: None,
+        }];
+        let envelope = seal_tool_result_envelope(&results);
+        let display = "Tool results (1) (web_search)";
+        let msg = AgentMessage::with_parts(AgentRole::ToolResult, display, vec![envelope]);
+        let text = msg.provider_text();
+        assert_eq!(text, display);
+        assert!(!text.contains("untrusted_tool_output"));
+        assert!(!text.contains("[tool_result envelope bytes="));
+    }
+
+    #[test]
+    fn provider_text_for_user_with_parts_flattens_typed_parts() {
+        let msg = AgentMessage::with_parts(
+            AgentRole::User,
+            "ignored when parts present",
+            vec![
+                AgentContentPart::Text {
+                    text: "hello".into(),
+                },
+                AgentContentPart::Image {
+                    attachment_id: "att-1".into(),
+                    mime_type: "image/png".into(),
+                    data_base64: None,
+                },
+            ],
+        );
+        let text = msg.provider_text();
+        assert!(text.contains("hello"));
+        assert!(text.contains("[image attachmentId=att-1"));
+        assert_ne!(text, msg.content);
+    }
+
+    #[test]
+    fn provider_text_text_only_message_returns_content() {
+        let msg = AgentMessage::text(AgentRole::Assistant, "plain body");
+        assert_eq!(msg.provider_text(), "plain body");
     }
 }

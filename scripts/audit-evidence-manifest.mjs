@@ -119,6 +119,23 @@ const OVERCLAIM_RULES = [
         d.journeys.some((j) => j?.status === "passed_partial" || j?.status === "partial")),
     reason: "Partial E2E suite must not claim Desktop Verified",
   },
+  {
+    path: "reports/command-authority-results.json",
+    forbidEvidenceLevels: ["Desktop Verified"],
+    when: (d) =>
+      d?.rawInvokeDenialTest === "passed" && d?.status === "generated_from_e2e",
+    reason:
+      "Journey 11 isolated evidence must use Isolated Desktop Verified, not bare Desktop Verified",
+  },
+  {
+    path: "reports/command-authority-results.json",
+    forbidEvidenceLevels: ["Desktop Verified", "Packaged Verified"],
+    when: (d) =>
+      d?.rawInvokeDenialTest === "passed" &&
+      d?.status === "generated_from_e2e" &&
+      d?.isolatedSuiteOnly !== true,
+    reason: "Journey 11 ACL evidence must declare isolatedSuiteOnly: true",
+  },
 ];
 
 const commit = git(["rev-parse", "HEAD"]);

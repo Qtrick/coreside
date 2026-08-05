@@ -1445,6 +1445,13 @@ img {
   min-width: 0;
 }
 
+.settings-category-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
 @media (max-width: 820px) {
   .settings-layout {
     grid-template-columns: 1fr;
@@ -4127,6 +4134,44 @@ img {
   position: absolute;
   top: 0.35rem;
   right: 0.35rem;
+}
+
+.contextual-hint.presence-entering,
+.settings-category-body.presence-entering,
+.tutorial-overlay.presence-entering .tutorial-popover,
+.tutorial-popover.presence-entering {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.contextual-hint.presence-entered,
+.settings-category-body.presence-entered,
+.tutorial-overlay.presence-entered .tutorial-popover,
+.tutorial-popover.presence-entered {
+  opacity: 1;
+  transform: none;
+}
+
+.contextual-hint.presence-exiting,
+.settings-category-body.presence-exiting,
+.tutorial-overlay.presence-exiting .tutorial-popover,
+.tutorial-popover.presence-exiting {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.contextual-hint,
+.settings-category-body,
+.tutorial-popover {
+  transition: opacity var(--motion-duration-panel) var(--motion-ease-enter),
+    transform var(--motion-duration-panel) var(--motion-ease-enter);
+}
+
+.contextual-hint.reduced-motion,
+.settings-category-body.reduced-motion,
+.tutorial-overlay.reduced-motion .tutorial-popover,
+.tutorial-popover.reduced-motion {
+  transition: none;
 }
 
 .whats-new-banner {

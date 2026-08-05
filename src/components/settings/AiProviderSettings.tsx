@@ -31,6 +31,20 @@ export function AiProviderSettings() {
   const [managing, setManaging] = useState(false);
   const [hostedConfigured] = useState(() => isHostedAuthConfigured());
   const [hostedSignedIn, setHostedSignedIn] = useState(false);
+  const [hostedPlan, setHostedPlan] = useState<{
+    planId: string;
+    displayName: string;
+    hostedAiEnabled: boolean;
+    allowanceAmount: number;
+  } | null>(null);
+  const [hostedPlanCatalog, setHostedPlanCatalog] = useState<
+    Array<{
+      planId: string;
+      displayName: string;
+      hostedAiEnabled: boolean;
+      allowanceAmount: number;
+    }>
+  >([]);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
@@ -48,6 +62,17 @@ export function AiProviderSettings() {
     aiStatus?.userFacingStatus ??
     (aiStatus?.status === "ready" ? "Connected" : "Unavailable");
 
+  const accessModeLabel =
+    accessMode === "coreside_hosted"
+      ? "Coreside AI"
+      : accessMode === "user_local"
+        ? "Local AI"
+        : accessMode === "user_byok"
+          ? "Your own API key"
+          : accessMode === "developer_environment"
+            ? "Development access"
+            : null;
+
   const reload = async () => {
     try {
       const rows = await api.listProviderConnections();
@@ -63,8 +88,16 @@ export function AiProviderSettings() {
   useEffect(() => {
     void api
       .getHostedAuthStatus()
-      .then((s) => setHostedSignedIn(Boolean(s.signedIn)))
-      .catch(() => setHostedSignedIn(false));
+      .then((s) => {
+        setHostedSignedIn(Boolean(s.signedIn));
+        setHostedPlan(s.plan ?? null);
+        setHostedPlanCatalog(s.availablePlans ?? []);
+      })
+      .catch(() => {
+        setHostedSignedIn(false);
+        setHostedPlan(null);
+        setHostedPlanCatalog([]);
+      });
   }, [aiStatus?.accessMode, aiStatus?.status]);
 
   useEffect(() => {
@@ -144,6 +177,11 @@ export function AiProviderSettings() {
           )}
           {statusLabel}
         </span>
+        {accessModeLabel ? (
+          <span className="status-pill muted" aria-label="Access type">
+            {accessModeLabel}
+          </span>
+        ) : null}
         {showProvider || showModel ? (
           <div className="provider-status-meta">
             {showProvider ? (
@@ -184,15 +222,37 @@ export function AiProviderSettings() {
             Coreside AI account
           </h4>
           {hostedSignedIn ? (
-            <div className="button-row">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={authBusy}
-                onClick={() => void runHostedSignOut()}
-              >
-                Sign out
-              </button>
+            <div className="hosted-plan-summary">
+              {hostedPlan ? (
+                <p className="muted" role="status">
+                  Plan: <strong>{hostedPlan.displayName}</strong>
+                  {hostedPlan.hostedAiEnabled
+                    ? ` · ${hostedPlan.allowanceAmount.toLocaleString()} requests / period`
+                    : " · Coreside AI not included"}
+                </p>
+              ) : null}
+              {hostedPlanCatalog.length > 0 ? (
+                <ul className="hosted-plan-catalog muted" aria-label="Available plans">
+                  {hostedPlanCatalog.map((row) => (
+                    <li key={row.planId}>
+                      {row.displayName}
+                      {row.hostedAiEnabled
+                        ? ` — ${row.allowanceAmount.toLocaleString()} requests`
+                        : " — sign-in only"}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={authBusy}
+                  onClick={() => void runHostedSignOut()}
+                >
+                  Sign out
+                </button>
+              </div>
             </div>
           ) : (
             <form
@@ -273,7 +333,8 @@ export function AiProviderSettings() {
       <div className="hosted-auth-byok">
         <h4 className="settings-subheading hosted-auth-heading">Your own AI</h4>
         <p className="muted hosted-auth-hint">
-          Connect a personal API key instead of using Coreside AI.
+          Connect a provider API key (BYOK) instead of Coreside AI. Keys stay on
+          your device in secure storage — not on Coreside servers.
         </p>
         <div className="button-row">
           <button

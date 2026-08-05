@@ -52,9 +52,9 @@
       "classification": "behavioral_reimplementation",
       "coresideFile": "docs/SCOPED_TURN_STREAMING.md",
       "coresideSymbol": "Channel on send_message + subscribe_conversation_sync",
-      "securityChanges": "Caller-bound Channel for private kinds; Sync/Conflict prefer conversation-scoped subscribers; residual global Sync only when scoped delivery fails",
+      "securityChanges": "Caller-bound Channel for private kinds; Sync/Conflict prefer conversation-scoped subscribers; preview overlay clears require conversationId for tool/surface targets; residual global Sync only when scoped delivery fails",
       "status": "partial",
-      "gap": "Residual global Sync when no subscriber; queue-drain Action/Error/Operation dropped (no progress UI)",
+      "gap": "Residual global Sync when no subscriber; queue-drain Action/Error/Operation dropped; multi-window desktop not_run",
       "rc34Relevant": true
     },
     {

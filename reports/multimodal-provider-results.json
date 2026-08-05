@@ -1,22 +1,25 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T03:04:12.000Z",
-  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "generatedAt": "2026-08-04T21:09:00.000Z",
+  "commit": "2b502278ede0d0db57fe16f77ef1e282a92fd0d1",
   "dirty": true,
-  "phase": "RC3.3 — multimodal Image part foundation",
-  "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib -- maps_image_part_to_openai image_part_from_bytes",
+  "phase": "RC3.6 — multimodal + native tool-result send path",
+  "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib anthropic_family gemini_family provider_send openai_family ollama_message tool_result",
   "exitStatus": 0,
   "result": "Integrated",
   "partial": true,
-  "partialReason": "AgentContentPart::Image + OpenAI image_url data-URL mapping Unit Verified. Send path loads bytes after authorize_attachment_access and appends Image parts (Integrated). Anthropic/Gemini native multimodal parts not wired. Desktop E2E not_run. Paths never sent to providers.",
+  "partialReason": "OpenAI-family (OpenAI/OpenRouter/hosted) maps Image parts to image_url data URLs and ToolResult to JSON envelope with name=tool_result. Ollama maps images to native images[] array and tool results to JSON envelope. Anthropic maps Image parts to native base64 image blocks and tool results to multipart text envelope blocks. Gemini maps Image parts to inlineData and tool results to functionResponse with sealed envelope object (trust + envelopeHash). Send path validates capability profile and rolls back user message on unsupported image/tool (draft preserved). Desktop E2E not_run.",
   "assertions": [
-    "Image part stores attachment_id + mime_type; data_base64 filled only from authorized bytes",
-    "validate_provider_image_bytes enforces mime + byte + pixel bounds",
-    "map_image_part_to_openai_content builds data: URL image_url parts",
-    "map_image_part_to_openai_content skips missing bytes with honest reason (no filesystem paths)",
-    "openai_message_content emits multimodal content arrays when Image parts present",
-    "send_message path appends Image parts after authorize_attachment_access"
+    "Image parts never flatten to [image attachmentId=...] on OpenAI-family, Ollama, Anthropic, or Gemini send paths",
+    "Failed/skipped images emit honest [image not sent to model: …] notes, not silent omit",
+    "ToolResult uses ToolResultEnvelope JSON with trust=untrusted_tool_output and envelopeHash",
+    "Anthropic tool-loop follow-ups use multipart text blocks with envelope JSON",
+    "Gemini tool-loop follow-ups use functionResponse wrapping parsed envelope",
+    "OpenAI-family tool_result messages use role=tool with tool_call_id and sealed envelope JSON content (no name field)",
+    "Ollama multimodal uses raw base64 in images array",
+    "validate_provider_send blocks images/tool-results for providers without ImageInput/NativeToolResults and rolls back user message",
+    "provider_text() for ToolResult returns display summary only"
   ],
   "levels": {
     "unit": "Unit Verified",
@@ -25,19 +28,21 @@
     "packaged": "not_run"
   },
   "cargoTests": {
-    "filter": "maps_image_part_to_openai|image_part_from_bytes",
-    "passed": 2,
+    "filter": "anthropic_family|gemini_family|provider_send|openai_family|ollama_message|tool_result_envelope|provider_text_for_tool",
+    "passed": 558,
     "failed": 0,
-    "focused": [
-      "ai::openai::tests::maps_image_part_to_openai_data_url_not_filesystem_path",
-      "ai::structured_user_input::tests::image_part_from_bytes_rejects_paths_and_bounds"
-    ]
+    "note": "Full lib suite 558 passed on HEAD (dirty tree)"
+  },
+  "vitest": {
+    "aiGateway": { "passed": 10, "failed": 0 },
+    "billingLib": { "passed": 16, "failed": 0 }
   },
   "docs": "docs/ATTACHMENT_LIFECYCLE.md",
   "publicBeta": "Not ready",
   "doNotClaim": [
-    "Anthropic/Gemini native multimodal Image parts",
     "Desktop Verified multimodal chat",
-    "Unbounded image payloads are safe without byte/pixel caps"
+    "Packaged Verified multimodal chat",
+    "Anthropic native tool_result blocks tied to prior tool_use ids (Coreside uses JSON-schema toolCalls)",
+    "OpenAI native role=tool API function-calling integration"
   ]
 }

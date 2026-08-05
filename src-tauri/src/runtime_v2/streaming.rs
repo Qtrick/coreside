@@ -24,6 +24,97 @@ pub const MAX_EVENTS: usize = 512;
 /// Max harvested operations (aligned with per-turn operation ceiling).
 pub const MAX_OPERATIONS: usize = MAX_OPERATIONS_PER_TURN;
 
+/// Typed NDJSON parser failure — surfaced to preview_transaction for classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamParseErrorKind {
+    Incomplete,
+    Malformed,
+    Unrecognized,
+    LimitExceeded,
+    Utf8,
+    Halted,
+}
+
+impl StreamParseErrorKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Incomplete => "incomplete",
+            Self::Malformed => "malformed",
+            Self::Unrecognized => "unrecognized",
+            Self::LimitExceeded => "limit_exceeded",
+            Self::Utf8 => "utf8",
+            Self::Halted => "halted",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamParseError {
+    pub kind: StreamParseErrorKind,
+    pub detail: String,
+}
+
+impl StreamParseError {
+    pub fn new(kind: StreamParseErrorKind, detail: impl Into<String>) -> Self {
+        Self {
+            kind,
+            detail: detail.into(),
+        }
+    }
+
+    pub fn to_line(self) -> String {
+        format!("[{}] {}", self.kind.as_str(), self.detail)
+    }
+
+    /// Classify legacy string errors (and typed lines) for preview routing.
+    pub fn classify_message(raw: &str) -> (StreamParseErrorKind, bool) {
+        if let Some(rest) = raw.strip_prefix('[') {
+            if let Some((tag, detail)) = rest.split_once("] ") {
+                let fatal = match tag {
+                    "incomplete" => false,
+                    "malformed" | "unrecognized" => false,
+                    "limit_exceeded" | "utf8" | "halted" => true,
+                    _ => true,
+                };
+                let kind = match tag {
+                    "incomplete" => StreamParseErrorKind::Incomplete,
+                    "malformed" => StreamParseErrorKind::Malformed,
+                    "unrecognized" => StreamParseErrorKind::Unrecognized,
+                    "limit_exceeded" => StreamParseErrorKind::LimitExceeded,
+                    "utf8" => StreamParseErrorKind::Utf8,
+                    "halted" => StreamParseErrorKind::Halted,
+                    _ => StreamParseErrorKind::Malformed,
+                };
+                let _ = detail;
+                return (kind, fatal);
+            }
+        }
+        let lower = raw.to_ascii_lowercase();
+        if lower.contains("incomplete frame exceeds")
+            || lower.contains("exceeded max total")
+            || lower.contains("exceeded max events")
+            || lower.contains("exceeded max operations")
+            || lower.contains("frame exceeds max")
+            || lower.contains("halted")
+        {
+            return (StreamParseErrorKind::LimitExceeded, true);
+        }
+        if lower.contains("incomplete frame") || lower.contains("incomplete or invalid") {
+            return (StreamParseErrorKind::Incomplete, false);
+        }
+        if lower.contains("invalid") || lower.contains("unknown") || lower.contains("rejected") {
+            return (StreamParseErrorKind::Unrecognized, false);
+        }
+        (StreamParseErrorKind::Malformed, true)
+    }
+}
+
+impl std::fmt::Display for StreamParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}] {}", self.kind.as_str(), self.detail)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamEvent {
@@ -64,6 +155,10 @@ pub enum StreamEvent {
 enum ParseMode {
     Canonical,
     Legacy,
+}
+
+fn stream_err(kind: StreamParseErrorKind, detail: impl Into<String>) -> String {
+    StreamParseError::new(kind, detail).to_line()
 }
 
 #[derive(Debug, Default)]
@@ -117,7 +212,10 @@ impl NdjsonFrameParser {
         }
         let next_total = self.total_bytes.saturating_add(chunk.len());
         if next_total > MAX_TOTAL_STREAM_BYTES {
-            let msg = format!("stream exceeded max total bytes ({MAX_TOTAL_STREAM_BYTES})");
+            let msg = stream_err(
+                StreamParseErrorKind::LimitExceeded,
+                format!("stream exceeded max total bytes ({MAX_TOTAL_STREAM_BYTES})"),
+            );
             self.halted = Some(msg.clone());
             out.push(Err(msg));
             return out;
@@ -130,8 +228,9 @@ impl NdjsonFrameParser {
             let frame_len = line_end - self.start;
             if frame_len > MAX_FRAME_BYTES {
                 self.start = line_end + 1;
-                out.push(Err(format!(
-                    "frame exceeds max size ({MAX_FRAME_BYTES} bytes)"
+                out.push(Err(stream_err(
+                    StreamParseErrorKind::LimitExceeded,
+                    format!("frame exceeds max size ({MAX_FRAME_BYTES} bytes)"),
                 )));
                 continue;
             }
@@ -139,7 +238,10 @@ impl NdjsonFrameParser {
                 Ok(s) => s.trim().to_string(),
                 Err(_) => {
                     self.start = line_end + 1;
-                    out.push(Err("frame is not valid UTF-8".into()));
+                    out.push(Err(stream_err(
+                        StreamParseErrorKind::Utf8,
+                        "frame is not valid UTF-8",
+                    )));
                     continue;
                 }
             };
@@ -148,7 +250,10 @@ impl NdjsonFrameParser {
                 continue;
             }
             if self.event_count >= MAX_EVENTS {
-                let msg = format!("stream event limit exceeded (max {MAX_EVENTS})");
+                let msg = stream_err(
+                    StreamParseErrorKind::LimitExceeded,
+                    format!("stream event limit exceeded (max {MAX_EVENTS})"),
+                );
                 self.halted = Some(msg.clone());
                 out.push(Err(msg));
                 return out;
@@ -162,8 +267,9 @@ impl NdjsonFrameParser {
 
         let incomplete = self.buffer.len() - self.start;
         if incomplete > MAX_INCOMPLETE_BUFFER {
-            let msg = format!(
-                "incomplete frame exceeds max buffer ({MAX_INCOMPLETE_BUFFER} bytes)"
+            let msg = stream_err(
+                StreamParseErrorKind::LimitExceeded,
+                format!("incomplete frame exceeds max buffer ({MAX_INCOMPLETE_BUFFER} bytes)"),
             );
             // Framing lost — halt so later chunks cannot resync mid-garbage.
             self.halted = Some(msg.clone());
@@ -191,26 +297,35 @@ impl NdjsonFrameParser {
         match mode {
             ParseMode::Canonical => {
                 let preview = String::from_utf8_lossy(&trimmed);
-                vec![Err(format!(
-                    "incomplete frame at end of stream: {}",
-                    truncate(&preview, 80)
+                vec![Err(stream_err(
+                    StreamParseErrorKind::Incomplete,
+                    format!("incomplete frame at end of stream: {}", truncate(&preview, 80)),
                 ))]
             }
             ParseMode::Legacy => {
                 if trimmed.len() > MAX_FRAME_BYTES {
-                    return vec![Err(format!(
-                        "frame exceeds max size ({MAX_FRAME_BYTES} bytes)"
+                    return vec![Err(stream_err(
+                        StreamParseErrorKind::LimitExceeded,
+                        format!("frame exceeds max size ({MAX_FRAME_BYTES} bytes)"),
                     ))];
                 }
                 let line = match std::str::from_utf8(&trimmed) {
                     Ok(s) => s.trim().to_string(),
-                    Err(_) => return vec![Err("frame is not valid UTF-8".into())],
+                    Err(_) => {
+                        return vec![Err(stream_err(
+                            StreamParseErrorKind::Utf8,
+                            "frame is not valid UTF-8",
+                        ))];
+                    }
                 };
                 if line.is_empty() {
                     return vec![];
                 }
                 if self.event_count >= MAX_EVENTS {
-                    let msg = format!("stream event limit exceeded (max {MAX_EVENTS})");
+                    let msg = stream_err(
+                        StreamParseErrorKind::LimitExceeded,
+                        format!("stream event limit exceeded (max {MAX_EVENTS})"),
+                    );
                     self.halted = Some(msg.clone());
                     return vec![Err(msg)];
                 }
@@ -230,15 +345,19 @@ impl NdjsonFrameParser {
 
     fn parse_line_canonical(&mut self, line: &str) -> Result<StreamEvent, String> {
         if !line.starts_with('{') || !line.ends_with('}') {
-            return Err(format!(
-                "incomplete or invalid frame: {}",
-                truncate(line, 80)
+            return Err(stream_err(
+                StreamParseErrorKind::Incomplete,
+                format!("incomplete or invalid frame: {}", truncate(line, 80)),
             ));
         }
-        let value: Value =
-            serde_json::from_str(line).map_err(|e| format!("malformed frame: {e}"))?;
-        let ev: StreamEvent = serde_json::from_value(value)
-            .map_err(|_| "unrecognized stream frame (expected StreamEvent)".to_string())?;
+        let value: Value = serde_json::from_str(line)
+            .map_err(|e| stream_err(StreamParseErrorKind::Malformed, format!("malformed frame: {e}")))?;
+        let ev: StreamEvent = serde_json::from_value(value).map_err(|_| {
+            stream_err(
+                StreamParseErrorKind::Unrecognized,
+                "unrecognized stream frame (expected StreamEvent)",
+            )
+        })?;
         self.record_stream_event(&ev)?;
         Ok(ev)
     }
@@ -246,13 +365,13 @@ impl NdjsonFrameParser {
     /// Legacy/compat: StreamEvent, bare AppOperation, or AgentResponseV2.
     fn parse_line_legacy(&mut self, line: &str) -> Result<StreamEvent, String> {
         if !line.starts_with('{') || !line.ends_with('}') {
-            return Err(format!(
-                "incomplete or invalid frame: {}",
-                truncate(line, 80)
+            return Err(stream_err(
+                StreamParseErrorKind::Incomplete,
+                format!("incomplete or invalid frame: {}", truncate(line, 80)),
             ));
         }
-        let value: Value =
-            serde_json::from_str(line).map_err(|e| format!("malformed frame: {e}"))?;
+        let value: Value = serde_json::from_str(line)
+            .map_err(|e| stream_err(StreamParseErrorKind::Malformed, format!("malformed frame: {e}")))?;
         if let Ok(ev) = serde_json::from_value::<StreamEvent>(value.clone()) {
             self.record_stream_event(&ev)?;
             return Ok(ev);
@@ -265,13 +384,19 @@ impl NdjsonFrameParser {
             if resp.operations.len()
                 > MAX_OPERATIONS.saturating_sub(self.completed_operations.len())
             {
-                return Err(format!("operations exceed max of {MAX_OPERATIONS}"));
+                return Err(stream_err(
+                    StreamParseErrorKind::LimitExceeded,
+                    format!("operations exceed max of {MAX_OPERATIONS}"),
+                ));
             }
             // Validate the whole batch before mutating seen/completed sets.
             let mut batch_ids = std::collections::HashSet::with_capacity(resp.operations.len());
             for op in &resp.operations {
                 if !batch_ids.insert(op.id.clone()) || self.seen_operation_ids.contains(&op.id) {
-                    return Err(format!("duplicate operation frame: {}", op.id));
+                    return Err(stream_err(
+                        StreamParseErrorKind::Unrecognized,
+                        format!("duplicate operation frame: {}", op.id),
+                    ));
                 }
             }
             for op in &resp.operations {
@@ -283,7 +408,10 @@ impl NdjsonFrameParser {
                 operations: resp.operations,
             });
         }
-        Err("unrecognized stream frame".into())
+        Err(stream_err(
+            StreamParseErrorKind::Unrecognized,
+            "unrecognized stream frame",
+        ))
     }
 
     fn record_stream_event(&mut self, ev: &StreamEvent) -> Result<(), String> {
@@ -295,10 +423,16 @@ impl NdjsonFrameParser {
 
     fn record_operation(&mut self, op: AppOperation) -> Result<(), String> {
         if self.completed_operations.len() >= MAX_OPERATIONS {
-            return Err(format!("operations exceed max of {MAX_OPERATIONS}"));
+            return Err(stream_err(
+                StreamParseErrorKind::LimitExceeded,
+                format!("operations exceed max of {MAX_OPERATIONS}"),
+            ));
         }
         if !self.seen_operation_ids.insert(op.id.clone()) {
-            return Err(format!("duplicate operation frame: {}", op.id));
+            return Err(stream_err(
+                StreamParseErrorKind::Unrecognized,
+                format!("duplicate operation frame: {}", op.id),
+            ));
         }
         self.completed_operations.push(op);
         Ok(())
@@ -549,5 +683,18 @@ mod tests {
         assert_eq!(truncate("你好世界", 6), "你好…");
         assert_eq!(truncate("hello🎉world", 7), "hello…"); // 🎉 starts at byte 5
         assert_eq!(truncate("a\u{0301}b", 2), "a…"); // combining acute starts at byte 1
+    }
+
+    #[test]
+    fn typed_parse_errors_classify_fatal_vs_incomplete() {
+        let incomplete = stream_err(StreamParseErrorKind::Incomplete, "still buffering");
+        let (kind, fatal) = StreamParseError::classify_message(&incomplete);
+        assert_eq!(kind, StreamParseErrorKind::Incomplete);
+        assert!(!fatal);
+
+        let limit = stream_err(StreamParseErrorKind::LimitExceeded, "too big");
+        let (kind, fatal) = StreamParseError::classify_message(&limit);
+        assert_eq!(kind, StreamParseErrorKind::LimitExceeded);
+        assert!(fatal);
     }
 }

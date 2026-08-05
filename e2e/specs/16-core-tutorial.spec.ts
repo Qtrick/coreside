@@ -2,15 +2,15 @@ import { waitForAppReady } from "../helpers.js";
 
 /**
  * Journey 16 — core essentials tutorial overlay.
- * Spec registered; desktop execution is not_run until onboarding can run
- * under the E2E harness (see Journey 15 note about CORESIDE_E2E).
+ * Orchestrator runs with CORESIDE_E2E_ALLOW_ONBOARDING=1 on a clean profile.
  */
 describe("Journey 16 — core tutorial", () => {
   it("advances the essentials tour when started from Welcome", async () => {
     await waitForAppReady();
 
     const onboardingDisabled =
-      process.env.CORESIDE_E2E === "1" ||
+      (process.env.CORESIDE_E2E === "1" &&
+        process.env.CORESIDE_E2E_ALLOW_ONBOARDING !== "1") ||
       process.env.CORESIDE_DISABLE_ONBOARDING === "1";
 
     if (onboardingDisabled) {
@@ -20,20 +20,62 @@ describe("Journey 16 — core tutorial", () => {
       return;
     }
 
+    await browser.waitUntil(
+      async () => {
+        const title = await $("#onboarding-welcome-title");
+        return title.isDisplayed().catch(() => false);
+      },
+      {
+        timeout: 25_000,
+        timeoutMsg: "Welcome dialog never appeared before starting tour",
+      },
+    );
+
     const takeTour = await $("button=Take the 3-minute tour");
-    await takeTour.waitForDisplayed({ timeout: 20_000 });
+    await takeTour.waitForClickable({ timeout: 10_000 });
     await takeTour.click();
 
+    await browser.waitUntil(
+      async () => {
+        const title = await $("#tutorial-step-title");
+        if (!(await title.isExisting())) return false;
+        const text = await title.getText();
+        return text.length > 0;
+      },
+      {
+        timeout: 20_000,
+        timeoutMsg: "Tutorial overlay step title never appeared",
+      },
+    );
+
     const overlay = await $(".tutorial-overlay");
-    await overlay.waitForDisplayed({ timeout: 15_000 });
+    await expect(overlay).toBeExisting();
 
     const stepTitle = await $("#tutorial-step-title");
-    await expect(stepTitle).toBeDisplayed();
+    await expect(stepTitle).toBeExisting();
+    const firstTitle = await stepTitle.getText();
 
-    const next = await $("button=Next");
-    if (await next.isExisting()) {
-      await next.click();
-      await expect(stepTitle).toBeDisplayed();
-    }
+    // WebDriver treats the popover as non-interactable while enter motion runs
+    // (computed opacity can remain 0 briefly). Programmatic click matches user intent.
+    await browser.execute(() => {
+      (
+        document.querySelector(
+          ".tutorial-popover-actions .btn-primary",
+        ) as HTMLButtonElement | null
+      )?.click();
+    });
+
+    await browser.waitUntil(
+      async () => {
+        const title = await $("#tutorial-step-title");
+        if (!(await title.isExisting())) return false;
+        const text = await title.getText();
+        return text.length > 0 && text !== firstTitle;
+      },
+      {
+        timeout: 10_000,
+        timeoutMsg: "Tutorial step did not advance after Next",
+      },
+    );
   });
 });

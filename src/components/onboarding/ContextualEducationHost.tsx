@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { api, listenApprovalsChanged } from "@/lib/tauri";
+import { readStoredSettingsCategory } from "@/lib/settings-categories";
 import { CONTEXTUAL_TIP_IDS } from "@/lib/onboarding/tutorials";
 import { useAppStore } from "@/stores/app-store";
 import { useOnboardingStore } from "@/stores/onboarding-store";
@@ -17,6 +18,7 @@ export function ContextualEducationHost() {
   const phase = useOnboardingStore((s) => s.phase);
   const activeTool = useAppStore((s) => s.activeTool);
   const view = useAppStore((s) => s.view);
+  const aiStatus = useAppStore((s) => s.aiStatus);
   const offeredRef = useRef(new Set<string>());
 
   const tryOffer = (tipId: string) => {
@@ -70,6 +72,24 @@ export function ContextualEducationHost() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bootstrapped, onboardingDisabled, phase]);
+
+  // First AI connection ready or AI connections settings opened
+  useEffect(() => {
+    if (aiStatus?.status === "ready") {
+      tryOffer(CONTEXTUAL_TIP_IDS.firstAiConnection);
+    }
+    if (view.kind === "settings" && readStoredSettingsCategory() === "ai-access") {
+      tryOffer(CONTEXTUAL_TIP_IDS.firstAiConnection);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    aiStatus?.status,
+    aiStatus?.accessMode,
+    view.kind,
+    bootstrapped,
+    onboardingDisabled,
+    phase,
+  ]);
 
   // First queue / history — thin custom events from leaf components
   useEffect(() => {

@@ -75,6 +75,65 @@ BEGIN
       AND roles::text LIKE '%authenticated%'
   ), 'authenticated users must not insert hosted_search_usage rows';
 
+  ASSERT NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'ai_plan_catalog'
+      AND cmd IN ('INSERT', 'UPDATE', 'DELETE')
+      AND roles::text LIKE '%authenticated%'
+  ), 'authenticated users must not mutate ai_plan_catalog';
+
+  ASSERT (
+    SELECT relrowsecurity
+    FROM pg_class
+    WHERE oid = 'public.billing_stripe_customers'::regclass
+  ), 'billing_stripe_customers must have RLS enabled';
+
+  ASSERT (
+    SELECT relrowsecurity
+    FROM pg_class
+    WHERE oid = 'public.billing_subscriptions'::regclass
+  ), 'billing_subscriptions must have RLS enabled';
+
+  ASSERT NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'billing_stripe_customers'
+      AND cmd IN ('INSERT', 'UPDATE', 'DELETE')
+      AND roles::text LIKE '%authenticated%'
+  ), 'authenticated users must not mutate billing_stripe_customers';
+
+  ASSERT NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'billing_subscriptions'
+      AND cmd IN ('INSERT', 'UPDATE', 'DELETE')
+      AND roles::text LIKE '%authenticated%'
+  ), 'authenticated users must not mutate billing_subscriptions';
+
+  ASSERT NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'billing_stripe_webhook_events'
+      AND roles::text LIKE '%authenticated%'
+  ), 'billing_stripe_webhook_events must not be readable by authenticated users';
+
+  ASSERT NOT EXISTS (
+    SELECT 1
+    FROM information_schema.routine_privileges
+    WHERE routine_schema = 'public'
+      AND routine_name IN (
+        'reserve_hosted_ai_request',
+        'settle_hosted_ai_request',
+        'fail_hosted_ai_request'
+      )
+      AND grantee IN ('PUBLIC', 'anon', 'authenticated')
+  ), 'hosted AI billing RPCs must be service_role only';
+
   RAISE NOTICE 'hosted_ai_rls expectations passed';
 END;
 $$;

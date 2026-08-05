@@ -20,7 +20,7 @@ use super::errors::AiError;
 use super::provider::{
     AgentRequest, AgentResponse, AiProvider, ProviderStreamEvent, ProviderStreamTx,
 };
-use crate::config::AppConfig;
+use crate::credentials::ResolvedAiAccess;
 
 /// Ordered Auto candidates for a provider (best first).
 /// Diversify vendors so one provider's rate limit doesn't stall Auto.
@@ -165,12 +165,13 @@ pub fn peek_assistant_message(partial: &str) -> Option<String> {
 
 /// Run chat_stream with optional Auto fallback across candidate models.
 pub async fn chat_with_auto(
-    config: &AppConfig,
+    access: &ResolvedAiAccess,
     model_preference: &str,
     request: AgentRequest,
     mut on_action: impl FnMut(&str),
     mut on_stream: impl FnMut(ProviderStreamEvent),
 ) -> Result<ResolvedChat, AiError> {
+    let config = access.credentials.to_app_config();
     let auto_mode = is_auto_preference(model_preference);
     let candidates = if auto_mode {
         auto_model_candidates(&config.provider, &config.model)
@@ -199,7 +200,7 @@ pub async fn chat_with_auto(
         }
 
         attempts += 1;
-        let provider = build_provider(config, model)?;
+        let provider = build_provider(access, model)?;
 
         let attempt = AgentRequest {
             system_prompt: request.system_prompt.clone(),
@@ -393,8 +394,8 @@ async fn run_chat_stream(
     }
 }
 
-fn build_provider(config: &AppConfig, model: &str) -> Result<Arc<dyn AiProvider>, AiError> {
-    crate::ai::create_provider_with_model(config, Some(model))
+fn build_provider(access: &ResolvedAiAccess, model: &str) -> Result<Arc<dyn AiProvider>, AiError> {
+    crate::ai::create_provider_for_access(access, Some(model))
 }
 
 #[cfg(test)]
@@ -677,6 +678,33 @@ mod tests {
             // No TextDelta — failure before user-visible content.
             Err(AiError::Provider("unavailable".into()))
         }
+    }
+
+    fn ollama_authless_access() -> crate::credentials::ResolvedAiAccess {
+        crate::credentials::ResolvedAiAccess {
+            credentials: crate::credentials::ResolvedCredentials {
+                provider: "ollama".into(),
+                api_key: None,
+                model: "llama3.2".into(),
+                base_url: "http://127.0.0.1:11434".into(),
+                source: "connection".into(),
+                active_connection_id: Some("ollama-1".into()),
+                env_path: None,
+                missing_connection_secret: false,
+            },
+            route: crate::credentials::AiAccessRoute::LocalAuthless,
+        }
+    }
+
+    #[test]
+    fn build_provider_preserves_local_route_across_model_retries() {
+        let access = ollama_authless_access();
+        let first = build_provider(&access, "llama3.2").expect("first model");
+        let second = build_provider(&access, "mistral").expect("retry model");
+        assert_eq!(first.provider_id(), "ollama");
+        assert_eq!(second.provider_id(), "ollama");
+        assert_ne!(first.provider_id(), "coreside_hosted");
+        assert_ne!(second.provider_id(), "coreside_hosted");
     }
 
     #[tokio::test]

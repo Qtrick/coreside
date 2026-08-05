@@ -6,8 +6,8 @@
  * 1. main — clean DB (Journeys 1, 3, 4)
  * 2. existing-* — seeded profile, one fresh DB per journey group (2, 5–11, 14)
  * 3. true-streaming / wallpaper-targeted — clean DB (Journeys 12–13)
- * 4. Journeys 15–16 (onboarding) are registered as not_run — CORESIDE_E2E
- *    disables onboarding; specs exist under e2e/specs/ but are not executed here.
+ * 4. Journeys 15–16 — clean profile with CORESIDE_E2E_ALLOW_ONBOARDING=1
+ * 5. Journeys 17–18 — registered not_run until Local AI / hosted profiles exist
  *
  * Writes reports/e2e-results.json from actual suite exits — never invents passes.
  * Journey 7 is recorded as passed_partial when its suite exits 0 (coverage is
@@ -39,7 +39,7 @@ const JOURNEYS = [
     name: "multi-window-approval-race",
     suite: "existing-approval-race",
     coverage: "partial",
-    note: "Secondary window opens; duplicate-approval UI on secondary not fully asserted",
+    note: "Single-window WebDriver: secondary absence asserted; concurrent cross-window approve race not exercised",
   },
   { id: 8, name: "grant-revoke", suite: "existing-grant", coverage: "full" },
   { id: 9, name: "recovery-mode", suite: "existing-recovery", coverage: "full" },
@@ -78,14 +78,26 @@ const JOURNEYS = [
     name: "first-run-welcome",
     suite: "first-run-welcome",
     coverage: "full",
-    note: "Spec present; not executed — CORESIDE_E2E disables onboarding",
   },
   {
     id: 16,
     name: "core-tutorial",
     suite: "core-tutorial",
     coverage: "full",
-    note: "Spec present; not executed — CORESIDE_E2E disables onboarding",
+  },
+  {
+    id: 17,
+    name: "local-ai-privacy",
+    suite: "local-ai-privacy",
+    coverage: "full",
+    note: "Spec present; not executed — requires Local AI desktop profile",
+  },
+  {
+    id: 18,
+    name: "hosted-free-chat",
+    suite: "hosted-free-chat",
+    coverage: "full",
+    note: "Spec present; not executed — requires hosted Supabase + Coreside AI session",
   },
 ];
 
@@ -126,7 +138,9 @@ function writeResults(overallStatus) {
       id: j.id,
       name: j.name,
       status,
-      ...(j.note && status === "passed_partial" ? { note: j.note } : {}),
+      ...(j.note && (status === "passed_partial" || status === "not_run")
+        ? { note: j.note }
+        : {}),
     };
   });
   const hasFailed = journeys.some((j) => j.status === "failed");
@@ -138,11 +152,23 @@ function writeResults(overallStatus) {
     // Journey 7 (and any future partial) must not inflate a full desktop pass.
     status = "passed_partial";
   }
+  let sourceFingerprint = null;
+  try {
+    const fpPath = path.join(root, "reports/current-source-fingerprint.json");
+    if (fs.existsSync(fpPath)) {
+      const fp = JSON.parse(fs.readFileSync(fpPath, "utf8"));
+      sourceFingerprint =
+        typeof fp.sourceFingerprint === "string" ? fp.sourceFingerprint : null;
+    }
+  } catch {
+    sourceFingerprint = null;
+  }
   const payload = {
     product: "Coreside",
     generatedAt: new Date().toISOString(),
     commit,
     dirty,
+    ...(sourceFingerprint ? { sourceFingerprint } : {}),
     command: "npm run e2e",
     status,
     platform: os.platform(),
@@ -153,10 +179,10 @@ function writeResults(overallStatus) {
   };
   fs.mkdirSync(path.dirname(resultsPath), { recursive: true });
   fs.writeFileSync(resultsPath, JSON.stringify(payload, null, 2) + "\n");
-  console.log(`[e2e:run] wrote ${path.relative(root, resultsPath)} status=${overallStatus}`);
+  console.log(`[e2e:run] wrote ${path.relative(root, resultsPath)} status=${status}`);
 }
 
-function runSuite(suite, { seed } = {}) {
+function runSuite(suite, { seed, env: envOverrides } = {}) {
   const dbDir = fs.mkdtempSync(path.join(os.tmpdir(), `coreside-e2e-${suite}-`));
   const dbPath = path.join(dbDir, "coreside.db");
   const commit = spawnSync("git", ["rev-parse", "HEAD"], {
@@ -174,6 +200,7 @@ function runSuite(suite, { seed } = {}) {
     AI_PROVIDER: process.env.AI_PROVIDER || "mock",
     CORESIDE_E2E_COMMIT: (commit.stdout || "").trim(),
     CORESIDE_E2E_DIRTY: (porcelain.stdout || "").trim().length > 0 ? "1" : "0",
+    ...envOverrides,
   };
   // Explicitly unset vs empty-string: a polluted parent shell must not leak seed.
   if (seed) {
@@ -181,7 +208,6 @@ function runSuite(suite, { seed } = {}) {
   } else {
     delete env.CORESIDE_E2E_SEED;
   }
-  // Drop any inherited CARGO_TARGET_DIR so binary resolution stays local.
   delete env.CARGO_TARGET_DIR;
   console.log(`\n[e2e:run] suite=${suite} db=${dbPath} seed=${seed ?? "(none)"}`);
   const result = spawnSync(
@@ -229,6 +255,15 @@ runSuite("wallpaper-targeted");
 
 // Seeded eavesdropping denial (needs tool window from existing seed).
 runSuite("existing-eavesdrop", { seed: "existing" });
+
+// Onboarding journeys need CORESIDE_E2E but must not disable welcome/tutorial.
+// Explicit empty seed prevents a polluted parent shell from leaking existing fixture data.
+const onboardingEnv = {
+  CORESIDE_E2E_ALLOW_ONBOARDING: "1",
+  CORESIDE_E2E_SEED: "",
+};
+runSuite("first-run-welcome", { env: onboardingEnv });
+runSuite("core-tutorial", { env: onboardingEnv });
 
 writeResults("passed");
 console.log("\n[e2e:run] all suites passed");

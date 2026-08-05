@@ -54,17 +54,7 @@ impl OpenRouterProvider {
     }
 
     fn build_messages(system_prompt: &str, messages: &[AgentMessage]) -> Vec<Value> {
-        let mut out = vec![json!({
-            "role": "system",
-            "content": system_prompt
-        })];
-        for m in messages {
-            out.push(json!({
-                "role": m.role.as_openai_role(),
-                "content": m.provider_text()
-            }));
-        }
-        out
+        super::openai_family::build_openai_chat_messages(system_prompt, messages)
     }
 
     async fn post_chat(&self, body: Value, cancel: CancellationToken) -> Result<Value, AiError> {

@@ -84,7 +84,7 @@ pub use preview_transaction::{
     PreviewSurfaceModel, PreviewTransaction, RejectedPreviewOp,
 };
 #[allow(unused_imports)]
-pub use streaming::{NdjsonFrameParser, StreamEvent};
+pub use streaming::{NdjsonFrameParser, StreamEvent, StreamParseError, StreamParseErrorKind};
 #[allow(unused_imports)]
 pub use surfaces::{
     archive_surface, create_inline_surface, delete_surface, get_surface, get_surface_state,

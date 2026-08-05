@@ -85,7 +85,7 @@ Reports: `reports/attachment-gc-results.json` → **Unit Verified**.
 ## Remaining P1/P2
 
 - Protocol whole-file reads remain bounded but still load into memory (P1)
-- Multimodal provider parts (P1) — **Partial**: `AgentContentPart::Image { attachment_id, mime_type, data_base64 }` after `authorize_attachment_access`; OpenAI maps to `image_url` data URLs (never filesystem paths); byte/pixel bounds enforced. Anthropic/Gemini native parts still open. Report: `reports/multimodal-provider-results.json`
+- Multimodal provider parts (P1) — **Integrated (unit)**: `AgentContentPart::Image { attachment_id, mime_type, data_base64 }` after `authorize_attachment_access`; OpenAI-family → `image_url` data URLs; Ollama → `images[]`; Anthropic → native base64 `image` blocks; Gemini → `inlineData`. Tool results use sealed JSON envelope (`envelopeHash`, `trust=untrusted_tool_output`); Gemini wraps envelope in `functionResponse`. Send path blocks unsupported image/tool via `validate_provider_send` (draft preserved). Report: `reports/multimodal-provider-results.json`. Desktop E2E **not_run**.
 - Parser-level image bomb budgets (P2)
 - Wire `run_attachment_gc` into a periodic scheduler tick (P2)
 - Desktop / packaged attachment crash proof (open)

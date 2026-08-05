@@ -140,13 +140,20 @@ function artifactDirFor(testTitle: string): string {
 const appBinaryPath = resolveAppBinary();
 const dbPath = ensureIsolatedDbPath();
 const seed = process.env.CORESIDE_E2E_SEED?.trim() || "";
+const allowOnboarding = process.env.CORESIDE_E2E_ALLOW_ONBOARDING?.trim();
 
-const appEnv: Record<string, string> = {
-  CORESIDE_E2E: "1",
-  CORESIDE_DB_PATH: dbPath,
-  AI_PROVIDER: process.env.AI_PROVIDER || "mock",
-  ...(seed ? { CORESIDE_E2E_SEED: seed } : {}),
-};
+function buildAppEnv(): Record<string, string> {
+  const env: Record<string, string> = {
+    CORESIDE_E2E: "1",
+    CORESIDE_DB_PATH: dbPath,
+    AI_PROVIDER: process.env.AI_PROVIDER || "mock",
+  };
+  if (seed) env.CORESIDE_E2E_SEED = seed;
+  if (allowOnboarding) env.CORESIDE_E2E_ALLOW_ONBOARDING = allowOnboarding;
+  return env;
+}
+
+const appEnv = buildAppEnv();
 
 export const config: Options.Testrunner = {
   runner: "local",
@@ -225,6 +232,8 @@ export const config: Options.Testrunner = {
     process.env.AI_PROVIDER = process.env.AI_PROVIDER || "mock";
     if (seed) process.env.CORESIDE_E2E_SEED = seed;
     else delete process.env.CORESIDE_E2E_SEED;
+    if (allowOnboarding) process.env.CORESIDE_E2E_ALLOW_ONBOARDING = allowOnboarding;
+    else delete process.env.CORESIDE_E2E_ALLOW_ONBOARDING;
     console.log(`[e2e] binary=${appBinaryPath}`);
     console.log(`[e2e] CORESIDE_DB_PATH=${dbPath}`);
     console.log(`[e2e] CORESIDE_E2E_SEED=${seed || "(unset)"}`);

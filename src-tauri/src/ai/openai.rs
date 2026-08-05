@@ -106,6 +106,10 @@ pub fn openai_message_content(message: &AgentMessage) -> Value {
                 Ok(v) => content_parts.push(v),
                 Err(reason) => {
                     tracing::info!(target: "coreside::ai::openai", "{reason}");
+                    content_parts.push(json!({
+                        "type": "text",
+                        "text": format!("[image not sent to model: {reason}]"),
+                    }));
                 }
             }
         }
@@ -185,17 +189,7 @@ impl OpenAiProvider {
     }
 
     fn build_messages(system_prompt: &str, messages: &[AgentMessage]) -> Vec<Value> {
-        let mut out = vec![json!({
-            "role": "system",
-            "content": system_prompt
-        })];
-        for m in messages {
-            out.push(json!({
-                "role": m.role.as_openai_role(),
-                "content": openai_message_content(m)
-            }));
-        }
-        out
+        super::openai_family::build_openai_chat_messages(system_prompt, messages)
     }
 
     async fn post_chat(&self, body: Value, cancel: CancellationToken) -> Result<Value, AiError> {

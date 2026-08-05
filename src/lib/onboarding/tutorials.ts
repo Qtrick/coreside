@@ -6,13 +6,14 @@ export const TOUR_TARGETS = {
   composerSend: "chat-composer-send",
   appPanel: "app-panel",
   sidebarProjects: "sidebar-projects",
+  aiConnections: "ai-connections-nav",
   helpLearning: "help-learning-nav",
 } as const;
 
 export const ESSENTIALS_TUTORIAL_ID = "coreside-essentials";
 
 /** Persisted via `tutorial_progress` — dismissed What's new for this release slice. */
-export const WHATS_NEW_ID = "whats-new:rc3.4";
+export const WHATS_NEW_ID = "whats-new:rc3.6";
 
 export const CONTEXTUAL_TIP_IDS = {
   firstApp: "contextual-first-app",
@@ -20,6 +21,7 @@ export const CONTEXTUAL_TIP_IDS = {
   firstQueue: "contextual-first-queue",
   firstProject: "contextual-first-project",
   firstVersions: "contextual-first-versions",
+  firstAiConnection: "contextual-first-ai-connection",
 } as const;
 
 /** Single-shot first-use hints (not listed as Help tour modules). */
@@ -53,6 +55,12 @@ export const CONTEXTUAL_TIPS: readonly ContextualTipDefinition[] = [
     version: 1,
     title: "History and versions",
     body: "Branches and snapshots live here. You can revisit earlier states without losing your place.",
+  },
+  {
+    id: CONTEXTUAL_TIP_IDS.firstAiConnection,
+    version: 1,
+    title: "AI connections",
+    body: "Choose Coreside AI, a local model, or your own provider key. Keys stay in the operating system credential store — never in chat history.",
   },
 ] as const;
 
@@ -149,6 +157,30 @@ export const TUTORIALS: readonly TutorialDefinition[] = [
         title: "Changes are versioned",
         body: "App updates keep history so you can undo when something goes wrong.",
         kind: "dialog",
+      },
+    ],
+  },
+  {
+    id: "coreside-ai-connections",
+    version: 1,
+    title: "AI connections",
+    description: "How Coreside reaches a model on this computer.",
+    firstRun: false,
+    estimatedMinutes: 2,
+    steps: [
+      {
+        id: "ai-connections-nav",
+        title: "AI connections",
+        body: "Open Settings → AI connections to choose Coreside AI, Local AI, or bring your own provider key. Provider keys never live in chat or the database.",
+        target: TOUR_TARGETS.aiConnections,
+        kind: "spotlight",
+      },
+      {
+        id: "ai-connections-privacy",
+        title: "Privacy stays local-first",
+        body: "Local AI keeps traffic on this machine when configured. Hosted Coreside AI only sends what is needed for replies. You can review details under Privacy & Security.",
+        kind: "dialog",
+        nextLabel: "Done",
       },
     ],
   },

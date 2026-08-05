@@ -376,25 +376,17 @@ fn merge_json_objects(target: &mut Value, patch: &Value) {
 
 /// Classify parser errors: incomplete buffering vs fatal framing loss.
 fn classify_parser_error(err: &str) -> (&'static str, bool) {
-    let lower = err.to_ascii_lowercase();
-    if lower.contains("incomplete frame exceeds")
-        || lower.contains("exceeded max total")
-        || lower.contains("exceeded max events")
-        || lower.contains("exceeded max operations")
-        || lower.contains("frame exceeds max")
-        || lower.contains("halted")
-    {
-        return ("fatal", true);
-    }
-    if lower.contains("incomplete frame") || lower.contains("incomplete or invalid") {
-        // Mid-buffer noise while assembling a line is expected for JSON blobs;
-        // only treat as fatal when the parser itself halted (handled above).
-        return ("incomplete", false);
-    }
-    if lower.contains("invalid") || lower.contains("unknown") || lower.contains("rejected") {
-        return ("rejected", false);
-    }
-    ("fatal", true)
+    use super::streaming::StreamParseError;
+    let (kind, fatal) = StreamParseError::classify_message(err);
+    let status = match kind {
+        super::streaming::StreamParseErrorKind::Incomplete => "incomplete",
+        super::streaming::StreamParseErrorKind::Malformed
+        | super::streaming::StreamParseErrorKind::Unrecognized => "rejected",
+        super::streaming::StreamParseErrorKind::LimitExceeded
+        | super::streaming::StreamParseErrorKind::Utf8
+        | super::streaming::StreamParseErrorKind::Halted => "fatal",
+    };
+    (status, fatal)
 }
 
 /// Push a live TextDelta chunk through the canonical NDJSON parser.

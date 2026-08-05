@@ -8,9 +8,24 @@
 1. User signs in (Supabase Auth email/password).
 2. Session JSON stored in OS keyring (`coreside:hosted-auth`).
 3. Desktop calls `ai-gateway` with user JWT + publishable `apikey`.
-4. Gateway validates JWT, entitlement, rate limit, idempotency.
-5. Optimistic entitlement reserve → upstream provider (server secret) → usage ledger.
+4. Gateway validates JWT, rate limit, then `reserve_hosted_ai_request` (service_role RPC).
+5. Upstream provider (server secret) → `settle_hosted_ai_request` or `fail_hosted_ai_request`.
 6. Consumer UI shows **Coreside AI**; upstream provider/model hidden.
+
+**Security:** Upstream provider API keys (`CORESIDE_AI_PROVIDER_API_KEY`, Exa keys) live only in Edge Function secrets and never ship to desktop, SQLite, or the webview. Desktop sends chat messages + user JWT only.
+
+## Portable gateway contract
+
+`supabase/functions/ai-gateway/contract.json` documents the desktop ↔ `ai-gateway` JSON contract (auth headers, POST body, success/error shapes). Keep Rust `HostedAiProvider` aligned with this file.
+
+## Plan catalog and entitlements
+
+Migrations:
+
+- `20260804120000_hosted_ai_free_plan_entitlements.sql` — `free` + `beta` catalog; new users get **Free** (no auto 50-request grant)
+- `20260804140000_hosted_ai_billing_reservations.sql` — `personal` / `pro` catalog rows, Stripe billing tables, atomic `reserve_hosted_ai_request` / `settle_hosted_ai_request` / `fail_hosted_ai_request` RPC stubs (service_role only)
+
+`ai_plan_catalog` is read-only for authenticated users. Entitlement and subscription writes happen only via Edge Functions / service role.
 
 ## Edge Functions
 
@@ -18,6 +33,9 @@
 | --- | --- |
 | `ai-gateway` | Hosted chat completions + health |
 | `search-gateway` | Hosted Exa discovery |
+| `billing-checkout` | Stripe Checkout session (server-bound `client_reference_id` + metadata) |
+| `billing-portal` | Stripe Customer Portal session stub |
+| `stripe-webhook` | Webhook signature verification, idempotency, entitlement sync |
 
 ## Tables (migration `20260719120000_hosted_ai_foundation.sql`)
 
@@ -27,7 +45,7 @@ profiles, ai_entitlements, ai_usage_ledger, ai_request_idempotency, hosted_searc
 
 - `HostedAiProvider` when no BYOK/env key and session present
 - `adapter_connected` drives `coreside_hosted` access mode
-- Settings: sign-in / sign-out when `VITE_SUPABASE_*` configured
+- Settings: sign-in / sign-out when `VITE_SUPABASE_*` configured; plan read from `ai_entitlements` when signed in (falls back to contract defaults)
 
 ## Still required for live hosted AI
 

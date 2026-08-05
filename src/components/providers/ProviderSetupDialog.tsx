@@ -29,7 +29,7 @@ const emptyForm = (): FormState => ({
 });
 
 function defaultLabel(hint: ProviderHint): string {
-  return `${hint.label} Personal`;
+  return hint.label;
 }
 
 function clearSensitiveForm(
@@ -121,10 +121,13 @@ export function ProviderSetupDialog() {
         ({
           id: editing.provider,
           label: editing.label,
+          local: false,
           keyPlaceholder: "Enter API key",
           defaultModel: editing.modelDefault ?? "",
           docsUrl: null,
           supportsBaseUrl: editing.provider === "compatible",
+          requiresApiKey: true,
+          experimental: false,
         } satisfies ProviderHint);
       setSelected(hint);
       setEditId(editing.id);

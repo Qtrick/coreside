@@ -42,7 +42,7 @@ mod tests {
             Some(LATEST_MIGRATION),
             "expected latest migration {LATEST_MIGRATION}, got {applied:?}"
         );
-        assert_eq!(applied.len(), 18, "expected 18 migrations, got {applied:?}");
+        assert_eq!(applied.len(), 19, "expected 19 migrations, got {applied:?}");
         // Re-applying must be a no-op.
         let again = Database::open_path(db.path()).unwrap();
         assert_eq!(again.applied_migrations().unwrap(), applied);
@@ -477,7 +477,7 @@ mod tests {
             .iter()
             .map(|(n, _)| *n)
             .collect::<Vec<_>>();
-        assert_eq!(names.len(), 18);
+        assert_eq!(names.len(), 19);
         for (i, name) in names.iter().enumerate() {
             let expected = format!("{:03}_", i + 1);
             assert!(
@@ -485,6 +485,6 @@ mod tests {
                 "migration {i} should start with {expected}, got {name}"
             );
         }
-        assert_eq!(names[17], LATEST_MIGRATION);
+        assert_eq!(names[18], LATEST_MIGRATION);
     }
 }

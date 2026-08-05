@@ -60,13 +60,10 @@ impl AnthropicProvider {
     }
 
     fn build_body(system_prompt: &str, messages: &[AgentMessage], model: &str) -> Value {
-        let mut api_messages = Vec::new();
-        for m in messages {
-            api_messages.push(json!({
-                "role": m.role.as_openai_role(),
-                "content": m.provider_text()
-            }));
-        }
+        let api_messages: Vec<Value> = messages
+            .iter()
+            .map(super::anthropic_family::anthropic_message_json)
+            .collect();
         json!({
             "model": model,
             "max_tokens": 8192,

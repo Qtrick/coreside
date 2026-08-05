@@ -62,6 +62,7 @@ fn local_chat() -> CapabilityProfile {
         flags: vec![
             CapabilityFlag::TextInput,
             CapabilityFlag::TextStreaming,
+            CapabilityFlag::ImageInput,
             CapabilityFlag::ModelListing,
             CapabilityFlag::Cancellation,
         ],

@@ -28,3 +28,12 @@ verify_jwt = true
 
 [functions.search-gateway]
 verify_jwt = true
+
+[functions.billing-checkout]
+verify_jwt = true
+
+[functions.billing-portal]
+verify_jwt = true
+
+[functions.stripe-webhook]
+verify_jwt = false

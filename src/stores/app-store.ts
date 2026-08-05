@@ -241,7 +241,7 @@ type AppStore = {
       surfaceId?: string | null;
       fields: Record<string, unknown>;
     } | null,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   cancelRequest: () => Promise<void>;
   retryLastFailed: () => Promise<void>;
   editAndResendMessage: (messageId: string, content: string) => Promise<void>;
@@ -1801,12 +1801,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     structuredUserInput = null,
   ) => {
     const trimmed = content.trim();
-    if (!trimmed && attachments.length === 0 && !structuredUserInput) return;
+    if (!trimmed && attachments.length === 0 && !structuredUserInput) return false;
 
     const aiStatus = get().aiStatus?.status;
     if (aiStatus === "missing_key" || aiStatus === "unconfigured") {
       get().openProviderSetup();
-      return;
+      return false;
     }
 
     let conversationId = get().activeConversationId;
@@ -1814,7 +1814,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       await get().createConversation();
       conversationId = get().activeConversationId;
     }
-    if (!conversationId) return;
+    if (!conversationId) return false;
 
     const messageContent =
       trimmed ||
@@ -2078,7 +2078,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           streamingText: null,
           ...finalizeTurnInState(state, conversationId, "completed"),
         }));
-        return;
+        return true;
       }
 
       if (result.queued) {
@@ -2099,7 +2099,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
               : m,
           ),
         }));
-        return;
+        return true;
       }
 
       let themePatch: Partial<{
@@ -2136,7 +2136,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           ...finalizeTurnInState(state, conversationId, "completed"),
           ...themePatch,
         }));
-        return;
+        return true;
       }
 
       set((state) => ({
@@ -2156,11 +2156,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
         ),
         ...themePatch,
       }));
+      return true;
     } catch (error) {
       const message =
         error instanceof TauriCommandError || error instanceof Error
           ? error.message
           : "Failed to send message";
+      get().setChatDraft(conversationId, trimmed);
       if (get().activeConversationId !== conversationId) {
         set((state) => ({
           sending: false,
@@ -2169,7 +2171,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           streamingText: null,
           ...finalizeTurnInState(state, conversationId, "failed", message),
         }));
-        return;
+        return false;
       }
       set((state) => ({
         sending: false,
@@ -2184,6 +2186,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
             : m,
         ),
       }));
+      return false;
     }
   },
 

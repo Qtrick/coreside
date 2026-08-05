@@ -40,8 +40,16 @@ impl AgentRole {
         match self {
             Self::Assistant => "assistant",
             Self::System => "system",
-            // tool_result maps to user for API shape; content is untrusted-enveloped.
+            // ToolResult uses role "user" + `name: tool_result` with JSON envelope content.
             Self::ToolResult | Self::User => "user",
+        }
+    }
+
+    /// Optional OpenAI `name` field — distinguishes tool_result from human user turns.
+    pub fn openai_message_name(self) -> Option<&'static str> {
+        match self {
+            Self::ToolResult => Some("tool_result"),
+            _ => None,
         }
     }
 
@@ -50,6 +58,14 @@ impl AgentRole {
         match self {
             Self::Assistant => "model",
             Self::ToolResult | Self::User | Self::System => "user",
+        }
+    }
+
+    /// Anthropic Messages API role string.
+    pub fn as_anthropic_role(self) -> &'static str {
+        match self {
+            Self::Assistant => "assistant",
+            Self::User | Self::ToolResult | Self::System => "user",
         }
     }
 }
@@ -120,6 +136,10 @@ pub enum AgentContentPart {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         data_base64: Option<String>,
     },
+    /// Sealed untrusted tool output envelope (JSON). Never flattened into user text upstream.
+    ToolResultEnvelope {
+        envelope_json: String,
+    },
 }
 
 /// Max decoded image bytes allowed into a provider Image part (4 MiB).
@@ -160,6 +180,44 @@ pub fn validate_provider_image_bytes(mime: &str, bytes: &[u8]) -> Result<(), Str
     if pixels > MAX_PROVIDER_IMAGE_PIXELS {
         return Err(format!(
             "image exceeds {MAX_PROVIDER_IMAGE_PIXELS} pixel provider limit ({w}x{h})"
+        ));
+    }
+    Ok(())
+}
+
+/// Preflight: image part is ready for provider send when the preset claims ImageInput.
+/// Fail-closed — mapping layers must not silently omit claimed multimodal parts.
+pub fn validate_image_part_for_provider_send(part: &AgentContentPart) -> Result<(), String> {
+    let AgentContentPart::Image {
+        attachment_id,
+        mime_type,
+        data_base64,
+    } = part
+    else {
+        return Ok(());
+    };
+    if attachment_id.trim().is_empty() {
+        return Err("image part missing attachment_id".into());
+    }
+    if !is_provider_image_mime(mime_type) {
+        return Err(format!(
+            "unsupported mime {mime_type} for attachment {attachment_id}"
+        ));
+    }
+    let Some(b64) = data_base64.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+        return Err(format!(
+            "no authorized bytes loaded for attachment {attachment_id} (paths are never sent)"
+        ));
+    };
+    if b64.starts_with('/') || (b64.contains("://") && !b64.starts_with("data:")) {
+        return Err(format!(
+            "refusing path-like payload for attachment {attachment_id}"
+        ));
+    }
+    let approx_bytes = (b64.len() / 4).saturating_mul(3);
+    if approx_bytes > MAX_PROVIDER_IMAGE_BYTES {
+        return Err(format!(
+            "attachment {attachment_id} exceeds provider byte budget (~{approx_bytes} bytes)"
         ));
     }
     Ok(())
@@ -332,9 +390,15 @@ pub fn flatten_parts_for_provider(parts: &[AgentContentPart]) -> String {
                 mime_type,
                 ..
             } => {
-                // Never dump base64 or filesystem paths into text flatten.
+                // Display-only placeholder — providers use native Image parts, not this flatten.
                 chunks.push(format!(
                     "[image attachmentId={attachment_id} mime={mime_type}]"
+                ));
+            }
+            AgentContentPart::ToolResultEnvelope { envelope_json } => {
+                chunks.push(format!(
+                    "[tool_result envelope bytes={}]",
+                    envelope_json.len()
                 ));
             }
         }
@@ -576,5 +640,36 @@ mod tests {
         assert!(flat.contains("attachmentId=att-1"));
         assert!(!flat.contains("/Users/"));
         assert!(!flat.contains("data:"));
+    }
+
+    #[test]
+    fn flatten_tool_result_envelope_uses_byte_count_placeholder_not_raw_json() {
+        let envelope_json = r#"{"coresideEnvelope":"tool_result","trust":"untrusted_tool_output"}"#;
+        let flat = flatten_parts_for_provider(&[AgentContentPart::ToolResultEnvelope {
+            envelope_json: envelope_json.into(),
+        }]);
+        assert!(flat.contains("[tool_result envelope bytes="));
+        assert!(flat.contains(&format!("bytes={}", envelope_json.len())));
+        assert!(
+            !flat.contains("untrusted_tool_output"),
+            "flatten must not leak raw envelope JSON into BYOK text"
+        );
+        assert!(!flat.contains("coresideEnvelope"));
+    }
+
+    #[test]
+    fn flatten_mixed_text_and_tool_result_envelope_joins_both_chunks() {
+        let envelope_json = r#"{"results":[]}"#;
+        let flat = flatten_parts_for_provider(&[
+            AgentContentPart::Text {
+                text: "user prompt".into(),
+            },
+            AgentContentPart::ToolResultEnvelope {
+                envelope_json: envelope_json.into(),
+            },
+        ]);
+        assert!(flat.starts_with("user prompt"));
+        assert!(flat.contains("[tool_result envelope bytes="));
+        assert!(flat.contains("\n\n"));
     }
 }

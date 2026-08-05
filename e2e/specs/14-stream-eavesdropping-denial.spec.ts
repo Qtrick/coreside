@@ -176,6 +176,9 @@ describe("Journey 14 — stream eavesdropping denial", () => {
       generatedAt: new Date().toISOString(),
       commit: identity.commit,
       dirty: identity.dirty,
+      ...(identity.sourceFingerprint
+        ? { sourceFingerprint: identity.sourceFingerprint }
+        : {}),
       platform: identity.platform,
       architecture: identity.arch,
       command: "e2e:journey-14-stream-eavesdropping-denial",

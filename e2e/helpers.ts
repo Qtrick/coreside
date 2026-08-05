@@ -16,12 +16,13 @@ export const E2E_NOTE_INPUT_ID = "e2e-note-input";
 const helpersDir = path.dirname(fileURLToPath(import.meta.url));
 export const E2E_REPO_ROOT = path.resolve(helpersDir, "..");
 
-/** Commit / dirty identity for evidence reports (prefers orchestrator env). */
+/** Commit / dirty / fingerprint identity for evidence reports (prefers orchestrator env). */
 export function evidenceIdentity(): {
   commit: string;
   dirty: boolean;
   platform: string;
   arch: string;
+  sourceFingerprint: string | null;
 } {
   const commitEnv = process.env.CORESIDE_E2E_COMMIT?.trim();
   const dirtyEnv = process.env.CORESIDE_E2E_DIRTY;
@@ -39,11 +40,25 @@ export function evidenceIdentity(): {
     commit = (rev.stdout || "").trim();
     dirty = (porcelain.stdout || "").trim().length > 0;
   }
+  let sourceFingerprint: string | null = null;
+  try {
+    const fpPath = path.join(E2E_REPO_ROOT, "reports/current-source-fingerprint.json");
+    if (fs.existsSync(fpPath)) {
+      const fp = JSON.parse(fs.readFileSync(fpPath, "utf8")) as {
+        sourceFingerprint?: string;
+      };
+      sourceFingerprint =
+        typeof fp.sourceFingerprint === "string" ? fp.sourceFingerprint : null;
+    }
+  } catch {
+    sourceFingerprint = null;
+  }
   return {
     commit,
     dirty,
     platform: os.platform(),
     arch: os.arch(),
+    sourceFingerprint,
   };
 }
 
@@ -80,6 +95,27 @@ export function requireExistingSeed(suiteLabel = "this journey") {
       `${suiteLabel} requires CORESIDE_E2E_SEED=existing (use npm run e2e / e2e:desktop)`,
     );
   }
+}
+
+/**
+ * E2E-only: WebKit embedded WebViews used by Tauri E2E often keep
+ * visibilityState=hidden and do not set navigator.webdriver. LiveWallpaper only
+ * enables its automation paint path when navigator.webdriver is true — call this
+ * before mounting canvas wallpapers in wallpaper pixel journeys.
+ */
+export async function ensureWebDriverPaintProbe() {
+  if (process.env.CORESIDE_E2E !== "1") {
+    throw new Error(
+      "ensureWebDriverPaintProbe is E2E-only (set CORESIDE_E2E=1 via npm run e2e)",
+    );
+  }
+  await browser.execute(() => {
+    if (navigator.webdriver === true) return;
+    Object.defineProperty(navigator, "webdriver", {
+      get: () => true,
+      configurable: true,
+    });
+  });
 }
 
 export async function waitForAppReady(timeout = 30_000) {
@@ -154,11 +190,17 @@ export async function closeSettings() {
   );
 }
 
+/** Sidebar app button (Personal apps label; legacy Personal tools fallback). */
+function personalAppButtonSelector(toolName: string): string {
+  return [
+    `.sidebar-section[aria-label="Personal apps"] button[aria-label="${toolName}"]`,
+    `.sidebar-section[aria-label="Personal tools"] button[aria-label="${toolName}"]`,
+  ].join(", ");
+}
+
 export async function openPersonalTool(toolName = E2E_TOOL_NAME) {
   await waitForSeededTool();
-  const btn = await $(
-    `.sidebar-section[aria-label="Personal tools"] button[aria-label="${toolName}"]`,
-  );
+  const btn = await $(personalAppButtonSelector(toolName));
   await btn.waitForClickable({ timeout: 15_000 });
   await btn.click();
 }
@@ -226,9 +268,7 @@ export async function approveOnce() {
 export async function waitForSeededTool(timeout = 20_000) {
   await browser.waitUntil(
     async () => {
-      const btn = await $(
-        `.sidebar-section[aria-label="Personal tools"] button[aria-label="${E2E_TOOL_NAME}"]`,
-      );
+      const btn = await $(personalAppButtonSelector(E2E_TOOL_NAME));
       return btn.isExisting();
     },
     {
@@ -275,12 +315,16 @@ export async function openSettingsCategory(label: string) {
   }, label);
   await browser.waitUntil(
     async () => {
+      const region = await $(".settings-content");
+      if (!(await region.isExisting())) return false;
+      const busy = await region.getAttribute("aria-busy");
+      if (busy === "true") return false;
       const title = await $(".settings-group-title");
       return (await title.isExisting()) && (await title.getText()) === label;
     },
     {
-      timeout: 10_000,
-      timeoutMsg: `Settings category “${label}” did not become active`,
+      timeout: 15_000,
+      timeoutMsg: `Settings category “${label}” did not finish transitioning`,
     },
   );
 }

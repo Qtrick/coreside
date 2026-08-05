@@ -137,6 +137,7 @@ describe("preview surface overlay", () => {
       }),
     };
     const next = clearPreviewOverlaysMatching(current, {
+      conversationId: "conv-1",
       toolIds: ["tool-1"],
       surfaceIds: [],
     });
@@ -199,6 +200,41 @@ describe("preview surface overlay", () => {
     const next = clearPreviewOverlaysForConversation(current, "conv-a");
     expect(next["tool-1"]).toBeUndefined();
     expect(next["tool-2"]).toBeDefined();
+  });
+
+  it("does not clear by tool id without conversation scope", () => {
+    const current = {
+      "tool-1": sampleOverlay({ conversationId: "conv-a" }),
+    };
+    const next = clearPreviewOverlaysMatching(current, {
+      toolIds: ["tool-1"],
+      surfaceIds: [],
+    });
+    expect(next).toBe(current);
+  });
+
+  it("does not clear overlay from another conversation on tool id match", () => {
+    const current = {
+      "tool-1": sampleOverlay({ conversationId: "conv-a" }),
+    };
+    const next = clearPreviewOverlaysMatching(current, {
+      conversationId: "conv-b",
+      toolIds: ["tool-1"],
+      surfaceIds: [],
+    });
+    expect(next["tool-1"]).toBeDefined();
+  });
+
+  it("clears scoped overlay when conversation and tool id match", () => {
+    const current = {
+      "tool-1": sampleOverlay({ conversationId: "conv-b" }),
+    };
+    const next = clearPreviewOverlaysMatching(current, {
+      conversationId: "conv-b",
+      toolIds: ["tool-1"],
+      surfaceIds: [],
+    });
+    expect(next["tool-1"]).toBeUndefined();
   });
 
   it("resolves overlay for active tool only when conversation matches", () => {

@@ -18,13 +18,13 @@ const commandName = "audit:current-source";
 
 const DEFAULT_ARCHIVE =
   process.env.CORESIDE_ARCHIVE ||
-  path.join(process.env.HOME || "", "Downloads", "Coreside Chat AI (1).zip");
+  path.join(process.env.HOME || "", "Downloads", "Coreside Chat AI.zip");
 const EXPECTED_ARCHIVE_SHA256 =
-  "e8325a54af8a98889272a397dd8afa9523c3303531837e4eab3bbf38a930c70c";
+  "724cd17ca7249f5fd94b5711d840b8bb1cc6ffaccec14559e85d1f0e93836c7a";
 const PREVIOUS_ARCHIVE_SHA256 =
-  "9d951b9f8ab53b24fde55bcfa49f8b4005020ccc045d0e8226be5fbbf9d0ab06";
-const PREVIOUS_ARCHIVE_LABEL = "Coreside Chat AI(12).zip / prior RC3 zip";
-const CURRENT_ARCHIVE_LABEL = "Coreside Chat AI (1).zip";
+  "e8325a54af8a98889272a397dd8afa9523c3303531837e4eab3bbf38a930c70c";
+const PREVIOUS_ARCHIVE_LABEL = "Coreside Chat AI (1).zip / RC3.5 archive";
+const CURRENT_ARCHIVE_LABEL = "Coreside Chat AI.zip";
 const PARTIAL_UPDATE_ARCHIVE =
   process.env.PARTIAL_UPDATE_ARCHIVE ||
   path.join(process.env.HOME || "", "Downloads", "Partial Update Main (1).zip");
@@ -122,6 +122,7 @@ function countGlob(dir, predicate) {
 
 function archiveExtractRoot() {
   const candidates = [
+    path.join(root, ".reference", "coreside-rc3.6-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-rc3.5-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-rc3-archive", "coreside-main"),
   ];
@@ -133,6 +134,7 @@ function archiveExtractRoot() {
 
 function archiveExtractMatchesExpected() {
   const markers = [
+    path.join(root, ".reference", "coreside-rc3.6-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-rc3.5-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-rc3-archive", "source.sha256"),
   ];
@@ -299,7 +301,7 @@ if (
 ) {
   archiveDiff = {
     status: "extract_stale_or_unmarked",
-    hint: "Re-extract Coreside Chat AI (1).zip into .reference/coreside-rc3.5-archive and write source.sha256 with the expected archive hash",
+    hint: "Re-extract Coreside Chat AI.zip into .reference/coreside-rc3.6-archive and write source.sha256 with the expected archive hash",
     expectedArchiveSha256: EXPECTED_ARCHIVE_SHA256,
     onlyInActive: [],
     onlyInArchive: [],
@@ -308,7 +310,7 @@ if (
 } else if (archiveStatus === "present_hash_match") {
   archiveDiff = {
     status: "archive_present_but_extract_missing",
-    hint: "Extract zip to .reference/coreside-rc3.5-archive/coreside-main then re-run",
+    hint: "Extract zip to .reference/coreside-rc3.6-archive/coreside-main then re-run",
     onlyInActive: [],
     onlyInArchive: [],
     changed: [],
@@ -366,7 +368,7 @@ const hostedAi = "Not ready";
 
 const baselineReport = {
   ...common,
-  phase: "RC3.5",
+  phase: "RC3.6",
   publicBeta,
   hostedAi,
   evidenceClass: dirty ? "development-dirty" : "development-clean",
@@ -465,6 +467,154 @@ writeJson("current-source-fingerprint.json", fingerprintReport);
 writeJson("current-source-baseline.json", baselineReport);
 writeJson("active-versus-uploaded-coreside.json", compareReport);
 
+const HISTORICAL_NOTE =
+  "RC3.6 archive 724cd17c; suite not re-run on current tree. Absent until Desktop/Packaged gates execute.";
+
+/** Restamp gate reports that must not claim passes on a dirty or stale fingerprint. */
+function restampAbsentGateReports() {
+  const absentBase = {
+    schemaVersion: 1,
+    product: "Coreside",
+    generatedAt: nowIso(),
+    generatedAtLocal: new Date().toString(),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    commit,
+    dirty,
+    sourceFingerprint,
+    packageLockHash,
+    cargoLockHash,
+    platform: process.platform,
+    architecture: process.arch,
+    buildMode: "development",
+    exitStatus: "not_run",
+    evidenceLevel: "Absent",
+    currentOrHistorical: "historical",
+    historicalNote: HISTORICAL_NOTE,
+    archiveExpectedSha256: EXPECTED_ARCHIVE_SHA256,
+  };
+
+  const targets = {
+    "e2e-results.json": {
+      ...absentBase,
+      command: "test:e2e",
+      status: "not_run",
+      journeys: [],
+      requiredJourneyCount: 57,
+      passedCount: 0,
+    },
+    "packaged-smoke-results.json": {
+      ...absentBase,
+      command: "test:packaged-smoke",
+      classification: "Packaged launch smoke",
+      smokeKind: "not_run",
+      scope: "not_run",
+      checks: [],
+    },
+    "release-evidence.json": {
+      ...absentBase,
+      command: "release:evidence",
+      status: "historical",
+      gates: [],
+      summary: { notRun: 0, passed: 0, failed: 0 },
+    },
+    "local-beta-readiness.json": {
+      ...absentBase,
+      command: "audit:readiness",
+      evidenceLevel: "Development Build",
+      publicBeta: "Not ready",
+    },
+    "command-authority-results.json": {
+      ...absentBase,
+      command: "e2e:journey-11-command-authority",
+      status: "not_run",
+      rawInvokeDenialTest: "not_run",
+      publicBeta: "Not ready",
+      denials: [],
+      crossToolStateWriteDenied: false,
+    },
+  };
+
+  for (const [name, body] of Object.entries(targets)) {
+    const abs = path.join(reportsDir, name);
+    if (!fs.existsSync(abs)) {
+      fs.writeFileSync(abs, JSON.stringify(body, null, 2) + "\n");
+      continue;
+    }
+    let existing = null;
+    try {
+      existing = JSON.parse(fs.readFileSync(abs, "utf8"));
+    } catch {
+      existing = null;
+    }
+    const archiveChanged =
+      typeof existing.archiveExpectedSha256 === "string" &&
+      existing.archiveExpectedSha256 !== EXPECTED_ARCHIVE_SHA256;
+    // Reset gate reports only when source identity changes — never wipe valid
+    // Journey 11 / e2e evidence on a matching fingerprint + commit.
+    const needsRestamp =
+      !existing ||
+      existing.sourceFingerprint !== sourceFingerprint ||
+      existing.commit !== commit ||
+      archiveChanged;
+    if (needsRestamp) {
+      // Never replace real desktop evidence with an Absent placeholder — freshness
+      // inventory marks fingerprint drift; audit-readiness treats stale fp honestly.
+      if (
+        name === "e2e-results.json" &&
+        Array.isArray(existing?.journeys) &&
+        existing.journeys.length > 0
+      ) {
+        continue;
+      }
+      if (
+        name === "command-authority-results.json" &&
+        existing?.rawInvokeDenialTest === "passed" &&
+        Array.isArray(existing?.denials) &&
+        existing.denials.length > 0
+      ) {
+        continue;
+      }
+      fs.writeFileSync(abs, JSON.stringify(body, null, 2) + "\n");
+    }
+  }
+
+  const ppiPath = path.join(reportsDir, "provider-platform-inventory.json");
+  if (fs.existsSync(ppiPath)) {
+    try {
+      const existing = JSON.parse(fs.readFileSync(ppiPath, "utf8"));
+      if (
+        existing.sourceFingerprint !== sourceFingerprint ||
+        existing.commit !== commit ||
+        existing.archiveExpectedSha256 !== EXPECTED_ARCHIVE_SHA256
+      ) {
+        fs.writeFileSync(
+          ppiPath,
+          JSON.stringify(
+            {
+              ...existing,
+              generatedAt: nowIso(),
+              commit,
+              dirty,
+              sourceFingerprint,
+              packageLockHash,
+              cargoLockHash,
+              exitStatus: "not_run",
+              historicalNote: HISTORICAL_NOTE,
+              archiveExpectedSha256: EXPECTED_ARCHIVE_SHA256,
+            },
+            null,
+            2,
+          ) + "\n",
+        );
+      }
+    } catch {
+      // ignore unreadable inventory
+    }
+  }
+}
+
+restampAbsentGateReports();
+
 // Mark prior reports stale when fingerprint or archive expectation changes.
 const freshnessEntries = fs
   .readdirSync(reportsDir)
@@ -522,11 +672,11 @@ const freshnessReport = {
 };
 writeJson("report-freshness-inventory.json", freshnessReport);
 
-const md = `# Current Source Baseline (RC3.5)
+const md = `# Current Source Baseline (RC3.6)
 
 **Product:** Coreside  
 **Access date:** ${nowIso().slice(0, 10)}  
-**Phase:** Public-beta release candidate 3.5 — frontier provider platform  
+**Phase:** Public-beta release candidate 3.6 — hosted AI + local privacy routing  
 **Public beta:** **NOT READY**  
 **Hosted AI:** **NOT READY**
 

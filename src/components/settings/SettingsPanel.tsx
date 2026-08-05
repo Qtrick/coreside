@@ -27,6 +27,7 @@ import {
 import type { DockIconPreference, ThemePreference } from "@/types/agent";
 import type { AddedSetting } from "@/types/settings";
 import { useShallow } from "zustand/react/shallow";
+import { usePresence } from "@/lib/motion/usePresence";
 import { useAppStore } from "@/stores/app-store";
 
 function categorySummary(
@@ -117,6 +118,15 @@ export function SettingsPanel() {
   const [category, setCategory] = useState<SettingsCategoryId>(() =>
     readStoredSettingsCategory(),
   );
+  const [displayCategory, setDisplayCategory] = useState(category);
+  const paneStable = category === displayCategory;
+  const {
+    mounted: paneMounted,
+    phase: panePhase,
+    onEnterComplete: onPaneEnterComplete,
+    onExitComplete: onPaneExitComplete,
+    reducedMotion: paneReducedMotion,
+  } = usePresence(paneStable);
   const [searchQuery, setSearchQuery] = useState("");
   const [confirmClearChats, setConfirmClearChats] = useState(false);
   const [confirmClearTools, setConfirmClearTools] = useState(false);
@@ -148,6 +158,12 @@ export function SettingsPanel() {
   useEffect(() => {
     storeSettingsCategory(category);
   }, [category]);
+
+  useEffect(() => {
+    if (category !== displayCategory && panePhase === "exited") {
+      setDisplayCategory(category);
+    }
+  }, [category, displayCategory, panePhase]);
 
   useEffect(() => {
     const onExternalCategory = (event: Event) => {
@@ -231,7 +247,8 @@ export function SettingsPanel() {
   const essentialsProgress = onboardingProgress[ESSENTIALS_TUTORIAL_ID];
   const unfinishedEssentials =
     essentialsProgress?.status === "in_progress";
-  const active = SETTINGS_CATEGORIES.find((c) => c.id === category);
+  const active = SETTINGS_CATEGORIES.find((c) => c.id === displayCategory);
+  const categoryTransitioning = category !== displayCategory || panePhase !== "entered";
   const coresideCats = SETTINGS_CATEGORIES.filter((c) => c.group === "coreside");
   const addedCats = SETTINGS_CATEGORIES.filter((c) => c.group === "added");
 
@@ -357,7 +374,11 @@ export function SettingsPanel() {
                   className="settings-nav-item"
                   aria-current={category === cat.id ? "page" : undefined}
                   data-coreside-tour={
-                    cat.id === "help-learning" ? "help-learning-nav" : undefined
+                    cat.id === "help-learning"
+                      ? "help-learning-nav"
+                      : cat.id === "ai-access"
+                        ? "ai-connections-nav"
+                        : undefined
                   }
                   onClick={() => selectCategory(cat.id)}
                 >
@@ -399,6 +420,7 @@ export function SettingsPanel() {
           className="settings-content"
           role="region"
           aria-labelledby={categoryHeadingId}
+          aria-busy={categoryTransitioning}
         >
           <div className="settings-category-header">
             <h2 id={categoryHeadingId} className="settings-group-title">
@@ -409,7 +431,17 @@ export function SettingsPanel() {
             ) : null}
           </div>
 
-          {category === "general" ? (
+          {paneMounted ? (
+            <div
+              className={`settings-category-body presence-${panePhase}${paneReducedMotion ? " reduced-motion" : ""}`}
+              onTransitionEnd={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.propertyName !== "opacity") return;
+                if (panePhase === "entering") onPaneEnterComplete();
+                if (panePhase === "exiting") onPaneExitComplete();
+              }}
+            >
+          {displayCategory === "general" ? (
             <section className="settings-section" aria-labelledby="general-heading">
               <h3 id="general-heading" className="visually-hidden">
                 General
@@ -468,7 +500,7 @@ export function SettingsPanel() {
             </section>
           ) : null}
 
-          {category === "appearance" ? (
+          {displayCategory === "appearance" ? (
             <div className="settings-group">
             <section
               className="settings-section"
@@ -545,13 +577,13 @@ export function SettingsPanel() {
             </div>
           ) : null}
 
-          {category === "ai-access" ? <AiProviderSettings /> : null}
+          {displayCategory === "ai-access" ? <AiProviderSettings /> : null}
 
-          {category === "agent" ? <AgentBehaviorSettings /> : null}
+          {displayCategory === "agent" ? <AgentBehaviorSettings /> : null}
 
-          {category === "search" ? <SearchSettingsSection /> : null}
+          {displayCategory === "search" ? <SearchSettingsSection /> : null}
 
-          {category === "privacy" ? (
+          {displayCategory === "privacy" ? (
             <div className="settings-group">
               <section
                 className="settings-section"
@@ -618,7 +650,7 @@ export function SettingsPanel() {
             </div>
           ) : null}
 
-          {category === "data" ? (
+          {displayCategory === "data" ? (
             <div className="settings-group">
               <section className="settings-section" aria-labelledby="storage-overview-heading">
                 <h3 id="storage-overview-heading">Storage overview</h3>
@@ -806,7 +838,7 @@ export function SettingsPanel() {
             </div>
           ) : null}
 
-          {category === "accessibility" ? (
+          {displayCategory === "accessibility" ? (
             <section
               className="settings-section"
               aria-labelledby="accessibility-heading"
@@ -822,14 +854,14 @@ export function SettingsPanel() {
             </section>
           ) : null}
 
-          {category === "advanced" ? (
+          {displayCategory === "advanced" ? (
             <div className="settings-group">
               <RecoverySettings />
               <RuntimePermissionsSettings />
             </div>
           ) : null}
 
-          {category === "help-learning" ? (
+          {displayCategory === "help-learning" ? (
             <div className="settings-group">
               <section
                 className="settings-section"
@@ -927,7 +959,7 @@ export function SettingsPanel() {
             </div>
           ) : null}
 
-          {category === "about" ? (
+          {displayCategory === "about" ? (
             <section className="settings-section" aria-labelledby="about-heading">
               <h3 id="about-heading">About</h3>
               <div className="settings-about-brand">
@@ -948,7 +980,7 @@ export function SettingsPanel() {
             </section>
           ) : null}
 
-          {category === "added" ? (
+          {displayCategory === "added" ? (
             <div className="settings-group">
               <section className="settings-section settings-section-added">
                 <h3>App settings</h3>
@@ -982,6 +1014,8 @@ export function SettingsPanel() {
                   </ul>
                 )}
               </section>
+            </div>
+          ) : null}
             </div>
           ) : null}
         </div>

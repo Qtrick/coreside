@@ -140,13 +140,18 @@ export function clearPreviewOverlaysMatching(
     return current;
   }
 
+  // Tool/surface targeting must stay conversation-scoped.
+  if (!conversationId) return current;
+
   let changed = false;
   const next: Record<string, PreviewSurfaceOverlay> = {};
   for (const [key, overlay] of Object.entries(current)) {
+    const convMatch = overlay.conversationId === conversationId;
     const hit =
-      (overlay.toolId && toolIds.has(overlay.toolId)) ||
-      toolIds.has(key) ||
-      surfaceIds.has(overlay.surfaceId);
+      convMatch &&
+      ((overlay.toolId && toolIds.has(overlay.toolId)) ||
+        toolIds.has(key) ||
+        surfaceIds.has(overlay.surfaceId));
     if (hit) {
       changed = true;
       continue;

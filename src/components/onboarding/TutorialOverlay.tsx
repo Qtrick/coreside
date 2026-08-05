@@ -9,6 +9,7 @@ import { useOnboardingStore } from "@/stores/onboarding-store";
 import { useAppStore } from "@/stores/app-store";
 import { activeStep, activeTutorial } from "@/lib/onboarding/coordinator";
 import { TOUR_TARGETS } from "@/lib/onboarding/tutorials";
+import { usePresence } from "@/lib/motion/usePresence";
 import { storeSettingsCategory } from "@/lib/settings-categories";
 
 type AnchorRect = { top: number; left: number; width: number; height: number };
@@ -40,21 +41,24 @@ export function TutorialOverlay() {
   const popoverRef = useRef<HTMLDivElement>(null);
   const primaryRef = useRef<HTMLButtonElement>(null);
   const [anchor, setAnchor] = useState<AnchorRect | null>(null);
-  const reducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const tourOpen = phase === "tour" && Boolean(tutorial && step);
+  const { mounted, phase: presencePhase, reducedMotion } = usePresence(tourOpen);
 
-  // Ensure Help & learning nav exists before measuring the completion step.
+  // Ensure Help & learning / AI connections nav exists before measuring tour targets.
   useLayoutEffect(() => {
-    if (phase !== "tour" || !step) return;
+    if (!tourOpen || !step) return;
     if (step.target === TOUR_TARGETS.helpLearning) {
       storeSettingsCategory("help-learning");
       useAppStore.getState().navigateToSettings();
     }
-  }, [phase, step?.id, step?.target]);
+    if (step.target === TOUR_TARGETS.aiConnections) {
+      storeSettingsCategory("ai-access");
+      useAppStore.getState().navigateToSettings();
+    }
+  }, [tourOpen, step?.id, step?.target]);
 
   useLayoutEffect(() => {
-    if (phase !== "tour" || !step) {
+    if (!tourOpen || !step) {
       setAnchor(null);
       return;
     }
@@ -63,10 +67,10 @@ export function TutorialOverlay() {
       setAnchor(measureTarget(step.target));
     });
     return () => window.cancelAnimationFrame(id);
-  }, [phase, step, stepIndex]);
+  }, [tourOpen, step, stepIndex]);
 
   useEffect(() => {
-    if (phase !== "tour") return;
+    if (!tourOpen) return;
     const reposition = () => setAnchor(measureTarget(step?.target));
     window.addEventListener("resize", reposition);
     window.addEventListener("scroll", reposition, true);
@@ -74,7 +78,7 @@ export function TutorialOverlay() {
       window.removeEventListener("resize", reposition);
       window.removeEventListener("scroll", reposition, true);
     };
-  }, [phase, step]);
+  }, [tourOpen, step?.target]);
 
   useEffect(() => {
     if (phase !== "tour") return;
@@ -105,17 +109,17 @@ export function TutorialOverlay() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [phase, pause]);
+  }, [tourOpen, pause]);
 
   useEffect(() => {
-    if (phase !== "tour") return;
+    if (!tourOpen) return;
     const frame = window.requestAnimationFrame(() => {
       primaryRef.current?.focus();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [phase, stepIndex, step?.id]);
+  }, [tourOpen, stepIndex, step?.id]);
 
-  if (phase !== "tour" || !tutorial || !step) return null;
+  if (!mounted || !tutorial || !step) return null;
 
   // Overlay tour skips the welcome dialog step in the progress denominator.
   const overlaySteps = tutorial.steps.filter((s) => s.kind !== "welcome");
@@ -166,7 +170,7 @@ export function TutorialOverlay() {
   // focus stays on the tour controls. Backdrop remains non-blocking for targets.
   return (
     <div
-      className={`tutorial-overlay${reducedMotion ? " reduced-motion" : ""}`}
+      className={`tutorial-overlay presence-${presencePhase}${reducedMotion ? " reduced-motion" : ""}`}
       role="presentation"
     >
       {anchor ? (
@@ -183,7 +187,7 @@ export function TutorialOverlay() {
       ) : null}
       <div
         ref={popoverRef}
-        className="tutorial-popover"
+        className={`tutorial-popover presence-${presencePhase}${reducedMotion ? " reduced-motion" : ""}`}
         style={popoverStyle}
         role="dialog"
         aria-modal="false"

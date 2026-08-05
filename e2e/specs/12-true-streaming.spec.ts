@@ -121,6 +121,9 @@ describe("Journey 12 — true provider streaming", () => {
       generatedAt: new Date().toISOString(),
       commit: identity.commit,
       dirty: identity.dirty,
+      ...(identity.sourceFingerprint
+        ? { sourceFingerprint: identity.sourceFingerprint }
+        : {}),
       platform: identity.platform,
       architecture: identity.arch,
       binaryHash,
