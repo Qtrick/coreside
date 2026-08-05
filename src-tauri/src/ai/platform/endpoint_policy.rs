@@ -259,6 +259,41 @@ pub fn classify_and_validate_endpoint_with_resolver(
     })
 }
 
+/// Build a redirect-denied client bound to validated addresses (DNS pin).
+/// Preserves TLS SNI/hostname verification while connecting only to pinned IPs.
+pub fn build_redirect_free_pinned_client(
+    validation: &EndpointValidation,
+    timeout: std::time::Duration,
+) -> Result<reqwest::Client, EndpointPolicyError> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::none());
+    if !validation.pinned_addrs.is_empty() {
+        builder = builder.resolve_to_addrs(&validation.host, &validation.pinned_addrs);
+    }
+    builder
+        .build()
+        .map_err(|_| EndpointPolicyError::DnsResolutionFailed)
+}
+
+/// Validate a credential-bearing base URL and build a pinned, redirect-free client.
+pub fn validate_and_build_credential_client(
+    raw_url: &str,
+    endpoint_class: EndpointClass,
+    allows_override: bool,
+    is_override: bool,
+    timeout: std::time::Duration,
+) -> Result<(EndpointValidation, reqwest::Client), EndpointPolicyError> {
+    let validation = classify_and_validate_endpoint(
+        raw_url,
+        endpoint_class,
+        allows_override,
+        is_override,
+    )?;
+    let client = build_redirect_free_pinned_client(&validation, timeout)?;
+    Ok((validation, client))
+}
+
 fn default_resolve(host: &str, port: u16) -> Result<Vec<SocketAddr>, EndpointPolicyError> {
     let addrs = (host, port)
         .to_socket_addrs()

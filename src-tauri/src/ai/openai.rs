@@ -160,20 +160,57 @@ impl OpenAiProvider {
         provider_id: impl Into<String>,
         display_name: impl Into<String>,
     ) -> Self {
-        // Fail closed: never fall back to Client::new() (default follows redirects).
-        let client = reqwest::Client::builder()
-            .timeout(REQUEST_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("reqwest Client");
+        let provider_id = provider_id.into();
+        let base_url = base_url.trim_end_matches('/').to_string();
+        let class = if provider_id == "compatible" {
+            super::platform::EndpointClass::UserConfiguredRemoteCompatible
+        } else {
+            super::platform::EndpointClass::FixedTrustedRemote
+        };
+        let is_override = provider_id == "compatible";
+        // Send-authoritative pin at client construction; rebuilt again at request time.
+        let client = super::platform::validate_and_build_credential_client(
+            &base_url,
+            class,
+            is_override,
+            is_override,
+            REQUEST_TIMEOUT,
+        )
+        .map(|(_, c)| c)
+        .unwrap_or_else(|_| {
+            // Construction must not panic; send path revalidates and fail-closes.
+            reqwest::Client::builder()
+                .timeout(REQUEST_TIMEOUT)
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("reqwest Client")
+        });
         Self {
             api_key,
             model,
-            base_url: base_url.trim_end_matches('/').to_string(),
-            provider_id: provider_id.into(),
+            base_url,
+            provider_id,
             display_name: display_name.into(),
             client,
         }
+    }
+
+    fn request_client(&self) -> Result<reqwest::Client, AiError> {
+        let class = if self.provider_id == "compatible" {
+            super::platform::EndpointClass::UserConfiguredRemoteCompatible
+        } else {
+            super::platform::EndpointClass::FixedTrustedRemote
+        };
+        let is_override = self.provider_id == "compatible";
+        super::platform::validate_and_build_credential_client(
+            &self.base_url,
+            class,
+            is_override,
+            is_override,
+            REQUEST_TIMEOUT,
+        )
+        .map(|(_, c)| c)
+        .map_err(|e| AiError::Validation(e.to_string()))
     }
 
     fn chat_url(&self) -> String {
@@ -195,8 +232,9 @@ impl OpenAiProvider {
     }
 
     async fn post_chat(&self, body: Value, cancel: CancellationToken) -> Result<Value, AiError> {
+        let client = self.request_client()?;
         let request = self
-            .auth_headers(self.client.post(self.chat_url()))
+            .auth_headers(client.post(self.chat_url()))
             .json(&body);
         let response = tokio::select! {
             _ = cancel.cancelled() => return Err(AiError::Cancelled),
@@ -426,8 +464,9 @@ impl AiProvider for OpenAiProvider {
     }
 
     async fn health_check(&self, cancel: CancellationToken) -> Result<ProviderHealth, AiError> {
+        let client = self.request_client()?;
         let list_req = self
-            .auth_headers(self.client.get(self.models_url()))
+            .auth_headers(client.get(self.models_url()))
             .timeout(Duration::from_secs(20));
         let list_result = tokio::select! {
             _ = cancel.cancelled() => return Err(AiError::Cancelled),
@@ -535,8 +574,9 @@ impl AiProvider for OpenAiProvider {
             })
             .await;
 
+        let client = self.request_client()?;
         let http_req = self
-            .auth_headers(self.client.post(self.chat_url()))
+            .auth_headers(client.post(self.chat_url()))
             .json(&body);
         let response = tokio::select! {
             _ = request.cancel.cancelled() => {

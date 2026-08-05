@@ -147,8 +147,20 @@ pub async fn refresh_session_if_needed() -> Result<Option<StoredHostedSession>, 
     let url = format!("{base}/auth/v1/token?grant_type=refresh_token");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| CredentialError::Other(e.to_string()))?;
+    // Pin Supabase auth origin when DNS resolves publicly.
+    let client = match crate::ai::platform::validate_and_build_credential_client(
+        base,
+        crate::ai::platform::EndpointClass::HostedCoresideGateway,
+        false,
+        false,
+        std::time::Duration::from_secs(20),
+    ) {
+        Ok((_, pinned)) => pinned,
+        Err(_) => client,
+    };
     let response = client
         .post(&url)
         .header("apikey", publishable_key.trim())
@@ -274,8 +286,19 @@ pub async fn fetch_server_plan_presentation() -> Result<HostedPlanPresentation, 
     );
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| CredentialError::Other(e.to_string()))?;
+    let client = match crate::ai::platform::validate_and_build_credential_client(
+        base,
+        crate::ai::platform::EndpointClass::HostedCoresideGateway,
+        false,
+        false,
+        std::time::Duration::from_secs(15),
+    ) {
+        Ok((_, pinned)) => pinned,
+        Err(_) => client,
+    };
     let response = client
         .get(&url)
         .header("apikey", publishable_key.trim())

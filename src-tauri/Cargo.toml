@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Coreside — AI-native personal software environment"
 authors = ["Coreside"]
 edition = "2021"
-rust-version = "1.77"
+# Deliberate MSRV raise: IpAddr::is_documentation and related classifiers,
+# plus current Tauri/reqwest toolchain. Host builds use rustc >= 1.85.
+rust-version = "1.85"
 
 # Capitalized binary so macOS Dock tooltip shows "Coreside" during `tauri dev`
 # (Cargo package names must stay lowercase; the Dock uses the executable basename).

@@ -1589,11 +1589,20 @@ async fn send_message_inner(
         });
 
         let db = state.db.lock();
+        let active_branch_id: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT id FROM chat_branches WHERE new_conversation_id = ?1
+                 ORDER BY created_at DESC LIMIT 1",
+                [&conversation_id],
+                |r| r.get(0),
+            )
+            .ok();
         if let Ok(entries) = crate::runtime_v2::list_ledger_entries_for_inject(
             &db,
             &conversation_id,
             project_id.as_deref(),
-            None, // conversation-global + unbranched; branch-scoped requires active branch id
+            active_branch_id.as_deref(),
             MAX_STRUCTURED_ENTRIES,
             true,
         ) {
@@ -2546,43 +2555,63 @@ async fn send_message_inner(
 
     let assistant_message = {
         let mut db = state.db.lock();
-        if let Some(events) = action_log.as_ref() {
-            for (i, event) in events.iter().enumerate() {
-                let label = event
-                    .get("label")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Action");
-                let event_type = event
-                    .get("eventType")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("request_started");
-                let _ = db::insert_action_event(
-                    &mut db,
-                    &user_message.id,
-                    Some(&conversation_id),
-                    event_type,
-                    label,
-                    "completed",
-                    i as i64,
-                );
+        db.conn()
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+        let commit = (|| -> Result<crate::db::Message, CommandError> {
+            if let Some(events) = action_log.as_ref() {
+                for (i, event) in events.iter().enumerate() {
+                    let label = event
+                        .get("label")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Action");
+                    let event_type = event
+                        .get("eventType")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("request_started");
+                    let _ = db::insert_action_event(
+                        &mut db,
+                        &user_message.id,
+                        Some(&conversation_id),
+                        event_type,
+                        label,
+                        "completed",
+                        i as i64,
+                    );
+                }
+            }
+            let assistant = db::insert_message(
+                &mut db,
+                &conversation_id,
+                "assistant",
+                &parsed.payload.assistant_message,
+                Some(&metadata),
+            )
+            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
+            for id in &pending_ledger_consume {
+                crate::runtime_v2::mark_ledger_consumed(&mut db, id, Some(&assistant.id))
+                    .map_err(|e| {
+                        CommandError::new("storage", sanitize_error(&e.to_string(), None))
+                    })?;
+            }
+            Ok(assistant)
+        })();
+        match commit {
+            Ok(assistant) => {
+                if let Err(e) = db.conn().execute_batch("COMMIT") {
+                    let _ = db.conn().execute_batch("ROLLBACK");
+                    return Err(CommandError::new(
+                        "storage",
+                        sanitize_error(&e.to_string(), None),
+                    ));
+                }
+                assistant
+            }
+            Err(e) => {
+                let _ = db.conn().execute_batch("ROLLBACK");
+                return Err(e);
             }
         }
-        let assistant = db::insert_message(
-            &mut db,
-            &conversation_id,
-            "assistant",
-            &parsed.payload.assistant_message,
-            Some(&metadata),
-        )?;
-        // Consume single-use ledger entries only after durable turn success.
-        for id in &pending_ledger_consume {
-            let _ = crate::runtime_v2::mark_ledger_consumed(
-                &mut db,
-                id,
-                Some(&assistant.id),
-            );
-        }
-        assistant
     };
 
     note_timeline(

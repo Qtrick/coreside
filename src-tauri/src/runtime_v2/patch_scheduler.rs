@@ -520,85 +520,85 @@ pub fn schedule_and_apply(
     let scheduled = schedule_patches(db, &req)?;
     let order = topological_order(&req.operations).map_err(DbError::Invalid)?;
 
-    let mut applied = Vec::new();
+    // One kernel transaction for the whole ordered batch — never leave earlier
+    // ops committed when a later op fails (Partial Update atomicity).
+    let ordered_ops: Vec<_> = order
+        .iter()
+        .map(|&idx| req.operations[idx].clone())
+        .collect();
     let now = now_rfc3339();
     let source_type = req.source_type.clone();
+    let op_ids: Vec<String> = ordered_ops.iter().map(|o| o.id.clone()).collect();
 
-    for &idx in &order {
-        let op = &req.operations[idx];
-        let patch = scheduled
-            .iter()
-            .find(|p| p.operation_id == op.id)
-            .ok_or_else(|| DbError::Invalid("scheduled patch missing".into()))?;
+    let result = apply_change(
+        db,
+        bus.as_deref_mut(),
+        ChangeRequest {
+            conversation_id: req.conversation_id.clone(),
+            project_id: None,
+            turn_id: req.turn_id.clone(),
+            summary: format!("Patch batch ({})", ordered_ops.len()),
+            operations: ordered_ops,
+            silent: req.priority == PatchPriority::ActiveTurnPreview,
+            source_type: source_type.clone(),
+            provider: None,
+            model: None,
+            require_approval: false,
+            approval_granted,
+        },
+    );
 
-        let result = apply_change(
-            db,
-            bus.as_deref_mut(),
-            ChangeRequest {
-                conversation_id: req.conversation_id.clone(),
-                project_id: None,
-                turn_id: req.turn_id.clone(),
-                summary: format!("Patch {}", op.id),
-                operations: vec![op.clone()],
-                silent: req.priority == PatchPriority::ActiveTurnPreview,
-                source_type: source_type.clone(),
-                provider: None,
-                model: None,
-                require_approval: false,
-                approval_granted,
-            },
-        );
-
-        let change_result = match result {
-            Ok(r) => r,
-            Err(e) => {
+    let change_result = match result {
+        Ok(r) => r,
+        Err(e) => {
+            for patch in &scheduled {
                 let _ = db.conn().execute(
                     "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
                      error_category = 'apply' WHERE id = ?2",
                     params![now, patch.id],
                 );
-                return Err(DbError::Invalid(e.user_message()));
             }
-        };
+            return Err(DbError::Invalid(e.user_message()));
+        }
+    };
 
-        if change_result.apply.is_some() {
+    if change_result.apply.is_some() {
+        let txn_id = change_result
+            .apply
+            .as_ref()
+            .map(|a| a.transaction.id.as_str());
+        for patch in &scheduled {
             db.conn().execute(
                 "UPDATE patch_scheduler_items SET status = 'applied', applied_at = ?1,
                  transaction_id = ?2 WHERE id = ?3",
-                params![
-                    now,
-                    change_result
-                        .apply
-                        .as_ref()
-                        .map(|a| a.transaction.id.as_str()),
-                    patch.id
-                ],
+                params![now, txn_id, patch.id],
             )?;
-            if source_type == "user" || source_type == "direct_manipulation" {
-                let _ = record_manual_edit_provenance(
-                    db,
-                    change_result
-                        .apply
-                        .as_ref()
-                        .map(|a| a.transaction.id.as_str()),
-                    patch.surface_id.as_deref(),
-                    &source_type,
-                    "patch_apply",
-                    &[op.id.clone()],
-                );
-            }
-        } else {
+        }
+        if source_type == "user" || source_type == "direct_manipulation" {
+            let surface_id = scheduled
+                .first()
+                .and_then(|p| p.surface_id.as_deref());
+            let _ = record_manual_edit_provenance(
+                db,
+                txn_id,
+                surface_id,
+                &source_type,
+                "patch_apply",
+                &op_ids,
+            );
+        }
+    } else {
+        for patch in &scheduled {
             db.conn().execute(
                 "UPDATE patch_scheduler_items SET status = 'pending_approval' WHERE id = ?1",
                 params![patch.id],
             )?;
         }
-        applied.push(change_result);
     }
 
     Ok(ScheduleAndApplyResult {
         scheduled,
-        applied,
+        applied: vec![change_result],
         superseded,
     })
 }

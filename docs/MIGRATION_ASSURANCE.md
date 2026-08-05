@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 15 forward migrations (001–015; includes `015_registered_actions.sql`)
+**Count:** 20 forward migrations (001–020; includes `020_context_ledger_isolation.sql`)
 
 ## Inventory
 
@@ -23,6 +23,11 @@
 | 013 | `013_application_kernel.sql` | Application Kernel: manifests, packages, permissions, recovery |
 | 014 | `014_continuity_scheduler.sql` | Preservation, drafts, patch scheduler, routes, context ledger |
 | 015 | `015_registered_actions.sql` | Registered-action runtime: approvals, grants, audit events, build failures |
+| 016 | `016_chat_attachments.sql` | Chat attachment binding, GC metadata, message attachment links |
+| 017 | `017_tutorial_progress.sql` | Onboarding / tutorial progress persistence |
+| 018 | `018_turn_timeline_events.sql` | Turn timeline / inspector event storage |
+| 019 | `019_provider_platform.sql` | Provider platform metadata columns (non-secret) |
+| 020 | `020_context_ledger_isolation.sql` | Context ledger consume/isolation columns and indexes |
 
 ## What is verified
 
@@ -46,6 +51,7 @@ Run: `npm run test:migrations`
 | Large production-like data volume (10k+ messages) | **Not tested** |
 | Cross-version export/import after upgrade | **Pending** (manual L/M) |
 | Migration failure mid-script recovery UX | **Partial** — DDL+bookkeeping is transactional; user-facing recovery messaging not documented |
+| Upgrade stops explicitly seeded through 016–020 | **Partial** — fresh path reaches 020; dedicated mid-stop fixtures for 016–019 remain thin |
 
 ## Fixture approach
 
@@ -64,4 +70,4 @@ Fixtures are built programmatically (no committed user databases):
 
 ## Honest assessment
 
-Forward migrations are fixture-tested for the common upgrade stops (006, 011–015) and fresh installs. Large-volume and export-after-upgrade assurance remain open.
+Forward migrations are fixture-tested for common upgrade stops (006, 011–015) and fresh installs through `020_context_ledger_isolation`. Large-volume and export-after-upgrade assurance remain open.

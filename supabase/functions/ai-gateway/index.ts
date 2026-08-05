@@ -459,8 +459,13 @@ Deno.serve(async (req) => {
         if (!finished.ok) {
           throw new Error(finished.reason);
         }
-        controller.close();
+        // Settle before closing so clients never observe success without
+        // durable settlement / reconciliation.
         await settleIfOpen(finished.text);
+        if (terminal !== "settled") {
+          throw new Error("settlement_failed");
+        }
+        controller.close();
       } catch {
         try {
           controller.error(new Error("stream_failed"));
