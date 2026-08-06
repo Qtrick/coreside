@@ -319,12 +319,7 @@ pub fn normalize_setting_kv(key: &str, value: &str) -> Result<String, String> {
             }
         }
         "dockIcon" | "dock_icon" => {
-            let t = value.trim().to_lowercase();
-            if matches!(t.as_str(), "auto" | "dark" | "light") {
-                Ok(t)
-            } else {
-                Err("dockIcon must be auto, dark, or light".into())
-            }
+            Err("Dock icon cannot be changed by the assistant; use Settings → Appearance".into())
         }
         "sidebarCollapsed" | "sidebar_collapsed" => {
             let t = value.trim().to_lowercase();

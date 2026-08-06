@@ -20,12 +20,12 @@ const DEFAULT_ARCHIVE =
   process.env.CORESIDE_ARCHIVE ||
   path.join(process.env.HOME || "", "Downloads", "Coreside Chat AI.zip");
 const EXPECTED_ARCHIVE_SHA256 =
-  "3ae9f51473f718532c177e67b55ef1f2fb74cf6ca78e52e15f0e0660e16efadf";
+  "8e984965f35cb28807fbb3ad24d1e48b9e6667801df716ab9c294e8e4a33b101";
 const PREVIOUS_ARCHIVE_SHA256 =
-  "2914751c9e4fdfb48e776dbff50807cd0e32fa5dd5f9f942e19e1394ff88ec98";
+  "3ae9f51473f718532c177e67b55ef1f2fb74cf6ca78e52e15f0e0660e16efadf";
 const PREVIOUS_ARCHIVE_LABEL =
-  "Coreside Chat AI.zip / prior RC3.9 archive (2914751c…)";
-const CURRENT_ARCHIVE_LABEL = "Coreside Chat AI.zip";
+  "Coreside Chat AI.zip / prior RC3.10 archive (3ae9f514…)";
+const CURRENT_ARCHIVE_LABEL = "Coreside Chat AI.zip (RC3.11)";
 const PARTIAL_UPDATE_ARCHIVE =
   process.env.PARTIAL_UPDATE_ARCHIVE ||
   path.join(process.env.HOME || "", "Downloads", "Partial Update Main (1).zip");
@@ -127,7 +127,7 @@ function countGlob(dir, predicate) {
 
 function archiveExtractRoot() {
   const candidates = [
-    path.join(root, ".reference", "coreside-rc3.10-archive", "coreside-main"),
+    path.join(root, ".reference", "coreside-rc3.11-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-rc3-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-rc3.9-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-rc3.8-archive", "coreside-main"),
@@ -142,7 +142,7 @@ function archiveExtractRoot() {
 
 function archiveExtractMatchesExpected() {
   const markers = [
-    path.join(root, ".reference", "coreside-rc3.10-archive", "source.sha256"),
+    path.join(root, ".reference", "coreside-rc3.11-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-rc3-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-rc3.9-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-rc3.8-archive", "source.sha256"),
@@ -312,7 +312,7 @@ if (
 ) {
   archiveDiff = {
     status: "extract_stale_or_unmarked",
-    hint: "Re-extract Coreside Chat AI.zip into .reference/coreside-rc3.10-archive and write source.sha256 with the expected archive hash",
+    hint: "Re-extract Coreside Chat AI.zip into .reference/coreside-rc3.11-archive and write source.sha256 with the expected archive hash",
     expectedArchiveSha256: EXPECTED_ARCHIVE_SHA256,
     onlyInActive: [],
     onlyInArchive: [],
@@ -321,7 +321,7 @@ if (
 } else if (archiveStatus === "present_hash_match") {
   archiveDiff = {
     status: "archive_present_but_extract_missing",
-    hint: "Extract zip to .reference/coreside-rc3.10-archive/coreside-main then re-run",
+    hint: "Extract zip to .reference/coreside-rc3.11-archive/coreside-main then re-run",
     onlyInActive: [],
     onlyInArchive: [],
     changed: [],
@@ -379,7 +379,7 @@ const hostedAi = "Not ready";
 
 const baselineReport = {
   ...common,
-  phase: "RC3.10",
+  phase: "RC3.11",
   publicBeta,
   hostedAi,
   evidenceClass: dirty ? "development-dirty" : "development-clean",
@@ -479,7 +479,7 @@ writeJson("current-source-baseline.json", baselineReport);
 writeJson("active-versus-uploaded-coreside.json", compareReport);
 
 const HISTORICAL_NOTE =
-  "RC3.10 archive 3ae9f514; suite not re-run on current tree. Absent until Desktop/Packaged gates execute.";
+  "RC3.11 archive 8e984965; suite not re-run on current tree. Absent until Desktop/Packaged gates execute.";
 
 /** Restamp gate reports that must not claim passes on a dirty or stale fingerprint. */
 function restampAbsentGateReports() {
@@ -683,7 +683,7 @@ const freshnessReport = {
 };
 writeJson("report-freshness-inventory.json", freshnessReport);
 
-const md = `# Current Source Baseline (RC3.10)
+const md = `# Current Source Baseline (RC3.11)
 
 **Product:** Coreside  
 **Access date:** ${nowIso().slice(0, 10)}  

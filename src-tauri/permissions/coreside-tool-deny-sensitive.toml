@@ -44,6 +44,8 @@ commands.deny = [
   "retry_open_database",
   "send_message",
   "set_active_provider_connection",
+  "commit_dock_icon_preference",
+  "apply_persisted_dock_icon",
   "set_exa_budget",
   "set_setting",
   "set_workspace_appearance",

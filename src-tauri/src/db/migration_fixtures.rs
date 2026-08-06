@@ -482,7 +482,7 @@ mod tests {
             .iter()
             .map(|(n, _)| *n)
             .collect::<Vec<_>>();
-        assert_eq!(names.len(), 22);
+        assert_eq!(names.len(), 23);
         for (i, name) in names.iter().enumerate() {
             let expected = format!("{:03}_", i + 1);
             assert!(
@@ -490,6 +490,6 @@ mod tests {
                 "migration {i} should start with {expected}, got {name}"
             );
         }
-        assert_eq!(names[21], LATEST_MIGRATION);
+        assert_eq!(names[22], LATEST_MIGRATION);
     }
 }

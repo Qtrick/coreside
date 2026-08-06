@@ -132,7 +132,7 @@ export function App() {
   const resolvedTheme = useAppStore((s) => s.resolvedTheme);
   const appearance = useAppStore((s) => s.appearance);
   const applyResolvedTheme = useAppStore((s) => s.applyResolvedTheme);
-  const dockIcon = useAppStore((s) => s.dockIcon);
+  const applyPersistedDockIcon = useAppStore((s) => s.applyPersistedDockIcon);
   const toolRoute =
     typeof window !== "undefined" ? parseToolRoute(window.location.hash) : null;
 
@@ -158,25 +158,14 @@ export function App() {
     return () => media.removeEventListener("change", sync);
   }, [theme, applyResolvedTheme]);
 
-  // Dock icon ownership is process-global. Only the main window applies it —
-  // detached tool webviews must not overwrite the user's locked preference with
-  // a fresh store default. Temporary PNG overrides via applicationIconImage do
-  // not follow macOS Icon & Widget Style; packaged adaptive icons are required.
+  // Dock icon ownership is process-global and Rust-owned. Only the main window
+  // re-applies the persisted preference once after bootstrap. Follow macOS clears
+  // the temporary AppKit override; manual mode installs a validated PNG.
   useEffect(() => {
     if (!bootstrapped) return;
     if (toolRoute) return;
-    const apply = () => {
-      const osIsDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      void api.setDockIcon(dockIcon, osIsDark).catch(() => {
-        // Non-macOS / web preview: command may no-op or be unavailable.
-      });
-    };
-    apply();
-    if (dockIcon !== "auto") return;
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    media.addEventListener("change", apply);
-    return () => media.removeEventListener("change", apply);
-  }, [bootstrapped, dockIcon, toolRoute]);
+    void applyPersistedDockIcon();
+  }, [bootstrapped, toolRoute, applyPersistedDockIcon]);
 
   useEffect(() => {
     const onHash = () => {

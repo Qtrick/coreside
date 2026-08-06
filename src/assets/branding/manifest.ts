@@ -15,15 +15,11 @@ export const BRAND_MANIFEST = {
     dark: "coreside-dock-dark.png",
     /** Light-background tile (black mark) — Classic artwork */
     light: "coreside-dock-light.png",
-    /**
-     * Split mark source (1254×1254, no alpha). Protected reference for Icon Composer /
-     * adaptive packaging. Not a temporary NSApplication.applicationIconImage override —
-     * runtime PNG overrides do not follow macOS Icon & Widget Style.
-     */
-    splitSource: "coreside-dock-split-source.png",
+    /** Manual Split tile (generated from protected Split source) */
+    split: "coreside-dock-split.png",
   },
   note:
-    "In-app logos follow Coreside Appearance. Settings Dock tiles are Classic Dark/Light (or Auto appearance). Split source artwork is a packaging/Icon Composer reference — not a runtime Dock preference. Icon & Widget Style follows macOS only when the packaged adaptive icon is authoritative; temporary PNG overrides cannot provide it.",
+    "Follow macOS clears the temporary Dock override so the packaged application icon is authoritative. Adaptive Icon & Widget Style needs Assets.car (blocked without Xcode/Icon Composer). Manual Classic/Split tiles are temporary AppKit overrides while Coreside is running.",
 } as const;
 
 export type BrandAppearance = "light" | "dark";

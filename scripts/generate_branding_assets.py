@@ -1,28 +1,31 @@
 #!/usr/bin/env python3
-"""Generate Coreside branding assets from supplied solid-background sources.
+"""Generate Coreside branding assets from repository-owned sources.
 
-Produces genuine RGBA transparent marks (no baked checkerboard) and
-Liquid-Glass-inspired dock icon variants.
+Produces genuine RGBA transparent marks (no baked checkerboard), Classic
+Liquid-Glass-inspired dock tiles, and the manual Split dock tile.
 
 Usage (from repo root):
   python3 scripts/generate_branding_assets.py
+  python3 scripts/generate_branding_assets.py --src /path/to/logo/sources
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 
 REPO = Path(__file__).resolve().parents[1]
-DEFAULT_SRC = Path(
-    "/Users/qunyingfan/.cursor/projects/Users-qunyingfan-Coreside/assets"
-)
+DEFAULT_SRC = REPO / "design" / "branding" / "sources"
 OUT = REPO / "src" / "assets" / "branding"
 RES = REPO / "src-tauri" / "resources" / "branding"
 ICONS = REPO / "src-tauri" / "icons"
+SPLIT_EXPECTED_SHA256 = (
+    "4ced90e8089b3248c9b978979dd22c9e8679bb6e5a27cdea7583f4047d1ea93a"
+)
 
 
 def soft_mask_from_luma(rgb: Image.Image, *, mark_is_light: bool) -> Image.Image:
@@ -122,6 +125,38 @@ def make_dock_icon(
     icon.save(out_path, optimize=True)
 
 
+def make_split_dock_icon(src: Image.Image, out_path: Path, size: int = 1024) -> None:
+    """Fit full-bleed Split artwork into the same optical Dock safe area as Classic."""
+    outer = int(size * 0.11)
+    inner = size - 2 * outer
+    pad = int(inner * 0.04)
+    avail = inner - 2 * pad
+    fitted = src.convert("RGB").resize((avail, avail), Image.Resampling.LANCZOS).convert(
+        "RGBA"
+    )
+    mask = rounded_squircle(inner)
+    content = Image.new("RGBA", (inner, inner), (0, 0, 0, 0))
+    content.paste(fitted, (pad, pad))
+    content.putalpha(ImageChops.multiply(content.split()[-1], mask))
+    tile = content
+    ring = Image.new("RGBA", (inner, inner), (0, 0, 0, 0))
+    rdraw = ImageDraw.Draw(ring)
+    inset = int(inner * 0.028)
+    r = int(inner * 0.223) - inset // 2
+    rdraw.rounded_rectangle(
+        (inset, inset, inner - 1 - inset, inner - 1 - inset),
+        radius=max(8, r),
+        outline=(0, 0, 0, 28),
+        width=max(2, inner // 256),
+    )
+    ring.putalpha(ImageChops.multiply(ring.split()[-1], mask))
+    tile = Image.alpha_composite(tile, ring)
+    icon = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    icon.alpha_composite(tile, (outer, outer))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    icon.save(out_path, optimize=True)
+
+
 def validate_rgba(path: Path) -> None:
     im = Image.open(path)
     if im.mode != "RGBA":
@@ -140,22 +175,63 @@ def validate_rgba(path: Path) -> None:
     print(f"OK {path.name}: transparent corners + alpha channel")
 
 
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--src", type=Path, default=DEFAULT_SRC)
+    parser.add_argument(
+        "--src",
+        type=Path,
+        default=DEFAULT_SRC,
+        help="Directory with Classic logo sources and coreside-split-logo.png",
+    )
+    parser.add_argument(
+        "--skip-classic-sources",
+        action="store_true",
+        help="Only regenerate Split from design/branding/sources (Classic logos optional)",
+    )
     args = parser.parse_args()
     src: Path = args.src
-
-    black_bg = Image.open(
-        next(src.glob("Coreside_Black_Logo*.png"))
-    ).convert("RGB")
-    white_bg = Image.open(
-        next(src.glob("Coreside_White_Logo*.png"))
-    ).convert("RGB")
 
     OUT.mkdir(parents=True, exist_ok=True)
     RES.mkdir(parents=True, exist_ok=True)
     ICONS.mkdir(parents=True, exist_ok=True)
+
+    split_src = src / "coreside-split-logo.png"
+    if not split_src.is_file():
+        raise SystemExit(f"Missing Split source: {split_src}")
+    digest = sha256_file(split_src)
+    if digest != SPLIT_EXPECTED_SHA256:
+        raise SystemExit(
+            f"Split source hash mismatch: {digest} (expected {SPLIT_EXPECTED_SHA256})"
+        )
+
+    make_split_dock_icon(Image.open(split_src), OUT / "coreside-dock-split.png")
+    make_split_dock_icon(Image.open(split_src), RES / "coreside-dock-split.png")
+    validate_rgba(OUT / "coreside-dock-split.png")
+    validate_rgba(RES / "coreside-dock-split.png")
+
+    if args.skip_classic_sources:
+        print("Split Dock tile regenerated; Classic sources skipped.")
+        return
+
+    black_candidates = list(src.glob("Coreside_Black_Logo*.png")) + list(
+        OUT.glob("coreside-icon-dark-source.png")
+    )
+    white_candidates = list(src.glob("Coreside_White_Logo*.png")) + list(
+        OUT.glob("coreside-icon-light-source.png")
+    )
+    if not black_candidates or not white_candidates:
+        print(
+            "Classic logo sources not found under --src; "
+            "Split tile updated. Pass Classic sources to regenerate Classic tiles."
+        )
+        return
+
+    black_bg = Image.open(black_candidates[0]).convert("RGB")
+    white_bg = Image.open(white_candidates[0]).convert("RGB")
 
     black_bg.save(OUT / "coreside-icon-dark-source.png")
     white_bg.save(OUT / "coreside-icon-light-source.png")
@@ -170,8 +246,6 @@ def main() -> None:
     for path, img in [
         (OUT / "coreside-mark-white-transparent.png", mark_white),
         (OUT / "coreside-mark-black-transparent.png", mark_black),
-        (RES / "coreside-mark-white-transparent.png", mark_white),
-        (RES / "coreside-mark-black-transparent.png", mark_black),
     ]:
         img.save(path, optimize=True)
         validate_rgba(path)
@@ -180,6 +254,13 @@ def main() -> None:
     make_dock_icon((246, 246, 244), mark_black, OUT / "coreside-dock-light.png")
     make_dock_icon((18, 18, 18), mark_white, RES / "coreside-dock-dark.png")
     make_dock_icon((246, 246, 244), mark_black, RES / "coreside-dock-light.png")
+    for p in [
+        OUT / "coreside-dock-dark.png",
+        OUT / "coreside-dock-light.png",
+        RES / "coreside-dock-dark.png",
+        RES / "coreside-dock-light.png",
+    ]:
+        validate_rgba(p)
 
     dock_dark = Image.open(OUT / "coreside-dock-dark.png")
     for name, size in {
@@ -191,6 +272,16 @@ def main() -> None:
         dock_dark.resize((size, size), Image.Resampling.LANCZOS).save(
             ICONS / name, optimize=True
         )
+
+    # Runtime resources: only Dock tiles (no design-only Split source / marks).
+    for orphan in RES.glob("*"):
+        if orphan.name not in {
+            "coreside-dock-dark.png",
+            "coreside-dock-light.png",
+            "coreside-dock-split.png",
+        }:
+            orphan.unlink()
+            print(f"removed non-runtime resource {orphan.name}")
 
     print("Branding assets generated.")
 

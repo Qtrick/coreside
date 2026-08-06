@@ -11,9 +11,105 @@ export type ToolCallRequest = z.infer<typeof ToolCallRequestSchema>;
 export const ThemePreferenceSchema = z.enum(["system", "light", "dark"]);
 export type ThemePreference = z.infer<typeof ThemePreferenceSchema>;
 
-/** Dock tile: follow OS, or lock to one of the two brand variants. */
-export const DockIconPreferenceSchema = z.enum(["auto", "dark", "light"]);
-export type DockIconPreference = z.infer<typeof DockIconPreferenceSchema>;
+/** Dock tile authority: Follow macOS (packaged icon) or a fixed manual tile. */
+export const DockAuthoritySchema = z.enum(["follow_macos", "manual"]);
+export type DockAuthority = z.infer<typeof DockAuthoritySchema>;
+
+export const DockArtworkSchema = z.enum(["classic", "split"]);
+export type DockArtwork = z.infer<typeof DockArtworkSchema>;
+
+export const DockStyleSchema = z.enum(["dark", "light", "original"]);
+export type DockStyle = z.infer<typeof DockStyleSchema>;
+
+export const DockIconConfigSchema = z.object({
+  schemaVersion: z.literal(1),
+  authority: DockAuthoritySchema,
+  artwork: DockArtworkSchema.optional(),
+  style: DockStyleSchema.optional(),
+});
+export type DockIconConfig = z.infer<typeof DockIconConfigSchema>;
+
+export const DEFAULT_DOCK_ICON: DockIconConfig = {
+  schemaVersion: 1,
+  authority: "follow_macos",
+};
+
+/** Align with Rust `normalize_dock_config` (invalid combos fail closed). */
+export function normalizeDockIconConfig(cfg: DockIconConfig): DockIconConfig {
+  if (cfg.schemaVersion !== 1) return { ...DEFAULT_DOCK_ICON };
+  if (cfg.authority === "follow_macos") return { ...DEFAULT_DOCK_ICON };
+  if (cfg.artwork === "split") {
+    return {
+      schemaVersion: 1,
+      authority: "manual",
+      artwork: "split",
+      style: "original",
+    };
+  }
+  if (cfg.artwork === "classic" || cfg.artwork == null) {
+    return {
+      schemaVersion: 1,
+      authority: "manual",
+      artwork: "classic",
+      style: cfg.style === "light" ? "light" : "dark",
+    };
+  }
+  return { ...DEFAULT_DOCK_ICON };
+}
+
+/** Normalize legacy string prefs and versioned objects. Invalid → Follow macOS. */
+export function parseDockIconConfig(raw: unknown): DockIconConfig {
+  if (typeof raw === "string") {
+    const t = raw.trim().toLowerCase();
+    if (t === "dark") {
+      return {
+        schemaVersion: 1,
+        authority: "manual",
+        artwork: "classic",
+        style: "dark",
+      };
+    }
+    if (t === "light") {
+      return {
+        schemaVersion: 1,
+        authority: "manual",
+        artwork: "classic",
+        style: "light",
+      };
+    }
+    if (t === "split") {
+      return {
+        schemaVersion: 1,
+        authority: "manual",
+        artwork: "split",
+        style: "original",
+      };
+    }
+    return { ...DEFAULT_DOCK_ICON };
+  }
+  const parsed = DockIconConfigSchema.safeParse(raw);
+  return parsed.success
+    ? normalizeDockIconConfig(parsed.data)
+    : { ...DEFAULT_DOCK_ICON };
+}
+
+export function dockIconStatusLabel(config: DockIconConfig): string {
+  if (config.authority === "follow_macos") return "Following macOS";
+  if (config.artwork === "split") return "Using Split";
+  if (config.style === "light") return "Using Classic Light";
+  if (config.style === "dark") return "Using Classic Dark";
+  return "Using manual Dock icon";
+}
+
+export type DockIconCommitResult = {
+  config: DockIconConfig;
+  statusLabel: string;
+  effectiveAuthority: DockAuthority;
+  overrideCleared: boolean;
+};
+
+/** @deprecated Use DockIconConfig */
+export type DockIconPreference = DockIconConfig;
 
 export const ResponseTypeSchema = z.enum([
   "message",
@@ -175,8 +271,14 @@ export const AppSettingsSchema = z.object({
   sidebarCollapsed: z.boolean().optional().default(false),
   /** `"auto"` or a concrete model id such as `gemini-3.5-flash`. */
   preferredModel: z.string().optional().default("auto"),
-  /** `auto` follows OS; `dark` / `light` lock the dock tile. */
-  dockIcon: DockIconPreferenceSchema.optional().default("auto"),
+  /** Follow macOS (default) or manual Classic/Split Dock tile. */
+  dockIcon: z
+    .preprocess(
+      (v) => parseDockIconConfig(v),
+      DockIconConfigSchema,
+    )
+    .optional()
+    .default(DEFAULT_DOCK_ICON),
   accentPrimaryLight: z.string().optional().default("#2f8f63"),
   accentPrimaryDark: z.string().optional().default("#69c994"),
   accentSecondaryLight: z.string().optional().default("#d38b3d"),

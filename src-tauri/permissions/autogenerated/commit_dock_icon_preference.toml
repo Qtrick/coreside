@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-commit-dock-icon-preference"
+description = "Enables the commit_dock_icon_preference command without any pre-configured scope."
+commands.allow = ["commit_dock_icon_preference"]
+
+[[permission]]
+identifier = "deny-commit-dock-icon-preference"
+description = "Denies the commit_dock_icon_preference command without any pre-configured scope."
+commands.deny = ["commit_dock_icon_preference"]

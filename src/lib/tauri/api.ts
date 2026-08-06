@@ -2,7 +2,8 @@ import type {
   AiStatus,
   AppInfo,
   AppSettings,
-  DockIconPreference,
+  DockIconConfig,
+  DockIconCommitResult,
   ModelCatalog,
   SendMessageResult,
   ToolChange,
@@ -395,10 +396,10 @@ export const api = {
     invoke<void>("delete_added_setting", { id }),
   validateChangeTargets: (ids: string[]) =>
     invoke<ValidateChangeTargetsResult>("validate_change_targets", { ids }),
-  setDockIcon: (preference: DockIconPreference, osIsDark: boolean) =>
-    invoke<void>("set_dock_icon", { preference, osIsDark }),
-  setDockIconForOsAppearance: (isDark: boolean) =>
-    invoke<void>("set_dock_icon_for_os_appearance", { isDark }),
+  commitDockIconPreference: (preference: DockIconConfig) =>
+    invoke<DockIconCommitResult>("commit_dock_icon_preference", { preference }),
+  applyPersistedDockIcon: () =>
+    invoke<DockIconCommitResult>("apply_persisted_dock_icon"),
   clearConversations: () => invoke<void>("clear_conversations"),
   clearTools: () => invoke<void>("clear_tools"),
   openToolWindow: (toolId: string, size?: { width?: number; height?: number }) =>

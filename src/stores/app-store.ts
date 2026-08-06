@@ -2,13 +2,18 @@ import { create } from "zustand";
 import type {
   AiStatus,
   AppInfo,
-  DockIconPreference,
+  DockIconConfig,
   ModelCatalog,
   ThemePreference,
   ToolChange,
   WallpaperConfig,
 } from "@/types/agent";
-import { DEFAULT_WALLPAPER, WallpaperKindSchema } from "@/types/agent";
+import {
+  DEFAULT_DOCK_ICON,
+  DEFAULT_WALLPAPER,
+  parseDockIconConfig,
+  WallpaperKindSchema,
+} from "@/types/agent";
 import type { ChatMessage, Conversation } from "@/types/messages";
 import type {
   ToolDefinition,
@@ -133,7 +138,11 @@ type AppStore = {
   actionLogEnabled: boolean;
   actionLogMode: ActionLogMode;
   preferredModel: string;
-  dockIcon: DockIconPreference;
+  dockIcon: DockIconConfig;
+  dockIconPending: boolean;
+  dockIconError: string | null;
+  /** Monotonic epoch so stale commit/apply responses cannot clobber newer choices. */
+  dockIconEpoch: number;
   developerMode: boolean;
   modelCatalog: ModelCatalog | null;
 
@@ -222,7 +231,9 @@ type AppStore = {
   ) => void;
   closeProviderSetup: () => void;
   setPreferredModel: (modelId: string) => Promise<void>;
-  setDockIcon: (preference: DockIconPreference) => Promise<void>;
+  setDockIcon: (preference: DockIconConfig) => Promise<void>;
+  applyPersistedDockIcon: () => Promise<void>;
+  clearDockIconError: () => void;
   setDeveloperMode: (enabled: boolean) => Promise<void>;
   refreshModelCatalog: () => Promise<void>;
 
@@ -808,7 +819,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   actionLogEnabled: false,
   actionLogMode: "off" as const,
   preferredModel: "auto",
-  dockIcon: "auto",
+  dockIcon: { ...DEFAULT_DOCK_ICON },
+  dockIconPending: false,
+  dockIconError: null,
+  dockIconEpoch: 0,
   developerMode: false,
   modelCatalog: null,
 
@@ -906,7 +920,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
             : 0.5,
         sidebarCollapsed: settings.sidebarCollapsed ?? false,
         preferredModel: settings.preferredModel ?? modelCatalog?.selected ?? "auto",
-        dockIcon: settings.dockIcon ?? "auto",
+        dockIcon: parseDockIconConfig(settings.dockIcon ?? DEFAULT_DOCK_ICON),
+        dockIconError: null,
         developerMode: Boolean(settings.developerMode),
         actionLogEnabled: Boolean(settings.actionLogEnabled) || settings.actionLogMode === "always" || settings.actionLogMode === "intelligent",
         actionLogMode:
@@ -1663,19 +1678,54 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   setDockIcon: async (preference) => {
-    const next = preference === "dark" || preference === "light" ? preference : "auto";
-    set({ dockIcon: next });
-    const settings = await api.setSetting("dockIcon", next);
-    const resolved = (settings.dockIcon ?? next) as DockIconPreference;
-    set({ dockIcon: resolved });
-    const osIsDark =
-      typeof window !== "undefined" && window.matchMedia
-        ? window.matchMedia("(prefers-color-scheme: dark)").matches
-        : false;
-    await api.setDockIcon(resolved, osIsDark).catch(() => {
-      // Non-macOS / web preview: command may no-op.
+    const prior = get().dockIcon;
+    const epoch = get().dockIconEpoch + 1;
+    set({
+      dockIcon: preference,
+      dockIconPending: true,
+      dockIconError: null,
+      dockIconEpoch: epoch,
     });
+    try {
+      const result = await api.commitDockIconPreference(preference);
+      if (get().dockIconEpoch !== epoch) return;
+      set({
+        dockIcon: parseDockIconConfig(result.config),
+        dockIconPending: false,
+        dockIconError: null,
+      });
+    } catch (error) {
+      if (get().dockIconEpoch !== epoch) return;
+      const message =
+        error instanceof TauriCommandError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "Couldn't update the Dock icon.";
+      set({
+        dockIcon: prior,
+        dockIconPending: false,
+        dockIconError: message,
+      });
+    }
   },
+
+  applyPersistedDockIcon: async () => {
+    const epochAtStart = get().dockIconEpoch;
+    try {
+      const result = await api.applyPersistedDockIcon();
+      // Startup apply must not overwrite an in-flight or newer user commit.
+      if (get().dockIconPending || get().dockIconEpoch !== epochAtStart) return;
+      set({
+        dockIcon: parseDockIconConfig(result.config),
+        dockIconError: null,
+      });
+    } catch {
+      // Non-macOS / web preview: command may no-op or be unavailable.
+    }
+  },
+
+  clearDockIconError: () => set({ dockIconError: null }),
 
   setDeveloperMode: async (enabled) => {
     set({ developerMode: enabled });

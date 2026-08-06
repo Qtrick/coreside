@@ -34,16 +34,19 @@ Validation (corners alpha 0, RGBA mode, substantial transparent + opaque pixel c
 
 Manifest: `src/assets/branding/manifest.ts` (`inAppLogoFor`).
 
-### Dock / application icons (follow OS appearance, not in-app theme)
+### Dock / application icons
 
-| OS appearance | Asset | Content |
-| --- | --- | --- |
-| Light | `coreside-dock-dark.png` | Dark squircle + white mark |
-| Dark | `coreside-dock-light.png` | Light squircle + black mark |
+**Follow macOS** (default): clears `NSApplication.applicationIconImage` so the packaged application icon is authoritative again. Adaptive Icon & Widget Style (Default / Dark / Clear / Tinted) requires a genuine Icon Composer `.icon` → `Assets.car` (blocked on this machine without Xcode 26+ / `actool`). Do not claim adaptive packaging until Assets.car ships.
 
-Packaged copies live under `src-tauri/resources/branding/`.
+**Choose manually**: temporary AppKit override via `commit_dock_icon_preference` (main window only):
 
-Default packaged Tauri icons (`src-tauri/icons/*`, including `icon.icns` / `icon.ico`) are generated from the dark dock variant via `tauri icon`.
+| Manual choice | Runtime asset |
+| --- | --- |
+| Classic Dark | `coreside-dock-dark.png` |
+| Classic Light | `coreside-dock-light.png` |
+| Split | `coreside-dock-split.png` (generated from `design/branding/sources/coreside-split-logo.png`) |
+
+Commands: `commit_dock_icon_preference`, `apply_persisted_dock_icon`. Do not use `set_setting("dockIcon")`.
 
 ## Liquid-Glass-inspired treatment
 
@@ -60,12 +63,11 @@ Readable from 32px through 1024px.
 
 ## Runtime macOS Dock switching
 
-- Setting: `dockIcon` — `auto` | `dark` | `light` (Base Settings → Appearance)
-- Command: `set_dock_icon(preference, osIsDark)`
-- `auto` listens to `prefers-color-scheme` (OS), **not** the in-app Appearance override
-- `dark` / `light` lock the corresponding brand tile
-- Implementation: `objc2` / AppKit `NSApplication::setApplicationIconImage` on macOS; no-op elsewhere
-- Limitation: affects the running Dock tile; Finder’s permanent app icon remains the packaged default
+- Setting: versioned `dockIcon` JSON (`follow_macos` or manual Classic/Split)
+- Commands: `commit_dock_icon_preference`, `apply_persisted_dock_icon` (main window only)
+- Follow macOS: `NSApplication.setApplicationIconImage(None)` — no PNG, no `prefers-color-scheme`
+- Manual: temporary PNG override; Finder/Launchpad keep the packaged icon
+- Agent / `set_setting("dockIcon")` cannot change the Dock icon
 
 ## Protected branding behavior
 

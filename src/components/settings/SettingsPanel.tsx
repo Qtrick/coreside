@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Search, Trash2, X } from "lucide-react";
 import dockDarkUrl from "@/assets/branding/coreside-dock-dark.png";
 import dockLightUrl from "@/assets/branding/coreside-dock-light.png";
+import dockSplitUrl from "@/assets/branding/coreside-dock-split.png";
 import { CoresideLogo } from "@/components/branding/CoresideLogo";
 import { AgentBehaviorSettings } from "@/components/settings/AgentBehaviorSettings";
 import { AiProviderSettings } from "@/components/settings/AiProviderSettings";
@@ -26,11 +27,22 @@ import {
   type SettingsCategoryId,
   type SettingsSearchHit,
 } from "@/lib/settings-categories";
-import type { DockIconPreference, ThemePreference } from "@/types/agent";
+import type { DockIconConfig, ThemePreference } from "@/types/agent";
+import {
+  DEFAULT_DOCK_ICON,
+  dockIconStatusLabel,
+} from "@/types/agent";
 import type { AddedSetting } from "@/types/settings";
 import { useShallow } from "zustand/react/shallow";
 import { usePresence } from "@/lib/motion/usePresence";
 import { useAppStore } from "@/stores/app-store";
+
+function isMacOsClient(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const platform = navigator.platform || "";
+  const ua = navigator.userAgent || "";
+  return /Mac|Macintosh|MacIntel|MacPPC/i.test(platform) || /Mac OS X/i.test(ua);
+}
 
 function categorySummary(
   id: SettingsCategoryId,
@@ -91,6 +103,9 @@ export function SettingsPanel() {
     setTheme,
     dockIcon,
     setDockIcon,
+    dockIconPending,
+    dockIconError,
+    clearDockIconError,
     resolvedTheme,
     adaptiveWindowSizing,
     setAdaptiveWindowSizing,
@@ -106,6 +121,9 @@ export function SettingsPanel() {
       setTheme: s.setTheme,
       dockIcon: s.dockIcon,
       setDockIcon: s.setDockIcon,
+      dockIconPending: s.dockIconPending,
+      dockIconError: s.dockIconError,
+      clearDockIconError: s.clearDockIconError,
       resolvedTheme: s.resolvedTheme,
       adaptiveWindowSizing: s.adaptiveWindowSizing,
       setAdaptiveWindowSizing: s.setAdaptiveWindowSizing,
@@ -121,6 +139,9 @@ export function SettingsPanel() {
     readStoredSettingsCategory(),
   );
   const [displayCategory, setDisplayCategory] = useState(category);
+  const [dockRetryTarget, setDockRetryTarget] = useState<DockIconConfig | null>(
+    null,
+  );
   const paneStable = category === displayCategory;
   const {
     mounted: paneMounted,
@@ -281,15 +302,61 @@ export function SettingsPanel() {
     { id: "dark", label: "Dark" },
   ];
 
-  const dockOptions: Array<{
-    id: DockIconPreference;
+  const macOs = isMacOsClient();
+  const dockManual = dockIcon.authority === "manual";
+  const manualChoices: Array<{
+    config: DockIconConfig;
     label: string;
-    preview?: string;
+    preview: string;
   }> = [
-    { id: "auto", label: "Auto" },
-    { id: "dark", label: "Dark tile", preview: dockDarkUrl },
-    { id: "light", label: "Light tile", preview: dockLightUrl },
+    {
+      config: {
+        schemaVersion: 1,
+        authority: "manual",
+        artwork: "classic",
+        style: "dark",
+      },
+      label: "Classic Dark",
+      preview: dockDarkUrl,
+    },
+    {
+      config: {
+        schemaVersion: 1,
+        authority: "manual",
+        artwork: "classic",
+        style: "light",
+      },
+      label: "Classic Light",
+      preview: dockLightUrl,
+    },
+    {
+      config: {
+        schemaVersion: 1,
+        authority: "manual",
+        artwork: "split",
+        style: "original",
+      },
+      label: "Split",
+      preview: dockSplitUrl,
+    },
   ];
+
+  const selectFollowMacos = () => {
+    if (dockIconPending) return;
+    const next = { ...DEFAULT_DOCK_ICON };
+    setDockRetryTarget(next);
+    void setDockIcon(next);
+  };
+
+  const selectManual = (config: DockIconConfig) => {
+    if (dockIconPending) return;
+    setDockRetryTarget(config);
+    void setDockIcon(config);
+  };
+  const isManualSelected = (config: DockIconConfig) =>
+    dockIcon.authority === "manual" &&
+    dockIcon.artwork === config.artwork &&
+    dockIcon.style === config.style;
 
   const selectCategory = (id: SettingsCategoryId) => {
     setCategory(id);
@@ -598,43 +665,130 @@ export function SettingsPanel() {
               <h4 className="settings-subheading" id={settingsTargetDomId("dock-icon")}>
                 Dock icon
               </h4>
-              <p>
-                macOS Dock tile. Classic Dark and Light lock a fixed brand tile.
-                Auto follows light/dark appearance only — it does not follow
-                macOS Icon &amp; Widget Style (Default / Dark / Clear / Tinted).
-                Adaptive Icon &amp; Widget Style requires the packaged system
-                icon; temporary runtime PNG overrides cannot provide it.
-              </p>
-              <div
-                className="dock-icon-options"
-                role="group"
-                aria-labelledby={settingsTargetDomId("dock-icon")}
-              >
-                {dockOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    className="dock-icon-option"
-                    aria-pressed={dockIcon === option.id}
-                    onClick={() => void setDockIcon(option.id)}
+              {macOs ? (
+                <>
+                  <p>
+                    Follow macOS (Recommended) clears any temporary Dock override
+                    so Coreside can use its packaged application icon. Once an
+                    adaptive packaged icon is available, macOS can apply your
+                    Default, Dark, Clear, or Tinted icon style automatically.
+                    Choose manually to lock Classic Dark, Classic Light, or
+                    Split while Coreside is open.
+                  </p>
+                  <div
+                    className="dock-authority-options"
+                    role="radiogroup"
+                    aria-labelledby={settingsTargetDomId("dock-icon")}
+                    aria-disabled={dockIconPending || undefined}
                   >
-                    {option.preview ? (
-                      <img
-                        src={option.preview}
-                        alt=""
-                        className="dock-icon-preview"
-                        width={56}
-                        height={56}
-                      />
-                    ) : (
-                      <span className="dock-icon-auto-badge" aria-hidden>
-                        A
+                    <button
+                      type="button"
+                      className="dock-authority-option"
+                      role="radio"
+                      aria-checked={dockIcon.authority === "follow_macos"}
+                      disabled={dockIconPending}
+                      onClick={selectFollowMacos}
+                    >
+                      <span className="dock-authority-title">
+                        Follow macOS
+                        <span className="dock-recommended">Recommended</span>
                       </span>
-                    )}
-                    <span>{option.label}</span>
-                  </button>
-                ))}
-              </div>
+                      <span className="dock-authority-hint">
+                        Uses the packaged icon; follows macOS when adaptive packaging is present
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="dock-authority-option"
+                      role="radio"
+                      aria-checked={dockManual}
+                      disabled={dockIconPending}
+                      onClick={() =>
+                        selectManual({
+                          schemaVersion: 1,
+                          authority: "manual",
+                          artwork: dockIcon.artwork ?? "classic",
+                          style:
+                            dockIcon.artwork === "split"
+                              ? "original"
+                              : dockIcon.style === "light"
+                                ? "light"
+                                : "dark",
+                        })
+                      }
+                    >
+                      <span className="dock-authority-title">Choose manually</span>
+                      <span className="dock-authority-hint">
+                        Classic Dark, Classic Light, or Split
+                      </span>
+                    </button>
+                  </div>
+
+                  <p className="dock-icon-status" aria-live="polite">
+                    {dockIconPending
+                      ? "Updating Dock icon…"
+                      : dockIconStatusLabel(dockIcon)}
+                  </p>
+
+                  {dockManual ? (
+                    <div
+                      className="dock-icon-options"
+                      role="radiogroup"
+                      aria-label="Manual Dock artwork"
+                    >
+                      {manualChoices.map((option) => (
+                        <button
+                          key={option.label}
+                          type="button"
+                          className="dock-icon-option"
+                          role="radio"
+                          aria-checked={isManualSelected(option.config)}
+                          disabled={dockIconPending}
+                          onClick={() => selectManual(option.config)}
+                        >
+                          <img
+                            src={option.preview}
+                            alt=""
+                            className="dock-icon-preview"
+                            width={56}
+                            height={56}
+                          />
+                          <span>{option.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {dockIconError ? (
+                    <div className="dock-icon-error" role="alert" aria-live="assertive">
+                      <p>{dockIconError}</p>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={dockIconPending || !dockRetryTarget}
+                        onClick={() => {
+                          if (!dockRetryTarget) return;
+                          clearDockIconError();
+                          void setDockIcon(dockRetryTarget);
+                        }}
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <p className="dock-icon-footnote">
+                    Manual choices update the running Dock tile. Finder,
+                    Launchpad, and the closed app continue to use Coreside’s
+                    packaged icon.
+                  </p>
+                </>
+              ) : (
+                <p>
+                  Dock icon settings are available on macOS. On this platform
+                  the setting is hidden.
+                </p>
+              )}
             </section>
             <section
               className="settings-section"

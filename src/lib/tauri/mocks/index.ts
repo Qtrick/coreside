@@ -1,9 +1,9 @@
-import { DEFAULT_WALLPAPER, WallpaperKindSchema } from "@/types/agent";
+import { DEFAULT_DOCK_ICON, DEFAULT_WALLPAPER, parseDockIconConfig, WallpaperKindSchema } from "@/types/agent";
 import type {
   AiStatus,
   AppInfo,
   AppSettings,
-  DockIconPreference,
+  DockIconConfig,
   ModelCatalog,
   SendMessageResult,
   ThemePreference,
@@ -127,7 +127,7 @@ const mockDb = {
     theme: "system" as ThemePreference,
     sidebarCollapsed: false as boolean,
     preferredModel: "auto",
-    dockIcon: "auto" as DockIconPreference,
+    dockIcon: { ...DEFAULT_DOCK_ICON } as DockIconConfig,
     accentPrimaryLight: "#2f8f63",
     accentPrimaryDark: "#69c994",
     accentSecondaryLight: "#d38b3d",
@@ -1417,10 +1417,10 @@ export async function mockInvoke<T>(
       if (key === "preferredModel" && typeof value === "string") {
         mockDb.settings.preferredModel = value.trim() || "auto";
       }
-      if (key === "dockIcon" && typeof value === "string") {
-        const next = value.trim().toLowerCase();
-        mockDb.settings.dockIcon =
-          next === "dark" || next === "light" ? next : "auto";
+      if (key === "dockIcon" || key === "dock_icon") {
+        throw Object.assign(new Error("Use commit_dock_icon_preference"), {
+          code: "forbidden",
+        });
       }
       if (key === "accentPrimaryLight" && typeof value === "string") {
         const hex = normalizeMockHex(value);
@@ -1705,9 +1705,39 @@ export async function mockInvoke<T>(
       } satisfies ValidateChangeTargetsResult as T;
     }
 
-    case "set_dock_icon":
-    case "set_dock_icon_for_os_appearance":
-      return undefined as T;
+    case "commit_dock_icon_preference": {
+      const preference = parseDockIconConfig(args?.preference);
+      mockDb.settings.dockIcon = preference;
+      return {
+        config: preference,
+        statusLabel:
+          preference.authority === "follow_macos"
+            ? "Following macOS"
+            : preference.artwork === "split"
+              ? "Using Split"
+              : preference.style === "light"
+                ? "Using Classic Light"
+                : "Using Classic Dark",
+        effectiveAuthority: preference.authority,
+        overrideCleared: preference.authority === "follow_macos",
+      } as T;
+    }
+    case "apply_persisted_dock_icon": {
+      const preference = parseDockIconConfig(mockDb.settings.dockIcon);
+      return {
+        config: preference,
+        statusLabel:
+          preference.authority === "follow_macos"
+            ? "Following macOS"
+            : preference.artwork === "split"
+              ? "Using Split"
+              : preference.style === "light"
+                ? "Using Classic Light"
+                : "Using Classic Dark",
+        effectiveAuthority: preference.authority,
+        overrideCleared: preference.authority === "follow_macos",
+      } as T;
+    }
 
     case "clear_conversations":
       mockDb.conversations = [];
@@ -2695,7 +2725,7 @@ export function __resetMockDb(): void {
     theme: "system",
     sidebarCollapsed: false,
     preferredModel: "auto",
-    dockIcon: "auto",
+    dockIcon: { ...DEFAULT_DOCK_ICON },
     accentPrimaryLight: "#2f8f63",
     accentPrimaryDark: "#69c994",
     accentSecondaryLight: "#d38b3d",

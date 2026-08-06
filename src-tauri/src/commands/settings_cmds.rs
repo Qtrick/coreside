@@ -2,17 +2,18 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, State, WebviewWindow};
 
 use super::CommandError;
 use crate::ai::{
     normalize_hex_or_none, normalize_setting_kv, parse_wallpaper_setting, WallpaperConfig,
 };
-use crate::branding;
+use crate::branding::{self, DockAuthority, DockIconCommitResult, DockIconConfig};
 use crate::db;
 use crate::security::{assert_not_protected, is_protected};
 use crate::settings::{AddedSettingRecord, UpsertAddedSettingInput};
 use crate::state::AppState;
+use crate::windows;
 
 const DEFAULT_WALLPAPER_JSON: &str = r#"{"kind":"none"}"#;
 
@@ -74,8 +75,8 @@ pub struct AppSettings {
     pub sidebar_collapsed: bool,
     /// `"auto"` or a concrete provider model id.
     pub preferred_model: String,
-    /// Dock icon preference: `auto` | `dark` | `light`.
-    pub dock_icon: String,
+    /// Versioned Dock preference (Follow macOS or manual Classic/Split).
+    pub dock_icon: DockIconConfig,
     /// Accent colors (hex). Light/dark variants for when Appearance theme resolves.
     pub accent_primary_light: String,
     pub accent_primary_dark: String,
@@ -165,10 +166,8 @@ fn settings_from_map(map: &std::collections::HashMap<String, String>) -> AppSett
     let dock_icon = map
         .get("dockIcon")
         .or_else(|| map.get("dock_icon"))
-        .cloned()
-        .map(|s| s.trim().to_lowercase())
-        .filter(|s| matches!(s.as_str(), "auto" | "dark" | "light"))
-        .unwrap_or_else(|| "auto".to_string());
+        .map(|s| branding::parse_dock_icon_setting(s))
+        .unwrap_or_else(DockIconConfig::follow_macos);
 
     let color = |key: &str, alt: &str, default: &str| {
         map.get(key)
@@ -385,6 +384,13 @@ pub fn set_setting(
             "Use set_workspace_appearance; wallpaper and interface transparency cannot be changed via set_setting.",
         ));
     }
+    // Dock icon is a single-authority native+DB transaction.
+    if matches!(key.trim(), "dockIcon" | "dock_icon") {
+        return Err(CommandError::new(
+            "forbidden",
+            "Use commit_dock_icon_preference; Dock icon cannot be changed via set_setting.",
+        ));
+    }
     let stored = value_to_storage(&value);
     // Reject values that look like provider API keys.
     let stored_lower = stored.to_lowercase();
@@ -511,23 +517,76 @@ pub fn validate_change_targets(
     })
 }
 
-/// Apply the macOS dock icon for a preference (`auto` | `dark` | `light`).
-/// When `auto`, `os_is_dark` selects which of the two tiles to use.
-#[tauri::command]
-pub fn set_dock_icon(
-    app: AppHandle,
-    preference: String,
-    os_is_dark: bool,
-) -> Result<(), CommandError> {
-    branding::set_dock_icon(&app, &preference, os_is_dark)
-        .map_err(|e| CommandError::new("dock_icon", e))
+fn require_main_dock_window(window: &WebviewWindow) -> Result<(), CommandError> {
+    if windows::caller_bound_tool_id(window).is_some() || window.label() != "main" {
+        return Err(CommandError::new(
+            "forbidden",
+            "Only the main Coreside window can change the Dock icon.",
+        ));
+    }
+    Ok(())
 }
 
-/// Back-compat: OS appearance with preference treated as `auto`.
+fn read_persisted_dock(state: &AppState) -> Result<DockIconConfig, CommandError> {
+    let db = state.db.lock();
+    let map = db::get_settings(&db)?;
+    Ok(map
+        .get("dockIcon")
+        .or_else(|| map.get("dock_icon"))
+        .map(|s| branding::parse_dock_icon_setting(s))
+        .unwrap_or_else(DockIconConfig::follow_macos))
+}
+
+/// Single-authority Dock preference commit: validate → AppKit → persist (with rollback).
 #[tauri::command]
-pub fn set_dock_icon_for_os_appearance(app: AppHandle, is_dark: bool) -> Result<(), CommandError> {
-    branding::set_dock_icon_for_os_appearance(&app, is_dark)
-        .map_err(|e| CommandError::new("dock_icon", e))
+pub fn commit_dock_icon_preference(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    window: WebviewWindow,
+    preference: DockIconConfig,
+) -> Result<DockIconCommitResult, CommandError> {
+    state.require_profile()?;
+    require_main_dock_window(&window)?;
+
+    let prior = read_persisted_dock(&state)?;
+    branding::commit_dock_preference(&app, &prior, preference, |cfg| {
+        let stored = cfg.to_storage()?;
+        let mut db = state.db.lock();
+        db::set_setting(&mut db, branding::setting_key(), &stored).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .map_err(|e| {
+        if e.rollback_failed {
+            CommandError::new(
+                "dock_rollback_failed",
+                "Couldn't save the Dock icon setting, and restoring the previous Dock icon also failed.",
+            )
+        } else {
+            CommandError::new(e.code, e.message)
+        }
+    })
+}
+
+/// Reapply the persisted Dock preference at startup (main window only).
+#[tauri::command]
+pub fn apply_persisted_dock_icon(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    window: WebviewWindow,
+) -> Result<DockIconCommitResult, CommandError> {
+    state.require_profile()?;
+    require_main_dock_window(&window)?;
+
+    let cfg = read_persisted_dock(&state)?;
+    // Same mutex as commit — prevents startup apply from racing a live preference change.
+    branding::apply_dock_native_serialized(&app, &cfg)
+        .map_err(|_| CommandError::new("dock_icon", "Couldn't update the Dock icon."))?;
+    Ok(DockIconCommitResult {
+        status_label: cfg.status_label().to_string(),
+        override_cleared: cfg.authority == DockAuthority::FollowMacos,
+        effective_authority: cfg.authority,
+        config: cfg,
+    })
 }
 
 /// Helper used by apply paths — returns Err when any id is protected.
