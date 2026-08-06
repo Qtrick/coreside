@@ -1,8 +1,36 @@
 # Response Rules (coreside-prompt-v1 + Runtime V2)
 
-You MUST respond with a single JSON object matching this schema (no markdown outside the JSON when possible).
+Capability negotiation selects the response mode for this turn.
 
-## Schema version 1 (still supported)
+## Text / single-object mode (default when progressive operations are not advertised)
+
+Respond with a single JSON object (no markdown outside the JSON when possible). Prefer `schemaVersion: "2"` for multi-surface edits; `schemaVersion: "1"` remains for simple message/tool_change/settings_change turns.
+
+## Progressive operation mode (`coreside.ops.v1`)
+
+When the provider and capability profile advertise progressive operations, emit **only** NDJSON frames of the Coreside progressive-operation protocol — not a single final blob and not internal UI event names (`turn.started`, `operation.frame_completed`, etc.).
+
+Exact wire format:
+
+1. Exactly one start:
+   `{"v":"coreside.ops.v1","type":"start","groupId":"…","schemaVersion":"2","capabilityVersion":"…"}`
+   Optional binding fields when supplied by the runtime: `turnId`, `attemptId`.
+2. Zero or more ops with strictly increasing `frameId`:
+   `{"v":"coreside.ops.v1","type":"op","frameId":1,"groupId":"…","op":{…AppOperation…}}`
+3. Exactly one terminal:
+   `{"v":"coreside.ops.v1","type":"complete","frameId":N,"groupId":"…"}`
+   or
+   `{"v":"coreside.ops.v1","type":"abort","frameId":N,"groupId":"…","reason":"…"}`
+
+Rules:
+- Malformed JSON, missing start, missing/duplicate terminal, frames after terminal, out-of-order or repeated `frameId`, wrong `groupId`/`turnId`/`attemptId`, incomplete trailing frames, unknown frame types, or any rejected sibling operation fail the **entire** group.
+- An `abort` terminal discards every speculative operation in the group.
+- Progressive frames may update a speculative preview only. They never authorize durable mutation until a valid `complete` terminal and approval policy both succeed.
+- If you also emit a final aggregate `operations` array, it must exactly match the progressive preview set. Divergent finals are rejected and commit nothing.
+- Never invent JavaScript, CDN scripts, or arbitrary HTML.
+- Text-only replies remain valid when progressive mode is not selected for the turn.
+
+## Schema version 1 (still supported for non-progressive turns)
 
 ```json
 {
@@ -36,17 +64,9 @@ You MUST respond with a single JSON object matching this schema (no markdown out
 }
 ```
 
-## Schema version 2 (preferred for multi-surface edits)
+## Schema version 2 (preferred for multi-surface edits when not streaming progressive frames)
 
-Prefer `schemaVersion: "2"` when the user needs multiple coordinated changes, fine-grained component patches, inline chat surfaces, or silent updates.
-
-When the provider and capability profile advertise progressive operations, emit NDJSON frames of the Coreside progressive-operation protocol (`coreside.ops.v1`) rather than one final blob:
-
-1. `{"v":"coreside.ops.v1","type":"start","groupId":"…","schemaVersion":"2","capabilityVersion":"…"}`
-2. Zero or more `{"v":"coreside.ops.v1","type":"op","frameId":N,"op":{…AppOperation…}}` with monotonic `frameId`
-3. Exactly one terminal: `{"v":"coreside.ops.v1","type":"complete","frameId":N}` or `{"v":"coreside.ops.v1","type":"abort","frameId":N,"reason":"…"}`
-
-Rules: malformed JSON, missing start, missing/duplicate terminal, frames after terminal, out-of-order frame IDs, incomplete trailing frames, or any rejected sibling operation fail the entire group. Never invent JavaScript, CDN scripts, or arbitrary HTML.
+Prefer `schemaVersion: "2"` when the user needs multiple coordinated changes, fine-grained component patches, inline chat surfaces, or silent updates — and progressive mode is not active.
 
 ```json
 {
@@ -86,7 +106,7 @@ Rules for v2:
 - Never invent JavaScript, CDN scripts, or arbitrary HTML — only trusted component types from capability packs.
 - Do not target protected resources (`core.*`, logos, Base Settings security controls).
 - Multiple operations in one `transactionGroup` apply atomically.
-- Finalization requires a valid progressive terminal when progressive mode is active; incomplete streams never authorize durable mutation.
+- When progressive mode is active, finalization requires a valid progressive terminal; incomplete streams never authorize durable mutation.
 
 ## responseType
 - `message` — chat only; `toolChange` should be null (optional `settingsChange` is also allowed). Use optional `citations` for source links after search.
@@ -104,7 +124,7 @@ When the user needs current web facts, images, videos, or project history:
 5. After tool results are returned to you, answer with `responseType: "message"` and optional `citations` grounded in results. Never invent citations.
 
 ## Validation
-- `schemaVersion` must be `"1"`.
+- `schemaVersion` must be `"1"` or `"2"` as appropriate for the selected mode. Progressive frames use `"schemaVersion":"2"` inside the start frame.
 - For `tool_use`, `toolCalls` is required, must be non-empty, and has at most 8 entries.
 - For `tool_change`, `tool.id` and `tool.name` are required.
 - For `update` / `replace`, `targetToolId` is required.

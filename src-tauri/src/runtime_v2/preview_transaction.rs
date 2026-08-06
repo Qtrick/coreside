@@ -389,6 +389,110 @@ fn classify_parser_error(err: &str) -> (&'static str, bool) {
     (status, fatal)
 }
 
+/// Ingest provider `coreside.ops.v1` frames into a speculative preview.
+/// Speculative paint only — durable apply requires [`ProgressiveOpsParser::durable_operations`].
+pub fn ingest_progressive_chunk_with_seed(
+    parser: &mut super::progressive_ops::ProgressiveOpsParser,
+    preview: &mut PreviewTransaction,
+    chunk: &str,
+    mut seed: impl FnMut(&str) -> Option<PreviewSurfaceModel>,
+) -> Vec<PreviewOpEvent> {
+    use super::progressive_ops::ProgressiveOpsFrame;
+
+    let mut out = Vec::new();
+    if chunk.is_empty() || preview.interrupted || preview.committed {
+        return out;
+    }
+    for ev in parser.push(chunk) {
+        match ev {
+            Ok(ProgressiveOpsFrame::Op { op, .. }) => {
+                let paint_events = accept_and_paint(preview, op, &mut seed);
+                // Response rules: any rejected sibling fails the entire group.
+                // Parser already recorded the op — clear it so durable apply cannot proceed.
+                if paint_events.iter().any(|e| e.status == "rejected") {
+                    let reason = paint_events
+                        .iter()
+                        .find_map(|e| e.reason.clone())
+                        .unwrap_or_else(|| "rejected sibling operation".into());
+                    parser.fail_group(format!("rejected sibling operation: {reason}"));
+                    preview.mark_interrupted();
+                    out.extend(paint_events);
+                    out.push(PreviewOpEvent {
+                        operation_id: "parser".into(),
+                        status: "fatal".into(),
+                        reason: Some(reason),
+                        paint: None,
+                    });
+                    return out;
+                }
+                out.extend(paint_events);
+            }
+            Ok(ProgressiveOpsFrame::Abort { reason, .. }) => {
+                preview.mark_interrupted();
+                out.push(PreviewOpEvent {
+                    operation_id: String::new(),
+                    status: "interrupted".into(),
+                    reason: Some(reason.unwrap_or_else(|| "progressive abort".into())),
+                    paint: None,
+                });
+            }
+            Ok(ProgressiveOpsFrame::Complete { .. }) => {
+                out.push(PreviewOpEvent {
+                    operation_id: String::new(),
+                    status: "terminal_complete".into(),
+                    reason: None,
+                    paint: None,
+                });
+            }
+            Ok(ProgressiveOpsFrame::Start { .. }) => {}
+            Err(err) => {
+                let (status, fatal) = classify_parser_error(&err);
+                if status == "incomplete" && !fatal {
+                    continue;
+                }
+                // Any rejected/malformed/halted sibling invalidates the group.
+                preview.mark_interrupted();
+                preview.reject("parser", err.clone());
+                out.push(PreviewOpEvent {
+                    operation_id: "parser".into(),
+                    status: "fatal".into(),
+                    reason: Some(err),
+                    paint: None,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Finish the progressive stream; missing/invalid terminal clears speculative ops.
+pub fn finish_progressive_ingest(
+    parser: &mut super::progressive_ops::ProgressiveOpsParser,
+    preview: &mut PreviewTransaction,
+) -> Vec<PreviewOpEvent> {
+    let mut out = Vec::new();
+    if preview.interrupted || preview.committed {
+        let _ = parser.finish();
+        return out;
+    }
+    for ev in parser.finish() {
+        if let Err(err) = ev {
+            preview.mark_interrupted();
+            preview.reject("parser", err.clone());
+            out.push(PreviewOpEvent {
+                operation_id: "parser".into(),
+                status: "fatal".into(),
+                reason: Some(err),
+                paint: None,
+            });
+        }
+    }
+    if parser.durable_operations().is_none() && parser.started() && !preview.interrupted {
+        preview.mark_interrupted();
+    }
+    out
+}
+
 /// Push a live TextDelta chunk through the canonical NDJSON parser.
 ///
 /// Yields preview/reject/fatal events for complete frames. When `seed` can
@@ -760,6 +864,36 @@ mod tests {
             .contains("surface not found"));
         assert!(preview.accepted.is_empty());
         assert_eq!(preview.rejected.len(), 1);
+    }
+
+    #[test]
+    fn progressive_rejected_sibling_clears_durable_ops() {
+        use super::super::progressive_ops::{ProgressiveOpsExpect, ProgressiveOpsParser};
+
+        let mut parser = ProgressiveOpsParser::new(ProgressiveOpsExpect {
+            capability_version: Some("1".into()),
+            ..Default::default()
+        });
+        let mut preview = PreviewTransaction::new("turn-prog-reject", None);
+        let start = concat!(
+            r#"{"v":"coreside.ops.v1","type":"start","groupId":"g1","schemaVersion":"2","capabilityVersion":"1"}"#,
+            "\n"
+        );
+        let bad_op = concat!(
+            r#"{"v":"coreside.ops.v1","type":"op","frameId":1,"groupId":"g1","op":{"id":"op-missing","type":"component.update_props","target":{"surfaceId":"missing","componentId":"c1"},"payload":{"maximum":10}}}"#,
+            "\n"
+        );
+        assert!(
+            ingest_progressive_chunk_with_seed(&mut parser, &mut preview, start, |_| None)
+                .is_empty()
+        );
+        let events =
+            ingest_progressive_chunk_with_seed(&mut parser, &mut preview, bad_op, |_| None);
+        assert!(events.iter().any(|e| e.status == "rejected"));
+        assert!(events.iter().any(|e| e.status == "fatal"));
+        assert!(preview.interrupted);
+        assert!(parser.durable_operations().is_none());
+        assert!(parser.speculative_operations().is_empty());
     }
 
     fn op_frame_for_surface(id: &str, surface_id: &str) -> String {

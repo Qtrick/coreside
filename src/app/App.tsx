@@ -158,9 +158,13 @@ export function App() {
     return () => media.removeEventListener("change", sync);
   }, [theme, applyResolvedTheme]);
 
-  // Dock icon: `auto` follows OS; `dark` / `light` lock the tile. Independent of in-app theme.
+  // Dock icon ownership is process-global. Only the main window applies it —
+  // detached tool webviews must not overwrite the user's locked preference with
+  // a fresh store default. Temporary PNG overrides via applicationIconImage do
+  // not follow macOS Icon & Widget Style; packaged adaptive icons are required.
   useEffect(() => {
     if (!bootstrapped) return;
+    if (toolRoute) return;
     const apply = () => {
       const osIsDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
       void api.setDockIcon(dockIcon, osIsDark).catch(() => {
@@ -172,7 +176,7 @@ export function App() {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
-  }, [bootstrapped, dockIcon]);
+  }, [bootstrapped, dockIcon, toolRoute]);
 
   useEffect(() => {
     const onHash = () => {

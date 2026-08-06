@@ -141,7 +141,9 @@ pub fn apply_transaction_with_bus(
     if result.transaction.status == "applied" && result.conflicts.is_empty() {
         for effect in &deferred {
             if let Some(bus) = bus.as_deref_mut() {
-                super::outbox::apply_deferred_effect(bus, effect);
+                if let Err(err) = super::outbox::apply_deferred_effect(bus, effect) {
+                    tracing::warn!(error = %err, "deferred EventBus effect failed after commit");
+                }
             }
         }
     }

@@ -157,7 +157,7 @@ enum ParseMode {
     Legacy,
 }
 
-fn stream_err(kind: StreamParseErrorKind, detail: impl Into<String>) -> String {
+pub(crate) fn stream_err(kind: StreamParseErrorKind, detail: impl Into<String>) -> String {
     StreamParseError::new(kind, detail).to_line()
 }
 

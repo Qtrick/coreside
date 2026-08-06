@@ -413,14 +413,26 @@ impl AiProvider for MockAiProvider {
 }
 
 impl MockAiProvider {
-    /// NDJSON `operation.frame_completed` arrives as TextDelta before ResponseCompleted.
+    /// NDJSON `coreside.ops.v1` frames arrive as TextDelta before ResponseCompleted.
     async fn stream_progressive_op_preview(
         request: AgentRequest,
         tx: ProviderStreamTx,
     ) -> Result<AgentResponse, AiError> {
-        let op_frame = json!({
-            "type": "operation.frame_completed",
-            "operation": {
+        let start = json!({
+            "v": "coreside.ops.v1",
+            "type": "start",
+            "groupId": "g-progressive-preview",
+            "schemaVersion": "2",
+            "capabilityVersion": "1"
+        })
+        .to_string()
+            + "\n";
+        let op = json!({
+            "v": "coreside.ops.v1",
+            "type": "op",
+            "frameId": 1,
+            "groupId": "g-progressive-preview",
+            "op": {
                 "id": "op-progressive-preview",
                 "type": "chat.status",
                 "target": {},
@@ -429,6 +441,15 @@ impl MockAiProvider {
         })
         .to_string()
             + "\n";
+        let complete = json!({
+            "v": "coreside.ops.v1",
+            "type": "complete",
+            "frameId": 2,
+            "groupId": "g-progressive-preview"
+        })
+        .to_string()
+            + "\n";
+        let stream_body = format!("{start}{op}{complete}");
 
         let raw = json!({
             // Runtime V2 apply path requires schemaVersion "2" (distinct from SCHEMA_VERSION="1").
@@ -447,11 +468,11 @@ impl MockAiProvider {
                 live: true,
             })
             .await;
-        // Split the frame across two deltas so the parser buffers until newline.
-        let mid = op_frame.len() / 2;
+        // Split the stream across two deltas so the parser buffers until newline.
+        let mid = stream_body.len() / 2;
         let _ = tx
             .send(ProviderStreamEvent::TextDelta {
-                text: op_frame[..mid].to_string(),
+                text: stream_body[..mid].to_string(),
             })
             .await;
 
@@ -465,7 +486,7 @@ impl MockAiProvider {
 
         let _ = tx
             .send(ProviderStreamEvent::TextDelta {
-                text: op_frame[mid..].to_string(),
+                text: stream_body[mid..].to_string(),
             })
             .await;
 
@@ -565,7 +586,10 @@ mod tests {
 
     #[tokio::test]
     async fn progressive_op_preview_completes_ndjson_frame_before_response_completed() {
-        use crate::runtime_v2::{ingest_live_chunk, NdjsonFrameParser, PreviewTransaction};
+        use crate::runtime_v2::{
+            finish_progressive_ingest, ingest_progressive_chunk_with_seed, PreviewTransaction,
+            ProgressiveOpsExpect, ProgressiveOpsParser,
+        };
 
         let provider = MockAiProvider::new();
         let (tx, mut rx) = tokio::sync::mpsc::channel(16);
@@ -580,7 +604,10 @@ mod tests {
         };
         let join = tokio::spawn(async move { provider.chat_stream(request, tx).await });
 
-        let mut parser = NdjsonFrameParser::new();
+        let mut parser = ProgressiveOpsParser::new(ProgressiveOpsExpect {
+            capability_version: Some("1".into()),
+            ..Default::default()
+        });
         let mut preview = PreviewTransaction::new("test-turn", None);
         let mut saw_preview = false;
         let mut preview_before_complete = false;
@@ -588,7 +615,12 @@ mod tests {
         while let Some(ev) = rx.recv().await {
             match ev {
                 ProviderStreamEvent::TextDelta { text } => {
-                    let events = ingest_live_chunk(&mut parser, &mut preview, &text);
+                    let events = ingest_progressive_chunk_with_seed(
+                        &mut parser,
+                        &mut preview,
+                        &text,
+                        |_| None,
+                    );
                     if events.iter().any(|e| e.status == "preview") {
                         saw_preview = true;
                     }
@@ -601,15 +633,23 @@ mod tests {
             }
         }
         let response = join.await.unwrap().unwrap();
+        let _ = finish_progressive_ingest(&mut parser, &mut preview);
         assert!(
             preview_before_complete,
             "Operation preview must fire before ResponseCompleted"
         );
-        assert_eq!(preview.accepted_operations().len(), 1);
         assert_eq!(
-            preview.accepted_operations()[0].id,
+            parser.durable_operations().map(|o| o.len()),
+            Some(1),
+            "complete terminal must authorize durable ops"
+        );
+        assert_eq!(
+            parser.durable_operations().unwrap()[0].id,
             "op-progressive-preview"
         );
+        assert!(response
+            .raw_text
+            .contains("Progressive op preview complete"));
         let parsed = parse_agent_response(&response.raw_text).unwrap();
         assert_eq!(parsed.payload.schema_version, "2");
         assert!(parsed

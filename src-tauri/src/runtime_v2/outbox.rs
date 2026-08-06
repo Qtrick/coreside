@@ -5,7 +5,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::db::{now_rfc3339, Database, DbResult};
-use crate::runtime_v2::events::{EventBus, EventRef, Subscription, SurfaceEvent};
+use crate::runtime_v2::events::{EventBus, EventBusError, EventRef, Subscription, SurfaceEvent};
 use rusqlite::params;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -76,22 +76,32 @@ pub fn enqueue_outbox(
     Ok(id)
 }
 
-pub fn apply_deferred_effect(bus: &mut EventBus, effect: &DeferredBusEffect) {
+pub fn apply_deferred_effect(
+    bus: &mut EventBus,
+    effect: &DeferredBusEffect,
+) -> Result<(), EventBusError> {
     match effect {
         DeferredBusEffect::AddSubscription(sub) => {
-            let _ = bus.add_subscription(sub.clone());
+            bus.add_subscription(sub.clone())?;
+            Ok(())
         }
         DeferredBusEffect::RemoveSubscription { id } => {
             bus.remove_subscription(id);
+            Ok(())
         }
         DeferredBusEffect::RemoveSubscriptionsForSurface { surface_id } => {
             bus.remove_subscriptions_for_surface(surface_id);
+            Ok(())
         }
         DeferredBusEffect::SetSubscriptionEnabled { id, enabled } => {
             bus.set_subscription_enabled(id, *enabled);
+            Ok(())
         }
         DeferredBusEffect::Dispatch(ev) => {
-            let _ = bus.dispatch(ev, 0);
+            // Dispatch matching is notification-only: matched subscription IDs are
+            // not proof of durable consumer work. surface_events claim/ack is separate.
+            let _matched = bus.dispatch(ev, 0)?;
+            Ok(())
         }
     }
 }
@@ -129,14 +139,25 @@ pub fn flush_pending_outbox(db: &Database, bus: Option<&mut EventBus>) -> DbResu
                 continue;
             }
         };
-        apply_deferred_effect(bus, &effect);
-        let updated = db.conn().execute(
-            "UPDATE commit_event_outbox SET status = 'delivered', delivered_at = ?1,
-             delivery_attempts = delivery_attempts + 1 WHERE id = ?2 AND status = 'pending'",
-            params![now, id],
-        )?;
-        if updated > 0 {
-            delivered += 1;
+        match apply_deferred_effect(bus, &effect) {
+            Ok(()) => {
+                let updated = db.conn().execute(
+                    "UPDATE commit_event_outbox SET status = 'delivered', delivered_at = ?1,
+                     delivery_attempts = delivery_attempts + 1 WHERE id = ?2 AND status = 'pending'",
+                    params![now, id],
+                )?;
+                if updated > 0 {
+                    delivered += 1;
+                }
+            }
+            Err(e) => {
+                db.conn().execute(
+                    "UPDATE commit_event_outbox SET last_error = ?1,
+                     delivery_attempts = delivery_attempts + 1 WHERE id = ?2 AND status = 'pending'",
+                    params![e.to_string(), id],
+                )?;
+                // Do not mark delivered — row stays pending for retry.
+            }
         }
     }
     Ok(delivered)

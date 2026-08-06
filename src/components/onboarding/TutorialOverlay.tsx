@@ -11,6 +11,7 @@ import { activeStep, activeTutorial } from "@/lib/onboarding/coordinator";
 import { TOUR_TARGETS } from "@/lib/onboarding/tutorials";
 import { usePresence } from "@/lib/motion/usePresence";
 import { storeSettingsCategory } from "@/lib/settings-categories";
+import { OverlayPortal } from "@/components/ui/OverlayPortal";
 
 type AnchorRect = { top: number; left: number; width: number; height: number };
 
@@ -147,7 +148,9 @@ export function TutorialOverlay() {
 
   // Spotlight coach-mark: dialog (not tooltip) so AT announces title/body and
   // focus stays on the tour controls. Backdrop remains non-blocking for targets.
+  // Portal out of AppShell so the broad shell child rule cannot demote fixed stacking.
   return (
+    <OverlayPortal>
     <div
       className={`tutorial-overlay presence-${presencePhase}${reducedMotion ? " reduced-motion" : ""}`}
       role="presentation"
@@ -213,5 +216,6 @@ export function TutorialOverlay() {
         </button>
       </div>
     </div>
+    </OverlayPortal>
   );
 }

@@ -415,43 +415,19 @@ export function InlineSurfaceCard({
             }}
             onSubmitToAgent={(payload) => {
               const summary = `App form submitted (${payload.eventName})`;
-              // Typed StructuredUserInput is sealed in Rust via send_message.
-              // Chat text is human-readable only — not trust authority.
-              const fields =
-                Object.keys(payload.values).length > 64
-                  ? Object.fromEntries(Object.entries(payload.values).slice(0, 64))
-                  : payload.values;
-              void (async () => {
-                try {
-                  await api.appendContextLedger({
-                    conversationId,
-                    projectId: activeProjectId,
-                    entryType: "surface_form_submit",
-                    visibility: "model_context_only",
-                    payload: {
-                      surfaceId: surface.id,
-                      formId: payload.componentId ?? surface.id,
-                      instanceId: surface.instanceId,
-                      componentId: payload.componentId ?? null,
-                      eventName: payload.eventName,
-                      values: payload.values,
-                    },
-                    summary,
-                  });
-                } catch {
-                  // Ledger is best-effort; typed send_message path still seals trust.
-                }
-                void saveComponentDraft(
-                  payload.componentId ?? "form",
-                  payload.values,
-                  payload.componentId ?? null,
-                );
-                void sendMessage(summary, [], [], {
-                  formId: payload.componentId ?? surface.id,
-                  surfaceId: surface.id,
-                  fields,
-                });
-              })();
+              // Single authority: send_message seals StructuredUserInput in Rust.
+              // Do not also appendContextLedger — that created a second ledger-* id
+              // reinjected on the next ordinary turn.
+              void saveComponentDraft(
+                payload.componentId ?? "form",
+                payload.values,
+                payload.componentId ?? null,
+              );
+              void sendMessage(summary, [], [], {
+                formId: payload.componentId ?? surface.id,
+                surfaceId: surface.id,
+                fields: payload.values,
+              });
             }}
           />
         </div>

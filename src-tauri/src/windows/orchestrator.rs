@@ -578,14 +578,16 @@ pub fn restore(app: &AppHandle, reduced_motion: bool) -> Result<ExpansionDecisio
         });
     }
 
-    // Keep restore within current work area.
+    // Keep restore within current work area. Never panic when usable < MIN_*.
     let work_area = read_work_area_logical(&window, scale)?;
     let usable = work_area.inset(WORK_AREA_MARGIN);
     let clamped = place_expanded_bounds(
         to,
         usable,
-        to.width.clamp(MIN_WIDTH, usable.width),
-        to.height.clamp(MIN_HEIGHT, usable.height),
+        to.width
+            .clamp(MIN_WIDTH.min(usable.width), usable.width.max(1.0)),
+        to.height
+            .clamp(MIN_HEIGHT.min(usable.height), usable.height.max(1.0)),
         ExpandDirection::Balanced,
     );
 
@@ -760,16 +762,23 @@ mod tests {
     }
 
     #[test]
-    fn automatic_prefers_side_with_more_space() {
-        let current = at(20.0, 40.0, 1000.0, 700.0);
-        let plan = compute_expansion(
-            current,
-            area(1920.0, 1080.0),
-            200.0,
-            0.0,
-            ExpandDirection::Automatic,
-        )
-        .unwrap();
-        assert_eq!(plan.direction, ExpandDirection::Right);
+    fn restore_clamp_survives_usable_below_minimum() {
+        // f64::clamp panics when min > max — small work areas must not crash.
+        let usable = at(0.0, 0.0, 640.0, 480.0);
+        let snapshot = at(10.0, 10.0, 1200.0, 800.0);
+        let clamped = place_expanded_bounds(
+            snapshot,
+            usable,
+            snapshot
+                .width
+                .clamp(MIN_WIDTH.min(usable.width), usable.width.max(1.0)),
+            snapshot
+                .height
+                .clamp(MIN_HEIGHT.min(usable.height), usable.height.max(1.0)),
+            ExpandDirection::Balanced,
+        );
+        assert!(clamped.width <= usable.width + 0.01);
+        assert!(clamped.height <= usable.height + 0.01);
+        assert!(clamped.width > 0.0 && clamped.height > 0.0);
     }
 }

@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApplicationDetailsPanel } from "@/components/applications/ApplicationDetailsPanel";
 import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
 import { AppRouteShell } from "@/components/tool-renderer/AppRouteShell";
@@ -89,7 +89,9 @@ export function ToolCanvas() {
   const [recovery, setRecovery] = useState<RecoveryState | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [canvasError, setCanvasError] = useState<string | null>(null);
-  const [headerWidth, setHeaderWidth] = useState(0);
+  /** Available width for header actions (not the whole header). */
+  const [actionsWidth, setActionsWidth] = useState(0);
+  const actionsRef = useRef<HTMLDivElement>(null);
 
   const runHeaderAction = useCallback(
     async (label: string, run: () => Promise<unknown>) => {
@@ -112,9 +114,9 @@ export function ToolCanvas() {
   );
 
   const headerDensity =
-    headerWidth > 0 && headerWidth < 360
+    actionsWidth > 0 && actionsWidth < 220
       ? "menu"
-      : headerWidth > 0 && headerWidth < 560
+      : actionsWidth > 0 && actionsWidth < 360
         ? "icons"
         : layoutMode === "compact"
           ? "icons"
@@ -150,15 +152,16 @@ export function ToolCanvas() {
   );
 
   useEffect(() => {
-    const header = document.querySelector<HTMLElement>(".tool-canvas-header");
-    if (!header || typeof ResizeObserver === "undefined") return;
+    const el = actionsRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
     let frame = 0;
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width ?? 0;
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => setHeaderWidth(w));
+      frame = requestAnimationFrame(() => setActionsWidth(w));
     });
-    ro.observe(header);
+    ro.observe(el);
+    setActionsWidth(el.getBoundingClientRect().width);
     return () => {
       cancelAnimationFrame(frame);
       ro.disconnect();
@@ -231,42 +234,16 @@ export function ToolCanvas() {
       values: Record<string, unknown>;
     }) => {
       const summary = `Tool form submitted (${payload.eventName})`;
-      // Typed StructuredUserInput is sealed in Rust via send_message.
-      // Do not put trust-bearing [STRUCTURED_USER_INPUT] markers in chat text —
-      // markers are display-only leftovers and are not authority.
-      const fields =
-        Object.keys(payload.values).length > 64
-          ? Object.fromEntries(Object.entries(payload.values).slice(0, 64))
-          : payload.values;
-      void (async () => {
-        if (activeConversationId) {
-          try {
-            await api.appendContextLedger({
-              conversationId: activeConversationId,
-              projectId: activeProjectId,
-              entryType: "tool_form_submit",
-              visibility: "model_context_only",
-              payload: {
-                toolId: payload.toolId,
-                formId: payload.toolId,
-                componentId: payload.componentId ?? null,
-                eventName: payload.eventName,
-                values: payload.values,
-              },
-              summary,
-            });
-          } catch {
-            // Ledger is best-effort; typed send_message path still seals trust.
-          }
-        }
-        void sendMessage(summary, [], [], {
-          formId: payload.toolId,
-          applicationId: payload.toolId,
-          fields,
-        });
-      })();
+      // Single authority: send_message seals StructuredUserInput in Rust.
+      // Do not also appendContextLedger here — that created a second ledger-* id
+      // which was skipped on this turn then reinjected on the next ordinary turn.
+      void sendMessage(summary, [], [], {
+        formId: payload.toolId,
+        applicationId: payload.toolId,
+        fields: payload.values,
+      });
     },
-    [activeConversationId, activeProjectId, sendMessage],
+    [sendMessage],
   );
 
   const onPendingApproval = useCallback(
@@ -333,7 +310,7 @@ export function ToolCanvas() {
   return (
     <section className="tool-canvas" aria-label={`${activeTool.name} canvas`} data-coreside-tour="app-panel">
       <header className="tool-canvas-header">
-        <div>
+        <div className="tool-canvas-header-title" style={{ minWidth: 0, flex: "1 1 auto" }}>
           <h2>
             {activeTool.name}
             {isPreviewPaint ? (
@@ -352,24 +329,30 @@ export function ToolCanvas() {
             ) : null}
           </div>
         </div>
-        <ToolHeaderActions
-          tool={activeTool}
-          conversationId={activeConversationId}
-          density={headerDensity}
-          closeLabel={
-            layoutMode === "compact" ? "Back to chat" : "Close tool canvas"
-          }
-          onDetails={() => setDetailsOpen(true)}
-          onExport={() => openExportDialog(activeTool.id, activeTool.name)}
-          onOpen={() =>
-            void runHeaderAction("Opening the tool window", openToolWindow)
-          }
-          onUndo={() => void runHeaderAction("Undo", undoTool)}
-          onClose={closeToolCanvas}
-          onCustomizeApplied={() => {
-            void useAppStore.getState().selectTool(activeTool.id);
-          }}
-        />
+        <div
+          ref={actionsRef}
+          className="tool-canvas-header-actions"
+          style={{ flex: "0 1 auto", minWidth: 0, maxWidth: "100%" }}
+        >
+          <ToolHeaderActions
+            tool={activeTool}
+            conversationId={activeConversationId}
+            density={headerDensity}
+            closeLabel={
+              layoutMode === "compact" ? "Back to chat" : "Close tool canvas"
+            }
+            onDetails={() => setDetailsOpen(true)}
+            onExport={() => openExportDialog(activeTool.id, activeTool.name)}
+            onOpen={() =>
+              void runHeaderAction("Opening the tool window", openToolWindow)
+            }
+            onUndo={() => void runHeaderAction("Undo", undoTool)}
+            onClose={closeToolCanvas}
+            onCustomizeApplied={() => {
+              void useAppStore.getState().selectTool(activeTool.id);
+            }}
+          />
+        </div>
       </header>
       {windowExpandStatus?.startsWith("ask:") ? (
         <div className="window-fit-prompt" role="status">

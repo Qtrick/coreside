@@ -86,9 +86,8 @@ impl TurnState {
                     Created | Claimed | Reserved | ProviderStarted | Streaming | TypedTerminal
                         | Finalizing,
                     InterruptedRecoverable
-                )
-                | (InterruptedRecoverable, Claimed) // recovery retry same turn new attempt handled separately
-                | (Failed, Claimed) // explicit retry
+                ) // Failed|InterruptedRecoverable → Claimed requires begin_retry_attempt
+                  // (rotates attempt_id). Do not allow transition_turn to reclaim without rotation.
         )
     }
 }
@@ -122,14 +121,14 @@ pub fn create_turn(
     idempotency_key: &str,
     route: Option<&str>,
 ) -> DbResult<TurnJournalRecord> {
-    // Idempotent create: return existing if key already present.
-    if let Ok(existing) = get_turn_by_idempotency(db, idempotency_key) {
+    // Idempotent create: scoped to conversation.
+    if let Ok(existing) = get_turn_by_idempotency(db, conversation_id, idempotency_key) {
         return Ok(existing);
     }
     let id = format!("turn-{}", Uuid::new_v4());
     let attempt_id = format!("attempt-{}", Uuid::new_v4());
     let now = now_rfc3339();
-    db.conn().execute(
+    match db.conn().execute(
         "INSERT INTO turn_journal (
             id, conversation_id, project_id, attempt_id, idempotency_key, state,
             route, created_at, updated_at
@@ -143,8 +142,16 @@ pub fn create_turn(
             route,
             now
         ],
-    )?;
-    get_turn(db, &id)
+    ) {
+        Ok(_) => get_turn(db, &id),
+        Err(rusqlite::Error::SqliteFailure(err, _))
+            if err.code == rusqlite::ErrorCode::ConstraintViolation =>
+        {
+            // Concurrent create with the same conversation-scoped key.
+            get_turn_by_idempotency(db, conversation_id, idempotency_key)
+        }
+        Err(e) => Err(DbError::Sqlite(e)),
+    }
 }
 
 pub fn get_turn(db: &Database, id: &str) -> DbResult<TurnJournalRecord> {
@@ -163,19 +170,23 @@ pub fn get_turn(db: &Database, id: &str) -> DbResult<TurnJournalRecord> {
         })
 }
 
-pub fn get_turn_by_idempotency(db: &Database, key: &str) -> DbResult<TurnJournalRecord> {
+pub fn get_turn_by_idempotency(
+    db: &Database,
+    conversation_id: &str,
+    key: &str,
+) -> DbResult<TurnJournalRecord> {
     db.conn()
         .query_row(
             "SELECT id, conversation_id, project_id, attempt_id, idempotency_key, state,
                     route, provider, model, reservation_id, provisional_text, operations_json,
                     error_category, error_message, created_at, updated_at, finalized_at
-             FROM turn_journal WHERE idempotency_key = ?1",
-            [key],
+             FROM turn_journal WHERE conversation_id = ?1 AND idempotency_key = ?2",
+            params![conversation_id, key],
             map_turn_row,
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
-                DbError::NotFound(format!("turn idempotency {key}"))
+                DbError::NotFound(format!("turn idempotency {conversation_id}/{key}"))
             }
             other => DbError::Sqlite(other),
         })
@@ -189,7 +200,16 @@ fn map_turn_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TurnJournalRecord> 
         project_id: row.get(2)?,
         attempt_id: row.get(3)?,
         idempotency_key: row.get(4)?,
-        state: TurnState::parse(&state_s).unwrap_or(TurnState::Failed),
+        state: TurnState::parse(&state_s).ok_or_else(|| {
+            rusqlite::Error::FromSqlConversionFailure(
+                5,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown turn_journal state: {state_s}"),
+                )),
+            )
+        })?,
         route: row.get(6)?,
         provider: row.get(7)?,
         model: row.get(8)?,
@@ -204,7 +224,8 @@ fn map_turn_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TurnJournalRecord> 
     })
 }
 
-/// Transition only if the caller owns `attempt_id` and the transition is legal.
+/// Transition only if the caller owns `attempt_id`, expected prior state matches,
+/// and the transition is legal (compare-and-swap).
 pub fn transition_turn(
     db: &Database,
     turn_id: &str,
@@ -224,32 +245,37 @@ pub fn transition_turn(
             current.state, next
         )));
     }
+    let expected_state = current.state;
     let now = now_rfc3339();
-    let finalized = if matches!(
+    let is_terminal = matches!(
         next,
         TurnState::Committed | TurnState::Published | TurnState::Failed
-    ) {
-        Some(now.as_str())
-    } else {
-        None
-    };
-    db.conn().execute(
+    );
+    let n = db.conn().execute(
         "UPDATE turn_journal SET
             state = ?1,
             updated_at = ?2,
-            finalized_at = COALESCE(?3, finalized_at),
-            reservation_id = COALESCE(?4, reservation_id),
-            provisional_text = COALESCE(?5, provisional_text),
-            operations_json = COALESCE(?6, operations_json),
-            provider = COALESCE(?7, provider),
-            model = COALESCE(?8, model),
-            error_category = COALESCE(?9, error_category),
-            error_message = COALESCE(?10, error_message)
-         WHERE id = ?11 AND attempt_id = ?12",
+            finalized_at = CASE
+              WHEN ?3 THEN COALESCE(?4, finalized_at)
+              ELSE finalized_at
+            END,
+            reservation_id = COALESCE(?5, reservation_id),
+            provisional_text = COALESCE(?6, provisional_text),
+            operations_json = COALESCE(?7, operations_json),
+            provider = COALESCE(?8, provider),
+            model = COALESCE(?9, model),
+            error_category = COALESCE(?10, error_category),
+            error_message = COALESCE(?11, error_message)
+         WHERE id = ?12 AND attempt_id = ?13 AND state = ?14",
         params![
             next.as_str(),
             now,
-            finalized,
+            is_terminal,
+            if is_terminal {
+                Some(now.as_str())
+            } else {
+                None
+            },
             patch.reservation_id,
             patch.provisional_text,
             patch.operations_json,
@@ -258,9 +284,63 @@ pub fn transition_turn(
             patch.error_category,
             patch.error_message,
             turn_id,
-            attempt_id
+            attempt_id,
+            expected_state.as_str(),
         ],
     )?;
+    if n != 1 {
+        return Err(DbError::Invalid(
+            "turn_cas_conflict: expected prior state/attempt no longer matches".into(),
+        ));
+    }
+    get_turn(db, turn_id)
+}
+
+/// Rotate attempt identity for a genuine retry. Clears terminal timestamps.
+pub fn begin_retry_attempt(
+    db: &Database,
+    turn_id: &str,
+    prior_attempt_id: &str,
+) -> DbResult<TurnJournalRecord> {
+    let current = get_turn(db, turn_id)?;
+    if current.attempt_id != prior_attempt_id {
+        return Err(DbError::Invalid(
+            "stale_attempt: cannot retry from an older attempt".into(),
+        ));
+    }
+    if !matches!(
+        current.state,
+        TurnState::Failed | TurnState::InterruptedRecoverable
+    ) {
+        return Err(DbError::Invalid(format!(
+            "retry only from failed|interrupted_recoverable, got {:?}",
+            current.state
+        )));
+    }
+    let new_attempt = format!("attempt-{}", Uuid::new_v4());
+    let now = now_rfc3339();
+    let n = db.conn().execute(
+        "UPDATE turn_journal SET
+            attempt_id = ?1,
+            state = 'claimed',
+            updated_at = ?2,
+            finalized_at = NULL,
+            error_category = NULL,
+            error_message = NULL
+         WHERE id = ?3 AND attempt_id = ?4 AND state = ?5",
+        params![
+            new_attempt,
+            now,
+            turn_id,
+            prior_attempt_id,
+            current.state.as_str()
+        ],
+    )?;
+    if n != 1 {
+        return Err(DbError::Invalid(
+            "turn_cas_conflict: retry attempt rotation failed".into(),
+        ));
+    }
     get_turn(db, turn_id)
 }
 
@@ -301,6 +381,7 @@ pub fn list_recoverable_turns(db: &Database, limit: usize) -> DbResult<Vec<TurnJ
 }
 
 /// Append a conversation-scoped event after durable commit (cursor resume).
+/// Sequence allocation uses a dedicated counter row — not `MAX(sequence)+1`.
 pub fn append_conversation_event(
     db: &Database,
     conversation_id: &str,
@@ -311,12 +392,22 @@ pub fn append_conversation_event(
 ) -> DbResult<(String, i64)> {
     let id = format!("cev-{}", Uuid::new_v4());
     let now = now_rfc3339();
-    let seq: i64 = db.conn().query_row(
-        "SELECT COALESCE(MAX(sequence), 0) + 1 FROM conversation_event_log WHERE conversation_id = ?1",
+    let tx = db.conn().unchecked_transaction()?;
+    // Ensure counter row exists, then atomically increment.
+    tx.execute(
+        "INSERT OR IGNORE INTO conversation_event_sequences (conversation_id, next_sequence)
+         VALUES (?1, 1)",
+        [conversation_id],
+    )?;
+    let seq: i64 = tx.query_row(
+        "UPDATE conversation_event_sequences
+         SET next_sequence = next_sequence + 1
+         WHERE conversation_id = ?1
+         RETURNING next_sequence - 1",
         [conversation_id],
         |r| r.get(0),
     )?;
-    db.conn().execute(
+    tx.execute(
         "INSERT INTO conversation_event_log (
             id, conversation_id, sequence, turn_id, attempt_id, event_type, payload_json, created_at
          ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
@@ -331,6 +422,7 @@ pub fn append_conversation_event(
             now
         ],
     )?;
+    tx.commit()?;
     Ok((id, seq))
 }
 
@@ -372,6 +464,108 @@ mod tests {
             TurnPatch::default(),
         )
         .is_err());
+    }
+
+    #[test]
+    fn cas_rejects_stale_prior_state() {
+        let db = db();
+        let turn = create_turn(&db, "c1", None, "idem-cas", Some("hosted")).unwrap();
+        transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::Claimed,
+            TurnPatch::default(),
+        )
+        .unwrap();
+        // Concurrent CAS: same attempt but state already moved — second Claimed fails.
+        assert!(transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::Claimed,
+            TurnPatch::default(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn retry_rotates_attempt_and_clears_finalized() {
+        let db = db();
+        let turn = create_turn(&db, "c1", None, "idem-retry", None).unwrap();
+        let prior = turn.attempt_id.clone();
+        transition_turn(
+            &db,
+            &turn.id,
+            &prior,
+            TurnState::Claimed,
+            TurnPatch::default(),
+        )
+        .unwrap();
+        transition_turn(
+            &db,
+            &turn.id,
+            &prior,
+            TurnState::Failed,
+            TurnPatch {
+                error_category: Some("provider".into()),
+                error_message: Some("boom".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let failed = get_turn(&db, &turn.id).unwrap();
+        assert!(failed.finalized_at.is_some());
+        let retried = begin_retry_attempt(&db, &turn.id, &prior).unwrap();
+        assert_ne!(retried.attempt_id, prior);
+        assert_eq!(retried.state, TurnState::Claimed);
+        assert!(retried.finalized_at.is_none());
+        // Stale callback from prior attempt must not settle.
+        assert!(transition_turn(
+            &db,
+            &turn.id,
+            &prior,
+            TurnState::Streaming,
+            TurnPatch::default(),
+        )
+        .is_err());
+        // Reclaim without attempt rotation is forbidden.
+        let failed_again = {
+            let t = create_turn(&db, "c1", None, "idem-retry-2", None).unwrap();
+            let a = t.attempt_id.clone();
+            transition_turn(&db, &t.id, &a, TurnState::Claimed, TurnPatch::default()).unwrap();
+            transition_turn(
+                &db,
+                &t.id,
+                &a,
+                TurnState::Failed,
+                TurnPatch {
+                    error_category: Some("provider".into()),
+                    error_message: Some("boom".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            (t.id, a)
+        };
+        assert!(transition_turn(
+            &db,
+            &failed_again.0,
+            &failed_again.1,
+            TurnState::Claimed,
+            TurnPatch::default(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn idempotency_is_conversation_scoped() {
+        let db = db();
+        let a = create_turn(&db, "c-a", None, "same-key", None).unwrap();
+        let b = create_turn(&db, "c-b", None, "same-key", None).unwrap();
+        assert_ne!(a.id, b.id);
+        let a2 = create_turn(&db, "c-a", None, "same-key", None).unwrap();
+        assert_eq!(a.id, a2.id);
     }
 
     #[test]

@@ -14,6 +14,7 @@ pub mod patch;
 pub mod patch_scheduler;
 pub mod preservation;
 pub mod preview_transaction;
+pub mod progressive_ops;
 pub mod provider_conformance;
 pub mod queue;
 pub mod streaming;
@@ -76,8 +77,14 @@ pub use preservation::{
 };
 #[allow(unused_imports)]
 pub use preview_transaction::{
-    ingest_live_chunk, ingest_live_chunk_with_seed, PreviewOpEvent, PreviewPaintEvent,
-    PreviewSurfaceModel, PreviewTransaction, RejectedPreviewOp,
+    finish_progressive_ingest, ingest_live_chunk, ingest_live_chunk_with_seed,
+    ingest_progressive_chunk_with_seed, PreviewOpEvent, PreviewPaintEvent, PreviewSurfaceModel,
+    PreviewTransaction, RejectedPreviewOp,
+};
+#[allow(unused_imports)]
+pub use progressive_ops::{
+    reconcile_final_operations, ProgressiveOpsExpect, ProgressiveOpsFrame, ProgressiveOpsParser,
+    ProgressiveTerminal, PROGRESSIVE_OPS_V, PROGRESSIVE_SCHEMA_VERSION,
 };
 #[allow(unused_imports)]
 pub use provider_conformance::{

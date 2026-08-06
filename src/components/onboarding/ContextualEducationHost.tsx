@@ -6,6 +6,7 @@ import { useAppStore } from "@/stores/app-store";
 import { useOnboardingStore } from "@/stores/onboarding-store";
 import { ContextualHint } from "./ContextualHint";
 import { WhatsNewBanner } from "./WhatsNewBanner";
+import { OverlayPortal } from "@/components/ui/OverlayPortal";
 
 /**
  * Central first-use education watchers — keep triggers out of leaf UI.
@@ -106,9 +107,9 @@ export function ContextualEducationHost() {
   }, [bootstrapped, onboardingDisabled, phase]);
 
   return (
-    <>
+    <OverlayPortal>
       <WhatsNewBanner />
       <ContextualHint />
-    </>
+    </OverlayPortal>
   );
 }

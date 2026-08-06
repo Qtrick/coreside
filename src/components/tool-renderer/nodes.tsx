@@ -19,6 +19,13 @@ function asNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** Logical presentation size for generated scenes — reject nonfinite/negative/huge. */
+function asBoundedSceneSize(value: unknown, fallback: number, max = 2048): number {
+  const n = asNumber(value, fallback);
+  if (!(n > 0) || !Number.isFinite(n)) return fallback;
+  return Math.min(n, max);
+}
+
 function asBoolean(value: unknown, fallback = false): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
@@ -948,8 +955,8 @@ export function MediaPickerNode({ component }: ToolNodeProps) {
 }
 
 export function SvgSceneNode({ component, renderChild }: ToolNodeProps) {
-  const width = asNumber(component.props?.width, 320);
-  const height = asNumber(component.props?.height, 240);
+  const width = asBoundedSceneSize(component.props?.width, 320);
+  const height = asBoundedSceneSize(component.props?.height, 240);
   const viewBox = asString(component.props?.viewBox, `0 0 ${width} ${height}`);
   return (
     <svg
@@ -1140,8 +1147,8 @@ export function CanvasSceneNode({ component }: ToolNodeProps) {
   const objects = Array.isArray(component.props?.objects)
     ? (component.props?.objects as Array<Record<string, unknown>>).slice(0, 200)
     : [];
-  const width = asNumber(component.props?.width, 320);
-  const height = asNumber(component.props?.height, 240);
+  const width = asBoundedSceneSize(component.props?.width, 320);
+  const height = asBoundedSceneSize(component.props?.height, 240);
   return (
     <div
       className="tr-canvas-scene"

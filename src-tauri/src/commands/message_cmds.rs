@@ -502,24 +502,26 @@ fn emit_live_text_delta(
     }
 }
 
-/// Progressive op preview + speculative surface paint (RC3.4 Phase 7).
+/// Progressive op preview + speculative surface paint (RC3.10).
 ///
-/// Adapted from Partial Update `UpdateStreamParser` / `runModel` progressive
-/// dispatch (MIT) — preview paint is in-memory only; durable apply stays at
-/// turn end.
+/// Provider wire format is `coreside.ops.v1`. Speculative paint is in-memory
+/// only; durable apply requires a valid progressive terminal (`complete`).
 fn emit_progressive_op_previews(
     app: &AppHandle,
     state: &AppState,
     on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
     conversation_id: &str,
-    parser: &mut crate::runtime_v2::NdjsonFrameParser,
+    parser: &mut crate::runtime_v2::ProgressiveOpsParser,
     preview_txn: &mut crate::runtime_v2::PreviewTransaction,
     delta: &str,
 ) {
     use crate::runtime_v2::{get_surface, get_surface_state, PreviewSurfaceModel};
 
-    let events =
-        crate::runtime_v2::ingest_live_chunk_with_seed(parser, preview_txn, delta, |surface_id| {
+    let events = crate::runtime_v2::ingest_progressive_chunk_with_seed(
+        parser,
+        preview_txn,
+        delta,
+        |surface_id| {
             let db = state.db.lock();
             let surface = get_surface(&db, surface_id).ok()?;
             let state_json = get_surface_state(&db, surface_id).unwrap_or_else(|_| json!({}));
@@ -532,10 +534,14 @@ fn emit_progressive_op_previews(
                 base_revision: surface.current_revision,
                 preview_revision: surface.current_revision,
             })
-        });
+        },
+    );
 
     for ev in events {
         let status = ev.status.clone();
+        if status == "terminal_complete" {
+            continue;
+        }
         emit_turn(
             app,
             on_event,
@@ -1735,8 +1741,18 @@ async fn send_message_inner(
     // Stable id for this send_message turn's Text events (registry follow-up).
     let turn_id = Uuid::new_v4().to_string();
     let progressive_ops_enabled = provider_supports_progressive_ops(&access.credentials.provider);
-    // Progressive NDJSON op preview (RC3.3) — preview only until turn-end apply.
-    let mut progressive_parser = crate::runtime_v2::NdjsonFrameParser::new();
+    // Progressive coreside.ops.v1 parser — preview only until valid terminal.
+    // Do not bind turnId/attemptId until the runtime advertises them to the
+    // provider. Expecting an unpublished id rejects honest streams that omit
+    // binding and fails closed on any hallucinated turnId.
+    let mut progressive_parser =
+        crate::runtime_v2::ProgressiveOpsParser::new(crate::runtime_v2::ProgressiveOpsExpect {
+            turn_id: None,
+            attempt_id: None,
+            group_id: None,
+            schema_version: crate::runtime_v2::PROGRESSIVE_SCHEMA_VERSION.into(),
+            capability_version: None,
+        });
     let mut preview_txn = crate::runtime_v2::PreviewTransaction::new(turn_id.clone(), None);
     let resolved = chat_with_auto(
         &access,
@@ -2009,10 +2025,17 @@ async fn send_message_inner(
         let on_event_for_actions = on_event.clone();
         let mut live_text_accum = String::new();
         let mut last_preview = String::new();
-        // Discard incomplete NDJSON buffer from the prior provider round so a
-        // trailing partial frame cannot splice with the follow-up stream.
-        // Keep preview_txn accepted ops — turn-end apply still owns commit.
-        progressive_parser = crate::runtime_v2::NdjsonFrameParser::new();
+        // Discard incomplete progressive buffer from the prior provider round.
+        // Speculative preview ops are cleared — only a valid terminal authorizes commit.
+        progressive_parser =
+            crate::runtime_v2::ProgressiveOpsParser::new(crate::runtime_v2::ProgressiveOpsExpect {
+                turn_id: None,
+                attempt_id: None,
+                group_id: None,
+                schema_version: crate::runtime_v2::PROGRESSIVE_SCHEMA_VERSION.into(),
+                capability_version: None,
+            });
+        preview_txn = crate::runtime_v2::PreviewTransaction::new(turn_id.clone(), None);
 
         let follow_up = chat_with_auto(
             &access,
@@ -2301,8 +2324,27 @@ async fn send_message_inner(
     // Runtime V2: apply multi-surface operations when present
     let mut v2_apply: Option<serde_json::Value> = None;
     if parsed.payload.schema_version == "2" {
-        // Live NDJSON path: if operations array empty, prefer progressive preview
-        // ops harvested during TextDelta; else post-hoc legacy harvest from raw_text.
+        // Finish progressive stream first — incomplete/missing terminal commits nothing.
+        if progressive_ops_enabled {
+            for ev in crate::runtime_v2::finish_progressive_ingest(
+                &mut progressive_parser,
+                &mut preview_txn,
+            ) {
+                if ev.status == "fatal" {
+                    if let Some(reason) = &ev.reason {
+                        emit_turn(
+                            &app,
+                            on_event.as_ref(),
+                            AgentTurnEvent::Error {
+                                conversation_id: conversation_id.clone(),
+                                message: sanitize_error(reason, None),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
         let mut operations_from_payload: Option<Vec<crate::runtime_v2::AppOperation>> = None;
         if let Some(ops_val) = &parsed.payload.operations {
             if !ops_val.is_empty() {
@@ -2313,7 +2355,45 @@ async fn send_message_inner(
                 }
             }
         }
-        if operations_from_payload
+
+        if progressive_ops_enabled {
+            match progressive_parser.durable_operations() {
+                Some(durable) => {
+                    let durable = durable.to_vec();
+                    if let Some(final_ops) = operations_from_payload.as_ref() {
+                        if let Err(err) =
+                            crate::runtime_v2::reconcile_final_operations(&durable, final_ops)
+                        {
+                            tracing::warn!(
+                                conversation_id = %conversation_id,
+                                error = %err,
+                                "progressive final payload diverged from preview — committing zero ops"
+                            );
+                            preview_txn.mark_interrupted();
+                            operations_from_payload = Some(Vec::new());
+                        }
+                        // Prefer final_ops when reconciliation succeeded (already set).
+                    } else if !durable.is_empty() {
+                        operations_from_payload = Some(durable);
+                    }
+                }
+                None if progressive_parser.started() || progressive_parser.is_halted() => {
+                    // Incomplete/abort/halted progressive stream — never harvest speculative ops.
+                    preview_txn.mark_interrupted();
+                    if operations_from_payload.is_some() {
+                        tracing::warn!(
+                            conversation_id = %conversation_id,
+                            "ignoring final operations after invalid progressive stream"
+                        );
+                        operations_from_payload = Some(Vec::new());
+                    }
+                }
+                None => {
+                    // Progressive mode enabled but no progressive frames — allow
+                    // aggregate schema-v2 operations only (text/tool_change path).
+                }
+            }
+        } else if operations_from_payload
             .as_ref()
             .map(|o| o.is_empty())
             .unwrap_or(true)
@@ -2321,21 +2401,19 @@ async fn send_message_inner(
             && !preview_txn.committed
             && !preview_txn.is_empty()
         {
-            // Progressive live previews already emitted status "preview" on Channel.
-            // Never harvest after interrupt — that would durable-commit speculative ops.
+            // Legacy internal StreamEvent preview path (non-progressive providers).
             operations_from_payload = Some(preview_txn.accepted_operations().to_vec());
         }
-        if progressive_ops_enabled
+
+        // Post-hoc legacy harvest is isolated from the authoritative progressive path.
+        if !progressive_ops_enabled
             && operations_from_payload
                 .as_ref()
                 .map(|o| o.is_empty())
                 .unwrap_or(true)
         {
-            // Post-hoc buffered harvest: use legacy/compat parser so bare
-            // AppOperation / AgentResponseV2 in raw_text still harvest (not live NDJSON).
-            // Fail-closed: same capability gate as live TextDelta NDJSON previews.
             let mut parser = crate::runtime_v2::NdjsonFrameParser::new();
-            let mut emit_harvest_events =
+            let emit_harvest_events =
                 |events: Vec<Result<crate::runtime_v2::StreamEvent, String>>| {
                     for ev in events {
                         if let Ok(crate::runtime_v2::StreamEvent::OperationFrameCompleted {
@@ -2355,7 +2433,6 @@ async fn send_message_inner(
                     }
                 };
             emit_harvest_events(parser.push_legacy_compat(&resolved.response.raw_text));
-            // Buffered raw_text often lacks a trailing newline — finish must emit too.
             emit_harvest_events(parser.finish_legacy_compat());
             let harvested = parser.completed_operations().to_vec();
             if !harvested.is_empty() {

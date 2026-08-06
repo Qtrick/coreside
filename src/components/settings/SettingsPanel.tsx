@@ -599,8 +599,11 @@ export function SettingsPanel() {
                 Dock icon
               </h4>
               <p>
-                macOS Dock tile. Auto follows system appearance; Dark and Light
-                lock one of the two brand icons.
+                macOS Dock tile. Classic Dark and Light lock a fixed brand tile.
+                Auto follows light/dark appearance only — it does not follow
+                macOS Icon &amp; Widget Style (Default / Dark / Clear / Tinted).
+                Adaptive Icon &amp; Widget Style requires the packaged system
+                icon; temporary runtime PNG overrides cannot provide it.
               </p>
               <div
                 className="dock-icon-options"

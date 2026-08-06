@@ -187,13 +187,28 @@ img {
   height: 100%;
 }
 
-.app-shell > :not(.live-wallpaper):not(.provider-modal-root) {
-  position: relative;
-  z-index: 1;
+/* Structural shell layers — explicit z-index contract (not a broad child rule). */
+.app-shell > .live-wallpaper {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
 }
 
-/* Keep modals as true viewport overlays — never grid participants. */
-.app-shell > .provider-modal-root {
+.app-shell > .sidebar,
+.app-shell > .app-shell-main {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+/* Window-local overlay host — never a grid participant.
+ * OverlayPortal mounts to document.body (#coreside-window-overlay-root).
+ * ModalPortal portals .provider-modal-root under body (via display:contents). */
+.app-shell > .window-overlay-root,
+.app-shell > .provider-modal-root,
+body > .window-overlay-root,
+#coreside-window-overlay-root {
   position: fixed;
   inset: 0;
   z-index: 100;
@@ -202,6 +217,19 @@ img {
   width: auto;
   height: auto;
   margin: 0;
+  pointer-events: none;
+}
+
+.app-shell > .window-overlay-root > *,
+.app-shell > .provider-modal-root > *,
+body > .window-overlay-root > *,
+#coreside-window-overlay-root > * {
+  pointer-events: auto;
+}
+
+/* Keep modals as true viewport overlays — never grid participants. */
+.app-shell > .provider-modal-root {
+  z-index: 110;
 }
 
 .app-shell[data-wallpaper] .sidebar {
@@ -603,9 +631,27 @@ img {
   max-width: 100%;
 }
 
-.tool-canvas-header > div:first-child {
+.tool-canvas-header > div:first-child,
+.tool-canvas-header-title {
   min-width: 0;
-  flex: 1 1 10rem;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.tool-canvas-header-title h2,
+.tool-canvas-header h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.tool-canvas-header-actions {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .panel-subtitle,
@@ -1845,6 +1891,21 @@ img {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   overflow: hidden;
+}
+
+.tr-svg-scene,
+.tr-canvas-scene {
+  display: block;
+  max-inline-size: 100%;
+  max-width: 100%;
+  height: auto;
+  min-width: 0;
+}
+
+.tr-canvas-scene {
+  /* Presentation box scales down; absolute children stay in logical coords. */
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .tr-field {
