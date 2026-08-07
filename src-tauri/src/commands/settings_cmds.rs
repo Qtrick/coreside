@@ -579,11 +579,11 @@ pub fn apply_persisted_dock_icon(
 
     let cfg = read_persisted_dock(&state)?;
     // Same mutex as commit — prevents startup apply from racing a live preference change.
-    branding::apply_dock_native_serialized(&app, &cfg)
+    let override_cleared = branding::apply_dock_native_serialized(&app, &cfg)
         .map_err(|_| CommandError::new("dock_icon", "Couldn't update the Dock icon."))?;
     Ok(DockIconCommitResult {
         status_label: cfg.status_label().to_string(),
-        override_cleared: cfg.authority == DockAuthority::FollowMacos,
+        override_cleared,
         effective_authority: cfg.authority,
         config: cfg,
     })

@@ -22,6 +22,8 @@
   <string>0.1.0</string>
   <key>LSMinimumSystemVersion</key>
   <string>10.13</string>
+  <key>CFBundleIconName</key>
+  <string>Icon</string>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>LSHasLocalizedDisplayName</key>

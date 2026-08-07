@@ -19,7 +19,7 @@ export const BRAND_MANIFEST = {
     split: "coreside-dock-split.png",
   },
   note:
-    "Follow macOS clears the temporary Dock override so the packaged application icon is authoritative. Adaptive Icon & Widget Style needs Assets.car (blocked without Xcode/Icon Composer). Manual Classic/Split tiles are temporary AppKit overrides while Coreside is running.",
+    "Follow macOS clears the temporary Dock override so the packaged application icon is authoritative. Adaptive Icon & Widget Style needs Assets.car in the installed bundle. Manual Classic/Split tiles are temporary AppKit overrides while Coreside is running.",
 } as const;
 
 export type BrandAppearance = "light" | "dark";

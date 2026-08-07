@@ -1,4 +1,11 @@
-import { DEFAULT_DOCK_ICON, DEFAULT_WALLPAPER, parseDockIconConfig, WallpaperKindSchema } from "@/types/agent";
+import {
+  DEFAULT_DOCK_ICON,
+  DEFAULT_WALLPAPER,
+  dockIconStatusLabel,
+  parseDockIconConfig,
+  validateDockIconConfig,
+  WallpaperKindSchema,
+} from "@/types/agent";
 import type {
   AiStatus,
   AppInfo,
@@ -1706,18 +1713,22 @@ export async function mockInvoke<T>(
     }
 
     case "commit_dock_icon_preference": {
-      const preference = parseDockIconConfig(args?.preference);
+      // Match Rust commit: strict validate (reject), not tolerant parse/normalize.
+      let preference: DockIconConfig;
+      try {
+        preference = validateDockIconConfig(
+          args?.preference as DockIconConfig,
+        );
+      } catch (error) {
+        throw new TauriCommandError(
+          error instanceof Error ? error.message : "Invalid Dock icon preference",
+          "invalid",
+        );
+      }
       mockDb.settings.dockIcon = preference;
       return {
         config: preference,
-        statusLabel:
-          preference.authority === "follow_macos"
-            ? "Following macOS"
-            : preference.artwork === "split"
-              ? "Using Split"
-              : preference.style === "light"
-                ? "Using Classic Light"
-                : "Using Classic Dark",
+        statusLabel: dockIconStatusLabel(preference),
         effectiveAuthority: preference.authority,
         overrideCleared: preference.authority === "follow_macos",
       } as T;
@@ -1726,14 +1737,7 @@ export async function mockInvoke<T>(
       const preference = parseDockIconConfig(mockDb.settings.dockIcon);
       return {
         config: preference,
-        statusLabel:
-          preference.authority === "follow_macos"
-            ? "Following macOS"
-            : preference.artwork === "split"
-              ? "Using Split"
-              : preference.style === "light"
-                ? "Using Classic Light"
-                : "Using Classic Dark",
+        statusLabel: dockIconStatusLabel(preference),
         effectiveAuthority: preference.authority,
         overrideCleared: preference.authority === "follow_macos",
       } as T;

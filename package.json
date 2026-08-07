@@ -71,6 +71,8 @@
     "test:policy": "cargo test --manifest-path src-tauri/Cargo.toml --lib application_kernel::policy",
     "test:recovery": "cargo test --manifest-path src-tauri/Cargo.toml --lib application_kernel::recovery",
     "brand:generate": "python3 scripts/generate_branding_assets.py",
+    "brand:compile-adaptive-icon": "bash scripts/compile_macos_adaptive_icon.sh",
+    "test:branding-icons": "python3 scripts/test_branding_icon_geometry.py",
     "crawl4ai:setup": "node scripts/crawl4ai-setup.mjs",
     "crawl4ai:doctor": "node scripts/crawl4ai-doctor.mjs",
     "crawl4ai:smoke": "node scripts/crawl4ai-smoke.mjs",

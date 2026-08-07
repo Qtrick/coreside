@@ -2,7 +2,7 @@
 //!
 //! Follow macOS clears the temporary AppKit override (`applicationIconImage(None)`)
 //! so the packaged application icon is authoritative again. Adaptive Icon & Widget
-//! Style requires a genuine Assets.car (blocked without Xcode/actool/Icon Composer).
+//! Style requires a genuine `Assets.car` in the installed app bundle (`CFBundleIconName`).
 //! Manual mode installs a temporary PNG override for Classic or Split artwork.
 
 use std::path::PathBuf;
@@ -245,7 +245,11 @@ pub fn dock_icon_candidates(app: Option<&AppHandle>, filename: &str) -> Vec<Path
             candidates.push(resource_dir.join("branding").join(filename));
         }
     }
-    candidates.push(source_tree_branding_dir().join(filename));
+    // Packaged/release builds must not fall back to CARGO_MANIFEST_DIR — that
+    // path is a build-machine artifact and can mask missing bundled resources.
+    if cfg!(debug_assertions) {
+        candidates.push(source_tree_branding_dir().join(filename));
+    }
     candidates
 }
 
@@ -291,21 +295,67 @@ fn read_and_validate_manual(app: &AppHandle, cfg: &DockIconConfig) -> Result<Vec
     Ok(bytes)
 }
 
-/// Apply AppKit mutation only (no persistence). Caller must hold `commit_lock`
-/// when serializing against concurrent commit/apply (see `apply_dock_native_serialized`).
-pub fn apply_dock_native(app: &AppHandle, cfg: &DockIconConfig) -> Result<(), String> {
+/// `…/Something.app/Contents/Resources` when `exe` is the bundle binary.
+pub fn macos_app_bundle_resources_dir(exe: &std::path::Path) -> Option<PathBuf> {
+    let macos = exe.parent()?;
+    if macos.file_name()?.to_str()? != "MacOS" {
+        return None;
+    }
+    let contents = macos.parent()?;
+    if contents.file_name()?.to_str()? != "Contents" {
+        return None;
+    }
+    let bundle = contents.parent()?;
+    if bundle.extension()?.to_str()? != "app" {
+        return None;
+    }
+    Some(contents.join("Resources"))
+}
+
+/// True when this process is a real `.app` with a packaged Dock icon resource.
+/// Unpackaged `tauri dev` binaries have none — clearing AppKit then shows `exec`.
+pub fn packaged_macos_icon_available() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let Some(resources) = macos_app_bundle_resources_dir(&exe) else {
+        return false;
+    };
+    ["Assets.car", "icon.icns", "AppIcon.icns"]
+        .iter()
+        .any(|name| resources.join(name).is_file())
+}
+
+/// Apply AppKit mutation only (no persistence). Returns whether the temporary
+/// override was cleared (Follow macOS inside a packaged `.app`).
+///
+/// Caller must hold `commit_lock` when serializing against concurrent
+/// commit/apply (see `apply_dock_native_serialized`).
+pub fn apply_dock_native(app: &AppHandle, cfg: &DockIconConfig) -> Result<bool, String> {
     match cfg.authority {
         DockAuthority::FollowMacos => {
             #[cfg(target_os = "macos")]
             {
+                // ponytail: unpackaged binaries have no CFBundle icon — clearing
+                // AppKit yields the generic `exec` Dock tile. Stand in Classic Dark
+                // (same primary as packaged icns) until a real .app is launched.
+                if !packaged_macos_icon_available() {
+                    let stand_in = DockIconConfig::manual_classic(DockStyle::Dark);
+                    let bytes = read_and_validate_manual(app, &stand_in)?;
+                    run_appkit_on_main(app, move || set_macos_application_icon(&bytes))?;
+                    tracing::info!(
+                        "Follow macOS: unpackaged process — Classic Dark stand-in (avoid exec icon)"
+                    );
+                    return Ok(false);
+                }
                 run_appkit_on_main(app, || clear_macos_application_icon())?;
                 tracing::info!("Cleared macOS Dock override (Follow macOS)");
-                Ok(())
+                Ok(true)
             }
             #[cfg(not(target_os = "macos"))]
             {
                 let _ = app;
-                Ok(())
+                Ok(true)
             }
         }
         DockAuthority::Manual => {
@@ -318,19 +368,19 @@ pub fn apply_dock_native(app: &AppHandle, cfg: &DockIconConfig) -> Result<(), St
                     style = ?cfg.style,
                     "Applied manual macOS Dock override"
                 );
-                Ok(())
+                Ok(false)
             }
             #[cfg(not(target_os = "macos"))]
             {
                 let _ = bytes;
-                Ok(())
+                Ok(false)
             }
         }
     }
 }
 
 /// Startup / re-apply path: same mutex as commit so rapid selection cannot race AppKit.
-pub fn apply_dock_native_serialized(app: &AppHandle, cfg: &DockIconConfig) -> Result<(), String> {
+pub fn apply_dock_native_serialized(app: &AppHandle, cfg: &DockIconConfig) -> Result<bool, String> {
     let _guard = commit_lock().lock();
     apply_dock_native(app, cfg)
 }
@@ -365,13 +415,16 @@ pub fn commit_dock_preference(
         })?;
     }
 
-    if let Err(message) = apply_dock_native(app, &cfg) {
-        return Err(DockIconCommitError {
-            code: "native".into(),
-            message: consumer_safe_native_error(&message),
-            rollback_failed: false,
-        });
-    }
+    let override_cleared = match apply_dock_native(app, &cfg) {
+        Ok(cleared) => cleared,
+        Err(message) => {
+            return Err(DockIconCommitError {
+                code: "native".into(),
+                message: consumer_safe_native_error(&message),
+                rollback_failed: false,
+            });
+        }
+    };
 
     if let Err(message) = persist(&cfg) {
         let rollback_failed = apply_dock_native(app, prior).is_err();
@@ -392,7 +445,7 @@ pub fn commit_dock_preference(
 
     Ok(DockIconCommitResult {
         status_label: cfg.status_label().to_string(),
-        override_cleared: cfg.authority == DockAuthority::FollowMacos,
+        override_cleared,
         effective_authority: cfg.authority,
         config: cfg,
     })
@@ -500,6 +553,36 @@ fn clear_macos_application_icon() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+    use std::io::Cursor;
+
+    /// Synthetic dock PNG: square canvas with controllable corner alpha.
+    fn rgba_png(w: u32, h: u32, corner_alpha: u8) -> Vec<u8> {
+        let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_fn(w, h, |x, y| {
+            let at_corner = (x == 0 || x == w - 1) && (y == 0 || y == h - 1);
+            Rgba([10, 20, 30, if at_corner { corner_alpha } else { 255 }])
+        });
+        let mut bytes = Vec::new();
+        DynamicImage::ImageRgba8(img)
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+            .unwrap();
+        bytes
+    }
+
+    #[test]
+    fn macos_bundle_resources_dir_requires_app_layout() {
+        use std::path::Path;
+        assert!(macos_app_bundle_resources_dir(Path::new(
+            "/tmp/target/debug/Coreside"
+        ))
+        .is_none());
+        assert_eq!(
+            macos_app_bundle_resources_dir(Path::new(
+                "/Applications/Coreside.app/Contents/MacOS/Coreside"
+            )),
+            Some(PathBuf::from("/Applications/Coreside.app/Contents/Resources"))
+        );
+    }
 
     #[test]
     fn legacy_auto_becomes_follow_macos() {
@@ -540,11 +623,48 @@ mod tests {
     }
 
     #[test]
-    fn follow_never_resolves_manual_filename() {
-        assert!(manual_dock_filename(DockArtwork::Classic, DockStyle::Dark).is_some());
-        // Follow path does not call manual_dock_filename.
-        let follow = DockIconConfig::follow_macos();
+    fn follow_macos_never_resolves_a_png_filename() {
+        // Follow strips any leftover artwork/style — no manual PNG applies.
+        let follow = validate_dock_config(&DockIconConfig {
+            schema_version: 1,
+            authority: DockAuthority::FollowMacos,
+            artwork: Some(DockArtwork::Split),
+            style: Some(DockStyle::Original),
+        })
+        .unwrap();
+        assert_eq!(follow.authority, DockAuthority::FollowMacos);
         assert!(follow.artwork.is_none());
+        assert!(follow.style.is_none());
+    }
+
+    #[test]
+    fn manual_split_still_resolves_dock_split_png() {
+        assert_eq!(
+            manual_dock_filename(DockArtwork::Split, DockStyle::Original),
+            Some("coreside-dock-split.png")
+        );
+        let cfg = validate_dock_config(&DockIconConfig::manual_split()).unwrap();
+        let name = manual_dock_filename(cfg.artwork.unwrap(), cfg.style.unwrap()).unwrap();
+        assert_eq!(name, "coreside-dock-split.png");
+        assert!(source_tree_branding_dir().join(name).is_file());
+    }
+
+    #[test]
+    fn dock_icon_candidates_source_tree_only_in_debug() {
+        let name = "coreside-dock-dark.png";
+        let candidates = dock_icon_candidates(None, name);
+        let source = source_tree_branding_dir().join(name);
+        if cfg!(debug_assertions) {
+            assert!(
+                candidates.iter().any(|p| p == &source),
+                "debug builds may resolve repo branding resources"
+            );
+        } else {
+            assert!(
+                candidates.is_empty(),
+                "release builds must not fall back to CARGO_MANIFEST_DIR without an AppHandle"
+            );
+        }
     }
 
     #[test]
@@ -557,22 +677,65 @@ mod tests {
             manual_dock_filename(DockArtwork::Classic, DockStyle::Light),
             Some("coreside-dock-light.png")
         );
-        assert_eq!(
-            manual_dock_filename(DockArtwork::Split, DockStyle::Original),
-            Some("coreside-dock-split.png")
-        );
         assert!(manual_dock_filename(DockArtwork::Split, DockStyle::Dark).is_none());
     }
 
     #[test]
     fn validate_rejects_bad_manual_combo() {
-        let bad = DockIconConfig {
+        let split_dark = DockIconConfig {
             schema_version: 1,
             authority: DockAuthority::Manual,
             artwork: Some(DockArtwork::Split),
             style: Some(DockStyle::Dark),
         };
-        assert!(validate_dock_config(&bad).is_err());
+        assert!(validate_dock_config(&split_dark).is_err());
+
+        let classic_original = DockIconConfig {
+            schema_version: 1,
+            authority: DockAuthority::Manual,
+            artwork: Some(DockArtwork::Classic),
+            style: Some(DockStyle::Original),
+        };
+        assert!(validate_dock_config(&classic_original).is_err());
+
+        let missing_artwork = DockIconConfig {
+            schema_version: 1,
+            authority: DockAuthority::Manual,
+            artwork: None,
+            style: Some(DockStyle::Dark),
+        };
+        assert!(validate_dock_config(&missing_artwork).is_err());
+    }
+
+    #[test]
+    fn validate_manual_dock_bytes_rejects_non_square() {
+        let bytes = rgba_png(128, 160, 0);
+        let err = validate_manual_dock_bytes(&bytes).unwrap_err();
+        assert!(err.contains("square"), "{err}");
+    }
+
+    #[test]
+    fn validate_manual_dock_bytes_rejects_undersized() {
+        let bytes = rgba_png(64, 64, 0);
+        let err = validate_manual_dock_bytes(&bytes).unwrap_err();
+        assert!(err.contains("128"), "{err}");
+    }
+
+    #[test]
+    fn validate_manual_dock_bytes_rejects_opaque_corners() {
+        let bytes = rgba_png(128, 128, 255);
+        let err = validate_manual_dock_bytes(&bytes).unwrap_err();
+        assert!(err.contains("transparent"), "{err}");
+    }
+
+    #[test]
+    fn validate_manual_dock_bytes_accepts_transparent_square() {
+        validate_manual_dock_bytes(&rgba_png(128, 128, 0)).unwrap();
+    }
+
+    #[test]
+    fn validate_manual_dock_bytes_rejects_garbage() {
+        assert!(validate_manual_dock_bytes(b"not-a-png").is_err());
     }
 
     #[test]
@@ -592,12 +755,32 @@ mod tests {
 
     #[test]
     fn commit_follow_does_not_require_png() {
-        // persist-only unit path: apply is no-op off-macOS; on macOS needs main thread.
-        let prior = DockIconConfig::manual_classic(DockStyle::Dark);
+        // Follow validates without resolving a manual PNG filename.
         let requested = DockIconConfig::follow_macos();
-        // Without AppHandle we only test validate path.
         assert!(validate_dock_config(&requested).is_ok());
-        let _ = prior;
+        assert!(requested.artwork.is_none());
+    }
+
+    #[test]
+    fn native_errors_are_consumer_safe() {
+        assert_eq!(
+            consumer_safe_native_error("Dock icon AppKit calls must run on the main thread"),
+            "Couldn't update the Dock icon right now. Try again."
+        );
+        assert_eq!(
+            consumer_safe_native_error(
+                "Couldn't find the Dock icon image. Try reinstalling Coreside."
+            ),
+            "Couldn't find the Dock icon image. Try reinstalling Coreside."
+        );
+        assert_eq!(
+            consumer_safe_native_error("objc2::panic: null selector 0xdead"),
+            "Couldn't update the Dock icon."
+        );
+        assert_eq!(
+            consumer_safe_persist_error("SQLITE_BUSY: database is locked"),
+            "Your previous Dock icon was restored."
+        );
     }
 
     #[test]

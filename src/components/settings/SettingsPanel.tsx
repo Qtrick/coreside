@@ -669,9 +669,11 @@ export function SettingsPanel() {
                 <>
                   <p>
                     Follow macOS (Recommended) clears any temporary Dock override
-                    so Coreside can use its packaged application icon. Once an
-                    adaptive packaged icon is available, macOS can apply your
-                    Default, Dark, Clear, or Tinted icon style automatically.
+                    so the packaged application icon is authoritative. When the
+                    app bundle includes Assets.car, macOS can apply Default,
+                    Dark, Clear, or Tinted Icon & Widget Style. In development
+                    (unpackaged), Follow macOS uses Classic Dark as a stand-in
+                    so the Dock does not fall back to a generic executable icon.
                     Choose manually to lock Classic Dark, Classic Light, or
                     Split while Coreside is open.
                   </p>
@@ -694,7 +696,7 @@ export function SettingsPanel() {
                         <span className="dock-recommended">Recommended</span>
                       </span>
                       <span className="dock-authority-hint">
-                        Uses the packaged icon; follows macOS when adaptive packaging is present
+                        Uses the packaged icon; follows macOS Icon & Widget Style when Assets.car is present
                       </span>
                     </button>
                     <button

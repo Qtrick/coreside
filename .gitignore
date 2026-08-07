@@ -67,3 +67,7 @@ reports/e2e-results.json
 # Test / temp
 tmp/
 *.tmp
+
+# Intermediate actool output (final Assets.car is committed under icons/)
+src-tauri/icons/adaptive-build/
+

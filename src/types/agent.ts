@@ -57,6 +57,48 @@ export function normalizeDockIconConfig(cfg: DockIconConfig): DockIconConfig {
   return { ...DEFAULT_DOCK_ICON };
 }
 
+/**
+ * Align with Rust `validate_dock_config` (commit path).
+ * Rejects invalid manual combinations instead of silently normalizing them.
+ */
+export function validateDockIconConfig(cfg: DockIconConfig): DockIconConfig {
+  if (cfg.schemaVersion !== 1) {
+    throw new Error("Unsupported Dock icon schema version");
+  }
+  if (cfg.authority === "follow_macos") {
+    return { ...DEFAULT_DOCK_ICON };
+  }
+  if (cfg.artwork == null) {
+    throw new Error("Manual Dock mode requires artwork");
+  }
+  if (cfg.style == null) {
+    throw new Error("Manual Dock mode requires style");
+  }
+  if (cfg.artwork === "classic" && (cfg.style === "dark" || cfg.style === "light")) {
+    return {
+      schemaVersion: 1,
+      authority: "manual",
+      artwork: "classic",
+      style: cfg.style,
+    };
+  }
+  if (cfg.artwork === "split" && cfg.style === "original") {
+    return {
+      schemaVersion: 1,
+      authority: "manual",
+      artwork: "split",
+      style: "original",
+    };
+  }
+  if (cfg.artwork === "classic" && cfg.style === "original") {
+    throw new Error("Classic artwork requires dark or light style");
+  }
+  if (cfg.artwork === "split") {
+    throw new Error("Split artwork requires original style");
+  }
+  throw new Error("That Dock artwork combination is not available");
+}
+
 /** Normalize legacy string prefs and versioned objects. Invalid → Follow macOS. */
 export function parseDockIconConfig(raw: unknown): DockIconConfig {
   if (typeof raw === "string") {

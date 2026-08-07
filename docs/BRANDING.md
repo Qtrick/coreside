@@ -36,7 +36,7 @@ Manifest: `src/assets/branding/manifest.ts` (`inAppLogoFor`).
 
 ### Dock / application icons
 
-**Follow macOS** (default): clears `NSApplication.applicationIconImage` so the packaged application icon is authoritative again. Adaptive Icon & Widget Style (Default / Dark / Clear / Tinted) requires a genuine Icon Composer `.icon` → `Assets.car` (blocked on this machine without Xcode 26+ / `actool`). Do not claim adaptive packaging until Assets.car ships.
+**Follow macOS** (default): clears `NSApplication.applicationIconImage` so the packaged application icon is authoritative again. Adaptive Icon & Widget Style (Default / Dark / Clear / Tinted) requires a genuine `Assets.car` in the installed app bundle (`CFBundleIconName` = `Icon`). Source is wired for precompiled `src-tauri/icons/Assets.car` from `Coreside.icon` via `actool` 26+ (`./scripts/compile_macos_adaptive_icon.sh`, listed in `bundle.icon`). Confirm `Contents/Resources/Assets.car` after packaging before calling adaptive packaging ready.
 
 **Choose manually**: temporary AppKit override via `commit_dock_icon_preference` (main window only):
 
