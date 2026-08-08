@@ -8,7 +8,7 @@
 #[cfg(test)]
 mod tests {
     use crate::db::{Database, DEFAULT_WORKSPACE_ID, LATEST_MIGRATION};
-    use rusqlite::params;
+    use rusqlite::{params, OptionalExtension};
     use tempfile::tempdir;
 
     fn assert_fk_ok(db: &Database) {
@@ -67,6 +67,27 @@ mod tests {
 
     fn count(db: &Database, sql: &str) -> i64 {
         db.conn().query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+
+    const FOLLOW_MACOS_DOCK: &str = r#"{"schemaVersion":1,"authority":"follow_macos"}"#;
+
+    fn upsert_setting(db: &Database, key: &str, value: &str) {
+        db.conn()
+            .execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            )
+            .unwrap();
+    }
+
+    fn setting_value(db: &Database, key: &str) -> Option<String> {
+        db.conn()
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
+            .optional()
+            .unwrap()
     }
 
     /// Seed the common user-facing rows that existed by migration 006.
@@ -482,7 +503,7 @@ mod tests {
             .iter()
             .map(|(n, _)| *n)
             .collect::<Vec<_>>();
-        assert_eq!(names.len(), 23);
+        assert_eq!(names.len(), 24);
         for (i, name) in names.iter().enumerate() {
             let expected = format!("{:03}_", i + 1);
             assert!(
@@ -490,6 +511,125 @@ mod tests {
                 "migration {i} should start with {expected}, got {name}"
             );
         }
-        assert_eq!(names[22], LATEST_MIGRATION);
+        assert_eq!(names[23], LATEST_MIGRATION);
+        assert_eq!(LATEST_MIGRATION, "024_reset_dock_icon_follow_macos");
+    }
+
+    #[test]
+    fn fresh_install_reaches_dock_icon_follow_macos_reset() {
+        let dir = tempdir().unwrap();
+        let db = Database::open_path(&dir.path().join("fresh024.db")).unwrap();
+        assert_latest(&db);
+        assert_fk_ok(&db);
+        // Fresh installs have no Dock preference row; 024 is an UPDATE-only
+        // migration and must not invent a setting.
+        assert_eq!(setting_value(&db, "dockIcon"), None);
+        assert_eq!(setting_value(&db, "dock_icon"), None);
+    }
+
+    #[test]
+    fn upgrade_from_023_preserves_follow_macos_dock_icon() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("from023-follow.db");
+        {
+            let db = Database::open_path_through(&path, "023_dock_icon_preference").unwrap();
+            upsert_setting(&db, "dockIcon", FOLLOW_MACOS_DOCK);
+            assert_eq!(db.applied_migrations().unwrap().len(), 23);
+        }
+        let db = Database::open_path(&path).unwrap();
+        assert_latest(&db);
+        assert_fk_ok(&db);
+        assert_eq!(
+            setting_value(&db, "dockIcon").as_deref(),
+            Some(FOLLOW_MACOS_DOCK)
+        );
+    }
+
+    #[test]
+    fn upgrade_from_023_resets_manual_and_legacy_dock_icons() {
+        // 024 must clear both versioned manual JSON and any leftover legacy
+        // dark/light/split strings under either settings key.
+        let cases: &[(&str, &str)] = &[
+            (
+                "dockIcon",
+                r#"{"schemaVersion":1,"authority":"manual","artwork":"classic","style":"dark"}"#,
+            ),
+            (
+                "dockIcon",
+                r#"{"schemaVersion":1,"authority":"manual","artwork":"classic","style":"light"}"#,
+            ),
+            (
+                "dockIcon",
+                r#"{"schemaVersion":1,"authority":"manual","artwork":"split","style":"original"}"#,
+            ),
+            ("dock_icon", "dark"),
+            ("dockIcon", "light"),
+            ("dock_icon", "split"),
+            ("dockIcon", "  Dark  "),
+        ];
+
+        for (i, (key, stale)) in cases.iter().enumerate() {
+            let dir = tempdir().unwrap();
+            let path = dir.path().join(format!("from023-reset-{i}.db"));
+            {
+                let db = Database::open_path_through(&path, "023_dock_icon_preference").unwrap();
+                upsert_setting(&db, key, stale);
+                assert_eq!(
+                    setting_value(&db, key).as_deref(),
+                    Some(*stale),
+                    "precondition: stale value stored for case {i}"
+                );
+            }
+            let db = Database::open_path(&path).unwrap();
+            assert_latest(&db);
+            assert_fk_ok(&db);
+            assert_eq!(
+                setting_value(&db, key).as_deref(),
+                Some(FOLLOW_MACOS_DOCK),
+                "case {i} ({key}={stale}) must reset to Follow macOS"
+            );
+        }
+    }
+
+    #[test]
+    fn upgrade_from_023_dock_icon_reset_is_idempotent() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("from023-idempotent.db");
+        {
+            let db = Database::open_path_through(&path, "023_dock_icon_preference").unwrap();
+            upsert_setting(
+                &db,
+                "dockIcon",
+                r#"{"schemaVersion":1,"authority":"manual","artwork":"split","style":"original"}"#,
+            );
+            upsert_setting(&db, "dock_icon", "light");
+        }
+
+        let db = Database::open_path(&path).unwrap();
+        assert_latest(&db);
+        assert_eq!(
+            setting_value(&db, "dockIcon").as_deref(),
+            Some(FOLLOW_MACOS_DOCK)
+        );
+        assert_eq!(
+            setting_value(&db, "dock_icon").as_deref(),
+            Some(FOLLOW_MACOS_DOCK)
+        );
+
+        // Re-open applies no further migrations; Follow macOS rows stay put
+        // (024's WHERE clause skips already-correct values).
+        let again = Database::open_path(&path).unwrap();
+        assert_eq!(
+            again.applied_migrations().unwrap(),
+            db.applied_migrations().unwrap()
+        );
+        assert_eq!(
+            setting_value(&again, "dockIcon").as_deref(),
+            Some(FOLLOW_MACOS_DOCK)
+        );
+        assert_eq!(
+            setting_value(&again, "dock_icon").as_deref(),
+            Some(FOLLOW_MACOS_DOCK)
+        );
     }
 }

@@ -578,14 +578,24 @@ pub fn apply_persisted_dock_icon(
     require_main_dock_window(&window)?;
 
     let cfg = read_persisted_dock(&state)?;
+    let effective = branding::effective_dock_config_for_runtime(cfg.clone());
     // Same mutex as commit — prevents startup apply from racing a live preference change.
-    let override_cleared = branding::apply_dock_native_serialized(&app, &cfg)
+    let override_cleared = branding::apply_dock_native_serialized(&app, &effective)
         .map_err(|_| CommandError::new("dock_icon", "Couldn't update the Dock icon."))?;
+    // Persist only when runtime authority coerced the stored value (e.g. dormant
+    // manual selection → Follow macOS). Avoid rewriting Follow on every startup.
+    if cfg != effective {
+        let stored = effective
+            .to_storage()
+            .map_err(|_| CommandError::new("dock_icon", "Couldn't update the Dock icon."))?;
+        let mut db = state.db.lock();
+        let _ = db::set_setting(&mut db, branding::setting_key(), &stored);
+    }
     Ok(DockIconCommitResult {
-        status_label: cfg.status_label().to_string(),
+        status_label: effective.status_label().to_string(),
         override_cleared,
-        effective_authority: cfg.authority,
-        config: cfg,
+        effective_authority: effective.authority,
+        config: effective,
     })
 }
 

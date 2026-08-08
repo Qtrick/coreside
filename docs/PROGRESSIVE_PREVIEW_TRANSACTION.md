@@ -26,7 +26,18 @@
 - **Component-state preservation engine:** Speculative paint preserves tool identity and applies component/state ops; full preservation-policy parity across live paint is **P2**.
 - **Anthropic / Gemini:** Live text SSE unit-verified; progressive NDJSON ops still depend on model emitting frames (same as OpenAI JSON-blob path).
 - **Tool-round reset:** One parser/preview bag spans the turn (including tool follow-ups); not yet a multi-attempt registry.
-- **Desktop E2E:** Fixture + unit/vitest covered; packaged Journey for progressive paint **not_run**. **Do not claim Desktop Verified.**
+- **Desktop E2E:** Fixture + unit/vitest + SQLite cancel/incomplete integration covered; packaged Journey for progressive **surface paint** **not_run**. **Do not claim Desktop Verified.**
+- **Journey 12 (`e2e/specs/12-true-streaming.spec.ts`):** Proves **text** live-stream deltas (`live stream probe`) only. It does **not** assert `PreviewSurface` Channel events, ToolCanvas Preview badge, overlay clear-on-cancel, or SQLite non-durability of speculative paint. Do not reuse Journey 12 as progressive-paint desktop evidence — a dedicated progressive-surface journey is still required.
+
+## Integration evidence (Unit Verified, SQLite-backed)
+
+These tests raise cancel/incomplete confidence without claiming Desktop Verified:
+
+| Test | Proves |
+| --- | --- |
+| `paint_model_updates_before_commit_without_db_write` | Speculative paint changes in-memory model only; SQLite revision/definition unchanged |
+| `cancel_after_speculative_paint_leaves_sqlite_unchanged_and_blocks_harvest` | Cancel after paint → interrupted + empty accepted bag (harvest gate closed) + SQLite unchanged |
+| `incomplete_progressive_finish_rolls_back_preview_without_sqlite_write` | Progressive op painted without `complete` → finish interrupts; `durable_operations()` stays `None`; SQLite unchanged |
 
 ## How to verify
 

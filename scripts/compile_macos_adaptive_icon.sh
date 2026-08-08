@@ -20,37 +20,63 @@ if [[ -z "$MAJOR" || "$MAJOR" -lt 26 ]]; then
   exit 1
 fi
 
-# Stale ibtoold can make actool fail intermittently (tauri#15315 commentary).
-killall ibtoold 2>/dev/null || true
+run_actool() {
+  local workdir="$1"
+  xcrun actool "$workdir/Icon.icon" \
+    --compile "$OUT_DIR" \
+    --output-format human-readable-text \
+    --notices \
+    --warnings \
+    --errors \
+    --output-partial-info-plist "$OUT_DIR/assetcatalog_generated_info.plist" \
+    --app-icon Icon \
+    --include-all-app-icons \
+    --enable-on-demand-resources NO \
+    --development-region en \
+    --target-device mac \
+    --minimum-deployment-target 26.0 \
+    --platform macosx
+}
 
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
-# actool requires the document basename to match --app-icon when copied as Icon.icon
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 cp -R "$ICON_SRC" "$WORKDIR/Icon.icon"
 
-xcrun actool "$WORKDIR/Icon.icon" \
-  --compile "$OUT_DIR" \
-  --output-format human-readable-text \
-  --notices \
-  --warnings \
-  --errors \
-  --output-partial-info-plist "$OUT_DIR/assetcatalog_generated_info.plist" \
-  --app-icon Icon \
-  --include-all-app-icons \
-  --enable-on-demand-resources NO \
-  --development-region en \
-  --target-device mac \
-  --minimum-deployment-target 26.0 \
-  --platform macosx
+set +e
+ACTOOL_LOG="$(mktemp)"
+run_actool "$WORKDIR" >"$ACTOOL_LOG" 2>&1
+ACTOOL_STATUS=$?
+set -e
 
-if [[ ! -f "$OUT_DIR/Assets.car" ]]; then
-  echo "actool did not produce Assets.car" >&2
-  exit 1
+if [[ $ACTOOL_STATUS -ne 0 || ! -f "$OUT_DIR/Assets.car" ]]; then
+  # Narrow recovery for the known stale-ibtoold / actool flake (tauri#15315).
+  if grep -qiE 'ibtoold|NSPlaceholderArray|nil object|Internal Error|segfault|crash' "$ACTOOL_LOG"; then
+    echo "actool failed with known IB tooling symptom; attempting one scoped ibtoold recovery…" >&2
+    killall ibtoold 2>/dev/null || true
+    sleep 1
+    rm -rf "$OUT_DIR"
+    mkdir -p "$OUT_DIR"
+    set +e
+    run_actool "$WORKDIR" >"$ACTOOL_LOG" 2>&1
+    ACTOOL_STATUS=$?
+    set -e
+  fi
 fi
 
+if [[ $ACTOOL_STATUS -ne 0 || ! -f "$OUT_DIR/Assets.car" ]]; then
+  echo "actool failed to produce Assets.car (exit=$ACTOOL_STATUS)" >&2
+  echo "----- actool output -----" >&2
+  cat "$ACTOOL_LOG" >&2 || true
+  rm -f "$ACTOOL_LOG"
+  exit 1
+fi
+rm -f "$ACTOOL_LOG"
+
 cp "$OUT_DIR/Assets.car" "$DEST_CAR"
+# Fingerprint via the same Node algorithm as brand:verify-adaptive-icon.
+node "$ROOT/scripts/verify-adaptive-icon.mjs" --write-fingerprint
 echo "Wrote $DEST_CAR ($(wc -c < "$DEST_CAR") bytes)"
 echo "actool $ACTOOL_VERSION OK"

@@ -1,0 +1,522 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-07T23:49:03.532Z",
+  "commit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+  "dirty": true,
+  "sourceFingerprint": "efa94051db2148fc58d887ad7558bf270c5912090da70550f6e5fb0f2bf266ab",
+  "packageLockHash": "cdacd042fad79a9b863244cd07f2c238b49cefbf299a8e2d4f7a0f5e5d923dbc",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "command": "audit:current-source/report-freshness",
+  "exitStatus": 0,
+  "currentFingerprint": "efa94051db2148fc58d887ad7558bf270c5912090da70550f6e5fb0f2bf266ab",
+  "currentCommit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+  "archiveExpectedSha256": "8e984965f35cb28807fbb3ad24d1e48b9e6667801df716ab9c294e8e4a33b101",
+  "inventory": [
+    {
+      "file": "active-versus-uploaded-coreside.json",
+      "status": "current",
+      "reportFingerprint": "efa94051db2148fc58d887ad7558bf270c5912090da70550f6e5fb0f2bf266ab",
+      "reportCommit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+      "mtimeMs": 1786146543533.5212
+    },
+    {
+      "file": "agent-capability-inventory.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "af03633",
+      "mtimeMs": 1785643308318.4712
+    },
+    {
+      "file": "application-cleansing-baseline.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "4b5fb1a288b5180860fe1e4fb984defdf296f036",
+      "mtimeMs": 1785623989891.0776
+    },
+    {
+      "file": "application-feature-inventory.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "25e6c80e8ec7c0b9f43829f4efa053b56508e257",
+      "mtimeMs": 1785857539536.9138
+    },
+    {
+      "file": "application-subsystem-matrix.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "4b5fb1a288b5180860fe1e4fb984defdf296f036",
+      "mtimeMs": 1785624633096.7952
+    },
+    {
+      "file": "attachment-authorization-results.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+      "mtimeMs": 1785810166887.965
+    },
+    {
+      "file": "attachment-crash-results.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+      "mtimeMs": 1785815828898.6636
+    },
+    {
+      "file": "attachment-gc-results.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+      "mtimeMs": 1785810167230.1536
+    },
+    {
+      "file": "background-rule-inventory.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+      "mtimeMs": 1785808891261.0344
+    },
+    {
+      "file": "command-authority-results.json",
+      "status": "stale_fingerprint",
+      "reportFingerprint": "3c3fa498fa75b2aade48f3d127a45066df532598526258c60051d6c0cb5252dd",
+      "reportCommit": "2b502278ede0d0db57fe16f77ef1e282a92fd0d1",
+      "mtimeMs": 1785880943375.742
+    },
+    {
+      "file": "consumer-language-audit.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "25e6c80e8ec7c0b9f43829f4efa053b56508e257",
+      "mtimeMs": 1785860732180.2405
+    },
+    {
+      "file": "consumer-polish-findings.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1785643001358.6821
+    },
+    {
+      "file": "coreside-feature-evidence.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1784350063870.034
+    },
+    {
+      "file": "coreside-file-manifest.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1784349575224.4927
+    },
+    {
+      "file": "coreside-uploaded-manifest.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1785642289047.3506
+    },
+    {
+      "file": "current-source-baseline.json",
+      "status": "current",
+      "reportFingerprint": "efa94051db2148fc58d887ad7558bf270c5912090da70550f6e5fb0f2bf266ab",
+      "reportCommit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+      "mtimeMs": 1786146543533.401
+    },
+    {
+      "file": "current-source-fingerprint.json",
+      "status": "current",
+      "reportFingerprint": "efa94051db2148fc58d887ad7558bf270c5912090da70550f6e5fb0f2bf266ab",
+      "reportCommit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+      "mtimeMs": 1786146543533.2754
+    },
+    {
+      "file": "database-command-classification.json",
+      "status": "stale_fingerprint",
+      "reportFingerprint": "dirty-worktree-wallpaper-backup-trust-shell",
+      "reportCommit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
+      "mtimeMs": 1785707776432.2507
+    },
+    {
+      "file": "dead-control-audit.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+      "mtimeMs": 1785812465693.6382
+    },
+    {
+      "file": "e2e-results.json",
+      "status": "dirty_tree_untrusted",
+      "reportFingerprint": "efa94051db2148fc58d887ad7558bf270c5912090da70550f6e5fb0f2bf266ab",
+      "reportCommit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+      "mtimeMs": 1786146543545.2483
+    },
+    {
+      "file": "effective-window-authority.json",
+      "status": "stale_fingerprint",
+      "reportFingerprint": "643ab4d7bc80921fb0e4f05b35b29245d1aaad06942f366df87b23f214465ac1",
+      "reportCommit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+      "mtimeMs": 1786146313705.518
+    },
+    {
+      "file": "feature-inventory.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1785643086791.71
+    },
+    {
+      "file": "interactive-control-inventory.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+      "mtimeMs": 1785812465693.5195
+    },
+    {
+      "file": "layout-overflow-baseline.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1785639883313.6414
+    },
+    {
+      "file": "layout-overflow-result.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1785639953574.3325
+    },
+    {
+      "file": "local-beta-readiness.json",
+      "status": "dirty_tree_untrusted",
+      "reportFingerprint": "efa94051db2148fc58d887ad7558bf270c5912090da70550f6e5fb0f2bf266ab",
+      "reportCommit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+      "mtimeMs": 1786146543545.6948
+    },
+    {
+      "file": "maintenance-startup-results.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+      "mtimeMs": 1785813006694.4783
+    },
+    {
+      "file": "multimodal-provider-results.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "2b502278ede0d0db57fe16f77ef1e282a92fd0d1",
+      "mtimeMs": 1785878154404.707
+    },
+    {
+      "file": "packaged-smoke-results.json",
+      "status": "dirty_tree_untrusted",
+      "reportFingerprint": "efa94051db2148fc58d887ad7558bf270c5912090da70550f6e5fb0f2bf266ab",
+      "reportCommit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+      "mtimeMs": 1786146543545.4133
+    },
+    {
+      "file": "packaging-results.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1786146510988.0784
+    },
+    {
+      "file": "partial-update-current-gap-audit.json",
+      "status": "stale_fingerprint",
+      "reportFingerprint": "3306d5de459be8d661c52e0101b70d956c2218f841bacafdbedb6ebb6acf9f41",
+      "reportCommit": "41fd4595db420eac8b1c5cc30723f1dd377608f4",
+      "mtimeMs": 1786070306865.5903
+    },
+    {
+      "file": "partial-update-feature-matrix.json",
+      "status": "stale_fingerprint",
+      "reportFingerprint": "643ab4d7bc80921fb0e4f05b35b29245d1aaad06942f366df87b23f214465ac1",
+      "reportCommit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+      "mtimeMs": 1786146313551.9893
+    },
+    {
+      "file": "partial-update-file-manifest-current.json",
+      "status": "stale_fingerprint",
+      "reportFingerprint": "3306d5de459be8d661c52e0101b70d956c2218f841bacafdbedb6ebb6acf9f41",
+      "reportCommit": "41fd4595db420eac8b1c5cc30723f1dd377608f4",
+      "mtimeMs": 1785786648449.5146
+    },
+    {
+      "file": "partial-update-file-manifest.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1784349573461.5942
+    },
+    {
+      "file": "partial-update-final-gap-audit.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1784407049420.6296
+    },
+    {
+      "file": "partial-update-port-map.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
+      "mtimeMs": 1785878459892.8906
+    },
+    {
+      "file": "partial-update-secure-parity-matrix.json",
+      "status": "stale_fingerprint",
+      "reportFingerprint": "3306d5de459be8d661c52e0101b70d956c2218f841bacafdbedb6ebb6acf9f41",
+      "reportCommit": "41fd4595db420eac8b1c5cc30723f1dd377608f4",
+      "mtimeMs": 1785786648450.5073
+    },
+    {
+      "file": "performance-baseline.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1785624356605.275
+    },
+    {
+      "file": "preservation-results.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+      "mtimeMs": 1785812471595.467
+    },
+    {
+      "file": "privacy-data-flow-registry.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1785645576674.2715
+    },
+    {
+      "file": "protected-prompt-inventory.json",
+      "status": "stale_fingerprint",
+      "reportFingerprint": "see-current-source-fingerprint",
+      "reportCommit": "3054afb40a4202cda62cfb13f310d8a4ed4fbebf",
+      "mtimeMs": 1785765624607.134
+    },
+    {
+      "file": "provider-conformance-results.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+      "mtimeMs": 1785812301233.4539
+    },
+    {
+      "file": "provider-platform-inventory.json",
+      "status": "dirty_tree_untrusted",
+      "reportFingerprint": "efa94051db2148fc58d887ad7558bf270c5912090da70550f6e5fb0f2bf266ab",
+      "reportCommit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+      "mtimeMs": 1786146543546.222
+    },
+    {
+      "file": "queue-product-results.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+      "mtimeMs": 1785815807845.8037
+    },
+    {
+      "file": "registered-actions-test-results.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1785619996219.616
+    },
+    {
+      "file": "release-evidence.json",
+      "status": "dirty_tree_untrusted",
+      "reportFingerprint": "efa94051db2148fc58d887ad7558bf270c5912090da70550f6e5fb0f2bf266ab",
+      "reportCommit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+      "mtimeMs": 1786146543545.5215
+    },
+    {
+      "file": "replay-results.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+      "mtimeMs": 1785809710005.2847
+    },
+    {
+      "file": "report-freshness-inventory.json",
+      "status": "current",
+      "reportFingerprint": "643ab4d7bc80921fb0e4f05b35b29245d1aaad06942f366df87b23f214465ac1",
+      "reportCommit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+      "mtimeMs": 1786146128557.6335
+    },
+    {
+      "file": "restore-transaction-results.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+      "mtimeMs": 1785815856028.8025
+    },
+    {
+      "file": "runtime-v2-completion-audit.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1784403756081.73
+    },
+    {
+      "file": "scoped-streaming-results.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "76072ff4cfbca185d8420fc4f6da64a49aa91b17",
+      "mtimeMs": 1785805466792.2466
+    },
+    {
+      "file": "secret-inventory.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1784503084423.8987
+    },
+    {
+      "file": "security-findings.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "4b5fb1a288b5180860fe1e4fb984defdf296f036",
+      "mtimeMs": 1785624560037.7402
+    },
+    {
+      "file": "settings-inventory.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1785643301272.8699
+    },
+    {
+      "file": "stream-eavesdropping-results.json",
+      "status": "stale_fingerprint",
+      "reportFingerprint": "3c3fa498fa75b2aade48f3d127a45066df532598526258c60051d6c0cb5252dd",
+      "reportCommit": "2b502278ede0d0db57fe16f77ef1e282a92fd0d1",
+      "mtimeMs": 1785880959093.643
+    },
+    {
+      "file": "structured-form-results.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+      "mtimeMs": 1785809765479.2734
+    },
+    {
+      "file": "subsystem-quiescence-results.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+      "mtimeMs": 1785813005165.1758
+    },
+    {
+      "file": "tauri-capability-inventory.json",
+      "status": "stale_fingerprint",
+      "reportFingerprint": "643ab4d7bc80921fb0e4f05b35b29245d1aaad06942f366df87b23f214465ac1",
+      "reportCommit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+      "mtimeMs": 1786146313705.689
+    },
+    {
+      "file": "test-coverage-map.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1784441228087.1516
+    },
+    {
+      "file": "true-streaming-results.json",
+      "status": "stale_fingerprint",
+      "reportFingerprint": "3c3fa498fa75b2aade48f3d127a45066df532598526258c60051d6c0cb5252dd",
+      "reportCommit": "2b502278ede0d0db57fe16f77ef1e282a92fd0d1",
+      "mtimeMs": 1785880947164.6667
+    },
+    {
+      "file": "tutorial-target-inventory.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "25e6c80e8ec7c0b9f43829f4efa053b56508e257",
+      "mtimeMs": 1785859759457.287
+    },
+    {
+      "file": "typescript-5-baseline.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1784483022711.1997
+    },
+    {
+      "file": "typescript-6-result.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1784503084423.8877
+    },
+    {
+      "file": "user-journey-matrix.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1785643091526.7295
+    },
+    {
+      "file": "vendo-adoption-matrix.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1785619844314.561
+    },
+    {
+      "file": "vendo-uploaded-manifest.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1785642289047.5427
+    },
+    {
+      "file": "video-feature-evidence.json",
+      "status": "missing_provenance",
+      "reportFingerprint": null,
+      "reportCommit": null,
+      "mtimeMs": 1784350107256.3313
+    },
+    {
+      "file": "wallpaper-compositing-graph.json",
+      "status": "stale_fingerprint",
+      "reportFingerprint": "dirty-worktree-wallpaper-backup-trust-shell",
+      "reportCommit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
+      "mtimeMs": 1785707503749.48
+    },
+    {
+      "file": "wallpaper-compositing.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "90b99538c6c3ce094a7d3b9b09fdc54e7e26e1f6",
+      "mtimeMs": 1785707511081.624
+    },
+    {
+      "file": "wallpaper-settings-results.json",
+      "status": "stale_or_dirty_tree",
+      "reportFingerprint": null,
+      "reportCommit": "a491887e2a80d21619301ed6049de7f29ad9b44b",
+      "mtimeMs": 1785808944956.3564
+    },
+    {
+      "file": "wallpaper-visual-results.json",
+      "status": "stale_fingerprint",
+      "reportFingerprint": "3c3fa498fa75b2aade48f3d127a45066df532598526258c60051d6c0cb5252dd",
+      "reportCommit": "2b502278ede0d0db57fe16f77ef1e282a92fd0d1",
+      "mtimeMs": 1785880951044.098
+    }
+  ],
+  "staleCount": 39,
+  "notes": [
+    "Reports without matching sourceFingerprint are not release evidence.",
+    "Dirty trees cannot claim public-beta readiness regardless of report freshness."
+  ]
+}

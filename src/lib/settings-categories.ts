@@ -37,7 +37,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
     id: "appearance",
     label: "Appearance",
     group: "coreside",
-    description: "Theme, Dock icon, and wallpapers.",
+    description: "Theme and wallpapers.",
   },
   {
     id: "ai-access",
@@ -141,25 +141,9 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchEntry[] = [
     label: "Theme",
     keywords: ["light", "dark", "system", "appearance"],
   },
-  {
-    id: "dock-icon",
-    categoryId: "appearance",
-    label: "Dock icon",
-    keywords: [
-      "dock",
-      "icon",
-      "system",
-      "macos",
-      "default",
-      "dark",
-      "clear",
-      "tinted",
-      "split",
-      "classic",
-      "tile",
-      "brand",
-    ],
-  },
+  // dock-icon search entry intentionally omitted while manual Dock selection is
+  // product-dormant (MANUAL_DOCK_ICON_SELECTION_ENABLED=false). Restore with the
+  // ManualDockIconSelector mount when reactivating.
   {
     id: "wallpaper-link",
     categoryId: "appearance",

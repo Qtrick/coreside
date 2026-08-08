@@ -65,15 +65,17 @@ describe("settings categories", () => {
 
   it("returns no hits for blank queries and scores token matches", () => {
     expect(matchSettingsSearch("   ")).toEqual([]);
-    const hits = matchSettingsSearch("dock tile");
-    expect(hits[0]?.id).toBe("dock-icon");
-    expect(hits[0]?.score).toBeGreaterThan(0);
-    expect(matchSettingsSearch("Tinted")[0]?.id).toBe("dock-icon");
-    expect(matchSettingsSearch("Split")[0]?.id).toBe("dock-icon");
-    expect(matchSettingsSearch("Classic")[0]?.id).toBe("dock-icon");
-    expect(
-      matchSettingsSearch("macOS Default").some((h) => h.id === "dock-icon"),
-    ).toBe(true);
+    // Manual Dock selection is product-dormant — search must not surface it.
+    expect(matchSettingsSearch("dock tile").some((h) => h.id === "dock-icon")).toBe(
+      false,
+    );
+    expect(matchSettingsSearch("Classic Dark").some((h) => h.id === "dock-icon")).toBe(
+      false,
+    );
+    expect(matchSettingsSearch("Split").some((h) => h.id === "dock-icon")).toBe(false);
+    const wallpaper = matchSettingsSearch("wallpaper");
+    expect(wallpaper[0]?.categoryId).toBe("appearance");
+    expect(wallpaper[0]?.score).toBeGreaterThan(0);
   });
 
   it("keeps search index entries pointing at known categories", () => {

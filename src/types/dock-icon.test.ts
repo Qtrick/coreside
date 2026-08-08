@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  effectiveDockIconForProduct,
+  MANUAL_DOCK_ICON_SELECTION_ENABLED,
+} from "@/lib/branding/manual-dock-icon-capability";
+import {
   DEFAULT_DOCK_ICON,
   dockIconStatusLabel,
   parseDockIconConfig,
@@ -10,6 +14,21 @@ describe("Dock icon config", () => {
   it("defaults to Follow macOS", () => {
     expect(DEFAULT_DOCK_ICON.authority).toBe("follow_macos");
     expect(dockIconStatusLabel(DEFAULT_DOCK_ICON)).toBe("Following macOS");
+  });
+
+  it("product gate forces Follow macOS while manual selection is dormant", () => {
+    const staleManual = parseDockIconConfig({
+      schemaVersion: 1,
+      authority: "manual",
+      artwork: "classic",
+      style: "dark",
+    });
+    expect(staleManual.authority).toBe("manual");
+    // While the product capability is off, effective authority must follow macOS
+    // even if parse still understands dormant manual configs.
+    expect(MANUAL_DOCK_ICON_SELECTION_ENABLED).toBe(false);
+    expect(effectiveDockIconForProduct(staleManual)).toBe("follow_macos");
+    expect(effectiveDockIconForProduct(DEFAULT_DOCK_ICON)).toBe("follow_macos");
   });
 
   it("migrates legacy auto/dark/light/split strings", () => {

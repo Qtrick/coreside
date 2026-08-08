@@ -28,7 +28,7 @@ const PREVIOUS_ARCHIVE_LABEL =
 const CURRENT_ARCHIVE_LABEL = "Coreside Chat AI.zip (RC3.11)";
 const PARTIAL_UPDATE_ARCHIVE =
   process.env.PARTIAL_UPDATE_ARCHIVE ||
-  path.join(process.env.HOME || "", "Downloads", "Partial Update Main (1).zip");
+  path.join(process.env.HOME || "", "Downloads", "Partial Update Main.zip");
 const EXPECTED_PARTIAL_UPDATE_SHA256 =
   "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607";
 const OLDER_ARCHIVE_SHA256 =
@@ -66,10 +66,59 @@ const EXCLUDE_DIR_NAMES = new Set([
   "gen",
 ]);
 
-function run(cmd, args) {
+/**
+ * Run a subprocess with explicit command status.
+ * status: pass | fail | missing_optional | missing_required | not_applicable
+ * Optional tools must not throw on ENOENT.
+ */
+function run(cmd, args, { required = true, applicable = true } = {}) {
+  if (!applicable) {
+    return {
+      status: "not_applicable",
+      code: 0,
+      stdout: "",
+      stderr: "",
+      errorCode: null,
+    };
+  }
   const r = spawnSync(cmd, args, { cwd: root, encoding: "utf8" });
-  if (r.error) throw r.error;
-  return { code: r.status ?? 1, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
+  if (r.error) {
+    const errorCode = r.error.code || "spawn_error";
+    if (errorCode === "ENOENT") {
+      return {
+        status: required ? "missing_required" : "missing_optional",
+        code: 1,
+        stdout: "",
+        stderr: String(r.error.message || r.error),
+        errorCode,
+      };
+    }
+    return {
+      status: "fail",
+      code: 1,
+      stdout: "",
+      stderr: String(r.error.message || r.error),
+      errorCode,
+    };
+  }
+  const code = r.status ?? 1;
+  return {
+    status: code === 0 ? "pass" : "fail",
+    code,
+    stdout: (r.stdout || "").trim(),
+    stderr: (r.stderr || "").trim(),
+    errorCode: null,
+  };
+}
+
+function requireRun(cmd, args, label) {
+  const r = run(cmd, args, { required: true });
+  if (r.status === "missing_required" || r.status === "fail") {
+    throw new Error(
+      `${label || cmd} unavailable (${r.status}): ${r.stderr || r.errorCode || "unknown"}`,
+    );
+  }
+  return r;
 }
 
 function sha256File(filePath) {
@@ -248,9 +297,12 @@ function parsePorcelain(stdout) {
   return { staged, modified, untracked };
 }
 
-const commit = run("git", ["rev-parse", "HEAD"]).stdout;
-const branch = run("git", ["rev-parse", "--abbrev-ref", "HEAD"]).stdout;
-const porcelain = run("git", ["status", "--porcelain"]).stdout;
+const commitResult = requireRun("git", ["rev-parse", "HEAD"], "git");
+const branchResult = requireRun("git", ["rev-parse", "--abbrev-ref", "HEAD"], "git");
+const porcelainResult = requireRun("git", ["status", "--porcelain"], "git");
+const commit = commitResult.stdout;
+const branch = branchResult.stdout;
+const porcelain = porcelainResult.stdout;
 const dirty = porcelain.length > 0;
 const { staged, modified, untracked } = parsePorcelain(porcelain);
 
@@ -259,11 +311,50 @@ const cargoLockHash = sha256File(path.join(root, "src-tauri", "Cargo.lock"));
 const fpFiles = collectFingerprintFiles();
 const sourceFingerprint = fingerprintSource(fpFiles);
 
-const node = run("node", ["-v"]).stdout;
-const npm = run("npm", ["-v"]).stdout;
-const rustc = run("rustc", ["--version"]).stdout;
-const cargo = run("cargo", ["--version"]).stdout;
-const tauriCli = run("npx", ["tauri", "--version"]).stdout;
+const toolRuns = {
+  node: run("node", ["-v"], { required: true }),
+  npm: run("npm", ["-v"], { required: true }),
+  rustc: run("rustc", ["--version"], { required: false }),
+  cargo: run("cargo", ["--version"], { required: false }),
+  tauriCli: run("npx", ["tauri", "--version"], { required: false }),
+  rg: run("rg", ["-c", "#\\[tauri::command\\]", "src-tauri/src", "--glob", "*.rs"], {
+    required: false,
+  }),
+};
+
+const node = toolRuns.node.status === "pass" ? toolRuns.node.stdout : `(${toolRuns.node.status})`;
+const npm = toolRuns.npm.status === "pass" ? toolRuns.npm.stdout : `(${toolRuns.npm.status})`;
+if (toolRuns.node.status === "missing_required" || toolRuns.npm.status === "missing_required") {
+  throw new Error(
+    `Required tooling missing: node=${toolRuns.node.status} npm=${toolRuns.npm.status}`,
+  );
+}
+const rustc =
+  toolRuns.rustc.status === "pass" ? toolRuns.rustc.stdout : `(${toolRuns.rustc.status})`;
+const cargo =
+  toolRuns.cargo.status === "pass" ? toolRuns.cargo.stdout : `(${toolRuns.cargo.status})`;
+const tauriCli =
+  toolRuns.tauriCli.status === "pass"
+    ? toolRuns.tauriCli.stdout
+    : `(${toolRuns.tauriCli.status})`;
+
+const tauriCommands = (() => {
+  const r = toolRuns.rg;
+  if (r.status === "missing_optional" || r.status === "not_applicable") return null;
+  if (r.status !== "pass" && !r.stdout) return null;
+  return r.stdout
+    .split("\n")
+    .filter(Boolean)
+    .reduce((sum, line) => sum + Number(line.split(":").pop() || 0), 0);
+})();
+
+const commandStatuses = Object.fromEntries(
+  Object.entries(toolRuns).map(([name, r]) => [
+    name,
+    { status: r.status, code: r.code, errorCode: r.errorCode },
+  ]),
+);
+commandStatuses.git = { status: "pass", code: 0, errorCode: null };
 
 const archivePath = DEFAULT_ARCHIVE;
 const archivePresent = fs.existsSync(archivePath);
@@ -337,14 +428,6 @@ const e2eSpecs = fs.existsSync(path.join(root, "e2e", "specs"))
   : 0;
 const srcFiles = countGlob("src", () => true);
 const rustFiles = countGlob("src-tauri/src", (f) => f.endsWith(".rs"));
-const tauriCommands = (() => {
-  const r = run("rg", ["-c", "#\\[tauri::command\\]", "src-tauri/src", "--glob", "*.rs"]);
-  if (r.code !== 0 && !r.stdout) return null;
-  return r.stdout
-    .split("\n")
-    .filter(Boolean)
-    .reduce((sum, line) => sum + Number(line.split(":").pop() || 0), 0);
-})();
 
 const common = {
   schemaVersion: 1,
@@ -437,6 +520,7 @@ const baselineReport = {
     cargo,
     tauriCli,
   },
+  commandStatuses,
   capabilities: fs.existsSync(path.join(root, "src-tauri", "capabilities"))
     ? fs.readdirSync(path.join(root, "src-tauri", "capabilities")).filter((f) => f.endsWith(".json"))
     : [],
@@ -448,6 +532,7 @@ const baselineReport = {
       ? "Dirty tree: development evidence only; cannot claim public beta."
       : "Clean tree at audit time; public beta still Not ready pending full gates.",
     "Open: packaged E2E/smoke, ACL raw-invoke denial proof, wallpaper pixel proof.",
+    "Optional tools use statuses pass|fail|missing_optional|missing_required|not_applicable (no uncaught ENOENT).",
   ],
 };
 

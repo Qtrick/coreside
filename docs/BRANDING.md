@@ -36,17 +36,27 @@ Manifest: `src/assets/branding/manifest.ts` (`inAppLogoFor`).
 
 ### Dock / application icons
 
-**Follow macOS** (default): clears `NSApplication.applicationIconImage` so the packaged application icon is authoritative again. Adaptive Icon & Widget Style (Default / Dark / Clear / Tinted) requires a genuine `Assets.car` in the installed app bundle (`CFBundleIconName` = `Icon`). Source is wired for precompiled `src-tauri/icons/Assets.car` from `Coreside.icon` via `actool` 26+ (`./scripts/compile_macos_adaptive_icon.sh`, listed in `bundle.icon`). Confirm `Contents/Resources/Assets.car` after packaging before calling adaptive packaging ready.
+**CURRENT PRODUCT (P0.2):** Coreside automatically follows macOS. There is **no** user-facing Dock icon selector in Appearance settings. The packaged adaptive icon (`Assets.car` + `CFBundleIconName` = `Icon`) is authoritative when launched as a real `.app`.
 
-**Choose manually**: temporary AppKit override via `commit_dock_icon_preference` (main window only):
+Test adaptive appearance with:
+```bash
+npm run macos:build-and-run-packaged
+# or, if already built:
+npm run macos:run-packaged
+```
+Do **not** treat `tauri dev` as proof of adaptive Icon & Widget Style behavior.
 
-| Manual choice | Runtime asset |
+**DORMANT MANUAL SYSTEM:** Classic Dark / Classic Light / Split infrastructure remains in source behind `MANUAL_DOCK_ICON_SELECTION_ENABLED = false` (TypeScript + Rust). UI lives in `ManualDockIconSelector.tsx` and is not mounted while the capability is off. Runtime and IPC normalize manual requests to Follow macOS. Migration `024_reset_dock_icon_follow_macos` resets stored manual prefs. Re-enable later by flipping the flag and mounting the selector — do not rewrite native Dock handling.
+
+| Dormant manual choice | Runtime asset |
 | --- | --- |
 | Classic Dark | `coreside-dock-dark.png` |
 | Classic Light | `coreside-dock-light.png` |
-| Split | `coreside-dock-split.png` (generated from `design/branding/sources/coreside-split-logo.png`) |
+| Split | `coreside-dock-split.png` (composed from canonical Classic Dark + Light marks + shared diagonal mask) |
 
-Commands: `commit_dock_icon_preference`, `apply_persisted_dock_icon`. Do not use `set_setting("dockIcon")`.
+Commands (still registered; manual authority gated): `commit_dock_icon_preference`, `apply_persisted_dock_icon`. Do not use `set_setting("dockIcon")`.
+
+Adaptive freshness: `npm run brand:verify-adaptive-icon` (fails on missing/stale `Assets.car`).
 
 ## Liquid-Glass-inspired treatment
 
@@ -54,19 +64,20 @@ Dock sources use:
 
 - Squircle inset in a transparent canvas (~11% outer margin) so Dock scale matches other macOS apps
 - Large mark inside the squircle (trimmed source margins, ~8% inner padding)
+- Shared flower placement across Classic Dark, Classic Light, and Split
 - Subtle top highlight band
 - Thin inner edge ring
 - No accent color tinting of the mark
 - No blue-purple effects
 
-Readable from 32px through 1024px.
+Readable from 16px through 1024px. Contact sheet: `reports/evidence/branding/dock-icon-contact-sheet.png`.
 
-## Runtime macOS Dock switching
+## Runtime macOS Dock behavior
 
-- Setting: versioned `dockIcon` JSON (`follow_macos` or manual Classic/Split)
-- Commands: `commit_dock_icon_preference`, `apply_persisted_dock_icon` (main window only)
-- Follow macOS: `NSApplication.setApplicationIconImage(None)` — no PNG, no `prefers-color-scheme`
-- Manual: temporary PNG override; Finder/Launchpad keep the packaged icon
+- Setting: versioned `dockIcon` JSON (defaults / migrates to `follow_macos`)
+- While manual selection is dormant, effective authority is always Follow macOS
+- Follow macOS in a packaged `.app`: `NSApplication.setApplicationIconImage(None)`
+- Follow macOS in unpackaged development: Classic Dark PNG stand-in (not adaptive proof)
 - Agent / `set_setting("dockIcon")` cannot change the Dock icon
 
 ## Protected branding behavior

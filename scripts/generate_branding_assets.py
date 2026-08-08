@@ -97,57 +97,143 @@ def apply_squircle_polish(
     return Image.alpha_composite(tile, ring)
 
 
-def make_dock_icon(
-    bg_rgb: tuple[int, int, int], mark: Image.Image, out_path: Path, size: int = 1024
-) -> None:
-    """Build a macOS-sized dock icon.
-
-    The squircle is inset in a transparent canvas so the on-Dock visual size
-    matches other apps. Inside the squircle the mark stays large.
-    """
-    # Outer transparent margin (~11%) so the tile matches native Dock icon scale.
-    outer = int(size * 0.11)
-    inner = size - 2 * outer
-
-    tile = Image.new("RGBA", (inner, inner), (0, 0, 0, 0))
-    base = Image.new("RGBA", (inner, inner), (*bg_rgb, 255))
-    mask = rounded_squircle(inner)
-    tile.paste(base, (0, 0), mask)
-    edge = (255, 255, 255, 36) if sum(bg_rgb) < 380 else (0, 0, 0, 22)
-    tile = apply_squircle_polish(tile, mask, inner, edge=edge)
-
-    # Fill most of the squircle: trim source margins, keep comfortable pad.
+def compute_mark_placement(
+    mark: Image.Image, inner: int
+) -> tuple[Image.Image, int, int, int, int]:
+    """Return (resized_mark, ox, oy, tw, th) for Classic geometry."""
     glyph = trim_mark(mark)
     mark_pad = int(inner * 0.08)
     avail = inner - 2 * mark_pad
-    # Fit glyph to the largest square that preserves aspect ratio.
     gw, gh = glyph.size
     scale = min(avail / gw, avail / gh)
     tw, th = max(1, int(gw * scale)), max(1, int(gh * scale))
     mark_resized = glyph.resize((tw, th), Image.Resampling.LANCZOS)
     ox = mark_pad + (avail - tw) // 2
     oy = mark_pad + (avail - th) // 2
-    tile.alpha_composite(mark_resized, (ox, oy))
+    return mark_resized, ox, oy, tw, th
 
+
+def place_resized_mark(
+    tile: Image.Image, mark_resized: Image.Image, ox: int, oy: int
+) -> tuple[Image.Image, tuple[int, int, int, int]]:
+    out = tile.copy()
+    out.alpha_composite(mark_resized, (ox, oy))
+    tw, th = mark_resized.size
+    return out, (ox, oy, ox + tw, oy + th)
+
+
+def resize_mark_to_placement(mark: Image.Image, tw: int, th: int) -> Image.Image:
+    """Force a mark into the canonical placement size (shared flower geometry)."""
+    return trim_mark(mark).resize((tw, th), Image.Resampling.LANCZOS)
+
+
+def build_inner_tile_with_placement(
+    bg_rgb: tuple[int, int, int],
+    mark_resized: Image.Image,
+    ox: int,
+    oy: int,
+    inner: int,
+) -> Image.Image:
+    tile = Image.new("RGBA", (inner, inner), (0, 0, 0, 0))
+    base = Image.new("RGBA", (inner, inner), (*bg_rgb, 255))
+    mask = rounded_squircle(inner)
+    tile.paste(base, (0, 0), mask)
+    tile, _placement = place_resized_mark(tile, mark_resized, ox, oy)
+    edge = (255, 255, 255, 36) if sum(bg_rgb) < 380 else (0, 0, 0, 22)
+    return apply_squircle_polish(tile, mask, inner, edge=edge)
+
+
+def make_dock_icon_pair(
+    mark_white: Image.Image,
+    mark_black: Image.Image,
+    dark_out: Path,
+    light_out: Path,
+    size: int = 1024,
+) -> tuple[int, int, int, int]:
+    """Build Classic Dark + Light with ONE shared flower placement."""
+    outer = int(size * 0.11)
+    inner = size - 2 * outer
+    canonical, ox, oy, tw, th = compute_mark_placement(mark_white, inner)
+    light_mark = resize_mark_to_placement(mark_black, tw, th)
+    dark_tile = build_inner_tile_with_placement((18, 18, 18), canonical, ox, oy, inner)
+    light_tile = build_inner_tile_with_placement(
+        (246, 246, 244), light_mark, ox, oy, inner
+    )
+    for path, tile in ((dark_out, dark_tile), (light_out, light_tile)):
+        icon = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        icon.alpha_composite(tile, (outer, outer))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        icon.save(path, optimize=True)
+    return (ox + outer, oy + outer, ox + tw + outer, oy + th + outer)
+
+
+def make_dock_icon(
+    bg_rgb: tuple[int, int, int], mark: Image.Image, out_path: Path, size: int = 1024
+) -> tuple[int, int, int, int]:
+    """Build a single Classic dock icon (legacy single-call path)."""
+    outer = int(size * 0.11)
+    inner = size - 2 * outer
+    mark_resized, ox, oy, tw, th = compute_mark_placement(mark, inner)
+    tile = build_inner_tile_with_placement(bg_rgb, mark_resized, ox, oy, inner)
     icon = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     icon.alpha_composite(tile, (outer, outer))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     icon.save(out_path, optimize=True)
+    return (ox + outer, oy + outer, ox + tw + outer, oy + th + outer)
 
 
+def diagonal_split_mask(inner: int) -> Image.Image:
+    """Shared diagonal: dark upper-left / light lower-right (design reference)."""
+    mask = Image.new("L", (inner, inner), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.polygon([(inner - 1, 0), (inner - 1, inner - 1), (0, inner - 1)], fill=255)
+    return mask
+
+
+def make_split_dock_icon_from_marks(
+    mark_white: Image.Image,
+    mark_black: Image.Image,
+    out_path: Path,
+    size: int = 1024,
+) -> tuple[int, int, int, int]:
+    """Build Split from canonical Classic Dark + Light flower placement.
+
+    Flower geometry comes from the white-mark Classic placement — not from the
+    flattened precomposed Split bitmap (provenance / diagonal reference only).
+    """
+    outer = int(size * 0.11)
+    inner = size - 2 * outer
+    canonical, ox, oy, tw, th = compute_mark_placement(mark_white, inner)
+    light_mark = resize_mark_to_placement(mark_black, tw, th)
+    squircle = rounded_squircle(inner)
+    dark_base = Image.new("RGBA", (inner, inner), (0, 0, 0, 0))
+    light_base = Image.new("RGBA", (inner, inner), (0, 0, 0, 0))
+    dark_base.paste(Image.new("RGBA", (inner, inner), (18, 18, 18, 255)), (0, 0), squircle)
+    light_base.paste(
+        Image.new("RGBA", (inner, inner), (246, 246, 244, 255)), (0, 0), squircle
+    )
+    dark_tile, _ = place_resized_mark(dark_base, canonical, ox, oy)
+    light_tile, _ = place_resized_mark(light_base, light_mark, ox, oy)
+    split_mask = diagonal_split_mask(inner)
+    tile = Image.composite(light_tile, dark_tile, split_mask)
+    tile.putalpha(ImageChops.multiply(tile.split()[-1], squircle))
+    tile = apply_squircle_polish(tile, squircle, inner, edge=(0, 0, 0, 28))
+    icon = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    icon.alpha_composite(tile, (outer, outer))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    icon.save(out_path, optimize=True)
+    return (ox + outer, oy + outer, ox + tw + outer, oy + th + outer)
+
+
+# Kept for provenance tooling — do not use as flower geometry source.
 def make_split_dock_icon(src: Image.Image, out_path: Path, size: int = 1024) -> None:
-    """Build Split with the same geometry and polish as Classic.
+    """Legacy path: full-bleed resize of precomposed Split (outer parity only).
 
-    Root cause of the smaller Split tile: the previous path padded artwork inside
-    the squircle and left a transparent ring, so the opaque region and flower
-    read smaller than Classic. Fill the full squircle first (Classic does the
-    same with a solid base), then apply the shared highlight and edge ring.
+    Prefer make_split_dock_icon_from_marks for production assets.
     """
     outer = int(size * 0.11)
     inner = size - 2 * outer
     mask = rounded_squircle(inner)
-
-    # Full-bleed Split fill — same outer/inner canvas as Classic.
     base = (
         src.convert("RGB")
         .resize((inner, inner), Image.Resampling.LANCZOS)
@@ -156,7 +242,6 @@ def make_split_dock_icon(src: Image.Image, out_path: Path, size: int = 1024) -> 
     tile = Image.new("RGBA", (inner, inner), (0, 0, 0, 0))
     tile.paste(base, (0, 0), mask)
     tile = apply_squircle_polish(tile, mask, inner, edge=(0, 0, 0, 28))
-
     icon = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     icon.alpha_composite(tile, (outer, outer))
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -226,6 +311,61 @@ def assert_dock_optical_parity(
     )
 
 
+def assert_flower_geometry_parity(
+    classic_flower: tuple[int, int, int, int],
+    split_flower: tuple[int, int, int, int],
+    *,
+    tol: int = 2,
+) -> None:
+    """Inner flower bbox must match — outer tile parity alone is insufficient."""
+    if not _bbox_within_tol(classic_flower, split_flower, tol=tol):
+        raise SystemExit(
+            f"Flower geometry diverge: classic={classic_flower} split={split_flower} (±{tol})"
+        )
+    cw = classic_flower[2] - classic_flower[0]
+    ch = classic_flower[3] - classic_flower[1]
+    sw = split_flower[2] - split_flower[0]
+    sh = split_flower[3] - split_flower[1]
+    if abs(cw - sw) > tol or abs(ch - sh) > tol:
+        raise SystemExit(
+            f"Flower size diverge: classic={cw}x{ch} split={sw}x{sh} (±{tol})"
+        )
+    print(
+        f"OK flower parity: bbox={classic_flower} size={cw}x{ch} (tol={tol})"
+    )
+
+
+def write_dock_contact_sheet(
+    dark: Path, light: Path, split: Path, out_path: Path
+) -> None:
+    """Multi-scale evidence sheet (not Settings-card UI)."""
+    scales = [16, 32, 64, 128, 56, 128, 512, 1024]
+    # 56 ≈ former Settings-card preview; duplicate 128 stands in for Dock-ish mid size.
+    labels = ["16", "32", "64", "128", "card56", "dock128", "512", "1024"]
+    gap = 24
+    row_h = max(scales) + 40
+    col_w = max(scales) + gap
+    sheet = Image.new("RGB", (gap + col_w * len(scales), gap + row_h * 3), (40, 40, 42))
+    draw = ImageDraw.Draw(sheet)
+    sources = [("Classic Dark", dark), ("Classic Light", light), ("Split", split)]
+    for row, (label, path) in enumerate(sources):
+        src = Image.open(path).convert("RGBA")
+        for col, (scale, tag) in enumerate(zip(scales, labels, strict=True)):
+            thumb = src.resize((scale, scale), Image.Resampling.LANCZOS)
+            x = gap + col * col_w + (max(scales) - scale) // 2
+            y = gap + row * row_h + (max(scales) - scale) // 2
+            # Checker underlay for transparency visibility.
+            checker = Image.new("RGB", (scale, scale), (90, 90, 94))
+            sheet.paste(checker, (x, y))
+            sheet.paste(thumb, (x, y), thumb)
+            if row == 0:
+                draw.text((x, gap + row * row_h + max(scales) + 8), tag, fill=(200, 200, 200))
+        draw.text((gap, gap + row * row_h - 2), label, fill=(230, 230, 230))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(out_path, optimize=True)
+    print(f"OK contact sheet {out_path}")
+
+
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -241,7 +381,7 @@ def main() -> None:
     parser.add_argument(
         "--skip-classic-sources",
         action="store_true",
-        help="Only regenerate Split from design/branding/sources (Classic logos optional)",
+        help="Only regenerate Split from existing Classic marks (no Classic logo re-extract)",
     )
     args = parser.parse_args()
     src: Path = args.src
@@ -258,57 +398,64 @@ def main() -> None:
         raise SystemExit(
             f"Split source hash mismatch: {digest} (expected {SPLIT_EXPECTED_SHA256})"
         )
+    # Provenance check only — flower geometry no longer comes from this bitmap.
+    print(f"OK Split provenance source sha256={digest[:12]}…")
 
-    make_split_dock_icon(Image.open(split_src), OUT / "coreside-dock-split.png")
-    make_split_dock_icon(Image.open(split_src), RES / "coreside-dock-split.png")
-    validate_rgba(OUT / "coreside-dock-split.png")
-    validate_rgba(RES / "coreside-dock-split.png")
+    mark_white_path = OUT / "coreside-mark-white-transparent.png"
+    mark_black_path = OUT / "coreside-mark-black-transparent.png"
 
-    classic_dark = RES / "coreside-dock-dark.png"
-    if classic_dark.is_file():
-        assert_dock_optical_parity(classic_dark, RES / "coreside-dock-split.png")
-
-    if args.skip_classic_sources:
-        print("Split Dock tile regenerated; Classic sources skipped.")
-        return
-
-    black_candidates = list(src.glob("Coreside_Black_Logo*.png")) + list(
-        OUT.glob("coreside-icon-dark-source.png")
-    )
-    white_candidates = list(src.glob("Coreside_White_Logo*.png")) + list(
-        OUT.glob("coreside-icon-light-source.png")
-    )
-    if not black_candidates or not white_candidates:
-        print(
-            "Classic logo sources not found under --src; "
-            "Split tile updated. Pass Classic sources to regenerate Classic tiles."
+    if not args.skip_classic_sources:
+        black_candidates = list(src.glob("Coreside_Black_Logo*.png")) + list(
+            OUT.glob("coreside-icon-dark-source.png")
         )
-        return
+        white_candidates = list(src.glob("Coreside_White_Logo*.png")) + list(
+            OUT.glob("coreside-icon-light-source.png")
+        )
+        if not black_candidates or not white_candidates:
+            raise SystemExit(
+                "Classic logo sources not found under --src; "
+                "cannot build canonical Split from shared flower geometry."
+            )
 
-    black_bg = Image.open(black_candidates[0]).convert("RGB")
-    white_bg = Image.open(white_candidates[0]).convert("RGB")
+        black_bg = Image.open(black_candidates[0]).convert("RGB")
+        white_bg = Image.open(white_candidates[0]).convert("RGB")
 
-    black_bg.save(OUT / "coreside-icon-dark-source.png")
-    white_bg.save(OUT / "coreside-icon-light-source.png")
+        black_bg.save(OUT / "coreside-icon-dark-source.png")
+        white_bg.save(OUT / "coreside-icon-light-source.png")
 
-    mark_white = compose_mark(
-        black_bg, soft_mask_from_luma(black_bg, mark_is_light=True), force_rgb=(255, 255, 255)
+        mark_white = compose_mark(
+            black_bg, soft_mask_from_luma(black_bg, mark_is_light=True), force_rgb=(255, 255, 255)
+        )
+        mark_black = compose_mark(
+            white_bg, soft_mask_from_luma(white_bg, mark_is_light=False), force_rgb=(0, 0, 0)
+        )
+
+        for path, img in [
+            (mark_white_path, mark_white),
+            (mark_black_path, mark_black),
+        ]:
+            img.save(path, optimize=True)
+            validate_rgba(path)
+    else:
+        if not mark_white_path.is_file() or not mark_black_path.is_file():
+            raise SystemExit(
+                "--skip-classic-sources requires existing mark PNGs under src/assets/branding"
+            )
+        mark_white = Image.open(mark_white_path)
+        mark_black = Image.open(mark_black_path)
+
+    flower = make_dock_icon_pair(
+        mark_white,
+        mark_black,
+        OUT / "coreside-dock-dark.png",
+        OUT / "coreside-dock-light.png",
     )
-    mark_black = compose_mark(
-        white_bg, soft_mask_from_luma(white_bg, mark_is_light=False), force_rgb=(0, 0, 0)
+    make_dock_icon_pair(
+        mark_white,
+        mark_black,
+        RES / "coreside-dock-dark.png",
+        RES / "coreside-dock-light.png",
     )
-
-    for path, img in [
-        (OUT / "coreside-mark-white-transparent.png", mark_white),
-        (OUT / "coreside-mark-black-transparent.png", mark_black),
-    ]:
-        img.save(path, optimize=True)
-        validate_rgba(path)
-
-    make_dock_icon((18, 18, 18), mark_white, OUT / "coreside-dock-dark.png")
-    make_dock_icon((246, 246, 244), mark_black, OUT / "coreside-dock-light.png")
-    make_dock_icon((18, 18, 18), mark_white, RES / "coreside-dock-dark.png")
-    make_dock_icon((246, 246, 244), mark_black, RES / "coreside-dock-light.png")
     for p in [
         OUT / "coreside-dock-dark.png",
         OUT / "coreside-dock-light.png",
@@ -317,8 +464,16 @@ def main() -> None:
     ]:
         validate_rgba(p)
 
+    flower_split = make_split_dock_icon_from_marks(
+        mark_white, mark_black, OUT / "coreside-dock-split.png"
+    )
+    make_split_dock_icon_from_marks(mark_white, mark_black, RES / "coreside-dock-split.png")
+    validate_rgba(OUT / "coreside-dock-split.png")
+    validate_rgba(RES / "coreside-dock-split.png")
+
     assert_dock_optical_parity(RES / "coreside-dock-dark.png", RES / "coreside-dock-split.png")
     assert_dock_optical_parity(RES / "coreside-dock-light.png", RES / "coreside-dock-split.png")
+    assert_flower_geometry_parity(flower, flower_split)
 
     dock_dark = Image.open(OUT / "coreside-dock-dark.png")
     for name, size in {
@@ -330,6 +485,14 @@ def main() -> None:
         dock_dark.resize((size, size), Image.Resampling.LANCZOS).save(
             ICONS / name, optimize=True
         )
+
+    evidence = REPO / "reports" / "evidence" / "branding" / "dock-icon-contact-sheet.png"
+    write_dock_contact_sheet(
+        OUT / "coreside-dock-dark.png",
+        OUT / "coreside-dock-light.png",
+        OUT / "coreside-dock-split.png",
+        evidence,
+    )
 
     # Runtime resources: only Dock tiles (no design-only Split source / marks).
     for orphan in RES.glob("*"):

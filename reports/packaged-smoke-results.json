@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-07T23:49:03.546Z",
-  "generatedAtLocal": "Tue Aug 04 2026 15:33:13 GMT-0400 (Eastern Daylight Time)",
+  "generatedAt": "2026-08-07T23:49:03.533Z",
+  "generatedAtLocal": "Fri Aug 07 2026 19:49:03 GMT-0400 (Eastern Daylight Time)",
   "timezone": "America/New_York",
   "commit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
   "dirty": true,
@@ -13,30 +13,13 @@
   "architecture": "arm64",
   "buildMode": "development",
   "exitStatus": "not_run",
+  "evidenceLevel": "Absent",
+  "currentOrHistorical": "historical",
   "historicalNote": "RC3.11 archive 8e984965; suite not re-run on current tree. Absent until Desktop/Packaged gates execute.",
   "archiveExpectedSha256": "8e984965f35cb28807fbb3ad24d1e48b9e6667801df716ab9c294e8e4a33b101",
-  "command": "audit:provider-platform",
-  "evidenceLevel": "Unit Verified",
-  "descriptorVersion": "1",
-  "presets": [
-    "gemini",
-    "openai",
-    "anthropic",
-    "openrouter",
-    "kimi",
-    "mistral",
-    "ollama",
-    "lmstudio",
-    "vllm",
-    "llama_cpp",
-    "compatible",
-    "mock"
-  ],
-  "authlessLocal": [
-    "ollama",
-    "lmstudio",
-    "vllm",
-    "llama_cpp"
-  ],
-  "migration": "019_provider_platform"
+  "command": "test:packaged-smoke",
+  "classification": "Packaged launch smoke",
+  "smokeKind": "not_run",
+  "scope": "not_run",
+  "checks": []
 }

@@ -842,6 +842,167 @@ mod tests {
         );
     }
 
+    /// Integration evidence: speculative paint + cancel leaves SQLite untouched and
+    /// blocks the turn-end harvest gate (`!interrupted && !is_empty()`).
+    #[test]
+    fn cancel_after_speculative_paint_leaves_sqlite_unchanged_and_blocks_harvest() {
+        use crate::db::{create_conversation, DEFAULT_WORKSPACE_ID};
+        use crate::runtime_v2::surfaces::create_inline_surface;
+
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("preview-cancel.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Counter",
+            &sample_definition(),
+            &[],
+        )
+        .expect("create surface");
+        let before = get_surface(&db, &surface.id).expect("get");
+        let before_def = before.definition.clone();
+        let before_rev = before.current_revision;
+
+        let mut parser = NdjsonFrameParser::new();
+        let mut preview = PreviewTransaction::new("turn-cancel-db", Some(before_rev));
+        let sid = surface.id.clone();
+        let paint_events = ingest_live_chunk_with_seed(
+            &mut parser,
+            &mut preview,
+            &op_frame_for_surface("op-cancel-paint", &sid),
+            |want| {
+                if want == sid {
+                    Some(PreviewSurfaceModel {
+                        surface_id: surface.id.clone(),
+                        tool_id: surface.tool_id.clone(),
+                        application_id: surface.tool_id.clone(),
+                        definition: before_def.clone(),
+                        state: json!({}),
+                        base_revision: before_rev,
+                        preview_revision: before_rev,
+                    })
+                } else {
+                    None
+                }
+            },
+        );
+        assert_eq!(paint_events.len(), 1);
+        assert_eq!(paint_events[0].status, "preview");
+        assert!(!preview.is_empty());
+        assert!(preview.surface(&sid).is_some());
+
+        let cancel_events = ingest_live_chunk(
+            &mut parser,
+            &mut preview,
+            &(r#"{"type":"turn.cancelled","turn_id":"turn-cancel-db"}"#.to_string() + "\n"),
+        );
+        assert_eq!(cancel_events.len(), 1);
+        assert_eq!(cancel_events[0].status, "interrupted");
+        assert!(preview.interrupted);
+        assert!(preview.surfaces.is_empty());
+        assert!(
+            preview.is_empty(),
+            "cancel must clear accepted ops so durable harvest cannot run"
+        );
+        // Mirror message_cmds turn-end harvest gate.
+        let harvest_allowed = !preview.interrupted && !preview.committed && !preview.is_empty();
+        assert!(
+            !harvest_allowed,
+            "interrupted preview must not authorize schedule_and_apply"
+        );
+
+        let after: SurfaceRecord = get_surface(&db, &surface.id).expect("get after cancel");
+        assert_eq!(after.definition, before_def);
+        assert_eq!(after.current_revision, before_rev);
+    }
+
+    /// Incomplete progressive stream (painted op, no `complete`) must not durable-commit.
+    #[test]
+    fn incomplete_progressive_finish_rolls_back_preview_without_sqlite_write() {
+        use super::super::progressive_ops::{ProgressiveOpsExpect, ProgressiveOpsParser};
+        use crate::db::{create_conversation, DEFAULT_WORKSPACE_ID};
+        use crate::runtime_v2::surfaces::create_inline_surface;
+
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("preview-incomplete.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Counter",
+            &sample_definition(),
+            &[],
+        )
+        .expect("create surface");
+        let before = get_surface(&db, &surface.id).expect("get");
+        let before_def = before.definition.clone();
+        let before_rev = before.current_revision;
+        let sid = surface.id.clone();
+        let tool_id = surface.tool_id.clone();
+
+        let mut parser = ProgressiveOpsParser::new(ProgressiveOpsExpect {
+            capability_version: Some("1".into()),
+            ..Default::default()
+        });
+        let mut preview = PreviewTransaction::new("turn-incomplete", Some(before_rev));
+        let make_seed = |want: &str| {
+            if want == sid.as_str() {
+                Some(PreviewSurfaceModel {
+                    surface_id: sid.clone(),
+                    tool_id: tool_id.clone(),
+                    application_id: tool_id.clone(),
+                    definition: before_def.clone(),
+                    state: json!({}),
+                    base_revision: before_rev,
+                    preview_revision: before_rev,
+                })
+            } else {
+                None
+            }
+        };
+
+        let start = concat!(
+            r#"{"v":"coreside.ops.v1","type":"start","groupId":"g-inc","schemaVersion":"2","capabilityVersion":"1"}"#,
+            "\n"
+        );
+        let op = format!(
+            r#"{{"v":"coreside.ops.v1","type":"op","frameId":1,"groupId":"g-inc","op":{{"id":"op-incomplete","type":"component.update_props","target":{{"surfaceId":"{sid}","componentId":"c1"}},"payload":{{"maximum":10}}}}}}"#
+        ) + "\n";
+
+        assert!(
+            ingest_progressive_chunk_with_seed(&mut parser, &mut preview, start, make_seed)
+                .is_empty()
+        );
+        let painted = ingest_progressive_chunk_with_seed(&mut parser, &mut preview, &op, make_seed);
+        assert!(
+            painted.iter().any(|e| e.status == "preview"),
+            "op must speculative-paint before stream ends"
+        );
+        assert!(!preview.is_empty());
+        assert!(
+            parser.durable_operations().is_none(),
+            "incomplete stream must not authorize durable ops"
+        );
+
+        let _ = finish_progressive_ingest(&mut parser, &mut preview);
+        assert!(
+            preview.interrupted,
+            "finish without complete must interrupt preview"
+        );
+        assert!(preview.is_empty());
+        assert!(preview.surfaces.is_empty());
+        assert!(parser.durable_operations().is_none());
+
+        let after: SurfaceRecord = get_surface(&db, &surface.id).expect("get after incomplete");
+        assert_eq!(after.definition, before_def);
+        assert_eq!(after.current_revision, before_rev);
+    }
+
     #[test]
     fn interrupt_blocks_further_accept() {
         let mut preview = PreviewTransaction::new("turn-int", None);

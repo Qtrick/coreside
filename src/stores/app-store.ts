@@ -28,6 +28,7 @@ import {
   shouldShowAppConflict,
 } from "@/lib/tauri";
 import type { AgentTurnEvent } from "@/lib/tauri";
+import { MANUAL_DOCK_ICON_SELECTION_ENABLED } from "@/lib/branding/manual-dock-icon-capability";
 import type { ToolMention } from "@/lib/mentions";
 import { ensureReadableForeground } from "@/lib/readability/contrast";
 import type { ActionLogMode } from "@/lib/action-log";
@@ -1678,16 +1679,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   setDockIcon: async (preference) => {
+    const gated =
+      !MANUAL_DOCK_ICON_SELECTION_ENABLED && preference.authority === "manual"
+        ? { ...DEFAULT_DOCK_ICON }
+        : preference;
     const prior = get().dockIcon;
     const epoch = get().dockIconEpoch + 1;
     set({
-      dockIcon: preference,
+      dockIcon: gated,
       dockIconPending: true,
       dockIconError: null,
       dockIconEpoch: epoch,
     });
     try {
-      const result = await api.commitDockIconPreference(preference);
+      const result = await api.commitDockIconPreference(gated);
       if (get().dockIconEpoch !== epoch) return;
       set({
         dockIcon: parseDockIconConfig(result.config),

@@ -15,6 +15,15 @@ import {
  * The mock adapter emits TextDelta before delayed completion when the
  * user message contains "live stream probe".
  *
+ * Scope (intentionally text-only):
+ * - Asserts assistant-stream-text appears before turn completion.
+ * - Does NOT cover progressive generated-surface preview (PreviewSurface Channel
+ *   events, ToolCanvas Preview badge, overlay clear-on-cancel, or SQLite
+ *   non-durability). Those remain Unit Verified via PreviewTransaction SQLite
+ *   integration tests — see docs/PROGRESSIVE_PREVIEW_TRANSACTION.md.
+ * Do not extend this journey into a weak progressive-paint substitute; add a
+ * dedicated progressive-surface journey when desktop evidence is required.
+ *
  * Run alone:
  *   CORESIDE_E2E=1 AI_PROVIDER=mock npx wdio run e2e/wdio.conf.ts --suite true-streaming
  */

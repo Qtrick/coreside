@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""High-value checks for Split/Classic dock optical parity and adaptive icon sources.
+"""High-value checks for Split/Classic dock optical + flower parity and adaptive sources.
 
 Run: python3 scripts/test_branding_icon_geometry.py
 """
@@ -15,8 +15,12 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from generate_branding_assets import (  # noqa: E402
     RES,
+    OUT,
     assert_dock_optical_parity,
+    assert_flower_geometry_parity,
     alpha_bbox,
+    compute_mark_placement,
+    make_split_dock_icon_from_marks,
 )
 
 
@@ -39,11 +43,33 @@ def main() -> None:
         if abs(span[0] - expected_span[0]) > 1 or abs(span[1] - expected_span[1]) > 1:
             raise SystemExit(f"{path.name} span {span} != {expected_span} (±1)")
 
+    # Inner flower: regenerate Split placement from marks and compare to Classic Dark.
+    mark_white = OUT / "coreside-mark-white-transparent.png"
+    mark_black = OUT / "coreside-mark-black-transparent.png"
+    if mark_white.is_file() and mark_black.is_file():
+        from PIL import Image
+
+        inner = 1024 - 2 * int(1024 * 0.11)
+        canonical, ox, oy, tw, th = compute_mark_placement(Image.open(mark_white), inner)
+        outer = int(1024 * 0.11)
+        classic_placement = (ox + outer, oy + outer, ox + tw + outer, oy + th + outer)
+        # Determinism: writing Split again must match committed bytes' flower placement.
+        tmp = RES / ".split-geometry-check.png"
+        split_placement = make_split_dock_icon_from_marks(
+            Image.open(mark_white), Image.open(mark_black), tmp
+        )
+        tmp.unlink(missing_ok=True)
+        assert_flower_geometry_parity(classic_placement, split_placement)
+        _ = canonical  # placement already asserted
+    else:
+        print("WARN: mark PNGs missing — skipped flower regeneration check")
+
     icon_json = REPO / "src-tauri" / "icons" / "Coreside.icon" / "icon.json"
     mark = REPO / "src-tauri" / "icons" / "Coreside.icon" / "Assets" / "mark.png"
     assets_car = REPO / "src-tauri" / "icons" / "Assets.car"
     tauri_conf = REPO / "src-tauri" / "tauri.conf.json"
     info_plist = REPO / "src-tauri" / "Info.plist"
+    fingerprint = REPO / "src-tauri" / "icons" / "Assets.car.fingerprint"
 
     if not icon_json.is_file():
         raise SystemExit("missing Coreside.icon/icon.json")
@@ -51,6 +77,10 @@ def main() -> None:
         raise SystemExit("missing Coreside.icon/Assets/mark.png")
     if not assets_car.is_file() or assets_car.stat().st_size < 10_000:
         raise SystemExit("missing or tiny Assets.car — run brand:compile-adaptive-icon")
+    if not fingerprint.is_file():
+        raise SystemExit(
+            "missing Assets.car.fingerprint — run brand:compile-adaptive-icon"
+        )
 
     conf = json.loads(tauri_conf.read_text())
     icons = conf.get("bundle", {}).get("icon", [])
@@ -64,7 +94,11 @@ def main() -> None:
     if "groups" not in doc or not doc["groups"]:
         raise SystemExit("Coreside.icon icon.json missing groups")
 
-    print("PASS branding icon geometry + adaptive package sources")
+    contact = REPO / "reports" / "evidence" / "branding" / "dock-icon-contact-sheet.png"
+    if not contact.is_file():
+        raise SystemExit(f"missing contact sheet evidence: {contact}")
+
+    print("PASS branding icon geometry + flower parity + adaptive package sources")
 
 
 if __name__ == "__main__":

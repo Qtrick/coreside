@@ -55,6 +55,7 @@ services/crawl4ai/**/.pytest_cache/
 
 # Desktop E2E temp / local overrides
 e2e/.artifacts/
+reports/.artifacts/
 e2e-results/
 logs/
 

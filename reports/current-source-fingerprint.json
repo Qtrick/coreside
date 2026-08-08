@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-07T23:49:03.532Z",
+  "commit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+  "dirty": true,
+  "sourceFingerprint": "efa94051db2148fc58d887ad7558bf270c5912090da70550f6e5fb0f2bf266ab",
+  "packageLockHash": "cdacd042fad79a9b863244cd07f2c238b49cefbf299a8e2d4f7a0f5e5d923dbc",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "command": "audit:current-source",
+  "exitStatus": 0,
+  "algorithm": "sha256-concat-path-bytes",
+  "roots": [
+    "src",
+    "src-tauri/src",
+    "src-tauri/capabilities",
+    "src-tauri/permissions",
+    "src-tauri/migrations",
+    "src-tauri/prompts",
+    "src-tauri/tauri.conf.json",
+    "src-tauri/tauri.e2e.conf.json",
+    "src-tauri/Cargo.toml",
+    "src-tauri/Cargo.lock",
+    "src-tauri/build.rs",
+    "e2e",
+    "scripts",
+    "package.json",
+    "package-lock.json",
+    "vite.config.ts",
+    "tsconfig.json",
+    "eslint.config.js"
+  ],
+  "fileCount": 705,
+  "inclusionRules": [
+    "Tracked and untracked files under fingerprint roots",
+    "Excludes node_modules, target, dist, .git, .reference, gen"
+  ]
+}

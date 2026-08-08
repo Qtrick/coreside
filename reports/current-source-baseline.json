@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-07T23:49:03.532Z",
+  "commit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+  "dirty": true,
+  "sourceFingerprint": "efa94051db2148fc58d887ad7558bf270c5912090da70550f6e5fb0f2bf266ab",
+  "packageLockHash": "cdacd042fad79a9b863244cd07f2c238b49cefbf299a8e2d4f7a0f5e5d923dbc",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "command": "audit:current-source",
+  "exitStatus": 0,
+  "phase": "RC3.11",
+  "publicBeta": "Not ready",
+  "hostedAi": "Not ready",
+  "evidenceClass": "development-dirty",
+  "branch": "main",
+  "dirtyState": true,
+  "stagedFiles": [],
+  "modifiedFiles": [
+    "FFATU/FFATU_README.md",
+    "FFATU/Inbox/Partial Update Main (1).zip",
+    "FFATU/Inbox/Screenshot 2026-08-06 at 8.32.39\\342\\200\\257PM.png",
+    "FFATU/Inbox/Screenshot 2026-08-06 at 8.32.46\\342\\200\\257PM.png",
+    "docs/BRANDING.md",
+    "docs/CURRENT_SOURCE_BASELINE.md",
+    "docs/PROGRESSIVE_PREVIEW_TRANSACTION.md",
+    "e2e/specs/12-true-streaming.spec.ts",
+    "package.json",
+    "reports/effective-window-authority.json",
+    "reports/partial-update-feature-matrix.json",
+    "reports/provider-platform-inventory.json",
+    "reports/tauri-capability-inventory.json",
+    "scripts/audit-current-source.mjs",
+    "scripts/audit-partial-update.mjs",
+    "scripts/compile_macos_adaptive_icon.sh",
+    "scripts/generate_branding_assets.py",
+    "scripts/test_branding_icon_geometry.py",
+    "src-tauri/icons/128x128.png",
+    "src-tauri/icons/128x128@2x.png",
+    "src-tauri/icons/32x32.png",
+    "src-tauri/icons/Assets.car",
+    "src-tauri/icons/icon.png",
+    "src-tauri/resources/branding/coreside-dock-dark.png",
+    "src-tauri/resources/branding/coreside-dock-light.png",
+    "src-tauri/resources/branding/coreside-dock-split.png",
+    "src-tauri/src/branding/mod.rs",
+    "src-tauri/src/commands/settings_cmds.rs",
+    "src-tauri/src/db/migration_fixtures.rs",
+    "src-tauri/src/db/mod.rs",
+    "src-tauri/src/runtime_v2/preview_transaction.rs",
+    "src/assets/branding/coreside-dock-dark.png",
+    "src/assets/branding/coreside-dock-light.png",
+    "src/assets/branding/coreside-dock-split.png",
+    "src/components/settings/SettingsPanel.tsx",
+    "src/lib/settings-categories.test.ts",
+    "src/lib/settings-categories.ts",
+    "src/stores/app-store.ts",
+    "src/types/dock-icon.test.ts"
+  ],
+  "untrackedSourceFiles": [
+    "docs/P0_2_IMPLEMENTATION_PLAN_2026-08-07.md",
+    "scripts/macos-run-packaged.sh",
+    "scripts/verify-adaptive-icon.mjs",
+    "scripts/verify_adaptive_icon.sh",
+    "src-tauri/icons/Assets.car.fingerprint",
+    "src-tauri/migrations/024_reset_dock_icon_follow_macos.sql",
+    "src/components/settings/ManualDockIconSelector.tsx",
+    "src/components/settings/manual-dock-icon-dormancy.test.ts",
+    "src/lib/branding/"
+  ],
+  "archive": {
+    "filename": "Coreside Chat AI.zip",
+    "label": "Coreside Chat AI.zip (RC3.11)",
+    "expectedPath": "/Users/qunyingfan/Downloads/Coreside Chat AI.zip",
+    "expectedSha256": "8e984965f35cb28807fbb3ad24d1e48b9e6667801df716ab9c294e8e4a33b101",
+    "present": true,
+    "observedSha256": "10cc325466f85ca09eabcb814622e17a315684fd705330a782f9adc57578f149",
+    "status": "present_hash_mismatch",
+    "supersedes": "3ae9f51473f718532c177e67b55ef1f2fb74cf6ca78e52e15f0e0660e16efadf",
+    "previousLabel": "Coreside Chat AI.zip / prior RC3.10 archive (3ae9f514…)"
+  },
+  "partialUpdateArchive": {
+    "filename": "Partial Update Main.zip",
+    "expectedPath": "/Users/qunyingfan/Downloads/Partial Update Main.zip",
+    "expectedSha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
+    "present": true,
+    "observedSha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
+    "status": "present_hash_match"
+  },
+  "counts": {
+    "srcFiles": 192,
+    "rustFiles": 193,
+    "migrations": 24,
+    "e2eSpecs": 18,
+    "tauriCommands": 222,
+    "fingerprintFileCount": 705
+  },
+  "toolVersions": {
+    "node": "v24.17.0",
+    "npm": "11.18.0",
+    "rustc": "rustc 1.96.1 (31fca3adb 2026-06-26)",
+    "cargo": "cargo 1.96.1 (356927216 2026-06-26)",
+    "tauriCli": "tauri-cli 2.11.4"
+  },
+  "commandStatuses": {
+    "node": {
+      "status": "pass",
+      "code": 0,
+      "errorCode": null
+    },
+    "npm": {
+      "status": "pass",
+      "code": 0,
+      "errorCode": null
+    },
+    "rustc": {
+      "status": "pass",
+      "code": 0,
+      "errorCode": null
+    },
+    "cargo": {
+      "status": "pass",
+      "code": 0,
+      "errorCode": null
+    },
+    "tauriCli": {
+      "status": "pass",
+      "code": 0,
+      "errorCode": null
+    },
+    "rg": {
+      "status": "pass",
+      "code": 0,
+      "errorCode": null
+    },
+    "git": {
+      "status": "pass",
+      "code": 0,
+      "errorCode": null
+    }
+  },
+  "capabilities": [
+    "default.json",
+    "tool-window.json"
+  ],
+  "previousArchiveSuperseded": "3ae9f51473f718532c177e67b55ef1f2fb74cf6ca78e52e15f0e0660e16efadf",
+  "notes": [
+    "Archive status: present_hash_mismatch",
+    "Public beta remains Not ready until full current-source gates pass.",
+    "Dirty tree: development evidence only; cannot claim public beta.",
+    "Open: packaged E2E/smoke, ACL raw-invoke denial proof, wallpaper pixel proof.",
+    "Optional tools use statuses pass|fail|missing_optional|missing_required|not_applicable (no uncaught ENOENT)."
+  ]
+}

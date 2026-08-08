@@ -4,6 +4,9 @@
 //! so the packaged application icon is authoritative again. Adaptive Icon & Widget
 //! Style requires a genuine `Assets.car` in the installed app bundle (`CFBundleIconName`).
 //! Manual mode installs a temporary PNG override for Classic or Split artwork.
+//!
+//! Product note: `MANUAL_DOCK_ICON_SELECTION_ENABLED` defaults false — manual
+//! selection is dormant in the consumer product but the implementation remains.
 
 use std::path::PathBuf;
 
@@ -13,6 +16,10 @@ use tauri::{AppHandle, Manager};
 
 /// Public product name shown in Dock, menus, and About surfaces.
 pub const PRODUCT_NAME: &str = "Coreside";
+
+/// Source-level product capability. When false, runtime authority is always
+/// Follow macOS regardless of any stored manual preference. Not user-configurable.
+pub const MANUAL_DOCK_ICON_SELECTION_ENABLED: bool = false;
 
 pub const DOCK_SCHEMA_VERSION: u32 = 1;
 
@@ -188,6 +195,12 @@ pub fn validate_dock_config(cfg: &DockIconConfig) -> Result<DockIconConfig, Stri
             Ok(DockIconConfig::follow_macos())
         }
         DockAuthority::Manual => {
+            if !MANUAL_DOCK_ICON_SELECTION_ENABLED {
+                // Product dormancy: normalize manual requests to Follow macOS so
+                // hidden IPC cannot activate a PNG override while the capability
+                // is off. Persist path then stores Follow macOS.
+                return Ok(DockIconConfig::follow_macos());
+            }
             let artwork = cfg
                 .artwork
                 .ok_or_else(|| "Manual Dock mode requires artwork".to_string())?;
@@ -212,6 +225,16 @@ pub fn validate_dock_config(cfg: &DockIconConfig) -> Result<DockIconConfig, Stri
             })
         }
     }
+}
+
+/// Runtime authority while the product capability may be dormant.
+/// Stored prefs may still parse as manual for dormant-system integrity tests;
+/// effective presentation always follows macOS when the capability is off.
+pub fn effective_dock_config_for_runtime(cfg: DockIconConfig) -> DockIconConfig {
+    if !MANUAL_DOCK_ICON_SELECTION_ENABLED {
+        return DockIconConfig::follow_macos();
+    }
+    normalize_dock_config(cfg)
 }
 
 /// Runtime filename for a manual tile. Follow macOS never resolves a PNG.
@@ -331,7 +354,11 @@ pub fn packaged_macos_icon_available() -> bool {
 ///
 /// Caller must hold `commit_lock` when serializing against concurrent
 /// commit/apply (see `apply_dock_native_serialized`).
+///
+/// While `MANUAL_DOCK_ICON_SELECTION_ENABLED` is false, any request is forced
+/// to Follow macOS so stale persisted manual prefs cannot keep a PNG override.
 pub fn apply_dock_native(app: &AppHandle, cfg: &DockIconConfig) -> Result<bool, String> {
+    let cfg = effective_dock_config_for_runtime(cfg.clone());
     match cfg.authority {
         DockAuthority::FollowMacos => {
             #[cfg(target_os = "macos")]
@@ -359,7 +386,7 @@ pub fn apply_dock_native(app: &AppHandle, cfg: &DockIconConfig) -> Result<bool, 
             }
         }
         DockAuthority::Manual => {
-            let bytes = read_and_validate_manual(app, cfg)?;
+            let bytes = read_and_validate_manual(app, &cfg)?;
             #[cfg(target_os = "macos")]
             {
                 run_appkit_on_main(app, move || set_macos_application_icon(&bytes))?;
@@ -570,17 +597,43 @@ mod tests {
     }
 
     #[test]
+    fn manual_capability_defaults_disabled() {
+        assert!(
+            !MANUAL_DOCK_ICON_SELECTION_ENABLED,
+            "product default must keep manual Dock selection dormant"
+        );
+    }
+
+    #[test]
+    fn effective_runtime_ignores_stale_manual_when_disabled() {
+        let stale = DockIconConfig::manual_classic(DockStyle::Dark);
+        let effective = effective_dock_config_for_runtime(stale);
+        assert_eq!(effective.authority, DockAuthority::FollowMacos);
+        assert!(effective.artwork.is_none());
+    }
+
+    #[test]
+    fn validate_normalizes_manual_to_follow_when_capability_disabled() {
+        let split = DockIconConfig::manual_split();
+        let validated = validate_dock_config(&split).unwrap();
+        if MANUAL_DOCK_ICON_SELECTION_ENABLED {
+            assert_eq!(validated.authority, DockAuthority::Manual);
+        } else {
+            assert_eq!(validated.authority, DockAuthority::FollowMacos);
+        }
+    }
+
+    #[test]
     fn macos_bundle_resources_dir_requires_app_layout() {
         use std::path::Path;
-        assert!(macos_app_bundle_resources_dir(Path::new(
-            "/tmp/target/debug/Coreside"
-        ))
-        .is_none());
+        assert!(macos_app_bundle_resources_dir(Path::new("/tmp/target/debug/Coreside")).is_none());
         assert_eq!(
             macos_app_bundle_resources_dir(Path::new(
                 "/Applications/Coreside.app/Contents/MacOS/Coreside"
             )),
-            Some(PathBuf::from("/Applications/Coreside.app/Contents/Resources"))
+            Some(PathBuf::from(
+                "/Applications/Coreside.app/Contents/Resources"
+            ))
         );
     }
 
@@ -643,7 +696,9 @@ mod tests {
             manual_dock_filename(DockArtwork::Split, DockStyle::Original),
             Some("coreside-dock-split.png")
         );
-        let cfg = validate_dock_config(&DockIconConfig::manual_split()).unwrap();
+        // Exercise mapping from the dormant manual config constructors directly —
+        // validate_dock_config normalizes to Follow macOS while the product gate is off.
+        let cfg = DockIconConfig::manual_split();
         let name = manual_dock_filename(cfg.artwork.unwrap(), cfg.style.unwrap()).unwrap();
         assert_eq!(name, "coreside-dock-split.png");
         assert!(source_tree_branding_dir().join(name).is_file());
@@ -688,23 +743,37 @@ mod tests {
             artwork: Some(DockArtwork::Split),
             style: Some(DockStyle::Dark),
         };
-        assert!(validate_dock_config(&split_dark).is_err());
-
         let classic_original = DockIconConfig {
             schema_version: 1,
             authority: DockAuthority::Manual,
             artwork: Some(DockArtwork::Classic),
             style: Some(DockStyle::Original),
         };
-        assert!(validate_dock_config(&classic_original).is_err());
-
         let missing_artwork = DockIconConfig {
             schema_version: 1,
             authority: DockAuthority::Manual,
             artwork: None,
             style: Some(DockStyle::Dark),
         };
-        assert!(validate_dock_config(&missing_artwork).is_err());
+        if MANUAL_DOCK_ICON_SELECTION_ENABLED {
+            assert!(validate_dock_config(&split_dark).is_err());
+            assert!(validate_dock_config(&classic_original).is_err());
+            assert!(validate_dock_config(&missing_artwork).is_err());
+        } else {
+            // Product dormancy normalizes all manual requests to Follow macOS.
+            assert_eq!(
+                validate_dock_config(&split_dark).unwrap().authority,
+                DockAuthority::FollowMacos
+            );
+            assert_eq!(
+                validate_dock_config(&classic_original).unwrap().authority,
+                DockAuthority::FollowMacos
+            );
+            assert_eq!(
+                validate_dock_config(&missing_artwork).unwrap().authority,
+                DockAuthority::FollowMacos
+            );
+        }
     }
 
     #[test]
