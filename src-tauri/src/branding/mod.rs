@@ -336,7 +336,8 @@ pub fn macos_app_bundle_resources_dir(exe: &std::path::Path) -> Option<PathBuf> 
 }
 
 /// True when this process is a real `.app` with a packaged Dock icon resource.
-/// Unpackaged `tauri dev` binaries have none — clearing AppKit then shows `exec`.
+/// Unpackaged `tauri dev` / `npm run dev:raw` binaries have none — clearing
+/// AppKit then shows `exec`.
 pub fn packaged_macos_icon_available() -> bool {
     let Ok(exe) = std::env::current_exe() else {
         return false;
@@ -347,6 +348,47 @@ pub fn packaged_macos_icon_available() -> bool {
     ["Assets.car", "icon.icns", "AppIcon.icns"]
         .iter()
         .any(|name| resources.join(name).is_file())
+}
+
+/// True when this process is inside a real `.app` that has adaptive `Assets.car`
+/// and `CFBundleIconName=Icon` in the adjacent Info.plist.
+///
+/// Distinct from [`packaged_macos_icon_available`]: static icns-only bundles are
+/// packaged but not adaptive. macOS still owns adaptive rendering; this is for
+/// diagnostics / evidence classification.
+pub fn packaged_macos_adaptive_icon_available() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    packaged_macos_adaptive_icon_available_for_exe(&exe)
+}
+
+/// Testable form of [`packaged_macos_adaptive_icon_available`].
+pub fn packaged_macos_adaptive_icon_available_for_exe(exe: &std::path::Path) -> bool {
+    let Some(resources) = macos_app_bundle_resources_dir(exe) else {
+        return false;
+    };
+    if !resources.join("Assets.car").is_file() {
+        return false;
+    }
+    let Some(contents) = resources.parent() else {
+        return false;
+    };
+    let plist_path = contents.join("Info.plist");
+    let Ok(plist) = std::fs::read_to_string(&plist_path) else {
+        return false;
+    };
+    plist_has_cf_bundle_icon_name_icon(&plist)
+}
+
+/// True when Info.plist sets `CFBundleIconName` to exactly `Icon`.
+fn plist_has_cf_bundle_icon_name_icon(plist: &str) -> bool {
+    let Some(after_key) = plist.split("<key>CFBundleIconName</key>").nth(1) else {
+        return false;
+    };
+    after_key
+        .trim_start()
+        .starts_with("<string>Icon</string>")
 }
 
 /// Apply AppKit mutation only (no persistence). Returns whether the temporary
@@ -366,6 +408,8 @@ pub fn apply_dock_native(app: &AppHandle, cfg: &DockIconConfig) -> Result<bool, 
                 // ponytail: unpackaged binaries have no CFBundle icon — clearing
                 // AppKit yields the generic `exec` Dock tile. Stand in Classic Dark
                 // (same primary as packaged icns) until a real .app is launched.
+                // Default `npm run dev` on macOS uses the packaged development
+                // runner so this stand-in should not activate there.
                 if !packaged_macos_icon_available() {
                     let stand_in = DockIconConfig::manual_classic(DockStyle::Dark);
                     let bytes = read_and_validate_manual(app, &stand_in)?;
@@ -375,8 +419,17 @@ pub fn apply_dock_native(app: &AppHandle, cfg: &DockIconConfig) -> Result<bool, 
                     );
                     return Ok(false);
                 }
+                let adaptive = packaged_macos_adaptive_icon_available();
                 run_appkit_on_main(app, || clear_macos_application_icon())?;
-                tracing::info!("Cleared macOS Dock override (Follow macOS)");
+                if adaptive {
+                    tracing::info!(
+                        "Cleared macOS Dock override (Follow macOS, packaged adaptive Assets.car)"
+                    );
+                } else {
+                    tracing::info!(
+                        "Cleared macOS Dock override (Follow macOS, packaged static icon)"
+                    );
+                }
                 Ok(true)
             }
             #[cfg(not(target_os = "macos"))]
@@ -635,6 +688,86 @@ mod tests {
                 "/Applications/Coreside.app/Contents/Resources"
             ))
         );
+    }
+
+    #[test]
+    fn adaptive_packaged_icon_requires_assets_car_and_icon_name() {
+        use std::io::Write;
+        let root = std::env::temp_dir().join(format!(
+            "coreside-adaptive-icon-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let macos = root.join("Coreside.app/Contents/MacOS");
+        let resources = root.join("Coreside.app/Contents/Resources");
+        std::fs::create_dir_all(&macos).unwrap();
+        std::fs::create_dir_all(&resources).unwrap();
+        let exe = macos.join("Coreside");
+        std::fs::write(&exe, b"x").unwrap();
+
+        // Static icns only → packaged icon yes, adaptive no.
+        std::fs::write(resources.join("icon.icns"), b"icns").unwrap();
+        assert!(!packaged_macos_adaptive_icon_available_for_exe(&exe));
+
+        // Assets.car without plist Icon name → not adaptive.
+        std::fs::write(resources.join("Assets.car"), b"car").unwrap();
+        let plist_path = root.join("Coreside.app/Contents/Info.plist");
+        {
+            let mut f = std::fs::File::create(&plist_path).unwrap();
+            writeln!(
+                f,
+                r#"<?xml version="1.0"?><plist><dict><key>CFBundleName</key><string>Coreside</string></dict></plist>"#
+            )
+            .unwrap();
+        }
+        assert!(!packaged_macos_adaptive_icon_available_for_exe(&exe));
+
+        // Full adaptive evidence.
+        {
+            let mut f = std::fs::File::create(&plist_path).unwrap();
+            writeln!(
+                f,
+                r#"<?xml version="1.0"?><plist><dict><key>CFBundleIconName</key><string>Icon</string></dict></plist>"#
+            )
+            .unwrap();
+        }
+        assert!(packaged_macos_adaptive_icon_available_for_exe(&exe));
+
+        // Wrong CFBundleIconName value → not adaptive (release/debug both need Icon).
+        {
+            let mut f = std::fs::File::create(&plist_path).unwrap();
+            writeln!(
+                f,
+                r#"<?xml version="1.0"?><plist><dict><key>CFBundleIconName</key><string>AppIcon</string></dict></plist>"#
+            )
+            .unwrap();
+        }
+        assert!(!packaged_macos_adaptive_icon_available_for_exe(&exe));
+
+        // Unrelated <string>Icon</string> must not satisfy CFBundleIconName=Icon.
+        {
+            let mut f = std::fs::File::create(&plist_path).unwrap();
+            writeln!(
+                f,
+                r#"<?xml version="1.0"?><plist><dict><key>CFBundleName</key><string>Icon</string><key>CFBundleIconName</key><string>AppIcon</string></dict></plist>"#
+            )
+            .unwrap();
+        }
+        assert!(!packaged_macos_adaptive_icon_available_for_exe(&exe));
+        assert!(!plist_has_cf_bundle_icon_name_icon(
+            &std::fs::read_to_string(&plist_path).unwrap()
+        ));
+
+        // Missing Info.plist → not adaptive even with Assets.car.
+        std::fs::remove_file(&plist_path).unwrap();
+        assert!(!packaged_macos_adaptive_icon_available_for_exe(&exe));
+
+        // Unpackaged binary → never adaptive.
+        assert!(!packaged_macos_adaptive_icon_available_for_exe(
+            std::path::Path::new("/tmp/target/debug/Coreside")
+        ));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

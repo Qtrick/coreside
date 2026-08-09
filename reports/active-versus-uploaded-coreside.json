@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-07T23:49:03.532Z",
-  "commit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+  "generatedAt": "2026-08-09T02:06:33.185Z",
+  "commit": "590705317ad0cf9b827f847ef1e53506ded931eb",
   "dirty": true,
-  "sourceFingerprint": "efa94051db2148fc58d887ad7558bf270c5912090da70550f6e5fb0f2bf266ab",
-  "packageLockHash": "cdacd042fad79a9b863244cd07f2c238b49cefbf299a8e2d4f7a0f5e5d923dbc",
+  "sourceFingerprint": "06cc24b02d800106037fcd40c96f69ec7151f98fbd98e2996745875233f93640",
+  "packageLockHash": "f99da7c99dc5e2db93567632e2c36d36796c4b3ea8cf6a575a3f337bb6b9d641",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
   "architecture": "arm64",
@@ -13,19 +13,42 @@
   "command": "audit:current-source",
   "exitStatus": 0,
   "archive": {
-    "filename": "Coreside Chat AI.zip",
-    "label": "Coreside Chat AI.zip (RC3.11)",
-    "expectedPath": "/Users/qunyingfan/Downloads/Coreside Chat AI.zip",
-    "expectedSha256": "8e984965f35cb28807fbb3ad24d1e48b9e6667801df716ab9c294e8e4a33b101",
+    "filename": "Coreside Chat AI (1).zip",
+    "label": "Coreside Chat AI (1).zip (P0.3 / 2026-08-08)",
+    "expectedPath": "/Users/qunyingfan/Downloads/Coreside Chat AI (1).zip",
+    "expectedSha256": "7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d",
     "present": true,
-    "observedSha256": "10cc325466f85ca09eabcb814622e17a315684fd705330a782f9adc57578f149",
-    "status": "present_hash_mismatch",
-    "supersedes": "3ae9f51473f718532c177e67b55ef1f2fb74cf6ca78e52e15f0e0660e16efadf",
-    "previousLabel": "Coreside Chat AI.zip / prior RC3.10 archive (3ae9f514…)"
+    "observedSha256": "7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d",
+    "status": "present_hash_match_extract_stale",
+    "supersedes": "8e984965f35cb28807fbb3ad24d1e48b9e6667801df716ab9c294e8e4a33b101",
+    "previousLabel": "Coreside Chat AI.zip / prior RC3.11 archive (8e984965…)",
+    "historicalIdentities": [
+      {
+        "sha256": "7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d",
+        "label": "Coreside Chat AI (1).zip (P0.3 / 2026-08-08)",
+        "role": "current_supplied"
+      },
+      {
+        "sha256": "8e984965f35cb28807fbb3ad24d1e48b9e6667801df716ab9c294e8e4a33b101",
+        "label": "Coreside Chat AI.zip / prior RC3.11 archive (8e984965…)",
+        "role": "historical_rc3_11"
+      },
+      {
+        "sha256": "3ae9f51473f718532c177e67b55ef1f2fb74cf6ca78e52e15f0e0660e16efadf",
+        "label": "Coreside Chat AI.zip / prior RC3.10 archive (3ae9f514…)",
+        "role": "historical_rc3_10"
+      },
+      {
+        "sha256": "21fb56d11bacff5b6b611c6624ee3849bc2cfec9803723f80f24c02479b835a2",
+        "label": "historical RC3.8 archive identity (21fb56d1…) — filename reused later for P0.3",
+        "role": "historical_rc3_8"
+      }
+    ],
+    "workingTreeRole": "active_working_tree"
   },
-  "activeCommit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+  "activeCommit": "590705317ad0cf9b827f847ef1e53506ded931eb",
   "activeDirty": true,
-  "comparison": "archive_unavailable",
+  "comparison": "extract_stale_or_unmarked",
   "differences": {
     "onlyInActiveCount": 0,
     "onlyInArchiveCount": 0,

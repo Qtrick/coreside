@@ -293,6 +293,7 @@ impl AiProvider for MockAiProvider {
     /// Live stream fixtures:
     /// - `live stream probe` — text-only progressive TextDelta (TS-1)
     /// - `progressive op preview` — NDJSON StreamEvent op frame before completion (RC3.3)
+    /// - `progressive surface preview` — paint-capable `state.set` before completion (P0.3)
     async fn chat_stream(
         &self,
         request: AgentRequest,
@@ -306,8 +307,10 @@ impl AiProvider for MockAiProvider {
             .map(|m| m.content.as_str())
             .unwrap_or("");
         let lower = user_text.to_lowercase();
+        let progressive_surface = lower.contains("progressive surface preview");
         let progressive_ops = lower.contains("progressive op preview");
-        let live = progressive_ops || lower.contains("live stream probe");
+        let live =
+            progressive_surface || progressive_ops || lower.contains("live stream probe");
         if request.cancel.is_cancelled() {
             let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
             return Err(AiError::Cancelled);
@@ -349,6 +352,9 @@ impl AiProvider for MockAiProvider {
             return Ok(response);
         }
 
+        if progressive_surface {
+            return Self::stream_progressive_surface_preview(request, tx).await;
+        }
         if progressive_ops {
             return Self::stream_progressive_op_preview(request, tx).await;
         }
@@ -413,6 +419,111 @@ impl AiProvider for MockAiProvider {
 }
 
 impl MockAiProvider {
+    /// Paint-capable progressive preview for seeded E2E Notes (`surf-tool-e2e-notes`).
+    async fn stream_progressive_surface_preview(
+        request: AgentRequest,
+        tx: ProviderStreamTx,
+    ) -> Result<AgentResponse, AiError> {
+        let paint_op = json!({
+            "id": "op-progressive-surface-preview",
+            "type": "state.set",
+            "target": {
+                "surfaceId": "surf-tool-e2e-notes",
+                "toolId": "tool-e2e-notes"
+            },
+            "payload": {
+                "state": { "note": "progressive preview note" }
+            }
+        });
+        let start = json!({
+            "v": "coreside.ops.v1",
+            "type": "start",
+            "groupId": "g-progressive-surface-preview",
+            "schemaVersion": "2",
+            "capabilityVersion": "1"
+        })
+        .to_string()
+            + "\n";
+        let op = json!({
+            "v": "coreside.ops.v1",
+            "type": "op",
+            "frameId": 1,
+            "groupId": "g-progressive-surface-preview",
+            "op": paint_op.clone()
+        })
+        .to_string()
+            + "\n";
+        let complete = json!({
+            "v": "coreside.ops.v1",
+            "type": "complete",
+            "frameId": 2,
+            "groupId": "g-progressive-surface-preview"
+        })
+        .to_string()
+            + "\n";
+
+        // Final durable ops must match the progressive set (empty [] would diverge).
+        let raw = json!({
+            "schemaVersion": "2",
+            "assistantMessage": "Progressive surface preview complete",
+            "responseType": "message",
+            "operations": [paint_op],
+            "diagnostics": { "fixture": "progressive_surface_preview" }
+        })
+        .to_string();
+
+        let _ = tx
+            .send(ProviderStreamEvent::ResponseStarted {
+                provider_id: "mock".into(),
+                model: "mock-fixture".into(),
+                live: true,
+            })
+            .await;
+        // Send a newline-terminated start+op before the hold. A byte-midpoint
+        // split leaves `state.set` incomplete, so Preview never paints during sleep.
+        let _ = tx
+            .send(ProviderStreamEvent::TextDelta {
+                text: format!("{start}{op}"),
+            })
+            .await;
+
+        // Hold after the paint-capable op so desktop E2E can observe Preview.
+        tokio::select! {
+            _ = request.cancel.cancelled() => {
+                let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
+                return Err(AiError::Cancelled);
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_millis(600)) => {}
+        }
+
+        let _ = tx
+            .send(ProviderStreamEvent::TextDelta {
+                text: complete,
+            })
+            .await;
+
+        let response = AgentResponse {
+            raw_text: raw.clone(),
+            usage: UsageMetadata {
+                prompt_tokens: Some(10),
+                completion_tokens: Some(28),
+                total_tokens: Some(38),
+            },
+            model: "mock-fixture".into(),
+            provider_id: "mock".into(),
+        };
+        let _ = tx
+            .send(ProviderStreamEvent::TextCompleted { text: raw.clone() })
+            .await;
+        let _ = tx
+            .send(ProviderStreamEvent::ResponseCompleted {
+                response: response.clone(),
+                buffered: false,
+            })
+            .await;
+        Ok(response)
+    }
+
     /// NDJSON `coreside.ops.v1` frames arrive as TextDelta before ResponseCompleted.
     async fn stream_progressive_op_preview(
         request: AgentRequest,
@@ -656,6 +767,92 @@ mod tests {
             .payload
             .assistant_message
             .contains("Progressive op preview complete"));
+    }
+
+    #[tokio::test]
+    async fn progressive_surface_preview_paints_before_response_completed() {
+        use crate::runtime_v2::{
+            finish_progressive_ingest, ingest_progressive_chunk_with_seed, PreviewSurfaceModel,
+            PreviewTransaction, ProgressiveOpsExpect, ProgressiveOpsParser,
+        };
+
+        let provider = MockAiProvider::new();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        let request = AgentRequest {
+            system_prompt: "test".into(),
+            messages: vec![AgentMessage::text(
+                crate::ai::AgentRole::User,
+                "please run progressive surface preview now",
+            )],
+            cancel: CancellationToken::new(),
+            idempotency_key: Some("progressive-surface".into()),
+        };
+        let join = tokio::spawn(async move { provider.chat_stream(request, tx).await });
+
+        let mut parser = ProgressiveOpsParser::new(ProgressiveOpsExpect {
+            capability_version: Some("1".into()),
+            ..Default::default()
+        });
+        let mut preview = PreviewTransaction::new("test-turn-surface", None);
+        let mut saw_paint = false;
+        let mut paint_before_complete = false;
+
+        while let Some(ev) = rx.recv().await {
+            match ev {
+                ProviderStreamEvent::TextDelta { text } => {
+                    let events = ingest_progressive_chunk_with_seed(
+                        &mut parser,
+                        &mut preview,
+                        &text,
+                        |sid| {
+                            if sid == "surf-tool-e2e-notes" {
+                                Some(PreviewSurfaceModel {
+                                    surface_id: sid.to_string(),
+                                    tool_id: Some("tool-e2e-notes".into()),
+                                    application_id: Some("tool-e2e-notes".into()),
+                                    definition: json!({
+                                        "id": "tool-e2e-notes",
+                                        "name": "E2E Notes",
+                                        "components": []
+                                    }),
+                                    state: json!({ "note": "" }),
+                                    base_revision: 1,
+                                    preview_revision: 1,
+                                })
+                            } else {
+                                None
+                            }
+                        },
+                    );
+                    if events.iter().any(|e| e.paint.is_some()) {
+                        saw_paint = true;
+                    }
+                }
+                ProviderStreamEvent::ResponseCompleted { .. } => {
+                    paint_before_complete = saw_paint;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let response = join.await.unwrap().unwrap();
+        let _ = finish_progressive_ingest(&mut parser, &mut preview);
+        assert!(
+            paint_before_complete,
+            "surface paint must arrive before ResponseCompleted"
+        );
+        assert_eq!(
+            parser.durable_operations().map(|o| o.len()),
+            Some(1),
+            "complete terminal must authorize durable paint op"
+        );
+        assert_eq!(
+            parser.durable_operations().unwrap()[0].id,
+            "op-progressive-surface-preview"
+        );
+        assert!(response
+            .raw_text
+            .contains("Progressive surface preview complete"));
     }
 
     #[tokio::test]

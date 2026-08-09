@@ -74,6 +74,12 @@ const JOURNEYS = [
     coverage: "full",
   },
   {
+    id: 19,
+    name: "progressive-surface-preview",
+    suite: "progressive-surface-preview",
+    coverage: "full",
+  },
+  {
     id: 15,
     name: "first-run-welcome",
     suite: "first-run-welcome",
@@ -255,6 +261,9 @@ runSuite("wallpaper-targeted");
 
 // Seeded eavesdropping denial (needs tool window from existing seed).
 runSuite("existing-eavesdrop", { seed: "existing" });
+
+// Progressive surface preview needs seeded E2E Notes tool + mock paint fixture.
+runSuite("progressive-surface-preview", { seed: "existing" });
 
 // Onboarding journeys need CORESIDE_E2E but must not disable welcome/tutorial.
 // Explicit empty seed prevents a polluted parent shell from leaking existing fixture data.

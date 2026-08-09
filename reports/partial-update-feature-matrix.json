@@ -2,10 +2,10 @@
   "schemaVersion": 2,
   "product": "Coreside",
   "accessDate": "2026-08-07",
-  "generatedAt": "2026-08-07T23:45:13.551Z",
-  "commit": "57f65ae3475b1fd2a1976d0ef329a532e20078ba",
+  "generatedAt": "2026-08-09T02:11:40.616Z",
+  "commit": "590705317ad0cf9b827f847ef1e53506ded931eb",
   "dirty": true,
-  "sourceFingerprint": "643ab4d7bc80921fb0e4f05b35b29245d1aaad06942f366df87b23f214465ac1",
+  "sourceFingerprint": "06cc24b02d800106037fcd40c96f69ec7151f98fbd98e2996745875233f93640",
   "command": "audit:partial-update",
   "exitStatus": 0,
   "publicBeta": "Not ready",
@@ -53,7 +53,7 @@
     "name": "Progressive generated-surface preview",
     "status": "Unit Verified",
     "userValue": 10,
-    "rationale": "Progressive trusted surface paint is Unit Verified in-tree (PreviewTransaction + overlay + ToolCanvas) but lacks desktop/packaged evidence — the highest-value remaining secure parity gap versus Partial Update's live progressive apply."
+    "rationale": "Progressive trusted surface paint is Unit Verified with SQLite cancel/incomplete rollback evidence (PreviewTransaction + overlay + ToolCanvas) but lacks desktop/packaged progressive-surface journeys — Journey 12 covers text streaming only."
   },
   "methodology": [
     "Content probes on Partial Update and Coreside trees (mustMatch/anyMatch).",
@@ -206,7 +206,7 @@
         "packagedOk": false
       },
       "notes": [
-        "Secure progressive paint exists (PreviewTransaction + overlay + ToolCanvas badge) but desktop/packaged progressive-surface journeys are not_run."
+        "Secure progressive paint exists (PreviewTransaction + overlay + ToolCanvas badge); SQLite cancel/incomplete rollback is unit-integrated; Journey 19 (progressive-surface-preview) is the Desktop Verified path — remains Unit Verified until progressive-preview-results.json is fresh."
       ],
       "evidence": [
         {
@@ -244,6 +244,11 @@
         {
           "side": "unitFile",
           "path": "src/lib/preview/surface-overlay.test.ts",
+          "ok": true
+        },
+        {
+          "side": "unitFile",
+          "path": "src-tauri/src/ai/mock.rs",
           "ok": true
         }
       ],

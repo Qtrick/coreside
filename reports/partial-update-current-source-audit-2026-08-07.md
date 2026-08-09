@@ -2,8 +2,8 @@
 
 **Product:** Coreside  
 **Access date:** 2026-08-07  
-**Generated:** 2026-08-07T23:45:13.551Z  
-**Commit:** `57f65ae3475b1fd2a1976d0ef329a532e20078ba`  
+**Generated:** 2026-08-09T02:11:40.616Z  
+**Commit:** `590705317ad0cf9b827f847ef1e53506ded931eb`  
 **Dirty:** yes  
 **Public beta:** **NOT READY**
 
@@ -31,7 +31,7 @@
 
 **PU-PROGRESSIVE-PREVIEW — Progressive generated-surface preview** (Unit Verified)
 
-Progressive trusted surface paint is Unit Verified in-tree (PreviewTransaction + overlay + ToolCanvas) but lacks desktop/packaged evidence — the highest-value remaining secure parity gap versus Partial Update's live progressive apply.
+Progressive trusted surface paint is Unit Verified with SQLite cancel/incomplete rollback evidence (PreviewTransaction + overlay + ToolCanvas) but lacks desktop/packaged progressive-surface journeys — Journey 12 covers text streaming only.
 
 ## Features
 
@@ -39,7 +39,7 @@ Progressive trusted surface paint is Unit Verified in-tree (PreviewTransaction +
 | --- | --- | --- | --- | --- |
 | `PU-STREAM` | Provider streaming (live deltas) | **Unit Verified** | 10 | Historical desktop evidence in true-streaming-results.json not applied (fingerprint/commit mismatch). |
 | `PU-PARSE` | NDJSON / UpdateStreamParser incremental parse | **Unit Verified** | 9 | — |
-| `PU-PROGRESSIVE-PREVIEW` | Progressive generated-surface preview | **Unit Verified** | 10 | Secure progressive paint exists (PreviewTransaction + overlay + ToolCanvas badge) but desktop/packaged progressive-surface journeys are not_run. |
+| `PU-PROGRESSIVE-PREVIEW` | Progressive generated-surface preview | **Unit Verified** | 10 | Secure progressive paint exists (PreviewTransaction + overlay + ToolCanvas badge); SQLite cancel/incomplete rollback is unit-integrated; Journey 19 (progressive-surface-preview) is the Desktop Verified path — remains Unit Verified until progressive-preview-results.json is fresh. |
 | `PU-PREVIEW-TXN` | Preview transactions (speculative, non-durable) | **Unit Verified** | 9 | — |
 | `PU-QUEUE` | Agent queue + queue UI | **Unit Verified** | 8 | — |
 | `PU-REPLAY` | History Replay (paced, read-only) | **Unit Verified** | 7 | ReplayPlayer treated as read-only paced stepper (not PU stream re-execution). |

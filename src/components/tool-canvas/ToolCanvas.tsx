@@ -314,7 +314,11 @@ export function ToolCanvas() {
           <h2>
             {activeTool.name}
             {isPreviewPaint ? (
-              <span className="tool-preview-badge" aria-label="Preview — not saved yet">
+              <span
+                className="tool-preview-badge"
+                data-testid="tool-preview-badge"
+                aria-label="Preview — not saved yet"
+              >
                 Preview
               </span>
             ) : null}

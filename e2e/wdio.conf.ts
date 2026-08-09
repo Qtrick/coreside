@@ -182,6 +182,9 @@ export const config: Options.Testrunner = {
     "existing-authority": ["./specs/11-command-authority-denial.spec.ts"],
     "existing-eavesdrop": ["./specs/14-stream-eavesdropping-denial.spec.ts"],
     "true-streaming": ["./specs/12-true-streaming.spec.ts"],
+    "progressive-surface-preview": [
+      "./specs/19-progressive-surface-preview.spec.ts",
+    ],
     "wallpaper-targeted": ["./specs/13-wallpaper-targeted-update.spec.ts"],
     "first-run-welcome": ["./specs/15-first-run-welcome.spec.ts"],
     "core-tutorial": ["./specs/16-core-tutorial.spec.ts"],

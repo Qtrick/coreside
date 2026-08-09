@@ -5,8 +5,11 @@
   "type": "module",
   "description": "Coreside - an AI-native personal software environment",
   "scripts": {
-    "dev": "tauri dev",
+    "dev": "node scripts/dev.mjs",
+    "dev:raw": "tauri dev",
     "dev:web": "vite",
+    "dev:bundle-verify": "node scripts/macos-dev-bundle-verify.mjs",
+    "test:dev-dispatcher": "node --test scripts/dev-dispatcher.test.mjs",
     "build": "tauri build",
     "build:web": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",

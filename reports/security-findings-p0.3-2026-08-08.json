@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "phase": "P0.3",
+  "generatedAt": "2026-08-09T02:05:00.000Z",
+  "commit": "590705317ad0cf9b827f847ef1e53506ded931eb",
+  "dirty": true,
+  "reviewer": "main-agent-fallback",
+  "modelSelection": "Auto",
+  "note": "security-review subagent hit usage limits; main Cursor agent completed the review per task instructions.",
+  "supersedes": "reports/security-findings.json (2026-08-01 / commit 4b5fb1a)",
+  "toolchain": {
+    "tauriCli": "2.11.4",
+    "tauriApi": "2.11.1",
+    "tauriCrate": "2.11.5"
+  },
+  "cspCurrent": "default-src 'self'; img-src 'self' asset: coreside-asset: http://coreside-asset.localhost data:; media-src 'self' asset: coreside-asset: http://coreside-asset.localhost data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
+  "p0Count": 0,
+  "p1Count": 0,
+  "p2Count": 1,
+  "p3Count": 2,
+  "findings": [
+    {
+      "id": "SEC-CSP-001",
+      "severity": "info",
+      "title": "Stale claim: CSP img-src allows arbitrary https:",
+      "status": "superseded_false_positive",
+      "evidence": [
+        "Current tauri.conf.json img-src is 'self' asset: coreside-asset: http://coreside-asset.localhost data: — no https:"
+      ],
+      "detail": "reports/security-findings.json (2026-08-01) is stale against current CSP.",
+      "fixed": true,
+      "resolution": "No change required; regenerate security evidence from current source."
+    },
+    {
+      "id": "SEC-DEV-001",
+      "severity": "P3",
+      "title": "Development runner must not mutate release .app / use shell eval",
+      "evidence": [
+        "scripts/lib/macos-dev-bundle.mjs assertNotReleaseApp",
+        "scripts/macos-packaged-dev-runner.sh exec argv, no killall",
+        "scripts/macos-packaged-dev-prepare.mjs spawnSync cargo/node with argv arrays"
+      ],
+      "detail": "Reviewed for path escape, release-bundle mutation, codesign ad-hoc only on debug bundle, conflict reporting without broad killall.",
+      "fixed": true,
+      "resolution": "Guards and tests added (test:dev-dispatcher)."
+    },
+    {
+      "id": "SEC-KERNEL-001",
+      "severity": "P2",
+      "title": "Sensitive kernel commands remain main-window allowlisted",
+      "evidence": [
+        "coreside-main-default.toml includes allow-kernel-mark-last-known-good, allow-kernel-export-package*, allow-kernel-set/clear-policy-override",
+        "tool-window capability uses coreside-tool-scoped allowlist without those permissions",
+        "kernel_cmds.rs handlers check require_profile() but not an extra operator role"
+      ],
+      "detail": "Raw invoke from the trusted main React webview can reach these commands. Tool windows cannot. Generated surfaces do not receive Tauri IPC. Not a new Critical remote exploit; residual risk is XSS-in-main → local policy/package operations.",
+      "fixed": false,
+      "suggestedChange": "Optional: require_main_window + explicit settings/operator gate for policy override / package export / mark-last-known-good if product wants defense-in-depth beyond capability allowlists.",
+      "remainingRisk": "Main-webview XSS could call sensitive kernel commands; mitigate via CSP (script-src 'self') and no raw HTML rendering."
+    },
+    {
+      "id": "SEC-CAP-TOOL-001",
+      "severity": "P3",
+      "title": "Tool-window isolation uses allowlist-only (global deny hazard documented)",
+      "evidence": [
+        "capabilities/tool-window.json → coreside-tool-scoped",
+        "coreside-tool-deny-sensitive.toml documents Tauri 2.11 global deny hazard and is intentionally unlinked"
+      ],
+      "detail": "Correct current design; doctor guards against re-linking global denies.",
+      "fixed": true,
+      "resolution": "No change in P0.3."
+    }
+  ]
+}

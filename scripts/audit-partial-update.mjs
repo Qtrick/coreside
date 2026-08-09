@@ -387,9 +387,17 @@ const FEATURES = [
         path: "src/lib/preview/surface-overlay.test.ts",
         hints: [/applyPreviewSurfaceOverlay/, /expect\(/],
       },
+      {
+        path: "src-tauri/src/ai/mock.rs",
+        hints: [
+          /progressive_surface_preview_paints_before_response_completed/,
+          /progressive surface preview/,
+        ],
+      },
     ],
-    // Honest gap: SQLite cancel/incomplete integration exists; desktop/packaged
-    // progressive-surface paint journey still not_run (Journey 12 is text-only).
+    desktopReports: ["reports/progressive-preview-results.json"],
+    e2eHints: [/progressive.surface.preview|19-progressive-surface-preview/],
+    // Desktop elevation requires Journey 19 evidence with matching commit/fingerprint.
     gapPriority: "P0",
   },
   {
@@ -1157,7 +1165,7 @@ function classifyFeature(feature, ctx) {
 
   if (feature.id === "PU-PROGRESSIVE-PREVIEW") {
     notes.push(
-      "Secure progressive paint exists (PreviewTransaction + overlay + ToolCanvas badge); SQLite-backed cancel/incomplete rollback is unit-integrated; desktop/packaged progressive-surface journeys remain not_run (Journey 12 covers text streaming only).",
+      "Secure progressive paint exists (PreviewTransaction + overlay + ToolCanvas badge); SQLite cancel/incomplete rollback is unit-integrated; Journey 19 (progressive-surface-preview) is the Desktop Verified path — remains Unit Verified until progressive-preview-results.json is fresh.",
     );
   }
 

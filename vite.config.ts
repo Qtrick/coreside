@@ -43,6 +43,8 @@ export default defineConfig({
       "**/.reference/**",
       "**/src-tauri/**",
       "**/e2e/**",
+      // Node built-in test runner (npm run test:dev-dispatcher), not Vitest.
+      "**/scripts/**/*.test.mjs",
     ],
   },
 });

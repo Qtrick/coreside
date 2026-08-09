@@ -36,15 +36,19 @@ Manifest: `src/assets/branding/manifest.ts` (`inAppLogoFor`).
 
 ### Dock / application icons
 
-**CURRENT PRODUCT (P0.2):** Coreside automatically follows macOS. There is **no** user-facing Dock icon selector in Appearance settings. The packaged adaptive icon (`Assets.car` + `CFBundleIconName` = `Icon`) is authoritative when launched as a real `.app`.
+**CURRENT PRODUCT (P0.3):** Coreside automatically follows macOS. There is **no** user-facing Dock icon selector in Appearance settings. The packaged adaptive icon (`Assets.car` + `CFBundleIconName` = `Icon`) is authoritative when launched as a real `.app`.
 
-Test adaptive appearance with:
+On macOS, default development launches a real adaptive `.app`:
+
 ```bash
+npm run dev                 # packaged adaptive hot development (debug .app + Vite + Rust reload)
+npm run dev:raw             # unpackaged tauri dev escape hatch (Classic Dark stand-in; NOT adaptive proof)
+npm run dev:bundle-verify   # inspect the prepared debug .app without launching
 npm run macos:build-and-run-packaged
-# or, if already built:
-npm run macos:run-packaged
+npm run macos:run-packaged  # release .app verification
 ```
-Do **not** treat `tauri dev` as proof of adaptive Icon & Widget Style behavior.
+
+Do **not** treat `npm run dev:raw` / bare `tauri dev` as proof of adaptive Icon & Widget Style behavior.
 
 **DORMANT MANUAL SYSTEM:** Classic Dark / Classic Light / Split infrastructure remains in source behind `MANUAL_DOCK_ICON_SELECTION_ENABLED = false` (TypeScript + Rust). UI lives in `ManualDockIconSelector.tsx` and is not mounted while the capability is off. Runtime and IPC normalize manual requests to Follow macOS. Migration `024_reset_dock_icon_follow_macos` resets stored manual prefs. Re-enable later by flipping the flag and mounting the selector — do not rewrite native Dock handling.
 
@@ -76,8 +80,8 @@ Readable from 16px through 1024px. Contact sheet: `reports/evidence/branding/doc
 
 - Setting: versioned `dockIcon` JSON (defaults / migrates to `follow_macos`)
 - While manual selection is dormant, effective authority is always Follow macOS
-- Follow macOS in a packaged `.app`: `NSApplication.setApplicationIconImage(None)`
-- Follow macOS in unpackaged development: Classic Dark PNG stand-in (not adaptive proof)
+- Follow macOS in a packaged `.app` (including `npm run dev` debug bundle): `NSApplication.setApplicationIconImage(None)` so `Assets.car` owns the Dock tile
+- Follow macOS in unpackaged `npm run dev:raw`: Classic Dark PNG stand-in (not adaptive proof)
 - Agent / `set_setting("dockIcon")` cannot change the Dock icon
 
 ## Protected branding behavior
