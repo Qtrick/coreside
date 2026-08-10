@@ -34,17 +34,25 @@ assertNotReleaseApp(DEV_APP);
 
 const cargoArgs = process.argv.slice(2).filter((a) => a !== "--");
 
+const allowConcurrent =
+  process.env.CORESIDE_DEV_ALLOW_CONCURRENT === "1" ||
+  process.argv.includes("--allow-concurrent");
+
 const conflicts = conflictsForExpectedApp(DEV_APP);
 if (conflicts.length > 0) {
-  console.warn("macos-packaged-dev-prepare: other Coreside processes are running:");
+  console.error("macos-packaged-dev-prepare: other Coreside processes are running:");
   for (const p of conflicts) {
-    console.warn(`  pid=${p.pid} exe=${p.executable}`);
+    console.error(`  pid=${p.pid} exe=${p.executable}`);
   }
-  console.warn(
-    "Continuing with the exact development bundle. Prefer quitting the other instance.",
-  );
-  if (process.env.CORESIDE_DEV_FAIL_ON_CONFLICT === "1") {
-    fail("conflicting Coreside process (CORESIDE_DEV_FAIL_ON_CONFLICT=1)");
+  if (allowConcurrent) {
+    console.warn(
+      "Continuing because --allow-concurrent / CORESIDE_DEV_ALLOW_CONCURRENT=1 was set.",
+    );
+  } else {
+    console.error(
+      "Failing closed: quit the other Coreside process, or re-run with --allow-concurrent / CORESIDE_DEV_ALLOW_CONCURRENT=1.",
+    );
+    fail("conflicting Coreside process (fail-closed by default)");
   }
 }
 

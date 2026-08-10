@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "description": "Immutable archive intake history. Active audit selects currentIntakeId; prior SHA identities are never rewritten.",
+  "currentIntakeId": "p0.4-input",
+  "partialUpdate": {
+    "label": "partial-update-main",
+    "filename": "Partial Update Main.zip",
+    "sha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
+    "defaultPath": "~/Downloads/Partial Update Main.zip"
+  },
+  "intakes": [
+    {
+      "id": "p0.4-input",
+      "label": "P0.4 supplied Coreside archive",
+      "role": "current_supplied_reference",
+      "filename": "Coreside Chat AI.zip",
+      "sha256": "a9327c01cba67655b5af04ecd0d837b980a5af65348580167f613e6099b8194c",
+      "defaultPath": "~/Downloads/Coreside Chat AI.zip",
+      "accessed": "2026-08-09"
+    },
+    {
+      "id": "p0.3-input",
+      "label": "P0.3 supplied Coreside archive",
+      "role": "historical_input",
+      "filename": "Coreside Chat AI (1).zip",
+      "sha256": "7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d",
+      "defaultPath": "~/Downloads/Coreside Chat AI (1).zip",
+      "accessed": "2026-08-08",
+      "notes": "Historical P0.3 input. Preserve identity even when the zip is no longer present."
+    },
+    {
+      "id": "rc3.11-input",
+      "label": "prior RC3.11 archive",
+      "role": "historical_input",
+      "filename": "Coreside Chat AI.zip",
+      "sha256": "8e984965f35cb28807fbb3ad24d1e48b9e6667801df716ab9c294e8e4a33b101",
+      "accessed": "2026-08-07"
+    },
+    {
+      "id": "rc3.10-input",
+      "label": "prior RC3.10 archive",
+      "role": "historical_input",
+      "filename": "Coreside Chat AI.zip",
+      "sha256": "3ae9f51473f718532c177e67b55ef1f2fb74cf6ca78e52e15f0e0660e16efadf",
+      "accessed": "2026-08-06"
+    },
+    {
+      "id": "rc3.8-input",
+      "label": "historical RC3.8 archive identity",
+      "role": "historical_input",
+      "filename": "Coreside Chat AI (1).zip",
+      "sha256": "21fb56d11bacff5b6b611c6624ee3849bc2cfec9803723f80f24c02479b835a2",
+      "notes": "Filename reused later for other intakes; identity is SHA-bound."
+    }
+  ]
+}

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-09T02:06:33.185Z",
-  "commit": "590705317ad0cf9b827f847ef1e53506ded931eb",
+  "generatedAt": "2026-08-10T04:42:01.697Z",
+  "commit": "9ed96b923f158a25f92104b3c600ca551f8a141a",
   "dirty": true,
-  "sourceFingerprint": "06cc24b02d800106037fcd40c96f69ec7151f98fbd98e2996745875233f93640",
+  "sourceFingerprint": "796c2fd01729e7a18b890f0170de2bb43fa437d0f3ca2b3955f0e635e5a4c5d3",
   "packageLockHash": "f99da7c99dc5e2db93567632e2c36d36796c4b3ea8cf6a575a3f337bb6b9d641",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
@@ -12,62 +12,97 @@
   "buildMode": "development",
   "command": "audit:current-source",
   "exitStatus": 0,
-  "phase": "P0.3",
+  "phase": "P0.4",
   "publicBeta": "Not ready",
   "hostedAi": "Not ready",
   "evidenceClass": "development-dirty",
   "branch": "main",
   "dirtyState": true,
+  "sourceIntake": {
+    "manifest": "reports/source-intakes.json",
+    "currentIntakeId": "p0.4-input",
+    "currentSha256": "a9327c01cba67655b5af04ecd0d837b980a5af65348580167f613e6099b8194c"
+  },
   "stagedFiles": [],
   "modifiedFiles": [
-    "docs/MIGRATION_ASSURANCE.md",
-    "package-lock.json",
-    "package.json",
+    "e2e/run.mjs",
+    "e2e/specs/19-progressive-surface-preview.spec.ts",
+    "e2e/wdio.conf.ts",
+    "reports/P0_3_CLOSURE_EVIDENCE_2026-08-08.md",
+    "reports/active-versus-uploaded-coreside.json",
+    "reports/current-source-baseline.json",
+    "reports/current-source-fingerprint.json",
+    "reports/effective-window-authority.json",
+    "reports/hosted-ai-readiness.json",
+    "reports/packaged-smoke-results.json",
     "reports/partial-update-current-source-audit-2026-08-07.md",
     "reports/partial-update-feature-matrix.json",
+    "reports/provider-platform-inventory.json",
+    "reports/report-freshness-inventory.json",
+    "reports/tauri-capability-inventory.json",
     "scripts/audit-current-source.mjs",
-    "scripts/macos-run-packaged.sh",
-    "src-tauri/src/branding/mod.rs"
+    "scripts/audit-partial-update.mjs",
+    "scripts/dev-dispatcher.test.mjs",
+    "scripts/lib/macos-dev-bundle.mjs",
+    "scripts/macos-packaged-dev-prepare.mjs",
+    "src-tauri/src/ai/mock.rs",
+    "src-tauri/src/ai/response_schema.rs",
+    "src-tauri/src/branding/mod.rs",
+    "src-tauri/src/commands/kernel_cmds.rs",
+    "src-tauri/src/runtime_v2/packs.rs",
+    "src-tauri/src/runtime_v2/patch.rs",
+    "src-tauri/src/runtime_v2/preservation.rs",
+    "src-tauri/src/runtime_v2/preview_transaction.rs",
+    "src-tauri/src/runtime_v2/surfaces.rs",
+    "src-tauri/src/runtime_v2/transactions.rs",
+    "src/components/tool-renderer/nodes.tsx"
   ],
   "untrackedSourceFiles": [
-    "docs/P0_3_IMPLEMENTATION_PLAN_2026-08-08.md",
-    "scripts/dev-dispatcher.test.mjs",
-    "scripts/dev.mjs",
-    "scripts/lib/",
-    "scripts/macos-dev-bundle-verify.mjs",
-    "scripts/macos-packaged-dev-prepare.mjs",
-    "scripts/macos-packaged-dev-runner.sh"
+    "docs/DECLARATIVE_PARTIAL_UPDATES_CROSSWALK_2026-08-09.md",
+    "docs/DEV_RELEASE_STATE_ISOLATION_DECISION_2026-08-09.md",
+    "docs/P0_4_IMPLEMENTATION_PLAN_2026-08-09.md",
+    "e2e/specs/20-progressive-preview-cancel.spec.ts"
   ],
   "archive": {
-    "filename": "Coreside Chat AI (1).zip",
-    "label": "Coreside Chat AI (1).zip (P0.3 / 2026-08-08)",
-    "expectedPath": "/Users/qunyingfan/Downloads/Coreside Chat AI (1).zip",
-    "expectedSha256": "7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d",
+    "filename": "Coreside Chat AI.zip",
+    "label": "P0.4 supplied Coreside archive",
+    "expectedPath": "/Users/qunyingfan/Downloads/Coreside Chat AI.zip",
+    "expectedSha256": "a9327c01cba67655b5af04ecd0d837b980a5af65348580167f613e6099b8194c",
     "present": true,
-    "observedSha256": "7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d",
+    "observedSha256": "a9327c01cba67655b5af04ecd0d837b980a5af65348580167f613e6099b8194c",
     "status": "present_hash_match_extract_stale",
-    "supersedes": "8e984965f35cb28807fbb3ad24d1e48b9e6667801df716ab9c294e8e4a33b101",
-    "previousLabel": "Coreside Chat AI.zip / prior RC3.11 archive (8e984965…)",
+    "supersedes": "7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d",
+    "previousLabel": "P0.3 supplied Coreside archive",
     "historicalIdentities": [
       {
-        "sha256": "7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d",
-        "label": "Coreside Chat AI (1).zip (P0.3 / 2026-08-08)",
+        "id": "p0.4-input",
+        "sha256": "a9327c01cba67655b5af04ecd0d837b980a5af65348580167f613e6099b8194c",
+        "label": "P0.4 supplied Coreside archive",
         "role": "current_supplied"
       },
       {
+        "id": "p0.3-input",
+        "sha256": "7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d",
+        "label": "P0.3 supplied Coreside archive",
+        "role": "historical_input"
+      },
+      {
+        "id": "rc3.11-input",
         "sha256": "8e984965f35cb28807fbb3ad24d1e48b9e6667801df716ab9c294e8e4a33b101",
-        "label": "Coreside Chat AI.zip / prior RC3.11 archive (8e984965…)",
-        "role": "historical_rc3_11"
+        "label": "prior RC3.11 archive",
+        "role": "historical_input"
       },
       {
+        "id": "rc3.10-input",
         "sha256": "3ae9f51473f718532c177e67b55ef1f2fb74cf6ca78e52e15f0e0660e16efadf",
-        "label": "Coreside Chat AI.zip / prior RC3.10 archive (3ae9f514…)",
-        "role": "historical_rc3_10"
+        "label": "prior RC3.10 archive",
+        "role": "historical_input"
       },
       {
+        "id": "rc3.8-input",
         "sha256": "21fb56d11bacff5b6b611c6624ee3849bc2cfec9803723f80f24c02479b835a2",
-        "label": "historical RC3.8 archive identity (21fb56d1…) — filename reused later for P0.3",
-        "role": "historical_rc3_8"
+        "label": "historical RC3.8 archive identity",
+        "role": "historical_input"
       }
     ],
     "workingTreeRole": "active_working_tree"
@@ -84,9 +119,9 @@
     "srcFiles": 192,
     "rustFiles": 193,
     "migrations": 24,
-    "e2eSpecs": 18,
+    "e2eSpecs": 20,
     "tauriCommands": 222,
-    "fingerprintFileCount": 711
+    "fingerprintFileCount": 714
   },
   "toolVersions": {
     "node": "v24.17.0",
@@ -136,7 +171,7 @@
     "default.json",
     "tool-window.json"
   ],
-  "previousArchiveSuperseded": "8e984965f35cb28807fbb3ad24d1e48b9e6667801df716ab9c294e8e4a33b101",
+  "previousArchiveSuperseded": "7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d",
   "notes": [
     "Archive status: present_hash_match_extract_stale",
     "Public beta remains Not ready until full current-source gates pass.",

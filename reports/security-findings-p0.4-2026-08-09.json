@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "phase": "P0.4",
+  "generatedAt": "2026-08-10T04:30:00.000Z",
+  "commit": "9ed96b923f158a25f92104b3c600ca551f8a141a",
+  "dirty": true,
+  "reviewer": "main-agent-fallback",
+  "modelSelection": "Auto",
+  "note": "security-review subagent hit usage limits; main Cursor agent completed the review per task instructions.",
+  "supersedes": "reports/security-findings-p0.3-2026-08-08.json",
+  "sourceFingerprint": "04d15a5dc15a892614ba3602c4c8428032f88a5ca09245a39b1aadc478bf05ef",
+  "toolchain": {
+    "tauriCli": "2.11.4",
+    "tauriApi": "2.11.1",
+    "tauriCrate": "2.11.5"
+  },
+  "cspCurrent": "default-src 'self'; img-src 'self' asset: coreside-asset: http://coreside-asset.localhost data:; media-src 'self' asset: coreside-asset: http://coreside-asset.localhost data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
+  "capabilities": {
+    "main": "windows:[main] → coreside-main-default + minimal core window/event",
+    "tool": "windows:[tool-*] → coreside-tool-scoped allowlist-only (deny-sensitive intentionally unlinked)",
+    "npmAudit": "0 vulnerabilities (baseline)"
+  },
+  "p0Count": 0,
+  "p1Count": 0,
+  "p2Count": 1,
+  "p3Count": 2,
+  "findings": [
+    {
+      "id": "SEC-KERNEL-001",
+      "severity": "P2",
+      "title": "Sensitive kernel commands — main-window label enforcement expanded",
+      "status": "mitigated",
+      "evidence": [
+        "kernel_cmds.rs require_main_for_sensitive_kernel on apply_change, mark/restore LKG, export/import package, policy override, permissions, recovery mutations, decide_approval, revoke_runtime_grant, clear_audit, set_application_lifecycle",
+        "tool-window capability still lacks those allows",
+        "require_profile() retained"
+      ],
+      "detail": "Residual: main-webview XSS could still invoke these if script injection exists. Label gates are defense-in-depth only — do not treat main as a trust boundary by itself. Mitigations: script-src 'self', ReactMarkdown skipHtml, tool-renderer strips dangerouslySetInnerHTML/on*.",
+      "fixed": true,
+      "remainingRisk": "Main XSS → local policy/package/recovery ops; no remote Critical path identified."
+    },
+    {
+      "id": "SEC-XSS-MAIN-001",
+      "severity": "P3",
+      "title": "Main renderer markdown uses ReactMarkdown with skipHtml",
+      "status": "accepted_with_monitoring",
+      "evidence": [
+        "src/components/chat/MessageBubble.tsx skipHtml + safeMarkdownUrl",
+        "tool-renderer nodes.tsx strips on* and dangerouslySetInnerHTML"
+      ],
+      "detail": "No dangerouslySetInnerHTML usage found for model content. Continue rejecting raw HTML ports.",
+      "fixed": false
+    },
+    {
+      "id": "SEC-CSP-FONTS-001",
+      "severity": "P3",
+      "title": "CSP allows Google Fonts + style unsafe-inline",
+      "status": "deferred",
+      "evidence": ["tauri.conf.json csp style-src/font-src"],
+      "detail": "Bundling fonts locally is desirable but not done in this pass to avoid theming regressions. script-src remains 'self' only.",
+      "fixed": false
+    },
+    {
+      "id": "SEC-DEV-SHARE-001",
+      "severity": "P2",
+      "title": "Dev and release may share AppPaths + keychain",
+      "status": "documented",
+      "evidence": [
+        "docs/DEV_RELEASE_STATE_ISOLATION_DECISION_2026-08-09.md",
+        "app_paths.rs CORESIDE_DATA_DIR override",
+        "credentials SERVICE coreside.provider"
+      ],
+      "detail": "Fail-closed concurrent processes added. Profile-based isolation deferred (pre-beta).",
+      "fixed": false
+    }
+  ]
+}

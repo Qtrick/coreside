@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "journey": 20,
+  "name": "progressive-preview-cancel",
+  "evidenceLevel": "Desktop Verified",
+  "startedAt": "2026-08-10T04:41:10.536Z",
+  "endedAt": "2026-08-10T04:41:11.134Z",
+  "generatedAt": "2026-08-10T04:41:11.134Z",
+  "commit": "9ed96b923f158a25f92104b3c600ca551f8a141a",
+  "dirty": true,
+  "sourceFingerprint": "796c2fd01729e7a18b890f0170de2bb43fa437d0f3ca2b3955f0e635e5a4c5d3",
+  "binaryHash": "0b4019a4602154833cb9e69b2247fb03950f44111e86ae4f46bdea5a1b8676e7",
+  "e2eSpec": "e2e/specs/20-progressive-preview-cancel.spec.ts",
+  "providerFixture": "mock progressive surface preview (cancel during hold)",
+  "assertions": [
+    "preview badge visible before cancel",
+    "preview note painted before cancel",
+    "cancel via real Cancel request control",
+    "preview badge cleared after cancel",
+    "note rolled back to original",
+    "composer left sending state",
+    "conversation queue not stuck",
+    "durable complete message absent"
+  ],
+  "intentionallyRejected": [
+    "PU-HTML-RESP",
+    "PU-JS",
+    "PU-CDN",
+    "fake frontend state mutation"
+  ]
+}

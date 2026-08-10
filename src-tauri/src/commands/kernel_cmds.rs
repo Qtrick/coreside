@@ -45,9 +45,23 @@ use crate::application_kernel::testing::{
 use crate::application_kernel::{apply_change, capability_catalog, ChangeRequest, ChangeResult};
 use crate::commands::CommandError;
 use crate::state::AppState;
+use crate::windows;
 
 fn map_kernel(err: crate::application_kernel::errors::KernelError) -> CommandError {
     CommandError::new(err.category(), err.user_message())
+}
+
+/// Defense-in-depth: sensitive kernel mutations require the main window label.
+/// Tool windows are already capability-denied; this also blocks non-main labels.
+/// Not a substitute for CSP / markdown hardening — main-webview XSS remains residual risk.
+fn require_main_for_sensitive_kernel(window: &tauri::WebviewWindow) -> Result<(), CommandError> {
+    if windows::caller_bound_tool_id(window).is_some() || window.label() != "main" {
+        return Err(CommandError::new(
+            "forbidden",
+            "Only the main Coreside window can perform this kernel operation.",
+        ));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -57,10 +71,12 @@ pub fn kernel_capability_catalog() -> Value {
 
 #[tauri::command]
 pub fn kernel_apply_change(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     mut request: ChangeRequest,
 ) -> Result<ChangeResult, CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     // IPC from the UI is always user-initiated; never allow agent self-approval.
     request.source_type = "user".into();
     if request.operations.is_empty() {
@@ -110,20 +126,24 @@ pub fn kernel_ensure_tool_manifest(
 
 #[tauri::command]
 pub fn kernel_restore_last_known_good(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     application_id: String,
 ) -> Result<ManifestRecord, CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
     restore_last_known_good(&mut db, &application_id).map_err(CommandError::from)
 }
 
 #[tauri::command]
 pub fn kernel_mark_last_known_good(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     application_id: String,
 ) -> Result<(), CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
     // Trusted UI / verification path only — not agent-callable as self-grant via ops
     mark_last_known_good(&mut db, &application_id).map_err(CommandError::from)
@@ -150,12 +170,14 @@ pub fn kernel_upsert_data_model(
 
 #[tauri::command]
 pub fn kernel_grant_permission(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     application_id: String,
     permission: String,
     scope: Option<Value>,
 ) -> Result<PermissionGrant, CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
     grant_permission(
         &mut db,
@@ -169,11 +191,13 @@ pub fn kernel_grant_permission(
 
 #[tauri::command]
 pub fn kernel_revoke_permission(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     application_id: String,
     permission: String,
 ) -> Result<(), CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
     revoke_permission(&mut db, &application_id, &permission).map_err(CommandError::from)
 }
@@ -199,39 +223,49 @@ pub fn kernel_get_recovery_state(
 
 #[tauri::command]
 pub fn kernel_set_recovery_mode(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     enabled: bool,
 ) -> Result<RecoveryState, CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
     set_recovery_mode(&mut db, enabled).map_err(CommandError::from)
 }
 
 #[tauri::command]
 pub fn kernel_enter_safe_startup(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     reason: String,
 ) -> Result<RecoveryState, CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
     enter_safe_startup(&mut db, &reason).map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub fn kernel_clear_recovery(state: State<'_, AppState>) -> Result<RecoveryState, CommandError> {
+pub fn kernel_clear_recovery(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<RecoveryState, CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
     clear_recovery(&mut db).map_err(CommandError::from)
 }
 
 #[tauri::command]
 pub fn kernel_set_recovery_flags(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     disable_user_surfaces: Option<bool>,
     disable_custom_layouts: Option<bool>,
     disable_capability_packs: Option<bool>,
 ) -> Result<RecoveryState, CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
     set_flags(
         &mut db,
@@ -244,20 +278,24 @@ pub fn kernel_set_recovery_flags(
 
 #[tauri::command]
 pub fn kernel_export_package(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     application_id: String,
 ) -> Result<AppPackage, CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let db = state.db.lock();
     export_package(&db, &application_id).map_err(map_kernel)
 }
 
 #[tauri::command]
 pub fn kernel_export_package_bytes(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     application_id: String,
 ) -> Result<Vec<u8>, CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let db = state.db.lock();
     let pkg = export_package(&db, &application_id).map_err(map_kernel)?;
     package_to_bytes(&pkg).map_err(map_kernel)
@@ -271,12 +309,14 @@ pub fn kernel_preview_package(bytes: Vec<u8>) -> Result<PackagePreview, CommandE
 
 #[tauri::command]
 pub fn kernel_import_package(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     bytes: Vec<u8>,
     approve: bool,
     remint_ids: Option<bool>,
 ) -> Result<crate::application_kernel::manifest::ApplicationManifest, CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
     import_package(&mut db, &bytes, approve, remint_ids.unwrap_or(true)).map_err(map_kernel)
 }
@@ -382,21 +422,25 @@ pub fn kernel_interrupt_jobs(state: State<'_, AppState>) -> Result<u64, CommandE
 
 #[tauri::command]
 pub fn kernel_set_policy_override(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     key: String,
     decision: String,
 ) -> Result<(), CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
     set_policy_override(&mut db, &key, &decision).map_err(CommandError::from)
 }
 
 #[tauri::command]
 pub fn kernel_clear_policy_override(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     key: String,
 ) -> Result<(), CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
     clear_policy_override(&mut db, &key).map_err(CommandError::from)
 }
@@ -506,6 +550,7 @@ pub fn kernel_list_pending_approvals(
 /// always `user`; the agent has no command that decides approvals.
 #[tauri::command]
 pub fn kernel_decide_approval(
+    window: tauri::WebviewWindow,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     approval_id: String,
@@ -514,6 +559,7 @@ pub fn kernel_decide_approval(
     remember_duration: Option<String>,
 ) -> Result<ApprovalDecisionResult, CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let remember = match (remember_scope, remember_duration) {
         (Some(scope), Some(duration)) => {
             let scope = GrantScope::parse(&scope)
@@ -577,11 +623,13 @@ pub fn kernel_list_runtime_grants(
 
 #[tauri::command]
 pub fn kernel_revoke_runtime_grant(
+    window: tauri::WebviewWindow,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     grant_id: String,
 ) -> Result<(), CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     {
         let mut db = state.db.lock();
         grants::revoke_grant(&mut db, &grant_id).map_err(CommandError::from)?;
@@ -604,19 +652,25 @@ pub fn kernel_list_audit_events(
 }
 
 #[tauri::command]
-pub fn kernel_clear_audit_events(state: State<'_, AppState>) -> Result<u64, CommandError> {
+pub fn kernel_clear_audit_events(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<u64, CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
     audit::clear_events(&mut db).map_err(CommandError::from)
 }
 
 #[tauri::command]
 pub fn kernel_set_application_lifecycle(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     application_id: String,
     enabled: bool,
 ) -> Result<ManifestRecord, CommandError> {
     state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
     set_application_enabled(&mut db, &application_id, enabled).map_err(CommandError::from)?;
     get_manifest(&db, &application_id).map_err(CommandError::from)

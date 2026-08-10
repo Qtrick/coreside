@@ -17,60 +17,69 @@ const reportsDir = path.join(root, "reports");
 const commandName = "audit:current-source";
 
 const DOWNLOADS = path.join(process.env.HOME || "", "Downloads");
-/** Prefer explicitly supplied P0.3 archive path, then common Downloads names. */
+const INTAKES_PATH = path.join(reportsDir, "source-intakes.json");
+
+function expandHome(p) {
+  if (!p) return p;
+  if (p.startsWith("~/")) return path.join(process.env.HOME || "", p.slice(2));
+  return p;
+}
+
+function loadSourceIntakes() {
+  if (!fs.existsSync(INTAKES_PATH)) {
+    throw new Error(`missing ${path.relative(root, INTAKES_PATH)}`);
+  }
+  const raw = JSON.parse(fs.readFileSync(INTAKES_PATH, "utf8"));
+  if (!raw?.currentIntakeId || !Array.isArray(raw.intakes)) {
+    throw new Error("source-intakes.json missing currentIntakeId/intakes");
+  }
+  const current = raw.intakes.find((i) => i.id === raw.currentIntakeId);
+  if (!current?.sha256) {
+    throw new Error(`current intake ${raw.currentIntakeId} missing sha256`);
+  }
+  return { manifest: raw, current };
+}
+
+const { manifest: SOURCE_INTAKES, current: CURRENT_INTAKE } = loadSourceIntakes();
+/** Prefer env override, then current intake default path, then common Downloads names. */
 const DEFAULT_ARCHIVE =
   process.env.CORESIDE_ARCHIVE ||
   [
-    path.join(DOWNLOADS, "Coreside Chat AI (1).zip"),
+    expandHome(CURRENT_INTAKE.defaultPath),
+    path.join(DOWNLOADS, CURRENT_INTAKE.filename || "Coreside Chat AI.zip"),
     path.join(DOWNLOADS, "Coreside Chat AI.zip"),
-  ].find((p) => fs.existsSync(p)) ||
-  path.join(DOWNLOADS, "Coreside Chat AI (1).zip");
-/** Current supplied Coreside archive (P0.3 / 2026-08-08). */
-const EXPECTED_ARCHIVE_SHA256 =
-  "7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d";
-/** Historical RC3.11 archive — preserve provenance; do not erase. */
-const PREVIOUS_ARCHIVE_SHA256 =
-  "8e984965f35cb28807fbb3ad24d1e48b9e6667801df716ab9c294e8e4a33b101";
-const PREVIOUS_ARCHIVE_LABEL =
-  "Coreside Chat AI.zip / prior RC3.11 archive (8e984965…)";
+    path.join(DOWNLOADS, "Coreside Chat AI (1).zip"),
+  ].find((p) => p && fs.existsSync(p)) ||
+  expandHome(CURRENT_INTAKE.defaultPath) ||
+  path.join(DOWNLOADS, "Coreside Chat AI.zip");
+/** Current supplied Coreside archive (from reports/source-intakes.json). */
+const EXPECTED_ARCHIVE_SHA256 = CURRENT_INTAKE.sha256;
 const CURRENT_ARCHIVE_LABEL =
-  "Coreside Chat AI (1).zip (P0.3 / 2026-08-08)";
+  CURRENT_INTAKE.label || `${CURRENT_INTAKE.filename} (${CURRENT_INTAKE.id})`;
 const PARTIAL_UPDATE_ARCHIVE =
   process.env.PARTIAL_UPDATE_ARCHIVE ||
+  expandHome(SOURCE_INTAKES.partialUpdate?.defaultPath) ||
   path.join(DOWNLOADS, "Partial Update Main.zip");
 const EXPECTED_PARTIAL_UPDATE_SHA256 =
+  SOURCE_INTAKES.partialUpdate?.sha256 ||
   "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607";
-/** Older historical archives kept for provenance only. */
-const OLDER_ARCHIVE_SHA256 =
-  "3ae9f51473f718532c177e67b55ef1f2fb74cf6ca78e52e15f0e0660e16efadf";
-const OLDER_ARCHIVE_LABEL =
-  "Coreside Chat AI.zip / prior RC3.10 archive (3ae9f514…)";
-const LEGACY_RC38_ARCHIVE_SHA256 =
-  "21fb56d11bacff5b6b611c6624ee3849bc2cfec9803723f80f24c02479b835a2";
-const LEGACY_RC38_ARCHIVE_LABEL =
-  "historical RC3.8 archive identity (21fb56d1…) — filename reused later for P0.3";
-const HISTORICAL_ARCHIVE_IDENTITIES = [
-  {
-    sha256: EXPECTED_ARCHIVE_SHA256,
-    label: CURRENT_ARCHIVE_LABEL,
-    role: "current_supplied",
-  },
-  {
-    sha256: PREVIOUS_ARCHIVE_SHA256,
-    label: PREVIOUS_ARCHIVE_LABEL,
-    role: "historical_rc3_11",
-  },
-  {
-    sha256: OLDER_ARCHIVE_SHA256,
-    label: OLDER_ARCHIVE_LABEL,
-    role: "historical_rc3_10",
-  },
-  {
-    sha256: LEGACY_RC38_ARCHIVE_SHA256,
-    label: LEGACY_RC38_ARCHIVE_LABEL,
-    role: "historical_rc3_8",
-  },
-];
+/** Historical intakes preserved for provenance — never rewrite SHA identities. */
+const HISTORICAL_ARCHIVE_IDENTITIES = SOURCE_INTAKES.intakes.map((intake) => ({
+  id: intake.id,
+  sha256: intake.sha256,
+  label: intake.label || intake.id,
+  role:
+    intake.id === SOURCE_INTAKES.currentIntakeId
+      ? "current_supplied"
+      : intake.role || "historical_input",
+}));
+// Previous (superseded) intake — used in baseline/compare reports.
+const PREVIOUS_ARCHIVE_SHA256 =
+  HISTORICAL_ARCHIVE_IDENTITIES.find((i) => i.id === "p0.3-input")?.sha256 ||
+  "7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d";
+const PREVIOUS_ARCHIVE_LABEL =
+  HISTORICAL_ARCHIVE_IDENTITIES.find((i) => i.id === "p0.3-input")?.label ||
+  "P0.3 supplied Coreside archive";
 
 const FINGERPRINT_ROOTS = [
   "src",
@@ -500,12 +509,17 @@ const hostedAi = "Not ready";
 
 const baselineReport = {
   ...common,
-  phase: "P0.3",
+  phase: "P0.4",
   publicBeta,
   hostedAi,
   evidenceClass: dirty ? "development-dirty" : "development-clean",
   branch,
   dirtyState: dirty,
+  sourceIntake: {
+    manifest: "reports/source-intakes.json",
+    currentIntakeId: SOURCE_INTAKES.currentIntakeId,
+    currentSha256: EXPECTED_ARCHIVE_SHA256,
+  },
   stagedFiles: staged,
   modifiedFiles: modified,
   untrackedSourceFiles: untracked.filter(
@@ -604,7 +618,7 @@ writeJson("current-source-baseline.json", baselineReport);
 writeJson("active-versus-uploaded-coreside.json", compareReport);
 
 const HISTORICAL_NOTE =
-  "P0.3 archive 7e335f18; suite not re-run on current tree. Absent until Desktop/Packaged gates execute.";
+  "P0.4 intake a9327c01 (current); P0.3 intake 7e335f18 preserved as historical. Desktop/Packaged gates require fresh evidence on current fingerprint.";
 
 /** Restamp gate reports that must not claim passes on a dirty or stale fingerprint. */
 function restampAbsentGateReports() {
@@ -808,7 +822,7 @@ const freshnessReport = {
 };
 writeJson("report-freshness-inventory.json", freshnessReport);
 
-const md = `# Current Source Baseline (P0.3)
+const md = `# Current Source Baseline (P0.4)
 
 **Product:** Coreside  
 **Access date:** ${nowIso().slice(0, 10)}  

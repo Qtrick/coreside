@@ -2,8 +2,8 @@
 
 **Product:** Coreside  
 **Access date:** 2026-08-07  
-**Generated:** 2026-08-09T02:11:40.616Z  
-**Commit:** `590705317ad0cf9b827f847ef1e53506ded931eb`  
+**Generated:** 2026-08-10T04:42:45.778Z  
+**Commit:** `9ed96b923f158a25f92104b3c600ca551f8a141a`  
 **Dirty:** yes  
 **Public beta:** **NOT READY**
 
@@ -22,16 +22,16 @@
 | Status | Count |
 | --- | --- |
 | Unit Verified | 12 |
-| Integrated – Not Verified | 1 |
+| Desktop Verified | 1 |
 | Intentionally Rejected | 5 |
 | Deferred | 2 |
 | **Total** | **20** |
 
 ## Highest-value remaining secure parity gap
 
-**PU-PROGRESSIVE-PREVIEW — Progressive generated-surface preview** (Unit Verified)
+**PU-STREAM — Provider streaming (live deltas)** (Unit Verified)
 
-Progressive trusted surface paint is Unit Verified with SQLite cancel/incomplete rollback evidence (PreviewTransaction + overlay + ToolCanvas) but lacks desktop/packaged progressive-surface journeys — Journey 12 covers text streaming only.
+Historical desktop evidence in true-streaming-results.json not applied (fingerprint/commit mismatch).
 
 ## Features
 
@@ -39,7 +39,7 @@ Progressive trusted surface paint is Unit Verified with SQLite cancel/incomplete
 | --- | --- | --- | --- | --- |
 | `PU-STREAM` | Provider streaming (live deltas) | **Unit Verified** | 10 | Historical desktop evidence in true-streaming-results.json not applied (fingerprint/commit mismatch). |
 | `PU-PARSE` | NDJSON / UpdateStreamParser incremental parse | **Unit Verified** | 9 | — |
-| `PU-PROGRESSIVE-PREVIEW` | Progressive generated-surface preview | **Unit Verified** | 10 | Secure progressive paint exists (PreviewTransaction + overlay + ToolCanvas badge); SQLite cancel/incomplete rollback is unit-integrated; Journey 19 (progressive-surface-preview) is the Desktop Verified path — remains Unit Verified until progressive-preview-results.json is fresh. |
+| `PU-PROGRESSIVE-PREVIEW` | Progressive generated-surface preview | **Desktop Verified** | 10 | Secure progressive paint exists (PreviewTransaction + overlay + ToolCanvas badge); SQLite cancel/incomplete rollback is unit-integrated; Journey 19 (progressive-surface-preview) is the Desktop Verified path — remains Unit Verified until progressive-preview-results.json is fresh. |
 | `PU-PREVIEW-TXN` | Preview transactions (speculative, non-durable) | **Unit Verified** | 9 | — |
 | `PU-QUEUE` | Agent queue + queue UI | **Unit Verified** | 8 | — |
 | `PU-REPLAY` | History Replay (paced, read-only) | **Unit Verified** | 7 | ReplayPlayer treated as read-only paced stepper (not PU stream re-execution). |
@@ -55,7 +55,7 @@ Progressive trusted surface paint is Unit Verified with SQLite cancel/incomplete
 | `PU-MULTIPLAYER` | Multiuser / Durable Object collaboration | **Deferred** | 4 | Public multiuser collaboration deferred; local-first consumer beta priority. |
 | `PU-AUTH` | Hosted auth / Better Auth stack | **Deferred** | 3 | Hosted identity deferred relative to local BYOK consumer track. |
 | `CS-TXN` | Trusted application transactions | **Unit Verified** | 9 | — |
-| `CS-PACKS` | Capability packs (trusted components) | **Integrated – Not Verified** | 9 | — |
+| `CS-PACKS` | Capability packs (trusted components) | **Unit Verified** | 9 | — |
 | `PU-CHANNEL-SCOPE` | Scoped turn / Channel delivery (vs global broadcast) | **Unit Verified** | 8 | — |
 
 ## Methodology

@@ -41,6 +41,53 @@ export function sha256File(filePath) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
 }
 
+/**
+ * Exact directory mirror for repository-managed branding resources only.
+ * Clears destination via temp + rename so deleted source files cannot linger.
+ */
+export function mirrorManagedDirectory(sourceDir, destDir) {
+  assertUnderRoot(destDir, "mirror destination");
+  if (!existsSync(sourceDir)) {
+    throw new Error(`mirror source missing: ${sourceDir}`);
+  }
+  const parent = dirname(destDir);
+  mkdirSync(parent, { recursive: true });
+  const tmp = join(parent, `.mirror-tmp-${process.pid}-${Date.now()}`);
+  assertUnderRoot(tmp, "mirror temp");
+  try {
+    rmSync(tmp, { recursive: true, force: true });
+    cpSync(sourceDir, tmp, { recursive: true });
+    rmSync(destDir, { recursive: true, force: true });
+    renameSync(tmp, destDir);
+  } catch (err) {
+    // If dest was removed but rename failed, recover from tmp before cleanup.
+    if (!existsSync(destDir) && existsSync(tmp)) {
+      try {
+        renameSync(tmp, destDir);
+      } catch {
+        /* fall through to original error */
+      }
+    }
+    throw err;
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+/** Extract Coreside executable path from `ps` args — supports spaces in paths. */
+export function executableFromPsArgs(args) {
+  const text = String(args || "").trim();
+  if (!text) return "";
+  const appMatch = text.match(
+    /^(.*?\.app\/Contents\/MacOS\/Coreside)(?:\s|$)/,
+  );
+  if (appMatch) return appMatch[1];
+  // Bare Mach-O: consume through `/Coreside` before argv extras (spaces allowed).
+  const bareMatch = text.match(/^(.+\/Coreside)(?:\s|$)/);
+  if (bareMatch) return bareMatch[1];
+  return text.split(/\s+/)[0] || text;
+}
+
 export function assertUnderRoot(absPath, label = "path") {
   const resolved = resolve(absPath);
   const rootPrefix = ROOT.endsWith("/") ? ROOT : `${ROOT}/`;
@@ -121,7 +168,8 @@ export function ensureDevAppBundle({ forceResources = false } = {}) {
 
   if (needCar) copyFileSync(SOURCE_ASSETS_CAR, carDest);
   if (needIcns) copyFileSync(SOURCE_ICON_ICNS, icnsDest);
-  cpSync(SOURCE_BRANDING, brandingDest, { recursive: true });
+  // Exact mirror — deleted source branding files must not linger in the debug .app.
+  mirrorManagedDirectory(SOURCE_BRANDING, brandingDest);
 
   return {
     appPath: DEV_APP,
@@ -183,8 +231,8 @@ export function listCoresideProcesses() {
     if (!m) continue;
     const pid = Number(m[1]);
     const args = m[2];
-    // argv[0] only — ignore editors/npm/node whose cwd/path merely contains "Coreside".
-    const executable = args.split(/\s+/)[0] || args;
+    // Full executable path — supports spaces; ignore editors whose args merely mention Coreside.
+    const executable = executableFromPsArgs(args);
     if (!/\/Coreside$/.test(executable)) continue;
     if (/ps -axo|macos-packaged-dev-runner|scripts\/dev\.mjs/.test(args)) {
       continue;

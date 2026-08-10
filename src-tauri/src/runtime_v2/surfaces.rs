@@ -478,6 +478,27 @@ pub fn save_surface_state(db: &mut Database, surface_id: &str, state: &Value) ->
     Ok(())
 }
 
+/// Deep-merge object patches for `state.patch` (preview + durable apply must match).
+pub(crate) fn merge_json_objects(target: &mut Value, patch: &Value) {
+    match (target, patch) {
+        (Value::Object(dst), Value::Object(src)) => {
+            for (k, v) in src {
+                match dst.get_mut(k) {
+                    Some(existing) if existing.is_object() && v.is_object() => {
+                        merge_json_objects(existing, v);
+                    }
+                    _ => {
+                        dst.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+        (target, patch) => {
+            *target = patch.clone();
+        }
+    }
+}
+
 trait OptionalCompat<T> {
     fn optional_compat(self) -> DbResult<Option<T>>;
 }
@@ -568,6 +589,7 @@ mod tests {
             components: vec![crate::ai::ToolComponent {
                 id: "h".into(),
                 component_type: "heading".into(),
+                value_key: None,
                 props: Some(json!({"text": "Hi"})),
                 children: None,
             }],

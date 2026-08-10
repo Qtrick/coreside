@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
 import {
   E2E_NOTE_INPUT_ID,
   E2E_REPO_ROOT,
@@ -35,6 +34,10 @@ const evidencePath = path.resolve(
 describe("Journey 19 — progressive surface preview", () => {
   it("shows a speculative Preview badge before the turn commits", async () => {
     requireExistingSeed("Journey 19");
+    const startedAt = new Date().toISOString();
+    const t0 = Date.now();
+    let firstBadgeMs: number | null = null;
+    let firstPaintMs: number | null = null;
     await waitForAppReady();
     await denyPendingApprovalIfPresent();
     await openPersonalTool();
@@ -49,6 +52,7 @@ describe("Journey 19 — progressive surface preview", () => {
     await send.waitForExist({ timeout: 10_000 });
     await send.waitForClickable({ timeout: 5_000 });
     await send.click();
+    const turnStartedMs = Date.now();
 
     const badge = await $('[data-testid="tool-preview-badge"]');
     await badge.waitForExist({
@@ -56,6 +60,7 @@ describe("Journey 19 — progressive surface preview", () => {
       timeoutMsg:
         "Preview badge never appeared before completion (is AI_PROVIDER=mock + progressive surface fixture live?)",
     });
+    firstBadgeMs = Date.now() - turnStartedMs;
 
     const note = await $(`#${E2E_NOTE_INPUT_ID}`);
     await note.waitForExist({
@@ -72,6 +77,13 @@ describe("Journey 19 — progressive surface preview", () => {
         timeoutMsg: "preview state never painted note value",
       },
     );
+    firstPaintMs = Date.now() - turnStartedMs;
+    // Capture painted value before completion — must not wait for final message first.
+    const paintedBeforeCompletion = await note.getValue();
+    expect(paintedBeforeCompletion.toLowerCase()).toContain(
+      "progressive preview note",
+    );
+    expect(await badge.isExisting()).toBe(true);
 
     await browser.waitUntil(
       async () => {
@@ -84,6 +96,7 @@ describe("Journey 19 — progressive surface preview", () => {
         timeoutMsg: "turn never completed with progressive surface preview message",
       },
     );
+    const completionMs = Date.now() - turnStartedMs;
 
     // After commit, speculative badge should clear.
     await browser.waitUntil(
@@ -94,27 +107,39 @@ describe("Journey 19 — progressive surface preview", () => {
       },
     );
 
+    const finalNote = await note.getValue();
+    expect(finalNote.toLowerCase()).toContain("progressive preview note");
+
     const identity = evidenceIdentity();
-    const fingerprint = createHash("sha256")
-      .update(fs.readFileSync(path.join(E2E_REPO_ROOT, "package.json")))
-      .update(fs.readFileSync(path.join(E2E_REPO_ROOT, "src-tauri/Cargo.lock")))
-      .digest("hex");
     const evidence = {
       schemaVersion: 1,
       journey: 19,
       name: "progressive-surface-preview",
       evidenceLevel: "Desktop Verified",
+      startedAt,
+      endedAt: new Date().toISOString(),
       generatedAt: new Date().toISOString(),
       commit: identity.commit,
       dirty: identity.dirty,
-      sourceFingerprint: fingerprint,
+      sourceFingerprint: identity.sourceFingerprint,
       binaryHash: evidenceBinaryHash(),
       e2eSpec: "e2e/specs/19-progressive-surface-preview.spec.ts",
+      providerFixture: "mock progressive surface preview",
       assertions: [
         "preview badge visible before completion",
+        "note input painted progressive preview value before completion",
         "completion message received",
         "preview badge cleared after commit",
+        "final note value remains progressive preview note",
       ],
+      metrics: {
+        turnStartToFirstBadgeMs: firstBadgeMs,
+        turnStartToFirstPaintMs: firstPaintMs,
+        turnStartToCompletionMs: completionMs,
+        totalWallMs: Date.now() - t0,
+        note:
+          "Timing is observational (not a CI gate). SQLite write absence during speculation is Unit Verified separately — do not elevate that claim from this Desktop run.",
+      },
       intentionallyRejected: [
         "PU-HTML-RESP",
         "PU-JS",

@@ -858,6 +858,16 @@ const FEATURES = [
         mustMatch: [/packs/],
       },
     ],
+    unitFiles: [
+      {
+        path: "src-tauri/src/runtime_v2/packs.rs",
+        hints: [
+          /validate_component_type_allowed/,
+          /#\[test\]/,
+          /evilScript|dictationButton|no_cdn_permissions/,
+        ],
+      },
+    ],
   },
   {
     id: "PU-CHANNEL-SCOPE",

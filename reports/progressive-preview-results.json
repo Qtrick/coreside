@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "journey": 19,
+  "name": "progressive-surface-preview",
+  "evidenceLevel": "Desktop Verified",
+  "startedAt": "2026-08-10T04:41:05.069Z",
+  "endedAt": "2026-08-10T04:41:07.568Z",
+  "generatedAt": "2026-08-10T04:41:07.568Z",
+  "commit": "9ed96b923f158a25f92104b3c600ca551f8a141a",
+  "dirty": true,
+  "sourceFingerprint": "796c2fd01729e7a18b890f0170de2bb43fa437d0f3ca2b3955f0e635e5a4c5d3",
+  "binaryHash": "0b4019a4602154833cb9e69b2247fb03950f44111e86ae4f46bdea5a1b8676e7",
+  "e2eSpec": "e2e/specs/19-progressive-surface-preview.spec.ts",
+  "providerFixture": "mock progressive surface preview",
+  "assertions": [
+    "preview badge visible before completion",
+    "note input painted progressive preview value before completion",
+    "completion message received",
+    "preview badge cleared after commit",
+    "final note value remains progressive preview note"
+  ],
+  "metrics": {
+    "turnStartToFirstBadgeMs": 29,
+    "turnStartToFirstPaintMs": 58,
+    "turnStartToCompletionMs": 2095,
+    "totalWallMs": 2532,
+    "note": "Timing is observational (not a CI gate). SQLite write absence during speculation is Unit Verified separately — do not elevate that claim from this Desktop run."
+  },
+  "intentionallyRejected": [
+    "PU-HTML-RESP",
+    "PU-JS",
+    "PU-CDN",
+    "PU-FORM-ROUTE",
+    "PU-SCOPED-CSS"
+  ]
+}

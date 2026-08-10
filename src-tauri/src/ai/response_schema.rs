@@ -54,6 +54,9 @@ pub struct ToolComponent {
     pub id: String,
     #[serde(rename = "type")]
     pub component_type: String,
+    /// Stable state binding key (preferred over embedding valueKey only in props).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub props: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

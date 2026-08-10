@@ -204,7 +204,7 @@ export function EmptyStateNode({ component }: ToolNodeProps) {
 
 export function TextInputNode({ component }: ToolNodeProps) {
   const { getValue, setValue } = useToolRuntime();
-  const key = component.valueKey ?? component.id;
+  const key = stateKeyFor(component, "valueKey", "stateKey");
   const label = asString(component.props?.label, "Text");
   return (
     <div className="tr-field" data-component-id={component.id}>
@@ -222,7 +222,7 @@ export function TextInputNode({ component }: ToolNodeProps) {
 
 export function TextAreaNode({ component }: ToolNodeProps) {
   const { getValue, setValue } = useToolRuntime();
-  const key = component.valueKey ?? component.id;
+  const key = stateKeyFor(component, "valueKey", "stateKey");
   const label = asString(component.props?.label, "Notes");
   return (
     <div className="tr-field" data-component-id={component.id}>
@@ -240,7 +240,7 @@ export function TextAreaNode({ component }: ToolNodeProps) {
 
 export function NumberInputNode({ component }: ToolNodeProps) {
   const { getValue, setValue } = useToolRuntime();
-  const key = component.valueKey ?? component.id;
+  const key = stateKeyFor(component, "valueKey", "stateKey");
   const label = asString(component.props?.label, "Number");
   return (
     <div className="tr-field" data-component-id={component.id}>
@@ -260,7 +260,7 @@ export function NumberInputNode({ component }: ToolNodeProps) {
 
 export function SelectNode({ component }: ToolNodeProps) {
   const { getValue, setValue } = useToolRuntime();
-  const key = component.valueKey ?? component.id;
+  const key = stateKeyFor(component, "valueKey", "stateKey");
   const label = asString(component.props?.label, "Select");
   const options = Array.isArray(component.props?.options)
     ? (component.props.options as Array<{ value: string; label: string } | string>)
@@ -289,7 +289,7 @@ export function SelectNode({ component }: ToolNodeProps) {
 
 export function CheckboxNode({ component }: ToolNodeProps) {
   const { getValue, setValueOptimistic } = useToolRuntime();
-  const key = component.valueKey ?? component.id;
+  const key = stateKeyFor(component, "valueKey", "stateKey");
   const label = asString(component.props?.label, "Checkbox");
   return (
     <label className="tr-checkbox" data-component-id={component.id}>
@@ -305,7 +305,7 @@ export function CheckboxNode({ component }: ToolNodeProps) {
 
 export function DateInputNode({ component }: ToolNodeProps) {
   const { getValue, setValue } = useToolRuntime();
-  const key = component.valueKey ?? component.id;
+  const key = stateKeyFor(component, "valueKey", "stateKey");
   const label = asString(component.props?.label, "Date");
   return (
     <div className="tr-field" data-component-id={component.id}>
@@ -322,7 +322,7 @@ export function DateInputNode({ component }: ToolNodeProps) {
 
 export function ListNode({ component }: ToolNodeProps) {
   const { getValue } = useToolRuntime();
-  const key = component.valueKey ?? component.id;
+  const key = stateKeyFor(component, "valueKey", "stateKey");
   const items = Array.isArray(getValue(key))
     ? (getValue(key) as unknown[])
     : Array.isArray(component.props?.items)
@@ -345,7 +345,7 @@ export function ListNode({ component }: ToolNodeProps) {
 
 export function ChecklistNode({ component }: ToolNodeProps) {
   const { getValue, setValue } = useToolRuntime();
-  const key = component.valueKey ?? component.id;
+  const key = stateKeyFor(component, "valueKey", "stateKey");
   const items = Array.isArray(getValue(key))
     ? (getValue(key) as Array<{ id: string; label: string; checked?: boolean }>)
     : Array.isArray(component.props?.items)

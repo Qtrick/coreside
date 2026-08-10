@@ -211,7 +211,7 @@ impl PreviewTransaction {
                     .get_mut(sid)
                     .ok_or_else(|| format!("preview surface missing: {sid}"))?;
                 if op.op_type == "state.patch" {
-                    merge_json_objects(&mut model.state, &state);
+                    super::surfaces::merge_json_objects(&mut model.state, &state);
                 } else {
                     model.state = state;
                 }
@@ -351,26 +351,6 @@ impl PreviewTransaction {
             revision: model.preview_revision,
             sequence: self.paint_sequence,
         })
-    }
-}
-
-fn merge_json_objects(target: &mut Value, patch: &Value) {
-    match (target, patch) {
-        (Value::Object(dst), Value::Object(src)) => {
-            for (k, v) in src {
-                match dst.get_mut(k) {
-                    Some(existing) if existing.is_object() && v.is_object() => {
-                        merge_json_objects(existing, v);
-                    }
-                    _ => {
-                        dst.insert(k.clone(), v.clone());
-                    }
-                }
-            }
-        }
-        (target, patch) => {
-            *target = patch.clone();
-        }
     }
 }
 

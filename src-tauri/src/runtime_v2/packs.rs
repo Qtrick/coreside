@@ -387,12 +387,14 @@ mod tests {
             ToolComponent {
                 id: "a".into(),
                 component_type: "textInput".into(),
+                value_key: None,
                 props: None,
                 children: None,
             },
             ToolComponent {
                 id: "b".into(),
                 component_type: "button".into(),
+                value_key: None,
                 props: Some(serde_json::json!({ "label": "Button" })),
                 children: None,
             },
@@ -402,6 +404,7 @@ mod tests {
         let ok = vec![ToolComponent {
             id: "c".into(),
             component_type: "textInput".into(),
+            value_key: None,
             props: Some(serde_json::json!({ "label": "Next task" })),
             children: None,
         }];

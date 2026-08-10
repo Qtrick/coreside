@@ -2,10 +2,10 @@
   "schemaVersion": 2,
   "product": "Coreside",
   "accessDate": "2026-08-07",
-  "generatedAt": "2026-08-09T02:11:40.616Z",
-  "commit": "590705317ad0cf9b827f847ef1e53506ded931eb",
+  "generatedAt": "2026-08-10T04:42:45.778Z",
+  "commit": "9ed96b923f158a25f92104b3c600ca551f8a141a",
   "dirty": true,
-  "sourceFingerprint": "06cc24b02d800106037fcd40c96f69ec7151f98fbd98e2996745875233f93640",
+  "sourceFingerprint": "796c2fd01729e7a18b890f0170de2bb43fa437d0f3ca2b3955f0e635e5a4c5d3",
   "command": "audit:partial-update",
   "exitStatus": 0,
   "publicBeta": "Not ready",
@@ -40,8 +40,8 @@
     "Scaffolded": 0,
     "Implemented": 0,
     "Unit Verified": 12,
-    "Integrated – Not Verified": 1,
-    "Desktop Verified": 0,
+    "Integrated – Not Verified": 0,
+    "Desktop Verified": 1,
     "Packaged Verified": 0,
     "Cross-Platform Verified": 0,
     "Human Accepted": 0,
@@ -49,11 +49,11 @@
     "Deferred": 2
   },
   "highestValueGap": {
-    "id": "PU-PROGRESSIVE-PREVIEW",
-    "name": "Progressive generated-surface preview",
+    "id": "PU-STREAM",
+    "name": "Provider streaming (live deltas)",
     "status": "Unit Verified",
     "userValue": 10,
-    "rationale": "Progressive trusted surface paint is Unit Verified with SQLite cancel/incomplete rollback evidence (PreviewTransaction + overlay + ToolCanvas) but lacks desktop/packaged progressive-surface journeys — Journey 12 covers text streaming only."
+    "rationale": "Historical desktop evidence in true-streaming-results.json not applied (fingerprint/commit mismatch)."
   },
   "methodology": [
     "Content probes on Partial Update and Coreside trees (mustMatch/anyMatch).",
@@ -196,13 +196,13 @@
       "name": "Progressive generated-surface preview",
       "category": "generative",
       "userValue": 10,
-      "status": "Unit Verified",
+      "status": "Desktop Verified",
       "partialUpdatePresent": true,
       "coreside": {
         "implOk": true,
         "wiredOk": true,
         "unitOk": true,
-        "desktopOk": false,
+        "desktopOk": true,
         "packagedOk": false
       },
       "notes": [
@@ -250,6 +250,12 @@
           "side": "unitFile",
           "path": "src-tauri/src/ai/mock.rs",
           "ok": true
+        },
+        {
+          "side": "desktopReport",
+          "path": "reports/progressive-preview-results.json",
+          "ok": true,
+          "fresh": true
         }
       ],
       "gapPriority": "P0",
@@ -964,12 +970,12 @@
       "name": "Capability packs (trusted components)",
       "category": "runtime",
       "userValue": 9,
-      "status": "Integrated – Not Verified",
+      "status": "Unit Verified",
       "partialUpdatePresent": true,
       "coreside": {
         "implOk": true,
         "wiredOk": true,
-        "unitOk": false,
+        "unitOk": true,
         "desktopOk": false,
         "packagedOk": false
       },
@@ -998,6 +1004,11 @@
             "src-tauri/src/runtime_v2/mod.rs"
           ],
           "misses": []
+        },
+        {
+          "side": "unitFile",
+          "path": "src-tauri/src/runtime_v2/packs.rs",
+          "ok": true
         }
       ],
       "gapPriority": null,

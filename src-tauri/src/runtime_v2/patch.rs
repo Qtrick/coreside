@@ -373,10 +373,12 @@ mod tests {
         vec![ToolComponent {
             id: "root".into(),
             component_type: "container".into(),
+            value_key: None,
             props: Some(json!({"title": "A"})),
             children: Some(vec![ToolComponent {
                 id: "goal".into(),
                 component_type: "progress".into(),
+                value_key: None,
                 props: Some(json!({"maximum": 8})),
                 children: None,
             }]),

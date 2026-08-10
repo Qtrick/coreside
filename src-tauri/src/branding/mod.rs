@@ -386,9 +386,7 @@ fn plist_has_cf_bundle_icon_name_icon(plist: &str) -> bool {
     let Some(after_key) = plist.split("<key>CFBundleIconName</key>").nth(1) else {
         return false;
     };
-    after_key
-        .trim_start()
-        .starts_with("<string>Icon</string>")
+    after_key.trim_start().starts_with("<string>Icon</string>")
 }
 
 /// Apply AppKit mutation only (no persistence). Returns whether the temporary

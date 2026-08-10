@@ -29,6 +29,8 @@ import {
   installDebugBinaryIntoDevApp,
   selectConflictingProcesses,
   sha256File,
+  executableFromPsArgs,
+  mirrorManagedDirectory,
 } from "./lib/macos-dev-bundle.mjs";
 
 const packageJson = JSON.parse(
@@ -225,10 +227,53 @@ describe("conflicting processes", () => {
     );
   });
 
-  it("prepare can fail closed on conflict via env gate", () => {
+  it("prepare fails closed on conflict unless allow-concurrent", () => {
     const prepare = readScript("scripts/macos-packaged-dev-prepare.mjs");
     assert.ok(prepare.includes("conflictsForExpectedApp"));
-    assert.ok(prepare.includes("CORESIDE_DEV_FAIL_ON_CONFLICT"));
+    assert.ok(prepare.includes("CORESIDE_DEV_ALLOW_CONCURRENT"));
+    assert.ok(prepare.includes("--allow-concurrent"));
+    assert.ok(prepare.includes("fail-closed by default"));
+  });
+
+  it("executableFromPsArgs keeps paths that contain spaces", () => {
+    const spaced =
+      "/Users/My Projects/Coreside/src-tauri/target/debug/bundle/macos/Coreside.app/Contents/MacOS/Coreside --flag";
+    assert.equal(
+      executableFromPsArgs(spaced),
+      "/Users/My Projects/Coreside/src-tauri/target/debug/bundle/macos/Coreside.app/Contents/MacOS/Coreside",
+    );
+    const bare =
+      "/Users/My Projects/Coreside/src-tauri/target/debug/Coreside --e2e";
+    assert.equal(
+      executableFromPsArgs(bare),
+      "/Users/My Projects/Coreside/src-tauri/target/debug/Coreside",
+    );
+    // Editors mentioning Coreside in cwd/args must not look like the app binary.
+    assert.equal(
+      executableFromPsArgs("/usr/bin/vim /Users/q/Coreside/README.md"),
+      "/usr/bin/vim",
+    );
+  });
+
+  it("mirrorManagedDirectory removes stale destination files", () => {
+    const base = mkdtempSync(join(tmpdir(), "coreside-mirror-"));
+    const src = join(base, "src");
+    const dest = join(ROOT, "tmp", `mirror-test-${process.pid}`);
+    try {
+      mkdirSync(src, { recursive: true });
+      writeFileSync(join(src, "a.txt"), "a");
+      writeFileSync(join(src, "b.txt"), "b");
+      mirrorManagedDirectory(src, dest);
+      assert.ok(existsSync(join(dest, "a.txt")));
+      assert.ok(existsSync(join(dest, "b.txt")));
+      rmSync(join(src, "b.txt"));
+      mirrorManagedDirectory(src, dest);
+      assert.ok(existsSync(join(dest, "a.txt")));
+      assert.equal(existsSync(join(dest, "b.txt")), false);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+      rmSync(dest, { recursive: true, force: true });
+    }
   });
 });
 

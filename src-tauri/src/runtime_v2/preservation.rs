@@ -394,12 +394,14 @@ mod tests {
         let old = ToolComponent {
             id: "field".into(),
             component_type: "text_input".into(),
+            value_key: None,
             props: Some(json!({"value": "typed", "label": "Name", "maximum": 8})),
             children: None,
         };
         let mut new = ToolComponent {
             id: "field".into(),
             component_type: "text_input".into(),
+            value_key: None,
             props: Some(json!({"label": "Full name", "maximum": 12})),
             children: None,
         };
@@ -420,12 +422,14 @@ mod tests {
         let old = ToolComponent {
             id: "field".into(),
             component_type: "text_input".into(),
+            value_key: None,
             props: Some(json!({"value": "typed"})),
             children: None,
         };
         let mut new = ToolComponent {
             id: "field".into(),
             component_type: "text_input".into(),
+            value_key: None,
             props: Some(json!({"value": ""})),
             children: None,
         };

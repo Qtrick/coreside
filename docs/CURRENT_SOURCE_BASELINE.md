@@ -1,7 +1,7 @@
-# Current Source Baseline (P0.3)
+# Current Source Baseline (P0.4)
 
 **Product:** Coreside  
-**Access date:** 2026-08-09  
+**Access date:** 2026-08-10  
 **Phase:** Public-beta release candidate 3.10 — durable turns, hosted billing, window-scoped tools  
 **Public beta:** **NOT READY**  
 **Hosted AI:** **NOT READY**
@@ -12,20 +12,20 @@
 | --- | --- |
 | Path | `/Users/qunyingfan/Coreside` |
 | Branch | `main` |
-| Commit | `590705317ad0cf9b827f847ef1e53506ded931eb` |
+| Commit | `9ed96b923f158a25f92104b3c600ca551f8a141a` |
 | Dirty | Yes (development evidence only) |
-| Source fingerprint | `06cc24b02d800106037fcd40c96f69ec7151f98fbd98e2996745875233f93640` |
+| Source fingerprint | `796c2fd01729e7a18b890f0170de2bb43fa437d0f3ca2b3955f0e635e5a4c5d3` |
 
 ## Uploaded archive
 
 | Field | Value |
 | --- | --- |
-| Filename | `Coreside Chat AI (1).zip` |
-| Path | `/Users/qunyingfan/Downloads/Coreside Chat AI (1).zip` |
-| Expected SHA-256 | `7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d` |
-| Observed SHA-256 | `7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d` |
+| Filename | `Coreside Chat AI.zip` |
+| Path | `/Users/qunyingfan/Downloads/Coreside Chat AI.zip` |
+| Expected SHA-256 | `a9327c01cba67655b5af04ecd0d837b980a5af65348580167f613e6099b8194c` |
+| Observed SHA-256 | `a9327c01cba67655b5af04ecd0d837b980a5af65348580167f613e6099b8194c` |
 | Status | **present_hash_match_extract_stale** |
-| Supersedes | `8e984965f35cb28807fbb3ad24d1e48b9e6667801df716ab9c294e8e4a33b101` (`Coreside Chat AI.zip / prior RC3.11 archive (8e984965…)`) |
+| Supersedes | `7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d` (`P0.3 supplied Coreside archive`) |
 | Partial Update archive | `Partial Update Main.zip` / `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607` |
 
 ## Lockfiles
@@ -52,9 +52,9 @@
 | `src` files | 192 |
 | Rust `.rs` | 193 |
 | Migrations | 24 |
-| E2E specs | 18 |
+| E2E specs | 20 |
 | Tauri commands | 222 |
-| Fingerprint files | 711 |
+| Fingerprint files | 714 |
 
 ## Archive vs active
 

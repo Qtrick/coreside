@@ -185,6 +185,9 @@ export const config: Options.Testrunner = {
     "progressive-surface-preview": [
       "./specs/19-progressive-surface-preview.spec.ts",
     ],
+    "progressive-preview-cancel": [
+      "./specs/20-progressive-preview-cancel.spec.ts",
+    ],
     "wallpaper-targeted": ["./specs/13-wallpaper-targeted-update.spec.ts"],
     "first-run-welcome": ["./specs/15-first-run-welcome.spec.ts"],
     "core-tutorial": ["./specs/16-core-tutorial.spec.ts"],

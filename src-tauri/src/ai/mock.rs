@@ -309,8 +309,7 @@ impl AiProvider for MockAiProvider {
         let lower = user_text.to_lowercase();
         let progressive_surface = lower.contains("progressive surface preview");
         let progressive_ops = lower.contains("progressive op preview");
-        let live =
-            progressive_surface || progressive_ops || lower.contains("live stream probe");
+        let live = progressive_surface || progressive_ops || lower.contains("live stream probe");
         if request.cancel.is_cancelled() {
             let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
             return Err(AiError::Cancelled);
@@ -487,19 +486,18 @@ impl MockAiProvider {
             })
             .await;
 
-        // Hold after the paint-capable op so desktop E2E can observe Preview.
+        // Hold after the paint-capable op so desktop E2E can observe Preview
+        // and (Journey 20) click Cancel before durable complete.
         tokio::select! {
             _ = request.cancel.cancelled() => {
                 let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
                 return Err(AiError::Cancelled);
             }
-            _ = tokio::time::sleep(std::time::Duration::from_millis(600)) => {}
+            _ = tokio::time::sleep(std::time::Duration::from_millis(2000)) => {}
         }
 
         let _ = tx
-            .send(ProviderStreamEvent::TextDelta {
-                text: complete,
-            })
+            .send(ProviderStreamEvent::TextDelta { text: complete })
             .await;
 
         let response = AgentResponse {
@@ -853,6 +851,51 @@ mod tests {
         assert!(response
             .raw_text
             .contains("Progressive surface preview complete"));
+    }
+
+    #[tokio::test]
+    async fn progressive_surface_preview_cancel_during_hold_returns_cancelled() {
+        let provider = MockAiProvider::new();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        let cancel = CancellationToken::new();
+        let request = AgentRequest {
+            system_prompt: "test".into(),
+            messages: vec![AgentMessage::text(
+                crate::ai::AgentRole::User,
+                "please run progressive surface preview now",
+            )],
+            cancel: cancel.clone(),
+            idempotency_key: Some("progressive-surface-cancel".into()),
+        };
+        let join = tokio::spawn(async move { provider.chat_stream(request, tx).await });
+
+        let mut saw_paint_delta = false;
+        let mut saw_cancelled = false;
+        let mut saw_completed = false;
+        while let Some(ev) = rx.recv().await {
+            match ev {
+                ProviderStreamEvent::TextDelta { text } => {
+                    if text.contains("op-progressive-surface-preview") {
+                        saw_paint_delta = true;
+                        cancel.cancel();
+                    }
+                }
+                ProviderStreamEvent::ResponseCancelled => saw_cancelled = true,
+                ProviderStreamEvent::ResponseCompleted { .. } => saw_completed = true,
+                _ => {}
+            }
+        }
+        let result = join.await.unwrap();
+        assert!(saw_paint_delta, "paint op must arrive before cancel");
+        assert!(
+            matches!(result, Err(AiError::Cancelled)),
+            "cancel during hold must return Cancelled"
+        );
+        assert!(saw_cancelled, "must emit ResponseCancelled");
+        assert!(
+            !saw_completed,
+            "must not emit ResponseCompleted after cancel"
+        );
     }
 
     #[tokio::test]

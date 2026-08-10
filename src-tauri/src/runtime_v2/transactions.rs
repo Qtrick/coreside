@@ -521,12 +521,27 @@ fn apply_one(
                 .surface_id
                 .as_deref()
                 .ok_or_else(|| "surfaceId required".to_string())?;
-            let state = op
+            let incoming = op
                 .payload
                 .get("state")
                 .cloned()
                 .unwrap_or(op.payload.clone());
+            let state = if op.op_type == "state.patch" {
+                let mut current =
+                    super::surfaces::get_surface_state(db, sid).unwrap_or_else(|_| json!({}));
+                // Same deep-merge as PreviewTransaction — shallow keys would diverge.
+                super::surfaces::merge_json_objects(&mut current, &incoming);
+                current
+            } else {
+                incoming
+            };
             super::surfaces::save_surface_state(db, sid, &state).map_err(|e| e.to_string())?;
+            // Personal tools read `tool_state` in the canvas — mirror only on durable apply.
+            if let Ok(surface) = get_surface(db, sid) {
+                if let Some(tool_id) = surface.tool_id.as_deref().filter(|t| !t.is_empty()) {
+                    crate::db::save_tool_state(db, tool_id, &state).map_err(|e| e.to_string())?;
+                }
+            }
             Ok(Some(get_surface(db, sid).map_err(|e| e.to_string())?))
         }
         "chat.status"
