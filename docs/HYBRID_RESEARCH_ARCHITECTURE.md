@@ -5,7 +5,7 @@
 
 ## Flow
 
-1. Hosted Exa discovery via Edge Function `search-gateway` (authenticated, metered).
+1. Hosted Linkup fast source discovery via Edge Function `search-gateway` (authenticated, metered). Exa remains an optional compatibility fallback for local deployments.
 2. Desktop normalizes bounded results (no Exa secret on device).
 3. Source selection in Coreside.
 4. Local Crawl4AI sidecar extracts selected pages (Rust-supervised).

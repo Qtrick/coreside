@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use super::capability_registry::capability_schemas;
 use super::response_schema::ToolDefinition;
 use crate::exa::has_exa_key;
+use crate::linkup::has_key as has_linkup_key;
 use crate::research::research_capability_notice;
 
 pub const PROMPT_VERSION: &str = "coreside-prompt-v1";
@@ -201,7 +202,7 @@ pub fn build_agent_prompt_with_references(
     );
     parts.push(format!(
         "## Web research capability\n{}",
-        research_capability_notice(has_exa_key())
+        research_capability_notice(has_linkup_key(), has_exa_key())
     ));
     parts.push(
         "When search or project context is needed, respond with responseType \"tool_use\" and toolCalls. \

@@ -116,3 +116,63 @@ export function boundSearchResults(
     return out;
   });
 }
+
+function isPrivateOrLocalHost(host: string): boolean {
+  const normalized = host.toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    normalized === "localhost" ||
+    normalized === "::1" ||
+    normalized === "0.0.0.0" ||
+    normalized.endsWith(".localhost") ||
+    normalized.endsWith(".local") ||
+    normalized.endsWith(".internal") ||
+    normalized.startsWith("fc") ||
+    normalized.startsWith("fd") ||
+    normalized.startsWith("fe80:") ||
+    normalized.startsWith("::ffff:")
+  ) return true;
+  const ipv4 = normalized.split(".").map(Number);
+  if (ipv4.length !== 4 || ipv4.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+  return (
+    ipv4[0] === 0 || ipv4[0] === 10 || ipv4[0] === 127 ||
+    (ipv4[0] === 100 && ipv4[1] >= 64 && ipv4[1] <= 127) ||
+    (ipv4[0] === 169 && ipv4[1] === 254) ||
+    (ipv4[0] === 172 && ipv4[1] >= 16 && ipv4[1] <= 31) ||
+    (ipv4[0] === 192 && ipv4[1] === 168)
+  );
+}
+
+/** Convert an upstream result into Coreside's stable source shape. Provider
+ * URLs remain untrusted and must at least be public HTTP(S) before desktop use. */
+export function normalizeProviderResults(payload: unknown, maxResults: number): unknown[] {
+  const rows = payload && typeof payload === "object" && Array.isArray((payload as Record<string, unknown>).results)
+    ? (payload as Record<string, unknown>).results as unknown[]
+    : [];
+  const seen = new Set<string>();
+  const normalized: Record<string, unknown>[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const source = row as Record<string, unknown>;
+    if (source.type !== undefined && source.type !== "text") continue;
+    if (typeof source.url !== "string") continue;
+    let url: URL;
+    try { url = new URL(source.url); } catch { continue; }
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== "https:" && url.protocol !== "http:") continue;
+    if (isPrivateOrLocalHost(host)) continue;
+    if (seen.has(url.href)) continue;
+    seen.add(url.href);
+    normalized.push({
+      title: typeof source.name === "string" && source.name.trim() ? source.name.slice(0, 400) : url.href,
+      url: url.href,
+      snippet: typeof source.content === "string" ? source.content.slice(0, 4000) : "",
+      date: typeof source.date === "string" ? source.date.slice(0, 80) : null,
+      rank: normalized.length + 1,
+      provider: "linkup",
+    });
+    if (normalized.length >= maxResults) break;
+  }
+  return normalized;
+}

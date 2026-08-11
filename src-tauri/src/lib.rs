@@ -12,6 +12,7 @@ mod credentials;
 mod db;
 mod exa;
 mod exports;
+mod linkup;
 mod maintenance;
 mod maintenance_journal;
 mod media;

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-10T23:35:39.747Z",
-  "commit": "1bd2a3e8376afdf847cec55ae90fe9e219eee605",
+  "generatedAt": "2026-08-11T01:33:07.742Z",
+  "commit": "dd8c60bbbccd1a3b21a3648f16586f7e2adc8a87",
   "dirty": true,
-  "sourceFingerprint": "c0da070e975788ca2881dd74f503eb98ef9a0d32a6d9246a35dc63e51d4d81dd",
+  "sourceFingerprint": "18165bddbc7b17a128ed3bc1526846640b2f9cafeb9bfb41cd9a28b0aff60d2d",
   "packageLockHash": "f99da7c99dc5e2db93567632e2c36d36796c4b3ea8cf6a575a3f337bb6b9d641",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
@@ -13,21 +13,27 @@
   "command": "audit:current-source",
   "exitStatus": 0,
   "archive": {
-    "filename": "Coreside Chat AI.zip",
-    "label": "P0.5 supplied Coreside archive",
-    "expectedPath": "/Users/qunyingfan/Downloads/Coreside Chat AI.zip",
-    "expectedSha256": "220c246eeed62133bb6b08d77278248192f4f7503f31004e5ce02861f2ae6412",
+    "filename": "Coreside main.zip",
+    "label": "P0.6 supplied Coreside archive",
+    "expectedPath": "/Users/qunyingfan/Downloads/Coreside main.zip",
+    "expectedSha256": "22a0ab2903fc26c6b17c903ae9f8d7181ed72803bec8f00c447d687462119764",
     "present": true,
-    "observedSha256": "220c246eeed62133bb6b08d77278248192f4f7503f31004e5ce02861f2ae6412",
+    "observedSha256": "22a0ab2903fc26c6b17c903ae9f8d7181ed72803bec8f00c447d687462119764",
     "status": "present_hash_match",
-    "supersedes": "7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d",
-    "previousLabel": "P0.3 supplied Coreside archive",
+    "supersedes": "220c246eeed62133bb6b08d77278248192f4f7503f31004e5ce02861f2ae6412",
+    "previousLabel": "P0.5 supplied Coreside archive",
     "historicalIdentities": [
+      {
+        "id": "p0.6-input",
+        "sha256": "22a0ab2903fc26c6b17c903ae9f8d7181ed72803bec8f00c447d687462119764",
+        "label": "P0.6 supplied Coreside archive",
+        "role": "current_supplied"
+      },
       {
         "id": "p0.5-input",
         "sha256": "220c246eeed62133bb6b08d77278248192f4f7503f31004e5ce02861f2ae6412",
         "label": "P0.5 supplied Coreside archive",
-        "role": "current_supplied"
+        "role": "historical_input"
       },
       {
         "id": "p0.4-input",
@@ -62,29 +68,39 @@
     ],
     "workingTreeRole": "active_working_tree"
   },
-  "activeCommit": "1bd2a3e8376afdf847cec55ae90fe9e219eee605",
+  "activeCommit": "dd8c60bbbccd1a3b21a3648f16586f7e2adc8a87",
   "activeDirty": true,
   "comparison": "compared",
   "differences": {
-    "onlyInActiveCount": 2,
+    "onlyInActiveCount": 4,
     "onlyInArchiveCount": 0,
-    "changedCount": 10,
+    "changedCount": 18,
     "onlyInActiveSample": [
       "scripts/.DS_Store",
-      "scripts/__pycache__/generate_branding_assets.cpython-314.pyc"
+      "scripts/__pycache__/generate_branding_assets.cpython-314.pyc",
+      "src-tauri/src/linkup.rs",
+      "src/styles/generated-surface-containment.test.ts"
     ],
     "onlyInArchiveSample": [],
     "changedSample": [
-      "e2e/wdio.conf.ts",
-      "package.json",
+      "e2e/specs/05-generated-tool-state.spec.ts",
       "scripts/audit-current-source.mjs",
-      "src-tauri/src/ai/mock.rs",
-      "src-tauri/src/commands/message_cmds.rs",
-      "src-tauri/src/runtime_v2/operations.rs",
-      "src-tauri/src/runtime_v2/packs.rs",
-      "src-tauri/src/runtime_v2/preview_transaction.rs",
-      "src-tauri/src/runtime_v2/surfaces.rs",
-      "src-tauri/src/runtime_v2/transactions.rs"
+      "src-tauri/src/ai/prompt_builder.rs",
+      "src-tauri/src/ai/tool_loop.rs",
+      "src-tauri/src/commands/search_cmds.rs",
+      "src-tauri/src/commands/tool_cmds.rs",
+      "src-tauri/src/lib.rs",
+      "src-tauri/src/research/hybrid.rs",
+      "src-tauri/src/runtime_v2/transactions.rs",
+      "src-tauri/src/search/registry.rs",
+      "src/components/search/SearchProviderSetup.tsx",
+      "src/components/tool-canvas/CustomizeMode.tsx",
+      "src/components/tool-canvas/ToolCanvas.tsx",
+      "src/components/tool-canvas/ToolHeaderActions.tsx",
+      "src/lib/layout-mode.test.ts",
+      "src/lib/layout-mode.ts",
+      "src/styles/global.css",
+      "src/types/search.ts"
     ]
   },
   "lockHashesMatchExternalNotes": false,

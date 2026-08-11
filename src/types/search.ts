@@ -14,6 +14,8 @@ export const SearchConnectionSchema = z.object({
   engineReason: z.string().optional().nullable(),
   exaConfigured: z.boolean().optional().default(false),
   exaSource: z.string().optional().default("none"),
+  linkupConfigured: z.boolean().optional().default(false),
+  linkupSource: z.string().optional().default("none"),
 });
 export type SearchConnection = z.infer<typeof SearchConnectionSchema>;
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyLayoutMode,
+  classifyToolHeaderDensity,
   clampSplitForWidth,
   clampSplitRatio,
 } from "./layout-mode";
@@ -40,5 +41,26 @@ describe("layout mode", () => {
     const r = clampSplitForWidth(0.5, 800);
     expect(800 * r).toBeGreaterThanOrEqual(320 - 1);
     expect(800 * (1 - r)).toBeGreaterThanOrEqual(360 - 1);
+  });
+
+  it("condenses tool header actions before they escape the pane", () => {
+    expect(
+      classifyToolHeaderDensity({ headerWidth: 0, layoutMode: "wide" }),
+    ).toBe("icons");
+    expect(
+      classifyToolHeaderDensity({ headerWidth: 360, layoutMode: "wide" }),
+    ).toBe("menu");
+    expect(
+      classifyToolHeaderDensity({ headerWidth: 560, layoutMode: "wide" }),
+    ).toBe("icons");
+    expect(
+      classifyToolHeaderDensity({ headerWidth: 800, layoutMode: "wide" }),
+    ).toBe("full");
+    expect(
+      classifyToolHeaderDensity({ headerWidth: 900, layoutMode: "standard" }),
+    ).toBe("icons");
+    expect(
+      classifyToolHeaderDensity({ headerWidth: 900, layoutMode: "compact" }),
+    ).toBe("menu");
   });
 });

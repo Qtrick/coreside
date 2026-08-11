@@ -15,6 +15,7 @@ import {
   restoreScrollSnapshot,
 } from "@/lib/preservation";
 import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
+import { classifyToolHeaderDensity } from "@/lib/layout-mode";
 import { surfaceIdForTool } from "@/lib/surface-ops";
 import type {
   ActionOutcome,
@@ -89,9 +90,9 @@ export function ToolCanvas() {
   const [recovery, setRecovery] = useState<RecoveryState | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [canvasError, setCanvasError] = useState<string | null>(null);
-  /** Available width for header actions (not the whole header). */
-  const [actionsWidth, setActionsWidth] = useState(0);
-  const actionsRef = useRef<HTMLDivElement>(null);
+  /** Available width for the whole Tool Canvas header (not the actions row). */
+  const [headerWidth, setHeaderWidth] = useState(0);
+  const headerRef = useRef<HTMLElement>(null);
 
   const runHeaderAction = useCallback(
     async (label: string, run: () => Promise<unknown>) => {
@@ -113,14 +114,10 @@ export function ToolCanvas() {
     [developerMode],
   );
 
-  const headerDensity =
-    actionsWidth > 0 && actionsWidth < 220
-      ? "menu"
-      : actionsWidth > 0 && actionsWidth < 360
-        ? "icons"
-        : layoutMode === "compact"
-          ? "icons"
-          : "full";
+  const headerDensity = classifyToolHeaderDensity({
+    headerWidth,
+    layoutMode,
+  });
 
   const applicationId = useMemo(() => {
     if (!activeTool) return null;
@@ -152,16 +149,19 @@ export function ToolCanvas() {
   );
 
   useEffect(() => {
-    const el = actionsRef.current;
+    const el = headerRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     let frame = 0;
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width ?? 0;
+    const publishWidth = () => {
+      // clientWidth matches padding-box; avoid mixing contentRect vs border-box.
+      setHeaderWidth(el.clientWidth);
+    };
+    const ro = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => setActionsWidth(w));
+      frame = requestAnimationFrame(publishWidth);
     });
     ro.observe(el);
-    setActionsWidth(el.getBoundingClientRect().width);
+    publishWidth();
     return () => {
       cancelAnimationFrame(frame);
       ro.disconnect();
@@ -309,8 +309,8 @@ export function ToolCanvas() {
 
   return (
     <section className="tool-canvas" aria-label={`${activeTool.name} canvas`} data-coreside-tour="app-panel">
-      <header className="tool-canvas-header">
-        <div className="tool-canvas-header-title" style={{ minWidth: 0, flex: "1 1 auto" }}>
+      <header className="tool-canvas-header" ref={headerRef}>
+        <div className="tool-canvas-header-title">
           <h2>
             {activeTool.name}
             {isPreviewPaint ? (
@@ -333,11 +333,7 @@ export function ToolCanvas() {
             ) : null}
           </div>
         </div>
-        <div
-          ref={actionsRef}
-          className="tool-canvas-header-actions"
-          style={{ flex: "0 1 auto", minWidth: 0, maxWidth: "100%" }}
-        >
+        <div className="tool-canvas-header-actions">
           <ToolHeaderActions
             tool={activeTool}
             conversationId={activeConversationId}

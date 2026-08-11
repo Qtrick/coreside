@@ -6,6 +6,10 @@
 fn main() {
     println!("cargo:rerun-if-changed=commands.list");
     println!("cargo:rerun-if-changed=permissions");
+    // Tauri embeds the Vite output. Watch it so native E2E builds cannot
+    // silently exercise a previously bundled UI after a frontend-only change.
+    println!("cargo:rerun-if-changed=../dist");
+    println!("cargo:rerun-if-changed=../dist/index.html");
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "activate_next_queue_cmd",

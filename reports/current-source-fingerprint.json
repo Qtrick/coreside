@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-10T23:35:39.747Z",
-  "commit": "1bd2a3e8376afdf847cec55ae90fe9e219eee605",
+  "generatedAt": "2026-08-11T01:33:07.742Z",
+  "commit": "dd8c60bbbccd1a3b21a3648f16586f7e2adc8a87",
   "dirty": true,
-  "sourceFingerprint": "c0da070e975788ca2881dd74f503eb98ef9a0d32a6d9246a35dc63e51d4d81dd",
+  "sourceFingerprint": "18165bddbc7b17a128ed3bc1526846640b2f9cafeb9bfb41cd9a28b0aff60d2d",
   "packageLockHash": "f99da7c99dc5e2db93567632e2c36d36796c4b3ea8cf6a575a3f337bb6b9d641",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",
@@ -33,7 +33,7 @@
     "tsconfig.json",
     "eslint.config.js"
   ],
-  "fileCount": 714,
+  "fileCount": 716,
   "inclusionRules": [
     "Tracked and untracked files under fingerprint roots",
     "Excludes node_modules, target, dist, .git, .reference, gen"

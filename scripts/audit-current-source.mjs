@@ -65,6 +65,9 @@ const PARTIAL_UPDATE_ARCHIVE =
 const EXPECTED_PARTIAL_UPDATE_SHA256 =
   SOURCE_INTAKES.partialUpdate?.sha256 ||
   "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607";
+const CURRENT_PHASE = (CURRENT_INTAKE.id || "current")
+  .replace(/-input$/, "")
+  .toUpperCase();
 /** Historical intakes preserved for provenance — never rewrite SHA identities. */
 const HISTORICAL_ARCHIVE_IDENTITIES = SOURCE_INTAKES.intakes.map((intake) => ({
   id: intake.id,
@@ -76,12 +79,14 @@ const HISTORICAL_ARCHIVE_IDENTITIES = SOURCE_INTAKES.intakes.map((intake) => ({
       : intake.role || "historical_input",
 }));
 // Previous (superseded) intake — used in baseline/compare reports.
+const PREVIOUS_INTAKE = SOURCE_INTAKES.intakes.find(
+  (intake) => intake.id !== SOURCE_INTAKES.currentIntakeId,
+);
 const PREVIOUS_ARCHIVE_SHA256 =
-  HISTORICAL_ARCHIVE_IDENTITIES.find((i) => i.id === "p0.3-input")?.sha256 ||
-  "7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d";
+  PREVIOUS_INTAKE?.sha256 ||
+  "220c246eeed62133bb6b08d77278248192f4f7503f31004e5ce02861f2ae6412";
 const PREVIOUS_ARCHIVE_LABEL =
-  HISTORICAL_ARCHIVE_IDENTITIES.find((i) => i.id === "p0.3-input")?.label ||
-  "P0.3 supplied Coreside archive";
+  PREVIOUS_INTAKE?.label || "P0.5 supplied Coreside archive";
 
 const FINGERPRINT_ROOTS = [
   "src",
@@ -223,6 +228,7 @@ function countGlob(dir, predicate) {
 
 function archiveExtractRoot() {
   const candidates = [
+    path.join(root, ".reference", "coreside-p0.6-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-p0.5-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-p0.3-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-rc3.11-archive", "coreside-main"),
@@ -240,6 +246,7 @@ function archiveExtractRoot() {
 
 function archiveExtractMatchesExpected() {
   const markers = [
+    path.join(root, ".reference", "coreside-p0.6-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-p0.5-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-p0.3-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-rc3.11-archive", "source.sha256"),
@@ -251,7 +258,10 @@ function archiveExtractMatchesExpected() {
   ];
   for (const marker of markers) {
     if (!fs.existsSync(marker)) continue;
-    if (fs.readFileSync(marker, "utf8").trim() === EXPECTED_ARCHIVE_SHA256) {
+    // Accept both our historical hash-only marker and standard `shasum`
+    // output (`<hash>  <filename>`). The hash remains the only authority.
+    const markerHash = fs.readFileSync(marker, "utf8").trim().split(/\s+/)[0];
+    if (markerHash === EXPECTED_ARCHIVE_SHA256) {
       return true;
     }
   }
@@ -327,7 +337,20 @@ function writeJson(name, data) {
       if (!value || typeof value !== "object") return value;
       return Object.fromEntries(
         Object.entries(value)
-          .filter(([key]) => !["generatedAt", "generatedAtLocal", "mtimeMs"].includes(key))
+          // Git's report artifacts become modified when this audit writes them.
+          // They are recorded for provenance, but cannot be a self-referential
+          // check input; sourceFingerprint remains the authority for code drift.
+          .filter(
+            ([key]) =>
+              ![
+                "generatedAt",
+                "generatedAtLocal",
+                "mtimeMs",
+                "stagedFiles",
+                "modifiedFiles",
+                "untrackedSourceFiles",
+              ].includes(key),
+          )
           .map(([key, child]) => [key, normalize(child)]),
       );
     };
@@ -542,7 +565,7 @@ const hostedAi = "Not ready";
 
 const baselineReport = {
   ...common,
-  phase: "P0.5",
+  phase: CURRENT_PHASE,
   publicBeta,
   hostedAi,
   evidenceClass: dirty ? "development-dirty" : "development-clean",
@@ -651,7 +674,7 @@ writeJson("current-source-baseline.json", baselineReport);
 writeJson("active-versus-uploaded-coreside.json", compareReport);
 
 const HISTORICAL_NOTE =
-  "P0.5 intake 220c246e is current; P0.4 intake a9327c01 and P0.3 intake 7e335f18 are historical. Desktop/Packaged gates require fresh evidence on the current fingerprint.";
+  `${CURRENT_PHASE} intake ${EXPECTED_ARCHIVE_SHA256.slice(0, 8)} is current; P0.5 intake 220c246e, P0.4 intake a9327c01, and P0.3 intake 7e335f18 are historical. Desktop/Packaged gates require fresh evidence on the current fingerprint.`;
 
 /** Restamp gate reports that must not claim passes on a dirty or stale fingerprint. */
 function restampAbsentGateReports() {
@@ -811,8 +834,19 @@ const freshnessEntries = fs
     } catch {
       parsed = null;
     }
-    const reportFp = parsed && typeof parsed.sourceFingerprint === "string" ? parsed.sourceFingerprint : null;
-    const reportCommit = parsed && typeof parsed.commit === "string" ? parsed.commit : null;
+    // This report inventories itself. Its previous on-disk fingerprint would
+    // otherwise make every immediate --check differ from the preceding write.
+    const selfInventory = name === "report-freshness-inventory.json";
+    const reportFp = selfInventory
+      ? sourceFingerprint
+      : parsed && typeof parsed.sourceFingerprint === "string"
+        ? parsed.sourceFingerprint
+        : null;
+    const reportCommit = selfInventory
+      ? commit
+      : parsed && typeof parsed.commit === "string"
+        ? parsed.commit
+        : null;
     const sameFp = reportFp === sourceFingerprint;
     const sameCommit = reportCommit === commit;
     let status = "unknown";
@@ -855,11 +889,11 @@ const freshnessReport = {
 };
 writeJson("report-freshness-inventory.json", freshnessReport);
 
-const md = `# Current Source Baseline (P0.5)
+const md = `# Current Source Baseline (${CURRENT_PHASE})
 
 **Product:** Coreside  
-**Access date:** ${nowIso().slice(0, 10)}  
-**Phase:** P0.5 source intake / development audit<br>
+**Access date:** ${nowIso().slice(0, 10)}
+**Phase:** ${CURRENT_PHASE} source intake / development audit<br>
 **Public beta:** **NOT READY**  
 **Hosted AI:** **NOT READY**
 

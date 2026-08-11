@@ -8,6 +8,7 @@ import {
   parseSearchBody,
   parseSearchReserveRpcResult,
   parseSearchSettleRpcResult,
+  normalizeProviderResults,
   type SearchRequestBody,
 } from "./search-lib.ts";
 
@@ -157,8 +158,12 @@ Deno.serve(async (req) => {
     return consumerError("Unauthorized", 401, origin);
   }
 
-  const exaKey = Deno.env.get("EXA_API_KEY")?.trim();
-  if (!exaKey) {
+  // LINKUP_SECRET_KEY is the deployed secret name. Keep the prior name as a
+  // non-breaking fallback for existing self-hosted installations.
+  const linkupKey =
+    Deno.env.get("LINKUP_SECRET_KEY")?.trim() ||
+    Deno.env.get("LINKUP_API_KEY")?.trim();
+  if (!linkupKey) {
     return consumerError("Coreside Search is not configured", 503, origin);
   }
 
@@ -256,7 +261,13 @@ Deno.serve(async (req) => {
   const numResults = body.numResults ?? DEFAULT_RESULTS;
   // Fingerprint is per-user cache key material — never log raw query.
   const fingerprint = await sha256(
-    JSON.stringify({ query: body.query, numResults }),
+    JSON.stringify({
+      provider: "linkup",
+      depth: "fast",
+      outputType: "searchResults",
+      query: body.query,
+      numResults,
+    }),
   );
 
   const { data: cached } = await adminClient
@@ -307,17 +318,17 @@ Deno.serve(async (req) => {
 
   let upstream: Response;
   try {
-    upstream = await fetch("https://api.exa.ai/search", {
+    upstream = await fetch("https://api.linkup.so/v1/search", {
       method: "POST",
       headers: {
-        "x-api-key": exaKey,
+        Authorization: `Bearer ${linkupKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        query: body.query,
-        numResults,
-        type: "auto",
-        contents: { highlights: { maxCharacters: 1000 } },
+        q: body.query,
+        depth: "fast",
+        outputType: "searchResults",
+        maxResults: numResults,
       }),
       signal: upstreamAbort.signal,
     });
@@ -360,16 +371,13 @@ Deno.serve(async (req) => {
     return consumerError("Coreside Search request failed", 502, origin);
   }
 
-  const results = boundSearchResults(
-    (payload as { results?: unknown }).results,
-    numResults,
-  );
+  const results = normalizeProviderResults(payload, numResults);
 
   const cacheExpires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
   await adminClient.from("hosted_search_cache").upsert({
     user_id: user.id,
     fingerprint,
-    params_json: { numResults },
+    params_json: { provider: "linkup", depth: "fast", outputType: "searchResults", numResults },
     result_json: results,
     expires_at: cacheExpires,
     hit_count: 0,

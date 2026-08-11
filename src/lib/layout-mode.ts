@@ -5,6 +5,8 @@
 
 export type LayoutMode = "wide" | "standard" | "compact";
 
+export type ToolHeaderDensity = "full" | "icons" | "menu";
+
 export const LAYOUT_SAFE = {
   minChatWidth: 320,
   minToolWidth: 360,
@@ -16,6 +18,9 @@ export const LAYOUT_SAFE = {
   defaultSplitRatio: 0.5,
   minSplitRatio: 0.28,
   maxSplitRatio: 0.72,
+  /** Tool header widths that force denser action chrome. */
+  toolHeaderMenuMax: 480,
+  toolHeaderIconsMax: 720,
 } as const;
 
 export type LayoutMetrics = {
@@ -68,4 +73,32 @@ export function clampSplitForWidth(
   const minTool = LAYOUT_SAFE.minToolWidth / mainWidth;
   if (minChat + minTool >= 1) return 0.5;
   return Math.min(1 - minTool, Math.max(minChat, r));
+}
+
+/**
+ * Condense Tool Canvas header actions from the header's available width.
+ * Measure the header (not the actions row) so labeled buttons cannot inflate
+ * the measurement and keep density stuck on "full".
+ */
+export function classifyToolHeaderDensity(args: {
+  headerWidth: number;
+  layoutMode: LayoutMode;
+}): ToolHeaderDensity {
+  const { headerWidth, layoutMode } = args;
+  if (layoutMode === "compact") return "menu";
+  // Before the first measure, prefer condensed chrome so labeled actions
+  // cannot paint past the pane on the initial frame.
+  if (!(headerWidth > 0)) {
+    return layoutMode === "wide" ? "icons" : "menu";
+  }
+  if (headerWidth < LAYOUT_SAFE.toolHeaderMenuMax) {
+    return "menu";
+  }
+  if (
+    layoutMode === "standard" ||
+    headerWidth < LAYOUT_SAFE.toolHeaderIconsMax
+  ) {
+    return "icons";
+  }
+  return "full";
 }

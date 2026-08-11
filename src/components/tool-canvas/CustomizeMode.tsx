@@ -14,6 +14,7 @@ type CustomizeModeProps = {
   conversationId?: string | null;
   tool: ToolDefinition;
   baseRevision: number;
+  compact?: boolean;
   onApplied?: () => void;
 };
 
@@ -22,6 +23,7 @@ export function CustomizeMode({
   conversationId,
   tool,
   baseRevision,
+  compact = false,
   onApplied,
 }: CustomizeModeProps) {
   const [enabled, setEnabled] = useState(false);
@@ -114,12 +116,13 @@ export function CustomizeMode({
     <div className="customize-mode">
       <button
         type="button"
-        className={`btn btn-secondary${enabled ? " active" : ""}`}
+        className={`${compact ? "icon-btn" : "btn btn-secondary"}${enabled ? " active" : ""}`}
         aria-pressed={enabled}
+        aria-label={compact ? "Customize tool" : undefined}
         onClick={() => setEnabled((v) => !v)}
       >
         <Wand2 size={16} aria-hidden />
-        Customize
+        {compact ? <span className="sr-only">Customize</span> : "Customize"}
       </button>
       {enabled ? (
         <div className="customize-mode-panel">

@@ -45,6 +45,12 @@ export function ToolHeaderActions({
   const rootRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
 
+  // A responsive reflow can remove the overflow trigger. Do not retain an
+  // invisible open menu and resurrect it on a later resize.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [density]);
+
   useEffect(() => {
     if (!menuOpen) return;
     const onDoc = (e: MouseEvent) => {
@@ -60,7 +66,7 @@ export function ToolHeaderActions({
     document.addEventListener("keydown", onKey);
     const focusFrame = requestAnimationFrame(() => {
       const first = rootRef.current?.querySelector<HTMLElement>(
-        '[role="menuitem"]:not([aria-disabled="true"]), .tool-header-menu .btn',
+        ".tool-header-menu button:not(:disabled)",
       );
       first?.focus();
     });
@@ -74,12 +80,11 @@ export function ToolHeaderActions({
   const showLabels = density === "full";
   const overflowOnly = density === "menu";
 
-  const renderSecondary = (inMenu: boolean) => (
+  const renderSecondary = () => (
     <>
       <button
         type="button"
         className="btn btn-secondary"
-        role={inMenu ? "menuitem" : undefined}
         onClick={() => {
           setMenuOpen(false);
           onDetails();
@@ -92,7 +97,6 @@ export function ToolHeaderActions({
       <button
         type="button"
         className="btn btn-secondary"
-        role={inMenu ? "menuitem" : undefined}
         onClick={() => {
           setMenuOpen(false);
           onExport();
@@ -114,6 +118,7 @@ export function ToolHeaderActions({
             conversationId={conversationId}
             tool={tool}
             baseRevision={tool.version ?? 1}
+            compact={density === "icons"}
             onApplied={onCustomizeApplied}
           />
           <button
@@ -134,7 +139,7 @@ export function ToolHeaderActions({
             <History size={16} aria-hidden />
             {showLabels ? "Undo" : null}
           </button>
-          {density === "full" ? renderSecondary(false) : null}
+          {density === "full" ? renderSecondary() : null}
           {density === "icons" ? (
             <div className="tool-header-more">
               <button
@@ -142,7 +147,6 @@ export function ToolHeaderActions({
                 type="button"
                 className="btn btn-secondary"
                 aria-label="More tool actions"
-                aria-haspopup="menu"
                 aria-expanded={menuOpen}
                 aria-controls={menuId}
                 onClick={() => setMenuOpen((v) => !v)}
@@ -151,8 +155,13 @@ export function ToolHeaderActions({
                 <span className="sr-only">More tool actions</span>
               </button>
               {menuOpen ? (
-                <div className="tool-header-menu" role="menu" id={menuId}>
-                  {renderSecondary(true)}
+                <div
+                  className="tool-header-menu"
+                  role="group"
+                  aria-label="More tool actions"
+                  id={menuId}
+                >
+                  {renderSecondary()}
                 </div>
               ) : null}
             </div>
@@ -165,7 +174,6 @@ export function ToolHeaderActions({
             type="button"
             className="btn btn-secondary"
             aria-label="More tool actions"
-            aria-haspopup="menu"
             aria-expanded={menuOpen}
             aria-controls={menuId}
             onClick={() => setMenuOpen((v) => !v)}
@@ -174,7 +182,12 @@ export function ToolHeaderActions({
             More
           </button>
           {menuOpen ? (
-            <div className="tool-header-menu" role="menu" id={menuId}>
+            <div
+              className="tool-header-menu"
+              role="group"
+              aria-label="More tool actions"
+              id={menuId}
+            >
               <CustomizeMode
                 surfaceId={surfaceIdForTool(tool.id)}
                 conversationId={conversationId}
@@ -188,7 +201,6 @@ export function ToolHeaderActions({
               <button
                 type="button"
                 className="btn btn-secondary"
-                role="menuitem"
                 aria-label="Open tool in new window"
                 onClick={() => {
                   setMenuOpen(false);
@@ -201,7 +213,6 @@ export function ToolHeaderActions({
               <button
                 type="button"
                 className="btn btn-secondary"
-                role="menuitem"
                 aria-label="Undo last tool change"
                 onClick={() => {
                   setMenuOpen(false);
@@ -211,7 +222,7 @@ export function ToolHeaderActions({
                 <History size={16} aria-hidden />
                 Undo
               </button>
-              {renderSecondary(true)}
+              {renderSecondary()}
             </div>
           ) : null}
         </div>

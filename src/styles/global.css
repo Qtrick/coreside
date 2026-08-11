@@ -567,6 +567,7 @@ body > .window-overlay-root > *,
 .projects-list-page {
   display: flex;
   flex-direction: column;
+  width: 100%;
   min-width: 0;
   min-height: 0;
   max-width: 100%;
@@ -652,6 +653,20 @@ body > .window-overlay-root > *,
   max-width: 100%;
   display: flex;
   justify-content: flex-end;
+}
+
+/* Below the full-header threshold, reserve a complete row for the controls.
+   A percentage-width child otherwise has an indefinite flex basis and can
+   paint past the canvas even though the buttons themselves wrap. */
+@container tool-header (max-width: 720px) {
+  .tool-canvas-header-actions {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .tool-header-actions {
+    justify-content: flex-start;
+  }
 }
 
 .panel-subtitle,
@@ -1169,7 +1184,12 @@ body > .window-overlay-root > *,
 }
 
 .tool-canvas-body {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  /* min-width:0 lets the pane shrink; keep overflow:auto so wide tool
+     content can still scroll instead of being clipped. */
   overflow: auto;
   padding: var(--space-5);
 }
@@ -1202,12 +1222,14 @@ body > .window-overlay-root > *,
   min-width: 0;
   flex: 0 1 auto;
   max-width: 100%;
+  width: 100%;
   container-type: inline-size;
   container-name: tool-header-actions;
 }
 
 .tool-header-actions .btn {
   flex: 0 1 auto;
+  max-width: 100%;
   white-space: nowrap;
 }
 
@@ -1912,6 +1934,11 @@ body > .window-overlay-root > *,
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  /* Generated labels can be arbitrary strings; let unbroken values wrap. */
+  overflow-wrap: anywhere;
 }
 
 .tr-row,
@@ -1920,6 +1947,28 @@ body > .window-overlay-root > *,
   flex-wrap: wrap;
   gap: var(--space-3);
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tr-container > *,
+.tr-column > *,
+.tr-row > *,
+.tr-card > *,
+.tr-button-group > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tr-container .btn,
+.tr-column .btn,
+.tr-row .btn,
+.tr-card .btn,
+.tr-button-group .btn {
+  /* Override blanket min-width:0 so labels wrap to a new row instead of crushing. */
+  min-width: auto;
+  max-width: 100%;
+  flex-shrink: 0;
 }
 
 .tr-card {
@@ -1927,6 +1976,8 @@ body > .window-overlay-root > *,
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--core-card-overlay);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .tr-tabs {
@@ -1990,6 +2041,13 @@ body > .window-overlay-root > *,
   overflow: hidden;
 }
 
+.tr-image img {
+  display: block;
+  max-inline-size: 100%;
+  max-width: 100%;
+  height: auto;
+}
+
 .tr-svg-scene,
 .tr-canvas-scene {
   display: block;
@@ -2009,8 +2067,10 @@ body > .window-overlay-root > *,
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  min-width: 160px;
-  flex: 1;
+  /* Prefer wrapping over a hard 160px floor that inflates tool min-content. */
+  min-width: 0;
+  flex: 1 1 12rem;
+  max-width: 100%;
 }
 
 .tr-field label {

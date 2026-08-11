@@ -6,6 +6,7 @@ use tauri::State;
 use super::CommandError;
 use crate::crawler::{detect_installation, InstallationState};
 use crate::exa::{has_exa_key, resolve_exa_credentials};
+use crate::linkup::{has_key as has_linkup_key, resolve_credentials as resolve_linkup_credentials};
 use crate::projects::load_project_context_settings;
 use crate::research::Crawl4aiSearchProvider;
 use crate::search::{image_search, video_search, web_search, SafeSearchLevel, SearchRegistry};
@@ -23,6 +24,8 @@ pub struct SearchConnectionView {
     /// Exa open-web search readiness (keyring or EXA_API_KEY).
     pub exa_configured: bool,
     pub exa_source: String,
+    pub linkup_configured: bool,
+    pub linkup_source: String,
 }
 
 fn map_search_err(e: crate::search::SearchError) -> CommandError {
@@ -32,8 +35,9 @@ fn map_search_err(e: crate::search::SearchError) -> CommandError {
 async fn resolve_registry(state: &AppState) -> Result<SearchRegistry, CommandError> {
     let report = detect_installation();
     if report.state != InstallationState::Ready {
-        // Free-text Exa search can still run without Crawl4AI; URL crawl needs the engine.
-        if !has_exa_key() {
+        // Configured discovery can run without Crawl4AI; advanced URL crawling
+        // still needs the engine or the SSRF-safe HTTP fallback.
+        if !has_linkup_key() && !has_exa_key() {
             return Err(CommandError::new(
                 "needs_setup",
                 report
@@ -57,9 +61,18 @@ pub fn get_search_connection(
     state.require_profile()?;
     let report = detect_installation();
     let _ = state;
+    let linkup = resolve_linkup_credentials();
     let exa = resolve_exa_credentials();
-    let provider = if exa.has_key() { "hybrid" } else { "crawl4ai" };
-    let source = if exa.has_key() {
+    let provider = if linkup.api_key.is_some() {
+        "linkup"
+    } else if exa.has_key() {
+        "exa"
+    } else {
+        "crawl4ai"
+    };
+    let source = if linkup.api_key.is_some() {
+        linkup.source.as_str().to_string()
+    } else if exa.has_key() {
         exa.source.as_str().to_string()
     } else {
         match report.state {
@@ -69,12 +82,14 @@ pub fn get_search_connection(
     };
     Ok(SearchConnectionView {
         provider: provider.into(),
-        has_key: exa.has_key(),
+        has_key: linkup.api_key.is_some() || exa.has_key(),
         source,
         engine_ready: report.state == InstallationState::Ready,
         engine_reason: report.reason,
         exa_configured: exa.has_key(),
         exa_source: exa.source.as_str().into(),
+        linkup_configured: linkup.api_key.is_some(),
+        linkup_source: linkup.source.as_str().into(),
     })
 }
 
@@ -109,7 +124,12 @@ pub async fn test_search_connection(state: State<'_, AppState>) -> Result<String
     state.require_profile()?;
     let registry = resolve_registry(&state).await?;
     registry.health_check().await.map_err(map_search_err)?;
-    Ok("Local research engine OK".into())
+    let provider = if has_linkup_key() {
+        "Web Research connection OK"
+    } else {
+        "Local research engine OK"
+    };
+    Ok(provider.into())
 }
 
 #[derive(Debug, Deserialize)]
@@ -311,6 +331,11 @@ pub async fn fetch_web_page_cmd(
     input: FetchWebPageInput,
 ) -> Result<crate::search::FetchedWebPage, CommandError> {
     state.require_profile()?;
+    if has_linkup_key() {
+        return crate::linkup::fetch_page(&input.url)
+            .await
+            .map_err(map_search_err);
+    }
     let report = detect_installation();
     if report.state != InstallationState::Ready {
         return Err(CommandError::new(

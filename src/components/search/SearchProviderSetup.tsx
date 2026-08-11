@@ -72,7 +72,7 @@ const SEARCH_PROFILES: {
   label: string;
   hint: string;
 }[] = [
-  { id: "saver", label: "Saver", hint: "Default — fewest Exa credits" },
+  { id: "saver", label: "Saver", hint: "Default — fewest provider requests" },
   { id: "balanced", label: "Balanced", hint: "5 results, one refinement" },
   { id: "thorough", label: "Thorough", hint: "More sources, budget-gated deep" },
 ];
@@ -127,17 +127,17 @@ export function SearchProviderSetup({ open, onClose }: SetupProps) {
           </header>
           <div className="provider-key-form">
             <p>
-              Indexed web discovery uses Exa (optional API key). Page inspection
-              uses the local Crawl4AI engine on this computer.
+              Web discovery uses Linkup when configured. Crawl4AI remains the
+              advanced local page inspector on this computer.
             </p>
             {developerMode ? (
               <>
                 <p className="muted">Developers: install the local engine with:</p>
                 <pre className="settings-code-block">npm run crawl4ai:setup</pre>
                 <p className="muted">
-                  Add <code>EXA_API_KEY=</code> to <code>.env</code> for indexed web
+                  Add <code>LINKUP_API_KEY=</code> to <code>.env</code> for web
                   discovery (development). Crawl4AI remains the local page inspector
-                  when installed.
+                  when installed. Exa is an optional compatibility fallback.
                 </p>
               </>
             ) : (
@@ -371,6 +371,7 @@ export function SearchSettingsSection() {
 
   const status = mapEngineStatus(connection);
   const needsSetup = status.label === "Needs Setup";
+  const linkupConfigured = Boolean(connection?.linkupConfigured);
   const exaConfigured = Boolean(connection?.exaConfigured);
 
   const testConnection = async () => {
@@ -502,11 +503,43 @@ export function SearchSettingsSection() {
       >
         <h3 id="search-media-heading">Web Search and Research</h3>
         <p>
-          Exa finds and ranks web sources. Crawl4AI inspects selected pages
-          locally. Saver mode is the default so your Exa allowance lasts.
+          Web Research finds public sources for Coreside to evaluate. Linkup is
+          the default discovery provider; Crawl4AI remains the advanced local
+          page inspector.
         </p>
 
-        <h4 className="settings-subheading">Indexed search (Exa)</h4>
+        <h4 className="settings-subheading">Default web discovery</h4>
+        <div className="provider-status-row">
+          <span className={`status-pill ${linkupConfigured ? "ready" : "warn"}`}>
+            {linkupConfigured ? "Connected" : "Not configured"}
+          </span>
+          <div className="provider-status-meta">
+            <div>
+              <span className="muted">Provider</span>
+              <strong>Linkup</strong>
+            </div>
+            <div>
+              <span className="muted">Credential</span>
+              <strong>{connection?.linkupSource ?? "none"}</strong>
+            </div>
+          </div>
+        </div>
+        <p className="muted">
+          Credentials stay in the OS keyring. Developers can also set
+          <code>LINKUP_API_KEY</code> in <code>.env</code>.
+        </p>
+        <div className="button-row">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={busy || !linkupConfigured}
+            onClick={() => void testConnection()}
+          >
+            Test Web Research
+          </button>
+        </div>
+
+        <h4 className="settings-subheading">Compatibility discovery (Exa)</h4>
         <div className="provider-status-row">
           <span className={`status-pill ${exaConfigured ? "ready" : "warn"}`}>
             {exaConfigured ? "Connected" : "Not configured"}
@@ -584,8 +617,8 @@ export function SearchSettingsSection() {
 
         <h4 className="settings-subheading">Search usage profile</h4>
         <p className="muted">
-          Controls Exa result counts and Crawl4AI handoff limits. Default is
-          Saver.
+          Controls provider result counts and Crawl4AI handoff limits. Default
+          is Saver.
         </p>
         <div
           className="theme-options"
@@ -613,7 +646,7 @@ export function SearchSettingsSection() {
           </p>
         ) : null}
 
-        <h4 className="settings-subheading">Local monthly budget (optional)</h4>
+        <h4 className="settings-subheading">Compatibility-provider budget (optional)</h4>
         <p className="muted">
           Caps automatic Exa spend in Coreside. This is not your Exa account
           balance.
@@ -653,7 +686,7 @@ export function SearchSettingsSection() {
           <div className="provider-status-meta">
             <div>
               <span className="muted">Source</span>
-              <strong>{connection?.source ?? "none"}</strong>
+              <strong>{connection?.engineReady ? "local" : "none"}</strong>
             </div>
           </div>
         </div>

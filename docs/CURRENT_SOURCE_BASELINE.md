@@ -1,8 +1,8 @@
-# Current Source Baseline (P0.5)
+# Current Source Baseline (P0.6)
 
 **Product:** Coreside  
-**Access date:** 2026-08-10  
-**Phase:** P0.5 source intake / development audit<br>
+**Access date:** 2026-08-11
+**Phase:** P0.6 source intake / development audit<br>
 **Public beta:** **NOT READY**  
 **Hosted AI:** **NOT READY**
 
@@ -12,20 +12,20 @@
 | --- | --- |
 | Path | `/Users/qunyingfan/Coreside` |
 | Branch | `main` |
-| Commit | `1bd2a3e8376afdf847cec55ae90fe9e219eee605` |
+| Commit | `dd8c60bbbccd1a3b21a3648f16586f7e2adc8a87` |
 | Dirty | Yes (development evidence only) |
-| Source fingerprint | `c0da070e975788ca2881dd74f503eb98ef9a0d32a6d9246a35dc63e51d4d81dd` |
+| Source fingerprint | `18165bddbc7b17a128ed3bc1526846640b2f9cafeb9bfb41cd9a28b0aff60d2d` |
 
 ## Uploaded archive
 
 | Field | Value |
 | --- | --- |
-| Filename | `Coreside Chat AI.zip` |
-| Path | `/Users/qunyingfan/Downloads/Coreside Chat AI.zip` |
-| Expected SHA-256 | `220c246eeed62133bb6b08d77278248192f4f7503f31004e5ce02861f2ae6412` |
-| Observed SHA-256 | `220c246eeed62133bb6b08d77278248192f4f7503f31004e5ce02861f2ae6412` |
+| Filename | `Coreside main.zip` |
+| Path | `/Users/qunyingfan/Downloads/Coreside main.zip` |
+| Expected SHA-256 | `22a0ab2903fc26c6b17c903ae9f8d7181ed72803bec8f00c447d687462119764` |
+| Observed SHA-256 | `22a0ab2903fc26c6b17c903ae9f8d7181ed72803bec8f00c447d687462119764` |
 | Status | **present_hash_match** |
-| Supersedes | `7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d` (`P0.3 supplied Coreside archive`) |
+| Supersedes | `220c246eeed62133bb6b08d77278248192f4f7503f31004e5ce02861f2ae6412` (`P0.5 supplied Coreside archive`) |
 | Partial Update archive | `Partial Update Main.zip` / `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607` |
 
 ## Lockfiles
@@ -49,21 +49,21 @@
 
 | Metric | Active |
 | --- | --- |
-| `src` files | 192 |
-| Rust `.rs` | 193 |
+| `src` files | 193 |
+| Rust `.rs` | 194 |
 | Migrations | 24 |
 | E2E specs | 20 |
 | Tauri commands | 222 |
-| Fingerprint files | 714 |
+| Fingerprint files | 716 |
 
 ## Archive vs active
 
 | Metric | Count |
 | --- | --- |
 | Comparison status | compared |
-| Only in active | 2 |
+| Only in active | 4 |
 | Only in archive | 0 |
-| Changed | 10 |
+| Changed | 18 |
 
 ## Generation command
 

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "product": "Coreside",
   "description": "Immutable archive intake history. Active audit selects currentIntakeId; prior SHA identities are never rewritten.",
-  "currentIntakeId": "p0.5-input",
+  "currentIntakeId": "p0.6-input",
   "partialUpdate": {
     "label": "partial-update-main",
     "filename": "Partial Update Main.zip",
@@ -11,14 +11,24 @@
   },
   "intakes": [
     {
+      "id": "p0.6-input",
+      "label": "P0.6 supplied Coreside archive",
+      "role": "current_supplied_reference",
+      "filename": "Coreside main.zip",
+      "sha256": "22a0ab2903fc26c6b17c903ae9f8d7181ed72803bec8f00c447d687462119764",
+      "defaultPath": "~/Downloads/Coreside main.zip",
+      "accessed": "2026-08-10",
+      "notes": "P0.6 intake. The active working tree remains implementation authority; this archive is immutable provenance and supersedes p0.5-input as the current supplied reference."
+    },
+    {
       "id": "p0.5-input",
       "label": "P0.5 supplied Coreside archive",
-      "role": "current_supplied_reference",
+      "role": "historical_input",
       "filename": "Coreside Chat AI.zip",
       "sha256": "220c246eeed62133bb6b08d77278248192f4f7503f31004e5ce02861f2ae6412",
       "defaultPath": "~/Downloads/Coreside Chat AI.zip",
       "accessed": "2026-08-10",
-      "notes": "P0.5 intake. The active working tree is implementation authority; this archive remains immutable reference provenance."
+      "notes": "Historical P0.5 input; superseded as current supplied reference by p0.6-input."
     },
     {
       "id": "p0.4-input",

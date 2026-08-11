@@ -19,7 +19,7 @@ impl SearchRegistry {
         Self { provider }
     }
 
-    /// Default production provider: Exa (when configured) + Crawl4AI hybrid.
+    /// Default production provider: Linkup discovery + Crawl4AI advanced retrieval.
     pub fn default_local(supervisor: Arc<CrawlerSupervisor>, db: Arc<Mutex<Database>>) -> Self {
         Self::from_provider(Arc::new(HybridSearchProvider::new(supervisor, db)))
     }

@@ -1,0 +1,61 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const css = fs.readFileSync(path.join(root, "src/styles/global.css"), "utf8");
+
+function rule(selectors: string): string {
+  const escaped = selectors.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
+  expect(match, `Missing CSS rule for ${selectors}`).not.toBeNull();
+  return match?.[1] ?? "";
+}
+
+/**
+ * Generated tools can compose arbitrary trusted primitives. These CSS contracts
+ * keep their min-content size inside the Tool Canvas instead of requiring every
+ * future tool definition to know the host pane width.
+ */
+describe("generated surface containment", () => {
+  it("keeps the canvas body as the explicit, bounded scroll owner", () => {
+    const body = rule(".tool-canvas-body");
+    expect(body).toMatch(/min-width:\s*0/);
+    expect(body).toMatch(/min-height:\s*0/);
+    expect(body).toMatch(/max-width:\s*100%/);
+    expect(body).toMatch(/overflow:\s*auto/);
+  });
+
+  it("makes generated layout primitives shrink or reflow before they widen the host", () => {
+    const columns = rule(".tr-container,\n.tr-column");
+    expect(columns).toMatch(/width:\s*100%/);
+    expect(columns).toMatch(/min-width:\s*0/);
+    expect(columns).toMatch(/max-width:\s*100%/);
+    expect(columns).toMatch(/overflow-wrap:\s*anywhere/);
+
+    const rows = rule(".tr-row,\n.tr-button-group");
+    expect(rows).toMatch(/flex-wrap:\s*wrap/);
+    expect(rows).toMatch(/min-width:\s*0/);
+    expect(rows).toMatch(/max-width:\s*100%/);
+
+    const descendants = rule(".tr-container > *,\n.tr-column > *,\n.tr-row > *,\n.tr-card > *,\n.tr-button-group > *");
+    expect(descendants).toMatch(/min-width:\s*0/);
+    expect(descendants).toMatch(/max-width:\s*100%/);
+  });
+
+  it("allows generated fields to reflow instead of imposing a fixed minimum width", () => {
+    const field = rule(".tr-field");
+    expect(field).toMatch(/min-width:\s*0/);
+    expect(field).toMatch(/flex:\s*1\s+1\s+12rem/);
+    expect(field).toMatch(/max-width:\s*100%/);
+    expect(field).not.toMatch(/min-width:\s*160px/);
+  });
+
+  it("scales generated images to the surface instead of clipping their intrinsic width", () => {
+    const image = rule(".tr-image img");
+    expect(image).toMatch(/display:\s*block/);
+    expect(image).toMatch(/max-inline-size:\s*100%/);
+    expect(image).toMatch(/height:\s*auto/);
+  });
+});

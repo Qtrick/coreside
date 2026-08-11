@@ -789,8 +789,12 @@ pub fn list_transactions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{create_conversation, Database, DEFAULT_WORKSPACE_ID};
-    use crate::runtime_v2::operations::OperationTarget;
+    use crate::ai::{ToolAction, ToolChangePayload, ToolComponent, ToolDefinition};
+    use crate::db::{
+        apply_tool_change, create_conversation, get_tool, Database, DEFAULT_WORKSPACE_ID,
+    };
+    use crate::runtime_v2::operations::{tool_change_to_operations, OperationTarget};
+    use crate::runtime_v2::surfaces::upsert_surface_from_tool;
     use tempfile::tempdir;
 
     fn test_db() -> Database {
@@ -865,6 +869,80 @@ mod tests {
         apply_transaction(&mut db, &txn2.id).unwrap();
         let restored = get_surface(&db, &surface2.id).unwrap();
         assert!(!restored.archived);
+    }
+
+    #[test]
+    fn legacy_adapter_replacement_cannot_expand_existing_surface_packs() {
+        let mut db = test_db();
+        let original = ToolDefinition {
+            id: "core-only-tool".into(),
+            name: "Core only".into(),
+            description: String::new(),
+            layout: json!({"type": "single-column"}),
+            components: vec![ToolComponent {
+                id: "title".into(),
+                component_type: "heading".into(),
+                value_key: None,
+                props: Some(json!({"text": "Original"})),
+                children: None,
+            }],
+        };
+        let saved = apply_tool_change(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            &original,
+            "create",
+            None,
+            "seed",
+        )
+        .unwrap();
+        let surface = upsert_surface_from_tool(
+            &mut db,
+            &saved.definition,
+            DEFAULT_WORKSPACE_ID,
+            saved.current_version,
+        )
+        .unwrap();
+        let before_tool = get_tool(&db, &original.id).unwrap();
+        let before_surface = get_surface(&db, &surface.id).unwrap();
+
+        let forbidden = ToolChangePayload {
+            action: ToolAction::Replace,
+            target_tool_id: Some(original.id.clone()),
+            tool: Some(ToolDefinition {
+                components: vec![ToolComponent {
+                    id: "scene".into(),
+                    component_type: "svgScene".into(),
+                    value_key: None,
+                    props: Some(json!({})),
+                    children: None,
+                }],
+                ..original.clone()
+            }),
+            change_summary: "attempt to add SVG".into(),
+        };
+        let ops = tool_change_to_operations(&forbidden);
+        let txn = create_transaction(&mut db, None, None, None, "legacy replacement", &ops, false)
+            .unwrap();
+        let result = apply_transaction(&mut db, &txn.id).unwrap();
+
+        assert_eq!(result.transaction.status, "failed");
+        assert!(result.conflicts.iter().any(|conflict| {
+            conflict.contains("coreside.svg") && conflict.contains("has not been granted")
+        }));
+        let after_tool = get_tool(&db, &original.id).unwrap();
+        let after_surface = get_surface(&db, &surface.id).unwrap();
+        assert_eq!(after_tool.definition, before_tool.definition);
+        assert_eq!(after_tool.current_version, before_tool.current_version);
+        assert_eq!(after_surface.definition, before_surface.definition);
+        assert_eq!(
+            after_surface.current_revision,
+            before_surface.current_revision
+        );
+        assert_eq!(
+            after_surface.capability_packs,
+            before_surface.capability_packs
+        );
     }
 }
 

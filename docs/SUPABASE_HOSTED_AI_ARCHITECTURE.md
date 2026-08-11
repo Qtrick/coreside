@@ -32,7 +32,7 @@ Migrations:
 | Function | Role |
 | --- | --- |
 | `ai-gateway` | Hosted chat completions + health |
-| `search-gateway` | Hosted Exa discovery |
+| `search-gateway` | Hosted Linkup fast source discovery |
 | `billing-checkout` | Stripe Checkout session (server-bound `client_reference_id` + metadata) |
 | `billing-portal` | Stripe Customer Portal session stub |
 | `stripe-webhook` | Webhook signature verification, idempotency, entitlement sync |
