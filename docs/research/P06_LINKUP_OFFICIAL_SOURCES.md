@@ -16,8 +16,8 @@ runtime dependency on Linkup reasoning.
   untrusted evidence.
 - [Authentication](https://docs.linkup.so/pages/documentation/platform/authentication):
   requests use a bearer API key. Local credentials live only in the OS keyring
-  (with `LINKUP_API_KEY` as a development fallback); hosted credentials stay in
-  the Edge-function secret environment.
+  (with `LINKUP_API_KEY` as a development fallback); hosted credentials use
+  the `LINKUP_API_KEY` Edge-function secret.
 
 Out of scope by design: Linkup Research, provider-generated answer synthesis,
 raw HTML/script execution, provider tool delegation, and forwarding retrieved

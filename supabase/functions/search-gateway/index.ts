@@ -158,11 +158,11 @@ Deno.serve(async (req) => {
     return consumerError("Unauthorized", 401, origin);
   }
 
-  // LINKUP_SECRET_KEY is the deployed secret name. Keep the prior name as a
-  // non-breaking fallback for existing self-hosted installations.
+  // LINKUP_API_KEY is the canonical deployed secret name. Keep the alternate
+  // name as a non-breaking fallback while existing environments transition.
   const linkupKey =
-    Deno.env.get("LINKUP_SECRET_KEY")?.trim() ||
-    Deno.env.get("LINKUP_API_KEY")?.trim();
+    Deno.env.get("LINKUP_API_KEY")?.trim() ||
+    Deno.env.get("LINKUP_SECRET_KEY")?.trim();
   if (!linkupKey) {
     return consumerError("Coreside Search is not configured", 503, origin);
   }
