@@ -1,8 +1,8 @@
-# Progressive Preview Transaction (RC3.3 Phase 5–6 / RC3.4 Phase 7)
+# Progressive Preview Transaction (P0.5 current-source rerun required)
 
 **Product:** Coreside  
-**Status:** Vertical slice landed — **not complete**  
-**Access date:** 2026-08-04
+**Status:** Desktop journeys 19 (commit) and 20 (cancel) exist, but their prior P0.4 results are historical until rerun against the current source fingerprint.
+**Access date:** 2026-08-10
 
 ## What landed
 
@@ -10,7 +10,7 @@
 | --- | --- |
 | `PreviewTransaction` | `runtime_v2/preview_transaction.rs` — preview_transaction_id, turn_id, accepted/rejected ops, base_revision, interrupted/committed, speculative `PreviewSurfaceModel` map |
 | Live ingest | `ingest_live_chunk` / `ingest_live_chunk_with_seed` feeds `NdjsonFrameParser::push` during `TextDelta` |
-| Speculative paint | Accepted paint ops apply via `apply_component_op` / state merge on an **in-memory** definition/state clone — **no SQLite write** |
+| Speculative paint | Accepted paint ops apply via `apply_component_op` / state merge on an **in-memory** definition/state clone — **no SQLite write**; component changes must satisfy the same per-surface capability-pack boundary before paint |
 | Channel preview | `AgentTurnEvent::Operation { status: "preview" }` plus `AgentTurnEvent::PreviewSurface { definition_json, state_json, revision, sequence, … }` (Channel-only; Sync global-fallback untouched) |
 | Parser failures | Incomplete buffer noise stays silent; oversized/halted/fatal → rejected list + optional `Error`; invalid paint target → rejected |
 | Interrupt / cancel | Clears speculative surfaces **and accepted ops**; emits `Operation { status: "interrupted" }`; turn-end harvest skips interrupted bags |
@@ -26,8 +26,8 @@
 - **Component-state preservation engine:** Speculative paint preserves tool identity and applies component/state ops; full preservation-policy parity across live paint is **P2**.
 - **Anthropic / Gemini:** Live text SSE unit-verified; progressive NDJSON ops still depend on model emitting frames (same as OpenAI JSON-blob path).
 - **Tool-round reset:** One parser/preview bag spans the turn (including tool follow-ups); not yet a multi-attempt registry.
-- **Desktop E2E:** Fixture + unit/vitest + SQLite cancel/incomplete integration covered; packaged Journey for progressive **surface paint** **not_run**. **Do not claim Desktop Verified.**
-- **Journey 12 (`e2e/specs/12-true-streaming.spec.ts`):** Proves **text** live-stream deltas (`live stream probe`) only. It does **not** assert `PreviewSurface` Channel events, ToolCanvas Preview badge, overlay clear-on-cancel, or SQLite non-durability of speculative paint. Do not reuse Journey 12 as progressive-paint desktop evidence — a dedicated progressive-surface journey is still required.
+- **Desktop E2E:** Journeys 19 and 20 are dedicated Desktop paths. Their current evidence must match `reports/current-source-fingerprint.json`; stale P0.4 evidence remains historical. Packaged progressive-surface proof is **not_run**.
+- **Journey 12 (`e2e/specs/12-true-streaming.spec.ts`):** Proves **text** live-stream deltas (`live stream probe`) only. It does **not** assert `PreviewSurface` Channel events, ToolCanvas Preview badge, overlay clear-on-cancel, or SQLite non-durability of speculative paint. Do not reuse Journey 12 as progressive-paint desktop evidence.
 
 ## Integration evidence (Unit Verified, SQLite-backed)
 

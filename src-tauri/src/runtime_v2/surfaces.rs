@@ -7,7 +7,10 @@ use uuid::Uuid;
 use super::limits::{
     MAX_DEFINITION_JSON_BYTES, MAX_STATE_JSON_BYTES, MAX_SURFACES_PER_CONVERSATION,
 };
-use super::packs::validate_definition_components;
+use super::packs::{
+    normalize_capability_packs, required_packs_for_definition,
+    validate_definition_components_for_packs,
+};
 use crate::ai::{layout_type_string, ToolDefinition};
 use crate::db::{now_rfc3339, Database, DbError, DbResult};
 use rusqlite::params;
@@ -61,33 +64,52 @@ pub fn upsert_surface_from_tool(
     let mut def = tool.clone();
     def.normalize_for_frontend();
     let def_json = serde_json::to_string(&def)?;
-    let existing: Option<(String, String)> = db
+    let existing: Option<(String, String, String, String)> = db
         .conn()
         .query_row(
-            "SELECT instance_id, id FROM surfaces WHERE tool_id = ?1 OR id = ?2",
+            "SELECT instance_id, id, capability_packs_json, definition_json FROM surfaces WHERE tool_id = ?1 OR id = ?2",
             params![tool.id, id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .optional_compat()?;
 
     let instance_id = existing
         .as_ref()
-        .map(|(i, _)| i.clone())
+        .map(|(i, _, _, _)| i.clone())
         .unwrap_or_else(new_instance_id);
+    let packs = match existing.as_ref() {
+        Some((_, _, packs_json, existing_definition_json)) => {
+            let persisted: Vec<String> = serde_json::from_str(packs_json)?;
+            if persisted.is_empty() {
+                // Legacy rows did not persist an assignment. Backfill from the
+                // already-stored definition, never the incoming replacement.
+                let existing_definition: Value = serde_json::from_str(existing_definition_json)?;
+                required_packs_for_definition(&existing_definition).map_err(DbError::Invalid)?
+            } else {
+                normalize_capability_packs(&persisted).map_err(DbError::Invalid)?
+            }
+        }
+        None => {
+            required_packs_for_definition(&serde_json::to_value(&def)?).map_err(DbError::Invalid)?
+        }
+    };
+    validate_definition_components_for_packs(&serde_json::to_value(&def)?, &packs)
+        .map_err(DbError::Invalid)?;
+    let packs_json = serde_json::to_string(&packs)?;
 
     if existing.is_some() {
         db.conn().execute(
             "UPDATE surfaces SET name = ?1, definition_json = ?2, current_revision = ?3,
-             updated_at = ?4, lifecycle_state = 'active', archived = 0 WHERE id = ?5",
-            params![def.name, def_json, revision, now, id],
+             capability_packs_json = ?4, updated_at = ?5, lifecycle_state = 'active', archived = 0 WHERE id = ?6",
+            params![def.name, def_json, revision, packs_json, now, id],
         )?;
     } else {
         db.conn().execute(
             "INSERT INTO surfaces (
                 id, instance_id, surface_type, placement, owner_type, owner_id,
-                tool_id, name, definition_json, current_revision, lifecycle_state, archived,
+                tool_id, name, definition_json, current_revision, lifecycle_state, archived, capability_packs_json,
                 created_at, updated_at
-             ) VALUES (?1, ?2, 'tool', 'tool_canvas', 'workspace', ?3, ?4, ?5, ?6, ?7, 'active', 0, ?8, ?9)",
+             ) VALUES (?1, ?2, 'tool', 'tool_canvas', 'workspace', ?3, ?4, ?5, ?6, ?7, 'active', 0, ?8, ?9, ?10)",
             params![
                 id,
                 instance_id,
@@ -96,6 +118,7 @@ pub fn upsert_surface_from_tool(
                 def.name,
                 def_json,
                 revision,
+                packs_json,
                 now,
                 now
             ],
@@ -121,7 +144,14 @@ pub fn create_inline_surface(
     definition: &Value,
     packs: &[String],
 ) -> DbResult<SurfaceRecord> {
-    validate_definition_components(definition).map_err(DbError::Invalid)?;
+    let supplied_packs = normalize_capability_packs(packs).map_err(DbError::Invalid)?;
+    let effective_packs = if packs.is_empty() {
+        required_packs_for_definition(definition).map_err(DbError::Invalid)?
+    } else {
+        supplied_packs
+    };
+    validate_definition_components_for_packs(definition, &effective_packs)
+        .map_err(DbError::Invalid)?;
     let def_json = serde_json::to_string(definition)?;
     if def_json.len() > MAX_DEFINITION_JSON_BYTES {
         return Err(DbError::Invalid("surface definition too large".into()));
@@ -139,7 +169,7 @@ pub fn create_inline_surface(
     let id = format!("surf-{}", Uuid::new_v4());
     let instance_id = new_instance_id();
     let now = now_rfc3339();
-    let packs_json = serde_json::to_string(packs)?;
+    let packs_json = serde_json::to_string(&effective_packs)?;
     db.conn().execute(
         "INSERT INTO surfaces (
             id, instance_id, surface_type, placement, owner_type, owner_id,
@@ -339,8 +369,14 @@ pub fn update_surface_definition(
     change_summary: &str,
     expected_revision: Option<i64>,
 ) -> DbResult<SurfaceRecord> {
-    validate_definition_components(definition).map_err(DbError::Invalid)?;
     let current = get_surface(db, surface_id)?;
+    let effective_packs = if current.capability_packs.is_empty() {
+        required_packs_for_definition(&current.definition).map_err(DbError::Invalid)?
+    } else {
+        normalize_capability_packs(&current.capability_packs).map_err(DbError::Invalid)?
+    };
+    validate_definition_components_for_packs(definition, &effective_packs)
+        .map_err(DbError::Invalid)?;
     if let Some(tool_id) = current.tool_id.as_ref() {
         crate::security::assert_not_protected(tool_id).map_err(DbError::Invalid)?;
     }
@@ -360,8 +396,8 @@ pub fn update_surface_definition(
         return Err(DbError::Invalid("surface definition too large".into()));
     }
     db.conn().execute(
-        "UPDATE surfaces SET definition_json = ?1, current_revision = ?2, updated_at = ?3, name = COALESCE(json_extract(?1, '$.name'), name) WHERE id = ?4",
-        params![def_json, next, now, surface_id],
+        "UPDATE surfaces SET definition_json = ?1, current_revision = ?2, capability_packs_json = ?3, updated_at = ?4, name = COALESCE(json_extract(?1, '$.name'), name) WHERE id = ?5",
+        params![def_json, next, serde_json::to_string(&effective_packs)?, now, surface_id],
     )?;
     let version_id = format!("sv-{}", Uuid::new_v4());
     db.conn().execute(
@@ -689,5 +725,109 @@ mod tests {
         }
         let listed = list_inline_surfaces(&db, &conv.id).unwrap();
         assert_eq!(listed.len(), count);
+    }
+
+    #[test]
+    fn surface_packs_reject_ungranted_components_and_backfill_legacy_assignments() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        let core_only = vec!["coreside.core".to_string()];
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Core only",
+            &minimal_def("Core only"),
+            &core_only,
+        )
+        .unwrap();
+        assert_eq!(surface.capability_packs, core_only);
+
+        let mut forbidden = minimal_def("Core only");
+        forbidden["components"].as_array_mut().unwrap().push(json!({
+            "id": "scene",
+            "type": "svgScene",
+            "props": {}
+        }));
+        let err = update_surface_definition(&mut db, &surface.id, &forbidden, "forbidden", None)
+            .unwrap_err();
+        assert!(err.to_string().contains("has not been granted"));
+        assert_eq!(
+            get_surface(&db, &surface.id).unwrap().definition,
+            minimal_def("Core only")
+        );
+
+        // Simulate an older row which predates persisted pack identity. The next
+        // safe update derives only the packs its already-trusted definition needs.
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET capability_packs_json = '[]' WHERE id = ?1",
+                [&surface.id],
+            )
+            .unwrap();
+        let backfilled = update_surface_definition(
+            &mut db,
+            &surface.id,
+            &minimal_def("Core only"),
+            "legacy backfill",
+            None,
+        )
+        .unwrap();
+        assert_eq!(backfilled.capability_packs, vec!["coreside.core"]);
+    }
+
+    #[test]
+    fn legacy_tool_surface_backfill_cannot_expand_on_upsert() {
+        let mut db = test_db();
+        let core_tool = ToolDefinition {
+            id: "legacy-tool".into(),
+            name: "Legacy".into(),
+            description: String::new(),
+            layout: json!({"type": "single-column"}),
+            components: vec![crate::ai::ToolComponent {
+                id: "title".into(),
+                component_type: "heading".into(),
+                value_key: None,
+                props: Some(json!({"text": "Legacy"})),
+                children: None,
+            }],
+        };
+        let applied = apply_tool_change(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            &core_tool,
+            "create",
+            None,
+            "test",
+        )
+        .unwrap();
+        let surface =
+            upsert_surface_from_tool(&mut db, &applied.definition, DEFAULT_WORKSPACE_ID, 1)
+                .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET capability_packs_json = '[]' WHERE id = ?1",
+                [&surface.id],
+            )
+            .unwrap();
+
+        let replacement = ToolDefinition {
+            components: vec![crate::ai::ToolComponent {
+                id: "scene".into(),
+                component_type: "svgScene".into(),
+                value_key: None,
+                props: Some(json!({})),
+                children: None,
+            }],
+            ..core_tool
+        };
+        let err =
+            upsert_surface_from_tool(&mut db, &replacement, DEFAULT_WORKSPACE_ID, 2).unwrap_err();
+        assert!(err.to_string().contains("has not been granted"));
+        assert!(get_surface(&db, &surface.id)
+            .unwrap()
+            .capability_packs
+            .is_empty());
     }
 }

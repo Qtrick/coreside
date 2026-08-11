@@ -9,7 +9,7 @@ use super::limits::{
 use crate::ai::SettingsChangePayload;
 use crate::ai::SourceCitation;
 use crate::ai::ToolCallRequest;
-use crate::ai::{ToolChangePayload, ToolDefinition};
+use crate::ai::{ToolAction, ToolChangePayload, ToolDefinition};
 
 pub const SCHEMA_VERSION_V2: &str = "2";
 
@@ -307,12 +307,23 @@ pub fn tool_change_to_operations(tc: &ToolChangePayload) -> Vec<AppOperation> {
         "update" | "replace" => "tool.full_replace",
         _ => "tool.full_replace",
     };
+    // A v1 update/replace persists under targetToolId, regardless of the ID in
+    // the proposed definition. Keep the v2 target aligned so preview and apply
+    // address the same surface and capability boundary.
+    let target_tool_id = if matches!(&tc.action, ToolAction::Update | ToolAction::Replace) {
+        tc.target_tool_id
+            .as_deref()
+            .filter(|id| !id.trim().is_empty())
+            .unwrap_or(&tool.id)
+    } else {
+        &tool.id
+    };
     vec![AppOperation {
         id: format!("op-v1-{}", tool.id),
         op_type: op_type.into(),
         target: OperationTarget {
-            surface_id: Some(format!("surf-{}", tool.id)),
-            tool_id: Some(tool.id.clone()),
+            surface_id: Some(format!("surf-{target_tool_id}")),
+            tool_id: Some(target_tool_id.to_string()),
             surface_type: Some("tool".into()),
             placement: Some("tool_canvas".into()),
             ..Default::default()
@@ -433,5 +444,25 @@ mod tests {
         let ops = tool_change_to_operations(&tc);
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].op_type, "surface.create");
+    }
+
+    #[test]
+    fn v1_replace_targets_the_persisted_tool_surface() {
+        let tc = ToolChangePayload {
+            action: ToolAction::Replace,
+            target_tool_id: Some("existing-tool".into()),
+            tool: Some(ToolDefinition {
+                id: "proposed-tool".into(),
+                name: "Replacement".into(),
+                description: "".into(),
+                layout: json!({"type":"single-column"}),
+                components: vec![],
+            }),
+            change_summary: "replace".into(),
+        };
+        let op = tool_change_to_operations(&tc).pop().unwrap();
+        assert_eq!(op.op_type, "tool.full_replace");
+        assert_eq!(op.target.tool_id.as_deref(), Some("existing-tool"));
+        assert_eq!(op.target.surface_id.as_deref(), Some("surf-existing-tool"));
     }
 }

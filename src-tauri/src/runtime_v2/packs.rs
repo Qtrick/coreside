@@ -203,21 +203,104 @@ pub fn validate_component_type_allowed(component_type: &str) -> Result<(), Strin
     }
 }
 
-/// Walk a surface/tool definition and reject unknown component types.
-pub fn validate_definition_components(definition: &Value) -> Result<(), String> {
-    let Some(components) = definition.get("components").and_then(|v| v.as_array()) else {
-        return Ok(());
-    };
-    for component in components {
-        validate_component_value(component)?;
+/// Normalize the explicit capability set for one surface. `coreside.core` is
+/// implicit for every surface; all other packs remain opt-in.
+pub fn normalize_capability_packs(pack_ids: &[String]) -> Result<Vec<String>, String> {
+    let registry = pack_registry();
+    let mut normalized = pack_ids.to_vec();
+    normalized.push("coreside.core".into());
+    normalized.sort();
+    normalized.dedup();
+    for id in &normalized {
+        match registry.get(id) {
+            Some(pack) if pack.enabled => {}
+            Some(_) => return Err(format!("capability pack '{id}' is disabled")),
+            None => return Err(format!("unknown capability pack '{id}'")),
+        }
+    }
+    Ok(normalized)
+}
+
+/// Derive the least set of bundled packs that can represent an existing trusted
+/// definition. This is used only for creation and legacy backfill; it never
+/// authorizes a later patch to expand a surface's assigned packs.
+pub fn required_packs_for_definition(definition: &Value) -> Result<Vec<String>, String> {
+    let mut packs = vec!["coreside.core".to_string()];
+    collect_required_packs(definition, &mut packs)?;
+    normalize_capability_packs(&packs)
+}
+
+fn collect_required_packs(value: &Value, packs: &mut Vec<String>) -> Result<(), String> {
+    if let Some(component_type) = value.get("type").and_then(|v| v.as_str()) {
+        let pack = resolve_pack_for_component(component_type).ok_or_else(|| {
+            format!("component type '{component_type}' is not in any enabled capability pack")
+        })?;
+        packs.push(pack.id);
+    }
+    if let Some(components) = value.get("components").and_then(|v| v.as_array()) {
+        for component in components {
+            collect_required_packs(component, packs)?;
+        }
+    }
+    if let Some(children) = value.get("children").and_then(|v| v.as_array()) {
+        for child in children {
+            collect_required_packs(child, packs)?;
+        }
     }
     Ok(())
 }
 
-fn validate_component_value(component: &Value) -> Result<(), String> {
+pub fn validate_component_type_allowed_for_packs(
+    component_type: &str,
+    allowed_pack_ids: &[String],
+) -> Result<(), String> {
+    validate_component_type_allowed(component_type)?;
+    let allowed = normalize_capability_packs(allowed_pack_ids)?;
+    let pack = resolve_pack_for_component(component_type)
+        .expect("global component validation resolved a pack");
+    if allowed.iter().any(|id| id == &pack.id) {
+        Ok(())
+    } else {
+        Err(format!(
+            "component type '{component_type}' requires capability pack '{}' which this surface has not been granted",
+            pack.id
+        ))
+    }
+}
+
+/// Walk a surface/tool definition and reject unknown component types.
+pub fn validate_definition_components(definition: &Value) -> Result<(), String> {
+    validate_definition_components_for_packs(
+        definition,
+        &bundled_packs()
+            .into_iter()
+            .map(|p| p.id)
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// Validate a definition against both the global trusted registry and one
+/// surface's assigned packs.
+pub fn validate_definition_components_for_packs(
+    definition: &Value,
+    allowed_pack_ids: &[String],
+) -> Result<(), String> {
+    let Some(components) = definition.get("components").and_then(|v| v.as_array()) else {
+        return Ok(());
+    };
+    for component in components {
+        validate_component_value_for_packs(component, allowed_pack_ids)?;
+    }
+    Ok(())
+}
+
+fn validate_component_value_for_packs(
+    component: &Value,
+    allowed_pack_ids: &[String],
+) -> Result<(), String> {
     let component_type = component.get("type").and_then(|v| v.as_str()).unwrap_or("");
     if !component_type.is_empty() {
-        validate_component_type_allowed(component_type)?;
+        validate_component_type_allowed_for_packs(component_type, allowed_pack_ids)?;
         validate_labeled_props(
             component_type,
             component.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
@@ -226,7 +309,7 @@ fn validate_component_value(component: &Value) -> Result<(), String> {
     }
     if let Some(children) = component.get("children").and_then(|v| v.as_array()) {
         for child in children {
-            validate_component_value(child)?;
+            validate_component_value_for_packs(child, allowed_pack_ids)?;
         }
     }
     Ok(())
@@ -234,15 +317,28 @@ fn validate_component_value(component: &Value) -> Result<(), String> {
 
 /// Validate a typed component tree (insert/replace/update_children paths).
 pub fn validate_tool_components(components: &[crate::ai::ToolComponent]) -> Result<(), String> {
+    validate_tool_components_for_packs(
+        components,
+        &bundled_packs()
+            .into_iter()
+            .map(|p| p.id)
+            .collect::<Vec<_>>(),
+    )
+}
+
+pub fn validate_tool_components_for_packs(
+    components: &[crate::ai::ToolComponent],
+    allowed_pack_ids: &[String],
+) -> Result<(), String> {
     for component in components {
-        validate_component_type_allowed(&component.component_type)?;
+        validate_component_type_allowed_for_packs(&component.component_type, allowed_pack_ids)?;
         validate_labeled_props(
             &component.component_type,
             &component.id,
             component.props.as_ref(),
         )?;
         if let Some(children) = &component.children {
-            validate_tool_components(children)?;
+            validate_tool_components_for_packs(children, allowed_pack_ids)?;
         }
     }
     Ok(())
@@ -378,6 +474,32 @@ mod tests {
                 .iter()
                 .any(|x| x.contains("cdn") || x.contains("network")));
         }
+    }
+
+    #[test]
+    fn per_surface_pack_boundary_rejects_an_ungranted_known_component() {
+        let core_only = vec!["coreside.core".into()];
+        assert!(validate_component_type_allowed_for_packs("textInput", &core_only).is_ok());
+        let err = validate_component_type_allowed_for_packs("svgScene", &core_only).unwrap_err();
+        assert!(err.contains("has not been granted"));
+
+        let definition = serde_json::json!({
+            "components": [{ "id": "svg", "type": "svgScene" }]
+        });
+        assert!(validate_definition_components_for_packs(&definition, &core_only).is_err());
+        assert!(
+            validate_definition_components_for_packs(&definition, &["coreside.svg".into()],)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn packs_are_deduplicated_and_core_is_implicit() {
+        assert_eq!(
+            normalize_capability_packs(&["coreside.svg".into(), "coreside.svg".into()]).unwrap(),
+            vec!["coreside.core", "coreside.svg"],
+        );
+        assert!(normalize_capability_packs(&["unknown.pack".into()]).is_err());
     }
 
     #[test]

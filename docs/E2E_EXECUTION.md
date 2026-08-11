@@ -50,9 +50,11 @@ npm run e2e:ci
 1. **main** — empty `CORESIDE_DB_PATH` (Journeys 1, 3, 4)
 2. **existing-*** — fresh DB + `CORESIDE_E2E_SEED=existing`, one DB per journey group (2, 5–11, 14)
 3. **true-streaming** / **wallpaper-targeted** — clean DB (Journeys 12–13; `AI_PROVIDER=mock`)
+4. **progressive-surface-preview** / **progressive-preview-cancel** — seeded isolated DB (Journeys 19–20; `AI_PROVIDER=mock`)
 4. **Journeys 15–16** (first-run welcome / core tutorial) — specs + WDIO suites registered; **not executed** by `e2e/run.mjs` (`not_run`). Default `CORESIDE_E2E=1` disables onboarding.
 
 Each seeded journey gets its own temp database so approval/grant state does not leak between specs.
+The harness also forces `AI_PROVIDER=mock`; set `CORESIDE_E2E_AI_PROVIDER` only for an explicitly configured provider-conformance run.
 
 Override binary path if needed:
 
@@ -75,6 +77,12 @@ npx wdio run e2e/wdio.conf.ts --suite wallpaper-targeted
 
 # Journey 14 — stream eavesdropping denial (seeded tool window)
 CORESIDE_E2E_SEED=existing npx wdio run e2e/wdio.conf.ts --suite existing-eavesdrop
+
+# Journey 19 — progressive surface preview commit (seeded tool)
+CORESIDE_E2E_SEED=existing npx wdio run e2e/wdio.conf.ts --suite progressive-surface-preview
+
+# Journey 20 — progressive surface preview cancellation (seeded tool)
+CORESIDE_E2E_SEED=existing npx wdio run e2e/wdio.conf.ts --suite progressive-preview-cancel
 
 # Journeys 15–16 — onboarding (registered; expect limited value while CORESIDE_E2E=1)
 npx wdio run e2e/wdio.conf.ts --suite first-run-welcome
@@ -135,6 +143,8 @@ On suite success, `e2e/run.mjs` removes the isolated temp DB directory. Failed s
 | 16 | `16-core-tutorial.spec.ts` | `core-tutorial` | **Automated** | Essentials tour from Welcome; advances at least one overlay step |
 | 17 | `17-local-ai-privacy.spec.ts` | `local-ai-privacy` | **Not run** | Requires dedicated Local AI desktop profile |
 | 18 | `18-hosted-free-chat.spec.ts` | `hosted-free-chat` | **Not run** | Requires hosted Supabase + Coreside AI session |
+| 19 | `19-progressive-surface-preview.spec.ts` | `progressive-surface-preview` | **Automated** | Preview badge and actual Notes paint before final durable commit; writes `reports/progressive-preview-results.json` |
+| 20 | `20-progressive-preview-cancel.spec.ts` | `progressive-preview-cancel` | **Automated** | Real Cancel control clears preview and preserves original Notes state; writes `reports/progressive-preview-cancel-results.json` |
 
 ### Seed fixture (`CORESIDE_E2E_SEED=existing`)
 

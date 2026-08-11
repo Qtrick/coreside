@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::operations::AppOperation;
+use super::packs::{required_packs_for_definition, validate_definition_components_for_packs};
 use super::patch::apply_component_op;
 use super::streaming::{NdjsonFrameParser, StreamEvent};
 use crate::ai::ToolComponent;
@@ -24,6 +25,8 @@ pub struct PreviewSurfaceModel {
     pub surface_id: String,
     pub tool_id: Option<String>,
     pub application_id: Option<String>,
+    /// Persisted surface capability boundary, copied into the speculative model.
+    pub capability_packs: Vec<String>,
     pub definition: Value,
     pub state: Value,
     pub base_revision: i64,
@@ -219,32 +222,67 @@ impl PreviewTransaction {
                 Ok(Some(self.make_paint(sid)?))
             }
             "surface.create" | "tool.full_replace" => {
-                let tool = op
+                let mut tool = op
                     .payload
                     .get("tool")
                     .cloned()
                     .unwrap_or_else(|| op.payload.clone());
-                let tool_id = tool
+                let proposed_tool_id = tool
                     .get("id")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
                     .or_else(|| op.target.tool_id.clone())
                     .ok_or_else(|| "tool id required for surface create/replace".to_string())?;
+                // Full replaces are persisted under targetToolId. Use that ID
+                // for the speculative surface too, otherwise preview may derive
+                // a fresh pack set while durable apply enforces the old surface.
+                let tool_id = if op.op_type == "tool.full_replace" {
+                    op.payload
+                        .get("targetToolId")
+                        .and_then(|v| v.as_str())
+                        .filter(|id| !id.trim().is_empty())
+                        .or(op.target.tool_id.as_deref())
+                        .unwrap_or(&proposed_tool_id)
+                        .to_string()
+                } else {
+                    proposed_tool_id
+                };
                 let surface_id = op
                     .target
                     .surface_id
                     .clone()
-                    .unwrap_or_else(|| format!("surf-{tool_id}"));
+                    .unwrap_or_else(|| super::surfaces::surface_id_for_tool(&tool_id));
+                if !self.surfaces.contains_key(&surface_id) {
+                    if let Some(model) = seed(&surface_id) {
+                        if model.surface_id != surface_id {
+                            return Err(format!(
+                                "invalid preview target: seed surface id mismatch ({})",
+                                model.surface_id
+                            ));
+                        }
+                        self.seed_surface(model);
+                    }
+                }
+                if let Some(object) = tool.as_object_mut() {
+                    object.insert("id".into(), json!(tool_id));
+                }
                 let base = self
                     .surfaces
                     .get(&surface_id)
                     .map(|m| m.base_revision)
                     .or(self.base_revision)
                     .unwrap_or(0);
+                let capability_packs = self
+                    .surfaces
+                    .get(&surface_id)
+                    .map(|model| model.capability_packs.clone())
+                    .unwrap_or(required_packs_for_definition(&tool)?);
+                validate_definition_components_for_packs(&tool, &capability_packs)?;
                 self.seed_surface(PreviewSurfaceModel {
                     surface_id: surface_id.clone(),
                     tool_id: Some(tool_id.clone()),
                     application_id: Some(tool_id),
+                    capability_packs,
                     definition: tool,
                     state: self
                         .surfaces
@@ -289,6 +327,7 @@ impl PreviewTransaction {
 
         if op.op_type == "chat.inline_surface_update" {
             if let Some(definition) = op.payload.get("definition") {
+                validate_definition_components_for_packs(definition, &model.capability_packs)?;
                 model.definition = definition.clone();
                 model.preview_revision = model.preview_revision.saturating_add(1);
                 return Ok(());
@@ -315,22 +354,28 @@ impl PreviewTransaction {
         )
         .map_err(|e| e.to_string())?;
 
-        if let Some(obj) = model.definition.as_object_mut() {
+        // Build and validate a candidate before mutating speculative state. A
+        // rejected streamed operation must not leave an unauthorized component
+        // behind for a later sibling operation to paint.
+        let mut candidate = model.definition.clone();
+        if let Some(obj) = candidate.as_object_mut() {
             obj.insert(
                 "components".into(),
                 serde_json::to_value(&components).unwrap_or_else(|_| json!([])),
             );
         } else {
-            model.definition = json!({ "components": components });
+            candidate = json!({ "components": components });
         }
+        validate_definition_components_for_packs(&candidate, &model.capability_packs)?;
         // Preserve tool identity when definition is component-only.
-        if model.definition.get("id").is_none() {
+        if candidate.get("id").is_none() {
             if let Some(tool_id) = &model.tool_id {
-                if let Some(obj) = model.definition.as_object_mut() {
+                if let Some(obj) = candidate.as_object_mut() {
                     obj.insert("id".into(), json!(tool_id));
                 }
             }
         }
+        model.definition = candidate;
         model.preview_revision = model.preview_revision.saturating_add(1);
         Ok(())
     }
@@ -638,6 +683,7 @@ mod tests {
             surface_id: "s1".into(),
             tool_id: Some("tool-1".into()),
             application_id: Some("tool-1".into()),
+            capability_packs: vec!["coreside.core".into()],
             definition: sample_definition(),
             state: json!({ "n": 1 }),
             base_revision: 3,
@@ -764,6 +810,7 @@ mod tests {
                         surface_id: surface.id.clone(),
                         tool_id: surface.tool_id.clone(),
                         application_id: surface.tool_id.clone(),
+                        capability_packs: surface.capability_packs.clone(),
                         definition: before_def.clone(),
                         state: json!({}),
                         base_revision: before_rev,
@@ -859,6 +906,7 @@ mod tests {
                         surface_id: surface.id.clone(),
                         tool_id: surface.tool_id.clone(),
                         application_id: surface.tool_id.clone(),
+                        capability_packs: surface.capability_packs.clone(),
                         definition: before_def.clone(),
                         state: json!({}),
                         base_revision: before_rev,
@@ -936,6 +984,7 @@ mod tests {
                     surface_id: sid.clone(),
                     tool_id: tool_id.clone(),
                     application_id: tool_id.clone(),
+                    capability_packs: surface.capability_packs.clone(),
                     definition: before_def.clone(),
                     state: json!({}),
                     base_revision: before_rev,
@@ -1005,6 +1054,72 @@ mod tests {
             .contains("surface not found"));
         assert!(preview.accepted.is_empty());
         assert_eq!(preview.rejected.len(), 1);
+    }
+
+    #[test]
+    fn rejected_ungranted_component_patch_does_not_mutate_preview() {
+        let mut preview = PreviewTransaction::new("turn-pack-boundary", None);
+        preview.seed_surface(seed_s1());
+        let before = preview.surface("s1").unwrap().clone();
+        let op: AppOperation = serde_json::from_value(json!({
+            "id": "insert-svg",
+            "type": "component.insert",
+            "target": {"surfaceId": "s1"},
+            "baseRevision": 3,
+            "payload": {
+                "component": {"id": "scene", "type": "svgScene", "props": {}}
+            }
+        }))
+        .unwrap();
+
+        let err = preview.paint_op(&op, |_| None).unwrap_err();
+        assert!(err.contains("has not been granted"));
+        assert_eq!(preview.surface("s1").unwrap().definition, before.definition);
+        assert_eq!(
+            preview.surface("s1").unwrap().preview_revision,
+            before.preview_revision
+        );
+    }
+
+    #[test]
+    fn full_replace_previews_the_target_surface_pack_boundary() {
+        let mut preview = PreviewTransaction::new("turn-replace", None);
+        let op: AppOperation = serde_json::from_value(json!({
+            "id": "replace-op",
+            "type": "tool.full_replace",
+            "target": {"toolId": "existing-tool"},
+            "payload": {
+                "action": "replace",
+                "targetToolId": "existing-tool",
+                "tool": {
+                    "id": "proposed-tool",
+                    "name": "Replacement",
+                    "components": [{"id": "svg", "type": "svgScene", "props": {}}]
+                }
+            }
+        }))
+        .unwrap();
+        let result = preview.paint_op(&op, |surface_id| {
+            (surface_id == "surf-existing-tool").then(|| PreviewSurfaceModel {
+                surface_id: "surf-existing-tool".into(),
+                tool_id: Some("existing-tool".into()),
+                application_id: Some("existing-tool".into()),
+                capability_packs: vec!["coreside.core".into()],
+                definition: sample_definition(),
+                state: json!({}),
+                base_revision: 4,
+                preview_revision: 4,
+            })
+        });
+        assert!(result.unwrap_err().contains("has not been granted"));
+        assert_eq!(
+            preview
+                .surface("surf-existing-tool")
+                .unwrap()
+                .tool_id
+                .as_deref(),
+            Some("existing-tool")
+        );
     }
 
     #[test]

@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::operations::{validate_operations, AppOperation};
-use super::packs::validate_definition_components;
+use super::packs::{validate_definition_components, validate_tool_components_for_packs};
 use super::patch::apply_component_op;
 use super::preservation::{
     apply_preservation_on_replace, invalidate_component_live_state, resolve_policy_for_apply,
@@ -411,6 +411,21 @@ fn apply_one(
             .map_err(|e| e.to_string())?;
             crate::security::assert_not_protected(&tool.id)?;
             super::packs::validate_tool_components(&tool.components)?;
+            let existing_surface_id = super::surfaces::surface_id_for_tool(
+                op.payload
+                    .get("targetToolId")
+                    .and_then(|v| v.as_str())
+                    .or(op.target.tool_id.as_deref())
+                    .unwrap_or(&tool.id),
+            );
+            if let Ok(existing) = get_surface(db, &existing_surface_id) {
+                let allowed = if existing.capability_packs.is_empty() {
+                    super::packs::required_packs_for_definition(&existing.definition)?
+                } else {
+                    super::packs::normalize_capability_packs(&existing.capability_packs)?
+                };
+                validate_tool_components_for_packs(&tool.components, &allowed)?;
+            }
             let workspace = "ws-personal-default";
             let action = op.payload.get("action").and_then(|v| v.as_str()).unwrap_or(
                 if op.op_type == "surface.create" {

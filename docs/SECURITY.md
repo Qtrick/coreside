@@ -45,7 +45,7 @@ The webview is an untrusted UI surface. Keeping provider credentials and HTTP in
 
 ## Component validation
 
-Only registry-listed component types render. Unknown types fail closed. Rust validates structured tool payloads before persistence; the frontend validates again for defense in depth.
+Only registry-listed component types render. Unknown types fail closed. Rust validates structured tool payloads before persistence; the frontend validates again for defense in depth. Each surface also has a normalized capability-pack set: `coreside.core` is implicit, and non-core component types must belong to a pack already assigned to that surface. Unknown or disabled pack IDs fail closed. Existing rows with no assignment are backfilled to the minimum packs their already-trusted definition needs; ordinary patches cannot expand that set. The same rule is checked before a speculative preview paints and before a durable commit.
 
 ## Protected core
 
@@ -87,7 +87,7 @@ Conversation and tool data stay on the device in SQLite under the application da
 
 ## Native-window permissions
 
-Secondary tool windows use the same capability set as the main window. They do not receive elevated filesystem or network privileges and do not receive API keys.
+The main window matches `src-tauri/capabilities/default.json` (`coreside-main-default`, window `main`). Secondary tool windows match `src-tauri/capabilities/tool-window.json` (`coreside-tool-scoped`, windows `tool-*`). Tool windows receive only their bounded command categories; they do not inherit the main-window capability, arbitrary filesystem/network access, or API keys. Tauri merges matching capabilities, so window globs and capability overlap are audited as a security boundary.
 
 ## Threats inherited from generative UI
 

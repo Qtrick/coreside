@@ -808,6 +808,7 @@ mod tests {
                                     surface_id: sid.to_string(),
                                     tool_id: Some("tool-e2e-notes".into()),
                                     application_id: Some("tool-e2e-notes".into()),
+                                    capability_packs: vec!["coreside.core".into()],
                                     definition: json!({
                                         "id": "tool-e2e-notes",
                                         "name": "E2E Notes",

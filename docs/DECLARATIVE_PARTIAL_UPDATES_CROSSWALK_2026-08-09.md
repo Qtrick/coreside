@@ -1,12 +1,12 @@
-# Declarative Partial Updates Crosswalk — 2026-08-09
+# Declarative Partial Updates Crosswalk — refreshed 2026-08-10
 
 Architectural reference mapping Chrome/WICG Declarative Partial Updates → Partial Update product → Coreside secure analogues.
 
 **Primary sources**
 
-- Chrome blog: https://developer.chrome.com/blog/declarative-partial-updates (2026-05-19)
-- WICG: https://github.com/WICG/declarative-partial-updates (`patching-explainer.md`, `preserve-explainer.md`, `route-matching-explainer.md`, `dynamic-markup-revamped-explainer.md`)
-- Partial Update archive SHA `8666c226…` at `.reference/partial-update/partialupdate-main`
+- Chrome blog: https://developer.chrome.com/blog/declarative-partial-updates (read 2026-08-10; Chrome 148+ behind an experimental flag)
+- WICG: https://github.com/WICG/declarative-partial-updates (read 2026-08-10: `patching-explainer.md`, `preserve-explainer.md`, `route-matching-explainer.md`, `dynamic-markup-revamped-explainer.md`, `fragment-include-explainer.md`)
+- Partial Update archive SHA `8666c226…` at `.reference/partial-update-p0.5-input/partialupdate-main`
 - Coreside active tree (Tauri: macOS WKWebView / Windows WebView2 / Linux WebKitGTK)
 
 **Critical portability rule**
@@ -28,7 +28,7 @@ WebSocket-delivered HTML bodies applied via custom JS + unpkg `template-for-poly
 
 **Source files:** `src-tauri/src/runtime_v2/progressive_ops.rs`, `preview_transaction.rs`, `src-tauri/src/commands/message_cmds.rs`, `src/lib/preview/surface-overlay.ts`, `src/components/tool-canvas/ToolCanvas.tsx`
 
-**Evidence:** Unit Verified for speculative paint path. Journey 19 Desktop evidence is valid only when `reports/progressive-preview-results.json` matches the current source fingerprint on a clean tree — dirty-tree runs are development evidence only.
+**Evidence:** Unit Verified for speculative paint path. Journey 19 Desktop evidence is valid only when `reports/progressive-preview-results.json` matches the current source fingerprint; a dirty-tree run is development evidence only.
 
 **Gap / next:** Interleaved multi-surface Desktop journey if product needs A→B→A paint proof beyond unit coverage.
 
@@ -62,7 +62,7 @@ Loading markers + successive template patches; no formal speculative vs durable 
 ### Coreside
 Pending turn → speculative Preview badge → final validation → durable commit / rollback. Intermediate preview state must not write SQLite.
 
-**Evidence:** Journey 19 asserts paint-before-completion on Desktop. Cancel without durable SQLite writes is Unit Verified (`PreviewTransaction`); Journey 20 Desktop cancel is complementary and must not claim unit guarantees by itself.
+**Evidence:** Journeys 19 and 20 exist, but P0.4 results are historical until rerun against the current fingerprint. Cancel without durable SQLite writes is Unit Verified (`PreviewTransaction`); Journey 20 Desktop cancel is complementary and must not claim unit guarantees by itself.
 
 ---
 

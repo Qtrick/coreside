@@ -2,7 +2,7 @@
 /**
  * Regenerate current-source baseline, fingerprint, and archive-vs-active comparison.
  *
- * Usage: npm run audit:current-source
+ * Usage: npm run audit:current-source -- --check | --write
  * Optional: CORESIDE_ARCHIVE=/path/to/archive.zip
  */
 import crypto from "node:crypto";
@@ -15,6 +15,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const reportsDir = path.join(root, "reports");
 const commandName = "audit:current-source";
+const writeMode = process.argv.includes("--write");
+const driftedArtifacts = [];
 
 const DOWNLOADS = path.join(process.env.HOME || "", "Downloads");
 const INTAKES_PATH = path.join(reportsDir, "source-intakes.json");
@@ -221,6 +223,7 @@ function countGlob(dir, predicate) {
 
 function archiveExtractRoot() {
   const candidates = [
+    path.join(root, ".reference", "coreside-p0.5-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-p0.3-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-rc3.11-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-rc3-archive", "coreside-main"),
@@ -237,6 +240,7 @@ function archiveExtractRoot() {
 
 function archiveExtractMatchesExpected() {
   const markers = [
+    path.join(root, ".reference", "coreside-p0.5-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-p0.3-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-rc3.11-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-rc3-archive", "source.sha256"),
@@ -306,9 +310,38 @@ function nowIso() {
 }
 
 function writeJson(name, data) {
-  fs.mkdirSync(reportsDir, { recursive: true });
   const p = path.join(reportsDir, name);
-  fs.writeFileSync(p, JSON.stringify(data, null, 2) + "\n");
+  if (writeMode) {
+    fs.mkdirSync(reportsDir, { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(data, null, 2) + "\n");
+  } else {
+    let current = null;
+    try {
+      current = JSON.parse(fs.readFileSync(p, "utf8"));
+    } catch {
+      driftedArtifacts.push(name);
+      return p;
+    }
+    const normalize = (value) => {
+      if (Array.isArray(value)) return value.map(normalize);
+      if (!value || typeof value !== "object") return value;
+      return Object.fromEntries(
+        Object.entries(value)
+          .filter(([key]) => !["generatedAt", "generatedAtLocal", "mtimeMs"].includes(key))
+          .map(([key, child]) => [key, normalize(child)]),
+      );
+    };
+    if (JSON.stringify(normalize(current)) !== JSON.stringify(normalize(data))) {
+      driftedArtifacts.push(name);
+    }
+  }
+  return p;
+}
+
+function writeText(name, text) {
+  const p = path.join(root, name);
+  if (writeMode) fs.writeFileSync(p, text);
+  else if (!fs.existsSync(p) || fs.readFileSync(p, "utf8") !== text) driftedArtifacts.push(name);
   return p;
 }
 
@@ -509,7 +542,7 @@ const hostedAi = "Not ready";
 
 const baselineReport = {
   ...common,
-  phase: "P0.4",
+  phase: "P0.5",
   publicBeta,
   hostedAi,
   evidenceClass: dirty ? "development-dirty" : "development-clean",
@@ -618,7 +651,7 @@ writeJson("current-source-baseline.json", baselineReport);
 writeJson("active-versus-uploaded-coreside.json", compareReport);
 
 const HISTORICAL_NOTE =
-  "P0.4 intake a9327c01 (current); P0.3 intake 7e335f18 preserved as historical. Desktop/Packaged gates require fresh evidence on current fingerprint.";
+  "P0.5 intake 220c246e is current; P0.4 intake a9327c01 and P0.3 intake 7e335f18 are historical. Desktop/Packaged gates require fresh evidence on the current fingerprint.";
 
 /** Restamp gate reports that must not claim passes on a dirty or stale fingerprint. */
 function restampAbsentGateReports() {
@@ -763,7 +796,7 @@ function restampAbsentGateReports() {
   }
 }
 
-restampAbsentGateReports();
+if (writeMode) restampAbsentGateReports();
 
 // Mark prior reports stale when fingerprint or archive expectation changes.
 const freshnessEntries = fs
@@ -822,11 +855,11 @@ const freshnessReport = {
 };
 writeJson("report-freshness-inventory.json", freshnessReport);
 
-const md = `# Current Source Baseline (P0.4)
+const md = `# Current Source Baseline (P0.5)
 
 **Product:** Coreside  
 **Access date:** ${nowIso().slice(0, 10)}  
-**Phase:** Public-beta release candidate 3.10 — durable turns, hosted billing, window-scoped tools  
+**Phase:** P0.5 source intake / development audit<br>
 **Public beta:** **NOT READY**  
 **Hosted AI:** **NOT READY**
 
@@ -892,7 +925,10 @@ const md = `# Current Source Baseline (P0.4)
 ## Generation command
 
 \`\`\`bash
-npm run audit:current-source
+npm run audit:current-source -- --check
+
+# Intentionally regenerate source-controlled evidence
+npm run audit:current-source:write
 \`\`\`
 
 Reports:
@@ -903,12 +939,14 @@ Reports:
 - \`reports/report-freshness-inventory.json\`
 `;
 
-fs.writeFileSync(path.join(root, "docs", "CURRENT_SOURCE_BASELINE.md"), md);
+writeText("docs/CURRENT_SOURCE_BASELINE.md", md);
 
 console.log(
   JSON.stringify(
     {
       command: commandName,
+      mode: writeMode ? "write" : "check",
+      driftedArtifacts,
       archiveStatus,
       sourceFingerprint,
       commit,
@@ -926,8 +964,9 @@ console.log(
 );
 
 process.exit(
-  archiveStatus === "present_hash_match" ||
-    archiveStatus === "zip_unavailable_extract_present"
+  (archiveStatus === "present_hash_match" ||
+    archiveStatus === "zip_unavailable_extract_present") &&
+    (writeMode || driftedArtifacts.length === 0)
     ? 0
     : 1,
 );

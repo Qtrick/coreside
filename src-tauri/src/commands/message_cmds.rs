@@ -529,6 +529,7 @@ fn emit_progressive_op_previews(
                 surface_id: surface.id.clone(),
                 tool_id: surface.tool_id.clone(),
                 application_id: surface.tool_id.clone(),
+                capability_packs: surface.capability_packs,
                 definition: surface.definition,
                 state: state_json,
                 base_revision: surface.current_revision,

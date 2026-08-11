@@ -146,7 +146,9 @@ function buildAppEnv(): Record<string, string> {
   const env: Record<string, string> = {
     CORESIDE_E2E: "1",
     CORESIDE_DB_PATH: dbPath,
-    AI_PROVIDER: process.env.AI_PROVIDER || "mock",
+    // The test fixture is deterministic by default. Do not inherit a developer's
+    // real provider/key selection from the parent shell or `.env`.
+    AI_PROVIDER: process.env.CORESIDE_E2E_AI_PROVIDER || "mock",
   };
   if (seed) env.CORESIDE_E2E_SEED = seed;
   if (allowOnboarding) env.CORESIDE_E2E_ALLOW_ONBOARDING = allowOnboarding;
@@ -235,7 +237,7 @@ export const config: Options.Testrunner = {
     killOrphanedE2eWebDrivers(appBinaryPath);
     process.env.CORESIDE_E2E = "1";
     process.env.CORESIDE_DB_PATH = dbPath;
-    process.env.AI_PROVIDER = process.env.AI_PROVIDER || "mock";
+    process.env.AI_PROVIDER = process.env.CORESIDE_E2E_AI_PROVIDER || "mock";
     if (seed) process.env.CORESIDE_E2E_SEED = seed;
     else delete process.env.CORESIDE_E2E_SEED;
     if (allowOnboarding) process.env.CORESIDE_E2E_ALLOW_ONBOARDING = allowOnboarding;

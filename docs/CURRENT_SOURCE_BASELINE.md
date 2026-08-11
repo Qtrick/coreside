@@ -1,8 +1,8 @@
-# Current Source Baseline (P0.4)
+# Current Source Baseline (P0.5)
 
 **Product:** Coreside  
 **Access date:** 2026-08-10  
-**Phase:** Public-beta release candidate 3.10 — durable turns, hosted billing, window-scoped tools  
+**Phase:** P0.5 source intake / development audit<br>
 **Public beta:** **NOT READY**  
 **Hosted AI:** **NOT READY**
 
@@ -12,9 +12,9 @@
 | --- | --- |
 | Path | `/Users/qunyingfan/Coreside` |
 | Branch | `main` |
-| Commit | `9ed96b923f158a25f92104b3c600ca551f8a141a` |
+| Commit | `1bd2a3e8376afdf847cec55ae90fe9e219eee605` |
 | Dirty | Yes (development evidence only) |
-| Source fingerprint | `796c2fd01729e7a18b890f0170de2bb43fa437d0f3ca2b3955f0e635e5a4c5d3` |
+| Source fingerprint | `c0da070e975788ca2881dd74f503eb98ef9a0d32a6d9246a35dc63e51d4d81dd` |
 
 ## Uploaded archive
 
@@ -22,9 +22,9 @@
 | --- | --- |
 | Filename | `Coreside Chat AI.zip` |
 | Path | `/Users/qunyingfan/Downloads/Coreside Chat AI.zip` |
-| Expected SHA-256 | `a9327c01cba67655b5af04ecd0d837b980a5af65348580167f613e6099b8194c` |
-| Observed SHA-256 | `a9327c01cba67655b5af04ecd0d837b980a5af65348580167f613e6099b8194c` |
-| Status | **present_hash_match_extract_stale** |
+| Expected SHA-256 | `220c246eeed62133bb6b08d77278248192f4f7503f31004e5ce02861f2ae6412` |
+| Observed SHA-256 | `220c246eeed62133bb6b08d77278248192f4f7503f31004e5ce02861f2ae6412` |
+| Status | **present_hash_match** |
 | Supersedes | `7e335f187899d40a70dfc5738ed49f28b1177f18177d5e56a4489b33834bbd4d` (`P0.3 supplied Coreside archive`) |
 | Partial Update archive | `Partial Update Main.zip` / `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607` |
 
@@ -60,15 +60,18 @@
 
 | Metric | Count |
 | --- | --- |
-| Comparison status | extract_stale_or_unmarked |
-| Only in active | 0 |
+| Comparison status | compared |
+| Only in active | 2 |
 | Only in archive | 0 |
-| Changed | 0 |
+| Changed | 10 |
 
 ## Generation command
 
 ```bash
-npm run audit:current-source
+npm run audit:current-source -- --check
+
+# Intentionally regenerate source-controlled evidence
+npm run audit:current-source:write
 ```
 
 Reports:
