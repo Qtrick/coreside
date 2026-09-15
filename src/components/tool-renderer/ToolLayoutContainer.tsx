@@ -92,6 +92,8 @@ export function ToolLayoutContainer({
         data-layout-role={role}
         data-col-span={colSpan}
         data-row-span={rowSpan}
+        data-item-col-span={colSpan}
+        data-item-row-span={rowSpan}
         style={
           {
             "--item-col-span": colSpan ? String(colSpan) : undefined,
@@ -158,6 +160,40 @@ export function ToolLayoutContainer({
           </div>
           {footerNodes.length > 0 && (
             <div className="tr-dashboard-footer">
+              {footerNodes.map((c) => renderItem(c, "tr-role-footer"))}
+            </div>
+          )}
+        </>
+      ) : layoutType === "split" && (sidebarNodes.length > 0 || mainNodes.length > 0 || headerNodes.length > 0 || footerNodes.length > 0) ? (
+        <>
+          {headerNodes.length > 0 && (
+            <div className="tr-split-header">
+              {headerNodes.map((c) => renderItem(c, "tr-role-header"))}
+            </div>
+          )}
+          {splitRatio.startsWith("1:") && splitRatio !== "1:1" ? (
+            <>
+              <div className="tr-split-sidebar">
+                {sidebarNodes.map((c) => renderItem(c, "tr-role-sidebar"))}
+              </div>
+              <div className="tr-split-main">
+                {mainNodes.map((c) => renderItem(c, "tr-role-main"))}
+                {defaultNodes.map((c) => renderItem(c))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="tr-split-main">
+                {mainNodes.map((c) => renderItem(c, "tr-role-main"))}
+                {defaultNodes.map((c) => renderItem(c))}
+              </div>
+              <div className="tr-split-sidebar">
+                {sidebarNodes.map((c) => renderItem(c, "tr-role-sidebar"))}
+              </div>
+            </>
+          )}
+          {footerNodes.length > 0 && (
+            <div className="tr-split-footer">
               {footerNodes.map((c) => renderItem(c, "tr-role-footer"))}
             </div>
           )}

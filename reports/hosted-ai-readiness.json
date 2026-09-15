@@ -3,7 +3,7 @@
   "track": "hosted-ai",
   "verdict": "not_ready",
   "note": "Hosted AI private alpha is a separate track from local BYOK beta.",
-  "generatedAt": "2026-08-15T02:28:22.280Z",
-  "commit": "b491c6ab77ad9edd11f5e2aa4435f43d81449e8d",
+  "generatedAt": "2026-09-15T20:21:23.626Z",
+  "commit": "b7852f291a6f6d67d396907723d6bc21aa592f02",
   "sourceEvidence": "reports/release-evidence.json"
 }

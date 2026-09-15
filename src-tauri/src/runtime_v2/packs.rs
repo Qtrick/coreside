@@ -423,6 +423,22 @@ fn validate_tree_recursive(
             component.props.as_ref(),
         )?;
 
+        if let Some(actions) = &component.actions {
+            if actions.len() > crate::ai::response_schema::MAX_ACTIONS_PER_COMPONENT {
+                return Err(format!(
+                    "component '{}' actions count ({}) exceeds maximum of {}",
+                    component.id,
+                    actions.len(),
+                    crate::ai::response_schema::MAX_ACTIONS_PER_COMPONENT
+                ));
+            }
+            for action in actions {
+                action
+                    .validate()
+                    .map_err(|e| format!("component '{}' invalid action: {e}", component.id))?;
+            }
+        }
+
         if let Some(children) = &component.children {
             validate_tree_recursive(children, depth + 1, allowed_packs, state)?;
         }

@@ -376,11 +376,17 @@ export function ChecklistNode({ component }: ToolNodeProps) {
 }
 
 export function TableNode({ component }: ToolNodeProps) {
+  const { getValue } = useToolRuntime();
+  const key = stateKeyFor(component, "valueKey", "stateKey", "dataKey", "rowsKey");
+  const stateRows = getValue<unknown[]>(key);
+  const rawRows = Array.isArray(stateRows)
+    ? stateRows
+    : Array.isArray(component.props?.rows)
+      ? (component.props.rows as unknown[])
+      : [];
+  const rows = rawRows as Array<Record<string, unknown>>;
   const columns = Array.isArray(component.props?.columns)
     ? (component.props.columns as Array<{ key: string; label: string } | string>)
-    : [];
-  const rows = Array.isArray(component.props?.rows)
-    ? (component.props.rows as Array<Record<string, unknown>>)
     : [];
   const normalized = columns.map((col) =>
     typeof col === "string" ? { key: col, label: col } : col,
@@ -1196,11 +1202,17 @@ export function AudioPlayerNode({ component }: ToolNodeProps) {
 }
 
 export function DataTableNode({ component }: ToolNodeProps) {
+  const { getValue } = useToolRuntime();
+  const key = stateKeyFor(component, "valueKey", "stateKey", "dataKey", "rowsKey");
+  const stateRows = getValue<unknown[]>(key);
+  const rawRows = Array.isArray(stateRows)
+    ? stateRows
+    : Array.isArray(component.props?.rows)
+      ? (component.props.rows as unknown[])
+      : [];
+  const rows = (rawRows as Array<Record<string, unknown>>).slice(0, 500);
   const columns = Array.isArray(component.props?.columns)
     ? (component.props?.columns as Array<{ id: string; label: string }>)
-    : [];
-  const rows = Array.isArray(component.props?.rows)
-    ? (component.props?.rows as Array<Record<string, unknown>>).slice(0, 500)
     : [];
 
   const pageSizeProp = asNumber(component.props?.pageSize, 10);

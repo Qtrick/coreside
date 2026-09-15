@@ -9,7 +9,7 @@ describe("Visual Benchmark Suite", () => {
 
   for (const [name, tool] of Object.entries(FIXTURE_TOOLS)) {
     describe(`Fixture: ${name} (${tool.layout?.type ?? "stack"})`, () => {
-      it("renders successfully without crashing", () => {
+      it("renders successfully without crashing and contains no fallback nodes", () => {
         const { container } = render(
           <div style={{ width: 800 }}>
             <ToolRenderer
@@ -25,6 +25,9 @@ describe("Visual Benchmark Suite", () => {
 
         const layoutType = tool.layout?.type ?? "stack";
         expect(surface?.classList.contains(`tr-layout-${layoutType}`)).toBe(true);
+
+        const fallback = container.querySelector(".tr-fallback, .tr-unknown-component");
+        expect(fallback).toBeNull();
       });
 
       it("assigns layout roles and spans to components", () => {
@@ -41,11 +44,13 @@ describe("Visual Benchmark Suite", () => {
         for (const comp of tool.components) {
           const el = container.querySelector(`[data-component-id="${comp.id}"]`);
           expect(el).not.toBeNull();
-          if (comp.layout_role) {
-            expect(el?.getAttribute("data-layout-role")).toBe(comp.layout_role);
+          const role = comp.layoutRole ?? comp.layout_role;
+          if (role) {
+            expect(el?.getAttribute("data-layout-role")).toBe(role);
           }
-          if (comp.col_span != null) {
-            expect(el?.getAttribute("data-col-span")).toBe(String(comp.col_span));
+          const colSpan = comp.colSpan ?? comp.col_span;
+          if (colSpan != null) {
+            expect(el?.getAttribute("data-col-span")).toBe(String(colSpan));
           }
         }
       });

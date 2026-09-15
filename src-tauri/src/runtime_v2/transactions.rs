@@ -574,6 +574,7 @@ fn apply_one(
                 .cloned()
                 .unwrap_or_else(|| op.payload.clone());
             let norm_layout = crate::ai::normalize_layout(&new_layout);
+            crate::ai::validate_layout(&norm_layout)?;
             if let Some(obj) = def_value.as_object_mut() {
                 obj.insert("layout".into(), norm_layout.clone());
             }

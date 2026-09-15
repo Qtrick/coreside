@@ -1,4 +1,27 @@
-import type { ActionDefinition, ToolState } from "@/types/tool";
+import type { ActionDefinition, ToolComponent, ToolState } from "@/types/tool";
+
+export function collectTargets(components: ToolComponent[], into = new Set<string>()): Set<string> {
+  for (const component of components) {
+    into.add(component.id);
+    into.add(`${component.id}:tab`);
+    if (component.valueKey) into.add(component.valueKey);
+    const props = component.props ?? {};
+    for (const key of ["valueKey", "stateKey", "dataKey", "rowsKey", "name", "field", "target"] as const) {
+      const value = props[key];
+      if (typeof value === "string" && value.trim()) into.add(value.trim());
+    }
+    // Also include resultKey from actions so kernel query targets are authorized
+    if (component.actions) {
+      for (const action of component.actions) {
+        if ("resultKey" in action && typeof action.resultKey === "string" && action.resultKey.trim()) {
+          into.add(action.resultKey.trim());
+        }
+      }
+    }
+    if (component.children) collectTargets(component.children, into);
+  }
+  return into;
+}
 
 const MAX_ACTION_DEPTH = 12;
 
@@ -17,6 +40,7 @@ export type ActionEngineOptions = {
     actionName: string;
     input: Record<string, unknown>;
     componentId?: string;
+    resultKey?: string;
   }) => void | Promise<void>;
   depth?: number;
 };
@@ -227,11 +251,16 @@ export function applyAction(
           // Fail closed: do not invoke registered action if any stateKey is unauthorized
           break;
         }
+        if (action.resultKey && !isAllowed(action.resultKey, options.allowedTargets)) {
+          errors.push(`Result target "${action.resultKey}" is outside the current tool scope`);
+          break;
+        }
         const task = options.onInvokeRegisteredAction({
           toolId: options.toolId,
           actionName: action.actionName,
           input,
           componentId: action.componentId,
+          resultKey: action.resultKey,
         });
         if (task instanceof Promise) {
           pendingTasks.push(task);

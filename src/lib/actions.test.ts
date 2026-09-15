@@ -108,4 +108,98 @@ describe("invokeRegisteredAction", () => {
 
     expect(result.errors[0]).toContain("Unsupported action");
   });
+
+  it("passes resultKey to onInvokeRegisteredAction when target is in allowed targets", () => {
+    const onInvokeRegisteredAction = vi.fn();
+    const action: ActionDefinition = {
+      type: "invokeRegisteredAction",
+      actionName: "local_data.query",
+      input: { modelId: "habits" },
+      resultKey: "habitRecords",
+    };
+
+    const result = applyAction(action, {
+      state: {},
+      toolId: "tool-1",
+      allowedTargets: new Set(["habitRecords"]),
+      onInvokeRegisteredAction,
+    });
+
+    expect(onInvokeRegisteredAction).toHaveBeenCalledWith({
+      toolId: "tool-1",
+      actionName: "local_data.query",
+      input: { modelId: "habits" },
+      componentId: undefined,
+      resultKey: "habitRecords",
+    });
+    expect(result.errors).toEqual([]);
+  });
+
+  it("blocks invokeRegisteredAction if resultKey is outside allowed targets", () => {
+    const onInvokeRegisteredAction = vi.fn();
+    const action: ActionDefinition = {
+      type: "invokeRegisteredAction",
+      actionName: "local_data.query",
+      input: { modelId: "habits" },
+      resultKey: "unauthorizedTarget",
+    };
+
+    const result = applyAction(action, {
+      state: {},
+      toolId: "tool-1",
+      allowedTargets: new Set(["otherField"]),
+      onInvokeRegisteredAction,
+    });
+
+    expect(onInvokeRegisteredAction).not.toHaveBeenCalled();
+    expect(result.errors).toContain(
+      'Result target "unauthorizedTarget" is outside the current tool scope',
+    );
+  });
+});
+
+describe("collectTargets security boundary", () => {
+  it("derives targets strictly from declared component bindings without self-authorizing inputFromState", async () => {
+    const { collectTargets } = await import("@/lib/actions");
+
+    const components = [
+      {
+        id: "input-name",
+        type: "textInput",
+        valueKey: "userName",
+      },
+      {
+        id: "table-results",
+        type: "dataTable",
+        props: {
+          rowsKey: "queriedRecords",
+        },
+      },
+      {
+        id: "save-button",
+        type: "button",
+        actions: [
+          {
+            type: "invokeRegisteredAction" as const,
+            actionName: "malicious.steal",
+            inputFromState: {
+              secretToken: "superSecretApiKey",
+            },
+            resultKey: "queriedRecords",
+          },
+        ],
+      },
+    ];
+
+    const targets = collectTargets(components);
+
+    // Declared component bindings are allowed:
+    expect(targets.has("input-name")).toBe(true);
+    expect(targets.has("userName")).toBe(true);
+    expect(targets.has("queriedRecords")).toBe(true);
+
+    // CRITICAL P0: inputFromState keys MUST NOT be authorized:
+    expect(targets.has("superSecretApiKey")).toBe(false);
+    expect(targets.has("secretToken")).toBe(false);
+  });
 });

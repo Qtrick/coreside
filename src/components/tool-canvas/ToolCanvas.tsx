@@ -138,7 +138,7 @@ export function ToolCanvas() {
 
   const onStateChange = useCallback(
     (state: Record<string, unknown>) => {
-      void updateToolState(state, true);
+      void updateToolState(state, false);
     },
     [updateToolState],
   );

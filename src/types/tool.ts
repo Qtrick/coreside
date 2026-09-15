@@ -129,6 +129,7 @@ export const ActionSchema = z.discriminatedUnion("type", [
     input: z.record(z.unknown()).optional(),
     inputFromState: z.record(z.string()).optional(),
     componentId: z.string().optional(),
+    resultKey: z.string().optional(),
   }),
 ]);
 

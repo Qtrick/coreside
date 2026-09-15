@@ -2,23 +2,34 @@
   "schemaVersion": 1,
   "product": "Coreside",
   "description": "Immutable archive intake history. Active audit selects currentIntakeId; prior SHA identities are never rewritten.",
-  "currentIntakeId": "p0.6-input",
+  "currentIntakeId": "p0.7-input",
   "partialUpdate": {
     "label": "partial-update-main",
-    "filename": "Partial Update Main.zip",
+    "filename": "Partial Update Main (1).zip",
     "sha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
-    "defaultPath": "~/Downloads/Partial Update Main.zip"
+    "defaultPath": "FFATU/Partial Update Main (1).zip"
   },
   "intakes": [
     {
+      "id": "p0.7-input",
+      "label": "P0.7 newest supplied Coreside archive",
+      "role": "current_supplied_reference",
+      "filename": "Coreside Chat AI.zip",
+      "sha256": "0ecbb6580df498d0539fc9bae4b18ef8e5564daa708e7c45f714d061baf66605",
+      "defaultPath": "~/Downloads/Coreside Chat AI.zip",
+      "commit": "1e9944bae299aa40e7fd211e564e751602606d9f",
+      "accessed": "2026-09-15",
+      "notes": "P0.7 intake. The newest supplied archive identity matches commit 1e9944b. The active working tree remains implementation authority."
+    },
+    {
       "id": "p0.6-input",
       "label": "P0.6 supplied Coreside archive",
-      "role": "current_supplied_reference",
+      "role": "historical_input",
       "filename": "Coreside main.zip",
       "sha256": "22a0ab2903fc26c6b17c903ae9f8d7181ed72803bec8f00c447d687462119764",
       "defaultPath": "~/Downloads/Coreside main.zip",
       "accessed": "2026-08-10",
-      "notes": "P0.6 intake. The active working tree remains implementation authority; this archive is immutable provenance and supersedes p0.5-input as the current supplied reference."
+      "notes": "Historical P0.6 intake; superseded as current supplied reference by p0.7-input."
     },
     {
       "id": "p0.5-input",

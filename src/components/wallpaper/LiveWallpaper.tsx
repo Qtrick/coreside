@@ -317,6 +317,15 @@ function CanvasWallpaper({
       }
     };
 
+    const onFrameVisibility = () => {
+      hidden = document.visibilityState === "hidden";
+      if (!hidden && !reduced && running) {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(drawFrame);
+      }
+    };
+    document.addEventListener("visibilitychange", onFrameVisibility);
+
     raf = requestAnimationFrame(drawFrame);
     return () => {
       running = false;
@@ -324,6 +333,7 @@ function CanvasWallpaper({
       cancelAnimationFrame(resizeRaf);
       window.removeEventListener("resize", onResize);
       document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("visibilitychange", onFrameVisibility);
       ro?.disconnect();
     };
   }, [kind, color, secondaryColor, speed, density, opacity]);

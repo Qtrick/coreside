@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { AlertTriangle, X } from "lucide-react";
-import { applyActions } from "@/lib/actions";
+import { applyActions, collectTargets } from "@/lib/actions";
 import { api } from "@/lib/tauri";
 import type { ActionOutcome } from "@/types/application-kernel";
 import type { ActionDefinition, ToolComponent, ToolDefinition, ToolState } from "@/types/tool";
@@ -114,36 +114,6 @@ class ToolErrorBoundary extends Component<
   }
 }
 
-function collectTargets(components: ToolComponent[], into = new Set<string>()) {
-  for (const component of components) {
-    into.add(component.id);
-    into.add(`${component.id}:tab`);
-    if (component.valueKey) into.add(component.valueKey);
-    const props = component.props ?? {};
-    for (const key of ["valueKey", "stateKey", "target"] as const) {
-      const value = props[key];
-      if (typeof value === "string" && value.trim()) into.add(value);
-    }
-    if (Array.isArray(component.actions)) {
-      for (const action of component.actions) {
-        if ("target" in action && typeof action.target === "string") {
-          into.add(action.target);
-        }
-        if (
-          action.type === "invokeRegisteredAction" &&
-          action.inputFromState
-        ) {
-          for (const stateKey of Object.values(action.inputFromState)) {
-            if (stateKey.trim()) into.add(stateKey);
-          }
-        }
-      }
-    }
-    if (component.children) collectTargets(component.children, into);
-  }
-  return into;
-}
-
 function RenderNode({
   component,
   resetKey,
@@ -227,7 +197,19 @@ export function ToolRenderer({
             conversationId: conversationId ?? null,
             projectId: projectId ?? null,
           });
-          if (outcome.status === "pendingApproval") {
+          if (outcome.status === "ok") {
+            if (payload.resultKey && payload.resultKey.trim()) {
+              const targetKey = payload.resultKey.trim();
+              const nextState = { ...state, [targetKey]: outcome.data };
+              if (onPersistState) {
+                void onPersistState(nextState).catch(() => {
+                  setActionError("That change could not be saved.");
+                });
+              } else {
+                onStateChange(nextState);
+              }
+            }
+          } else if (outcome.status === "pendingApproval") {
             onPendingApproval?.(outcome);
           } else if (outcome.status === "error") {
             setActionError(outcome.message);
@@ -237,7 +219,13 @@ export function ToolRenderer({
         },
       });
       if (result.changedKeys.length > 0) {
-        onStateChange(result.state);
+        if (onPersistState) {
+          void onPersistState(result.state).catch(() => {
+            setActionError("That change could not be saved.");
+          });
+        } else {
+          onStateChange(result.state);
+        }
       }
       if (result.errors.length > 0) {
         setActionError(result.errors[0]);
@@ -251,6 +239,7 @@ export function ToolRenderer({
       applicationId,
       conversationId,
       onPendingApproval,
+      onPersistState,
       onStateChange,
       onSubmitToAgent,
       projectId,
@@ -270,11 +259,12 @@ export function ToolRenderer({
   const setValueOptimistic = useCallback(
     (key: string, value: unknown) => {
       const next = { ...state, [key]: value };
-      onStateChange(next);
       if (onPersistState) {
         void onPersistState(next).catch(() => {
           setActionError("That change could not be saved.");
         });
+      } else {
+        onStateChange(next);
       }
     },
     [onPersistState, onStateChange, state],

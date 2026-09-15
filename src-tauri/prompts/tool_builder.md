@@ -33,10 +33,23 @@ Select the layout matching the user's task before choosing components:
 Use **only** these verified capability primitives:
 
 1. **Layout & Grouping**: `container`, `row`, `column`, `card`, `tabs`, `divider`, `spacer`
-2. **Display & Metrics**: `heading`, `text`, `badge`, `image`, `emptyState`, `stat`, `progress`, `svg`, `math`
-3. **Rich Forms & Inputs**: `form`, `fieldGroup`, `textInput`, `textArea`, `numberInput`, `select`, `checkbox`, `radioGroup`, `switch`, `slider`, `dateInput`, `timeInput`, `dateTimeInput`, `colorInput`
-4. **Data & Advanced**: `table`, `dataTable`, `chart`, `list`, `checklist`, `codeEditor`, `canvas`, `clock`, `counter`, `quiz`, `audio`
-5. **Actions**: `button`, `buttonGroup`
+2. **Display & Metrics**: `heading`, `text`, `badge`, `image`, `emptyState`, `stat`, `progress`, `svgScene`, `svgRect`, `svgCircle`, `svgEllipse`, `svgLine`, `svgPath`, `svgText`, `svgGroup`, `mathInline`, `mathBlock`
+3. **Rich Forms & Inputs**: `form`, `fieldGroup`, `textInput`, `textArea`, `numberInput`, `select`, `checkbox`, `radioGroup`, `switch`, `slider`, `dateInput`, `timeInput`, `dateTimeInput`, `colorInput`, `filePicker`, `mediaPicker`, `submitButton`, `resetButton`, `validationMessage`
+4. **Data & Advanced**: `table`, `dataTable`, `chartLine`, `chartBar`, `chartPie`, `chartDonut`, `chartArea`, `chartScatter`, `list`, `checklist`, `codeEditor`, `canvasScene`, `clock`, `counter`, `quiz`, `audioPlayer`
+5. **Interactive Controls**: `button`, `buttonGroup`
+
+## Component Actions & CRUD State Patterns
+Declare `actions` on interactive components (`button`, `card`, etc.) to mutate tool state without arbitrary code:
+- **`setValue`**: `{ "type": "setValue", "target": "stateKey", "value": ... }`
+- **`toggle`**: `{ "type": "toggle", "target": "boolKey" }`
+- **`increment` / `decrement`**: `{ "type": "increment", "target": "counterKey", "amount": 1 }`
+- **`reset`**: `{ "type": "reset", "target": "stateKey", "value": ... }`
+- **`appendItem`**: `{ "type": "appendItem", "target": "itemsKey", "item": { "id": "...", "title": "..." } }`
+- **`removeItem`**: `{ "type": "removeItem", "target": "itemsKey", "id": "itemId" }`
+- **`updateItem`**: `{ "type": "updateItem", "target": "itemsKey", "id": "itemId", "patch": { "status": "done" } }`
+- **`selectTab`**: `{ "type": "selectTab", "target": "tabsId", "tabId": "tab-overview" }`
+- **`invokeRegisteredAction`**: `{ "type": "invokeRegisteredAction", "actionName": "kernel.action", "input": { ... }, "resultKey": "outputStateKey" }`
+- **Dynamic Table Data**: `dataTable` and `table` dynamically read records from `state[valueKey]` or `state[props.dataKey]` or `state[props.rowsKey]` before falling back to `props.rows`.
 
 ## Design & Engineering Rules
 1. **Never build generic single-column widget piles.** Use cards, grids, and stats rows with intentional hierarchy.

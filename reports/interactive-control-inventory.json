@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-15T02:29:08.835Z",
-  "commit": "b491c6ab77ad9edd11f5e2aa4435f43d81449e8d",
+  "generatedAt": "2026-09-15T20:06:27.875Z",
+  "commit": "1e9944bae299aa40e7fd211e564e751602606d9f",
   "dirty": true,
   "command": "audit:interactive-controls",
   "evidenceLevel": "Scaffolded",
   "note": "Static regex inventory only — not runtime interactivity proof.",
-  "filesScanned": 86,
-  "filesWithControls": 64,
-  "approximateTotalControls": 656,
+  "filesScanned": 87,
+  "filesWithControls": 65,
+  "approximateTotalControls": 679,
   "files": [
     {
       "file": "src/components/action-log/ActionLog.tsx",
@@ -551,10 +551,10 @@
     },
     {
       "file": "src/components/settings/WallpaperSettings.tsx",
-      "approximateControlCount": 20,
+      "approximateControlCount": 30,
       "counts": {
-        "button": 8,
-        "onClick": 8,
+        "button": 13,
+        "onClick": 13,
         "input_type": 4
       },
       "flags": {
@@ -568,19 +568,20 @@
         "button": 13,
         "onClick": 13
       },
-      "flags": {
-        "alert": true
-      }
+      "flags": {}
     },
     {
       "file": "src/components/tool-canvas/CustomizeMode.tsx",
-      "approximateControlCount": 13,
+      "approximateControlCount": 18,
       "counts": {
-        "button": 6,
-        "onClick": 6,
-        "input_type": 1
+        "button": 7,
+        "onClick": 7,
+        "input_type": 2,
+        "select": 2
       },
-      "flags": {}
+      "flags": {
+        "placeholder": true
+      }
     },
     {
       "file": "src/components/tool-canvas/ToolCanvas.tsx",
@@ -611,17 +612,25 @@
     },
     {
       "file": "src/components/tool-renderer/nodes.tsx",
-      "approximateControlCount": 36,
+      "approximateControlCount": 43,
       "counts": {
-        "button": 12,
+        "button": 15,
         "type_submit": 1,
-        "onClick": 10,
-        "input_type": 12,
+        "onClick": 13,
+        "input_type": 13,
         "select": 1
       },
       "flags": {
         "placeholder": true
       }
+    },
+    {
+      "file": "src/components/tool-renderer/ToolLayoutContainer.tsx",
+      "approximateControlCount": 1,
+      "counts": {
+        "onClick": 1
+      },
+      "flags": {}
     },
     {
       "file": "src/components/tool-renderer/ToolRenderer.tsx",

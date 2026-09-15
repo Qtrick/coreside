@@ -60,11 +60,10 @@ export const FIXTURE_TOOLS: Record<string, ToolDefinition> = {
       },
       {
         id: "main-chart",
-        type: "chart",
-        layout_role: "main",
-        col_span: 3,
+        type: "chartBar",
+        layoutRole: "main",
+        colSpan: 3,
         props: {
-          type: "bar",
           data: [
             { label: "Jan", value: 8500 },
             { label: "Feb", value: 9200 },
@@ -153,7 +152,7 @@ export const FIXTURE_TOOLS: Record<string, ToolDefinition> = {
       },
       {
         id: "input-notes",
-        type: "textarea",
+        type: "textArea",
         col_span: 2,
         props: { label: "Observation Notes", placeholder: "Record optical density and precipitate..." },
       },
@@ -352,10 +351,9 @@ export const FIXTURE_TOOLS: Record<string, ToolDefinition> = {
     components: [
       {
         id: "chart-1",
-        type: "chart",
-        col_span: 2,
+        type: "chartLine",
+        colSpan: 2,
         props: {
-          type: "line",
           data: [
             { label: "10:00", value: 45 },
             { label: "10:15", value: 52 },
@@ -434,7 +432,7 @@ export const FIXTURE_TOOLS: Record<string, ToolDefinition> = {
       },
       {
         id: "code-area",
-        type: "code",
+        type: "codeEditor",
         layout_role: "main",
         props: {
           language: "typescript",
@@ -483,6 +481,125 @@ export const FIXTURE_TOOLS: Record<string, ToolDefinition> = {
         type: "slider",
         col_span: 2,
         props: { label: "Persistence Throttle (ms)", min: 100, max: 2000, step: 50, defaultValue: 300 },
+      },
+    ],
+  },
+
+  crud_task_manager: {
+    id: "tool-task-manager",
+    name: "Project Task Manager",
+    description: "Full-featured CRUD data management with persistent actions and reactive metrics",
+    layout: {
+      type: "dashboard",
+      columns: 3,
+      gap: "md",
+    },
+    components: [
+      {
+        id: "crud-header",
+        type: "heading",
+        layoutRole: "header",
+        props: { text: "Sprint Execution & Task Board", level: 2 },
+      },
+      {
+        id: "stat-open-tasks",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: {
+          title: "Active Tasks",
+          content: "12 Remaining",
+        },
+        actions: [
+          {
+            type: "decrement",
+            target: "openTasks",
+            amount: 1,
+          },
+        ],
+      },
+      {
+        id: "stat-completed-tasks",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: {
+          title: "Completed",
+          content: "28 Closed",
+        },
+        actions: [
+          {
+            type: "increment",
+            target: "completedTasks",
+            amount: 1,
+          },
+        ],
+      },
+      {
+        id: "stat-velocity",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: {
+          title: "Velocity",
+          content: "4.8 pts/day",
+        },
+      },
+      {
+        id: "input-task-title",
+        type: "textInput",
+        valueKey: "newTaskTitle",
+        layoutRole: "sidebar",
+        props: { label: "New Task Title", placeholder: "e.g. Audit SQLite schema" },
+      },
+      {
+        id: "input-task-priority",
+        type: "select",
+        valueKey: "newTaskPriority",
+        layoutRole: "sidebar",
+        props: {
+          label: "Priority",
+          options: ["High", "Medium", "Low"],
+        },
+      },
+      {
+        id: "btn-add-task",
+        type: "button",
+        layoutRole: "sidebar",
+        props: { label: "Add Task", variant: "primary" },
+        actions: [
+          {
+            type: "appendItem",
+            target: "tasks",
+            item: {
+              id: "task-manual",
+              title: "Review Rust boundaries",
+              priority: "High",
+              status: "In Progress",
+            },
+          },
+        ],
+      },
+      {
+        id: "tasks-data-table",
+        type: "dataTable",
+        valueKey: "tasks",
+        layoutRole: "main",
+        colSpan: 2,
+        props: {
+          title: "Sprint Tasks",
+          columns: [
+            { id: "id", label: "Task ID" },
+            { id: "title", label: "Title" },
+            { id: "priority", label: "Priority" },
+            { id: "status", label: "Status" },
+          ],
+          rows: [
+            { id: "TSK-101", title: "Action authority enforcement", priority: "High", status: "Done" },
+            { id: "TSK-102", title: "Layout engine container queries", priority: "Medium", status: "In Progress" },
+            { id: "TSK-103", title: "Wallpaper visibility lifecycle", priority: "High", status: "Done" },
+          ],
+        },
       },
     ],
   },

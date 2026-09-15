@@ -233,7 +233,7 @@ export function WallpaperSettings() {
       const p = CANVAS_PRESETS.find((cp) => cp.id === activeId);
       return p ? p.label : activeId;
     }
-    return "None (Default Surface)";
+    return "None (Default)";
   }, [solidActive, committedSolid.color, activeId]);
 
   const activeCategoryDesc = useMemo(() => {

@@ -19,9 +19,9 @@ Always set `targetToolId` to the active tool id for `update` and `replace`.
    - `content`, `full`, or `stack`
 3. **Full Primitive Catalog**:
    - Layout: `container`, `row`, `column`, `card`, `tabs`, `divider`, `spacer`
-   - Display: `heading`, `text`, `badge`, `image`, `emptyState`, `stat`, `progress`, `svg`, `math`
-   - Forms: `form`, `fieldGroup`, `textInput`, `textArea`, `numberInput`, `select`, `checkbox`, `radioGroup`, `switch`, `slider`, `dateInput`, `timeInput`, `dateTimeInput`, `colorInput`
-   - Data & Advanced: `table`, `dataTable`, `chart`, `list`, `checklist`, `codeEditor`, `canvas`, `clock`, `counter`, `quiz`, `audio`
-   - Actions: `button`, `buttonGroup`
+   - Display: `heading`, `text`, `badge`, `image`, `emptyState`, `stat`, `progress`, `svgScene`, `svgRect`, `svgCircle`, `svgEllipse`, `svgLine`, `svgPath`, `svgText`, `svgGroup`, `mathInline`, `mathBlock`
+   - Forms: `form`, `fieldGroup`, `textInput`, `textArea`, `numberInput`, `select`, `checkbox`, `radioGroup`, `switch`, `slider`, `dateInput`, `timeInput`, `dateTimeInput`, `colorInput`, `filePicker`, `mediaPicker`, `submitButton`, `resetButton`, `validationMessage`
+   - Data & Advanced: `table`, `dataTable`, `chartLine`, `chartBar`, `chartPie`, `chartDonut`, `chartArea`, `chartScatter`, `list`, `checklist`, `codeEditor`, `canvasScene`, `clock`, `counter`, `quiz`, `audioPlayer`
+   - Actions: `button`, `buttonGroup` (with declarative `actions`: `setValue`, `toggle`, `increment`, `decrement`, `reset`, `appendItem`, `removeItem`, `updateItem`, `selectTab`, `invokeRegisteredAction`)
 4. **Immediate Action**: When asked to modify or restyle a tool, emit `responseType: "tool_change"` with the complete updated tree in this turn.
 5. **No Placeholders**: Maintain meaningful labels and clear actions. Never introduce arbitrary JavaScript or raw HTML.

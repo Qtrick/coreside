@@ -323,11 +323,24 @@ pub fn apply_component_op(
             update_props(components, id, &json!({ "hidden": !visible }))?;
         }
         "component.update_actions" => {
-            // Actions live in frontend ToolComponent; store under props._actions when present.
             let id = component_id
                 .ok_or_else(|| PatchConflict::InvalidPayload("componentId required".into()))?;
-            let actions = payload.get("actions").cloned().unwrap_or(json!([]));
-            update_props(components, id, &json!({ "_actions": actions }))?;
+            let raw_actions = payload.get("actions").cloned().unwrap_or(json!([]));
+            let actions: Vec<crate::ai::ActionDefinition> = serde_json::from_value(raw_actions)
+                .map_err(|e| PatchConflict::InvalidPayload(format!("invalid actions: {e}")))?;
+            if actions.len() > crate::ai::response_schema::MAX_ACTIONS_PER_COMPONENT {
+                return Err(PatchConflict::InvalidPayload(
+                    "too many actions on component".into(),
+                ));
+            }
+            for a in &actions {
+                a.validate()
+                    .map_err(|e| PatchConflict::InvalidPayload(e.into()))?;
+            }
+            let node = find_mut(components, id).ok_or_else(|| PatchConflict::MissingComponent {
+                component_id: id.into(),
+            })?;
+            node.actions = Some(actions);
         }
         "component.move" => {
             let id = component_id
@@ -425,5 +438,73 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, PatchConflict::StaleRevision { .. }));
+    }
+
+    #[test]
+    fn update_actions_updates_node_actions_directly_and_validates() {
+        let mut tree = sample();
+        apply_component_op(
+            &mut tree,
+            "component.update_actions",
+            Some("goal"),
+            None,
+            Some(4),
+            4,
+            &json!({
+                "actions": [
+                    {
+                        "type": "increment",
+                        "target": "goalValue",
+                        "amount": 2.0
+                    },
+                    {
+                        "type": "invokeRegisteredAction",
+                        "actionName": "local_data.query",
+                        "input": { "modelId": "goals" },
+                        "resultKey": "goalRecords"
+                    }
+                ]
+            }),
+        )
+        .unwrap();
+
+        let goal = &tree[0].children.as_ref().unwrap()[0];
+        let actions = goal.actions.as_ref().expect("actions must be Some");
+        assert_eq!(actions.len(), 2);
+        assert_eq!(
+            actions[0],
+            crate::ai::ActionDefinition::Increment {
+                target: "goalValue".into(),
+                amount: Some(2.0),
+            }
+        );
+        // Crucial verification: props must NOT have _actions
+        let props = goal.props.as_ref().unwrap();
+        assert!(props.get("_actions").is_none());
+        assert_eq!(props["maximum"], 8);
+    }
+
+    #[test]
+    fn update_actions_rejects_unknown_action_type() {
+        let mut tree = sample();
+        let err = apply_component_op(
+            &mut tree,
+            "component.update_actions",
+            Some("goal"),
+            None,
+            Some(4),
+            4,
+            &json!({
+                "actions": [
+                    {
+                        "type": "maliciousScript",
+                        "target": "window"
+                    }
+                ]
+            }),
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, PatchConflict::InvalidPayload(_)));
     }
 }

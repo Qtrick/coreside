@@ -23,6 +23,7 @@ import type { Project } from "@/types/project";
 import type { Conversation } from "@/types/messages";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/stores/app-store";
+import { api } from "@/lib/tauri";
 
 const ICON_EXPANDED = 16;
 const ICON_COLLAPSED = 22;
@@ -391,8 +392,31 @@ export function Sidebar() {
             if (menuChat.projectId) void navigateToProject(menuChat.projectId);
           }}
           onDuplicate={() => void duplicateConversation(menuChat.id)}
-          onExport={() => {
-            window.alert("Chat export is not available yet.");
+          onExport={async () => {
+            try {
+              const messages = await api.getMessages(menuChat.id);
+              const exportData = {
+                conversationId: menuChat.id,
+                title: menuChat.title,
+                exportedAt: new Date().toISOString(),
+                messages,
+              };
+              const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+                type: "application/json",
+              });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              const safeTitle =
+                menuChat.title.replace(/[^a-zA-Z0-9_-]/g, "_") || "chat";
+              a.download = `${safeTitle}-export.json`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            } catch (err) {
+              console.error("Failed to export chat:", err);
+            }
           }}
           onDelete={() => {
             if (window.confirm(`Delete "${menuChat.title}"?`)) {
