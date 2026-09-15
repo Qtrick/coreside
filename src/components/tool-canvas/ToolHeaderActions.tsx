@@ -22,6 +22,11 @@ type ToolHeaderActionsProps = {
   onUndo: () => void;
   onClose: () => void;
   onCustomizeApplied: () => void;
+  isCustomizing?: boolean;
+  onToggleCustomizing?: () => void;
+  selectedComponentId?: string | null;
+  onSelectComponentId?: (id: string | null) => void;
+  onAskAi?: (prompt: string) => void;
 };
 
 /**
@@ -39,6 +44,11 @@ export function ToolHeaderActions({
   onUndo,
   onClose,
   onCustomizeApplied,
+  isCustomizing,
+  onToggleCustomizing,
+  selectedComponentId,
+  onSelectComponentId,
+  onAskAi,
 }: ToolHeaderActionsProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuId = useId();
@@ -119,6 +129,11 @@ export function ToolHeaderActions({
             tool={tool}
             baseRevision={tool.version ?? 1}
             compact={density === "icons"}
+            enabled={isCustomizing}
+            onToggleEnabled={onToggleCustomizing}
+            selectedId={selectedComponentId}
+            onSelectId={onSelectComponentId}
+            onAskAi={onAskAi}
             onApplied={onCustomizeApplied}
           />
           <button

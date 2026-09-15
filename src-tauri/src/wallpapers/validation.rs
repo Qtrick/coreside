@@ -39,7 +39,26 @@ pub fn normalize_canonical_hex(raw: &str) -> Result<String, String> {
     Ok(s.to_lowercase())
 }
 
+pub const MAX_WALLPAPER_JSON_BYTES: usize = 32_768;
+pub const MAX_ASSET_ID_LEN: usize = 128;
+pub const MAX_SLIDESHOW_COUNT: usize = 50;
+pub const MIN_INTERVAL_MS: u64 = 1_000;
+pub const MAX_INTERVAL_MS: u64 = 3_600_000;
+
+fn safe_asset_id_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[a-zA-Z0-9_-]{1,128}$").expect("safe asset id regex"))
+}
+
 pub fn validate_wallpaper_config(raw: &str) -> Result<WallpaperConfig, String> {
+    if raw.len() > MAX_WALLPAPER_JSON_BYTES {
+        return Err(format!(
+            "wallpaper JSON exceeds maximum size ({} > {})",
+            raw.len(),
+            MAX_WALLPAPER_JSON_BYTES
+        ));
+    }
+
     let mut config: WallpaperConfig =
         serde_json::from_str(raw).map_err(|e| format!("wallpaper JSON invalid: {e}"))?;
 
@@ -91,6 +110,16 @@ fn validate_fields(config: &mut WallpaperConfig) -> Result<(), String> {
         }
     }
 
+    clamp_opt("opacity", config.opacity, 0.0, 1.0)?;
+
+    if let Some(interval) = config.interval_ms {
+        if !(MIN_INTERVAL_MS..=MAX_INTERVAL_MS).contains(&interval) {
+            return Err(format!(
+                "intervalMs must be between {MIN_INTERVAL_MS} and {MAX_INTERVAL_MS}"
+            ));
+        }
+    }
+
     if let Some(filter) = &config.filter {
         validate_filter(filter)?;
     }
@@ -102,8 +131,10 @@ fn validate_fields(config: &mut WallpaperConfig) -> Result<(), String> {
                 .as_deref()
                 .filter(|s| !s.trim().is_empty())
                 .ok_or_else(|| "media wallpaper requires local assetId".to_string())?;
-            if remote_url_re().is_match(id) {
-                return Err("remote asset URLs are not allowed; use local assetId".into());
+            if id.len() > MAX_ASSET_ID_LEN || !safe_asset_id_re().is_match(id) {
+                return Err(format!(
+                    "assetId '{id}' must be a safe local identifier (max {MAX_ASSET_ID_LEN} chars)"
+                ));
             }
         }
         WallpaperType::Slideshow => {
@@ -112,14 +143,27 @@ fn validate_fields(config: &mut WallpaperConfig) -> Result<(), String> {
                 .as_ref()
                 .filter(|v| !v.is_empty())
                 .ok_or_else(|| "slideshow requires slideAssetIds".to_string())?;
+            if ids.len() > MAX_SLIDESHOW_COUNT {
+                return Err(format!(
+                    "slideshow contains {} slides, exceeding maximum of {}",
+                    ids.len(),
+                    MAX_SLIDESHOW_COUNT
+                ));
+            }
             for id in ids {
-                if remote_url_re().is_match(id) {
-                    return Err("remote asset URLs are not allowed in slideshow".into());
+                if id.len() > MAX_ASSET_ID_LEN || !safe_asset_id_re().is_match(id) {
+                    return Err(format!("slide assetId '{id}' must be a safe local identifier (max {MAX_ASSET_ID_LEN} chars)"));
                 }
             }
         }
-        WallpaperType::CanvasPreset if config.preset.as_deref().unwrap_or("").trim().is_empty() => {
-            return Err("canvas preset requires preset name".into());
+        WallpaperType::CanvasPreset => {
+            let preset = config.preset.as_deref().unwrap_or("").trim().to_lowercase();
+            if !matches!(
+                preset.as_str(),
+                "none" | "matrix" | "aurora" | "particles" | "rain" | "pulse"
+            ) {
+                return Err(format!("unknown canvas preset: '{preset}'"));
+            }
         }
         WallpaperType::StaticColor => {
             if config.color.as_deref().unwrap_or("").trim().is_empty() {
@@ -130,9 +174,46 @@ fn validate_fields(config: &mut WallpaperConfig) -> Result<(), String> {
     }
 
     if let Some(extra) = &config.extra {
-        let s = extra.to_string();
-        if css_injection_re().is_match(&s) {
-            return Err("extra fields cannot contain raw CSS".into());
+        match extra {
+            serde_json::Value::Object(map) => {
+                for (k, v) in map {
+                    match k.as_str() {
+                        "fit" => {
+                            if let Some(fit_str) = v.as_str() {
+                                if fit_str != "cover" && fit_str != "contain" {
+                                    return Err(format!(
+                                        "extra.fit must be 'cover' or 'contain', got '{fit_str}'"
+                                    ));
+                                }
+                            } else {
+                                return Err("extra.fit must be a string".into());
+                            }
+                        }
+                        "speed" => {
+                            let speed = v
+                                .as_f64()
+                                .ok_or_else(|| "extra.speed must be a number".to_string())?;
+                            if !(0.05..=5.0).contains(&speed) {
+                                return Err("extra.speed must be between 0.05 and 5.0".into());
+                            }
+                        }
+                        "density" => {
+                            let density = v
+                                .as_f64()
+                                .ok_or_else(|| "extra.density must be a number".to_string())?;
+                            if !(0.05..=5.0).contains(&density) {
+                                return Err("extra.density must be between 0.05 and 5.0".into());
+                            }
+                        }
+                        other => {
+                            return Err(format!(
+                                "unrecognized extra field '{other}' in wallpaper config"
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => return Err("extra must be an object".into()),
         }
     }
 

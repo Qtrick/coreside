@@ -2,10 +2,10 @@
   "schemaVersion": 2,
   "product": "Coreside",
   "accessDate": "2026-08-07",
-  "generatedAt": "2026-08-10T04:42:45.778Z",
-  "commit": "9ed96b923f158a25f92104b3c600ca551f8a141a",
+  "generatedAt": "2026-09-15T05:51:20.951Z",
+  "commit": "b491c6ab77ad9edd11f5e2aa4435f43d81449e8d",
   "dirty": true,
-  "sourceFingerprint": "796c2fd01729e7a18b890f0170de2bb43fa437d0f3ca2b3955f0e635e5a4c5d3",
+  "sourceFingerprint": "630c063e81b6f29208fdc04de54114efcf08838daea722cc2e7ce9f17db42279",
   "command": "audit:partial-update",
   "exitStatus": 0,
   "publicBeta": "Not ready",
@@ -23,8 +23,8 @@
     "Deferred"
   ],
   "archive": {
-    "filename": "Partial Update Main.zip",
-    "path": "/Users/qunyingfan/Downloads/Partial Update Main.zip",
+    "filename": "Partial Update Main (1).zip",
+    "path": "/Users/qunyingfan/Coreside/FFATU/Partial Update Main (1).zip",
     "expectedSha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
     "observedSha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
     "status": "present_hash_match"
@@ -39,9 +39,9 @@
     "Absent": 0,
     "Scaffolded": 0,
     "Implemented": 0,
-    "Unit Verified": 12,
+    "Unit Verified": 13,
     "Integrated – Not Verified": 0,
-    "Desktop Verified": 1,
+    "Desktop Verified": 0,
     "Packaged Verified": 0,
     "Cross-Platform Verified": 0,
     "Human Accepted": 0,
@@ -49,11 +49,11 @@
     "Deferred": 2
   },
   "highestValueGap": {
-    "id": "PU-STREAM",
-    "name": "Provider streaming (live deltas)",
+    "id": "PU-PROGRESSIVE-PREVIEW",
+    "name": "Progressive generated-surface preview",
     "status": "Unit Verified",
     "userValue": 10,
-    "rationale": "Historical desktop evidence in true-streaming-results.json not applied (fingerprint/commit mismatch)."
+    "rationale": "Progressive trusted surface paint is Unit Verified with SQLite cancel/incomplete rollback evidence (PreviewTransaction + overlay + ToolCanvas) but lacks desktop/packaged progressive-surface journeys — Journey 12 covers text streaming only."
   },
   "methodology": [
     "Content probes on Partial Update and Coreside trees (mustMatch/anyMatch).",
@@ -196,16 +196,17 @@
       "name": "Progressive generated-surface preview",
       "category": "generative",
       "userValue": 10,
-      "status": "Desktop Verified",
+      "status": "Unit Verified",
       "partialUpdatePresent": true,
       "coreside": {
         "implOk": true,
         "wiredOk": true,
         "unitOk": true,
-        "desktopOk": true,
+        "desktopOk": false,
         "packagedOk": false
       },
       "notes": [
+        "Historical desktop evidence in progressive-preview-results.json not applied (fingerprint/commit mismatch).",
         "Secure progressive paint exists (PreviewTransaction + overlay + ToolCanvas badge); SQLite cancel/incomplete rollback is unit-integrated; Journey 19 (progressive-surface-preview) is the Desktop Verified path — remains Unit Verified until progressive-preview-results.json is fresh."
       ],
       "evidence": [
@@ -254,8 +255,9 @@
         {
           "side": "desktopReport",
           "path": "reports/progressive-preview-results.json",
-          "ok": true,
-          "fresh": true
+          "ok": false,
+          "fresh": false,
+          "commitFresh": false
         }
       ],
       "gapPriority": "P0",

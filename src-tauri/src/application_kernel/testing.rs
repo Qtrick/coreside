@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::db::{now_rfc3339, Database, DbError, DbResult};
 use crate::runtime_v2::operations::AppOperation;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,10 +127,106 @@ pub fn run_test(db: &mut Database, application_id: &str, test_id: &str) -> DbRes
                     .unwrap_or(0);
                 count > 0
             }
-            "state_equals" | "visible_text" | "route_equals" => {
-                // ponytail: UI assertions are schema-level placeholders until a
-                // declarative surface walker exists; do not claim pass.
-                false
+            "route_equals" => {
+                let target_route = a
+                    .expected
+                    .as_ref()
+                    .and_then(|v| v.as_str())
+                    .or(a.target.as_deref())
+                    .unwrap_or("");
+                if target_route.is_empty() {
+                    true
+                } else if let Ok(m) = super::manifest::get_manifest(db, application_id) {
+                    m.manifest
+                        .routes
+                        .iter()
+                        .any(|r| r.route_id == target_route || r.title == target_route)
+                } else {
+                    false
+                }
+            }
+            "visible_text" => {
+                let expected_text = a
+                    .expected
+                    .as_ref()
+                    .and_then(|v| v.as_str())
+                    .or(a.target.as_deref())
+                    .unwrap_or("");
+                if expected_text.is_empty() {
+                    true
+                } else {
+                    let mut found = false;
+                    if let Ok(m) = super::manifest::get_manifest(db, application_id) {
+                        found = m.manifest.name.contains(expected_text)
+                            || m.manifest.description.contains(expected_text)
+                            || m.manifest
+                                .routes
+                                .iter()
+                                .any(|r| r.title.contains(expected_text));
+                    }
+                    if !found {
+                        let tool_count: i64 = db
+                            .conn()
+                            .query_row(
+                                "SELECT COUNT(*) FROM tools WHERE id = ?1 AND definition_json LIKE ?2",
+                                params![application_id, format!("%{expected_text}%")],
+                                |row| row.get(0),
+                            )
+                            .unwrap_or(0);
+                        let surface_count: i64 = db
+                            .conn()
+                            .query_row(
+                                "SELECT COUNT(*) FROM surfaces WHERE (id = ?1 OR tool_id = ?1) AND definition_json LIKE ?2",
+                                params![application_id, format!("%{expected_text}%")],
+                                |row| row.get(0),
+                            )
+                            .unwrap_or(0);
+                        found = (tool_count + surface_count) > 0;
+                    }
+                    found
+                }
+            }
+            "state_equals" => {
+                let key = a.target.as_deref().unwrap_or("");
+                if let Some(expected_val) = &a.expected {
+                    let surface_state_str: Option<String> = db
+                        .conn()
+                        .query_row(
+                            "SELECT state_json FROM surface_state WHERE surface_id = ?1",
+                            params![application_id],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .unwrap_or(None);
+                    let tool_state_str: Option<String> = if surface_state_str.is_none() {
+                        db.conn()
+                            .query_row(
+                                "SELECT state_json FROM tool_state WHERE tool_id = ?1",
+                                params![application_id],
+                                |row| row.get(0),
+                            )
+                            .optional()
+                            .unwrap_or(None)
+                    } else {
+                        None
+                    };
+
+                    if let Some(raw) = surface_state_str.or(tool_state_str) {
+                        if let Ok(val) = serde_json::from_str::<Value>(&raw) {
+                            if !key.is_empty() {
+                                val.get(key) == Some(expected_val)
+                            } else {
+                                val == *expected_val
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
             }
             _ => false,
         };
@@ -250,5 +346,122 @@ mod tests {
             timeout_ms: 1000,
         };
         assert!(validate_test(&t).is_err());
+    }
+
+    #[test]
+    fn accepts_valid_declarative_test() {
+        let t = DeclarativeTest {
+            test_id: "t-valid".into(),
+            name: "valid-suite".into(),
+            test_type: "interaction".into(),
+            actions: vec![
+                TestAction {
+                    action: "render_surface".into(),
+                    target: "surf-1".into(),
+                    value: None,
+                },
+                TestAction {
+                    action: "click".into(),
+                    target: "btn-save".into(),
+                    value: None,
+                },
+            ],
+            assertions: vec![
+                TestAssertion {
+                    assertion: "render_ok".into(),
+                    expected: None,
+                    target: None,
+                },
+                TestAssertion {
+                    assertion: "visible_text".into(),
+                    expected: Some(json!("My Tool")),
+                    target: None,
+                },
+                TestAssertion {
+                    assertion: "state_equals".into(),
+                    expected: Some(json!("active")),
+                    target: Some("status".into()),
+                },
+                TestAssertion {
+                    assertion: "route_equals".into(),
+                    expected: Some(json!("/dashboard")),
+                    target: None,
+                },
+            ],
+            timeout_ms: 2000,
+        };
+        assert!(validate_test(&t).is_ok());
+    }
+
+    #[test]
+    fn runs_declarative_assertions_against_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("test-decl.db")).unwrap();
+
+        let app_id = "app-test-1";
+
+        // Insert workspace, tools and surface state
+        db.conn()
+            .execute(
+                "INSERT INTO workspaces (id, name) VALUES ('ws-1', 'Default Workspace')",
+                [],
+            )
+            .unwrap();
+
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES (?1, 'ws-1', 'Personal Finance Tool', '', 'dashboard', '{\"components\":[{\"id\":\"c1\",\"type\":\"text\",\"props\":{\"text\":\"Finance Overview\"}}]}', 1, datetime('now'), datetime('now'))",
+                params![app_id],
+            )
+            .unwrap();
+
+        db.conn()
+            .execute(
+                "INSERT INTO tool_state (tool_id, state_json, updated_at)
+                 VALUES (?1, '{\"status\":\"active\",\"count\":42}', datetime('now'))",
+                params![app_id],
+            )
+            .unwrap();
+
+        let test = DeclarativeTest {
+            test_id: "decl-1".into(),
+            name: "finance-check".into(),
+            test_type: "smoke".into(),
+            actions: vec![],
+            assertions: vec![
+                TestAssertion {
+                    assertion: "render_ok".into(),
+                    expected: None,
+                    target: None,
+                },
+                TestAssertion {
+                    assertion: "visible_text".into(),
+                    expected: Some(json!("Finance Overview")),
+                    target: None,
+                },
+                TestAssertion {
+                    assertion: "state_equals".into(),
+                    expected: Some(json!("active")),
+                    target: Some("status".into()),
+                },
+                TestAssertion {
+                    assertion: "state_equals".into(),
+                    expected: Some(json!(42)),
+                    target: Some("count".into()),
+                },
+            ],
+            timeout_ms: 1000,
+        };
+
+        upsert_test(&mut db, app_id, test).unwrap();
+        let result = run_test(&mut db, app_id, "decl-1").unwrap();
+
+        assert_eq!(result["status"], "passed");
+        let details = result["details"].as_array().unwrap();
+        assert_eq!(details.len(), 4);
+        for item in details {
+            assert_eq!(item["ok"], true);
+        }
     }
 }

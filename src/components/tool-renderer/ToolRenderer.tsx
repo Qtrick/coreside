@@ -13,6 +13,7 @@ import type { ActionOutcome } from "@/types/application-kernel";
 import type { ActionDefinition, ToolComponent, ToolDefinition, ToolState } from "@/types/tool";
 import { ToolRuntimeProvider } from "./context";
 import { resolveComponent } from "./registry";
+import { ToolLayoutContainer } from "./ToolLayoutContainer";
 
 type ToolRendererProps = {
   tool: ToolDefinition;
@@ -23,6 +24,9 @@ type ToolRendererProps = {
   surfaceId?: string | null;
   conversationId?: string | null;
   projectId?: string | null;
+  isCustomizing?: boolean;
+  selectedComponentId?: string | null;
+  onSelectComponent?: (component: ToolComponent) => void;
   onSubmitToAgent?: (payload: {
     toolId: string;
     eventName: string;
@@ -182,6 +186,9 @@ export function ToolRenderer({
   surfaceId,
   conversationId,
   projectId,
+  isCustomizing,
+  selectedComponentId,
+  onSelectComponent,
   onSubmitToAgent,
   onPendingApproval,
 }: ToolRendererProps) {
@@ -262,14 +269,13 @@ export function ToolRenderer({
 
   const setValueOptimistic = useCallback(
     (key: string, value: unknown) => {
-      const previous = state[key];
       const next = { ...state, [key]: value };
       onStateChange(next);
-      const persist = onPersistState ?? (async (saved) => onStateChange(saved));
-      void persist(next).catch(() => {
-        onStateChange({ ...state, [key]: previous });
-        setActionError("That change could not be saved and was undone.");
-      });
+      if (onPersistState) {
+        void onPersistState(next).catch(() => {
+          setActionError("That change could not be saved.");
+        });
+      }
     },
     [onPersistState, onStateChange, state],
   );
@@ -322,15 +328,23 @@ export function ToolRenderer({
             </button>
           </div>
         ) : null}
-        {tool.components.map((component) => (
-          <RenderNode
-            key={component.id}
-            component={component}
-            resetKey={resetKey}
-            applicationId={applicationId}
-            toolId={tool.id}
-          />
-        ))}
+        <ToolLayoutContainer
+          layout={tool.layout}
+          components={tool.components}
+          toolId={tool.id}
+          isCustomizing={isCustomizing}
+          selectedComponentId={selectedComponentId}
+          onSelectComponent={onSelectComponent}
+          renderComponent={(component) => (
+            <RenderNode
+              key={component.id}
+              component={component}
+              resetKey={resetKey}
+              applicationId={applicationId}
+              toolId={tool.id}
+            />
+          )}
+        />
       </div>
     </ToolRuntimeProvider>
   );

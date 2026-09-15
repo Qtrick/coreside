@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T03:01:05.693Z",
-  "commit": "3202ca67450687760f8166e65e7c035de0eda2b8",
+  "generatedAt": "2026-08-15T02:29:08.835Z",
+  "commit": "b491c6ab77ad9edd11f5e2aa4435f43d81449e8d",
   "dirty": true,
   "command": "audit:dead-controls",
   "evidenceLevel": "Scaffolded",
@@ -11,7 +11,7 @@
   "matches": [
     {
       "file": "src/components/sidebar/Sidebar.tsx",
-      "line": 394,
+      "line": 395,
       "hint": "alert_call",
       "snippet": "alert(\"Chat export is not available yet.\"); }} onDelete={()"
     }

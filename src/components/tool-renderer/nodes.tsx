@@ -1,5 +1,5 @@
 import type { ComponentType, CSSProperties, ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ActionDefinition, ToolComponent } from "@/types/tool";
 import { useToolRuntime } from "./context";
 
@@ -1202,27 +1202,163 @@ export function DataTableNode({ component }: ToolNodeProps) {
   const rows = Array.isArray(component.props?.rows)
     ? (component.props?.rows as Array<Record<string, unknown>>).slice(0, 500)
     : [];
+
+  const pageSizeProp = asNumber(component.props?.pageSize, 10);
+  const pageSize = pageSizeProp > 0 && pageSizeProp <= 100 ? pageSizeProp : 10;
+
+  const [filterText, setFilterText] = useState("");
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc" | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Filter
+  const filteredRows = useMemo(() => {
+    const q = filterText.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((row) =>
+      columns.some((col) => {
+        const val = row[col.id];
+        return val != null && String(val).toLowerCase().includes(q);
+      })
+    );
+  }, [rows, columns, filterText]);
+
+  // Sort
+  const sortedRows = useMemo(() => {
+    if (!sortColumn || !sortDir) return filteredRows;
+    const sorted = [...filteredRows];
+    sorted.sort((a, b) => {
+      const valA = a[sortColumn];
+      const valB = b[sortColumn];
+      if (valA == null && valB == null) return 0;
+      if (valA == null) return sortDir === "asc" ? 1 : -1;
+      if (valB == null) return sortDir === "asc" ? -1 : 1;
+
+      if (typeof valA === "number" && typeof valB === "number") {
+        return sortDir === "asc" ? valA - valB : valB - valA;
+      }
+      const strA = String(valA).toLowerCase();
+      const strB = String(valB).toLowerCase();
+      return sortDir === "asc" ? strA.localeCompare(strB) : strB.localeCompare(strA);
+    });
+    return sorted;
+  }, [filteredRows, sortColumn, sortDir]);
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const safePage = Math.min(Math.max(1, currentPage), totalPages);
+  const pagedRows = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return sortedRows.slice(start, start + pageSize);
+  }, [sortedRows, safePage, pageSize]);
+
+  const handleSort = (colId: string) => {
+    if (sortColumn !== colId) {
+      setSortColumn(colId);
+      setSortDir("asc");
+    } else if (sortDir === "asc") {
+      setSortDir("desc");
+    } else {
+      setSortColumn(null);
+      setSortDir(null);
+    }
+  };
+
+  const title = asString(component.props?.title, "Data table");
+  const enableSearch = component.props?.searchable !== false;
+
   return (
-    <div className="tr-data-table" data-component-id={component.id}>
-      <table>
-        <caption>{asString(component.props?.title, "Data table")}</caption>
-        <thead>
-          <tr>
-            {columns.map((c) => (
-              <th key={c.id} scope="col">{c.label}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={i}>
-              {columns.map((c) => (
-                <td key={c.id}>{String(row[c.id] ?? "")}</td>
-              ))}
+    <div className="tr-data-table" data-component-id={component.id} role="region" aria-label={title}>
+      {enableSearch || rows.length > 5 ? (
+        <div className="tr-data-table-toolbar">
+          <input
+            type="search"
+            className="tr-data-table-search"
+            placeholder="Search records…"
+            value={filterText}
+            onChange={(e) => {
+              setFilterText(e.target.value);
+              setCurrentPage(1);
+            }}
+            aria-label="Filter records"
+          />
+          <span className="tr-data-table-summary">
+            {sortedRows.length} {sortedRows.length === 1 ? "record" : "records"}
+            {filterText ? ` (filtered from ${rows.length})` : ""}
+          </span>
+        </div>
+      ) : null}
+
+      <div className="tr-data-table-scroll">
+        <table>
+          <caption>{title}</caption>
+          <thead>
+            <tr>
+              {columns.map((c) => {
+                const isSorted = sortColumn === c.id;
+                const ariaSort = isSorted ? (sortDir === "asc" ? "ascending" : "descending") : "none";
+                return (
+                  <th key={c.id} scope="col" aria-sort={ariaSort}>
+                    <button
+                      type="button"
+                      onClick={() => handleSort(c.id)}
+                      title={`Sort by ${c.label}`}
+                    >
+                      {c.label}
+                      <span aria-hidden="true">
+                        {isSorted ? (sortDir === "asc" ? " ▲" : " ▼") : " ⇅"}
+                      </span>
+                    </button>
+                  </th>
+                );
+              })}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {pagedRows.length > 0 ? (
+              pagedRows.map((row, i) => (
+                <tr key={i}>
+                  {columns.map((c) => (
+                    <td key={c.id}>{String(row[c.id] ?? "")}</td>
+                  ))}
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={columns.length || 1} className="tr-data-table-empty">
+                  {filterText ? "No matching records found." : "No data available."}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {totalPages > 1 ? (
+        <div className="tr-data-table-pagination">
+          <span>
+            Page {safePage} of {totalPages}
+          </span>
+          <div className="tr-data-table-pagination-controls">
+            <button
+              type="button"
+              className="tr-data-table-pagination-btn"
+              disabled={safePage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              className="tr-data-table-pagination-btn"
+              disabled={safePage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

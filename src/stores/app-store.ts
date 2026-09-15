@@ -20,6 +20,7 @@ import type {
   ToolState,
   ToolSummary,
 } from "@/types/tool";
+import { persistenceScheduler } from "@/lib/persistence-scheduler";
 import {
   api,
   TauriCommandError,
@@ -250,6 +251,7 @@ type AppStore = {
   openToolWindow: () => Promise<void>;
   undoTool: () => Promise<void>;
   updateToolState: (state: ToolState, persist?: boolean) => Promise<void>;
+  flushToolState: (toolId?: string) => Promise<void>;
 
   sendMessage: (
     content: string,
@@ -1796,6 +1798,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   selectTool: async (id) => {
+    const prevToolId = get().activeToolId;
+    if (prevToolId && prevToolId !== id) {
+      void persistenceScheduler.flush(prevToolId, (toolId, s) => api.saveToolState(toolId, s));
+    }
     if (!id) {
       set({ activeToolId: null, activeTool: null, toolState: {} });
       return;
@@ -1814,6 +1820,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     ]);
     // Selecting another tool, or closing the canvas, wins over a late load.
     if (get().activeToolId !== id) return;
+    persistenceScheduler.initToolState(id, state ?? {});
     set({
       activeTool: tool,
       toolState: state ?? {},
@@ -1822,6 +1829,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   closeToolCanvas: () => {
+    const prevToolId = get().activeToolId;
+    if (prevToolId) {
+      void persistenceScheduler.flush(prevToolId, (toolId, s) => api.saveToolState(toolId, s));
+    }
     const conversationId = get().activeConversationId;
     if (conversationId) {
       get().setChatActiveToolId(conversationId, null);
@@ -1849,14 +1860,27 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   updateToolState: async (state, persist = true) => {
     const id = get().activeToolId;
-    const previous = get().toolState;
     set({ toolState: state });
     if (persist && id) {
-      try {
-        await api.saveToolState(id, state);
-      } catch {
-        set({ toolState: previous });
-      }
+      await persistenceScheduler.schedule(
+        id,
+        state,
+        (toolId, s) => api.saveToolState(toolId, s),
+        {
+          onRollback: (restored) => {
+            if (get().activeToolId === id) {
+              set({ toolState: restored });
+            }
+          },
+        },
+      );
+    }
+  },
+
+  flushToolState: async (toolId?: string) => {
+    const id = toolId ?? get().activeToolId;
+    if (id) {
+      await persistenceScheduler.flush(id, (tid, s) => api.saveToolState(tid, s));
     }
   },
 

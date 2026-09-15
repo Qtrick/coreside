@@ -21,12 +21,20 @@ function hasAccessibleName(el: Element): boolean {
   if (aria) return true;
   const labelled = el.getAttribute("aria-labelledby");
   if (labelled && document.getElementById(labelled)?.textContent?.trim()) return true;
-  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+  if (
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLTextAreaElement ||
+    el instanceof HTMLSelectElement
+  ) {
     if (el.labels && el.labels.length > 0) return true;
     if (el.getAttribute("placeholder")?.trim()) return true;
+    if (el.closest("label")?.textContent?.trim()) return true;
+    if (el.id && document.querySelector(`label[for="${el.id}"]`)?.textContent?.trim()) return true;
+    if (el.getAttribute("title")?.trim()) return true;
   }
   if (el instanceof HTMLButtonElement || el.getAttribute("role") === "button") {
     if (el.textContent?.trim()) return true;
+    if (el.getAttribute("title")?.trim()) return true;
   }
   if (el instanceof HTMLImageElement) {
     return Boolean(el.getAttribute("alt")?.trim());

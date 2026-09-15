@@ -559,50 +559,74 @@ fn apply_one(
             }
             Ok(Some(get_surface(db, sid).map_err(|e| e.to_string())?))
         }
-        "chat.status"
-        | "chat.notification"
-        | "setting.create"
-        | "setting.update"
-        | "setting.delete"
-        | "layout.update"
-        | "layout.add_panel"
-        | "layout.move_panel"
-        | "layout.resize_panel"
-        | "layout.remove_panel"
-        | "layout.set_visibility"
-        | "wallpaper.apply"
-        | "wallpaper.create"
-        | "wallpaper.delete"
-        | "automation.create"
-        | "automation.update"
-        | "automation.pause"
-        | "automation.resume"
-        | "export.prepare"
-        | "project.panel_create"
-        | "project.panel_update"
-        | "chat.branch_create"
-        | "surface.update_metadata"
-        | "surface.move"
-        | "surface.duplicate"
-        | "state.reset"
-        | "state.delete_key"
-        | "route.navigate"
-        | "manifest.upsert"
-        | "manifest.disable"
-        | "manifest.restore_last_known_good"
-        | "data.model_upsert"
-        | "data.record_create"
-        | "data.record_update"
-        | "data.record_delete"
-        | "data.migrate"
-        | "permission.request"
-        | "test.upsert"
-        | "test.run"
-        | "package.export"
-        | "package.import" => {
-            // Handled by Application Kernel or recorded for replay.
+        "layout.update" => {
+            let sid = op
+                .target
+                .surface_id
+                .as_deref()
+                .or_else(|| op.payload.get("surfaceId").and_then(|v| v.as_str()))
+                .ok_or_else(|| "surfaceId required for layout.update".to_string())?;
+            let surface = get_surface(db, sid).map_err(|e| e.to_string())?;
+            let mut def_value = surface.definition.clone();
+            let new_layout = op
+                .payload
+                .get("layout")
+                .cloned()
+                .unwrap_or_else(|| op.payload.clone());
+            let norm_layout = crate::ai::normalize_layout(&new_layout);
+            if let Some(obj) = def_value.as_object_mut() {
+                obj.insert("layout".into(), norm_layout.clone());
+            }
+            let s = update_surface_definition(
+                db,
+                sid,
+                &def_value,
+                op.payload
+                    .get("changeSummary")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("layout.update"),
+                op.base_revision,
+            )
+            .map_err(|e| e.to_string())?;
+            let layout_str = crate::ai::layout_type_string(&norm_layout);
+            if let Some(tool_id) = s.tool_id.as_deref().filter(|t| !t.is_empty()) {
+                let _ = db.conn().execute(
+                    "UPDATE tools SET layout = ?1, updated_at = datetime('now') WHERE id = ?2",
+                    rusqlite::params![layout_str, tool_id],
+                );
+            }
+            Ok(Some(s))
+        }
+        "wallpaper.apply" => {
+            let wallpaper_json = op
+                .payload
+                .get("wallpaperJson")
+                .or_else(|| op.payload.get("wallpaper_json"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let default_wallpaper = r#"{"kind":"none"}"#;
+            if wallpaper_json.trim().is_empty() {
+                crate::db::set_setting(db, "wallpaperJson", "").map_err(|e| e.to_string())?;
+                crate::db::set_setting(db, "wallpaper", default_wallpaper)
+                    .map_err(|e| e.to_string())?;
+            } else {
+                let parsed = crate::wallpapers::validate_wallpaper_config(wallpaper_json)
+                    .map_err(|e| format!("invalid wallpaper: {e}"))?;
+                let canonical_json = serde_json::to_string(&parsed).map_err(|e| e.to_string())?;
+                crate::db::set_setting(db, "wallpaperJson", &canonical_json)
+                    .map_err(|e| e.to_string())?;
+                crate::db::set_setting(db, "wallpaper", default_wallpaper)
+                    .map_err(|e| e.to_string())?;
+            }
             Ok(None)
         }
+        "data.model_upsert" | "data.record_create" | "data.record_update"
+        | "data.record_delete" | "data.migrate" => {
+            crate::application_kernel::data::apply_kernel_operations(db, std::slice::from_ref(op))
+                .map_err(|e| e.to_string())?;
+            Ok(None)
+        }
+        "chat.status" | "chat.notification" => Ok(None),
         "subscription.create" => {
             let owner = op
                 .target
@@ -885,6 +909,7 @@ mod tests {
                 value_key: None,
                 props: Some(json!({"text": "Original"})),
                 children: None,
+                ..Default::default()
             }],
         };
         let saved = apply_tool_change(
@@ -916,6 +941,7 @@ mod tests {
                     value_key: None,
                     props: Some(json!({})),
                     children: None,
+                    ..Default::default()
                 }],
                 ..original.clone()
             }),

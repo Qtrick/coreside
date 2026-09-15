@@ -1,7 +1,7 @@
 # Current Source Baseline (P0.6)
 
 **Product:** Coreside  
-**Access date:** 2026-08-11
+**Access date:** 2026-09-15
 **Phase:** P0.6 source intake / development audit<br>
 **Public beta:** **NOT READY**  
 **Hosted AI:** **NOT READY**
@@ -12,9 +12,9 @@
 | --- | --- |
 | Path | `/Users/qunyingfan/Coreside` |
 | Branch | `main` |
-| Commit | `3b8a86994bc2263c55e0d830d8197ebf33cef20c` |
+| Commit | `b491c6ab77ad9edd11f5e2aa4435f43d81449e8d` |
 | Dirty | Yes (development evidence only) |
-| Source fingerprint | `18165bddbc7b17a128ed3bc1526846640b2f9cafeb9bfb41cd9a28b0aff60d2d` |
+| Source fingerprint | `ef2a2fc2fa0348ccb0f7ebefc57b7701cf79098a9dee442b0df94e962e62fb0a` |
 
 ## Uploaded archive
 
@@ -26,7 +26,7 @@
 | Observed SHA-256 | `n/a` |
 | Status | **zip_unavailable_extract_present** |
 | Supersedes | `220c246eeed62133bb6b08d77278248192f4f7503f31004e5ce02861f2ae6412` (`P0.5 supplied Coreside archive`) |
-| Partial Update archive | `Partial Update Main.zip` / `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607` |
+| Partial Update archive | `Partial Update Main (1).zip` / `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607` |
 
 ## Lockfiles
 
@@ -49,21 +49,21 @@
 
 | Metric | Active |
 | --- | --- |
-| `src` files | 193 |
+| `src` files | 198 |
 | Rust `.rs` | 194 |
 | Migrations | 24 |
 | E2E specs | 20 |
 | Tauri commands | 222 |
-| Fingerprint files | 716 |
+| Fingerprint files | 721 |
 
 ## Archive vs active
 
 | Metric | Count |
 | --- | --- |
 | Comparison status | compared_against_prior_extract |
-| Only in active | 4 |
+| Only in active | 9 |
 | Only in archive | 0 |
-| Changed | 18 |
+| Changed | 37 |
 
 ## Generation command
 

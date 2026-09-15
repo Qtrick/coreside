@@ -397,6 +397,7 @@ mod tests {
             value_key: None,
             props: Some(json!({"value": "typed", "label": "Name", "maximum": 8})),
             children: None,
+            ..Default::default()
         };
         let mut new = ToolComponent {
             id: "field".into(),
@@ -404,6 +405,7 @@ mod tests {
             value_key: None,
             props: Some(json!({"label": "Full name", "maximum": 12})),
             children: None,
+            ..Default::default()
         };
         assert!(apply_preservation_on_replace(
             &old,
@@ -425,6 +427,7 @@ mod tests {
             value_key: None,
             props: Some(json!({"value": "typed"})),
             children: None,
+            ..Default::default()
         };
         let mut new = ToolComponent {
             id: "field".into(),
@@ -432,6 +435,7 @@ mod tests {
             value_key: None,
             props: Some(json!({"value": ""})),
             children: None,
+            ..Default::default()
         };
         assert!(!apply_preservation_on_replace(
             &old,

@@ -90,6 +90,8 @@ export function ToolCanvas() {
   const [recovery, setRecovery] = useState<RecoveryState | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [canvasError, setCanvasError] = useState<string | null>(null);
+  const [isCustomizing, setIsCustomizing] = useState(false);
+  const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
   /** Available width for the whole Tool Canvas header (not the actions row). */
   const [headerWidth, setHeaderWidth] = useState(0);
   const headerRef = useRef<HTMLElement>(null);
@@ -341,6 +343,13 @@ export function ToolCanvas() {
             closeLabel={
               layoutMode === "compact" ? "Back to chat" : "Close tool canvas"
             }
+            isCustomizing={isCustomizing}
+            onToggleCustomizing={() => setIsCustomizing((v) => !v)}
+            selectedComponentId={selectedComponentId}
+            onSelectComponentId={setSelectedComponentId}
+            onAskAi={(prompt) => {
+              void sendMessage(prompt);
+            }}
             onDetails={() => setDetailsOpen(true)}
             onExport={() => openExportDialog(activeTool.id, activeTool.name)}
             onOpen={() =>
@@ -488,6 +497,9 @@ export function ToolCanvas() {
             state={renderState}
             onStateChange={isPreviewPaint ? () => undefined : onStateChange}
             onPersistState={isPreviewPaint ? async () => undefined : onPersistState}
+            isCustomizing={isCustomizing}
+            selectedComponentId={selectedComponentId}
+            onSelectComponent={(c) => setSelectedComponentId(c.id)}
             // Only a real manifest id — never invent one for legacy tools.
             applicationId={manifestRecord?.applicationId ?? null}
             surfaceId={surfaceId}

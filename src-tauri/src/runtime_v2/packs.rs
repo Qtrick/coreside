@@ -279,40 +279,24 @@ pub fn validate_definition_components(definition: &Value) -> Result<(), String> 
     )
 }
 
+struct TreeValidationState {
+    ids: std::collections::HashSet<String>,
+    total_count: usize,
+    animated_count: usize,
+}
+
 /// Validate a definition against both the global trusted registry and one
-/// surface's assigned packs.
+/// surface's assigned packs, enforcing unique IDs, depth, count, and size limits.
 pub fn validate_definition_components_for_packs(
     definition: &Value,
     allowed_pack_ids: &[String],
 ) -> Result<(), String> {
-    let Some(components) = definition.get("components").and_then(|v| v.as_array()) else {
+    let Some(components_val) = definition.get("components") else {
         return Ok(());
     };
-    for component in components {
-        validate_component_value_for_packs(component, allowed_pack_ids)?;
-    }
-    Ok(())
-}
-
-fn validate_component_value_for_packs(
-    component: &Value,
-    allowed_pack_ids: &[String],
-) -> Result<(), String> {
-    let component_type = component.get("type").and_then(|v| v.as_str()).unwrap_or("");
-    if !component_type.is_empty() {
-        validate_component_type_allowed_for_packs(component_type, allowed_pack_ids)?;
-        validate_labeled_props(
-            component_type,
-            component.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
-            component.get("props"),
-        )?;
-    }
-    if let Some(children) = component.get("children").and_then(|v| v.as_array()) {
-        for child in children {
-            validate_component_value_for_packs(child, allowed_pack_ids)?;
-        }
-    }
-    Ok(())
+    let components: Vec<crate::ai::ToolComponent> = serde_json::from_value(components_val.clone())
+        .map_err(|e| format!("invalid component definition: {e}"))?;
+    validate_tool_components_for_packs(&components, allowed_pack_ids)
 }
 
 /// Validate a typed component tree (insert/replace/update_children paths).
@@ -330,16 +314,153 @@ pub fn validate_tool_components_for_packs(
     components: &[crate::ai::ToolComponent],
     allowed_pack_ids: &[String],
 ) -> Result<(), String> {
+    let allowed = normalize_capability_packs(allowed_pack_ids)?;
+    let mut state = TreeValidationState {
+        ids: std::collections::HashSet::new(),
+        total_count: 0,
+        animated_count: 0,
+    };
+    validate_tree_recursive(components, 1, &allowed, &mut state)
+}
+
+fn validate_tree_recursive(
+    components: &[crate::ai::ToolComponent],
+    depth: usize,
+    allowed_packs: &[String],
+    state: &mut TreeValidationState,
+) -> Result<(), String> {
+    use super::limits::{
+        MAX_ANIMATED_COMPONENTS, MAX_CHART_POINTS, MAX_COMPONENTS_PER_SURFACE,
+        MAX_COMPONENT_ID_LEN, MAX_COMPONENT_TREE_DEPTH, MAX_PROPS_JSON_BYTES, MAX_SVG_NODES,
+        MAX_TEXT_CONTENT_CHARS,
+    };
+
+    if depth > MAX_COMPONENT_TREE_DEPTH {
+        return Err(format!(
+            "component tree depth ({depth}) exceeds maximum of {MAX_COMPONENT_TREE_DEPTH}"
+        ));
+    }
+
     for component in components {
-        validate_component_type_allowed_for_packs(&component.component_type, allowed_pack_ids)?;
+        state.total_count += 1;
+        if state.total_count > MAX_COMPONENTS_PER_SURFACE {
+            return Err(format!(
+                "component count ({}) exceeds maximum of {MAX_COMPONENTS_PER_SURFACE}",
+                state.total_count
+            ));
+        }
+
+        let id = component.id.trim();
+        if id.is_empty() {
+            return Err("component id cannot be empty".into());
+        }
+        if id.len() > MAX_COMPONENT_ID_LEN {
+            return Err(format!(
+                "component id '{id}' exceeds maximum length of {MAX_COMPONENT_ID_LEN}"
+            ));
+        }
+        if !state.ids.insert(component.id.clone()) {
+            return Err(format!("duplicate component id: {}", component.id));
+        }
+
+        validate_component_type_allowed_for_packs(&component.component_type, allowed_packs)?;
+
+        if matches!(component.component_type.as_str(), "canvasScene" | "clock") {
+            state.animated_count += 1;
+            if state.animated_count > MAX_ANIMATED_COMPONENTS {
+                return Err(format!(
+                    "animated components count ({}) exceeds maximum of {MAX_ANIMATED_COMPONENTS}",
+                    state.animated_count
+                ));
+            }
+        }
+
+        if let Some(props) = &component.props {
+            let s = props.to_string();
+            if s.len() > MAX_PROPS_JSON_BYTES {
+                return Err(format!(
+                    "component '{}' props exceed maximum size of {MAX_PROPS_JSON_BYTES} bytes",
+                    component.id
+                ));
+            }
+            validate_text_strings_bounded(props, MAX_TEXT_CONTENT_CHARS, &component.id)?;
+
+            if component.component_type.starts_with("chart") {
+                if let Some(data) = props
+                    .get("data")
+                    .or_else(|| props.get("points"))
+                    .and_then(|v| v.as_array())
+                {
+                    if data.len() > MAX_CHART_POINTS {
+                        return Err(format!(
+                            "chart '{}' data points ({}) exceed maximum of {MAX_CHART_POINTS}",
+                            component.id,
+                            data.len()
+                        ));
+                    }
+                }
+            }
+
+            if component.component_type == "svgScene" {
+                let node_count = component.children.as_ref().map(|c| c.len()).unwrap_or(0)
+                    + props
+                        .get("elements")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0);
+                if node_count > MAX_SVG_NODES {
+                    return Err(format!(
+                        "svgScene '{}' node count ({node_count}) exceeds maximum of {MAX_SVG_NODES}",
+                        component.id
+                    ));
+                }
+            }
+        }
+
         validate_labeled_props(
             &component.component_type,
             &component.id,
             component.props.as_ref(),
         )?;
+
         if let Some(children) = &component.children {
-            validate_tool_components_for_packs(children, allowed_pack_ids)?;
+            validate_tree_recursive(children, depth + 1, allowed_packs, state)?;
         }
+    }
+
+    Ok(())
+}
+
+fn validate_text_strings_bounded(
+    val: &Value,
+    max_len: usize,
+    component_id: &str,
+) -> Result<(), String> {
+    match val {
+        Value::String(s) => {
+            if s.chars().count() > max_len {
+                return Err(format!(
+                    "text content in component '{component_id}' exceeds maximum length of {max_len}"
+                ));
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                validate_text_strings_bounded(item, max_len, component_id)?;
+            }
+        }
+        Value::Object(map) => {
+            for (k, v) in map {
+                if k.len() > super::limits::MAX_COMPONENT_ID_LEN {
+                    return Err(format!(
+                        "prop key '{k}' in component '{component_id}' exceeds maximum length of {}",
+                        super::limits::MAX_COMPONENT_ID_LEN
+                    ));
+                }
+                validate_text_strings_bounded(v, max_len, component_id)?;
+            }
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -512,6 +633,7 @@ mod tests {
                 value_key: None,
                 props: None,
                 children: None,
+                ..Default::default()
             },
             ToolComponent {
                 id: "b".into(),
@@ -519,6 +641,7 @@ mod tests {
                 value_key: None,
                 props: Some(serde_json::json!({ "label": "Button" })),
                 children: None,
+                ..Default::default()
             },
         ];
         assert!(validate_tool_components(&stub).is_err());
@@ -529,7 +652,140 @@ mod tests {
             value_key: None,
             props: Some(serde_json::json!({ "label": "Next task" })),
             children: None,
+            ..Default::default()
         }];
         assert!(validate_tool_components(&ok).is_ok());
+    }
+
+    #[test]
+    fn rejects_duplicate_component_ids() {
+        use crate::ai::ToolComponent;
+        let comps = vec![
+            ToolComponent {
+                id: "dup-id".into(),
+                component_type: "text".into(),
+                value_key: None,
+                props: Some(serde_json::json!({ "text": "First" })),
+                children: None,
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "dup-id".into(),
+                component_type: "text".into(),
+                value_key: None,
+                props: Some(serde_json::json!({ "text": "Second" })),
+                children: None,
+                ..Default::default()
+            },
+        ];
+        let err = validate_tool_components(&comps).unwrap_err();
+        assert!(err.contains("duplicate component id: dup-id"));
+    }
+
+    #[test]
+    fn rejects_component_count_over_200() {
+        use crate::ai::ToolComponent;
+        let mut comps = Vec::new();
+        for i in 0..205 {
+            comps.push(ToolComponent {
+                id: format!("comp-{i}"),
+                component_type: "text".into(),
+                value_key: None,
+                props: Some(serde_json::json!({ "text": format!("Text {i}") })),
+                children: None,
+                ..Default::default()
+            });
+        }
+        let err = validate_tool_components(&comps).unwrap_err();
+        assert!(err.contains("component count"));
+    }
+
+    #[test]
+    fn rejects_tree_depth_over_24() {
+        use crate::ai::ToolComponent;
+        let mut root = ToolComponent {
+            id: "deep-25".into(),
+            component_type: "text".into(),
+            value_key: None,
+            props: Some(serde_json::json!({ "text": "leaf" })),
+            children: None,
+            ..Default::default()
+        };
+        for i in (0..25).rev() {
+            root = ToolComponent {
+                id: format!("node-{i}"),
+                component_type: "column".into(),
+                value_key: None,
+                props: None,
+                children: Some(vec![root]),
+                ..Default::default()
+            };
+        }
+        let err = validate_tool_components(&[root]).unwrap_err();
+        assert!(err.contains("component tree depth"));
+    }
+
+    #[test]
+    fn rejects_oversized_component_id() {
+        use crate::ai::ToolComponent;
+        let long_id = "a".repeat(70);
+        let comps = vec![ToolComponent {
+            id: long_id,
+            component_type: "text".into(),
+            value_key: None,
+            props: Some(serde_json::json!({ "text": "hello" })),
+            children: None,
+            ..Default::default()
+        }];
+        let err = validate_tool_components(&comps).unwrap_err();
+        assert!(err.contains("exceeds maximum length"));
+    }
+
+    #[test]
+    fn rejects_oversized_props() {
+        use crate::ai::ToolComponent;
+        let huge_str = "x".repeat(150_000);
+        let comps = vec![ToolComponent {
+            id: "huge-props".into(),
+            component_type: "text".into(),
+            value_key: None,
+            props: Some(serde_json::json!({ "text": "valid", "extra": huge_str })),
+            children: None,
+            ..Default::default()
+        }];
+        let err = validate_tool_components(&comps).unwrap_err();
+        assert!(err.contains("props exceed maximum size"));
+    }
+
+    #[test]
+    fn rejects_chart_points_over_limit() {
+        use crate::ai::ToolComponent;
+        let points: Vec<i32> = (0..2_500).collect();
+        let comps = vec![ToolComponent {
+            id: "big-chart".into(),
+            component_type: "chartLine".into(),
+            value_key: None,
+            props: Some(serde_json::json!({ "data": points })),
+            children: None,
+            ..Default::default()
+        }];
+        let err =
+            validate_tool_components_for_packs(&comps, &["coreside.charts".into()]).unwrap_err();
+        assert!(err.contains("data points (2500) exceed maximum of 2000"));
+    }
+
+    #[test]
+    fn full_replace_definition_rejects_duplicate_ids() {
+        let def = serde_json::json!({
+            "id": "tool-test",
+            "name": "Test Tool",
+            "layout": { "type": "stack" },
+            "components": [
+                { "id": "dup", "type": "text", "props": { "text": "A" } },
+                { "id": "dup", "type": "text", "props": { "text": "B" } }
+            ]
+        });
+        let err = validate_definition_components(&def).unwrap_err();
+        assert!(err.contains("duplicate component id: dup"));
     }
 }

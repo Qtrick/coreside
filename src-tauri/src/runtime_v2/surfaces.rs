@@ -628,6 +628,7 @@ mod tests {
                 value_key: None,
                 props: Some(json!({"text": "Hi"})),
                 children: None,
+                ..Default::default()
             }],
         };
         let applied =
@@ -791,6 +792,7 @@ mod tests {
                 value_key: None,
                 props: Some(json!({"text": "Legacy"})),
                 children: None,
+                ..Default::default()
             }],
         };
         let applied = apply_tool_change(
@@ -819,6 +821,7 @@ mod tests {
                 value_key: None,
                 props: Some(json!({})),
                 children: None,
+                ..Default::default()
             }],
             ..core_tool
         };

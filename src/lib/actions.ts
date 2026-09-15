@@ -185,12 +185,18 @@ export function applyAction(
       {
         const values: Record<string, unknown> = {};
         const fields = action.includeFields ?? Object.keys(state);
+        let hasUnauthorized = false;
         for (const field of fields) {
           if (!isAllowed(field, options.allowedTargets)) {
             errors.push(`Field "${field}" is outside the current tool scope`);
-            continue;
+            hasUnauthorized = true;
+          } else {
+            values[field] = state[field];
           }
-          values[field] = state[field];
+        }
+        if (hasUnauthorized) {
+          // Fail closed: do not invoke privileged submission if any field is unauthorized
+          break;
         }
         options.onSubmitToAgent({
           toolId: options.toolId,
@@ -208,12 +214,18 @@ export function applyAction(
       }
       {
         const input: Record<string, unknown> = { ...(action.input ?? {}) };
+        let hasUnauthorized = false;
         for (const [key, stateKey] of Object.entries(action.inputFromState ?? {})) {
           if (!isAllowed(stateKey, options.allowedTargets)) {
             errors.push(`Field "${stateKey}" is outside the current tool scope`);
-            continue;
+            hasUnauthorized = true;
+          } else {
+            input[key] = state[stateKey];
           }
-          input[key] = state[stateKey];
+        }
+        if (hasUnauthorized) {
+          // Fail closed: do not invoke registered action if any stateKey is unauthorized
+          break;
         }
         const task = options.onInvokeRegisteredAction({
           toolId: options.toolId,

@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-09-15T05:51:24.085Z",
+  "commit": "b491c6ab77ad9edd11f5e2aa4435f43d81449e8d",
+  "dirty": true,
+  "sourceFingerprint": "630c063e81b6f29208fdc04de54114efcf08838daea722cc2e7ce9f17db42279",
+  "packageLockHash": "f99da7c99dc5e2db93567632e2c36d36796c4b3ea8cf6a575a3f337bb6b9d641",
+  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "buildMode": "development",
+  "exitStatus": 0,
+  "evidenceLevel": "classified-not-desktop-verified",
+  "command": "audit:readiness",
+  "baseline": {
+    "kind": "prior-coreside-archive",
+    "label": "Coreside Chat AI(10).zip",
+    "sha256": "10d7c5110a12525b53a48ee3dc66bf8d3a054c243553bc4ee9a1db27bc8b86b5",
+    "note": "Compare active tree posture vs archive 10d7c511… (not a full file diff)."
+  },
+  "advanced": [
+    {
+      "id": "wallpaper-atomic-settings",
+      "from": "Absent / fragmented settings writes",
+      "to": "Integrated – Not Verified",
+      "detail": "Atomic workspace appearance + slider coalesce; desktop only when Journey 13 evidence is on HEAD."
+    },
+    {
+      "id": "channel-scoped-streaming",
+      "from": "Global agent-turn text bus",
+      "to": "Integrated – Not Verified",
+      "detail": "Interactive send uses Channel; Text kept off global bus; desktop when Journey 14 evidence is on HEAD."
+    },
+    {
+      "id": "true-streaming",
+      "from": "Buffered / incomplete live path",
+      "to": "Integrated – Not Verified",
+      "detail": "chat_with_auto → chat_stream; desktop when Journey 12 evidence is on HEAD."
+    },
+    {
+      "id": "queue-ui",
+      "from": "Disconnected / missing panel",
+      "to": "Unit Verified",
+      "detail": "ConversationQueue conversation-scoped Channel refresh; 20s reconcile."
+    },
+    {
+      "id": "history-replay",
+      "from": "Missing / misleading scripts",
+      "to": "Unit Verified",
+      "detail": "Paced read-only ReplayPlayer over Committed transaction summaries; full event-stream replay / desktop still open."
+    },
+    {
+      "id": "e2e-12-13",
+      "from": "Absent",
+      "to": "Integrated – Not Verified",
+      "detail": "Journey 12/13 specs exist; Desktop Verified only when both pass on HEAD."
+    },
+    {
+      "id": "progressive-preview",
+      "from": "Absent",
+      "to": "Unit Verified",
+      "detail": "PreviewTransaction + live NDJSON preview; surface paint / JSON-blob / E2E still open."
+    },
+    {
+      "id": "structured-user-input",
+      "from": "Scaffolded",
+      "to": "Unit Verified",
+      "detail": "Typed Rust seal + trust gate; spoofed marker does not grant trust; desktop E2E not_run."
+    },
+    {
+      "id": "attachment-authorization",
+      "from": "Opaque-ID-only reads",
+      "to": "Unit Verified",
+      "detail": "Conversation-scoped authorize_attachment_access; wrong conversation_id denied."
+    },
+    {
+      "id": "attachment-gc",
+      "from": "Startup reconcile only",
+      "to": "Unit Verified",
+      "detail": "run_attachment_gc command + no-follow symlink remove + counts-only report."
+    },
+    {
+      "id": "packaged-smoke",
+      "from": "Absent",
+      "to": "Scaffolded",
+      "detail": "Launch-only scan+quit recorded when present — not Packaged Verified until BYOK/chat/persistence packaged proof."
+    },
+    {
+      "id": "command-authority-j11",
+      "from": "Absent / manual",
+      "to": "Integrated – Not Verified",
+      "detail": "Journey 11 E2E denies 15 sensitive invokes + cross-tool save_tool_state from tool-* windows."
+    },
+    {
+      "id": "multimodal-provider-send",
+      "from": "Text-only flatten",
+      "to": "Unit Verified",
+      "detail": "Native image + tool-result envelopes per provider family; validate_provider_send fail-closed."
+    },
+    {
+      "id": "local-ai-privacy",
+      "from": "Absent",
+      "to": "Integrated – Not Verified",
+      "detail": "Rust access_mode + UI disclosure; Journey 17 spec not executed in default harness."
+    },
+    {
+      "id": "hosted-ai-gateway",
+      "from": "Absent",
+      "to": "Scaffolded",
+      "detail": "ai-gateway + Stripe billing scaffold + entitlements SQL; hosted track Deliberately Deferred."
+    },
+    {
+      "id": "e2e-1-14",
+      "from": "Absent",
+      "to": "Integrated – Not Verified",
+      "detail": "Journey 7 passed_partial blocks full Desktop Verified for the 1–14 suite."
+    }
+  ],
+  "unchangedOrStillOpen": [
+    {
+      "id": "hosted-ai",
+      "state": "Deliberately Deferred"
+    },
+    {
+      "id": "progressive-preview-gaps",
+      "state": "Unit Verified (partial)",
+      "detail": "Speculative surface paint + conversation-scoped overlay clear landed; JSON-blob progressive + desktop E2E still open."
+    },
+    {
+      "id": "packaged-smoke-full",
+      "state": "Integrated – Not Verified",
+      "detail": "Launch-only smoke ≠ Packaged Verified; BYOK/chat/persistence packaged checklist still open."
+    },
+    {
+      "id": "human-acceptance",
+      "state": "Absent",
+      "detail": "HUMAN_ACCEPTANCE_CHECKLIST unsigned — blocks Automated Public-Beta Candidate."
+    }
+  ],
+  "nonClaims": [
+    "No Human Accepted",
+    "No Automated Public-Beta Candidate (unsigned human checklist; Journey 7 partial; launch-only packaged smoke)",
+    "Public beta Not ready",
+    "Hosted private alpha Not ready",
+    "Journey 7 passed_partial is not a Desktop Verified suite pass",
+    "Launch-only packaged smoke is not Packaged Verified"
+  ]
+}

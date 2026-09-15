@@ -223,6 +223,32 @@ export function WallpaperSettings() {
     }
   };
 
+  const [selectedCategory, setSelectedCategory] = useState<"all" | "live" | "solid" | "media">("all");
+
+  const activeTitle = useMemo(() => {
+    if (solidActive) {
+      return `Solid Color (${committedSolid.color})`;
+    }
+    if (activeId && activeId !== "none") {
+      const p = CANVAS_PRESETS.find((cp) => cp.id === activeId);
+      return p ? p.label : activeId;
+    }
+    return "None (Default Surface)";
+  }, [solidActive, committedSolid.color, activeId]);
+
+  const activeCategoryDesc = useMemo(() => {
+    if (solidActive) return "Solid Color";
+    if (activeId && activeId !== "none") return LIVE_PRESET_IDS.has(activeId) ? "Live Ambient Canvas" : "Preset";
+    return "No active wallpaper layer";
+  }, [solidActive, activeId]);
+
+  const displayedPresets = useMemo(() => {
+    if (selectedCategory === "live") {
+      return filteredPresets.filter((p) => LIVE_PRESET_IDS.has(p.id));
+    }
+    return filteredPresets;
+  }, [filteredPresets, selectedCategory]);
+
   return (
     <section className="settings-subsection wallpaper-settings" aria-labelledby="wallpaper-heading">
       <h4 className="settings-subheading" id="wallpaper-heading">
@@ -231,145 +257,230 @@ export function WallpaperSettings() {
       <p>
         Choose a workspace background preset or import media from the library.
         Project chats can override this with their own wallpaper. Preview applies
-        immediately; durable save follows (failure restores the last saved
-        wallpaper).
+        immediately; durable save follows.
       </p>
 
-      <label className="wallpaper-preset-search">
-        <span className="sr-only">Search wallpaper presets</span>
-        <input
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search presets…"
-          disabled={busy}
-        />
-      </label>
-
-      <div className="wallpaper-preset-grid" role="group" aria-label="Wallpaper presets">
-        {filteredPresets.map((preset) => {
-          const isLive = LIVE_PRESET_IDS.has(preset.id);
-          return (
-            <button
-              key={preset.id}
-              type="button"
-              className="wallpaper-preset-card"
-              aria-pressed={activeId === preset.id}
-              disabled={busy}
-              onClick={() => void applyPreset(preset.id)}
-            >
-              <span className="wallpaper-preset-card-top">
-                <span className="wallpaper-preset-label">{preset.label}</span>
-                {isLive ? (
-                  <span className="wallpaper-live-badge" aria-label="Live wallpaper">
-                    Live
-                  </span>
-                ) : null}
-              </span>
-              <span className="muted">{preset.description}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {filteredPresets.length === 0 ? (
-        <p className="muted">No presets match “{query.trim()}”.</p>
-      ) : null}
-
-      <div className="wallpaper-solid-color" aria-labelledby="wallpaper-solid-heading">
-        <h4 className="settings-subheading" id="wallpaper-solid-heading">
-          Solid color
-        </h4>
-        <p>
-          Pick a workspace solid color. Draft changes preview locally below;
-          Apply saves. Filters affect only the wallpaper layer.
-        </p>
-        <div className="wallpaper-solid-row">
-          <label className="wallpaper-solid-swatch">
-            <span className="sr-only">Solid color</span>
-            <input
-              type="color"
-              value={draftCanonical ?? committedSolid.color}
-              disabled={busy}
-              onChange={(e) => setDraftHex(e.target.value)}
-            />
-          </label>
-          <label className="wallpaper-solid-hex">
-            <span className="sr-only">Hex color</span>
-            <input
-              type="text"
-              spellCheck={false}
-              autoComplete="off"
-              placeholder="#RRGGBB"
-              value={draftHex}
-              disabled={busy}
-              aria-invalid={draftHex.trim().length > 0 && !draftCanonical}
-              onChange={(e) => setDraftHex(e.target.value)}
-            />
-          </label>
+      {/* Active Wallpaper Banner */}
+      <div className="wallpaper-active-banner">
+        <div className="wallpaper-active-banner-info">
           <div
-            className="wallpaper-solid-preview"
-            style={{ background: draftCanonical ?? "transparent" }}
+            className={`wallpaper-active-preview ${
+              solidActive ? "" : `wallpaper-thumb-${activeId}`
+            }`}
+            style={solidActive ? { background: committedSolid.color } : undefined}
             aria-hidden
-            title="Draft preview"
           />
+          <div>
+            <div style={{ fontWeight: 600, fontSize: "0.95rem" }}>{activeTitle}</div>
+            <div className="muted" style={{ fontSize: "0.8rem" }}>{activeCategoryDesc}</div>
+          </div>
         </div>
-        <div
-          className="wallpaper-filter-presets"
-          role="group"
-          aria-label="Wallpaper filter presets"
-        >
-          {WALLPAPER_FILTER_PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              className="btn btn-secondary"
-              aria-pressed={draftFilter === preset.id}
-              disabled={busy}
-              onClick={() => setDraftFilter(preset.id)}
-            >
-              {preset.label}
-            </button>
-          ))}
-        </div>
-        <div className="button-row">
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={busy || !draftDirty || !draftCanonical}
-            onClick={() => void applySolidDraft()}
-          >
-            Apply
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={busy || !draftDirty}
-            onClick={cancelSolidDraft}
-          >
-            Cancel
-          </button>
+        {wallpaperActive ? (
           <button
             type="button"
             className="btn btn-ghost"
+            style={{ fontSize: "0.82rem" }}
             disabled={busy}
-            onClick={() => void resetSolid()}
+            onClick={() => void applyPreset("none")}
           >
-            Reset
+            Reset to None
           </button>
-        </div>
+        ) : null}
       </div>
 
-      <div className="button-row">
+      {/* Category Tabs */}
+      <div className="wallpaper-category-tabs" role="tablist" aria-label="Wallpaper categories">
         <button
           type="button"
-          className="btn btn-secondary"
-          disabled={busy}
-          onClick={() => navigateToMedia()}
+          role="tab"
+          className="wallpaper-category-tab"
+          aria-selected={selectedCategory === "all"}
+          onClick={() => setSelectedCategory("all")}
         >
-          Open media library
+          All Presets
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className="wallpaper-category-tab"
+          aria-selected={selectedCategory === "live"}
+          onClick={() => setSelectedCategory("live")}
+        >
+          Live Ambient
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className="wallpaper-category-tab"
+          aria-selected={selectedCategory === "solid"}
+          onClick={() => setSelectedCategory("solid")}
+        >
+          Solid Color
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className="wallpaper-category-tab"
+          aria-selected={selectedCategory === "media"}
+          onClick={() => setSelectedCategory("media")}
+        >
+          Media Library
         </button>
       </div>
+
+      {selectedCategory !== "solid" && selectedCategory !== "media" ? (
+        <>
+          <label className="wallpaper-preset-search">
+            <span className="sr-only">Search wallpaper presets</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search presets…"
+              disabled={busy}
+            />
+          </label>
+
+          <div className="wallpaper-preset-grid" role="group" aria-label="Wallpaper presets">
+            {displayedPresets.map((preset) => {
+              const isLive = LIVE_PRESET_IDS.has(preset.id);
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className="wallpaper-preset-card"
+                  aria-pressed={activeId === preset.id}
+                  disabled={busy}
+                  onClick={() => void applyPreset(preset.id)}
+                >
+                  <div
+                    className={`wallpaper-preset-thumbnail wallpaper-thumb-${preset.id}`}
+                    aria-hidden
+                  />
+                  <span className="wallpaper-preset-card-top">
+                    <span className="wallpaper-preset-label">{preset.label}</span>
+                    {isLive ? (
+                      <span className="wallpaper-live-badge" aria-label="Live wallpaper">
+                        Live
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="muted">{preset.description}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {displayedPresets.length === 0 ? (
+            <p className="muted">No presets match “{query.trim()}”.</p>
+          ) : null}
+        </>
+      ) : null}
+
+      {(selectedCategory === "all" || selectedCategory === "solid") ? (
+        <div className="wallpaper-solid-color" aria-labelledby="wallpaper-solid-heading">
+          <h4 className="settings-subheading" id="wallpaper-solid-heading">
+            Solid color
+          </h4>
+          <p>
+            Pick a workspace solid color. Draft changes preview locally below;
+            Apply saves. Filters affect only the wallpaper layer.
+          </p>
+          <div className="wallpaper-solid-row">
+            <label className="wallpaper-solid-swatch">
+              <span className="sr-only">Solid color</span>
+              <input
+                type="color"
+                value={draftCanonical ?? committedSolid.color}
+                disabled={busy}
+                onChange={(e) => setDraftHex(e.target.value)}
+              />
+            </label>
+            <label className="wallpaper-solid-hex">
+              <span className="sr-only">Hex color</span>
+              <input
+                type="text"
+                spellCheck={false}
+                autoComplete="off"
+                placeholder="#RRGGBB"
+                value={draftHex}
+                disabled={busy}
+                aria-invalid={draftHex.trim().length > 0 && !draftCanonical}
+                onChange={(e) => setDraftHex(e.target.value)}
+              />
+            </label>
+            <div
+              className="wallpaper-solid-preview"
+              style={{ background: draftCanonical ?? "transparent" }}
+              aria-hidden
+              title="Draft preview"
+            />
+          </div>
+          <div
+            className="wallpaper-filter-presets"
+            role="group"
+            aria-label="Wallpaper filter presets"
+          >
+            {WALLPAPER_FILTER_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className="btn btn-secondary"
+                aria-pressed={draftFilter === preset.id}
+                disabled={busy}
+                onClick={() => setDraftFilter(preset.id)}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <div className="button-row">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || !draftDirty || !draftCanonical}
+              onClick={() => void applySolidDraft()}
+            >
+              Apply
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={busy || !draftDirty}
+              onClick={cancelSolidDraft}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={busy}
+              onClick={() => void resetSolid()}
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {(selectedCategory === "all" || selectedCategory === "media") ? (
+        <div style={{ marginTop: "var(--space-4)" }}>
+          <h4 className="settings-subheading">Media Library</h4>
+          <p className="muted" style={{ marginBottom: "var(--space-2)" }}>
+            Use custom local images or videos from your library as workspace or project backgrounds.
+          </p>
+          <div className="button-row">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={busy}
+              onClick={() => navigateToMedia()}
+            >
+              Open media library
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div
         className="interface-transparency-control"

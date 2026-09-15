@@ -110,15 +110,18 @@ fn collect_ids(
 }
 
 pub fn assert_tree_limits(components: &[ToolComponent]) -> PatchResult<()> {
-    if count_components(components) > MAX_COMPONENTS_PER_SURFACE {
-        return Err(PatchConflict::ComponentLimitExceeded);
-    }
-    if max_depth(components, 1) > MAX_COMPONENT_TREE_DEPTH {
-        return Err(PatchConflict::DepthExceeded);
-    }
-    let mut ids = std::collections::HashSet::new();
-    collect_ids(components, &mut ids)?;
-    Ok(())
+    super::packs::validate_tool_components(components).map_err(|e| {
+        if e.contains("duplicate component id:") {
+            let id = e.split(": ").nth(1).unwrap_or(&e).trim().to_string();
+            PatchConflict::DuplicateId { component_id: id }
+        } else if e.contains("depth") {
+            PatchConflict::DepthExceeded
+        } else if e.contains("component count") {
+            PatchConflict::ComponentLimitExceeded
+        } else {
+            PatchConflict::InvalidPayload(e)
+        }
+    })
 }
 
 pub fn check_revision(base: Option<i64>, current: i64) -> PatchResult<()> {
@@ -381,7 +384,9 @@ mod tests {
                 value_key: None,
                 props: Some(json!({"maximum": 8})),
                 children: None,
+                ..Default::default()
             }]),
+            ..Default::default()
         }]
     }
 

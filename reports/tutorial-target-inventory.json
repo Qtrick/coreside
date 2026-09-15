@@ -1,12 +1,13 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T16:09:19.456Z",
-  "commit": "25e6c80e8ec7c0b9f43829f4efa053b56508e257",
+  "generatedAt": "2026-08-15T02:29:09.133Z",
+  "commit": "b491c6ab77ad9edd11f5e2aa4435f43d81449e8d",
   "dirty": true,
-  "fingerprint": "8c3f72d523464e6dedb7371af88ef4f00cb44387f223b6c69e2bc279cc443a93",
+  "fingerprint": "630c063e81b6f29208fdc04de54114efcf08838daea722cc2e7ce9f17db42279",
   "command": "audit:tutorial-targets",
   "declaredTargets": [
+    "ai-connections-nav",
     "app-panel",
     "chat-composer",
     "chat-composer-send",
@@ -20,23 +21,25 @@
     "help-learning-nav",
     "sidebar-projects"
   ],
-  "missingInDom": [],
+  "missingInDom": [
+    "ai-connections-nav"
+  ],
   "undeclaredInTutorials": [],
   "occurrences": [
     {
       "id": "chat-composer",
       "file": "src/components/chat/Composer.tsx",
-      "line": 300
+      "line": 324
     },
     {
       "id": "chat-composer-send",
       "file": "src/components/chat/Composer.tsx",
-      "line": 426
+      "line": 451
     },
     {
       "id": "help-learning-nav",
       "file": "src/components/settings/SettingsPanel.tsx",
-      "line": 359
+      "line": 429
     },
     {
       "id": "sidebar-projects",
@@ -46,12 +49,12 @@
     {
       "id": "app-panel",
       "file": "src/components/tool-canvas/ToolCanvas.tsx",
-      "line": 302
+      "line": 279
     },
     {
       "id": "app-panel",
       "file": "src/components/tool-canvas/ToolCanvas.tsx",
-      "line": 334
+      "line": 311
     }
   ]
 }

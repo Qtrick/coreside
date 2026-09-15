@@ -37,6 +37,9 @@ pub const MAX_PATCH_QUEUE: usize = 64;
 pub const MAX_PATCH_QUEUE_BYTES: usize = 1_000_000;
 pub const MAX_PREVIEW_HZ: u32 = 8;
 pub const MAX_CONTEXT_LEDGER_PER_CONVERSATION: usize = 200;
+pub const MAX_COMPONENT_ID_LEN: usize = 64;
+pub const MAX_TEXT_CONTENT_CHARS: usize = 50_000;
+pub const MAX_PROPS_JSON_BYTES: usize = 128_000;
 
 /// Compact JSON for agent capability introspection (agent cannot raise ceilings).
 pub fn limits_json() -> serde_json::Value {

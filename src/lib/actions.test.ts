@@ -30,30 +30,51 @@ describe("invokeRegisteredAction", () => {
     expect(result.changedKeys).toEqual([]);
   });
 
-  it("rejects inputFromState outside allowed targets", () => {
+  it("blocks invokeRegisteredAction fail-closed if any inputFromState field is outside allowed targets", () => {
     const onInvokeRegisteredAction = vi.fn();
     const result = applyAction(
       {
         type: "invokeRegisteredAction",
         actionName: "local_data.write",
-        inputFromState: { secret: "hidden" },
+        input: { publicParam: "ok" },
+        inputFromState: { secret: "hidden", allowed: "draft" },
       },
       {
-        state: { hidden: "value" },
+        state: { hidden: "sensitive_value", draft: "draft_value" },
         toolId: "tool-1",
         allowedTargets: new Set(["draft"]),
         onInvokeRegisteredAction,
       },
     );
 
-    expect(onInvokeRegisteredAction).toHaveBeenCalledWith({
-      toolId: "tool-1",
-      actionName: "local_data.write",
-      input: {},
-      componentId: undefined,
-    });
+    // Fail closed: zero privileged calls! No partial execution!
+    expect(onInvokeRegisteredAction).not.toHaveBeenCalled();
     expect(result.errors).toContain(
       'Field "hidden" is outside the current tool scope',
+    );
+    expect(result.changedKeys).toEqual([]);
+  });
+
+  it("blocks submitToAgent fail-closed if any requested field is outside allowed targets", () => {
+    const onSubmitToAgent = vi.fn();
+    const result = applyAction(
+      {
+        type: "submitToAgent",
+        eventName: "form_submit",
+        includeFields: ["allowedField", "secretField"],
+      },
+      {
+        state: { allowedField: "hello", secretField: "secret_token" },
+        toolId: "tool-1",
+        allowedTargets: new Set(["allowedField"]),
+        onSubmitToAgent,
+      },
+    );
+
+    // Fail closed: zero submissions to agent!
+    expect(onSubmitToAgent).not.toHaveBeenCalled();
+    expect(result.errors).toContain(
+      'Field "secretField" is outside the current tool scope',
     );
   });
 

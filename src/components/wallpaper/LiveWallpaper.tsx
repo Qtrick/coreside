@@ -148,10 +148,7 @@ function CanvasWallpaper({
 
       const draw = (force = false) => {
         if (!running) return;
-        // WebDriver sessions often report visibilityState=hidden even with a live window.
-        // When navigator.webdriver is set, keep painting; otherwise only forced frames run.
         if (hidden && !force && !webDriver) {
-          raf = requestAnimationFrame(() => draw());
           return;
         }
         const w = viewW;
@@ -173,10 +170,12 @@ function CanvasWallpaper({
           ctx.fillStyle = "#b8ffb0";
           ctx.fillText(ch, x, y);
           if (y > h && Math.random() > 0.975) drops[i] = 0;
-          drops[i]! += reduced ? 0.15 * speed : speed;
+          drops[i]! += speed;
         }
         ctx.globalAlpha = 1;
-        raf = requestAnimationFrame(() => draw());
+        if (!reduced) {
+          raf = requestAnimationFrame(() => draw());
+        }
       };
 
       repaintMatrixIfHidden = () => {
@@ -188,10 +187,17 @@ function CanvasWallpaper({
       ctx.fillStyle = "#050805";
       ctx.fillRect(0, 0, viewW, viewH);
       // Immediate first paint when visible or WebDriver needs samples before RAF.
-      if (!hidden || webDriver) {
-        draw(true);
-      }
+      draw(true);
       repaintMatrixIfHidden();
+
+      const onMatrixVisibility = () => {
+        hidden = document.visibilityState === "hidden";
+        if (!hidden && !reduced && running) {
+          cancelAnimationFrame(raf);
+          raf = requestAnimationFrame(() => draw());
+        }
+      };
+      document.addEventListener("visibilitychange", onMatrixVisibility);
 
       return () => {
         running = false;
@@ -199,6 +205,7 @@ function CanvasWallpaper({
         cancelAnimationFrame(resizeRaf);
         window.removeEventListener("resize", onResize);
         document.removeEventListener("visibilitychange", onVisibility);
+        document.removeEventListener("visibilitychange", onMatrixVisibility);
         ro?.disconnect();
       };
     }
@@ -229,18 +236,17 @@ function CanvasWallpaper({
     const drawFrame = (now: number) => {
       if (!running) return;
       if (hidden) {
-        raf = requestAnimationFrame(drawFrame);
         return;
       }
       const w = viewW;
       const h = viewH;
-      const t = (now - t0) / 1000;
+      const t = reduced ? 0 : (now - t0) / 1000;
       ctx.clearRect(0, 0, w, h);
       ctx.globalAlpha = opacity;
 
       if (kind === "aurora") {
         const g1 = ctx.createRadialGradient(
-          w * (0.3 + Math.sin(t * 0.4 * speed) * 0.15),
+          w * (0.3 + (reduced ? 0 : Math.sin(t * 0.4 * speed) * 0.15)),
           h * 0.2,
           40,
           w * 0.35,
@@ -250,7 +256,7 @@ function CanvasWallpaper({
         g1.addColorStop(0, color);
         g1.addColorStop(1, "transparent");
         const g2 = ctx.createRadialGradient(
-          w * (0.7 + Math.cos(t * 0.35 * speed) * 0.12),
+          w * (0.7 + (reduced ? 0 : Math.cos(t * 0.35 * speed) * 0.12)),
           h * 0.55,
           30,
           w * 0.65,
@@ -264,7 +270,7 @@ function CanvasWallpaper({
         ctx.fillStyle = g2;
         ctx.fillRect(0, 0, w, h);
       } else if (kind === "pulse") {
-        const pulse = 0.5 + 0.5 * Math.sin(t * 1.2 * speed);
+        const pulse = reduced ? 0.5 : 0.5 + 0.5 * Math.sin(t * 1.2 * speed);
         const g = ctx.createRadialGradient(
           w * 0.5,
           h * 0.45,
@@ -306,7 +312,9 @@ function CanvasWallpaper({
       }
 
       ctx.globalAlpha = 1;
-      raf = requestAnimationFrame(drawFrame);
+      if (!reduced) {
+        raf = requestAnimationFrame(drawFrame);
+      }
     };
 
     raf = requestAnimationFrame(drawFrame);

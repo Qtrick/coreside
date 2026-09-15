@@ -30,6 +30,24 @@ export function makeUpdatePropsOp(args: {
   };
 }
 
+export function makeReplaceComponentOp(args: {
+  surfaceId: string;
+  componentId: string;
+  component: ToolComponent;
+  baseRevision: number;
+}): AppOperation {
+  return {
+    id: opId(),
+    type: "component.replace",
+    target: {
+      surfaceId: args.surfaceId,
+      componentId: args.componentId,
+    },
+    baseRevision: args.baseRevision,
+    payload: { component: args.component },
+  };
+}
+
 export function makeHideComponentOp(args: {
   surfaceId: string;
   componentId: string;

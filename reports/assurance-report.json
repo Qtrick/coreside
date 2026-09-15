@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-08-15T02:33:59.758Z",
+  "commit": "b491c6ab77ad9edd11f5e2aa4435f43d81449e8d",
+  "dirty": true,
+  "command": "assurance:report",
+  "exitStatus": "failed",
+  "narrowAssuranceOnly": true,
+  "fullReleasePass": false,
+  "note": "Narrow evidence validator only (presence/freshness/partial rejection). Not a full release pass. Public beta remains Not ready.",
+  "findings": [
+    {
+      "severity": "P1",
+      "file": "release-gates.json",
+      "status": "missing"
+    },
+    {
+      "severity": "P1",
+      "file": "command-authority-results.json",
+      "status": "stale_commit",
+      "reportCommit": "2b502278ede0d0db57fe16f77ef1e282a92fd0d1",
+      "activeCommit": "b491c6ab77ad9edd11f5e2aa4435f43d81449e8d"
+    }
+  ],
+  "localFirstVerdict": "Not ready",
+  "hostedAiVerdict": "Not ready",
+  "publicBeta": "Not ready"
+}

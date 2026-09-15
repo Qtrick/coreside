@@ -48,7 +48,7 @@ impl ToolAction {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolComponent {
     pub id: String,
@@ -61,6 +61,12 @@ pub struct ToolComponent {
     pub props: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<ToolComponent>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub col_span: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_span: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

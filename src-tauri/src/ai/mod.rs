@@ -48,8 +48,8 @@ pub use provider::{
 pub use provider_send::validate_provider_send;
 pub use response_parser::{parse_agent_response, ParsedAgentResponse};
 pub use response_schema::{
-    layout_type_string, ResponseType, SourceCitation, ToolAction, ToolChangePayload, ToolComponent,
-    ToolDefinition,
+    layout_type_string, normalize_layout, ResponseType, SourceCitation, ToolAction,
+    ToolChangePayload, ToolComponent, ToolDefinition,
 };
 pub use settings_change::{
     is_allowed_setting_key, normalize_hex_or_none, normalize_setting_kv, parse_wallpaper_setting,
