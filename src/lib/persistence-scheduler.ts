@@ -19,7 +19,9 @@ interface ToolStateTracker {
   lastPersistedState: ToolState;
   timer: ReturnType<typeof setTimeout> | null;
   inFlightGen: number | null;
+  inFlightEpoch: number | null;
   inFlightPromise: Promise<void> | null;
+  hydrationEpoch: number;
   onRollback?: (restoredState: ToolState) => void;
   onError?: (error: unknown) => void;
 }
@@ -32,8 +34,10 @@ interface ToolStateTracker {
  * 2. Rapid keystrokes/toggles are debounced (250ms default) to avoid IPC write flooding.
  * 3. Stale rollback prevention: If save(gen 1) fails while gen 2 is in flight or applied,
  *    gen 1's failure CANNOT roll back gen 2's newer state.
- * 4. Explicit flushes (actions, tool switch, window unload, unmount) save immediately.
- * 5. Single source of persistence truth.
+ * 4. Hydration epoch concurrency: If tool is rehydrated with new state while an older save is in flight,
+ *    the older save cannot overwrite or roll back the newly hydrated state.
+ * 5. Explicit flushes (actions, tool switch, window unload, unmount) save immediately.
+ * 6. Single source of persistence truth.
  */
 export class PersistenceScheduler {
   private trackers = new Map<string, ToolStateTracker>();
@@ -54,7 +58,9 @@ export class PersistenceScheduler {
         lastPersistedState: initialState,
         timer: null,
         inFlightGen: null,
+        inFlightEpoch: null,
         inFlightPromise: null,
+        hydrationEpoch: 0,
       };
       this.trackers.set(toolId, tracker);
     }
@@ -63,11 +69,22 @@ export class PersistenceScheduler {
 
   /**
    * Initializes or refreshes the known persisted state for a tool (e.g. upon tool select / hydration).
+   * Cancels pending timers, advances hydrationEpoch, and disarms old callbacks so older in-flight
+   * saves cannot overwrite or rollback the new state.
    */
   public initToolState(toolId: string, state: ToolState): void {
     const tracker = this.getOrCreateTracker(toolId, state);
+    if (tracker.timer) {
+      clearTimeout(tracker.timer);
+      tracker.timer = null;
+    }
+    tracker.hydrationEpoch += 1;
+    tracker.currentGen = 0;
+    tracker.lastPersistedGen = 0;
     tracker.currentState = state;
     tracker.lastPersistedState = state;
+    tracker.onRollback = undefined;
+    tracker.onError = undefined;
   }
 
   /**
@@ -143,19 +160,29 @@ export class PersistenceScheduler {
     }
 
     const saveGen = tracker.currentGen;
+    const saveEpoch = tracker.hydrationEpoch;
     const stateToSave = tracker.currentState;
     tracker.inFlightGen = saveGen;
+    tracker.inFlightEpoch = saveEpoch;
 
     let saveFailed = false;
     const promise = (async () => {
       try {
         await saveFn(toolId, stateToSave);
+        // Stale epoch check: if rehydration occurred while save was in flight, ignore
+        if (tracker.hydrationEpoch !== saveEpoch) {
+          return;
+        }
         if (saveGen > tracker.lastPersistedGen) {
           tracker.lastPersistedGen = saveGen;
           tracker.lastPersistedState = stateToSave;
         }
       } catch (err) {
         saveFailed = true;
+        // Stale epoch check: DO NOT roll back if rehydrated with newer state
+        if (tracker.hydrationEpoch !== saveEpoch) {
+          return;
+        }
         // Stale failure check: ONLY roll back if no newer state was scheduled in the meantime
         if (tracker.currentGen === saveGen) {
           tracker.currentState = tracker.lastPersistedState;
@@ -163,8 +190,9 @@ export class PersistenceScheduler {
           tracker.onError?.(err);
         }
       } finally {
-        if (tracker.inFlightGen === saveGen) {
+        if (tracker.inFlightGen === saveGen && tracker.inFlightEpoch === saveEpoch) {
           tracker.inFlightGen = null;
+          tracker.inFlightEpoch = null;
           tracker.inFlightPromise = null;
         }
       }

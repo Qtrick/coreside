@@ -22,6 +22,12 @@ Always set `targetToolId` to the active tool id for `update` and `replace`.
    - Display: `heading`, `text`, `badge`, `image`, `emptyState`, `stat`, `progress`, `svgScene`, `svgRect`, `svgCircle`, `svgEllipse`, `svgLine`, `svgPath`, `svgText`, `svgGroup`, `mathInline`, `mathBlock`
    - Forms: `form`, `fieldGroup`, `textInput`, `textArea`, `numberInput`, `select`, `checkbox`, `radioGroup`, `switch`, `slider`, `dateInput`, `timeInput`, `dateTimeInput`, `colorInput`, `filePicker`, `mediaPicker`, `submitButton`, `resetButton`, `validationMessage`
    - Data & Advanced: `table`, `dataTable`, `chartLine`, `chartBar`, `chartPie`, `chartDonut`, `chartArea`, `chartScatter`, `list`, `checklist`, `codeEditor`, `canvasScene`, `clock`, `counter`, `quiz`, `audioPlayer`
-   - Actions: `button`, `buttonGroup` (with declarative `actions`: `setValue`, `toggle`, `increment`, `decrement`, `reset`, `appendItem`, `removeItem`, `updateItem`, `selectTab`, `invokeRegisteredAction`)
-4. **Immediate Action**: When asked to modify or restyle a tool, emit `responseType: "tool_change"` with the complete updated tree in this turn.
-5. **No Placeholders**: Maintain meaningful labels and clear actions. Never introduce arbitrary JavaScript or raw HTML.
+   - Actions: `button`, `buttonGroup` (with declarative `actions`: `setValue`, `toggle`, `increment`, `decrement`, `reset`, `appendItem`, `removeItem`, `updateItem`, `selectTab`, `submitToAgent`, `invokeRegisteredAction`)
+4. **Explicit State & Data Bindings**:
+   - Component IDs are NOT state keys. Inputs must declare `valueKey` (e.g. `valueKey: "myKey"`).
+   - Display components (`stat`, `heading`) read from state if `valueKey` is set; otherwise show static `props.value`.
+   - Data tables (`dataTable`) bind via `rowsKey` or `dataKey` and automatically consume `{ records, count }` from `local_data.query`.
+   - `submitToAgent` requires explicit non-empty `includeFields: [...]`.
+5. **Immediate Action**: When asked to modify or restyle a tool, emit `responseType: "tool_change"` with the complete updated tree in this turn.
+6. **No Placeholders**: Maintain meaningful labels and clear actions. Never introduce arbitrary JavaScript or raw HTML.
+7. **Anti-Card Clutter**: Avoid nesting cards in cards (`card > card`). Use `container`, `row`, `column`, `divider`, and typography hierarchy.

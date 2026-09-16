@@ -376,6 +376,12 @@ fn validate_tree_recursive(
         }
 
         if let Some(props) = &component.props {
+            if props.get("action").is_some() || props.get("actions").is_some() {
+                return Err(format!(
+                    "component '{}' uses legacy action props ('action'/'actions'); actions must be specified in the authoritative 'actions' field",
+                    component.id
+                ));
+            }
             let s = props.to_string();
             if s.len() > MAX_PROPS_JSON_BYTES {
                 return Err(format!(
@@ -586,6 +592,35 @@ pub fn agent_pack_catalog_markdown() -> String {
             p.component_types.join(", ")
         ));
     }
+
+    lines.push("\n## Declarative Action Types\n\
+        Attach actions ONLY via `component.actions: [...]` on interactive components (e.g. `button`). Never use legacy action props.\n\
+        - `setValue`: `{ \"type\": \"setValue\", \"target\": \"stateKey\", \"value\": ... }`\n\
+        - `toggle`: `{ \"type\": \"toggle\", \"target\": \"boolKey\" }`\n\
+        - `increment` / `decrement`: `{ \"type\": \"increment\", \"target\": \"key\", \"amount\": 1 }`\n\
+        - `reset`: `{ \"type\": \"reset\", \"target\": \"stateKey\", \"value\": ... }`\n\
+        - `appendItem`: `{ \"type\": \"appendItem\", \"target\": \"itemsKey\", \"item\": { \"id\": \"...\", ... } }`\n\
+        - `removeItem`: `{ \"type\": \"removeItem\", \"target\": \"itemsKey\", \"id\": \"itemId\" }`\n\
+        - `updateItem`: `{ \"type\": \"updateItem\", \"target\": \"itemsKey\", \"id\": \"itemId\", \"patch\": { ... } }`\n\
+        - `selectTab`: `{ \"type\": \"selectTab\", \"target\": \"tabsId\", \"tabId\": \"tab-1\" }`\n\
+        - `submitToAgent`: `{ \"type\": \"submitToAgent\", \"eventName\": \"submitted\", \"includeFields\": [\"field1\", \"field2\"] }` (includeFields is required and non-empty)\n\
+        - `invokeRegisteredAction`: `{ \"type\": \"invokeRegisteredAction\", \"actionName\": \"local_data.query\", \"input\": { ... }, \"resultKey\": \"targetStateKey\" }`".into());
+
+    lines.push("\n## Registered Kernel Actions\n\
+        - `local_data.query`: `{ \"model\": string, \"filter\"?: object, \"orderBy\"?: string, \"limit\"?: number }` -> returns `{ \"records\": [...], \"count\": number }`\n\
+        - `local_data.write`: `{ \"model\": string, \"record\": object }` -> returns `{ \"id\": string }`\n\
+        - `local_data.delete`: `{ \"model\": string, \"id\": string }` -> returns `{ \"deleted\": boolean }`\n\
+        - `media.read`: `{ \"assetId\": string }` -> returns `{ \"assetUrl\": string, \"mimeType\": string }`\n\
+        - `external_link.open`: `{ \"url\": string }`\n\
+        - `web_search.request`: `{ \"query\": string }`".into());
+
+    lines.push("\n## Explicit State & Data Binding Rules\n\
+        - Component IDs are identifiers for rendering and DOM patching; they are NEVER automatic permissions to read or write state.\n\
+        - Inputs (textInput, select, dateInput, etc.) must declare an explicit `valueKey: \"myKey\"` to bind to durable state; without `valueKey`, input is local ephemeral UI state.\n\
+        - Display components (stat, heading) read from state only if `valueKey` is specified; otherwise they show static `props.value`.\n\
+        - Data tables and lists bind via `rowsKey: \"itemsKey\"` or `dataKey: \"itemsKey\"` and automatically unwrap `{ records, count }`.\n\
+        - `resultKey` on `invokeRegisteredAction` sets the state destination key for action outputs; it does not authorize reading state.".into());
+
     lines.join("\n")
 }
 
@@ -804,4 +839,34 @@ mod tests {
         let err = validate_definition_components(&def).unwrap_err();
         assert!(err.contains("duplicate component id: dup"));
     }
+
+    #[test]
+    fn rejects_legacy_action_props_bypass() {
+        use crate::ai::ToolComponent;
+        let comp_with_action = vec![ToolComponent {
+            id: "btn-legacy".into(),
+            component_type: "button".into(),
+            props: Some(serde_json::json!({
+                "label": "Click",
+                "action": "reset",
+                "target": "secretState"
+            })),
+            ..Default::default()
+        }];
+        let err = validate_tool_components(&comp_with_action).unwrap_err();
+        assert!(err.contains("uses legacy action props ('action'/'actions')"));
+
+        let comp_with_actions = vec![ToolComponent {
+            id: "btn-legacy-multi".into(),
+            component_type: "button".into(),
+            props: Some(serde_json::json!({
+                "label": "Click",
+                "actions": [{ "type": "toggle", "target": "secretState" }]
+            })),
+            ..Default::default()
+        }];
+        let err2 = validate_tool_components(&comp_with_actions).unwrap_err();
+        assert!(err2.contains("uses legacy action props ('action'/'actions')"));
+    }
 }
+

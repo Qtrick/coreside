@@ -66,6 +66,45 @@ export function makeHideComponentOp(args: {
   };
 }
 
+export function makeInsertComponentOp(args: {
+  surfaceId: string;
+  parentId?: string | null;
+  component: ToolComponent;
+  index?: number;
+  baseRevision: number;
+}): AppOperation {
+  return {
+    id: opId(),
+    type: "component.insert",
+    target: {
+      surfaceId: args.surfaceId,
+      parentId: args.parentId ?? undefined,
+    },
+    baseRevision: args.baseRevision,
+    payload: {
+      component: args.component,
+      index: args.index,
+    },
+  };
+}
+
+export function makeRemoveComponentOp(args: {
+  surfaceId: string;
+  componentId: string;
+  baseRevision: number;
+}): AppOperation {
+  return {
+    id: opId(),
+    type: "component.remove",
+    target: {
+      surfaceId: args.surfaceId,
+      componentId: args.componentId,
+    },
+    baseRevision: args.baseRevision,
+    payload: {},
+  };
+}
+
 export function makeMoveComponentOp(args: {
   surfaceId: string;
   componentId: string;

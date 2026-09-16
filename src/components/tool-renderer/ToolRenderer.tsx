@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { AlertTriangle, X } from "lucide-react";
-import { applyActions, collectTargets } from "@/lib/actions";
+import { applyActionsAsync, collectDeclaredBindings } from "@/lib/actions";
 import { api } from "@/lib/tauri";
 import type { ActionOutcome } from "@/types/application-kernel";
 import type { ActionDefinition, ToolComponent, ToolDefinition, ToolState } from "@/types/tool";
@@ -119,11 +119,15 @@ function RenderNode({
   resetKey,
   applicationId,
   toolId,
+  isCustomizing,
+  selectedComponentId,
 }: {
   component: ToolComponent;
   resetKey?: string;
   applicationId?: string | null;
   toolId?: string | null;
+  isCustomizing?: boolean;
+  selectedComponentId?: string | null;
 }) {
   const Node = resolveComponent(component.type);
   const renderChild = (child: ToolComponent) => (
@@ -132,8 +136,12 @@ function RenderNode({
       resetKey={resetKey}
       applicationId={applicationId}
       toolId={toolId}
+      isCustomizing={isCustomizing}
+      selectedComponentId={selectedComponentId}
     />
   );
+
+  const isSelected = isCustomizing && selectedComponentId === component.id;
 
   return (
     <ToolErrorBoundary
@@ -142,7 +150,14 @@ function RenderNode({
       applicationId={applicationId}
       toolId={toolId}
     >
-      <Node component={component} renderChild={renderChild} />
+      <div
+        className={`tr-node-wrapper${isSelected ? " tr-node-selected" : ""}`}
+        data-component-id={component.id}
+        data-component-type={component.type}
+        data-is-selected={isSelected ? "true" : undefined}
+      >
+        <Node component={component} renderChild={renderChild} />
+      </div>
     </ToolErrorBoundary>
   );
 }
@@ -162,8 +177,8 @@ export function ToolRenderer({
   onSubmitToAgent,
   onPendingApproval,
 }: ToolRendererProps) {
-  const allowedTargets = useMemo(
-    () => collectTargets(tool.components ?? []),
+  const declaredBindings = useMemo(
+    () => collectDeclaredBindings(tool.components ?? []),
     [tool.components],
   );
   // Interaction failures are shown in the surface itself: a button that cannot
@@ -182,12 +197,18 @@ export function ToolRenderer({
         }
         return action;
       });
-      const result = applyActions(normalized, {
+      const result = await applyActionsAsync(normalized, {
         state,
         toolId: tool.id,
-        allowedTargets,
+        bindings: declaredBindings,
         onSubmitToAgent,
-        onInvokeRegisteredAction: async (payload) => {
+        onInvokeRegisteredAction: async (payload: {
+          toolId: string;
+          actionName: string;
+          input: Record<string, unknown>;
+          componentId?: string;
+          resultKey?: string;
+        }) => {
           const outcome = await api.kernelInvokeRegisteredAction({
             actionName: payload.actionName,
             input: payload.input,
@@ -197,25 +218,14 @@ export function ToolRenderer({
             conversationId: conversationId ?? null,
             projectId: projectId ?? null,
           });
-          if (outcome.status === "ok") {
-            if (payload.resultKey && payload.resultKey.trim()) {
-              const targetKey = payload.resultKey.trim();
-              const nextState = { ...state, [targetKey]: outcome.data };
-              if (onPersistState) {
-                void onPersistState(nextState).catch(() => {
-                  setActionError("That change could not be saved.");
-                });
-              } else {
-                onStateChange(nextState);
-              }
-            }
-          } else if (outcome.status === "pendingApproval") {
+          if (outcome.status === "pendingApproval") {
             onPendingApproval?.(outcome);
           } else if (outcome.status === "error") {
             setActionError(outcome.message);
           } else if (outcome.status === "blocked") {
             setActionError(outcome.reason);
           }
+          return outcome;
         },
       });
       if (result.changedKeys.length > 0) {
@@ -230,12 +240,9 @@ export function ToolRenderer({
       if (result.errors.length > 0) {
         setActionError(result.errors[0]);
       }
-      if (result.pendingTasks.length > 0) {
-        await Promise.all(result.pendingTasks);
-      }
     },
     [
-      allowedTargets,
+      declaredBindings,
       applicationId,
       conversationId,
       onPendingApproval,
@@ -290,6 +297,36 @@ export function ToolRenderer({
     [getValue, runActions, setValue, setValueOptimistic, state, tool.id],
   );
 
+  const handleCanvasClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isCustomizing || !onSelectComponent) return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const compEl = target.closest("[data-component-id]") as HTMLElement | null;
+      if (compEl) {
+        const id = compEl.getAttribute("data-component-id");
+        if (id) {
+          const findInTree = (nodes: ToolComponent[]): ToolComponent | null => {
+            for (const n of nodes) {
+              if (n.id === id) return n;
+              if (n.children) {
+                const found = findInTree(n.children);
+                if (found) return found;
+              }
+            }
+            return null;
+          };
+          const match = findInTree(tool.components ?? []);
+          if (match) {
+            e.stopPropagation();
+            onSelectComponent(match);
+          }
+        }
+      }
+    },
+    [isCustomizing, onSelectComponent, tool.components],
+  );
+
   if (!tool.components?.length) {
     return (
       <div className="empty-state">
@@ -303,7 +340,12 @@ export function ToolRenderer({
 
   return (
     <ToolRuntimeProvider value={runtime}>
-      <div className="tr-container" data-tool-id={tool.id}>
+      <div
+        className="tr-container"
+        data-tool-id={tool.id}
+        data-customizing={isCustomizing ? "true" : undefined}
+        onClick={isCustomizing ? handleCanvasClick : undefined}
+      >
         {actionError ? (
           <div className="tr-action-error" role="alert">
             <AlertTriangle size={16} aria-hidden />
@@ -332,6 +374,8 @@ export function ToolRenderer({
               resetKey={resetKey}
               applicationId={applicationId}
               toolId={tool.id}
+              isCustomizing={isCustomizing}
+              selectedComponentId={selectedComponentId}
             />
           )}
         />

@@ -257,41 +257,80 @@ export const FIXTURE_TOOLS: Record<string, ToolDefinition> = {
   research: {
     id: "tool-research-organizer",
     name: "Research Organizer",
-    description: "Search findings, references, and citations",
+    description: "Search findings, references, citations, and syntheses",
     layout: {
       type: "split",
       gap: "md",
     },
     components: [
       {
+        id: "res-header",
+        type: "heading",
+        layoutRole: "header",
+        props: { text: "Research Organizer & Knowledge Synthesizer", level: 2 },
+      },
+      {
         id: "res-search",
         type: "textInput",
-        layout_role: "sidebar",
-        props: { label: "Filter Findings", placeholder: "Search papers..." },
+        valueKey: "searchQuery",
+        layoutRole: "sidebar",
+        props: { label: "Search Query", placeholder: "Search papers..." },
       },
       {
-        id: "res-tags",
-        type: "card",
-        layout_role: "sidebar",
-        props: { title: "Active Filters", content: "Tags: #gen-ui, #security, #sqlite" },
+        id: "res-search-btn",
+        type: "button",
+        layoutRole: "sidebar",
+        props: { label: "Query Papers", variant: "primary" },
+        actions: [
+          {
+            type: "invokeRegisteredAction",
+            actionName: "local_data.query",
+            input: { model: "papers" },
+            resultKey: "paperResults",
+          },
+        ],
       },
       {
-        id: "res-card-1",
-        type: "card",
-        layout_role: "main",
+        id: "res-table",
+        type: "dataTable",
+        valueKey: "paperResults",
+        layoutRole: "main",
         props: {
-          title: "Declarative UI Containment Patterns",
-          content: "Analysis of sandboxed visual layout containment in desktop environments...",
+          title: "Indexed Papers",
+          selectionKey: "selectedPaperId",
+          columns: [
+            { id: "id", label: "Paper ID" },
+            { id: "title", label: "Title" },
+            { id: "year", label: "Year" },
+          ],
+          rows: [
+            { id: "P-101", title: "Declarative UI Containment Patterns", year: "2026" },
+            { id: "P-102", title: "Fail-Closed State Validation in WebViews", year: "2025" },
+          ],
         },
       },
       {
-        id: "res-card-2",
-        type: "card",
-        layout_role: "main",
+        id: "res-notes",
+        type: "textArea",
+        valueKey: "paperNotes",
+        layoutRole: "main",
         props: {
-          title: "Fail-Closed State Validation in WebViews",
-          content: "Techniques for eliminating silent no-ops and ensuring monotonic state revisions...",
+          label: "Research Synthesis Notes",
+          placeholder: "Enter structured notes, critique, or findings...",
         },
+      },
+      {
+        id: "res-submit-btn",
+        type: "button",
+        layoutRole: "main",
+        props: { label: "Submit Synthesis to Agent", variant: "secondary" },
+        actions: [
+          {
+            type: "submitToAgent",
+            eventName: "submit_paper_synthesis",
+            includeFields: ["selectedPaperId", "paperNotes"],
+          },
+        ],
       },
     ],
   },
@@ -566,17 +605,45 @@ export const FIXTURE_TOOLS: Record<string, ToolDefinition> = {
         id: "btn-add-task",
         type: "button",
         layoutRole: "sidebar",
-        props: { label: "Add Task", variant: "primary" },
+        props: { label: "Create Task", variant: "primary" },
         actions: [
           {
-            type: "appendItem",
-            target: "tasks",
-            item: {
-              id: "task-manual",
-              title: "Review Rust boundaries",
-              priority: "High",
-              status: "In Progress",
+            type: "invokeRegisteredAction",
+            actionName: "local_data.write",
+            input: { model: "tasks" },
+            inputFromState: {
+              title: "newTaskTitle",
+              priority: "newTaskPriority",
             },
+            resultKey: "lastTask",
+          },
+          {
+            type: "invokeRegisteredAction",
+            actionName: "local_data.query",
+            input: { model: "tasks" },
+            resultKey: "tasks",
+          },
+        ],
+      },
+      {
+        id: "btn-delete-task",
+        type: "button",
+        layoutRole: "sidebar",
+        props: { label: "Delete Selected", variant: "secondary" },
+        actions: [
+          {
+            type: "invokeRegisteredAction",
+            actionName: "local_data.delete",
+            input: { model: "tasks" },
+            inputFromState: {
+              id: "selectedTaskId",
+            },
+          },
+          {
+            type: "invokeRegisteredAction",
+            actionName: "local_data.query",
+            input: { model: "tasks" },
+            resultKey: "tasks",
           },
         ],
       },
@@ -588,6 +655,7 @@ export const FIXTURE_TOOLS: Record<string, ToolDefinition> = {
         colSpan: 2,
         props: {
           title: "Sprint Tasks",
+          selectionKey: "selectedTaskId",
           columns: [
             { id: "id", label: "Task ID" },
             { id: "title", label: "Title" },

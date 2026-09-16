@@ -191,6 +191,8 @@ type AppStore = {
   navigateToSettings: () => void;
   navigateToAutomations: () => void;
   applyWorkspaceWallpaper: (wallpaperJson: string) => Promise<void>;
+  previewWorkspaceWallpaper: (wallpaperJson: string) => void;
+  revertWorkspaceWallpaper: () => void;
   applyProjectWallpaper: (projectId: string, wallpaperJson: string) => Promise<void>;
   previewInterfaceTransparency: (value: number) => void;
   commitInterfaceTransparency: (value: number) => Promise<void>;
@@ -1234,6 +1236,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
       throw err;
     }
+  },
+
+  previewWorkspaceWallpaper: (wallpaperJson) => {
+    const preview = optimisticWallpaperFromJson(wallpaperJson);
+    set(preview);
+  },
+
+  revertWorkspaceWallpaper: () => {
+    set({
+      wallpaper: { ...committedWallpaper },
+      globalWallpaperJson: committedGlobalWallpaperJson,
+    });
   },
 
   applyProjectWallpaper: async (projectId, wallpaperJson) => {

@@ -71,6 +71,7 @@ export function ToolCanvas() {
   const toolState = useAppStore((s) => s.toolState);
   const previewSurfacesByKey = useAppStore((s) => s.previewSurfacesByKey);
   const updateToolState = useAppStore((s) => s.updateToolState);
+  const flushToolState = useAppStore((s) => s.flushToolState);
   const closeToolCanvas = useAppStore((s) => s.closeToolCanvas);
   const openToolWindow = useAppStore((s) => s.openToolWindow);
   const undoTool = useAppStore((s) => s.undoTool);
@@ -138,7 +139,7 @@ export function ToolCanvas() {
 
   const onStateChange = useCallback(
     (state: Record<string, unknown>) => {
-      void updateToolState(state, false);
+      void updateToolState(state, true);
     },
     [updateToolState],
   );
@@ -146,8 +147,9 @@ export function ToolCanvas() {
   const onPersistState = useCallback(
     async (state: Record<string, unknown>) => {
       await updateToolState(state, true);
+      await flushToolState(activeTool?.id);
     },
-    [updateToolState],
+    [updateToolState, flushToolState, activeTool?.id],
   );
 
   useEffect(() => {
@@ -184,7 +186,12 @@ export function ToolCanvas() {
         api
           .kernelGetManifest(activeTool.id)
           .then((rec) => setManifestRecord(rec))
-          .catch(() => setManifestRecord(null)),
+          .catch(() =>
+            api
+              .kernelEnsureToolManifest(activeTool.id, activeTool.name, sid)
+              .then((rec) => setManifestRecord(rec))
+              .catch(() => setManifestRecord(null)),
+          ),
       );
     void api.kernelGetRecoveryState().then(setRecovery).catch(() => setRecovery(null));
 
@@ -485,6 +492,7 @@ export function ToolCanvas() {
             }}
             state={renderState}
             onStateChange={isPreviewPaint ? () => undefined : onStateChange}
+            onPersistState={isPreviewPaint ? async () => undefined : onPersistState}
             onSubmitToAgent={onSubmitToAgent}
             surfaceId={surfaceId}
             conversationId={activeConversationId}

@@ -28,6 +28,7 @@ export function ToolLayoutContainer({
   const align = layout?.align ?? "stretch";
   const columns = layout?.columns ?? 3;
   const splitRatio = layout?.splitRatio ?? "1:2";
+  const collapseAt = layout?.collapseAt ?? "mobile";
 
   // Categorize components for archetype layouts if layoutRoles are used
   const { headerNodes, statsNodes, mainNodes, sidebarNodes, footerNodes, defaultNodes } =
@@ -129,9 +130,10 @@ export function ToolLayoutContainer({
 
   return (
     <div
-      className={`tr-layout-surface tr-layout-${layoutType} tr-gap-${gap} tr-max-w-${maxWidth} tr-density-${density} tr-align-${align}`}
+      className={`tr-layout-surface tr-layout-${layoutType} tr-gap-${gap} tr-max-w-${maxWidth} tr-density-${density} tr-align-${align} tr-collapse-${collapseAt}`}
       data-tool-id={toolId}
       data-layout-type={layoutType}
+      data-collapse-at={collapseAt}
       data-customizing={isCustomizing ? "true" : undefined}
       style={containerStyle}
     >

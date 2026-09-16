@@ -2514,6 +2514,40 @@ export async function mockInvoke<T>(
       return record as T;
     }
 
+    case "kernel_ensure_tool_manifest": {
+      const toolId = String(args?.toolId ?? "");
+      const toolName = String(args?.toolName ?? "");
+      const surfaceId = String(args?.surfaceId ?? "");
+      let record = mockDb.kernelManifests.find(
+        (m) => m.applicationId === toolId || m.applicationId === surfaceId,
+      );
+      if (!record) {
+        record = {
+          applicationId: toolId,
+          version: 1,
+          name: toolName || "Tool Application",
+          description: "",
+          surfaceId: surfaceId || `surface:${toolId}`,
+          defaultRoute: "/",
+          routes: [
+            {
+              path: "/",
+              title: toolName || "Main",
+              surfaceId: surfaceId || `surface:${toolId}`,
+            },
+          ],
+          capabilities: [],
+          permissions: [],
+          healthState: "healthy",
+          healthMessage: null,
+          createdAt: now(),
+          updatedAt: now(),
+        } as unknown as ManifestRecord;
+        mockDb.kernelManifests.push(record);
+      }
+      return record as T;
+    }
+
     case "kernel_get_recovery_state":
       return {
         recoveryMode: false,

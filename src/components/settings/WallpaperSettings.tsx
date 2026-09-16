@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, RotateCcw, Sliders, ExternalLink } from "lucide-react";
 import type { WallpaperKind } from "@/types/agent";
 import {
   buildCanvasPresetProposal,
   buildStaticColorProposal,
-  CANVAS_PRESETS,
+  CURATED_WALLPAPER_PRESETS,
+  type WallpaperPresetDefinition,
   parseWallpaperJson,
   schemaWallpaperToJson,
   WALLPAPER_FILTER_PRESETS,
   type WallpaperFilterConfig,
+  type SchemaWallpaperConfig,
 } from "@/types/wallpaper";
 import { normalizeCanonicalHex } from "@/lib/wallpaper-hex";
 import { activeCanvasPresetId } from "@/lib/wallpaper";
@@ -19,14 +22,6 @@ import {
   INTERFACE_TRANSPARENCY_STEP,
 } from "@/lib/interface-transparency";
 import { useAppStore } from "@/stores/app-store";
-
-const LIVE_PRESET_IDS = new Set<WallpaperKind>([
-  "matrix",
-  "aurora",
-  "particles",
-  "rain",
-  "pulse",
-]);
 
 const DEFAULT_SOLID = "#141714";
 
@@ -53,20 +48,25 @@ export function WallpaperSettings() {
   const wallpaper = useAppStore((s) => s.wallpaper);
   const globalWallpaperJson = useAppStore((s) => s.globalWallpaperJson);
   const applyWorkspaceWallpaper = useAppStore((s) => s.applyWorkspaceWallpaper);
+  const previewWorkspaceWallpaper = useAppStore((s) => s.previewWorkspaceWallpaper);
+  const revertWorkspaceWallpaper = useAppStore((s) => s.revertWorkspaceWallpaper);
   const interfaceTransparency = useAppStore((s) => s.interfaceTransparency);
-  const previewInterfaceTransparency = useAppStore(
-    (s) => s.previewInterfaceTransparency,
-  );
-  const commitInterfaceTransparency = useAppStore(
-    (s) => s.commitInterfaceTransparency,
-  );
+  const previewInterfaceTransparency = useAppStore((s) => s.previewInterfaceTransparency);
+  const commitInterfaceTransparency = useAppStore((s) => s.commitInterfaceTransparency);
   const developerMode = useAppStore((s) => s.developerMode);
   const navigateToMedia = useAppStore((s) => s.navigateToMedia);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [techDetail, setTechDetail] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  /** Guards pointerup+blur (and keyup+blur) double-commit of the same gesture. */
+  const [selectedCategory, setSelectedCategory] = useState<
+    "all" | "ambient" | "motion" | "solid" | "legacy" | "media"
+  >("all");
+
+  const [previewPreset, setPreviewPreset] = useState<WallpaperPresetDefinition | null>(null);
+  const [previewOpacity, setPreviewOpacity] = useState<number>(0.85);
+
   const transparencyCommitGenRef = useRef(0);
 
   const committedSolid = useMemo(
@@ -85,6 +85,7 @@ export function WallpaperSettings() {
   const draftDirty =
     (draftCanonical ?? draftHex.toLowerCase()) !== committedSolid.color ||
     draftFilter !== committedSolid.filterPreset;
+
   const solidActive = useMemo(() => {
     if (!globalWallpaperJson?.trim()) return false;
     const parsed = parseWallpaperJson(globalWallpaperJson);
@@ -95,8 +96,7 @@ export function WallpaperSettings() {
     globalWallpaperJson,
     globalWallpaper: wallpaper,
   });
-  // Transparency applies whenever any wallpaper layer is active — not only canvas presets.
-  // (activeCanvasPresetId maps static-color → "none" for preset selection UX.)
+
   const wallpaperActive = useMemo(() => {
     if (globalWallpaperJson?.trim()) {
       const parsed = parseWallpaperJson(globalWallpaperJson);
@@ -105,31 +105,114 @@ export function WallpaperSettings() {
     return Boolean(wallpaper.kind && wallpaper.kind !== "none");
   }, [globalWallpaperJson, wallpaper]);
 
-  const filteredPresets = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return CANVAS_PRESETS;
-    return CANVAS_PRESETS.filter((preset) => {
-      const live = LIVE_PRESET_IDS.has(preset.id) ? "live" : "";
-      return (
-        preset.label.toLowerCase().includes(q) ||
-        preset.description.toLowerCase().includes(q) ||
-        live.includes(q)
-      );
+  // Match current active preset
+  const activePreset = useMemo(() => {
+    return CURATED_WALLPAPER_PRESETS.find((p) => {
+      if (p.id === activeId) return true;
+      if (globalWallpaperJson && p.config.color) {
+        return globalWallpaperJson.includes(p.config.color);
+      }
+      return false;
     });
-  }, [query]);
+  }, [activeId, globalWallpaperJson]);
 
-  const applyPreset = async (preset: WallpaperKind) => {
+  const activeTitle = useMemo(() => {
+    if (previewPreset) {
+      return `${previewPreset.name} (Previewing)`;
+    }
+    if (solidActive) {
+      return `Solid Color (${committedSolid.color})`;
+    }
+    if (activePreset) {
+      return activePreset.name;
+    }
+    if (activeId && activeId !== "none") {
+      return activeId;
+    }
+    return "None (Default)";
+  }, [previewPreset, solidActive, committedSolid.color, activePreset, activeId]);
+
+  const activeCategoryDesc = useMemo(() => {
+    if (previewPreset) return `Preview · ${previewPreset.category}`;
+    if (solidActive) return "Solid Color";
+    if (activePreset) return activePreset.category.toUpperCase();
+    if (activeId && activeId !== "none") return "Preset";
+    return "No active wallpaper layer";
+  }, [previewPreset, solidActive, activePreset, activeId]);
+
+  const filteredPresets = useMemo(() => {
+    let list = CURATED_WALLPAPER_PRESETS;
+    if (selectedCategory !== "all" && selectedCategory !== "media") {
+      list = list.filter((p) => p.category === selectedCategory);
+    }
+    const q = query.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.description.toLowerCase().includes(q) ||
+        p.category.toLowerCase().includes(q),
+    );
+  }, [selectedCategory, query]);
+
+  const handleSelectPreset = (preset: WallpaperPresetDefinition) => {
+    setPreviewPreset(preset);
+    setPreviewOpacity(preset.config.opacity ?? 0.85);
+    const json = schemaWallpaperToJson(preset.config);
+    previewWorkspaceWallpaper(json);
+  };
+
+  const handleOpacityChange = (val: number) => {
+    setPreviewOpacity(val);
+    if (!previewPreset) return;
+    const updatedConfig: SchemaWallpaperConfig = {
+      ...previewPreset.config,
+      opacity: val,
+    };
+    previewWorkspaceWallpaper(schemaWallpaperToJson(updatedConfig));
+  };
+
+  const applyPreviewPreset = async () => {
+    if (!previewPreset) return;
     setBusy(true);
     setError(null);
     setTechDetail(null);
     try {
-      if (preset === "none") {
-        // Clear schema + legacy stores. Do not POST `{ kind: "none" }` as
-        // wallpaperJson — Rust validate_wallpaper_config requires schemaVersion.
+      const configToApply: SchemaWallpaperConfig = {
+        ...previewPreset.config,
+        opacity: previewOpacity,
+      };
+      await applyWorkspaceWallpaper(schemaWallpaperToJson(configToApply));
+      setPreviewPreset(null);
+    } catch (err) {
+      const { message, technical } = consumerErrorMessage(
+        err,
+        "Coreside could not apply that wallpaper.",
+      );
+      setError(message);
+      setTechDetail(technical);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revertPreview = () => {
+    revertWorkspaceWallpaper();
+    setPreviewPreset(null);
+    setError(null);
+  };
+
+  const applyPresetDirect = async (presetId: WallpaperKind | "none") => {
+    setBusy(true);
+    setError(null);
+    setTechDetail(null);
+    setPreviewPreset(null);
+    try {
+      if (presetId === "none") {
         await applyWorkspaceWallpaper("");
         return;
       }
-      const proposal = buildCanvasPresetProposal(preset);
+      const proposal = buildCanvasPresetProposal(presetId);
       if ("kind" in proposal) {
         await applyWorkspaceWallpaper("");
         return;
@@ -165,6 +248,7 @@ export function WallpaperSettings() {
         return;
       }
       await applyWorkspaceWallpaper(schemaWallpaperToJson(proposal));
+      setPreviewPreset(null);
     } catch (err) {
       const { message, technical } = consumerErrorMessage(
         err,
@@ -193,6 +277,7 @@ export function WallpaperSettings() {
     setTechDetail(null);
     try {
       await applyWorkspaceWallpaper("");
+      setPreviewPreset(null);
     } catch (err) {
       const { message, technical } = consumerErrorMessage(
         err,
@@ -212,7 +297,6 @@ export function WallpaperSettings() {
     try {
       await commitInterfaceTransparency(value);
     } catch (err) {
-      // Superseded gesture — do not overwrite a newer commit's error/UI state.
       if (gen !== transparencyCommitGenRef.current) return;
       const { message, technical } = consumerErrorMessage(
         err,
@@ -223,111 +307,131 @@ export function WallpaperSettings() {
     }
   };
 
-  const [selectedCategory, setSelectedCategory] = useState<"all" | "live" | "solid" | "media">("all");
-
-  const activeTitle = useMemo(() => {
+  const previewStyle = useMemo(() => {
+    if (previewPreset) {
+      const c = previewPreset.previewColors;
+      return {
+        background: `linear-gradient(135deg, ${c[0]} 0%, ${c[1]} 60%, ${c[2] ?? c[1]} 100%)`,
+      };
+    }
+    if (activePreset) {
+      const c = activePreset.previewColors;
+      return {
+        background: `linear-gradient(135deg, ${c[0]} 0%, ${c[1]} 60%, ${c[2] ?? c[1]} 100%)`,
+      };
+    }
     if (solidActive) {
-      return `Solid Color (${committedSolid.color})`;
+      return { background: committedSolid.color };
     }
-    if (activeId && activeId !== "none") {
-      const p = CANVAS_PRESETS.find((cp) => cp.id === activeId);
-      return p ? p.label : activeId;
-    }
-    return "None (Default)";
-  }, [solidActive, committedSolid.color, activeId]);
-
-  const activeCategoryDesc = useMemo(() => {
-    if (solidActive) return "Solid Color";
-    if (activeId && activeId !== "none") return LIVE_PRESET_IDS.has(activeId) ? "Live Ambient Canvas" : "Preset";
-    return "No active wallpaper layer";
-  }, [solidActive, activeId]);
-
-  const displayedPresets = useMemo(() => {
-    if (selectedCategory === "live") {
-      return filteredPresets.filter((p) => LIVE_PRESET_IDS.has(p.id));
-    }
-    return filteredPresets;
-  }, [filteredPresets, selectedCategory]);
+    return { background: "var(--surface-secondary, #252538)" };
+  }, [previewPreset, activePreset, solidActive, committedSolid.color]);
 
   return (
     <section className="settings-subsection wallpaper-settings" aria-labelledby="wallpaper-heading">
       <h4 className="settings-subheading" id="wallpaper-heading">
-        Wallpapers
+        Personalization & Wallpaper
       </h4>
       <p>
-        Choose a workspace background preset or import media from the library.
-        Project chats can override this with their own wallpaper. Preview applies
-        immediately; durable save follows.
+        Elevate Coreside with calm, restrained ambient backgrounds. Previews apply
+        instantly behind the interface without committing until confirmed.
       </p>
 
-      {/* Active Wallpaper Banner */}
-      <div className="wallpaper-active-banner">
-        <div className="wallpaper-active-banner-info">
-          <div
-            className={`wallpaper-active-preview ${
-              solidActive ? "" : `wallpaper-thumb-${activeId}`
-            }`}
-            style={solidActive ? { background: committedSolid.color } : undefined}
-            aria-hidden
-          />
-          <div>
-            <div style={{ fontWeight: 600, fontSize: "0.95rem" }}>{activeTitle}</div>
-            <div className="muted" style={{ fontSize: "0.8rem" }}>{activeCategoryDesc}</div>
+      {/* Large Live Preview Card */}
+      <div className="wallpaper-hero-card" style={previewStyle}>
+        <div className="wallpaper-hero-overlay">
+          <div className="wallpaper-hero-info">
+            <span className="badge">{activeCategoryDesc}</span>
+            <h3 className="wallpaper-hero-title">{activeTitle}</h3>
+            {previewPreset ? (
+              <p className="wallpaper-hero-desc">{previewPreset.description}</p>
+            ) : activePreset ? (
+              <p className="wallpaper-hero-desc">{activePreset.description}</p>
+            ) : null}
+          </div>
+
+          <div className="wallpaper-hero-actions">
+            {previewPreset ? (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={busy}
+                  onClick={() => void applyPreviewPreset()}
+                >
+                  <Check size={14} aria-hidden /> Apply Wallpaper
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={busy}
+                  onClick={revertPreview}
+                >
+                  <RotateCcw size={14} aria-hidden /> Revert
+                </button>
+              </>
+            ) : wallpaperActive ? (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={busy}
+                onClick={() => void applyPresetDirect("none")}
+              >
+                Reset to None
+              </button>
+            ) : null}
           </div>
         </div>
-        {wallpaperActive ? (
-          <button
-            type="button"
-            className="btn btn-ghost"
-            style={{ fontSize: "0.82rem" }}
-            disabled={busy}
-            onClick={() => void applyPreset("none")}
-          >
-            Reset to None
-          </button>
-        ) : null}
       </div>
+
+      {/* Fine-Tuning Slider if Previewing */}
+      {previewPreset && (
+        <div className="wallpaper-tuning-panel">
+          <div className="tuning-header">
+            <Sliders size={14} aria-hidden />
+            <strong>Adjust Preset Intensity</strong>
+          </div>
+          <div className="tuning-control">
+            <label htmlFor="wallpaper-opacity-slider">Opacity ({Math.round(previewOpacity * 100)}%)</label>
+            <input
+              id="wallpaper-opacity-slider"
+              type="range"
+              min={0.1}
+              max={1.0}
+              step={0.05}
+              value={previewOpacity}
+              onChange={(e) => handleOpacityChange(parseFloat(e.target.value))}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Category Tabs */}
       <div className="wallpaper-category-tabs" role="tablist" aria-label="Wallpaper categories">
-        <button
-          type="button"
-          role="tab"
-          className="wallpaper-category-tab"
-          aria-selected={selectedCategory === "all"}
-          onClick={() => setSelectedCategory("all")}
-        >
-          All Presets
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className="wallpaper-category-tab"
-          aria-selected={selectedCategory === "live"}
-          onClick={() => setSelectedCategory("live")}
-        >
-          Live Ambient
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className="wallpaper-category-tab"
-          aria-selected={selectedCategory === "solid"}
-          onClick={() => setSelectedCategory("solid")}
-        >
-          Solid Color
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className="wallpaper-category-tab"
-          aria-selected={selectedCategory === "media"}
-          onClick={() => setSelectedCategory("media")}
-        >
-          Media Library
-        </button>
+        {(["all", "ambient", "motion", "solid", "legacy", "media"] as const).map((cat) => (
+          <button
+            key={cat}
+            type="button"
+            role="tab"
+            className={`wallpaper-category-tab${selectedCategory === cat ? " active" : ""}`}
+            aria-selected={selectedCategory === cat}
+            onClick={() => setSelectedCategory(cat)}
+          >
+            {cat === "all"
+              ? "All Presets"
+              : cat === "ambient"
+                ? "Ambient"
+                : cat === "motion"
+                  ? "Motion"
+                  : cat === "solid"
+                    ? "Solid"
+                    : cat === "legacy"
+                      ? "Legacy"
+                      : "Media Library"}
+          </button>
+        ))}
       </div>
 
+      {/* Preset Cards Grid */}
       {selectedCategory !== "solid" && selectedCategory !== "media" ? (
         <>
           <label className="wallpaper-preset-search">
@@ -336,59 +440,64 @@ export function WallpaperSettings() {
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search presets…"
+              placeholder="Search curated wallpapers…"
               disabled={busy}
             />
           </label>
 
-          <div className="wallpaper-preset-grid" role="group" aria-label="Wallpaper presets">
-            {displayedPresets.map((preset) => {
-              const isLive = LIVE_PRESET_IDS.has(preset.id);
+          <div className="wallpaper-curated-grid" role="group" aria-label="Curated presets">
+            {filteredPresets.map((preset) => {
+              const isCurrent = previewPreset?.id === preset.id || activeId === preset.id;
+              const swatchStyle = {
+                background: `linear-gradient(135deg, ${preset.previewColors[0]} 0%, ${preset.previewColors[1]} 60%, ${preset.previewColors[2] ?? preset.previewColors[1]} 100%)`,
+              };
               return (
                 <button
                   key={preset.id}
                   type="button"
-                  className="wallpaper-preset-card"
-                  aria-pressed={activeId === preset.id}
+                  className={`wallpaper-card-item${isCurrent ? " is-active" : ""}`}
+                  aria-pressed={isCurrent}
                   disabled={busy}
-                  onClick={() => void applyPreset(preset.id)}
+                  onClick={() => handleSelectPreset(preset)}
                 >
-                  <div
-                    className={`wallpaper-preset-thumbnail wallpaper-thumb-${preset.id}`}
-                    aria-hidden
-                  />
-                  <span className="wallpaper-preset-card-top">
-                    <span className="wallpaper-preset-label">{preset.label}</span>
-                    {isLive ? (
-                      <span className="wallpaper-live-badge" aria-label="Live wallpaper">
-                        Live
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="muted">{preset.description}</span>
+                  <div className="wallpaper-card-swatch" style={swatchStyle} aria-hidden>
+                    {isCurrent && (
+                      <div className="swatch-check">
+                        <Check size={14} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="wallpaper-card-content">
+                    <div className="wallpaper-card-top">
+                      <span className="wallpaper-card-name">{preset.name}</span>
+                      <span className="wallpaper-cat-tag">{preset.category}</span>
+                    </div>
+                    <span className="wallpaper-card-desc">{preset.description}</span>
+                  </div>
                 </button>
               );
             })}
           </div>
 
-          {displayedPresets.length === 0 ? (
+          {filteredPresets.length === 0 ? (
             <p className="muted">No presets match “{query.trim()}”.</p>
           ) : null}
         </>
       ) : null}
 
-      {(selectedCategory === "all" || selectedCategory === "solid") ? (
+      {/* Solid Color Tab */}
+      {selectedCategory === "all" || selectedCategory === "solid" ? (
         <div className="wallpaper-solid-color" aria-labelledby="wallpaper-solid-heading">
           <h4 className="settings-subheading" id="wallpaper-solid-heading">
-            Solid color
+            Solid Color
           </h4>
           <p>
-            Pick a workspace solid color. Draft changes preview locally below;
-            Apply saves. Filters affect only the wallpaper layer.
+            Choose a precise matte workspace tone. Draft changes preview locally below;
+            Apply saves.
           </p>
           <div className="wallpaper-solid-row">
             <label className="wallpaper-solid-swatch">
-              <span className="sr-only">Solid color</span>
+              <span className="sr-only">Solid color picker</span>
               <input
                 type="color"
                 value={draftCanonical ?? committedSolid.color}
@@ -416,21 +525,17 @@ export function WallpaperSettings() {
               title="Draft preview"
             />
           </div>
-          <div
-            className="wallpaper-filter-presets"
-            role="group"
-            aria-label="Wallpaper filter presets"
-          >
-            {WALLPAPER_FILTER_PRESETS.map((preset) => (
+          <div className="wallpaper-filter-presets" role="group" aria-label="Wallpaper filter presets">
+            {WALLPAPER_FILTER_PRESETS.map((p) => (
               <button
-                key={preset.id}
+                key={p.id}
                 type="button"
-                className="btn btn-secondary"
-                aria-pressed={draftFilter === preset.id}
+                className="btn btn-secondary btn-sm"
+                aria-pressed={draftFilter === p.id}
                 disabled={busy}
-                onClick={() => setDraftFilter(preset.id)}
+                onClick={() => setDraftFilter(p.id)}
               >
-                {preset.label}
+                {p.label}
               </button>
             ))}
           </div>
@@ -441,7 +546,7 @@ export function WallpaperSettings() {
               disabled={busy || !draftDirty || !draftCanonical}
               onClick={() => void applySolidDraft()}
             >
-              Apply
+              Apply Color
             </button>
             <button
               type="button"
@@ -463,11 +568,12 @@ export function WallpaperSettings() {
         </div>
       ) : null}
 
-      {(selectedCategory === "all" || selectedCategory === "media") ? (
+      {/* Media Library Tab */}
+      {selectedCategory === "all" || selectedCategory === "media" ? (
         <div style={{ marginTop: "var(--space-4)" }}>
-          <h4 className="settings-subheading">Media Library</h4>
+          <h4 className="settings-subheading">Media Library Wallpapers</h4>
           <p className="muted" style={{ marginBottom: "var(--space-2)" }}>
-            Use custom local images or videos from your library as workspace or project backgrounds.
+            Select local imported images or looping videos from your personal media library.
           </p>
           <div className="button-row">
             <button
@@ -476,26 +582,21 @@ export function WallpaperSettings() {
               disabled={busy}
               onClick={() => navigateToMedia()}
             >
-              Open media library
+              <ExternalLink size={14} aria-hidden /> Open Media Library
             </button>
           </div>
         </div>
       ) : null}
 
-      <div
-        className="interface-transparency-control"
-        aria-labelledby="interface-transparency-heading"
-      >
+      {/* Interface Transparency Slider */}
+      <div className="interface-transparency-control" aria-labelledby="interface-transparency-heading">
         <h4 className="settings-subheading" id="interface-transparency-heading">
-          Interface transparency
+          Interface Transparency
         </h4>
         <p>
-          Controls how much of the active wallpaper shows through Coreside’s
-          panels. Readability protection may strengthen individual surfaces when
-          needed.
-          {!wallpaperActive
-            ? " Has no visual effect while None is active."
-            : null}
+          Controls how much of the background shows through Coreside’s panels.
+          Readability protection automatically ensures text remains legible.
+          {!wallpaperActive ? " (Has no visual effect while None is active.)" : null}
         </p>
         <label>
           <span className="sr-only">Interface transparency percent</span>
@@ -510,18 +611,10 @@ export function WallpaperSettings() {
             aria-valuenow={interfaceTransparency}
             aria-valuetext={`${interfaceTransparency} percent`}
             disabled={busy}
-            onChange={(e) =>
-              previewInterfaceTransparency(Number(e.target.value))
-            }
-            onPointerUp={(e) =>
-              void commitTransparency(Number(e.currentTarget.value))
-            }
-            onKeyUp={(e) =>
-              void commitTransparency(Number(e.currentTarget.value))
-            }
-            onBlur={(e) =>
-              void commitTransparency(Number(e.currentTarget.value))
-            }
+            onChange={(e) => previewInterfaceTransparency(Number(e.target.value))}
+            onPointerUp={(e) => void commitTransparency(Number(e.currentTarget.value))}
+            onKeyUp={(e) => void commitTransparency(Number(e.currentTarget.value))}
+            onBlur={(e) => void commitTransparency(Number(e.currentTarget.value))}
           />
         </label>
         <div className="button-row">
@@ -535,16 +628,12 @@ export function WallpaperSettings() {
             Reset
           </button>
         </div>
-        <div
-          className="transparency-presets"
-          role="group"
-          aria-label="Transparency presets"
-        >
+        <div className="transparency-presets" role="group" aria-label="Transparency presets">
           {INTERFACE_TRANSPARENCY_PRESETS.map((preset) => (
             <button
               key={preset.id}
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-secondary btn-sm"
               aria-pressed={interfaceTransparency === preset.value}
               disabled={busy}
               onClick={() => void commitTransparency(preset.value)}
@@ -558,9 +647,7 @@ export function WallpaperSettings() {
       {error ? (
         <p className="form-error" role="alert">
           {error}
-          {developerMode && techDetail ? (
-            <span className="muted"> — {techDetail}</span>
-          ) : null}
+          {developerMode && techDetail ? <span className="muted"> — {techDetail}</span> : null}
         </p>
       ) : null}
     </section>

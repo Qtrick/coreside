@@ -24,6 +24,27 @@ function prefersReducedMotion() {
   );
 }
 
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(() => prefersReducedMotion());
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const handler = (e: MediaQueryListEvent) => {
+      setReduced(e.matches);
+    };
+    if (mq.addEventListener) {
+      mq.addEventListener("change", handler);
+      return () => mq.removeEventListener("change", handler);
+    } else if (mq.addListener) {
+      mq.addListener(handler);
+      return () => mq.removeListener(handler);
+    }
+  }, []);
+
+  return reduced;
+}
+
 /** W3C WebDriver flag — false in normal production; true only under automation. */
 function webDriverSession() {
   return typeof navigator !== "undefined" && navigator.webdriver === true;
@@ -56,6 +77,7 @@ function CanvasWallpaper({
   speed,
   density,
   opacity,
+  reduced,
 }: {
   kind: string;
   color: string;
@@ -63,6 +85,7 @@ function CanvasWallpaper({
   speed: number;
   density: number;
   opacity: number;
+  reduced: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -75,7 +98,6 @@ function CanvasWallpaper({
 
     let raf = 0;
     let running = true;
-    const reduced = prefersReducedMotion();
 
     let viewW = window.innerWidth;
     let viewH = window.innerHeight;
@@ -109,11 +131,6 @@ function CanvasWallpaper({
         after?.();
       });
     };
-
-    const onVisibility = () => {
-      hidden = document.visibilityState === "hidden";
-    };
-    document.addEventListener("visibilitychange", onVisibility);
 
     const ro =
       typeof ResizeObserver !== "undefined"
@@ -195,17 +212,22 @@ function CanvasWallpaper({
         if (!hidden && !reduced && running) {
           cancelAnimationFrame(raf);
           raf = requestAnimationFrame(() => draw());
+        } else if (hidden) {
+          cancelAnimationFrame(raf);
         }
       };
       document.addEventListener("visibilitychange", onMatrixVisibility);
+      window.addEventListener("pageshow", onMatrixVisibility);
+      window.addEventListener("pagehide", onMatrixVisibility);
 
       return () => {
         running = false;
         cancelAnimationFrame(raf);
         cancelAnimationFrame(resizeRaf);
         window.removeEventListener("resize", onResize);
-        document.removeEventListener("visibilitychange", onVisibility);
         document.removeEventListener("visibilitychange", onMatrixVisibility);
+        window.removeEventListener("pageshow", onMatrixVisibility);
+        window.removeEventListener("pagehide", onMatrixVisibility);
         ro?.disconnect();
       };
     }
@@ -322,9 +344,13 @@ function CanvasWallpaper({
       if (!hidden && !reduced && running) {
         cancelAnimationFrame(raf);
         raf = requestAnimationFrame(drawFrame);
+      } else if (hidden) {
+        cancelAnimationFrame(raf);
       }
     };
     document.addEventListener("visibilitychange", onFrameVisibility);
+    window.addEventListener("pageshow", onFrameVisibility);
+    window.addEventListener("pagehide", onFrameVisibility);
 
     raf = requestAnimationFrame(drawFrame);
     return () => {
@@ -332,11 +358,12 @@ function CanvasWallpaper({
       cancelAnimationFrame(raf);
       cancelAnimationFrame(resizeRaf);
       window.removeEventListener("resize", onResize);
-      document.removeEventListener("visibilitychange", onVisibility);
       document.removeEventListener("visibilitychange", onFrameVisibility);
+      window.removeEventListener("pageshow", onFrameVisibility);
+      window.removeEventListener("pagehide", onFrameVisibility);
       ro?.disconnect();
     };
-  }, [kind, color, secondaryColor, speed, density, opacity]);
+  }, [kind, color, secondaryColor, speed, density, opacity, reduced]);
 
   return <canvas ref={canvasRef} className="live-wallpaper-canvas" />;
 }
@@ -367,11 +394,16 @@ function CssWallpaper({
   );
 }
 
-function MediaWallpaperLayer({ config }: { config: SchemaWallpaperConfig }) {
+function MediaWallpaperLayer({
+  config,
+  reduced,
+}: {
+  config: SchemaWallpaperConfig;
+  reduced: boolean;
+}) {
   const assetId = config.assetId ?? "";
   const [src, setSrc] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const reduced = prefersReducedMotion();
   const opacity = clamp(config.opacity ?? 0.85, 0.05, 1);
   const fit = config.extra?.fit === "contain" ? "contain" : "cover";
   const fallback = hexColor(config.reducedMotionFallback, "#141714");
@@ -459,10 +491,15 @@ function MediaWallpaperLayer({ config }: { config: SchemaWallpaperConfig }) {
   );
 }
 
-function SlideshowWallpaper({ config }: { config: SchemaWallpaperConfig }) {
+function SlideshowWallpaper({
+  config,
+  reduced,
+}: {
+  config: SchemaWallpaperConfig;
+  reduced: boolean;
+}) {
   const ids = config.slideAssetIds ?? [];
   const [index, setIndex] = useState(0);
-  const reduced = prefersReducedMotion();
 
   useEffect(() => {
     if (ids.length <= 1 || reduced) return;
@@ -477,6 +514,7 @@ function SlideshowWallpaper({ config }: { config: SchemaWallpaperConfig }) {
   const activeId = ids[index] ?? ids[0];
   return (
     <MediaWallpaperLayer
+      reduced={reduced}
       config={{
         ...config,
         type: "image-cover",
@@ -487,6 +525,7 @@ function SlideshowWallpaper({ config }: { config: SchemaWallpaperConfig }) {
 }
 
 export function LiveWallpaper({ wallpaper }: LiveWallpaperProps) {
+  const reduced = usePrefersReducedMotion();
   if (wallpaper.format === "none") return null;
 
   if (wallpaper.format === "legacy") {
@@ -511,6 +550,7 @@ export function LiveWallpaper({ wallpaper }: LiveWallpaperProps) {
           speed={speed}
           density={density}
           opacity={opacity}
+          reduced={reduced}
         />
       </div>
     );
@@ -545,6 +585,7 @@ export function LiveWallpaper({ wallpaper }: LiveWallpaperProps) {
           speed={speed}
           density={density}
           opacity={opacity}
+          reduced={reduced}
         />
       </div>
     );
@@ -553,7 +594,7 @@ export function LiveWallpaper({ wallpaper }: LiveWallpaperProps) {
   if (config.type === "slideshow") {
     return (
       <div className="live-wallpaper" style={wallpaperLayerStyle(config)} aria-hidden>
-        <SlideshowWallpaper config={config} />
+        <SlideshowWallpaper config={config} reduced={reduced} />
       </div>
     );
   }
@@ -565,7 +606,7 @@ export function LiveWallpaper({ wallpaper }: LiveWallpaperProps) {
   ) {
     return (
       <div className="live-wallpaper" style={wallpaperLayerStyle(config)} aria-hidden>
-        <MediaWallpaperLayer config={config} />
+        <MediaWallpaperLayer config={config} reduced={reduced} />
       </div>
     );
   }

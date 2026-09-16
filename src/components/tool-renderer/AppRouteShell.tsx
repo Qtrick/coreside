@@ -17,6 +17,7 @@ type AppRouteShellProps = {
   surfacesById?: Record<string, ToolDefinition>;
   state: ToolState;
   onStateChange: (state: ToolState) => void;
+  onPersistState?: (state: ToolState) => Promise<void>;
   surfaceId?: string | null;
   conversationId?: string | null;
   projectId?: string | null;
@@ -35,6 +36,7 @@ export function AppRouteShell({
   surfacesById = {},
   state,
   onStateChange,
+  onPersistState,
   surfaceId,
   conversationId,
   projectId,
@@ -192,6 +194,7 @@ export function AppRouteShell({
           tool={activeTool}
           state={state}
           onStateChange={onStateChange}
+          onPersistState={onPersistState}
           onSubmitToAgent={onSubmitToAgent}
           applicationId={applicationId}
           surfaceId={surfaceId ?? activeTool.id}

@@ -20,6 +20,7 @@ import {
 } from "@/lib/preservation";
 import { mergeStateForDefinitionPatch } from "@/lib/surface-ops";
 import { verifySurfaceElement } from "@/lib/visual-verification";
+import { persistenceScheduler } from "@/lib/persistence-scheduler";
 import type { SurfaceRecord } from "@/types/runtime-v2";
 import type { ToolDefinition, ToolState } from "@/types/tool";
 import { useAppStore } from "@/stores/app-store";
@@ -245,19 +246,42 @@ export function InlineSurfaceCard({
     return () => window.cancelAnimationFrame(frame);
   }, [surface, state, collapsed, fullWidth]);
 
+  const handleStateChange = useCallback(
+    (next: ToolState) => {
+      setState(next);
+      void persistenceScheduler.schedule(
+        `surface:${surface.id}`,
+        next,
+        (_key, s) => api.saveSurfaceState(surface.id, s),
+        {
+          onRollback: (restored) => {
+            setState(restored);
+          },
+        },
+      );
+    },
+    [surface.id],
+  );
+
   const persistState = useCallback(
     async (next: ToolState) => {
-      const previous = state;
       setState(next);
-      try {
-        await api.saveSurfaceState(surface.id, next);
-      } catch {
-        setState(previous);
-        throw new Error("Failed to save surface state");
-      }
+      await persistenceScheduler.flush(
+        `surface:${surface.id}`,
+        (_key, s) => api.saveSurfaceState(surface.id, s),
+      );
     },
-    [state, surface.id],
+    [surface.id],
   );
+
+  useEffect(() => {
+    return () => {
+      void persistenceScheduler.flush(
+        `surface:${surface.id}`,
+        (_key, s) => api.saveSurfaceState(surface.id, s),
+      );
+    };
+  }, [surface.id]);
 
   const saveComponentDraft = useCallback(
     async (componentId: string, draft: unknown, formId?: string | null) => {
@@ -402,7 +426,7 @@ export function InlineSurfaceCard({
           <ToolRenderer
             tool={tool}
             state={state}
-            onStateChange={(next) => setState(next)}
+            onStateChange={handleStateChange}
             onPersistState={persistState}
             // Prefer a real kernel application id when present; never invent one
             // solely so render failures can advance crash_count for legacy tools.

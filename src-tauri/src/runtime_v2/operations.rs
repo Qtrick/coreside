@@ -135,76 +135,98 @@ fn default_schema_v2() -> String {
     SCHEMA_VERSION_V2.to_string()
 }
 
+/// Fully implemented and tested model-facing operations supported by the transaction runtime.
+pub const SUPPORTED_MODEL_OPERATIONS: &[&str] = &[
+    "surface.create",
+    "surface.promote",
+    "surface.archive",
+    "surface.restore",
+    "surface.delete",
+    "tool.full_replace",
+    "component.insert",
+    "component.remove",
+    "component.move",
+    "component.replace",
+    "component.update_props",
+    "component.update_actions",
+    "component.update_children",
+    "component.update_visibility",
+    "state.set",
+    "state.patch",
+    "layout.update",
+    "wallpaper.apply",
+    "data.model_upsert",
+    "data.record_create",
+    "data.record_update",
+    "data.record_delete",
+    "data.migrate",
+    "chat.inline_surface_create",
+    "chat.inline_surface_update",
+    "chat.inline_surface_remove",
+    "chat.status",
+    "chat.notification",
+];
+
+/// Internal operations used by host subsystems and commands (not directly model-facing).
+pub const INTERNAL_OPERATIONS: &[&str] = &[
+    "surface.update_metadata",
+    "surface.move",
+    "surface.duplicate",
+    "state.reset",
+    "state.delete_key",
+    "manifest.upsert",
+    "manifest.set_health",
+    "manifest.disable",
+    "manifest.restore_last_known_good",
+    "project.panel_create",
+    "project.panel_update",
+    "export.prepare",
+    "package.export",
+    "package.import",
+    "route.navigate",
+    "permission.request",
+    "test.upsert",
+    "test.run",
+];
+
+/// Reserved / future operations recognized by the schema but not advertised to the model.
+pub const RESERVED_OPERATIONS: &[&str] = &[
+    "setting.create",
+    "setting.update",
+    "setting.delete",
+    "layout.add_panel",
+    "layout.move_panel",
+    "layout.resize_panel",
+    "layout.remove_panel",
+    "layout.set_visibility",
+    "event.dispatch",
+    "subscription.create",
+    "subscription.update",
+    "subscription.delete",
+    "chat.branch_create",
+    "automation.create",
+    "automation.update",
+    "automation.pause",
+    "automation.resume",
+    "wallpaper.create",
+    "wallpaper.delete",
+];
+
+pub fn is_supported_model_operation(op: &str) -> bool {
+    SUPPORTED_MODEL_OPERATIONS.contains(&op)
+}
+
+pub fn is_internal_operation(op: &str) -> bool {
+    INTERNAL_OPERATIONS.contains(&op)
+}
+
+pub fn is_reserved_operation(op: &str) -> bool {
+    RESERVED_OPERATIONS.contains(&op)
+}
+
 /// Allowed operation type prefixes / exact names.
 pub fn is_known_operation_type(op: &str) -> bool {
-    matches!(
-        op,
-        "surface.create"
-            | "surface.update_metadata"
-            | "surface.move"
-            | "surface.duplicate"
-            | "surface.promote"
-            | "surface.archive"
-            | "surface.restore"
-            | "surface.delete"
-            | "component.insert"
-            | "component.remove"
-            | "component.move"
-            | "component.replace"
-            | "component.update_props"
-            | "component.update_actions"
-            | "component.update_children"
-            | "component.update_visibility"
-            | "state.set"
-            | "state.patch"
-            | "state.reset"
-            | "state.delete_key"
-            | "setting.create"
-            | "setting.update"
-            | "setting.delete"
-            | "layout.update"
-            | "layout.add_panel"
-            | "layout.move_panel"
-            | "layout.resize_panel"
-            | "layout.remove_panel"
-            | "layout.set_visibility"
-            | "event.dispatch"
-            | "subscription.create"
-            | "subscription.update"
-            | "subscription.delete"
-            | "chat.inline_surface_create"
-            | "chat.inline_surface_update"
-            | "chat.inline_surface_remove"
-            | "chat.status"
-            | "chat.notification"
-            | "chat.branch_create"
-            | "automation.create"
-            | "automation.update"
-            | "automation.pause"
-            | "automation.resume"
-            | "wallpaper.create"
-            | "wallpaper.apply"
-            | "wallpaper.delete"
-            | "export.prepare"
-            | "project.panel_create"
-            | "project.panel_update"
-            | "tool.full_replace"
-            | "manifest.upsert"
-            | "manifest.set_health"
-            | "manifest.disable"
-            | "manifest.restore_last_known_good"
-            | "data.model_upsert"
-            | "data.record_create"
-            | "data.record_update"
-            | "data.record_delete"
-            | "data.migrate"
-            | "permission.request"
-            | "test.upsert"
-            | "test.run"
-            | "package.export"
-            | "package.import"
-            | "route.navigate"
-    )
+    is_supported_model_operation(op) || is_internal_operation(op) || is_reserved_operation(op)
 }
 
 /// Validate a list of application operations (trusted boundary).

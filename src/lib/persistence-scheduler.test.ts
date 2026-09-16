@@ -103,4 +103,66 @@ describe("PersistenceScheduler", () => {
     expect(saveFn).toHaveBeenCalledWith("tool-1", { activeTab: "settings" });
     expect(scheduler.getPendingCount("tool-1")).toBe(0);
   });
+
+  it("prevents stale in-flight save from overwriting or corrupting newly hydrated state", async () => {
+    const scheduler = new PersistenceScheduler(50);
+    let resolveFirstSave: () => void;
+    const firstSavePromise = new Promise<void>((resolve) => {
+      resolveFirstSave = resolve;
+    });
+
+    const saveFn = vi.fn().mockImplementation((_toolId, state) => {
+      if (state.version === "old") {
+        return firstSavePromise;
+      }
+      return Promise.resolve();
+    });
+
+    // 1. Tool A saves state version "old" in-flight
+    scheduler.schedule("tool-1", { version: "old" }, saveFn, { immediate: true });
+    expect(saveFn).toHaveBeenCalledWith("tool-1", { version: "old" });
+
+    // 2. While save is in flight, user switches away and Tool A is rehydrated with "hydrated-new"
+    scheduler.initToolState("tool-1", { version: "hydrated-new" });
+    expect(scheduler.getCurrentState("tool-1")).toEqual({ version: "hydrated-new" });
+
+    // 3. The old save now completes
+    resolveFirstSave!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // 4. Authoritative state MUST remain "hydrated-new", not overwritten by the stale save
+    expect(scheduler.getCurrentState("tool-1")).toEqual({ version: "hydrated-new" });
+  });
+
+  it("prevents stale in-flight save failure from triggering rollback on newly hydrated state", async () => {
+    const scheduler = new PersistenceScheduler(50);
+    let rejectFirstSave: (err: Error) => void;
+    const firstSavePromise = new Promise<void>((_, reject) => {
+      rejectFirstSave = reject;
+    });
+
+    const saveFn = vi.fn().mockImplementation((_toolId, state) => {
+      if (state.version === "old") {
+        return firstSavePromise;
+      }
+      return Promise.resolve();
+    });
+
+    const onRollback = vi.fn();
+
+    // 1. Tool A saves state version "old" in-flight with rollback callback
+    scheduler.schedule("tool-1", { version: "old" }, saveFn, { immediate: true, onRollback });
+
+    // 2. Tool A rehydrated with "brand-new"
+    scheduler.initToolState("tool-1", { version: "brand-new" });
+
+    // 3. Old save fails
+    rejectFirstSave!(new Error("Stale network timeout"));
+    await vi.advanceTimersByTimeAsync(10);
+
+    // 4. onRollback MUST NOT be called because hydrationEpoch changed!
+    expect(onRollback).not.toHaveBeenCalled();
+    expect(scheduler.getCurrentState("tool-1")).toEqual({ version: "brand-new" });
+  });
 });
+

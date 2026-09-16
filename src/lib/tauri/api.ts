@@ -947,6 +947,11 @@ export const api = {
     invoke<import("@/types/application-kernel").ManifestRecord>("kernel_get_manifest", {
       applicationId,
     }),
+  kernelEnsureToolManifest: (toolId: string, toolName: string, surfaceId: string) =>
+    invoke<import("@/types/application-kernel").ManifestRecord>(
+      "kernel_ensure_tool_manifest",
+      { toolId, toolName, surfaceId },
+    ),
   kernelRestoreLastKnownGood: (applicationId: string) =>
     invoke<import("@/types/application-kernel").ManifestRecord>(
       "kernel_restore_last_known_good",

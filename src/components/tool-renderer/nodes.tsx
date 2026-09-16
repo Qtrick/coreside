@@ -2,6 +2,9 @@ import type { ComponentType, CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import type { ActionDefinition, ToolComponent } from "@/types/tool";
 import { useToolRuntime } from "./context";
+import { resolveMediaAssetUrl } from "@/lib/media";
+import { api } from "@/lib/tauri";
+import type { MediaAsset } from "@/types/media";
 
 export type RenderChild = (component: ToolComponent) => ReactNode;
 
@@ -30,13 +33,48 @@ function asBoolean(value: unknown, fallback = false): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function stateKeyFor(component: ToolComponent, ...propKeys: string[]): string {
-  if (component.valueKey) return component.valueKey;
+/**
+ * Derives explicit state binding key for component.
+ * P0 Security: Never falls back to component.id. Unbound components return null
+ * and maintain local ephemeral React state.
+ */
+export function stateKeyFor(component: ToolComponent, ...propKeys: string[]): string | null {
+  if (component.valueKey && typeof component.valueKey === "string" && component.valueKey.trim()) {
+    return component.valueKey.trim();
+  }
   for (const propKey of propKeys) {
     const value = component.props?.[propKey];
-    if (typeof value === "string" && value.trim()) return value;
+    if (typeof value === "string" && value.trim()) return value.trim();
   }
-  return component.id;
+  return null;
+}
+
+/**
+ * Hook to manage bound state vs local ephemeral state.
+ * If key is non-null, delegates to useToolRuntime.
+ * If key is null, uses local React state.
+ */
+function useBoundState<T>(
+  key: string | null,
+  defaultValue: T,
+  optimistic = false,
+): [T, (val: T) => void] {
+  const { getValue, setValue, setValueOptimistic } = useToolRuntime();
+  const [localVal, setLocalVal] = useState<T>(defaultValue);
+
+  if (key) {
+    const remoteVal = getValue<T>(key, defaultValue);
+    const setRemoteVal = (val: T) => {
+      if (optimistic) {
+        setValueOptimistic(key, val);
+      } else {
+        setValue(key, val);
+      }
+    };
+    return [remoteVal, setRemoteVal];
+  }
+
+  return [localVal, setLocalVal];
 }
 
 export function ContainerNode({ component, renderChild }: ToolNodeProps) {
@@ -89,8 +127,19 @@ export function TabsNode({ component, renderChild }: ToolNodeProps) {
         id: child.id,
         label: asString(child.props?.label, child.id),
       }));
-  const valueKey = component.valueKey ?? `${component.id}:tab`;
-  const active = asString(getValue(valueKey), "") || tabs[0]?.id || "";
+  const explicitKey = stateKeyFor(component, "valueKey");
+  const [localActive, setLocalActive] = useState(tabs[0]?.id || "");
+  const active = explicitKey
+    ? asString(getValue(explicitKey), "") || tabs[0]?.id || ""
+    : localActive || tabs[0]?.id || "";
+
+  const handleSelectTab = (tabId: string) => {
+    if (explicitKey) {
+      setValueOptimistic(explicitKey, tabId);
+    } else {
+      setLocalActive(tabId);
+    }
+  };
 
   return (
     <div className="tr-tabs" data-component-id={component.id}>
@@ -106,7 +155,7 @@ export function TabsNode({ component, renderChild }: ToolNodeProps) {
             className="btn btn-secondary"
             role="tab"
             aria-selected={active === tab.id}
-            onClick={() => setValueOptimistic(valueKey, tab.id)}
+            onClick={() => handleSelectTab(tab.id)}
           >
             {tab.label}
           </button>
@@ -177,18 +226,65 @@ export function BadgeNode({ component }: ToolNodeProps) {
 }
 
 export function ImageNode({ component }: ToolNodeProps) {
-  const src = asString(component.props?.src);
+  const [resolvedSrc, setResolvedSrc] = useState<string | null>(null);
+  const rawSrc = asString(component.props?.src);
+  const assetId = asString(component.props?.mediaAssetId ?? component.props?.assetId);
   const alt = asString(component.props?.alt, "");
-  if (!src) {
+
+  useEffect(() => {
+    let cancelled = false;
+    if (assetId) {
+      resolveMediaAssetUrl(assetId)
+        .then((url) => {
+          if (!cancelled) setResolvedSrc(url);
+        })
+        .catch(() => {
+          if (!cancelled) setResolvedSrc(null);
+        });
+    } else if (rawSrc) {
+      // Security boundary: Block arbitrary remote http(s):// URLs from generated surfaces.
+      // Remote assets must be imported into the Media Library first.
+      const isRemote = /^(https?:|\/\/)/i.test(rawSrc.trim());
+      if (isRemote) {
+        setResolvedSrc(null);
+      } else {
+        setResolvedSrc(rawSrc);
+      }
+    } else {
+      setResolvedSrc(null);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [assetId, rawSrc]);
+
+  if (!assetId && !rawSrc) {
     return (
       <div className="tr-fallback" data-component-id={component.id}>
         Image source missing
       </div>
     );
   }
+
+  if (rawSrc && /^(https?:|\/\/)/i.test(rawSrc.trim()) && !assetId) {
+    return (
+      <div className="tr-fallback tr-security-blocked" data-component-id={component.id}>
+        Remote images are restricted. Import image to Media Library first.
+      </div>
+    );
+  }
+
+  if (!resolvedSrc) {
+    return (
+      <div className="tr-image tr-image-loading" data-component-id={component.id}>
+        <span className="muted">Loading image…</span>
+      </div>
+    );
+  }
+
   return (
     <div className="tr-image" data-component-id={component.id}>
-      <img src={src} alt={alt} />
+      <img src={resolvedSrc} alt={alt} />
     </div>
   );
 }
@@ -203,8 +299,8 @@ export function EmptyStateNode({ component }: ToolNodeProps) {
 }
 
 export function TextInputNode({ component }: ToolNodeProps) {
-  const { getValue, setValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey");
+  const [value, setVal] = useBoundState(key, asString(component.props?.defaultValue, ""));
   const label = asString(component.props?.label, "Text");
   return (
     <div className="tr-field" data-component-id={component.id}>
@@ -212,17 +308,17 @@ export function TextInputNode({ component }: ToolNodeProps) {
       <input
         id={component.id}
         type="text"
-        value={asString(getValue(key, asString(component.props?.defaultValue)))}
+        value={value}
         placeholder={asString(component.props?.placeholder)}
-        onChange={(e) => setValue(key, e.target.value)}
+        onChange={(e) => setVal(e.target.value)}
       />
     </div>
   );
 }
 
 export function TextAreaNode({ component }: ToolNodeProps) {
-  const { getValue, setValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey");
+  const [value, setVal] = useBoundState(key, asString(component.props?.defaultValue, ""));
   const label = asString(component.props?.label, "Notes");
   return (
     <div className="tr-field" data-component-id={component.id}>
@@ -230,17 +326,17 @@ export function TextAreaNode({ component }: ToolNodeProps) {
       <textarea
         id={component.id}
         rows={asNumber(component.props?.rows, 4)}
-        value={asString(getValue(key, asString(component.props?.defaultValue)))}
+        value={value}
         placeholder={asString(component.props?.placeholder)}
-        onChange={(e) => setValue(key, e.target.value)}
+        onChange={(e) => setVal(e.target.value)}
       />
     </div>
   );
 }
 
 export function NumberInputNode({ component }: ToolNodeProps) {
-  const { getValue, setValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey");
+  const [value, setVal] = useBoundState(key, asNumber(component.props?.defaultValue, 0));
   const label = asString(component.props?.label, "Number");
   return (
     <div className="tr-field" data-component-id={component.id}>
@@ -248,19 +344,19 @@ export function NumberInputNode({ component }: ToolNodeProps) {
       <input
         id={component.id}
         type="number"
-        value={asNumber(getValue(key, component.props?.defaultValue ?? 0))}
+        value={value}
         min={component.props?.min as number | undefined}
         max={component.props?.max as number | undefined}
         step={component.props?.step as number | undefined}
-        onChange={(e) => setValue(key, Number(e.target.value))}
+        onChange={(e) => setVal(Number(e.target.value))}
       />
     </div>
   );
 }
 
 export function SelectNode({ component }: ToolNodeProps) {
-  const { getValue, setValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey");
+  const [value, setVal] = useBoundState(key, asString(component.props?.defaultValue, ""));
   const label = asString(component.props?.label, "Select");
   const options = Array.isArray(component.props?.options)
     ? (component.props.options as Array<{ value: string; label: string } | string>)
@@ -270,15 +366,15 @@ export function SelectNode({ component }: ToolNodeProps) {
       <label htmlFor={component.id}>{label}</label>
       <select
         id={component.id}
-        value={asString(getValue(key, asString(component.props?.defaultValue)))}
-        onChange={(e) => setValue(key, e.target.value)}
+        value={value}
+        onChange={(e) => setVal(e.target.value)}
       >
         {options.map((option) => {
-          const value = typeof option === "string" ? option : option.value;
-          const optionLabel = typeof option === "string" ? option : option.label;
+          const optValue = typeof option === "string" ? option : option.value;
+          const optLabel = typeof option === "string" ? option : option.label;
           return (
-            <option key={value} value={value}>
-              {optionLabel}
+            <option key={optValue} value={optValue}>
+              {optLabel}
             </option>
           );
         })}
@@ -288,15 +384,19 @@ export function SelectNode({ component }: ToolNodeProps) {
 }
 
 export function CheckboxNode({ component }: ToolNodeProps) {
-  const { getValue, setValueOptimistic } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey");
+  const [checked, setChecked] = useBoundState(
+    key,
+    asBoolean(component.props?.defaultValue, false),
+    true,
+  );
   const label = asString(component.props?.label, "Checkbox");
   return (
     <label className="tr-checkbox" data-component-id={component.id}>
       <input
         type="checkbox"
-        checked={asBoolean(getValue(key, component.props?.defaultValue ?? false))}
-        onChange={(e) => setValueOptimistic(key, e.target.checked)}
+        checked={checked}
+        onChange={(e) => setChecked(e.target.checked)}
       />
       <span>{label}</span>
     </label>
@@ -304,8 +404,8 @@ export function CheckboxNode({ component }: ToolNodeProps) {
 }
 
 export function DateInputNode({ component }: ToolNodeProps) {
-  const { getValue, setValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey");
+  const [value, setVal] = useBoundState(key, asString(component.props?.defaultValue, ""));
   const label = asString(component.props?.label, "Date");
   return (
     <div className="tr-field" data-component-id={component.id}>
@@ -313,8 +413,8 @@ export function DateInputNode({ component }: ToolNodeProps) {
       <input
         id={component.id}
         type="date"
-        value={asString(getValue(key, asString(component.props?.defaultValue)))}
-        onChange={(e) => setValue(key, e.target.value)}
+        value={value}
+        onChange={(e) => setVal(e.target.value)}
       />
     </div>
   );
@@ -323,11 +423,18 @@ export function DateInputNode({ component }: ToolNodeProps) {
 export function ListNode({ component }: ToolNodeProps) {
   const { getValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey");
-  const items = Array.isArray(getValue(key))
-    ? (getValue(key) as unknown[])
-    : Array.isArray(component.props?.items)
-      ? (component.props.items as unknown[])
-      : [];
+  const rawData = key ? getValue(key) : undefined;
+  let items: unknown[] = [];
+  if (Array.isArray(rawData)) {
+    items = rawData;
+  } else if (rawData && typeof rawData === "object") {
+    const obj = rawData as Record<string, unknown>;
+    if (Array.isArray(obj.records)) items = obj.records;
+    else if (Array.isArray(obj.items)) items = obj.items;
+  } else if (Array.isArray(component.props?.items)) {
+    items = component.props.items as unknown[];
+  }
+
   return (
     <ul className="tr-list" data-component-id={component.id}>
       {items.map((item, index) => (
@@ -346,11 +453,27 @@ export function ListNode({ component }: ToolNodeProps) {
 export function ChecklistNode({ component }: ToolNodeProps) {
   const { getValue, setValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey");
-  const items = Array.isArray(getValue(key))
-    ? (getValue(key) as Array<{ id: string; label: string; checked?: boolean }>)
-    : Array.isArray(component.props?.items)
+  const [localItems, setLocalItems] = useState<Array<{ id: string; label: string; checked?: boolean }>>(
+    Array.isArray(component.props?.items)
       ? (component.props.items as Array<{ id: string; label: string; checked?: boolean }>)
-      : [];
+      : [],
+  );
+  const items = key
+    ? (Array.isArray(getValue(key))
+        ? (getValue(key) as Array<{ id: string; label: string; checked?: boolean }>)
+        : localItems)
+    : localItems;
+
+  const handleToggle = (index: number, checked: boolean) => {
+    const next = items.map((entry, i) =>
+      i === index ? { ...entry, checked } : entry,
+    );
+    if (key) {
+      setValue(key, next);
+    } else {
+      setLocalItems(next);
+    }
+  };
 
   return (
     <ul className="tr-checklist" data-component-id={component.id}>
@@ -360,12 +483,7 @@ export function ChecklistNode({ component }: ToolNodeProps) {
             <input
               type="checkbox"
               checked={Boolean(item.checked)}
-              onChange={(e) => {
-                const next = items.map((entry, i) =>
-                  i === index ? { ...entry, checked: e.target.checked } : entry,
-                );
-                setValue(key, next);
-              }}
+              onChange={(e) => handleToggle(index, e.target.checked)}
             />
             <span>{item.label}</span>
           </label>
@@ -378,12 +496,19 @@ export function ChecklistNode({ component }: ToolNodeProps) {
 export function TableNode({ component }: ToolNodeProps) {
   const { getValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey", "dataKey", "rowsKey");
-  const stateRows = getValue<unknown[]>(key);
-  const rawRows = Array.isArray(stateRows)
-    ? stateRows
-    : Array.isArray(component.props?.rows)
-      ? (component.props.rows as unknown[])
-      : [];
+  const stateRows = key ? getValue<unknown[]>(key) : undefined;
+  let rawRows: unknown[] = [];
+  if (Array.isArray(stateRows)) {
+    rawRows = stateRows;
+  } else if (stateRows && typeof stateRows === "object") {
+    const obj = stateRows as Record<string, unknown>;
+    if (Array.isArray(obj.records)) rawRows = obj.records;
+    else if (Array.isArray(obj.rows)) rawRows = obj.rows;
+    else if (Array.isArray(obj.items)) rawRows = obj.items;
+    else if (Array.isArray(obj.data)) rawRows = obj.data;
+  } else if (Array.isArray(component.props?.rows)) {
+    rawRows = component.props.rows as unknown[];
+  }
   const rows = rawRows as Array<Record<string, unknown>>;
   const columns = Array.isArray(component.props?.columns)
     ? (component.props.columns as Array<{ key: string; label: string } | string>)
@@ -421,7 +546,9 @@ export function TableNode({ component }: ToolNodeProps) {
 export function CounterNode({ component }: ToolNodeProps) {
   const { getValue } = useToolRuntime();
   const key = stateKeyFor(component, "stateKey", "valueKey");
-  const value = asNumber(getValue(key, component.props?.defaultValue ?? 0));
+  const value = key
+    ? asNumber(getValue(key, component.props?.defaultValue ?? 0))
+    : asNumber(component.props?.defaultValue ?? 0);
   return (
     <div className="tr-counter" data-component-id={component.id}>
       <span className="muted">{asString(component.props?.label, "Count")}</span>
@@ -433,20 +560,12 @@ export function CounterNode({ component }: ToolNodeProps) {
 export function ClockNode({ component }: ToolNodeProps) {
   const { getValue, setValue } = useToolRuntime();
   const hour24Key = stateKeyFor(component, "hour24Key");
-  const secondsKey = `${component.id}:showSeconds`;
-  const dateKey = `${component.id}:showDate`;
-  const hour24 = asBoolean(
-    getValue(hour24Key, component.props?.hour24 ?? false),
-    asBoolean(component.props?.hour24, false),
-  );
-  const showSeconds = asBoolean(
-    getValue(secondsKey, component.props?.showSeconds ?? true),
-    true,
-  );
-  const showDate = asBoolean(
-    getValue(dateKey, component.props?.showDate ?? true),
-    true,
-  );
+  const [localHour24, setLocalHour24] = useState(asBoolean(component.props?.hour24, false));
+  const [showSeconds, setShowSeconds] = useState(asBoolean(component.props?.showSeconds ?? true, true));
+  const [showDate] = useState(asBoolean(component.props?.showDate ?? true, true));
+  const hour24 = hour24Key
+    ? asBoolean(getValue(hour24Key, localHour24), localHour24)
+    : localHour24;
   const title = asString(component.props?.title, "Clock");
   const [now, setNow] = useState(() => new Date());
 
@@ -466,6 +585,14 @@ export function ClockNode({ component }: ToolNodeProps) {
   let time = `${pad(hours)}:${pad(now.getMinutes())}`;
   if (showSeconds) time += `:${pad(now.getSeconds())}`;
   time += suffix;
+
+  const toggleHour24 = () => {
+    if (hour24Key) {
+      setValue(hour24Key, !hour24);
+    } else {
+      setLocalHour24(!hour24);
+    }
+  };
 
   return (
     <div className="tr-clock" data-component-id={component.id}>
@@ -488,7 +615,7 @@ export function ClockNode({ component }: ToolNodeProps) {
           type="button"
           className="btn btn-secondary"
           aria-pressed={hour24}
-          onClick={() => setValue(hour24Key, !hour24)}
+          onClick={toggleHour24}
         >
           {hour24 ? "24-hour" : "12-hour"}
         </button>
@@ -496,17 +623,9 @@ export function ClockNode({ component }: ToolNodeProps) {
           type="button"
           className="btn btn-secondary"
           aria-pressed={showSeconds}
-          onClick={() => setValue(secondsKey, !showSeconds)}
+          onClick={() => setShowSeconds(!showSeconds)}
         >
-          Seconds
-        </button>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          aria-pressed={showDate}
-          onClick={() => setValue(dateKey, !showDate)}
-        >
-          Date
+          {showSeconds ? "Hide seconds" : "Show seconds"}
         </button>
       </div>
     </div>
@@ -516,7 +635,7 @@ export function ClockNode({ component }: ToolNodeProps) {
 export function ProgressNode({ component }: ToolNodeProps) {
   const { getValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey");
-  const value = asNumber(getValue(key, component.props?.value ?? 0));
+  const value = asNumber(key ? getValue(key, component.props?.value ?? 0) : (component.props?.value ?? 0));
   const max = Math.max(1, asNumber(component.props?.max, 100));
   const pct = Math.max(0, Math.min(100, (value / max) * 100));
   return (
@@ -538,7 +657,7 @@ export function ProgressNode({ component }: ToolNodeProps) {
 export function StatNode({ component }: ToolNodeProps) {
   const { getValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey");
-  const value = getValue(key, component.props?.value ?? "—");
+  const value = key ? getValue(key, component.props?.value ?? "—") : (component.props?.value ?? "—");
   return (
     <div className="tr-stat" data-component-id={component.id}>
       <span className="muted">{asString(component.props?.label, "Stat")}</span>
@@ -547,26 +666,13 @@ export function StatNode({ component }: ToolNodeProps) {
   );
 }
 
+/**
+ * P0 Security: Authoritative action resolution.
+ * Only component.actions is valid. Legacy props.action and props.actions are strictly ignored.
+ */
 function resolveButtonActions(component: ToolComponent): ActionDefinition[] {
-  if (component.actions && component.actions.length > 0) {
+  if (Array.isArray(component.actions) && component.actions.length > 0) {
     return component.actions;
-  }
-  const props = component.props ?? {};
-  if (Array.isArray(props.actions)) {
-    return props.actions as ActionDefinition[];
-  }
-  const type = props.action;
-  const target = props.target;
-  if (typeof type === "string" && typeof target === "string") {
-    const actionType = type === "set" ? "reset" : type;
-    return [
-      {
-        type: actionType,
-        target,
-        ...(props.amount != null ? { amount: Number(props.amount) } : {}),
-        ...(props.value !== undefined ? { value: props.value } : {}),
-      } as ActionDefinition,
-    ];
   }
   return [];
 }
@@ -629,6 +735,19 @@ const defaultQuizState: QuizState = {
 export function QuizNode({ component }: ToolNodeProps) {
   const { getValue, setValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey");
+  const [localQuizState, setLocalQuizState] = useState<QuizState>(defaultQuizState);
+  const state: QuizState = key
+    ? { ...defaultQuizState, ...(getValue<Partial<QuizState>>(key, {}) ?? {}) }
+    : localQuizState;
+
+  const updateQuizState = (nextState: QuizState) => {
+    if (key) {
+      setValue(key, nextState);
+    } else {
+      setLocalQuizState(nextState);
+    }
+  };
+
   const rawQuestions = Array.isArray(component.props?.questions)
     ? (component.props.questions as Array<Record<string, unknown>>)
     : [];
@@ -655,10 +774,6 @@ export function QuizNode({ component }: ToolNodeProps) {
         typeof q.explanation === "string" ? q.explanation : undefined,
     };
   });
-  const state = {
-    ...defaultQuizState,
-    ...(getValue<Partial<QuizState>>(key, {}) ?? {}),
-  };
   const question = questions[state.currentIndex];
 
   if (!questions.length) {
@@ -679,7 +794,7 @@ export function QuizNode({ component }: ToolNodeProps) {
         <button
           type="button"
           className="btn btn-secondary"
-          onClick={() => setValue(key, { ...defaultQuizState })}
+          onClick={() => updateQuizState({ ...defaultQuizState })}
         >
           Reset
         </button>
@@ -690,7 +805,7 @@ export function QuizNode({ component }: ToolNodeProps) {
   const selectChoice = (index: number) => {
     if (state.answered) return;
     const correct = index === question.correctIndex;
-    setValue(key, {
+    updateQuizState({
       ...state,
       selected: index,
       answered: true,
@@ -701,10 +816,10 @@ export function QuizNode({ component }: ToolNodeProps) {
   const next = () => {
     const nextIndex = state.currentIndex + 1;
     if (nextIndex >= questions.length) {
-      setValue(key, { ...state, finished: true });
+      updateQuizState({ ...state, finished: true });
       return;
     }
-    setValue(key, {
+    updateQuizState({
       ...state,
       currentIndex: nextIndex,
       selected: null,
@@ -753,7 +868,7 @@ export function QuizNode({ component }: ToolNodeProps) {
         <button
           type="button"
           className="btn btn-ghost"
-          onClick={() => setValue(key, { ...defaultQuizState })}
+          onClick={() => updateQuizState({ ...defaultQuizState })}
         >
           Reset
         </button>
@@ -806,22 +921,21 @@ export function FieldGroupNode({ component, renderChild }: ToolNodeProps) {
 }
 
 export function RadioGroupNode({ component }: ToolNodeProps) {
-  const { getValue, setValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey");
+  const [value, setVal] = useBoundState(key, asString(component.props?.defaultValue, ""));
   const options = Array.isArray(component.props?.options)
     ? (component.props?.options as Array<{ value: string; label: string }>)
     : [];
-  const value = asString(getValue(key), asString(component.props?.defaultValue));
   return (
-    <div className="tr-radio-group" role="radiogroup" aria-label={asString(component.props?.label, key)} data-component-id={component.id}>
+    <div className="tr-radio-group" role="radiogroup" aria-label={asString(component.props?.label, key ?? "Options")} data-component-id={component.id}>
       {options.map((opt) => (
         <label key={opt.value} className="tr-radio">
           <input
             type="radio"
-            name={key}
+            name={component.id}
             value={opt.value}
             checked={value === opt.value}
-            onChange={() => setValue(key, opt.value)}
+            onChange={() => setVal(opt.value)}
           />
           {opt.label}
         </label>
@@ -831,15 +945,14 @@ export function RadioGroupNode({ component }: ToolNodeProps) {
 }
 
 export function SliderNode({ component }: ToolNodeProps) {
-  const { getValue, setValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey");
   const min = asNumber(component.props?.min, 0);
   const max = asNumber(component.props?.max, 100);
   const step = asNumber(component.props?.step, 1);
-  const value = asNumber(getValue(key), asNumber(component.props?.defaultValue, min));
+  const [value, setVal] = useBoundState(key, asNumber(component.props?.defaultValue, min));
   return (
     <label className="tr-slider" data-component-id={component.id}>
-      <span>{asString(component.props?.label, key)}: {value}</span>
+      <span>{asString(component.props?.label, "Slider")}: {value}</span>
       <input
         type="range"
         min={min}
@@ -849,61 +962,57 @@ export function SliderNode({ component }: ToolNodeProps) {
         aria-valuemin={min}
         aria-valuemax={max}
         aria-valuenow={value}
-        onChange={(e) => setValue(key, Number(e.target.value))}
+        onChange={(e) => setVal(Number(e.target.value))}
       />
     </label>
   );
 }
 
 export function SwitchNode({ component }: ToolNodeProps) {
-  const { getValue, setValueOptimistic } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey");
-  const on = asBoolean(getValue(key), asBoolean(component.props?.defaultValue));
+  const [on, setOn] = useBoundState(key, asBoolean(component.props?.defaultValue, false), true);
   return (
     <label className="tr-switch" data-component-id={component.id}>
       <input
         type="checkbox"
         role="switch"
         checked={on}
-        onChange={() => setValueOptimistic(key, !on)}
+        onChange={() => setOn(!on)}
       />
-      {asString(component.props?.label, key)}
+      {asString(component.props?.label, "Toggle")}
     </label>
   );
 }
 
 export function ColorInputNode({ component }: ToolNodeProps) {
-  const { getValue, setValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey");
-  const value = asString(getValue(key), asString(component.props?.defaultValue, "#2f8f63"));
+  const [value, setVal] = useBoundState(key, asString(component.props?.defaultValue, "#2f8f63"));
   return (
     <label className="tr-color" data-component-id={component.id}>
       {asString(component.props?.label, "Color")}
-      <input type="color" value={value} onChange={(e) => setValue(key, e.target.value)} />
+      <input type="color" value={value} onChange={(e) => setVal(e.target.value)} />
     </label>
   );
 }
 
 export function TimeInputNode({ component }: ToolNodeProps) {
-  const { getValue, setValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey");
-  const value = asString(getValue(key), asString(component.props?.defaultValue, ""));
+  const [value, setVal] = useBoundState(key, asString(component.props?.defaultValue, ""));
   return (
     <label className="tr-time" data-component-id={component.id}>
       {asString(component.props?.label, "Time")}
-      <input type="time" value={value} onChange={(e) => setValue(key, e.target.value)} />
+      <input type="time" value={value} onChange={(e) => setVal(e.target.value)} />
     </label>
   );
 }
 
 export function DateTimeInputNode({ component }: ToolNodeProps) {
-  const { getValue, setValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey");
-  const value = asString(getValue(key), asString(component.props?.defaultValue, ""));
+  const [value, setVal] = useBoundState(key, asString(component.props?.defaultValue, ""));
   return (
     <label className="tr-datetime" data-component-id={component.id}>
       {asString(component.props?.label, "Date & time")}
-      <input type="datetime-local" value={value} onChange={(e) => setValue(key, e.target.value)} />
+      <input type="datetime-local" value={value} onChange={(e) => setVal(e.target.value)} />
     </label>
   );
 }
@@ -944,19 +1053,158 @@ export function FilePickerNode({ component }: ToolNodeProps) {
 }
 
 export function MediaPickerNode({ component }: ToolNodeProps) {
-  const { getValue, setValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey");
-  const value = asString(getValue(key));
+  const [value, setVal] = useBoundState(key, asString(component.props?.defaultValue, ""));
+  const [isOpen, setIsOpen] = useState(false);
+  const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (value) {
+      resolveMediaAssetUrl(value)
+        .then((url) => {
+          if (!cancelled) setPreviewUrl(url);
+        })
+        .catch(() => {
+          if (!cancelled) setPreviewUrl(null);
+        });
+    } else {
+      setPreviewUrl(null);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [value]);
+
+  const loadMedia = async () => {
+    setLoading(true);
+    try {
+      const assets = await api.listMediaAssets(null, 50);
+      setMediaAssets(assets);
+    } catch {
+      setMediaAssets([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openPicker = () => {
+    setIsOpen(true);
+    void loadMedia();
+  };
+
+  const filteredAssets = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return mediaAssets;
+    return mediaAssets.filter((a) => a.title.toLowerCase().includes(q));
+  }, [mediaAssets, search]);
+
   return (
-    <label className="tr-media-picker" data-component-id={component.id}>
-      {asString(component.props?.label, "Media asset id")}
-      <input
-        type="text"
-        value={value}
-        placeholder="media-…"
-        onChange={(e) => setValue(key, e.target.value)}
-      />
-    </label>
+    <div className="tr-media-picker-container" data-component-id={component.id}>
+      <span className="tr-field-label">{asString(component.props?.label, "Media Asset")}</span>
+      <div className="tr-media-picker-controls button-row">
+        {previewUrl ? (
+          <div className="tr-media-preview-box">
+            <img src={previewUrl} alt={value} className="tr-media-thumb" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 4 }} />
+            <span className="muted" style={{ fontSize: "0.85em" }}>{value}</span>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setVal("")}
+              title="Clear selection"
+            >
+              Clear
+            </button>
+          </div>
+        ) : (
+          <span className="muted">No media selected</span>
+        )}
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={openPicker}
+        >
+          {value ? "Change Media…" : "Choose Media…"}
+        </button>
+      </div>
+
+      {isOpen ? (
+        <div
+          className="tr-media-modal-backdrop"
+          onClick={() => setIsOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.6)",
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <div
+            className="tr-media-modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--color-bg-base, #1e2220)",
+              border: "1px solid var(--color-border, #333)",
+              borderRadius: 8,
+              padding: 16,
+              width: "90%",
+              maxWidth: 480,
+              maxHeight: "80vh",
+              overflow: "auto",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h4 style={{ margin: 0 }}>Select Media Asset</h4>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setIsOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <input
+              type="search"
+              className="input input-sm"
+              placeholder="Filter media by title…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ width: "100%", marginBottom: 12 }}
+              autoFocus
+            />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 8 }}>
+              {loading ? (
+                <p className="muted">Loading media assets…</p>
+              ) : filteredAssets.length === 0 ? (
+                <p className="muted">No media found in library</p>
+              ) : (
+                filteredAssets.map((asset) => (
+                  <button
+                    key={asset.id}
+                    type="button"
+                    className={`btn btn-secondary${value === asset.id ? " active" : ""}`}
+                    style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", padding: 8, height: "auto" }}
+                    onClick={() => {
+                      setVal(asset.id);
+                      setIsOpen(false);
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, fontSize: "0.85em", wordBreak: "break-all" }}>{asset.title}</span>
+                    <span className="muted" style={{ fontSize: "0.75em" }}>{asset.mimeType}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1040,25 +1288,221 @@ export function SvgGroupNode({ component, renderChild }: ToolNodeProps) {
 }
 
 function ChartNode({ component, kind }: { component: ToolComponent; kind: string }) {
-  const data = Array.isArray(component.props?.data)
-    ? (component.props?.data as Array<{ label?: string; value: number; x?: number; y?: number }>)
-    : [];
-  const bounded = data.slice(0, 2000);
-  const max = Math.max(1, ...bounded.map((d) => Math.abs(Number(d.value) || 0)));
+  const { getValue } = useToolRuntime();
+  const key = stateKeyFor(component, "valueKey", "dataKey", "rowsKey");
+  const stateData = key ? getValue(key) : undefined;
+  let rawData: unknown[] = [];
+  if (Array.isArray(stateData)) {
+    rawData = stateData;
+  } else if (stateData && typeof stateData === "object") {
+    const obj = stateData as Record<string, unknown>;
+    if (Array.isArray(obj.records)) rawData = obj.records;
+    else if (Array.isArray(obj.points)) rawData = obj.points;
+    else if (Array.isArray(obj.data)) rawData = obj.data;
+  } else if (Array.isArray(component.props?.data)) {
+    rawData = component.props.data as unknown[];
+  } else if (Array.isArray(component.props?.points)) {
+    rawData = component.props.points as unknown[];
+  }
+
+  const bounded = (rawData as Array<{ label?: string; value?: number; x?: number; y?: number }>).slice(0, 2000);
+  const title = asString(component.props?.title, kind);
+  const ariaLabel = asString(component.props?.ariaLabel, `${title} chart`);
+
+  // Compute metrics
+  const values = bounded.map((d) => (d.value != null ? Number(d.value) : Number(d.y ?? 0)));
+  const maxVal = Math.max(1, ...values.map((v) => Math.abs(v)));
+  const width = 360;
+  const height = 200;
+  const padL = 36;
+  const padR = 16;
+  const padT = 20;
+  const padB = 30;
+  const plotW = width - padL - padR;
+  const plotH = height - padT - padB;
+
+  const palette = ["#4f8df7", "#3dd68c", "#f7b955", "#e8657a", "#a27bf7", "#46c5e3"];
+
+  const renderSvgContent = () => {
+    if (bounded.length === 0) {
+      return (
+        <text x={width / 2} y={height / 2} textAnchor="middle" fill="currentColor" opacity={0.5} fontSize={13}>
+          No data available
+        </text>
+      );
+    }
+
+    if (kind === "bar") {
+      const barW = Math.max(8, Math.min(36, (plotW / bounded.length) * 0.7));
+      const step = plotW / bounded.length;
+      return (
+        <g>
+          <line x1={padL} y1={padT + plotH} x2={width - padR} y2={padT + plotH} stroke="currentColor" opacity={0.2} />
+          {bounded.map((d, i) => {
+            const v = values[i] ?? 0;
+            const barH = (Math.abs(v) / maxVal) * plotH;
+            const x = padL + i * step + (step - barW) / 2;
+            const y = padT + plotH - barH;
+            return (
+              <g key={i}>
+                <rect
+                  x={x}
+                  y={y}
+                  width={barW}
+                  height={Math.max(2, barH)}
+                  rx={3}
+                  fill={palette[i % palette.length]}
+                  opacity={0.85}
+                >
+                  <title>{`${d.label ?? i}: ${v}`}</title>
+                </rect>
+                <text
+                  x={x + barW / 2}
+                  y={height - 10}
+                  textAnchor="middle"
+                  fontSize={10}
+                  fill="currentColor"
+                  opacity={0.65}
+                >
+                  {String(d.label ?? i).slice(0, 5)}
+                </text>
+              </g>
+            );
+          })}
+        </g>
+      );
+    }
+
+    if (kind === "line" || kind === "area") {
+      const step = bounded.length > 1 ? plotW / (bounded.length - 1) : plotW;
+      const pts = bounded.map((_, i) => {
+        const v = values[i] ?? 0;
+        const x = padL + i * step;
+        const y = padT + plotH - (Math.abs(v) / maxVal) * plotH;
+        return { x, y };
+      });
+      const pathD = pts.reduce((acc, p, i) => `${acc} ${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`, "");
+      const areaD = pts.length > 0
+        ? `${pathD} L ${pts[pts.length - 1]!.x.toFixed(1)} ${padT + plotH} L ${pts[0]!.x.toFixed(1)} ${padT + plotH} Z`
+        : "";
+
+      return (
+        <g>
+          <line x1={padL} y1={padT} x2={width - padR} y2={padT} stroke="currentColor" opacity={0.1} strokeDasharray="3 3" />
+          <line x1={padL} y1={padT + plotH / 2} x2={width - padR} y2={padT + plotH / 2} stroke="currentColor" opacity={0.1} strokeDasharray="3 3" />
+          <line x1={padL} y1={padT + plotH} x2={width - padR} y2={padT + plotH} stroke="currentColor" opacity={0.2} />
+
+          {kind === "area" && areaD ? (
+            <path d={areaD} fill="#4f8df7" opacity={0.2} />
+          ) : null}
+          <path d={pathD} fill="none" stroke="#4f8df7" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+          {pts.map((p, i) => (
+            <g key={i}>
+              <circle cx={p.x} cy={p.y} r={3.5} fill="#4f8df7" stroke="var(--color-bg-base, #1a1a1a)" strokeWidth={1.5}>
+                <title>{`${bounded[i]?.label ?? i}: ${values[i]}`}</title>
+              </circle>
+              {bounded.length <= 12 ? (
+                <text x={p.x} y={height - 10} textAnchor="middle" fontSize={10} fill="currentColor" opacity={0.65}>
+                  {String(bounded[i]?.label ?? i).slice(0, 5)}
+                </text>
+              ) : null}
+            </g>
+          ))}
+        </g>
+      );
+    }
+
+    if (kind === "pie" || kind === "donut") {
+      const cx = width / 2;
+      const cy = height / 2;
+      const r = Math.min(plotW, plotH) / 2 - 4;
+      const innerR = kind === "donut" ? r * 0.55 : 0;
+      const total = values.reduce((sum, v) => sum + Math.max(0, v), 0) || 1;
+
+      let currentAngle = -Math.PI / 2;
+      const slices = bounded.map((d, i) => {
+        const v = Math.max(0, values[i] ?? 0);
+        const fraction = v / total;
+        const angle = fraction * Math.PI * 2;
+        const start = currentAngle;
+        const end = currentAngle + angle;
+        currentAngle = end;
+
+        const x1 = cx + r * Math.cos(start);
+        const y1 = cy + r * Math.sin(start);
+        const x2 = cx + r * Math.cos(end);
+        const y2 = cy + r * Math.sin(end);
+        const largeArc = angle > Math.PI ? 1 : 0;
+
+        let dPath = "";
+        if (innerR > 0) {
+          const ix1 = cx + innerR * Math.cos(end);
+          const iy1 = cy + innerR * Math.sin(end);
+          const ix2 = cx + innerR * Math.cos(start);
+          const iy2 = cy + innerR * Math.sin(start);
+          dPath = `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} L ${ix1} ${iy1} A ${innerR} ${innerR} 0 ${largeArc} 0 ${ix2} ${iy2} Z`;
+        } else {
+          dPath = `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`;
+        }
+        return { dPath, label: d.label ?? String(i), value: v, color: palette[i % palette.length] };
+      });
+
+      return (
+        <g>
+          {slices.map((s, i) => (
+            <path key={i} d={s.dPath} fill={s.color} opacity={0.88} stroke="var(--color-bg-base, #1a1a1a)" strokeWidth={1.5}>
+              <title>{`${s.label}: ${s.value}`}</title>
+            </path>
+          ))}
+        </g>
+      );
+    }
+
+    if (kind === "scatter") {
+      const maxX = Math.max(1, ...bounded.map((d) => Math.abs(Number(d.x ?? 0))));
+      return (
+        <g>
+          <line x1={padL} y1={padT + plotH} x2={width - padR} y2={padT + plotH} stroke="currentColor" opacity={0.2} />
+          <line x1={padL} y1={padT} x2={padL} y2={padT + plotH} stroke="currentColor" opacity={0.2} />
+          {bounded.map((d, i) => {
+            const xv = Number(d.x ?? i);
+            const yv = values[i] ?? 0;
+            const cx = padL + (Math.abs(xv) / maxX) * plotW;
+            const cy = padT + plotH - (Math.abs(yv) / maxVal) * plotH;
+            return (
+              <circle
+                key={i}
+                cx={cx}
+                cy={cy}
+                r={4.5}
+                fill={palette[i % palette.length]}
+                opacity={0.8}
+              >
+                <title>{`${d.label ?? i}: (${xv}, ${yv})`}</title>
+              </circle>
+            );
+          })}
+        </g>
+      );
+    }
+
+    return null;
+  };
+
   return (
     <figure className="tr-chart" data-component-id={component.id} data-chart={kind}>
-      <figcaption className="tr-heading">{asString(component.props?.title, kind)}</figcaption>
-      <div className="tr-chart-bars" role="img" aria-label={asString(component.props?.ariaLabel, "Chart")}>
-        {bounded.map((d, i) => {
-          const v = Number(d.value) || 0;
-          const h = Math.round((Math.abs(v) / max) * 100);
-          return (
-            <div key={i} className="tr-chart-bar-wrap" title={`${d.label ?? i}: ${v}`}>
-              <div className="tr-chart-bar" style={{ height: `${h}%` }} />
-              <span className="muted">{d.label ?? String(i)}</span>
-            </div>
-          );
-        })}
+      <figcaption className="tr-heading">{title}</figcaption>
+      <div className="tr-chart-svg-wrap" role="img" aria-label={ariaLabel}>
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          width="100%"
+          height="100%"
+          preserveAspectRatio="xMidYMid meet"
+          className="tr-chart-svg"
+          style={{ maxHeight: 240 }}
+        >
+          {renderSvgContent()}
+        </svg>
       </div>
       <table className="tr-chart-a11y">
         <caption>Accessible data</caption>
@@ -1071,8 +1515,8 @@ function ChartNode({ component, kind }: { component: ToolComponent; kind: string
         <tbody>
           {bounded.map((d, i) => (
             <tr key={i}>
-              <td>{d.label ?? i}</td>
-              <td>{d.value}</td>
+              <td>{d.label ?? String(i)}</td>
+              <td>{values[i]}</td>
             </tr>
           ))}
         </tbody>
@@ -1101,9 +1545,10 @@ export function ChartScatterNode({ component }: ToolNodeProps) {
 }
 
 export function CodeEditorNode({ component }: ToolNodeProps) {
-  const { getValue, setValue, runActions } = useToolRuntime();
+  const { runActions } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey");
-  const value = asString(getValue(key), asString(component.props?.value, asString(component.props?.defaultValue)));
+  const defaultVal = asString(component.props?.value, asString(component.props?.defaultValue, ""));
+  const [value, setVal] = useBoundState(key, defaultVal);
   const readOnly = asBoolean(component.props?.readOnly);
   const language = asString(component.props?.language, "text");
   return (
@@ -1116,7 +1561,7 @@ export function CodeEditorNode({ component }: ToolNodeProps) {
         spellCheck={false}
         aria-label={asString(component.props?.ariaLabel, "Code editor")}
         rows={asNumber(component.props?.rows, 12)}
-        onChange={(e) => setValue(key, e.target.value.slice(0, 200_000))}
+        onChange={(e) => setVal(e.target.value.slice(0, 200_000))}
       />
       {component.actions?.length ? (
         <button
@@ -1202,18 +1647,41 @@ export function AudioPlayerNode({ component }: ToolNodeProps) {
 }
 
 export function DataTableNode({ component }: ToolNodeProps) {
-  const { getValue } = useToolRuntime();
+  const { getValue, setValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey", "dataKey", "rowsKey");
-  const stateRows = getValue<unknown[]>(key);
-  const rawRows = Array.isArray(stateRows)
-    ? stateRows
-    : Array.isArray(component.props?.rows)
-      ? (component.props.rows as unknown[])
-      : [];
+  const selectionKey = stateKeyFor(component, "selectionKey");
+  const selectedId = selectionKey ? asString(getValue(selectionKey)) : null;
+
+  const stateRows = key ? getValue(key) : undefined;
+  let rawRows: unknown[] = [];
+  if (Array.isArray(stateRows)) {
+    rawRows = stateRows;
+  } else if (stateRows && typeof stateRows === "object") {
+    const obj = stateRows as Record<string, unknown>;
+    if (Array.isArray(obj.records)) rawRows = obj.records;
+    else if (Array.isArray(obj.rows)) rawRows = obj.rows;
+    else if (Array.isArray(obj.items)) rawRows = obj.items;
+    else if (Array.isArray(obj.data)) rawRows = obj.data;
+  } else if (Array.isArray(component.props?.rows)) {
+    rawRows = component.props.rows as unknown[];
+  }
   const rows = (rawRows as Array<Record<string, unknown>>).slice(0, 500);
-  const columns = Array.isArray(component.props?.columns)
-    ? (component.props?.columns as Array<{ id: string; label: string }>)
-    : [];
+
+  const columns = useMemo(() => {
+    if (Array.isArray(component.props?.columns) && component.props.columns.length > 0) {
+      return (component.props.columns as Array<{ id?: string; key?: string; label?: string } | string>).map((c) => {
+        if (typeof c === "string") return { id: c, label: c };
+        const id = c.id ?? c.key ?? "";
+        return { id, label: c.label ?? id };
+      });
+    }
+    if (rows.length > 0 && rows[0] && typeof rows[0] === "object") {
+      return Object.keys(rows[0])
+        .filter((k) => !k.startsWith("_"))
+        .map((k) => ({ id: k, label: k.charAt(0).toUpperCase() + k.slice(1) }));
+    }
+    return [];
+  }, [component.props?.columns, rows]);
 
   const pageSizeProp = asNumber(component.props?.pageSize, 10);
   const pageSize = pageSizeProp > 0 && pageSizeProp <= 100 ? pageSizeProp : 10;
@@ -1276,6 +1744,12 @@ export function DataTableNode({ component }: ToolNodeProps) {
     }
   };
 
+  const handleRowClick = (row: Record<string, unknown>, i: number) => {
+    if (!selectionKey) return;
+    const id = asString(row._id ?? row.id ?? i);
+    setValue(selectionKey, id);
+  };
+
   const title = asString(component.props?.title, "Data table");
   const enableSearch = component.props?.searchable !== false;
 
@@ -1328,13 +1802,23 @@ export function DataTableNode({ component }: ToolNodeProps) {
           </thead>
           <tbody>
             {pagedRows.length > 0 ? (
-              pagedRows.map((row, i) => (
-                <tr key={i}>
-                  {columns.map((c) => (
-                    <td key={c.id}>{String(row[c.id] ?? "")}</td>
-                  ))}
-                </tr>
-              ))
+              pagedRows.map((row, i) => {
+                const rowId = asString(row._id ?? row.id ?? i);
+                const isSelected = selectedId === rowId;
+                return (
+                  <tr
+                    key={row._id ? String(row._id) : i}
+                    className={isSelected ? "tr-row-selected" : undefined}
+                    aria-selected={selectionKey ? isSelected : undefined}
+                    onClick={() => handleRowClick(row, i)}
+                    style={selectionKey ? { cursor: "pointer" } : undefined}
+                  >
+                    {columns.map((c) => (
+                      <td key={c.id}>{String(row[c.id] ?? "")}</td>
+                    ))}
+                  </tr>
+                );
+              })
             ) : (
               <tr>
                 <td colSpan={columns.length || 1} className="tr-data-table-empty">

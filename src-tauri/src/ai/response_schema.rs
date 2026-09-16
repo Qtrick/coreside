@@ -197,13 +197,19 @@ impl ActionDefinition {
                 if event_name.trim().is_empty() || event_name.len() > MAX_ACTION_TARGET_LEN {
                     return Err("Invalid eventName in submitToAgent");
                 }
-                if let Some(fields) = include_fields {
-                    if fields.len() > 64 {
-                        return Err("Too many includeFields in submitToAgent");
+                match include_fields {
+                    None => return Err("submitToAgent requires explicit includeFields"),
+                    Some(fields) if fields.is_empty() => {
+                        return Err("submitToAgent requires non-empty includeFields");
                     }
-                    for f in fields {
-                        if f.trim().is_empty() || f.len() > MAX_ACTION_TARGET_LEN {
-                            return Err("Invalid field name in includeFields");
+                    Some(fields) => {
+                        if fields.len() > 64 {
+                            return Err("Too many includeFields in submitToAgent");
+                        }
+                        for f in fields {
+                            if f.trim().is_empty() || f.len() > MAX_ACTION_TARGET_LEN {
+                                return Err("Invalid field name in includeFields");
+                            }
                         }
                     }
                 }
