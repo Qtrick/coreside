@@ -44,3 +44,4 @@ Final Output:
    - files changed
    - verification performed
    - remaining risks
+   - suggested commit message (ALWAYS required at session close; follow Conventional Commits format with prefixes such as feat:, fix:, refactor:, chore:, concise imperative subject line, and detailed body explaining what and why)

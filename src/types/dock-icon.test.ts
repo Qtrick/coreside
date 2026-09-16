@@ -16,18 +16,16 @@ describe("Dock icon config", () => {
     expect(dockIconStatusLabel(DEFAULT_DOCK_ICON)).toBe("Following macOS");
   });
 
-  it("product gate forces Follow macOS while manual selection is dormant", () => {
-    const staleManual = parseDockIconConfig({
+  it("product gate allows manual selection when enabled", () => {
+    const manual = parseDockIconConfig({
       schemaVersion: 1,
       authority: "manual",
       artwork: "classic",
       style: "dark",
     });
-    expect(staleManual.authority).toBe("manual");
-    // While the product capability is off, effective authority must follow macOS
-    // even if parse still understands dormant manual configs.
-    expect(MANUAL_DOCK_ICON_SELECTION_ENABLED).toBe(false);
-    expect(effectiveDockIconForProduct(staleManual)).toBe("follow_macos");
+    expect(manual.authority).toBe("manual");
+    expect(MANUAL_DOCK_ICON_SELECTION_ENABLED).toBe(true);
+    expect(effectiveDockIconForProduct(manual)).toBe("manual");
     expect(effectiveDockIconForProduct(DEFAULT_DOCK_ICON)).toBe("follow_macos");
   });
 

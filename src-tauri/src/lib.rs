@@ -162,6 +162,7 @@ pub fn run() {
             commands::delete_added_setting,
             commands::validate_change_targets,
             commands::commit_dock_icon_preference,
+            commands::get_dock_icon_status,
             commands::apply_persisted_dock_icon,
             commands::clear_conversations,
             commands::clear_tools,
@@ -337,6 +338,12 @@ pub fn run() {
                 .map(|s| s.profile_ready())
                 .unwrap_or(false);
             if profile_ready {
+                if let Some(state) = app.try_state::<AppState>() {
+                    let handle = app.handle();
+                    if let Err(err) = branding::reconcile_dock_on_startup(handle, &state.db) {
+                        tracing::warn!(error = %err, "initial dock reconciliation failed at startup");
+                    }
+                }
                 // Interrupt in-flight application jobs after unclean restart (do not resume provider calls)
                 if let Some(state) = app.try_state::<AppState>() {
                     let mut db = state.db.lock();

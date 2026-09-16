@@ -527,17 +527,7 @@ fn require_main_dock_window(window: &WebviewWindow) -> Result<(), CommandError> 
     Ok(())
 }
 
-fn read_persisted_dock(state: &AppState) -> Result<DockIconConfig, CommandError> {
-    let db = state.db.lock();
-    let map = db::get_settings(&db)?;
-    Ok(map
-        .get("dockIcon")
-        .or_else(|| map.get("dock_icon"))
-        .map(|s| branding::parse_dock_icon_setting(s))
-        .unwrap_or_else(DockIconConfig::follow_macos))
-}
-
-/// Single-authority Dock preference commit: validate → AppKit → persist (with rollback).
+/// Single-authority Dock preference commit: validate → preflight → native plan → AppKit → persist (with rollback).
 #[tauri::command]
 pub fn commit_dock_icon_preference(
     app: AppHandle,
@@ -548,14 +538,7 @@ pub fn commit_dock_icon_preference(
     state.require_profile()?;
     require_main_dock_window(&window)?;
 
-    let prior = read_persisted_dock(&state)?;
-    branding::commit_dock_preference(&app, &prior, preference, |cfg| {
-        let stored = cfg.to_storage()?;
-        let mut db = state.db.lock();
-        db::set_setting(&mut db, branding::setting_key(), &stored).map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .map_err(|e| {
+    branding::commit_dock_preference(&app, &state, preference).map_err(|e| {
         if e.rollback_failed {
             CommandError::new(
                 "dock_rollback_failed",
@@ -565,6 +548,20 @@ pub fn commit_dock_icon_preference(
             CommandError::new(e.code, e.message)
         }
     })
+}
+
+/// Query authoritative Dock icon status.
+#[tauri::command]
+pub fn get_dock_icon_status(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    window: WebviewWindow,
+) -> Result<DockIconCommitResult, CommandError> {
+    state.require_profile()?;
+    require_main_dock_window(&window)?;
+
+    branding::get_dock_icon_status(Some(&app), &state)
+        .map_err(|e| CommandError::new("dock_status", e))
 }
 
 /// Reapply the persisted Dock preference at startup (main window only).
@@ -577,26 +574,8 @@ pub fn apply_persisted_dock_icon(
     state.require_profile()?;
     require_main_dock_window(&window)?;
 
-    let cfg = read_persisted_dock(&state)?;
-    let effective = branding::effective_dock_config_for_runtime(cfg.clone());
-    // Same mutex as commit — prevents startup apply from racing a live preference change.
-    let override_cleared = branding::apply_dock_native_serialized(&app, &effective)
-        .map_err(|_| CommandError::new("dock_icon", "Couldn't update the Dock icon."))?;
-    // Persist only when runtime authority coerced the stored value (e.g. dormant
-    // manual selection → Follow macOS). Avoid rewriting Follow on every startup.
-    if cfg != effective {
-        let stored = effective
-            .to_storage()
-            .map_err(|_| CommandError::new("dock_icon", "Couldn't update the Dock icon."))?;
-        let mut db = state.db.lock();
-        let _ = db::set_setting(&mut db, branding::setting_key(), &stored);
-    }
-    Ok(DockIconCommitResult {
-        status_label: effective.status_label().to_string(),
-        override_cleared,
-        effective_authority: effective.authority,
-        config: effective,
-    })
+    branding::reconcile_dock_on_startup(&app, &state.db)
+        .map_err(|e| CommandError::new("dock_icon", format!("Couldn't update the Dock icon: {e}")))
 }
 
 /// Helper used by apply paths — returns Err when any id is protected.

@@ -5,12 +5,12 @@ import { MANUAL_DOCK_ICON_SELECTION_ENABLED } from "@/lib/branding/manual-dock-i
 import { MANUAL_DOCK_ICON_LABELS } from "@/components/settings/ManualDockIconSelector";
 import { SETTINGS_SEARCH_INDEX } from "@/lib/settings-categories";
 
-describe("manual Dock icon product dormancy", () => {
-  it("defaults the product capability off", () => {
-    expect(MANUAL_DOCK_ICON_SELECTION_ENABLED).toBe(false);
+describe("manual Dock icon product capability", () => {
+  it("enables the product capability", () => {
+    expect(MANUAL_DOCK_ICON_SELECTION_ENABLED).toBe(true);
   });
 
-  it("retains dormant selector labels in source without mounting them", () => {
+  it("retains selector labels in source", () => {
     expect(MANUAL_DOCK_ICON_LABELS).toEqual([
       "Classic Dark",
       "Classic Light",
@@ -18,8 +18,8 @@ describe("manual Dock icon product dormancy", () => {
     ]);
   });
 
-  it("removes Dock icon from the active settings search index", () => {
-    expect(SETTINGS_SEARCH_INDEX.some((e) => e.id === "dock-icon")).toBe(false);
+  it("includes Dock icon in the active settings search index", () => {
+    expect(SETTINGS_SEARCH_INDEX.some((e) => e.id === "dock-icon")).toBe(true);
   });
 
   it("does not render manual Dock selection from SettingsPanel source", () => {

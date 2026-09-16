@@ -71,6 +71,9 @@ export function ManualDockIconSelector() {
     dockIconPending,
     dockIconError,
     clearDockIconError,
+    dockStatusLabel,
+    dockDevelopmentFallback,
+    dockAdaptiveCapable,
   } = useAppStore(
     useShallow((s) => ({
       dockIcon: s.dockIcon,
@@ -78,6 +81,9 @@ export function ManualDockIconSelector() {
       dockIconPending: s.dockIconPending,
       dockIconError: s.dockIconError,
       clearDockIconError: s.clearDockIconError,
+      dockStatusLabel: s.dockStatusLabel,
+      dockDevelopmentFallback: s.dockDevelopmentFallback,
+      dockAdaptiveCapable: s.dockAdaptiveCapable,
     })),
   );
   const [dockRetryTarget, setDockRetryTarget] = useState<DockIconConfig | null>(
@@ -143,8 +149,11 @@ export function ManualDockIconSelector() {
             <span className="dock-recommended">Recommended</span>
           </span>
           <span className="dock-authority-hint">
-            Uses the packaged icon; follows macOS Icon &amp; Widget Style when
-            Assets.car is present
+            {dockDevelopmentFallback
+              ? "Follow macOS is selected. Development preview uses a fixed Coreside icon because this process isn't running from an app bundle."
+              : dockAdaptiveCapable
+                ? "Uses the packaged icon; follows macOS Icon & Widget Style."
+                : "Uses Coreside’s packaged icon. Adaptive icon styles aren’t included in this build."}
           </span>
         </button>
         <button
@@ -177,7 +186,7 @@ export function ManualDockIconSelector() {
       <p className="dock-icon-status" aria-live="polite">
         {dockIconPending
           ? "Updating Dock icon…"
-          : dockIconStatusLabel(dockIcon)}
+          : dockStatusLabel || dockIconStatusLabel(dockIcon)}
       </p>
 
       {dockManual ? (

@@ -65,14 +65,13 @@ describe("settings categories", () => {
 
   it("returns no hits for blank queries and scores token matches", () => {
     expect(matchSettingsSearch("   ")).toEqual([]);
-    // Manual Dock selection is product-dormant — search must not surface it.
-    expect(matchSettingsSearch("dock tile").some((h) => h.id === "dock-icon")).toBe(
-      false,
+    // Dock icon setting is active in Appearance.
+    expect(matchSettingsSearch("dock").some((h) => h.id === "dock-icon")).toBe(
+      true,
     );
-    expect(matchSettingsSearch("Classic Dark").some((h) => h.id === "dock-icon")).toBe(
-      false,
+    expect(matchSettingsSearch("Split").some((h) => h.id === "dock-icon")).toBe(
+      true,
     );
-    expect(matchSettingsSearch("Split").some((h) => h.id === "dock-icon")).toBe(false);
     const wallpaper = matchSettingsSearch("wallpaper");
     expect(wallpaper[0]?.categoryId).toBe("appearance");
     expect(wallpaper[0]?.score).toBeGreaterThan(0);

@@ -531,7 +531,8 @@ if (exists("reports/release-evidence.json")) {
   try {
     const ev = JSON.parse(read("reports/release-evidence.json"));
     const head = spawnSyncGitHead();
-    const sameCommit = !head || ev?.git?.commit === head;
+    const evCommit = ev?.git?.commit || ev?.commit;
+    const sameCommit = !head || evCommit === head;
     const hasGates = Array.isArray(ev?.gates);
     // "passed" requires a numeric exitCode of 0 — null/undefined is invented.
     const inventsPass = (ev?.gates || []).some(

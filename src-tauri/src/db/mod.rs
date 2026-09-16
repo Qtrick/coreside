@@ -119,13 +119,13 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../../migrations/023_dock_icon_preference.sql"),
     ),
     (
-        "024_reset_dock_icon_follow_macos",
-        include_str!("../../migrations/024_reset_dock_icon_follow_macos.sql"),
+        "024_dock_icon_compatibility_repair",
+        include_str!("../../migrations/024_dock_icon_compatibility_repair.sql"),
     ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "024_reset_dock_icon_follow_macos";
+pub const LATEST_MIGRATION: &str = "024_dock_icon_compatibility_repair";
 
 #[derive(Debug, Error)]
 pub enum DbError {

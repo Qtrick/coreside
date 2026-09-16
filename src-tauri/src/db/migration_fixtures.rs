@@ -512,11 +512,11 @@ mod tests {
             );
         }
         assert_eq!(names[23], LATEST_MIGRATION);
-        assert_eq!(LATEST_MIGRATION, "024_reset_dock_icon_follow_macos");
+        assert_eq!(LATEST_MIGRATION, "024_dock_icon_compatibility_repair");
     }
 
     #[test]
-    fn fresh_install_reaches_dock_icon_follow_macos_reset() {
+    fn fresh_install_reaches_dock_icon_compatibility_repair() {
         let dir = tempdir().unwrap();
         let db = Database::open_path(&dir.path().join("fresh024.db")).unwrap();
         assert_latest(&db);
@@ -546,78 +546,155 @@ mod tests {
     }
 
     #[test]
-    fn upgrade_from_023_resets_manual_and_legacy_dock_icons() {
-        // 024 must clear both versioned manual JSON and any leftover legacy
-        // dark/light/split strings under either settings key.
-        let cases: &[(&str, &str)] = &[
-            (
-                "dockIcon",
-                r#"{"schemaVersion":1,"authority":"manual","artwork":"classic","style":"dark"}"#,
-            ),
-            (
-                "dockIcon",
-                r#"{"schemaVersion":1,"authority":"manual","artwork":"classic","style":"light"}"#,
-            ),
-            (
-                "dockIcon",
-                r#"{"schemaVersion":1,"authority":"manual","artwork":"split","style":"original"}"#,
-            ),
-            ("dock_icon", "dark"),
-            ("dockIcon", "light"),
-            ("dock_icon", "split"),
-            ("dockIcon", "  Dark  "),
-        ];
+    fn upgrade_from_023_preserves_valid_manual_dock_icons() {
+        const DARK_JSON: &str =
+            r#"{"schemaVersion":1,"authority":"manual","artwork":"classic","style":"dark"}"#;
+        const LIGHT_JSON: &str =
+            r#"{"schemaVersion":1,"authority":"manual","artwork":"classic","style":"light"}"#;
+        const SPLIT_JSON: &str =
+            r#"{"schemaVersion":1,"authority":"manual","artwork":"split","style":"original"}"#;
 
-        for (i, (key, stale)) in cases.iter().enumerate() {
+        for (i, expected) in [DARK_JSON, LIGHT_JSON, SPLIT_JSON].iter().enumerate() {
             let dir = tempdir().unwrap();
-            let path = dir.path().join(format!("from023-reset-{i}.db"));
+            let path = dir.path().join(format!("from023-manual-{i}.db"));
             {
                 let db = Database::open_path_through(&path, "023_dock_icon_preference").unwrap();
-                upsert_setting(&db, key, stale);
-                assert_eq!(
-                    setting_value(&db, key).as_deref(),
-                    Some(*stale),
-                    "precondition: stale value stored for case {i}"
-                );
+                upsert_setting(&db, "dockIcon", expected);
             }
             let db = Database::open_path(&path).unwrap();
             assert_latest(&db);
             assert_fk_ok(&db);
             assert_eq!(
-                setting_value(&db, key).as_deref(),
-                Some(FOLLOW_MACOS_DOCK),
-                "case {i} ({key}={stale}) must reset to Follow macOS"
+                setting_value(&db, "dockIcon").as_deref(),
+                Some(*expected),
+                "manual icon {expected} must be preserved across migration 024"
+            );
+            assert_eq!(setting_value(&db, "dock_icon"), None);
+        }
+    }
+
+    #[test]
+    fn upgrade_from_023_repairs_legacy_strings_including_split() {
+        const SPLIT_JSON: &str =
+            r#"{"schemaVersion":1,"authority":"manual","artwork":"split","style":"original"}"#;
+        const DARK_JSON: &str =
+            r#"{"schemaVersion":1,"authority":"manual","artwork":"classic","style":"dark"}"#;
+        const LIGHT_JSON: &str =
+            r#"{"schemaVersion":1,"authority":"manual","artwork":"classic","style":"light"}"#;
+
+        let cases: &[(&str, &str, &str)] = &[
+            ("dockIcon", "split", SPLIT_JSON),
+            ("dock_icon", "split", SPLIT_JSON),
+            ("dockIcon", "dark", DARK_JSON),
+            ("dock_icon", "dark", DARK_JSON),
+            ("dockIcon", "light", LIGHT_JSON),
+            ("dock_icon", "light", LIGHT_JSON),
+            ("dockIcon", "auto", FOLLOW_MACOS_DOCK),
+            ("dock_icon", "system", FOLLOW_MACOS_DOCK),
+            ("dockIcon", "follow_macos", FOLLOW_MACOS_DOCK),
+        ];
+
+        for (i, (key, legacy_val, expected)) in cases.iter().enumerate() {
+            let dir = tempdir().unwrap();
+            let path = dir.path().join(format!("from023-legacy-{i}.db"));
+            {
+                let db = Database::open_path_through(&path, "023_dock_icon_preference").unwrap();
+                upsert_setting(&db, key, legacy_val);
+            }
+            let db = Database::open_path(&path).unwrap();
+            assert_latest(&db);
+            assert_fk_ok(&db);
+            assert_eq!(
+                setting_value(&db, "dockIcon").as_deref(),
+                Some(*expected),
+                "case {i} ({key}={legacy_val}) must map to {expected}"
+            );
+            assert_eq!(
+                setting_value(&db, "dock_icon"),
+                None,
+                "legacy dock_icon key must be deleted"
             );
         }
     }
 
     #[test]
-    fn upgrade_from_023_dock_icon_reset_is_idempotent() {
+    fn upgrade_from_023_resolves_dual_alias_and_malformed() {
+        const SPLIT_JSON: &str =
+            r#"{"schemaVersion":1,"authority":"manual","artwork":"split","style":"original"}"#;
+        const FUTURE_JSON: &str = r#"{"schemaVersion":2,"authority":"adaptive","tint":"neon"}"#;
+
+        // 1. Malformed dockIcon but valid dock_icon: dock_icon wins!
+        {
+            let dir = tempdir().unwrap();
+            let path = dir.path().join("from023-dual-malformed-main.db");
+            {
+                let db = Database::open_path_through(&path, "023_dock_icon_preference").unwrap();
+                upsert_setting(&db, "dockIcon", "{corrupted_json_starting_with_brace");
+                upsert_setting(&db, "dock_icon", "split");
+            }
+            let db = Database::open_path(&path).unwrap();
+            assert_latest(&db);
+            assert_eq!(
+                setting_value(&db, "dockIcon").as_deref(),
+                Some(SPLIT_JSON),
+                "valid dock_icon must be adopted when dockIcon is malformed"
+            );
+            assert_eq!(setting_value(&db, "dock_icon"), None);
+        }
+
+        // 2. Corrupt JSON with no valid fallback fails closed to Follow macOS
+        {
+            let dir = tempdir().unwrap();
+            let path = dir.path().join("from023-corrupt.db");
+            {
+                let db = Database::open_path_through(&path, "023_dock_icon_preference").unwrap();
+                upsert_setting(&db, "dockIcon", "invalid_non_json");
+            }
+            let db = Database::open_path(&path).unwrap();
+            assert_latest(&db);
+            assert_eq!(
+                setting_value(&db, "dockIcon").as_deref(),
+                Some(FOLLOW_MACOS_DOCK)
+            );
+        }
+
+        // 3. Future schema versions (schemaVersion > 1) are preserved untouched
+        {
+            let dir = tempdir().unwrap();
+            let path = dir.path().join("from023-future.db");
+            {
+                let db = Database::open_path_through(&path, "023_dock_icon_preference").unwrap();
+                upsert_setting(&db, "dockIcon", FUTURE_JSON);
+            }
+            let db = Database::open_path(&path).unwrap();
+            assert_latest(&db);
+            assert_eq!(
+                setting_value(&db, "dockIcon").as_deref(),
+                Some(FUTURE_JSON),
+                "future schema version must not be destroyed"
+            );
+        }
+    }
+
+    #[test]
+    fn upgrade_from_023_dock_icon_repair_is_idempotent() {
+        const SPLIT_JSON: &str =
+            r#"{"schemaVersion":1,"authority":"manual","artwork":"split","style":"original"}"#;
+
         let dir = tempdir().unwrap();
         let path = dir.path().join("from023-idempotent.db");
         {
             let db = Database::open_path_through(&path, "023_dock_icon_preference").unwrap();
-            upsert_setting(
-                &db,
-                "dockIcon",
-                r#"{"schemaVersion":1,"authority":"manual","artwork":"split","style":"original"}"#,
-            );
+            upsert_setting(&db, "dockIcon", "split");
             upsert_setting(&db, "dock_icon", "light");
         }
 
         let db = Database::open_path(&path).unwrap();
         assert_latest(&db);
-        assert_eq!(
-            setting_value(&db, "dockIcon").as_deref(),
-            Some(FOLLOW_MACOS_DOCK)
-        );
-        assert_eq!(
-            setting_value(&db, "dock_icon").as_deref(),
-            Some(FOLLOW_MACOS_DOCK)
-        );
+        assert_eq!(setting_value(&db, "dockIcon").as_deref(), Some(SPLIT_JSON));
+        assert_eq!(setting_value(&db, "dock_icon"), None);
 
-        // Re-open applies no further migrations; Follow macOS rows stay put
-        // (024's WHERE clause skips already-correct values).
+        // Re-open applies no further migrations; state remains identical
         let again = Database::open_path(&path).unwrap();
         assert_eq!(
             again.applied_migrations().unwrap(),
@@ -625,11 +702,8 @@ mod tests {
         );
         assert_eq!(
             setting_value(&again, "dockIcon").as_deref(),
-            Some(FOLLOW_MACOS_DOCK)
+            Some(SPLIT_JSON)
         );
-        assert_eq!(
-            setting_value(&again, "dock_icon").as_deref(),
-            Some(FOLLOW_MACOS_DOCK)
-        );
+        assert_eq!(setting_value(&again, "dock_icon"), None);
     }
 }

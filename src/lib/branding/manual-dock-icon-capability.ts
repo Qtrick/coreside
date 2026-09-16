@@ -10,7 +10,7 @@
  * To re-enable later: set to true, mount ManualDockIconSelector in Appearance, and
  * ensure Rust `MANUAL_DOCK_ICON_SELECTION_ENABLED` matches.
  */
-export const MANUAL_DOCK_ICON_SELECTION_ENABLED = false;
+export const MANUAL_DOCK_ICON_SELECTION_ENABLED = true;
 
 /** Effective runtime preference while the product capability is disabled. */
 export function effectiveDockIconForProduct(

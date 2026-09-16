@@ -24,7 +24,7 @@ OUT = REPO / "src" / "assets" / "branding"
 RES = REPO / "src-tauri" / "resources" / "branding"
 ICONS = REPO / "src-tauri" / "icons"
 SPLIT_EXPECTED_SHA256 = (
-    "4ced90e8089b3248c9b978979dd22c9e8679bb6e5a27cdea7583f4047d1ea93a"
+    "0950f3dc6a812970a4a3bfc363b79baf943dcb0609a15bcf46255a02cd41127c"
 )
 
 
@@ -444,25 +444,31 @@ def main() -> None:
         mark_white = Image.open(mark_white_path)
         mark_black = Image.open(mark_black_path)
 
-    flower = make_dock_icon_pair(
-        mark_white,
-        mark_black,
-        OUT / "coreside-dock-dark.png",
-        OUT / "coreside-dock-light.png",
-    )
-    make_dock_icon_pair(
-        mark_white,
-        mark_black,
-        RES / "coreside-dock-dark.png",
-        RES / "coreside-dock-light.png",
-    )
-    for p in [
-        OUT / "coreside-dock-dark.png",
-        OUT / "coreside-dock-light.png",
-        RES / "coreside-dock-dark.png",
-        RES / "coreside-dock-light.png",
-    ]:
-        validate_rgba(p)
+    if not args.skip_classic_sources:
+        flower = make_dock_icon_pair(
+            mark_white,
+            mark_black,
+            OUT / "coreside-dock-dark.png",
+            OUT / "coreside-dock-light.png",
+        )
+        make_dock_icon_pair(
+            mark_white,
+            mark_black,
+            RES / "coreside-dock-dark.png",
+            RES / "coreside-dock-light.png",
+        )
+        for p in [
+            OUT / "coreside-dock-dark.png",
+            OUT / "coreside-dock-light.png",
+            RES / "coreside-dock-dark.png",
+            RES / "coreside-dock-light.png",
+        ]:
+            validate_rgba(p)
+    else:
+        outer = int(1024 * 0.11)
+        inner = 1024 - 2 * outer
+        _, ox, oy, tw, th = compute_mark_placement(mark_white, inner)
+        flower = (ox + outer, oy + outer, ox + tw + outer, oy + th + outer)
 
     flower_split = make_split_dock_icon_from_marks(
         mark_white, mark_black, OUT / "coreside-dock-split.png"
@@ -475,16 +481,17 @@ def main() -> None:
     assert_dock_optical_parity(RES / "coreside-dock-light.png", RES / "coreside-dock-split.png")
     assert_flower_geometry_parity(flower, flower_split)
 
-    dock_dark = Image.open(OUT / "coreside-dock-dark.png")
-    for name, size in {
-        "32x32.png": 32,
-        "128x128.png": 128,
-        "128x128@2x.png": 256,
-        "icon.png": 1024,
-    }.items():
-        dock_dark.resize((size, size), Image.Resampling.LANCZOS).save(
-            ICONS / name, optimize=True
-        )
+    if not args.skip_classic_sources:
+        dock_dark = Image.open(OUT / "coreside-dock-dark.png")
+        for name, size in {
+            "32x32.png": 32,
+            "128x128.png": 128,
+            "128x128@2x.png": 256,
+            "icon.png": 1024,
+        }.items():
+            dock_dark.resize((size, size), Image.Resampling.LANCZOS).save(
+                ICONS / name, optimize=True
+            )
 
     evidence = REPO / "reports" / "evidence" / "branding" / "dock-icon-contact-sheet.png"
     write_dock_contact_sheet(

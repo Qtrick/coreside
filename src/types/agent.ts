@@ -143,11 +143,20 @@ export function dockIconStatusLabel(config: DockIconConfig): string {
   return "Using manual Dock icon";
 }
 
+export type EffectiveDockPresentation =
+  | "packaged_adaptive"
+  | "packaged_static"
+  | "development_fallback"
+  | "manual";
+
 export type DockIconCommitResult = {
   config: DockIconConfig;
   statusLabel: string;
   effectiveAuthority: DockAuthority;
+  effectivePresentation: EffectiveDockPresentation;
   overrideCleared: boolean;
+  adaptiveCapable: boolean;
+  developmentFallback: boolean;
 };
 
 /** @deprecated Use DockIconConfig */

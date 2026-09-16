@@ -869,4 +869,3 @@ mod tests {
         assert!(err2.contains("uses legacy action props ('action'/'actions')"));
     }
 }
-

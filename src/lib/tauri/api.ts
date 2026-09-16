@@ -398,6 +398,8 @@ export const api = {
     invoke<ValidateChangeTargetsResult>("validate_change_targets", { ids }),
   commitDockIconPreference: (preference: DockIconConfig) =>
     invoke<DockIconCommitResult>("commit_dock_icon_preference", { preference }),
+  getDockIconStatus: () =>
+    invoke<DockIconCommitResult>("get_dock_icon_status"),
   applyPersistedDockIcon: () =>
     invoke<DockIconCommitResult>("apply_persisted_dock_icon"),
   clearConversations: () => invoke<void>("clear_conversations"),

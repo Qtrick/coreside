@@ -3,6 +3,7 @@ import type {
   AiStatus,
   AppInfo,
   DockIconConfig,
+  EffectiveDockPresentation,
   ModelCatalog,
   ThemePreference,
   ToolChange,
@@ -141,6 +142,10 @@ type AppStore = {
   actionLogMode: ActionLogMode;
   preferredModel: string;
   dockIcon: DockIconConfig;
+  dockPresentation: EffectiveDockPresentation | null;
+  dockStatusLabel: string | null;
+  dockDevelopmentFallback: boolean;
+  dockAdaptiveCapable: boolean;
   dockIconPending: boolean;
   dockIconError: string | null;
   /** Monotonic epoch so stale commit/apply responses cannot clobber newer choices. */
@@ -825,6 +830,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   actionLogMode: "off" as const,
   preferredModel: "auto",
   dockIcon: { ...DEFAULT_DOCK_ICON },
+  dockPresentation: null,
+  dockStatusLabel: null,
+  dockDevelopmentFallback: false,
+  dockAdaptiveCapable: false,
   dockIconPending: false,
   dockIconError: null,
   dockIconEpoch: 0,
@@ -1712,6 +1721,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (get().dockIconEpoch !== epoch) return;
       set({
         dockIcon: parseDockIconConfig(result.config),
+        dockPresentation: result.effectivePresentation,
+        dockStatusLabel: result.statusLabel,
+        dockDevelopmentFallback: result.developmentFallback,
+        dockAdaptiveCapable: result.adaptiveCapable,
         dockIconPending: false,
         dockIconError: null,
       });
@@ -1723,6 +1736,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
           : error instanceof Error
             ? error.message
             : "Couldn't update the Dock icon.";
+      try {
+        const current = await api.getDockIconStatus();
+        if (get().dockIconEpoch === epoch) {
+          set({
+            dockIcon: parseDockIconConfig(current.config),
+            dockPresentation: current.effectivePresentation,
+            dockStatusLabel: current.statusLabel,
+            dockDevelopmentFallback: current.developmentFallback,
+            dockAdaptiveCapable: current.adaptiveCapable,
+            dockIconPending: false,
+            dockIconError: message,
+          });
+          return;
+        }
+      } catch {
+        // Fallback to prior if status query fails
+      }
       set({
         dockIcon: prior,
         dockIconPending: false,
@@ -1739,6 +1769,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (get().dockIconPending || get().dockIconEpoch !== epochAtStart) return;
       set({
         dockIcon: parseDockIconConfig(result.config),
+        dockPresentation: result.effectivePresentation,
+        dockStatusLabel: result.statusLabel,
+        dockDevelopmentFallback: result.developmentFallback,
+        dockAdaptiveCapable: result.adaptiveCapable,
         dockIconError: null,
       });
     } catch {

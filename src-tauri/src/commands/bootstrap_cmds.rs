@@ -1,6 +1,6 @@
 //! Startup bootstrap / recovery-safe commands.
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use super::CommandError;
 use crate::db::{self, BootstrapStatus};
@@ -12,7 +12,10 @@ pub fn get_bootstrap_status(state: State<'_, AppState>) -> BootstrapStatus {
 }
 
 #[tauri::command]
-pub fn retry_open_database(state: State<'_, AppState>) -> Result<BootstrapStatus, CommandError> {
+pub fn retry_open_database(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<BootstrapStatus, CommandError> {
     if state.profile_ready() {
         return Ok(BootstrapStatus::Ready);
     }
@@ -21,6 +24,7 @@ pub fn retry_open_database(state: State<'_, AppState>) -> Result<BootstrapStatus
         Ok(db) => {
             let _ = db::ensure_default_workspace(&db);
             state.replace_profile_database(db);
+            let _ = crate::branding::reconcile_dock_on_startup(&app, &state.db);
             tracing::info!("profile database reopened successfully");
             Ok(BootstrapStatus::Ready)
         }

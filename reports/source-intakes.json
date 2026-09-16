@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "product": "Coreside",
   "description": "Immutable archive intake history. Active audit selects currentIntakeId; prior SHA identities are never rewritten.",
-  "currentIntakeId": "p0.8-input",
+  "currentIntakeId": "rc3.12-input",
   "partialUpdate": {
     "label": "partial-update-main",
     "filename": "Partial Update Main (1).zip",
@@ -11,9 +11,20 @@
   },
   "intakes": [
     {
+      "id": "rc3.12-input",
+      "label": "RC3.12 supplied Coreside archive",
+      "role": "current_supplied_reference",
+      "filename": "Coreside Chat AI.zip",
+      "sha256": "8d455783ca41492259b15f0ed2973c7db14513a8afe352005d5eff8a1eef3155",
+      "defaultPath": "~/Downloads/Coreside Chat AI.zip",
+      "commit": "f648117ef10600794723ae1c00c16473667ec0cb",
+      "accessed": "2026-09-16",
+      "notes": "RC3.12 intake. Rebaselined to supplied archive SHA256 8d455783ca41492259b15f0ed2973c7db14513a8afe352005d5eff8a1eef3155."
+    },
+    {
       "id": "p0.8-input",
       "label": "P0.8 newest supplied Coreside archive",
-      "role": "current_supplied_reference",
+      "role": "historical_input",
       "filename": "Coreside Chat AI (1).zip",
       "sha256": "f2547160c00e36d1274ee9fa2867d33eb05deb58a1ab05775c50ef6b990b1114",
       "defaultPath": "~/Downloads/Coreside Chat AI (1).zip",

@@ -1726,20 +1726,33 @@ export async function mockInvoke<T>(
         );
       }
       mockDb.settings.dockIcon = preference;
+      const isFollow = preference.authority === "follow_macos";
       return {
         config: preference,
-        statusLabel: dockIconStatusLabel(preference),
+        statusLabel: isFollow
+          ? "Follow macOS is selected. Development preview uses a fixed Coreside icon because this process isn't running from an app bundle."
+          : dockIconStatusLabel(preference),
         effectiveAuthority: preference.authority,
-        overrideCleared: preference.authority === "follow_macos",
+        effectivePresentation: isFollow ? "development_fallback" : "manual",
+        overrideCleared: false,
+        adaptiveCapable: false,
+        developmentFallback: isFollow,
       } as T;
     }
+    case "get_dock_icon_status":
     case "apply_persisted_dock_icon": {
       const preference = parseDockIconConfig(mockDb.settings.dockIcon);
+      const isFollow = preference.authority === "follow_macos";
       return {
         config: preference,
-        statusLabel: dockIconStatusLabel(preference),
+        statusLabel: isFollow
+          ? "Follow macOS is selected. Development preview uses a fixed Coreside icon because this process isn't running from an app bundle."
+          : dockIconStatusLabel(preference),
         effectiveAuthority: preference.authority,
-        overrideCleared: preference.authority === "follow_macos",
+        effectivePresentation: isFollow ? "development_fallback" : "manual",
+        overrideCleared: false,
+        adaptiveCapable: false,
+        developmentFallback: isFollow,
       } as T;
     }
 

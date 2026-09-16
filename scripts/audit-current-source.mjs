@@ -228,6 +228,7 @@ function countGlob(dir, predicate) {
 
 function archiveExtractRoot() {
   const candidates = [
+    path.join(root, ".reference", "coreside-rc3.12-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-p0.6-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-p0.5-archive", "coreside-main"),
     path.join(root, ".reference", "coreside-p0.3-archive", "coreside-main"),
@@ -246,6 +247,7 @@ function archiveExtractRoot() {
 
 function archiveExtractMatchesExpected() {
   const markers = [
+    path.join(root, ".reference", "coreside-rc3.12-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-p0.6-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-p0.5-archive", "source.sha256"),
     path.join(root, ".reference", "coreside-p0.3-archive", "source.sha256"),
@@ -460,7 +462,7 @@ const commandStatuses = Object.fromEntries(
 commandStatuses.git = { status: "pass", code: 0, errorCode: null };
 
 const archivePath = DEFAULT_ARCHIVE;
-const archivePresent = fs.existsSync(archivePath);
+const archivePresent = fs.existsSync(archivePath) && fs.statSync(archivePath).isFile();
 const observedSha = archivePresent ? sha256File(archivePath) : null;
 const extractRoot = archiveExtractRoot();
 const extractMatchesExpected = archiveExtractMatchesExpected();

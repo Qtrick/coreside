@@ -141,9 +141,12 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchEntry[] = [
     label: "Theme",
     keywords: ["light", "dark", "system", "appearance"],
   },
-  // dock-icon search entry intentionally omitted while manual Dock selection is
-  // product-dormant (MANUAL_DOCK_ICON_SELECTION_ENABLED=false). Restore with the
-  // ManualDockIconSelector mount when reactivating.
+  {
+    id: "dock-icon",
+    categoryId: "appearance",
+    label: "Dock icon",
+    keywords: ["dock", "icon", "classic", "split", "follow macos", "branding"],
+  },
   {
     id: "wallpaper-link",
     categoryId: "appearance",

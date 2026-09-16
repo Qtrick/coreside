@@ -1,8 +1,8 @@
-# Current Source Baseline (P0.6)
+# Current Source Baseline (RC3.12)
 
 **Product:** Coreside  
-**Access date:** 2026-09-15
-**Phase:** P0.6 source intake / development audit<br>
+**Access date:** 2026-09-16
+**Phase:** RC3.12 source intake / development audit<br>
 **Public beta:** **NOT READY**  
 **Hosted AI:** **NOT READY**
 
@@ -12,20 +12,20 @@
 | --- | --- |
 | Path | `/Users/qunyingfan/Coreside` |
 | Branch | `main` |
-| Commit | `b491c6ab77ad9edd11f5e2aa4435f43d81449e8d` |
+| Commit | `c08983161ee3d11858bdafce8c0fa7666ab3e4f9` |
 | Dirty | Yes (development evidence only) |
-| Source fingerprint | `ef2a2fc2fa0348ccb0f7ebefc57b7701cf79098a9dee442b0df94e962e62fb0a` |
+| Source fingerprint | `3639d324318ba0d83e8cb4047cc05bfd6ea5b4222be21b2f7ae859561c007d97` |
 
 ## Uploaded archive
 
 | Field | Value |
 | --- | --- |
-| Filename | `Coreside main.zip` |
-| Path | `/Users/qunyingfan/Downloads/Coreside main.zip` |
-| Expected SHA-256 | `22a0ab2903fc26c6b17c903ae9f8d7181ed72803bec8f00c447d687462119764` |
+| Filename | `Coreside Chat AI.zip` |
+| Path | `/Users/qunyingfan/Downloads/Coreside Chat AI.zip` |
+| Expected SHA-256 | `8d455783ca41492259b15f0ed2973c7db14513a8afe352005d5eff8a1eef3155` |
 | Observed SHA-256 | `n/a` |
 | Status | **zip_unavailable_extract_present** |
-| Supersedes | `220c246eeed62133bb6b08d77278248192f4f7503f31004e5ce02861f2ae6412` (`P0.5 supplied Coreside archive`) |
+| Supersedes | `f2547160c00e36d1274ee9fa2867d33eb05deb58a1ab05775c50ef6b990b1114` (`P0.8 newest supplied Coreside archive`) |
 | Partial Update archive | `Partial Update Main (1).zip` / `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607` |
 
 ## Lockfiles
@@ -49,21 +49,21 @@
 
 | Metric | Active |
 | --- | --- |
-| `src` files | 198 |
+| `src` files | 197 |
 | Rust `.rs` | 194 |
 | Migrations | 24 |
 | E2E specs | 20 |
-| Tauri commands | 222 |
-| Fingerprint files | 721 |
+| Tauri commands | 223 |
+| Fingerprint files | 720 |
 
 ## Archive vs active
 
 | Metric | Count |
 | --- | --- |
 | Comparison status | compared_against_prior_extract |
-| Only in active | 9 |
-| Only in archive | 0 |
-| Changed | 37 |
+| Only in active | 26 |
+| Only in archive | 1 |
+| Changed | 70 |
 
 ## Generation command
 
