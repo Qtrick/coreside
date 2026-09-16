@@ -554,7 +554,7 @@ impl AgentResponsePayload {
             let ops: Vec<crate::runtime_v2::AppOperation> =
                 serde_json::from_value(Value::Array(self.operations.clone().unwrap_or_default()))
                     .map_err(|e| format!("invalid operations: {e}"))?;
-            crate::runtime_v2::validate_operations(&ops)?;
+            crate::runtime_v2::validate_model_operations(&ops)?;
         }
 
         if self.assistant_message.trim().is_empty()

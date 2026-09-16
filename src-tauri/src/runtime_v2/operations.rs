@@ -229,7 +229,69 @@ pub fn is_known_operation_type(op: &str) -> bool {
     is_supported_model_operation(op) || is_internal_operation(op) || is_reserved_operation(op)
 }
 
+/// Validate a list of operations for model-facing responses.
+/// Only operations in SUPPORTED_MODEL_OPERATIONS are allowed.
+/// Internal and reserved operations must only come from host subsystems.
+pub fn validate_model_operations(operations: &[AppOperation]) -> Result<(), String> {
+    if operations.len() > MAX_OPERATIONS_PER_TURN {
+        return Err(format!(
+            "operations exceeds max of {MAX_OPERATIONS_PER_TURN}"
+        ));
+    }
+    let mut groups = std::collections::HashSet::new();
+    let mut seen_ids = std::collections::HashSet::new();
+    for op in operations {
+        if op.id.trim().is_empty() {
+            return Err("operation.id must be non-empty".into());
+        }
+        if !seen_ids.insert(op.id.clone()) {
+            return Err(format!("duplicate operation.id: {}", op.id));
+        }
+        if !is_supported_model_operation(&op.op_type) {
+            if is_internal_operation(&op.op_type) {
+                return Err(format!(
+                    "internal operation '{}' is not allowed in model responses",
+                    op.op_type
+                ));
+            }
+            if is_reserved_operation(&op.op_type) {
+                return Err(format!(
+                    "reserved operation '{}' is not allowed in model responses",
+                    op.op_type
+                ));
+            }
+            return Err(format!("unknown operation type: {}", op.op_type));
+        }
+        if let Some(g) = &op.transaction_group {
+            groups.insert(g.clone());
+        }
+        if let Some(sid) = op.target.surface_id.as_ref() {
+            crate::security::assert_not_protected(sid)?;
+        }
+        if let Some(tid) = op.target.tool_id.as_ref() {
+            crate::security::assert_not_protected(tid)?;
+        }
+        if let Some(tool) = op.payload.get("tool") {
+            if let Some(id) = tool.get("id").and_then(|v| v.as_str()) {
+                crate::security::assert_not_protected(id)?;
+            }
+        }
+        if let Ok(bytes) = serde_json::to_vec(&op.payload) {
+            if bytes.len() > MAX_DEFINITION_JSON_BYTES {
+                return Err("operation payload too large".into());
+            }
+        }
+    }
+    if groups.len() > MAX_TRANSACTION_GROUPS_PER_TURN {
+        return Err(format!(
+            "transaction groups exceed max of {MAX_TRANSACTION_GROUPS_PER_TURN}"
+        ));
+    }
+    Ok(())
+}
+
 /// Validate a list of application operations (trusted boundary).
+/// Accepts all known operation types including internal and reserved.
 pub fn validate_operations(operations: &[AppOperation]) -> Result<(), String> {
     if operations.len() > MAX_OPERATIONS_PER_TURN {
         return Err(format!(
@@ -390,16 +452,16 @@ mod tests {
             assistant_message: None,
             operations: vec![AppOperation {
                 id: "op1".into(),
-                op_type: "layout.move_panel".into(),
+                op_type: "state.set".into(),
                 target: OperationTarget {
-                    panel_id: Some("p1".into()),
+                    surface_id: Some("surf-test".into()),
                     ..Default::default()
                 },
                 base_revision: None,
                 transaction_group: None,
                 idempotency_key: None,
                 depends_on: None,
-                payload: json!({"position": 1}),
+                payload: json!({"state": {"key": "value"}}),
                 requires_approval: None,
                 destructive: None,
                 audience: None,
@@ -486,5 +548,64 @@ mod tests {
         assert_eq!(op.op_type, "tool.full_replace");
         assert_eq!(op.target.tool_id.as_deref(), Some("existing-tool"));
         assert_eq!(op.target.surface_id.as_deref(), Some("surf-existing-tool"));
+    }
+
+    #[test]
+    fn rejects_internal_operations_in_model_responses() {
+        let ops = vec![AppOperation {
+            id: "op1".into(),
+            op_type: "state.reset".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("internal operation"), "{err}");
+    }
+
+    #[test]
+    fn rejects_reserved_operations_in_model_responses() {
+        let ops = vec![AppOperation {
+            id: "op1".into(),
+            op_type: "layout.move_panel".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("reserved operation"), "{err}");
+    }
+
+    #[test]
+    fn accepts_model_facing_operations() {
+        let ops = vec![AppOperation {
+            id: "op1".into(),
+            op_type: "component.update_props".into(),
+            target: OperationTarget {
+                surface_id: Some("surf-test".into()),
+                ..Default::default()
+            },
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({"props": {"text": "hello"}}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        assert!(validate_model_operations(&ops).is_ok());
     }
 }

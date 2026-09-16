@@ -520,7 +520,25 @@ export async function applyActionsAsync(
         if (outcome && typeof outcome === "object") {
           if (outcome.status === "ok") {
             if (action.resultKey) {
-              state[action.resultKey] = outcome.data;
+              // Merge result into current state instead of overwriting.
+              // The action result updates only the resultKey; all other
+              // state (including user edits made during the async gap)
+              // is preserved.
+              if (
+                outcome.data &&
+                typeof outcome.data === "object" &&
+                !Array.isArray(outcome.data) &&
+                state[action.resultKey] &&
+                typeof state[action.resultKey] === "object" &&
+                !Array.isArray(state[action.resultKey])
+              ) {
+                state[action.resultKey] = {
+                  ...(state[action.resultKey] as Record<string, unknown>),
+                  ...(outcome.data as Record<string, unknown>),
+                };
+              } else {
+                state[action.resultKey] = outcome.data;
+              }
               changedKeys.push(action.resultKey);
             }
           } else if (outcome.status === "pendingApproval") {

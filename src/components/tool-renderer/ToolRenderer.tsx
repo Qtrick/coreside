@@ -306,20 +306,20 @@ export function ToolRenderer({
       if (compEl) {
         const id = compEl.getAttribute("data-component-id");
         if (id) {
-          const findInTree = (nodes: ToolComponent[]): ToolComponent | null => {
+          // Find the deepest component in the tree matching the DOM id.
+          // deepest holds the last match found during DFS, ensuring
+          // nested components are selected over their parents.
+          let deepest: ToolComponent | null = null;
+          const findInTree = (nodes: ToolComponent[]): void => {
             for (const n of nodes) {
-              if (n.id === id) return n;
-              if (n.children) {
-                const found = findInTree(n.children);
-                if (found) return found;
-              }
+              if (n.id === id) deepest = n;
+              if (n.children) findInTree(n.children);
             }
-            return null;
           };
-          const match = findInTree(tool.components ?? []);
-          if (match) {
+          findInTree(tool.components ?? []);
+          if (deepest) {
             e.stopPropagation();
-            onSelectComponent(match);
+            onSelectComponent(deepest);
           }
         }
       }
