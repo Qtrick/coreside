@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-15T20:06:27.875Z",
-  "commit": "1e9944bae299aa40e7fd211e564e751602606d9f",
+  "generatedAt": "2026-09-16T19:34:54.487Z",
+  "commit": "1839c1bd1f8baad098dc3fb2b60de7e52c09a863",
   "dirty": true,
   "command": "audit:interactive-controls",
   "evidenceLevel": "Scaffolded",
   "note": "Static regex inventory only — not runtime interactivity proof.",
   "filesScanned": 87,
   "filesWithControls": 65,
-  "approximateTotalControls": 679,
+  "approximateTotalControls": 718,
   "files": [
     {
       "file": "src/components/action-log/ActionLog.tsx",
@@ -553,9 +553,9 @@
       "file": "src/components/settings/WallpaperSettings.tsx",
       "approximateControlCount": 30,
       "counts": {
-        "button": 13,
-        "onClick": 13,
-        "input_type": 4
+        "button": 12,
+        "onClick": 12,
+        "input_type": 6
       },
       "flags": {
         "placeholder": true
@@ -572,11 +572,11 @@
     },
     {
       "file": "src/components/tool-canvas/CustomizeMode.tsx",
-      "approximateControlCount": 18,
+      "approximateControlCount": 47,
       "counts": {
-        "button": 7,
-        "onClick": 7,
-        "input_type": 2,
+        "button": 19,
+        "onClick": 19,
+        "input_type": 7,
         "select": 2
       },
       "flags": {
@@ -612,11 +612,11 @@
     },
     {
       "file": "src/components/tool-renderer/nodes.tsx",
-      "approximateControlCount": 43,
+      "approximateControlCount": 52,
       "counts": {
-        "button": 15,
+        "button": 18,
         "type_submit": 1,
-        "onClick": 13,
+        "onClick": 19,
         "input_type": 13,
         "select": 1
       },
@@ -634,10 +634,10 @@
     },
     {
       "file": "src/components/tool-renderer/ToolRenderer.tsx",
-      "approximateControlCount": 2,
+      "approximateControlCount": 3,
       "counts": {
         "button": 1,
-        "onClick": 1
+        "onClick": 2
       },
       "flags": {}
     },

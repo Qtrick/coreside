@@ -2,8 +2,8 @@
 
 **Product:** Coreside  
 **Access date:** 2026-08-07  
-**Generated:** 2026-09-15T05:51:20.951Z  
-**Commit:** `b491c6ab77ad9edd11f5e2aa4435f43d81449e8d`  
+**Generated:** 2026-09-16T19:35:37.623Z  
+**Commit:** `1839c1bd1f8baad098dc3fb2b60de7e52c09a863`  
 **Dirty:** yes  
 **Public beta:** **NOT READY**
 
@@ -11,10 +11,10 @@
 
 | Field | Value |
 | --- | --- |
-| Path | `/Users/qunyingfan/Coreside/FFATU/Partial Update Main (1).zip` |
+| Path | `/Users/qunyingfan/Downloads/Partial Update Main.zip` |
 | Expected SHA-256 | `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607` |
-| Observed SHA-256 | `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607` |
-| Status | **present_hash_match** |
+| Observed SHA-256 | `n/a` |
+| Status | **archive_unavailable** |
 | Source root | `.reference/partial-update/partialupdate-main` (reference_reuse) |
 
 ## Status counts

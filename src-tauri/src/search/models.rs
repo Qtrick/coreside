@@ -27,7 +27,29 @@ impl SafeSearchLevel {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResearchIntent {
+    Lookup,
+    News,
+    DeepResearch,
+    KnownUrl,
+    DomainSearch,
+}
+
+impl ResearchIntent {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Lookup => "lookup",
+            Self::News => "news",
+            Self::DeepResearch => "deep_research",
+            Self::KnownUrl => "known_url",
+            Self::DomainSearch => "domain_search",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebSearchResult {
     pub id: String,
@@ -37,6 +59,20 @@ pub struct WebSearchResult {
     pub snippet: Option<String>,
     pub age: Option<String>,
     pub rank: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highlights: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fetched_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retrieval_method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

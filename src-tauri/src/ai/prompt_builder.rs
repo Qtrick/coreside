@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use super::capability_registry::capability_schemas;
 use super::response_schema::ToolDefinition;
 use crate::exa::has_exa_key;
+use crate::firecrawl::has_key as has_firecrawl_key;
 use crate::linkup::has_key as has_linkup_key;
 use crate::research::research_capability_notice;
 
@@ -167,7 +168,8 @@ pub fn build_agent_prompt_with_references(
         parts.push(prompts.tool_builder);
     }
     parts.push(crate::runtime_v2::agent_pack_catalog_markdown());
-    parts.push(crate::application_kernel::registered_actions::registered_actions_catalog_markdown());
+    parts
+        .push(crate::application_kernel::registered_actions::registered_actions_catalog_markdown());
 
     if let Some(hint) = workspace_hint {
         parts.push(format!("## Workspace context\n{hint}"));
@@ -204,7 +206,7 @@ pub fn build_agent_prompt_with_references(
     );
     parts.push(format!(
         "## Web research capability\n{}",
-        research_capability_notice(has_linkup_key(), has_exa_key())
+        research_capability_notice(has_linkup_key(), has_exa_key(), has_firecrawl_key())
     ));
     parts.push(
         "When search or project context is needed, respond with responseType \"tool_use\" and toolCalls. \

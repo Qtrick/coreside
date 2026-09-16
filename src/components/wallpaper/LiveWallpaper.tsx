@@ -267,44 +267,71 @@ function CanvasWallpaper({
       ctx.globalAlpha = opacity;
 
       if (kind === "aurora") {
-        const g1 = ctx.createRadialGradient(
-          w * (0.3 + (reduced ? 0 : Math.sin(t * 0.4 * speed) * 0.15)),
-          h * 0.2,
-          40,
-          w * 0.35,
-          h * 0.35,
-          w * 0.55,
-        );
-        g1.addColorStop(0, color);
-        g1.addColorStop(1, "transparent");
-        const g2 = ctx.createRadialGradient(
-          w * (0.7 + (reduced ? 0 : Math.cos(t * 0.35 * speed) * 0.12)),
-          h * 0.55,
-          30,
-          w * 0.65,
-          h * 0.6,
-          w * 0.5,
-        );
-        g2.addColorStop(0, secondaryColor);
-        g2.addColorStop(1, "transparent");
-        ctx.fillStyle = g1;
+        // Base ambient horizon wash
+        const horizon = ctx.createLinearGradient(0, 0, 0, h);
+        horizon.addColorStop(0, "transparent");
+        horizon.addColorStop(0.3, color + "18");
+        horizon.addColorStop(0.7, secondaryColor + "25");
+        horizon.addColorStop(1, "transparent");
+        ctx.fillStyle = horizon;
         ctx.fillRect(0, 0, w, h);
-        ctx.fillStyle = g2;
-        ctx.fillRect(0, 0, w, h);
+
+        // Harmonic plasma waves undulating across dark horizon
+        const waves = [
+          { phase: t * 0.35 * speed, freq: 0.002, amp: h * 0.12, yOffset: h * 0.32, col: color },
+          { phase: t * 0.28 * speed + 1.2, freq: 0.0028, amp: h * 0.16, yOffset: h * 0.44, col: secondaryColor },
+          { phase: t * 0.22 * speed + 2.5, freq: 0.0018, amp: h * 0.11, yOffset: h * 0.56, col: color },
+        ];
+        for (const wave of waves) {
+          ctx.beginPath();
+          ctx.moveTo(0, h);
+          for (let x = 0; x <= w; x += 16) {
+            const y = wave.yOffset +
+              Math.sin(x * wave.freq + wave.phase) * wave.amp +
+              Math.cos(x * 0.0012 + wave.phase * 0.6) * (wave.amp * 0.45);
+            ctx.lineTo(x, y);
+          }
+          ctx.lineTo(w, h);
+          ctx.closePath();
+          const wg = ctx.createLinearGradient(0, wave.yOffset - wave.amp, 0, h);
+          wg.addColorStop(0, wave.col + "00");
+          wg.addColorStop(0.25, wave.col + "35");
+          wg.addColorStop(0.75, wave.col + "15");
+          wg.addColorStop(1, "transparent");
+          ctx.fillStyle = wg;
+          ctx.fill();
+        }
       } else if (kind === "pulse") {
-        const pulse = reduced ? 0.5 : 0.5 + 0.5 * Math.sin(t * 1.2 * speed);
+        const pulse1 = reduced ? 0.5 : 0.5 + 0.5 * Math.sin(t * 0.8 * speed);
+        const pulse2 = reduced ? 0.5 : 0.5 + 0.5 * Math.cos(t * 0.5 * speed + 0.5);
+        const radius = w * (0.22 + pulse1 * 0.25);
         const g = ctx.createRadialGradient(
           w * 0.5,
-          h * 0.45,
-          20,
+          h * 0.48,
+          radius * 0.05,
           w * 0.5,
-          h * 0.45,
-          w * (0.25 + pulse * 0.35),
+          h * 0.48,
+          radius,
         );
         g.addColorStop(0, color);
-        g.addColorStop(0.55, secondaryColor);
+        g.addColorStop(0.45, secondaryColor);
+        g.addColorStop(0.85, secondaryColor + "20");
         g.addColorStop(1, "transparent");
         ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+
+        // Secondary subtle harmonic ambient halo
+        const halo = ctx.createRadialGradient(
+          w * (0.5 + (reduced ? 0 : Math.sin(t * 0.3 * speed) * 0.06)),
+          h * (0.45 + (reduced ? 0 : Math.cos(t * 0.4 * speed) * 0.04)),
+          10,
+          w * 0.5,
+          h * 0.48,
+          w * (0.35 + pulse2 * 0.18),
+        );
+        halo.addColorStop(0, secondaryColor + "40");
+        halo.addColorStop(1, "transparent");
+        ctx.fillStyle = halo;
         ctx.fillRect(0, 0, w, h);
       } else {
         ctx.fillStyle = color;
@@ -314,20 +341,49 @@ function CanvasWallpaper({
             p.y += p.vy;
           }
           if (kind === "rain") {
-            if (p.y > h) {
-              p.y = -10;
-              p.x = Math.random() * w;
+            if (p.y > h + 25) {
+              p.y = -20;
+              p.x = Math.random() * (w + 100) - 50;
             }
-            ctx.globalAlpha = opacity * p.a;
-            ctx.fillRect(p.x, p.y, p.r * 0.6, p.r * 8);
-          } else {
-            if (p.x < 0) p.x = w;
-            if (p.x > w) p.x = 0;
-            if (p.y < 0) p.y = h;
-            if (p.y > h) p.y = 0;
-            ctx.globalAlpha = opacity * p.a;
+            // Angled streak with motion gradient
+            const streakLen = p.r * 12 * Math.max(0.6, speed);
+            const slant = streakLen * 0.2;
+            const rg = ctx.createLinearGradient(p.x, p.y, p.x - slant, p.y + streakLen);
+            rg.addColorStop(0, "transparent");
+            rg.addColorStop(0.6, color);
+            rg.addColorStop(1, secondaryColor);
+            ctx.strokeStyle = rg;
+            ctx.lineWidth = p.r * 0.8;
             ctx.beginPath();
-            ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(p.x - slant, p.y + streakLen);
+            ctx.stroke();
+          } else {
+            if (p.x < -15) p.x = w + 15;
+            if (p.x > w + 15) p.x = -15;
+            if (p.y < -15) p.y = h + 15;
+            if (p.y > h + 15) p.y = -15;
+            if (!reduced) {
+              p.x += Math.sin(t * 1.5 + p.y * 0.01) * 0.2;
+            }
+            const particleAlpha = opacity * p.a * (0.7 + 0.3 * Math.sin(t * 2 + p.x));
+            ctx.globalAlpha = Math.min(1, Math.max(0.05, particleAlpha));
+
+            // Soft glow aura
+            const aura = ctx.createRadialGradient(p.x, p.y, p.r * 0.2, p.x, p.y, p.r * 2.8);
+            aura.addColorStop(0, color);
+            aura.addColorStop(0.4, secondaryColor);
+            aura.addColorStop(1, "transparent");
+            ctx.fillStyle = aura;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r * 2.8, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Core luminous point
+            ctx.fillStyle = "#ffffff";
+            ctx.globalAlpha = Math.min(1, particleAlpha * 1.2);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r * 0.6, 0, Math.PI * 2);
             ctx.fill();
           }
         }

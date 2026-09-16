@@ -20,7 +20,7 @@ Always set `targetToolId` to the active tool id for `update` and `replace`.
 3. **Full Primitive Catalog**:
    - Layout: `container`, `row`, `column`, `card`, `tabs`, `divider`, `spacer`
    - Display: `heading`, `text`, `badge`, `image`, `emptyState`, `stat`, `progress`, `svgScene`, `svgRect`, `svgCircle`, `svgEllipse`, `svgLine`, `svgPath`, `svgText`, `svgGroup`, `mathInline`, `mathBlock`
-   - Forms: `form`, `fieldGroup`, `textInput`, `textArea`, `numberInput`, `select`, `checkbox`, `radioGroup`, `switch`, `slider`, `dateInput`, `timeInput`, `dateTimeInput`, `colorInput`, `filePicker`, `mediaPicker`, `submitButton`, `resetButton`, `validationMessage`
+   - Forms: `form`, `fieldGroup`, `textInput`, `textArea`, `numberInput`, `select`, `checkbox`, `radioGroup`, `switch`, `slider`, `dateInput`, `timeInput`, `dateTimeInput`, `colorInput`, `mediaPicker`, `submitButton`, `resetButton`, `validationMessage`
    - Data & Advanced: `table`, `dataTable`, `chartLine`, `chartBar`, `chartPie`, `chartDonut`, `chartArea`, `chartScatter`, `list`, `checklist`, `codeEditor`, `canvasScene`, `clock`, `counter`, `quiz`, `audioPlayer`
    - Actions: `button`, `buttonGroup` (with declarative `actions`: `setValue`, `toggle`, `increment`, `decrement`, `reset`, `appendItem`, `removeItem`, `updateItem`, `selectTab`, `submitToAgent`, `invokeRegisteredAction`)
 4. **Explicit State & Data Bindings**:

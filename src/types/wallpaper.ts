@@ -230,13 +230,91 @@ export function wallpaperDataAttribute(resolved: ResolvedWallpaper): string | un
 export interface WallpaperPresetDefinition {
   id: string;
   name: string;
-  category: "ambient" | "minimal" | "space" | "particles" | "rain" | "motion" | "solid" | "legacy";
+  category:
+    | "featured"
+    | "ambient"
+    | "minimal"
+    | "space"
+    | "particles"
+    | "rain"
+    | "motion"
+    | "media"
+    | "custom"
+    | "solid"
+    | "legacy";
   description: string;
   config: SchemaWallpaperConfig;
   previewColors: [string, string, string?];
 }
 
 export const CURATED_WALLPAPER_PRESETS: WallpaperPresetDefinition[] = [
+  {
+    id: "obsidian-flow",
+    name: "Obsidian Flow",
+    category: "featured",
+    description: "Deep obsidian backdrop with calm twilight indigo depth",
+    config: {
+      schemaVersion: "1",
+      type: "ambient-gradient",
+      color: "#0a0c10",
+      secondaryColor: "#1a1d28",
+      gradientAngle: 135,
+      opacity: 0.95,
+      reducedMotionFallback: "#0a0c10",
+    },
+    previewColors: ["#0a0c10", "#141822", "#1a1d28"],
+  },
+  {
+    id: "starlight-embers",
+    name: "Starlight Embers",
+    category: "featured",
+    description: "Luminescent floating particles drifting through nocturnal space",
+    config: {
+      schemaVersion: "1",
+      type: "floating-particles",
+      preset: "particles",
+      color: "#38bdf8",
+      secondaryColor: "#818cf8",
+      opacity: 0.35,
+      reducedMotionFallback: "#07090e",
+      extra: { speed: 0.5, density: 0.4 },
+    },
+    previewColors: ["#07090e", "#111726", "#38bdf8"],
+  },
+  {
+    id: "midnight-rain",
+    name: "Midnight Rain",
+    category: "featured",
+    description: "Atmospheric mist and delicate precipitation over deep slate",
+    config: {
+      schemaVersion: "1",
+      type: "canvas-preset",
+      preset: "rain",
+      color: "#64748b",
+      secondaryColor: "#94a3b8",
+      opacity: 0.3,
+      reducedMotionFallback: "#06090e",
+      extra: { speed: 0.6, density: 0.35 },
+    },
+    previewColors: ["#06090e", "#0e1626", "#64748b"],
+  },
+  {
+    id: "harmonic-aurora",
+    name: "Harmonic Aurora",
+    category: "featured",
+    description: "Atmospheric plasma waves undulating across dark emerald horizons",
+    config: {
+      schemaVersion: "1",
+      type: "canvas-preset",
+      preset: "aurora",
+      color: "#0d5c52",
+      secondaryColor: "#14b8a6",
+      opacity: 0.5,
+      reducedMotionFallback: "#041a14",
+      extra: { speed: 0.5, density: 0.45 },
+    },
+    previewColors: ["#041a14", "#0a3a2e", "#14b8a6"],
+  },
   {
     id: "obsidian",
     name: "Obsidian",

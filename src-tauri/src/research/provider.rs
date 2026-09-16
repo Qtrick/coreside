@@ -324,6 +324,11 @@ fn web_result_from_crawl(payload: &Value, rank: usize) -> Result<WebSearchResult
         snippet,
         age: None,
         rank,
+        provider: Some("crawl4ai".into()),
+        canonical_url: Some(safe_url.to_string()),
+        fetched_at: Some(crate::db::now_rfc3339()),
+        retrieval_method: Some("crawl4ai_extract".into()),
+        ..Default::default()
     })
 }
 

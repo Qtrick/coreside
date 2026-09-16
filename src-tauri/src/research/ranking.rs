@@ -63,6 +63,8 @@ pub fn rank_web_candidates(
                 snippet,
                 age: None,
                 rank: 0,
+                score: Some(score),
+                ..Default::default()
             },
         ));
     }

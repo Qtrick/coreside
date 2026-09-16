@@ -12,9 +12,9 @@
 | --- | --- |
 | Path | `/Users/qunyingfan/Coreside` |
 | Branch | `main` |
-| Commit | `c08983161ee3d11858bdafce8c0fa7666ab3e4f9` |
+| Commit | `1839c1bd1f8baad098dc3fb2b60de7e52c09a863` |
 | Dirty | Yes (development evidence only) |
-| Source fingerprint | `3639d324318ba0d83e8cb4047cc05bfd6ea5b4222be21b2f7ae859561c007d97` |
+| Source fingerprint | `b1afd5ce6e10ac82bbd86efacf33c8ba88724978f0019886238dc21033ad8c06` |
 
 ## Uploaded archive
 
@@ -49,21 +49,21 @@
 
 | Metric | Active |
 | --- | --- |
-| `src` files | 197 |
-| Rust `.rs` | 194 |
+| `src` files | 198 |
+| Rust `.rs` | 196 |
 | Migrations | 24 |
 | E2E specs | 20 |
 | Tauri commands | 223 |
-| Fingerprint files | 720 |
+| Fingerprint files | 723 |
 
 ## Archive vs active
 
 | Metric | Count |
 | --- | --- |
 | Comparison status | compared_against_prior_extract |
-| Only in active | 26 |
+| Only in active | 29 |
 | Only in archive | 1 |
-| Changed | 70 |
+| Changed | 84 |
 
 ## Generation command
 

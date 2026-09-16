@@ -89,6 +89,7 @@
     "tauri": "tauri",
     "doctor": "node scripts/coreside-doctor.mjs",
     "test:registered-actions": "cargo test --manifest-path src-tauri/Cargo.toml --lib application_kernel::registered_actions",
+    "test:research": "cargo test --manifest-path src-tauri/Cargo.toml --lib research:: && cargo test --manifest-path src-tauri/Cargo.toml --lib firecrawl::",
     "e2e:build": "env -u CARGO_TARGET_DIR npx tauri build --debug --features e2e --config src-tauri/tauri.e2e.conf.json --no-bundle",
     "e2e": "node e2e/run.mjs",
     "e2e:desktop": "npm run e2e:build && npm run e2e",

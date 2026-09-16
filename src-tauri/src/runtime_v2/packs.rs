@@ -93,7 +93,6 @@ pub fn bundled_packs() -> Vec<CapabilityPackMeta> {
                 "colorInput",
                 "timeInput",
                 "dateTimeInput",
-                "filePicker",
                 "mediaPicker",
                 "submitButton",
                 "resetButton",

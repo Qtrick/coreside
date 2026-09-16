@@ -257,9 +257,18 @@ pub async fn search(
                     .unwrap_or_else(|| url.as_str().to_string()),
                 url: url.to_string(),
                 display_domain: url.host_str().map(str::to_string),
-                snippet: result.content.map(|content| bound_text(&content, 400)),
+                snippet: result
+                    .content
+                    .as_ref()
+                    .map(|content| bound_text(content, 400)),
                 age: result.date,
                 rank: 0,
+                provider: Some(PROVIDER_ID.into()),
+                canonical_url: Some(url.to_string()),
+                content: result.content.map(|c| bound_text(&c, 2000)),
+                fetched_at: Some(crate::db::now_rfc3339()),
+                retrieval_method: Some("linkup_search".into()),
+                ..Default::default()
             })
         })
         .collect::<Vec<_>>();

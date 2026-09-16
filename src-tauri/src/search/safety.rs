@@ -150,6 +150,7 @@ fn is_private_v4(ip: Ipv4Addr) -> bool {
         || ip.is_link_local()
         || ip.is_unspecified()
         || ip.is_broadcast()
+        || ip.is_multicast()
         || ip.is_documentation()
         || ip.octets()[0] == 0
         || matches!(ip.octets(), [127, _, _, _])
@@ -161,14 +162,31 @@ fn is_private_v4(ip: Ipv4Addr) -> bool {
 }
 
 fn is_private_v6(ip: Ipv6Addr) -> bool {
+    // IPv4-mapped (::ffff:x.x.x.x) — extract and check embedded v4.
     if let Some(v4) = ip.to_ipv4_mapped() {
         return is_private_v4(v4);
     }
+    // IPv4-compatible (::x.x.x.x, deprecated RFC 4291) — first 96 bits zero.
+    if ip.is_unspecified() {
+        return true;
+    }
+    let segs = ip.segments();
+    if segs[0] == 0 && segs[1] == 0 && segs[2] == 0 && segs[3] == 0 && segs[4] == 0 && segs[5] == 0
+    {
+        // Last 32 bits encode an IPv4 address (two 16-bit segments → four 8-bit octets).
+        let v4 = Ipv4Addr::new(
+            (segs[6] >> 8) as u8,
+            segs[6] as u8,
+            (segs[7] >> 8) as u8,
+            segs[7] as u8,
+        );
+        return is_private_v4(v4);
+    }
     ip.is_loopback()
-        || ip.is_unspecified()
         || ip.is_unique_local()
         || ip.is_unicast_link_local()
-        || ip.segments()[0] & 0xfe00 == 0xfc00
+        || ip.is_multicast()
+        || segs[0] & 0xfe00 == 0xfc00
 }
 
 #[cfg(test)]
@@ -217,5 +235,31 @@ mod tests {
     #[test]
     fn rejects_public_ipv4_literals_that_are_private() {
         assert!(validate_public_http_url("https://169.254.169.254/latest").is_err());
+    }
+
+    #[test]
+    fn rejects_ipv4_mapped_ipv6() {
+        assert!(validate_public_http_url("http://[::ffff:127.0.0.1]/").is_err());
+        assert!(validate_public_http_url("http://[::ffff:10.0.0.1]/").is_err());
+        assert!(validate_public_http_url("http://[::ffff:192.168.1.1]/").is_err());
+    }
+
+    #[test]
+    fn rejects_ipv4_compatible_ipv6() {
+        assert!(validate_public_http_url("http://[::127.0.0.1]/").is_err());
+        assert!(validate_public_http_url("http://[::10.0.0.1]/").is_err());
+        assert!(validate_public_http_url("http://[::192.168.1.1]/").is_err());
+        assert!(validate_public_http_url("http://[::169.254.169.254]/").is_err());
+    }
+
+    #[test]
+    fn rejects_multicast_ipv4() {
+        assert!(validate_public_http_url("http://224.0.0.1/").is_err());
+        assert!(validate_public_http_url("http://239.255.255.250/").is_err());
+    }
+
+    #[test]
+    fn rejects_multicast_ipv6() {
+        assert!(validate_public_http_url("http://[ff02::1]/").is_err());
     }
 }

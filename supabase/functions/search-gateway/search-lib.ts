@@ -2,6 +2,8 @@ export interface SearchRequestBody {
   query: string;
   idempotencyKey: string;
   numResults?: number;
+  intent?: "lookup" | "news" | "deep_research" | "known_url" | "domain_search";
+  url?: string;
 }
 
 export const MAX_SEARCH_BODY_BYTES = 16 * 1024;
@@ -9,6 +11,14 @@ export const MAX_QUERY_CHARS = 512;
 export const MAX_RESULTS = 10;
 export const DEFAULT_RESULTS = 5;
 export const MAX_UPSTREAM_RESPONSE_BYTES = 512 * 1024;
+
+const VALID_INTENTS = new Set([
+  "lookup",
+  "news",
+  "deep_research",
+  "known_url",
+  "domain_search",
+]);
 
 export function parseSearchBody(raw: unknown): SearchRequestBody | null {
   if (!raw || typeof raw !== "object") return null;
@@ -27,10 +37,29 @@ export function parseSearchBody(raw: unknown): SearchRequestBody | null {
     numResults = Math.min(Math.floor(body.numResults), MAX_RESULTS);
   }
 
+  let intent: SearchRequestBody["intent"] = undefined;
+  if (typeof body.intent === "string" && VALID_INTENTS.has(body.intent.toLowerCase())) {
+    intent = body.intent.toLowerCase() as SearchRequestBody["intent"];
+  }
+
+  let targetUrl: string | undefined = undefined;
+  if (typeof body.url === "string" && body.url.trim().length > 0 && body.url.trim().length <= 2048) {
+    try {
+      const parsed = new URL(body.url.trim());
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        targetUrl = parsed.href;
+      }
+    } catch {
+      // ignore invalid optional url
+    }
+  }
+
   return {
     query,
     idempotencyKey: body.idempotencyKey.trim(),
     numResults,
+    ...(intent ? { intent } : {}),
+    ...(targetUrl ? { url: targetUrl } : {}),
   };
 }
 
@@ -144,7 +173,27 @@ function isPrivateOrLocalHost(host: string): boolean {
   );
 }
 
-/** Convert an upstream result into Coreside's stable source shape. Provider
+export function sanitizePromptInjection(text: string): string {
+  if (!text) return "";
+  let clean = text;
+  const injectionPatterns = [
+    /ignore\s+(all\s+)?(previous|prior)\s+instructions/gi,
+    /disregard\s+(all\s+)?(previous|prior)\s+instructions/gi,
+    /you\s+are\s+now\s+(a|an|in)\s+/gi,
+    /<\s*\/?\s*system\s*>/gi,
+    /\[\s*\/?\s*system\s*\]/gi,
+    /<\s*\/?\s*assistant\s*>/gi,
+    /\[\s*\/?\s*instruction\s*\]/gi,
+    /override\s+(all\s+)?system\s+prompts?/gi,
+    /new\s+system\s+prompt:/gi,
+  ];
+  for (const pattern of injectionPatterns) {
+    clean = clean.replace(pattern, "[untrusted-reference-neutralized]");
+  }
+  return clean;
+}
+
+/** Convert an upstream Linkup result into Coreside's stable source shape. Provider
  * URLs remain untrusted and must at least be public HTTP(S) before desktop use. */
 export function normalizeProviderResults(payload: unknown, maxResults: number): unknown[] {
   const rows = payload && typeof payload === "object" && Array.isArray((payload as Record<string, unknown>).results)
@@ -164,10 +213,12 @@ export function normalizeProviderResults(payload: unknown, maxResults: number): 
     if (isPrivateOrLocalHost(host)) continue;
     if (seen.has(url.href)) continue;
     seen.add(url.href);
+    const rawTitle = typeof source.name === "string" && source.name.trim() ? source.name.slice(0, 400) : url.href;
+    const rawSnippet = typeof source.content === "string" ? source.content.slice(0, 4000) : "";
     normalized.push({
-      title: typeof source.name === "string" && source.name.trim() ? source.name.slice(0, 400) : url.href,
+      title: sanitizePromptInjection(rawTitle),
       url: url.href,
-      snippet: typeof source.content === "string" ? source.content.slice(0, 4000) : "",
+      snippet: sanitizePromptInjection(rawSnippet),
       date: typeof source.date === "string" ? source.date.slice(0, 80) : null,
       rank: normalized.length + 1,
       provider: "linkup",
@@ -175,4 +226,89 @@ export function normalizeProviderResults(payload: unknown, maxResults: number): 
     if (normalized.length >= maxResults) break;
   }
   return normalized;
+}
+
+/** Convert an upstream Firecrawl search result into Coreside's stable source shape. */
+export function normalizeFirecrawlResults(payload: unknown, maxResults: number): unknown[] {
+  if (!payload || typeof payload !== "object") return [];
+  const body = payload as Record<string, unknown>;
+  const data = Array.isArray(body.data) ? body.data : [];
+  const seen = new Set<string>();
+  const normalized: Record<string, unknown>[] = [];
+  for (const item of data) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const rawUrl = typeof row.url === "string" ? row.url : "";
+    if (!rawUrl) continue;
+    let url: URL;
+    try { url = new URL(rawUrl); } catch { continue; }
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== "https:" && url.protocol !== "http:") continue;
+    if (isPrivateOrLocalHost(host)) continue;
+    if (seen.has(url.href)) continue;
+    seen.add(url.href);
+
+    const meta = row.metadata && typeof row.metadata === "object" ? (row.metadata as Record<string, unknown>) : {};
+    const rawTitle = typeof row.title === "string" && row.title.trim()
+      ? row.title
+      : typeof meta.title === "string" && meta.title.trim()
+        ? meta.title
+        : url.href;
+    const rawSnippet = typeof row.markdown === "string" && row.markdown.trim()
+      ? row.markdown.slice(0, 4000)
+      : typeof row.description === "string" && row.description.trim()
+        ? row.description.slice(0, 4000)
+        : typeof meta.description === "string" && meta.description.trim()
+          ? meta.description.slice(0, 4000)
+          : "";
+
+    normalized.push({
+      title: sanitizePromptInjection(rawTitle.slice(0, 400)),
+      url: url.href,
+      snippet: sanitizePromptInjection(rawSnippet),
+      date: null,
+      rank: normalized.length + 1,
+      provider: "firecrawl",
+    });
+    if (normalized.length >= maxResults) break;
+  }
+  return normalized;
+}
+
+/** Convert a Firecrawl scrape result into Coreside's stable source shape. */
+export function normalizeFirecrawlScrapeResult(payload: unknown, fallbackUrl: string): unknown[] {
+  if (!payload || typeof payload !== "object") return [];
+  const body = payload as Record<string, unknown>;
+  const data = body.data && typeof body.data === "object" ? (body.data as Record<string, unknown>) : null;
+  if (!data) return [];
+
+  const meta = data.metadata && typeof data.metadata === "object" ? (data.metadata as Record<string, unknown>) : {};
+  const targetUrl = typeof meta.sourceURL === "string" && meta.sourceURL.trim() ? meta.sourceURL.trim() : fallbackUrl;
+  let url: URL;
+  try { url = new URL(targetUrl); } catch { return []; }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return [];
+  if (isPrivateOrLocalHost(url.hostname.toLowerCase())) return [];
+
+  const rawTitle = typeof meta.title === "string" && meta.title.trim()
+    ? meta.title
+    : typeof meta.ogTitle === "string" && meta.ogTitle.trim()
+      ? meta.ogTitle
+      : url.href;
+  const rawContent = typeof data.markdown === "string" && data.markdown.trim()
+    ? data.markdown.slice(0, 8000)
+    : typeof meta.description === "string" && meta.description.trim()
+      ? meta.description.slice(0, 4000)
+      : "";
+
+  return [
+    {
+      title: sanitizePromptInjection(rawTitle.slice(0, 400)),
+      url: url.href,
+      snippet: sanitizePromptInjection(rawContent.slice(0, 4000)),
+      content: sanitizePromptInjection(rawContent),
+      date: null,
+      rank: 1,
+      provider: "firecrawl",
+    },
+  ];
 }

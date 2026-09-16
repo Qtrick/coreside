@@ -28,6 +28,8 @@ impl SearchProvider for MockSearchProvider {
             snippet: Some("Mock snippet from offline provider.".into()),
             age: None,
             rank: 1,
+            provider: Some("mock".into()),
+            ..Default::default()
         }]);
         Ok(super::models::WebSearchResponse {
             query: req.query.clone(),

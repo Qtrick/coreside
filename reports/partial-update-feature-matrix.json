@@ -2,10 +2,10 @@
   "schemaVersion": 2,
   "product": "Coreside",
   "accessDate": "2026-08-07",
-  "generatedAt": "2026-09-15T05:51:20.951Z",
-  "commit": "b491c6ab77ad9edd11f5e2aa4435f43d81449e8d",
+  "generatedAt": "2026-09-16T19:35:37.623Z",
+  "commit": "1839c1bd1f8baad098dc3fb2b60de7e52c09a863",
   "dirty": true,
-  "sourceFingerprint": "630c063e81b6f29208fdc04de54114efcf08838daea722cc2e7ce9f17db42279",
+  "sourceFingerprint": "3639d324318ba0d83e8cb4047cc05bfd6ea5b4222be21b2f7ae859561c007d97",
   "command": "audit:partial-update",
   "exitStatus": 0,
   "publicBeta": "Not ready",
@@ -23,11 +23,11 @@
     "Deferred"
   ],
   "archive": {
-    "filename": "Partial Update Main (1).zip",
-    "path": "/Users/qunyingfan/Coreside/FFATU/Partial Update Main (1).zip",
+    "filename": "Partial Update Main.zip",
+    "path": "/Users/qunyingfan/Downloads/Partial Update Main.zip",
     "expectedSha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
-    "observedSha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
-    "status": "present_hash_match"
+    "observedSha256": null,
+    "status": "archive_unavailable"
   },
   "partialUpdateSource": {
     "root": ".reference/partial-update/partialupdate-main",

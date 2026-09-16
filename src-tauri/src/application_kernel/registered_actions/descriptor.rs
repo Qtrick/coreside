@@ -335,13 +335,18 @@ pub fn catalog_json() -> Value {
 /// Generate model-facing registered actions documentation directly from the source of truth.
 pub fn registered_actions_catalog_markdown() -> String {
     let mut out = String::from("## Host-Registered Actions (`invokeRegisteredAction`)\n\n");
-    out.push_str("Generated applications can execute host-controlled registered actions at runtime. ");
+    out.push_str(
+        "Generated applications can execute host-controlled registered actions at runtime. ",
+    );
     out.push_str("Each action requires the specified permission to be declared in `requiredPermissions`.\n\n");
     for action in BUNDLED_ACTIONS.iter() {
         out.push_str(&format!("### Action: `{}`\n", action.name));
         out.push_str(&format!("- **Title**: {}\n", action.title));
         out.push_str(&format!("- **Purpose**: {}\n", action.description));
-        out.push_str(&format!("- **Permission Required**: `{}`\n", action.permission_category));
+        out.push_str(&format!(
+            "- **Permission Required**: `{}`\n",
+            action.permission_category
+        ));
         out.push_str(&format!("- **Risk Level**: `{}`\n", action.risk.as_str()));
         let schema_str = serde_json::to_string(&action.input_schema).unwrap_or_default();
         out.push_str(&format!("- **Input Schema**: `{schema_str}`\n\n"));

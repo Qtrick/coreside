@@ -1615,7 +1615,12 @@ async fn send_message_inner(
             let structured: Vec<&crate::runtime_v2::ContextLedgerEntry> = entries
                 .iter()
                 .filter(|e| {
-                    e.entry_type.contains("form_submit") && e.visibility == "model_context_only"
+                    (e.entry_type.contains("form_submit")
+                        || e.entry_type.contains("user_input")
+                        || e.entry_type.contains("structured"))
+                        && (e.visibility == "model_context_only"
+                            || e.visibility == "model_context"
+                            || e.visibility == "all")
                 })
                 .filter(|e| {
                     let expected_id = crate::runtime_v2::ledger_submission_id(&e.id);

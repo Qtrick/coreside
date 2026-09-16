@@ -359,6 +359,7 @@ mod tests {
                 snippet: Some("green".into()),
                 age: None,
                 rank: 1,
+                ..Default::default()
             }],
             session_id: None,
             notice: None,

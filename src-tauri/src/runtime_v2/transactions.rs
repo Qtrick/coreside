@@ -176,12 +176,15 @@ pub fn apply_transaction_deferred(
     let mut previous = json!({});
     let mut surfaces = Vec::new();
     let mut conflicts = Vec::new();
-    let mut initial_revisions: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut initial_revisions: std::collections::HashMap<String, i64> =
+        std::collections::HashMap::new();
 
     for op in &txn.operations {
         if let Some(sid) = op.target.surface_id.as_ref() {
             if let Ok(s) = get_surface(db, sid) {
-                initial_revisions.entry(sid.clone()).or_insert(s.current_revision);
+                initial_revisions
+                    .entry(sid.clone())
+                    .or_insert(s.current_revision);
                 previous.as_object_mut().unwrap().insert(
                     sid.clone(),
                     json!({ "revision": s.current_revision, "definition": s.definition }),
@@ -328,7 +331,9 @@ fn apply_one(
             let init_rev = initial_revisions.get(sid).copied();
             let effective_base = match (op.base_revision, init_rev) {
                 (Some(base), Some(init)) if base == init => Some(surface.current_revision),
-                (Some(base), _) if base == surface.current_revision => Some(surface.current_revision),
+                (Some(base), _) if base == surface.current_revision => {
+                    Some(surface.current_revision)
+                }
                 (Some(base), _) => Some(base),
                 (None, _) => None,
             };
@@ -591,7 +596,9 @@ fn apply_one(
             let init_rev = initial_revisions.get(sid).copied();
             let effective_base = match (op.base_revision, init_rev) {
                 (Some(base), Some(init)) if base == init => Some(surface.current_revision),
-                (Some(base), _) if base == surface.current_revision => Some(surface.current_revision),
+                (Some(base), _) if base == surface.current_revision => {
+                    Some(surface.current_revision)
+                }
                 (Some(base), _) => Some(base),
                 (None, _) => None,
             };
@@ -1001,9 +1008,16 @@ mod tests {
                 {"id": "c0", "type": "text", "props": {"text": "Initial"}}
             ]
         });
-        let surface =
-            create_inline_surface(&mut db, &conv.id, None, None, "Sequential Surface", &def, &[])
-                .unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Sequential Surface",
+            &def,
+            &[],
+        )
+        .unwrap();
         let initial_rev = surface.current_revision;
 
         let mut op1 = op(

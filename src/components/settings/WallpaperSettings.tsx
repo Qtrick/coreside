@@ -61,11 +61,12 @@ export function WallpaperSettings() {
   const [techDetail, setTechDetail] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<
-    "all" | "ambient" | "minimal" | "space" | "particles" | "rain" | "motion" | "solid" | "legacy" | "media"
+    "all" | "featured" | "ambient" | "minimal" | "space" | "particles" | "rain" | "motion" | "solid" | "legacy" | "media"
   >("all");
 
   const [previewPreset, setPreviewPreset] = useState<WallpaperPresetDefinition | null>(null);
   const [previewOpacity, setPreviewOpacity] = useState<number>(0.85);
+  const [previewSpeed, setPreviewSpeed] = useState<number>(1.0);
 
   const transparencyCommitGenRef = useRef(0);
 
@@ -158,6 +159,8 @@ export function WallpaperSettings() {
   const handleSelectPreset = (preset: WallpaperPresetDefinition) => {
     setPreviewPreset(preset);
     setPreviewOpacity(preset.config.opacity ?? 0.85);
+    const speed = preset.config.extra?.speed ?? 1.0;
+    setPreviewSpeed(speed);
     const json = schemaWallpaperToJson(preset.config);
     previewWorkspaceWallpaper(json);
   };
@@ -168,6 +171,23 @@ export function WallpaperSettings() {
     const updatedConfig: SchemaWallpaperConfig = {
       ...previewPreset.config,
       opacity: val,
+      extra: previewPreset.config.extra
+        ? { ...previewPreset.config.extra, speed: previewSpeed }
+        : undefined,
+    };
+    previewWorkspaceWallpaper(schemaWallpaperToJson(updatedConfig));
+  };
+
+  const handleSpeedChange = (val: number) => {
+    setPreviewSpeed(val);
+    if (!previewPreset) return;
+    const updatedConfig: SchemaWallpaperConfig = {
+      ...previewPreset.config,
+      opacity: previewOpacity,
+      extra: {
+        ...(previewPreset.config.extra ?? {}),
+        speed: val,
+      },
     };
     previewWorkspaceWallpaper(schemaWallpaperToJson(updatedConfig));
   };
@@ -181,6 +201,9 @@ export function WallpaperSettings() {
       const configToApply: SchemaWallpaperConfig = {
         ...previewPreset.config,
         opacity: previewOpacity,
+        extra: previewPreset.config.extra
+          ? { ...previewPreset.config.extra, speed: previewSpeed }
+          : undefined,
       };
       await applyWorkspaceWallpaper(schemaWallpaperToJson(configToApply));
       setPreviewPreset(null);
@@ -454,26 +477,43 @@ export function WallpaperSettings() {
         <div className="wallpaper-tuning-panel">
           <div className="tuning-header">
             <Sliders size={14} aria-hidden />
-            <strong>Adjust Preset Intensity</strong>
+            <strong>Adjust Preset Intensity & Motion</strong>
           </div>
-          <div className="tuning-control">
-            <label htmlFor="wallpaper-opacity-slider">Opacity ({Math.round(previewOpacity * 100)}%)</label>
-            <input
-              id="wallpaper-opacity-slider"
-              type="range"
-              min={0.1}
-              max={1.0}
-              step={0.05}
-              value={previewOpacity}
-              onChange={(e) => handleOpacityChange(parseFloat(e.target.value))}
-            />
+          <div className="tuning-control-group">
+            <div className="tuning-control">
+              <label htmlFor="wallpaper-opacity-slider">Opacity ({Math.round(previewOpacity * 100)}%)</label>
+              <input
+                id="wallpaper-opacity-slider"
+                type="range"
+                min={0.1}
+                max={1.0}
+                step={0.05}
+                value={previewOpacity}
+                onChange={(e) => handleOpacityChange(parseFloat(e.target.value))}
+              />
+            </div>
+            {(previewPreset.config.type === "canvas-preset" ||
+              previewPreset.config.type === "floating-particles") && (
+              <div className="tuning-control">
+                <label htmlFor="wallpaper-speed-slider">Speed ({previewSpeed.toFixed(1)}x)</label>
+                <input
+                  id="wallpaper-speed-slider"
+                  type="range"
+                  min={0.2}
+                  max={2.0}
+                  step={0.1}
+                  value={previewSpeed}
+                  onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
+                />
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* Category Tabs */}
       <div className="wallpaper-category-tabs" role="tablist" aria-label="Wallpaper categories">
-        {(["all", "ambient", "minimal", "space", "particles", "rain", "motion", "solid", "legacy", "media"] as const).map((cat) => (
+        {(["all", "featured", "ambient", "minimal", "space", "particles", "rain", "motion", "media", "solid", "legacy"] as const).map((cat) => (
           <button
             key={cat}
             type="button"
@@ -484,23 +524,25 @@ export function WallpaperSettings() {
           >
             {cat === "all"
               ? "All Presets"
-              : cat === "ambient"
-                ? "Ambient"
-                : cat === "minimal"
-                  ? "Minimal"
-                  : cat === "space"
-                    ? "Space"
-                    : cat === "particles"
-                      ? "Particles"
-                      : cat === "rain"
-                        ? "Rain"
-                        : cat === "motion"
-                          ? "Motion"
-                          : cat === "solid"
-                            ? "Solid"
-                            : cat === "legacy"
-                              ? "Legacy"
-                              : "Media Library"}
+              : cat === "featured"
+                ? "Featured"
+                : cat === "ambient"
+                  ? "Ambient"
+                  : cat === "minimal"
+                    ? "Minimal"
+                    : cat === "space"
+                      ? "Space"
+                      : cat === "particles"
+                        ? "Particles"
+                        : cat === "rain"
+                          ? "Rain"
+                          : cat === "motion"
+                            ? "Motion"
+                            : cat === "media"
+                              ? "Media Library"
+                              : cat === "solid"
+                                ? "Custom / Solid"
+                                : "Legacy"}
           </button>
         ))}
       </div>

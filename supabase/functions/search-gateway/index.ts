@@ -9,6 +9,8 @@ import {
   parseSearchReserveRpcResult,
   parseSearchSettleRpcResult,
   normalizeProviderResults,
+  normalizeFirecrawlResults,
+  normalizeFirecrawlScrapeResult,
   type SearchRequestBody,
 } from "./search-lib.ts";
 
@@ -158,12 +160,14 @@ Deno.serve(async (req) => {
     return consumerError("Unauthorized", 401, origin);
   }
 
-  // LINKUP_API_KEY is the canonical deployed secret name. Keep the alternate
-  // name as a non-breaking fallback while existing environments transition.
+  // Supported upstream providers: Linkup and Firecrawl.
   const linkupKey =
     Deno.env.get("LINKUP_API_KEY")?.trim() ||
     Deno.env.get("LINKUP_SECRET_KEY")?.trim();
-  if (!linkupKey) {
+  const firecrawlKey =
+    Deno.env.get("FIRECRAWL_API_KEY")?.trim() ||
+    Deno.env.get("FIRECRAWL_SECRET_KEY")?.trim();
+  if (!linkupKey && !firecrawlKey) {
     return consumerError("Coreside Search is not configured", 503, origin);
   }
 
@@ -262,9 +266,8 @@ Deno.serve(async (req) => {
   // Fingerprint is per-user cache key material — never log raw query.
   const fingerprint = await sha256(
     JSON.stringify({
-      provider: "linkup",
-      depth: "fast",
-      outputType: "searchResults",
+      intent: body.intent ?? "lookup",
+      url: body.url ?? null,
       query: body.query,
       numResults,
     }),
@@ -316,22 +319,111 @@ Deno.serve(async (req) => {
   req.signal.addEventListener("abort", onAbort);
   const timeout = setTimeout(() => upstreamAbort.abort(), UPSTREAM_TIMEOUT_MS);
 
-  let upstream: Response;
+  let results: unknown[] = [];
+  let usedProvider = "unknown";
+  let hadUpstreamError = false;
+
   try {
-    upstream = await fetch("https://api.linkup.so/v1/search", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${linkupKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        q: body.query,
-        depth: "fast",
-        outputType: "searchResults",
-        maxResults: numResults,
-      }),
-      signal: upstreamAbort.signal,
-    });
+    const isDirectUrl = body.intent === "known_url" ||
+      body.query.startsWith("http://") ||
+      body.query.startsWith("https://") ||
+      Boolean(body.url);
+
+    // If direct URL and Firecrawl is available, attempt scraping first
+    if (isDirectUrl && firecrawlKey) {
+      const targetUrl = body.url || body.query;
+      try {
+        const scrapeResp = await fetch("https://api.firecrawl.dev/v1/scrape", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${firecrawlKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            url: targetUrl,
+            formats: ["markdown"],
+          }),
+          signal: upstreamAbort.signal,
+        });
+        if (scrapeResp.ok) {
+          const payload = await readUpstreamJsonBounded(scrapeResp, MAX_UPSTREAM_RESPONSE_BYTES);
+          if (payload && typeof payload === "object") {
+            const parsed = normalizeFirecrawlScrapeResult(payload, targetUrl);
+            if (parsed.length > 0) {
+              results = parsed;
+              usedProvider = "firecrawl";
+            }
+          }
+        }
+      } catch {
+        // Fall back to discovery search
+      }
+    }
+
+    // If results are still empty, try Linkup if configured
+    if (results.length === 0 && linkupKey) {
+      try {
+        const linkupResp = await fetch("https://api.linkup.so/v1/search", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${linkupKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            q: body.query,
+            depth: "fast",
+            outputType: "searchResults",
+            maxResults: numResults,
+          }),
+          signal: upstreamAbort.signal,
+        });
+        if (linkupResp.ok) {
+          const payload = await readUpstreamJsonBounded(linkupResp, MAX_UPSTREAM_RESPONSE_BYTES);
+          if (payload && typeof payload === "object") {
+            results = normalizeProviderResults(payload, numResults);
+            if (results.length > 0) {
+              usedProvider = "linkup";
+            }
+          }
+        } else {
+          hadUpstreamError = true;
+        }
+      } catch {
+        hadUpstreamError = true;
+      }
+    }
+
+    // If results are still empty and Firecrawl is configured, fallback to Firecrawl search
+    if (results.length === 0 && firecrawlKey) {
+      try {
+        const firecrawlResp = await fetch("https://api.firecrawl.dev/v1/search", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${firecrawlKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            query: body.query,
+            limit: numResults,
+            scrapeOptions: { formats: ["markdown"] },
+          }),
+          signal: upstreamAbort.signal,
+        });
+        if (firecrawlResp.ok) {
+          const payload = await readUpstreamJsonBounded(firecrawlResp, MAX_UPSTREAM_RESPONSE_BYTES);
+          if (payload && typeof payload === "object") {
+            results = normalizeFirecrawlResults(payload, numResults);
+            if (results.length > 0) {
+              usedProvider = "firecrawl";
+            }
+          }
+        } else {
+          hadUpstreamError = true;
+        }
+      } catch {
+        hadUpstreamError = true;
+      }
+    }
   } catch {
     clearTimeout(timeout);
     req.signal.removeEventListener("abort", onAbort);
@@ -347,7 +439,7 @@ Deno.serve(async (req) => {
     req.signal.removeEventListener("abort", onAbort);
   }
 
-  if (!upstream.ok) {
+  if (results.length === 0 && hadUpstreamError && !req.signal.aborted) {
     await adminClient.rpc("fail_hosted_search_request", {
       p_user_id: user.id,
       p_request_id: requestId,
@@ -357,27 +449,11 @@ Deno.serve(async (req) => {
     return consumerError("Coreside Search request failed", 502, origin);
   }
 
-  const payload = await readUpstreamJsonBounded(
-    upstream,
-    MAX_UPSTREAM_RESPONSE_BYTES,
-  );
-  if (!payload || typeof payload !== "object") {
-    await adminClient.rpc("fail_hosted_search_request", {
-      p_user_id: user.id,
-      p_request_id: requestId,
-      p_idempotency_key: body.idempotencyKey,
-      p_failure_reason: "upstream_response_too_large",
-    });
-    return consumerError("Coreside Search request failed", 502, origin);
-  }
-
-  const results = normalizeProviderResults(payload, numResults);
-
   const cacheExpires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
   await adminClient.from("hosted_search_cache").upsert({
     user_id: user.id,
     fingerprint,
-    params_json: { provider: "linkup", depth: "fast", outputType: "searchResults", numResults },
+    params_json: { provider: usedProvider, query: body.query, numResults },
     result_json: results,
     expires_at: cacheExpires,
     hit_count: 0,
@@ -390,7 +466,7 @@ Deno.serve(async (req) => {
       p_request_id: requestId,
       p_idempotency_key: body.idempotencyKey,
       p_result_reference: results,
-      p_provider_usage: { fingerprint, numResults, cache_hit: false },
+      p_provider_usage: { fingerprint, numResults, provider: usedProvider, cache_hit: false },
     },
   );
   if (settleError || !parseSearchSettleRpcResult(settleData)) {
