@@ -213,7 +213,8 @@ function checkTargetWritable(
     if (options.allowedTargets instanceof Set) return options.allowedTargets.has(target);
     return options.allowedTargets.includes(target);
   }
-  return true;
+  // Fail closed: without declared bindings or allowed targets, state mutation is unauthorized.
+  return false;
 }
 
 function checkTargetReadable(
@@ -227,7 +228,8 @@ function checkTargetReadable(
     if (options.allowedTargets instanceof Set) return options.allowedTargets.has(sourceKey);
     return options.allowedTargets.includes(sourceKey);
   }
-  return true;
+  // Fail closed: without declared bindings or allowed targets, state reading is unauthorized.
+  return false;
 }
 
 export function applyAction(

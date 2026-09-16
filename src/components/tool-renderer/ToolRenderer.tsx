@@ -2,6 +2,7 @@ import {
   Component,
   useCallback,
   useMemo,
+  useRef,
   useState,
   type ErrorInfo,
   type ReactNode,
@@ -132,6 +133,7 @@ function RenderNode({
   const Node = resolveComponent(component.type);
   const renderChild = (child: ToolComponent) => (
     <RenderNode
+      key={child.id}
       component={child}
       resetKey={resetKey}
       applicationId={applicationId}
@@ -181,12 +183,19 @@ export function ToolRenderer({
     () => collectDeclaredBindings(tool.components ?? []),
     [tool.components],
   );
+  // Track authoritative live state in a ref to prevent in-flight async action results
+  // from overwriting concurrent user input.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
   // Interaction failures are shown in the surface itself: a button that cannot
   // do anything must say so rather than only logging to the console.
   const [actionError, setActionError] = useState<string | null>(null);
 
   const runActions = useCallback(
     async (actions: ActionDefinition[], componentId?: string) => {
+      // In customize mode, generated actions must not fire so user can click to inspect/select.
+      if (isCustomizing) return;
       setActionError(null);
       const normalized = actions.map((action) => {
         if (action.type === "submitToAgent") {
@@ -198,7 +207,7 @@ export function ToolRenderer({
         return action;
       });
       const result = await applyActionsAsync(normalized, {
-        state,
+        state: stateRef.current,
         toolId: tool.id,
         bindings: declaredBindings,
         onSubmitToAgent,
@@ -229,12 +238,17 @@ export function ToolRenderer({
         },
       });
       if (result.changedKeys.length > 0) {
+        // Merge only modified keys into the latest live state to avoid stale-state overwrites
+        const mergedState = { ...stateRef.current };
+        for (const key of result.changedKeys) {
+          mergedState[key] = result.state[key];
+        }
         if (onPersistState) {
-          void onPersistState(result.state).catch(() => {
+          void onPersistState(mergedState).catch(() => {
             setActionError("That change could not be saved.");
           });
         } else {
-          onStateChange(result.state);
+          onStateChange(mergedState);
         }
       }
       if (result.errors.length > 0) {
@@ -242,6 +256,7 @@ export function ToolRenderer({
       }
     },
     [
+      isCustomizing,
       declaredBindings,
       applicationId,
       conversationId,
@@ -250,7 +265,6 @@ export function ToolRenderer({
       onStateChange,
       onSubmitToAgent,
       projectId,
-      state,
       surfaceId,
       tool.id,
     ],
@@ -258,14 +272,16 @@ export function ToolRenderer({
 
   const setValue = useCallback(
     (key: string, value: unknown) => {
-      onStateChange({ ...state, [key]: value });
+      if (isCustomizing) return;
+      onStateChange({ ...stateRef.current, [key]: value });
     },
-    [onStateChange, state],
+    [isCustomizing, onStateChange],
   );
 
   const setValueOptimistic = useCallback(
     (key: string, value: unknown) => {
-      const next = { ...state, [key]: value };
+      if (isCustomizing) return;
+      const next = { ...stateRef.current, [key]: value };
       if (onPersistState) {
         void onPersistState(next).catch(() => {
           setActionError("That change could not be saved.");
@@ -274,15 +290,16 @@ export function ToolRenderer({
         onStateChange(next);
       }
     },
-    [onPersistState, onStateChange, state],
+    [isCustomizing, onPersistState, onStateChange],
   );
 
   const getValue = useCallback(
     <T,>(key: string, fallback?: T): T => {
-      if (key in state) return state[key] as T;
+      const current = stateRef.current;
+      if (key in current) return current[key] as T;
       return fallback as T;
     },
-    [state],
+    [],
   );
 
   const runtime = useMemo(

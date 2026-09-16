@@ -91,7 +91,7 @@ pub struct AppOperation {
     pub transaction_group: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idempotency_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "depends_on", skip_serializing_if = "Option::is_none")]
     pub depends_on: Option<Vec<String>>,
     #[serde(default)]
     pub payload: Value,

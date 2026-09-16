@@ -4,32 +4,35 @@ import { applyAction, applyActions, MAX_ACTION_DEPTH } from "@/lib/actions";
 describe("actions engine", () => {
   it("setValue, toggle, increment, decrement, reset", () => {
     let state: Record<string, unknown> = { count: 1, on: false, name: "a" };
+    const allowedTargets = ["count", "on", "name"];
 
     state = applyAction(
       { type: "setValue", target: "name", value: "b" },
-      { state, toolId: "t" },
+      { state, toolId: "t", allowedTargets },
     ).state;
     expect(state.name).toBe("b");
 
-    state = applyAction({ type: "toggle", target: "on" }, { state, toolId: "t" })
-      .state;
+    state = applyAction(
+      { type: "toggle", target: "on" },
+      { state, toolId: "t", allowedTargets },
+    ).state;
     expect(state.on).toBe(true);
 
     state = applyAction(
       { type: "increment", target: "count", amount: 2 },
-      { state, toolId: "t" },
+      { state, toolId: "t", allowedTargets },
     ).state;
     expect(state.count).toBe(3);
 
     state = applyAction(
       { type: "decrement", target: "count" },
-      { state, toolId: "t" },
+      { state, toolId: "t", allowedTargets },
     ).state;
     expect(state.count).toBe(2);
 
     state = applyAction(
       { type: "reset", target: "count", value: 0 },
-      { state, toolId: "t" },
+      { state, toolId: "t", allowedTargets },
     ).state;
     expect(state.count).toBe(0);
   });
@@ -38,22 +41,23 @@ describe("actions engine", () => {
     let state: Record<string, unknown> = {
       items: [{ id: "a", label: "A" }],
     };
+    const allowedTargets = ["items"];
 
     state = applyAction(
       { type: "appendItem", target: "items", item: { id: "b", label: "B" } },
-      { state, toolId: "t" },
+      { state, toolId: "t", allowedTargets },
     ).state;
     expect(state.items).toHaveLength(2);
 
     state = applyAction(
       { type: "updateItem", target: "items", id: "b", patch: { label: "Bee" } },
-      { state, toolId: "t" },
+      { state, toolId: "t", allowedTargets },
     ).state;
     expect((state.items as Array<{ label: string }>)[1].label).toBe("Bee");
 
     state = applyAction(
       { type: "removeItem", target: "items", id: "a" },
-      { state, toolId: "t" },
+      { state, toolId: "t", allowedTargets },
     ).state;
     expect(state.items).toHaveLength(1);
   });
@@ -61,10 +65,11 @@ describe("actions engine", () => {
   it("selectTab and submitToAgent", () => {
     const submitted: unknown[] = [];
     const state = { tab: "one", total: 10, people: 2 };
+    const allowedTargets = ["tab", "total", "people"];
 
     const tabbed = applyAction(
       { type: "selectTab", target: "tab", tabId: "two" },
-      { state, toolId: "expense" },
+      { state, toolId: "expense", allowedTargets },
     );
     expect(tabbed.state.tab).toBe("two");
 
@@ -77,6 +82,7 @@ describe("actions engine", () => {
       {
         state,
         toolId: "expense",
+        allowedTargets,
         onSubmitToAgent: (payload) => submitted.push(payload),
       },
     );

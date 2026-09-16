@@ -104,8 +104,10 @@ export function ToolLayoutContainer({
         onClick={
           isCustomizing
             ? (e) => {
-                e.stopPropagation();
-                onSelectComponent?.(component);
+                if (e.target === e.currentTarget || (e.target as HTMLElement).closest(".tr-item-badge")) {
+                  e.stopPropagation();
+                  onSelectComponent?.(component);
+                }
               }
             : undefined
         }

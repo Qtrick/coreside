@@ -82,9 +82,18 @@ fn str_field<'a>(input: &'a Value, key: &str) -> Result<&'a str, ActionError> {
         .ok_or_else(|| ActionError::invalid(format!("{key} is required")))
 }
 
+fn model_id_field<'a>(input: &'a Value) -> Result<&'a str, ActionError> {
+    input
+        .get("modelId")
+        .or_else(|| input.get("model"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| ActionError::invalid("modelId is required"))
+}
+
 fn local_data_query(db: &mut Database, ctx: &ActionRunContext, input: &Value) -> HandlerResult {
     let app = application_id(ctx)?;
-    let model_id = str_field(input, "modelId")?;
+    let model_id = model_id_field(input)?;
     let limit = input
         .get("limit")
         .and_then(|v| v.as_u64())
@@ -96,7 +105,7 @@ fn local_data_query(db: &mut Database, ctx: &ActionRunContext, input: &Value) ->
 
 fn local_data_write(db: &mut Database, ctx: &ActionRunContext, input: &Value) -> HandlerResult {
     let app = application_id(ctx)?;
-    let model_id = str_field(input, "modelId")?.to_string();
+    let model_id = model_id_field(input)?.to_string();
     let data = input
         .get("data")
         .cloned()

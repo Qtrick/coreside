@@ -61,7 +61,7 @@ export function WallpaperSettings() {
   const [techDetail, setTechDetail] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<
-    "all" | "ambient" | "motion" | "solid" | "legacy" | "media"
+    "all" | "ambient" | "minimal" | "space" | "particles" | "rain" | "motion" | "solid" | "legacy" | "media"
   >("all");
 
   const [previewPreset, setPreviewPreset] = useState<WallpaperPresetDefinition | null>(null);
@@ -336,8 +336,74 @@ export function WallpaperSettings() {
         instantly behind the interface without committing until confirmed.
       </p>
 
-      {/* Large Live Preview Card */}
+      {/* Large Live Preview Card with Real Coreside UI Shell Mockup */}
       <div className="wallpaper-hero-card" style={previewStyle}>
+        <div
+          className="wallpaper-mini-shell"
+          aria-hidden
+          style={{ opacity: Math.max(0.85, 1 - interfaceTransparency * 0.4) }}
+        >
+          {/* Mini Window Chrome */}
+          <div className="mini-shell-titlebar">
+            <div className="mini-traffic-lights">
+              <span className="dot dot-close" />
+              <span className="dot dot-min" />
+              <span className="dot dot-max" />
+            </div>
+            <span className="mini-shell-title">Task Manager — Coreside</span>
+            <div className="mini-shell-status">Live Preview</div>
+          </div>
+          {/* Mini Window Body */}
+          <div className="mini-shell-body">
+            {/* Sidebar */}
+            <div className="mini-shell-sidebar">
+              <div className="mini-nav-item">Home</div>
+              <div className="mini-nav-item active">
+                Tasks <span className="mini-badge">4</span>
+              </div>
+              <div className="mini-nav-item">Analytics</div>
+              <div className="mini-nav-item">Settings</div>
+            </div>
+            {/* Main Area */}
+            <div className="mini-shell-main">
+              <div className="mini-toolbar">
+                <span className="mini-section-title">Sprint Tasks</span>
+                <div className="mini-toolbar-actions">
+                  <span className="mini-chip">Filter: All ▾</span>
+                  <span className="mini-btn-primary">+ New</span>
+                </div>
+              </div>
+              <div className="mini-content-grid">
+                <div className="mini-stat-card">
+                  <span className="mini-stat-label">Active Tasks</span>
+                  <span className="mini-stat-value">4 remaining</span>
+                </div>
+                <div className="mini-stat-card">
+                  <span className="mini-stat-label">Velocity</span>
+                  <span className="mini-stat-value">5.2 pts/day</span>
+                </div>
+              </div>
+              <div className="mini-table">
+                <div className="mini-row header">
+                  <span>Task</span>
+                  <span>Priority</span>
+                  <span>Status</span>
+                </div>
+                <div className="mini-row selected">
+                  <span>Action authority & validation</span>
+                  <span className="mini-tag high">High</span>
+                  <span className="mini-tag done">Done</span>
+                </div>
+                <div className="mini-row">
+                  <span>Progressive dependency stream</span>
+                  <span className="mini-tag med">Med</span>
+                  <span className="mini-tag in-prog">Active</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div className="wallpaper-hero-overlay">
           <div className="wallpaper-hero-info">
             <span className="badge">{activeCategoryDesc}</span>
@@ -407,7 +473,7 @@ export function WallpaperSettings() {
 
       {/* Category Tabs */}
       <div className="wallpaper-category-tabs" role="tablist" aria-label="Wallpaper categories">
-        {(["all", "ambient", "motion", "solid", "legacy", "media"] as const).map((cat) => (
+        {(["all", "ambient", "minimal", "space", "particles", "rain", "motion", "solid", "legacy", "media"] as const).map((cat) => (
           <button
             key={cat}
             type="button"
@@ -420,13 +486,21 @@ export function WallpaperSettings() {
               ? "All Presets"
               : cat === "ambient"
                 ? "Ambient"
-                : cat === "motion"
-                  ? "Motion"
-                  : cat === "solid"
-                    ? "Solid"
-                    : cat === "legacy"
-                      ? "Legacy"
-                      : "Media Library"}
+                : cat === "minimal"
+                  ? "Minimal"
+                  : cat === "space"
+                    ? "Space"
+                    : cat === "particles"
+                      ? "Particles"
+                      : cat === "rain"
+                        ? "Rain"
+                        : cat === "motion"
+                          ? "Motion"
+                          : cat === "solid"
+                            ? "Solid"
+                            : cat === "legacy"
+                              ? "Legacy"
+                              : "Media Library"}
           </button>
         ))}
       </div>

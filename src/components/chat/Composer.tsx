@@ -108,6 +108,19 @@ export function Composer() {
   }, []);
 
   useEffect(() => {
+    const onPrefill = (e: Event) => {
+      const custom = e as CustomEvent<{ text: string }>;
+      if (custom.detail?.text) {
+        setValue(custom.detail.text);
+        setCaret(custom.detail.text.length);
+        textareaRef.current?.focus();
+      }
+    };
+    window.addEventListener("coreside:prefill-composer", onPrefill);
+    return () => window.removeEventListener("coreside:prefill-composer", onPrefill);
+  }, []);
+
+  useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "0px";

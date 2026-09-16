@@ -167,6 +167,7 @@ pub fn build_agent_prompt_with_references(
         parts.push(prompts.tool_builder);
     }
     parts.push(crate::runtime_v2::agent_pack_catalog_markdown());
+    parts.push(crate::application_kernel::registered_actions::registered_actions_catalog_markdown());
 
     if let Some(hint) = workspace_hint {
         parts.push(format!("## Workspace context\n{hint}"));

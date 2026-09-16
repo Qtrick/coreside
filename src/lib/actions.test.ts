@@ -531,4 +531,27 @@ describe("collectTargets security boundary", () => {
     expect(remainingTasks.count).toBe(0);
     expect(remainingTasks.records).toEqual([]);
   });
+
+  it("fails closed when neither bindings nor allowedTargets are provided", () => {
+    const onInvokeRegisteredAction = vi.fn();
+    const action: ActionDefinition = {
+      type: "invokeRegisteredAction",
+      actionName: "local_data.write",
+      input: { table: "notes" },
+      inputFromState: { body: "draft" },
+      resultKey: "output",
+    };
+
+    // No bindings and no allowedTargets provided
+    const result = applyAction(action, {
+      state: { draft: "Secret notes" },
+      toolId: "test-tool",
+      onInvokeRegisteredAction,
+    });
+
+    expect(onInvokeRegisteredAction).not.toHaveBeenCalled();
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toContain("outside the current tool scope");
+    expect(result.changedKeys).toEqual([]);
+  });
 });

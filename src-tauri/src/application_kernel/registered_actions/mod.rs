@@ -38,7 +38,8 @@ pub mod testing;
 pub use context::{ActionRunContext, ClientActionRequest, Presence, Venue};
 #[allow(unused_imports)]
 pub use descriptor::{
-    action_names, catalog_json, find_action, ActionDescriptor, ActionRisk, BUNDLED_ACTIONS,
+    action_names, catalog_json, find_action, registered_actions_catalog_markdown,
+    ActionDescriptor, ActionRisk, BUNDLED_ACTIONS,
 };
 #[allow(unused_imports)]
 pub use gateway::{

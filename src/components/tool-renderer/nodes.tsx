@@ -242,13 +242,21 @@ export function ImageNode({ component }: ToolNodeProps) {
           if (!cancelled) setResolvedSrc(null);
         });
     } else if (rawSrc) {
-      // Security boundary: Block arbitrary remote http(s):// URLs from generated surfaces.
+      const trimmed = rawSrc.trim();
+      // Security boundary: Block arbitrary remote http(s)://, file://, javascript:,
+      // and root/relative filesystem paths from generated surfaces.
       // Remote assets must be imported into the Media Library first.
-      const isRemote = /^(https?:|\/\/)/i.test(rawSrc.trim());
-      if (isRemote) {
-        setResolvedSrc(null);
+      const isSafeProtocol =
+        trimmed.startsWith("asset://") ||
+        trimmed.startsWith("tauri://") ||
+        trimmed.startsWith("https://asset.localhost/") ||
+        trimmed.startsWith("blob:") ||
+        /^data:image\/(png|jpeg|jpg|webp|gif|bmp);base64,[a-z0-9+/=]+$/i.test(trimmed);
+
+      if (isSafeProtocol) {
+        setResolvedSrc(trimmed);
       } else {
-        setResolvedSrc(rawSrc);
+        setResolvedSrc(null);
       }
     } else {
       setResolvedSrc(null);
@@ -266,10 +274,10 @@ export function ImageNode({ component }: ToolNodeProps) {
     );
   }
 
-  if (rawSrc && /^(https?:|\/\/)/i.test(rawSrc.trim()) && !assetId) {
+  if (rawSrc && !assetId && !resolvedSrc) {
     return (
       <div className="tr-fallback tr-security-blocked" data-component-id={component.id}>
-        Remote images are restricted. Import image to Media Library first.
+        Image source restricted. Import images into the Media Library first.
       </div>
     );
   }
@@ -1626,11 +1634,46 @@ export function CanvasSceneNode({ component }: ToolNodeProps) {
 }
 
 export function AudioPlayerNode({ component }: ToolNodeProps) {
-  const src = asString(component.props?.src);
-  if (!src.startsWith("asset:") && !src.startsWith("blob:") && !src.startsWith("/")) {
+  const [resolvedSrc, setResolvedSrc] = useState<string | null>(null);
+  const assetId = asString(component.props?.mediaAssetId ?? component.props?.assetId);
+  const rawSrc = asString(component.props?.src);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (assetId) {
+      resolveMediaAssetUrl(assetId)
+        .then((url) => {
+          if (!cancelled) setResolvedSrc(url);
+        })
+        .catch(() => {
+          if (!cancelled) setResolvedSrc(null);
+        });
+    } else if (rawSrc) {
+      const trimmed = rawSrc.trim();
+      const isSafeProtocol =
+        trimmed.startsWith("asset://") ||
+        trimmed.startsWith("tauri://") ||
+        trimmed.startsWith("https://asset.localhost/") ||
+        trimmed.startsWith("blob:") ||
+        /^data:audio\/(mpeg|mp3|wav|ogg|aac|webm);base64,[a-z0-9+/=]+$/i.test(trimmed);
+
+      if (isSafeProtocol) {
+        setResolvedSrc(trimmed);
+      } else {
+        setResolvedSrc(null);
+      }
+    } else {
+      setResolvedSrc(null);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [assetId, rawSrc]);
+
+  if (!resolvedSrc) {
     return (
-      <p className="muted" data-component-id={component.id}>
-        Audio requires a local Media Library source.
+      <p className="muted tr-security-blocked" data-component-id={component.id}>
+        Audio requires an approved Media Library source.
       </p>
     );
   }
@@ -1640,7 +1683,7 @@ export function AudioPlayerNode({ component }: ToolNodeProps) {
       data-component-id={component.id}
       controls
       preload="metadata"
-      src={src}
+      src={resolvedSrc}
       aria-label={asString(component.props?.ariaLabel, "Audio player")}
     />
   );

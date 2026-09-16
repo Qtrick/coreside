@@ -166,11 +166,17 @@ export class PersistenceScheduler {
     tracker.inFlightEpoch = saveEpoch;
 
     let saveFailed = false;
+    let needsHydrationReconcile = false;
     const promise = (async () => {
       try {
         await saveFn(toolId, stateToSave);
-        // Stale epoch check: if rehydration occurred while save was in flight, ignore
+        // Stale epoch check: if rehydration occurred while save was in flight,
+        // disk was overwritten with stale stateA after stateB was hydrated.
+        // We must re-flush the authoritative hydrated state to disk.
         if (tracker.hydrationEpoch !== saveEpoch) {
+          needsHydrationReconcile = true;
+          tracker.lastPersistedGen = -1;
+          tracker.currentGen = Math.max(tracker.currentGen, 1);
           return;
         }
         if (saveGen > tracker.lastPersistedGen) {
@@ -181,6 +187,9 @@ export class PersistenceScheduler {
         saveFailed = true;
         // Stale epoch check: DO NOT roll back if rehydrated with newer state
         if (tracker.hydrationEpoch !== saveEpoch) {
+          needsHydrationReconcile = true;
+          tracker.lastPersistedGen = -1;
+          tracker.currentGen = Math.max(tracker.currentGen, 1);
           return;
         }
         // Stale failure check: ONLY roll back if no newer state was scheduled in the meantime
@@ -201,8 +210,9 @@ export class PersistenceScheduler {
     tracker.inFlightPromise = promise;
     await promise;
 
-    // If save succeeded and newer state was scheduled while in flight, flush again to reach steady state
-    if (!saveFailed && tracker.currentGen > tracker.lastPersistedGen) {
+    // If a stale save completed after hydration, or newer state was scheduled while in flight,
+    // flush again to reconcile and reach steady state.
+    if (needsHydrationReconcile || (!saveFailed && tracker.currentGen > tracker.lastPersistedGen)) {
       await this.flush(toolId, saveFn);
     }
   }

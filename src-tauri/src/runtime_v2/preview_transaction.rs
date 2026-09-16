@@ -8,7 +8,7 @@
 //! dispatch (MIT License, Copyright (c) 2026 Phil Holden) — see
 //! `docs/PARTIAL_UPDATE_PORT_PROVENANCE.md` and `THIRD_PARTY_NOTICES.md`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -58,6 +58,8 @@ pub struct PreviewTransaction {
     pub committed: bool,
     pub surfaces: HashMap<String, PreviewSurfaceModel>,
     pub paint_sequence: u64,
+    pub buffered: Vec<AppOperation>,
+    pub painted_op_ids: HashSet<String>,
 }
 
 impl Default for PreviewTransaction {
@@ -93,6 +95,8 @@ impl PreviewTransaction {
             committed: false,
             surfaces: HashMap::new(),
             paint_sequence: 0,
+            buffered: Vec::new(),
+            painted_op_ids: HashSet::new(),
         }
     }
 
@@ -132,15 +136,18 @@ impl PreviewTransaction {
 
     pub fn mark_interrupted(&mut self) {
         self.interrupted = true;
-        // Drop accepted ops so turn-end harvest cannot durable-commit after
+        // Drop accepted and buffered ops so turn-end harvest cannot durable-commit after
         // cancel/fatal (surfaces were speculative only).
         self.accepted.clear();
+        self.buffered.clear();
+        self.painted_op_ids.clear();
         self.clear_surfaces();
     }
 
     /// Clear speculative paint after durable commit success.
     pub fn mark_committed(&mut self) {
         self.committed = true;
+        self.buffered.clear();
         self.clear_surfaces();
     }
 
@@ -342,13 +349,20 @@ impl PreviewTransaction {
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_default();
 
-        // ponytail: unspecified base_revision means "stack on current speculative".
+        // ponytail: unspecified or turn base_revision matches speculative base: stack on current speculative.
+        let effective_base = match op.base_revision {
+            Some(base) if base == model.base_revision || base == model.preview_revision => {
+                Some(model.preview_revision)
+            }
+            Some(base) => Some(base),
+            None => Some(model.preview_revision),
+        };
         apply_component_op(
             &mut components,
             &op.op_type,
             op.target.component_id.as_deref(),
             op.target.parent_id.as_deref(),
-            op.base_revision.or(Some(model.preview_revision)),
+            effective_base,
             model.preview_revision,
             &op.payload,
         )
@@ -512,6 +526,21 @@ pub fn finish_progressive_ingest(
             });
         }
     }
+    if !preview.buffered.is_empty() && !preview.interrupted {
+        let unfulfilled: Vec<String> = preview.buffered.iter().map(|o| o.id.clone()).collect();
+        let reason = format!(
+            "missing dependencies for buffered operations at stream end: {}",
+            unfulfilled.join(", ")
+        );
+        preview.mark_interrupted();
+        preview.reject("parser", reason.clone());
+        out.push(PreviewOpEvent {
+            operation_id: "parser".into(),
+            status: "fatal".into(),
+            reason: Some(reason),
+            paint: None,
+        });
+    }
     if parser.durable_operations().is_none() && parser.started() && !preview.interrupted {
         preview.mark_interrupted();
     }
@@ -616,35 +645,124 @@ fn accept_and_paint(
     seed: &mut impl FnMut(&str) -> Option<PreviewSurfaceModel>,
 ) -> Vec<PreviewOpEvent> {
     let id = operation.id.clone();
-    match preview.accept(operation.clone()) {
-        Ok(()) => match preview.paint_op(&operation, seed) {
-            Ok(paint) => vec![PreviewOpEvent {
-                operation_id: id,
-                status: "preview".into(),
-                reason: None,
-                paint,
-            }],
-            Err(reason) => {
-                preview.unaccept(&id);
-                preview.reject(id.clone(), reason.clone());
-                vec![PreviewOpEvent {
-                    operation_id: id,
-                    status: "rejected".into(),
-                    reason: Some(reason),
-                    paint: None,
-                }]
-            }
-        },
-        Err(reason) => {
+
+    // If this operation has dependencies, check if any are not yet painted
+    let has_unpainted_deps = operation.depends_on.as_ref().map_or(false, |deps| {
+        deps.iter().any(|dep| !preview.painted_op_ids.contains(dep))
+    });
+
+    if has_unpainted_deps {
+        let mut check_ops = preview.buffered.clone();
+        check_ops.push(operation.clone());
+        if let Some(cycle) = super::patch_scheduler::detect_dependency_cycle(&check_ops) {
+            let reason = format!("dependency cycle detected: {}", cycle.join(" -> "));
             preview.reject(id.clone(), reason.clone());
-            vec![PreviewOpEvent {
+            return vec![PreviewOpEvent {
                 operation_id: id,
                 status: "rejected".into(),
                 reason: Some(reason),
                 paint: None,
-            }]
+            }];
+        }
+        preview.buffered.push(operation);
+        return vec![PreviewOpEvent {
+            operation_id: id,
+            status: "buffered".into(),
+            reason: None,
+            paint: None,
+        }];
+    }
+
+    let mut out = Vec::new();
+    match preview.accept(operation.clone()) {
+        Ok(()) => match preview.paint_op(&operation, &mut *seed) {
+            Ok(paint) => {
+                preview.painted_op_ids.insert(id.clone());
+                out.push(PreviewOpEvent {
+                    operation_id: id,
+                    status: "preview".into(),
+                    reason: None,
+                    paint,
+                });
+            }
+            Err(reason) => {
+                preview.unaccept(&id);
+                preview.reject(id.clone(), reason.clone());
+                return vec![PreviewOpEvent {
+                    operation_id: id,
+                    status: "rejected".into(),
+                    reason: Some(reason),
+                    paint: None,
+                }];
+            }
+        },
+        Err(reason) => {
+            preview.reject(id.clone(), reason.clone());
+            return vec![PreviewOpEvent {
+                operation_id: id,
+                status: "rejected".into(),
+                reason: Some(reason),
+                paint: None,
+            }];
         }
     }
+
+    // Drain any buffered operations whose dependencies are all satisfied
+    loop {
+        let mut ready_idx = None;
+        for (i, b_op) in preview.buffered.iter().enumerate() {
+            let ready = b_op.depends_on.as_ref().map_or(true, |deps| {
+                deps.iter().all(|dep| preview.painted_op_ids.contains(dep))
+            });
+            if ready {
+                ready_idx = Some(i);
+                break;
+            }
+        }
+
+        if let Some(idx) = ready_idx {
+            let b_op = preview.buffered.remove(idx);
+            let b_id = b_op.id.clone();
+            match preview.accept(b_op.clone()) {
+                Ok(()) => match preview.paint_op(&b_op, &mut *seed) {
+                    Ok(paint) => {
+                        preview.painted_op_ids.insert(b_id.clone());
+                        out.push(PreviewOpEvent {
+                            operation_id: b_id,
+                            status: "preview".into(),
+                            reason: None,
+                            paint,
+                        });
+                    }
+                    Err(reason) => {
+                        preview.unaccept(&b_id);
+                        preview.reject(b_id.clone(), reason.clone());
+                        out.push(PreviewOpEvent {
+                            operation_id: b_id,
+                            status: "rejected".into(),
+                            reason: Some(reason),
+                            paint: None,
+                        });
+                        break;
+                    }
+                },
+                Err(reason) => {
+                    preview.reject(b_id.clone(), reason.clone());
+                    out.push(PreviewOpEvent {
+                        operation_id: b_id,
+                        status: "rejected".into(),
+                        reason: Some(reason),
+                        paint: None,
+                    });
+                    break;
+                }
+            }
+        } else {
+            break;
+        }
+    }
+
+    out
 }
 
 #[cfg(test)]
@@ -1150,6 +1268,113 @@ mod tests {
         assert!(preview.interrupted);
         assert!(parser.durable_operations().is_none());
         assert!(parser.speculative_operations().is_empty());
+    }
+
+    #[test]
+    fn progressive_out_of_order_dependencies_buffered_and_unblocked() {
+        let mut preview = PreviewTransaction::new("turn-ooo", None);
+        preview.seed_surface(PreviewSurfaceModel {
+            surface_id: "surf-1".into(),
+            tool_id: Some("tool-1".into()),
+            application_id: Some("tool-1".into()),
+            capability_packs: vec!["coreside.core".into()],
+            definition: sample_definition(),
+            state: json!({}),
+            base_revision: 1,
+            preview_revision: 1,
+        });
+
+        // Child op that depends on parent op
+        let child_op: AppOperation = serde_json::from_value(json!({
+            "id": "op-child",
+            "type": "component.update_props",
+            "target": {"surfaceId": "surf-1", "componentId": "c1"},
+            "depends_on": ["op-parent"],
+            "payload": {"text": "Updated by child"}
+        }))
+        .unwrap();
+
+        // Deliver child op first
+        let events1 = accept_and_paint(&mut preview, child_op, &mut |_| None);
+        assert_eq!(events1.len(), 1);
+        assert_eq!(events1[0].operation_id, "op-child");
+        assert_eq!(events1[0].status, "buffered");
+        assert_eq!(preview.buffered.len(), 1);
+        assert_eq!(preview.accepted_operations().len(), 0);
+
+        // Parent op arriving later
+        let parent_op: AppOperation = serde_json::from_value(json!({
+            "id": "op-parent",
+            "type": "component.update_props",
+            "target": {"surfaceId": "surf-1", "componentId": "c1"},
+            "payload": {"text": "Updated by parent"}
+        }))
+        .unwrap();
+
+        // Deliver parent op: should paint parent op and then unblock & paint child op
+        let events2 = accept_and_paint(&mut preview, parent_op, &mut |_| None);
+        assert_eq!(events2.len(), 2);
+        assert_eq!(events2[0].operation_id, "op-parent");
+        assert_eq!(events2[0].status, "preview");
+        assert_eq!(events2[1].operation_id, "op-child");
+        assert_eq!(events2[1].status, "preview");
+
+        assert_eq!(preview.buffered.len(), 0);
+        assert_eq!(preview.accepted_operations().len(), 2);
+    }
+
+    #[test]
+    fn progressive_dependency_cycle_rejected() {
+        let mut preview = PreviewTransaction::new("turn-cycle", None);
+        let op1: AppOperation = serde_json::from_value(json!({
+            "id": "op-a",
+            "type": "component.update_props",
+            "target": {"surfaceId": "surf-1", "componentId": "c1"},
+            "depends_on": ["op-b"],
+            "payload": {"text": "A"}
+        }))
+        .unwrap();
+        let events1 = accept_and_paint(&mut preview, op1, &mut |_| None);
+        assert_eq!(events1[0].status, "buffered");
+
+        // op-b arrives depending on op-a: cycle detected
+        let op2: AppOperation = serde_json::from_value(json!({
+            "id": "op-b",
+            "type": "component.update_props",
+            "target": {"surfaceId": "surf-1", "componentId": "c1"},
+            "depends_on": ["op-a"],
+            "payload": {"text": "B"}
+        }))
+        .unwrap();
+        let events2 = accept_and_paint(&mut preview, op2, &mut |_| None);
+        assert_eq!(events2[0].status, "rejected");
+        assert!(events2[0].reason.as_ref().unwrap().contains("cycle"));
+    }
+
+    #[test]
+    fn progressive_missing_dependency_fails_at_finish() {
+        use super::super::progressive_ops::{ProgressiveOpsExpect, ProgressiveOpsParser};
+
+        let mut parser = ProgressiveOpsParser::new(ProgressiveOpsExpect {
+            capability_version: Some("1".into()),
+            ..Default::default()
+        });
+        let mut preview = PreviewTransaction::new("turn-unresolved", None);
+        let op: AppOperation = serde_json::from_value(json!({
+            "id": "op-orphan",
+            "type": "component.update_props",
+            "target": {"surfaceId": "surf-1", "componentId": "c1"},
+            "depends_on": ["op-never-arrives"],
+            "payload": {"text": "Orphan"}
+        }))
+        .unwrap();
+        let events = accept_and_paint(&mut preview, op, &mut |_| None);
+        assert_eq!(events[0].status, "buffered");
+
+        // Stream finishes while buffered op is still unfulfilled
+        let finish_events = finish_progressive_ingest(&mut parser, &mut preview);
+        assert!(finish_events.iter().any(|e| e.status == "fatal"));
+        assert!(preview.interrupted);
     }
 
     fn op_frame_for_surface(id: &str, surface_id: &str) -> String {

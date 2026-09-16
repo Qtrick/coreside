@@ -116,22 +116,125 @@ export function MessageList() {
     );
   }
 
+const STARTER_PROMPTS = [
+  {
+    title: "Task Manager",
+    desc: "Persistent task board with priorities, statuses, and filtering",
+    prompt:
+      "Build me a task manager with persistent tasks, priority, status, create, edit, delete, search, and filtering.",
+  },
+  {
+    title: "Habit Tracker",
+    desc: "Daily habit tracking with streaks, metrics, and progress logs",
+    prompt:
+      "Build a habit tracker to log daily habits, completion streaks, notes, and progress overview.",
+  },
+  {
+    title: "Research Organizer",
+    desc: "Structured research topics with key findings, tags, and summary",
+    prompt:
+      "Build a research organizer with search, categorized findings, tags, and summary view.",
+  },
+  {
+    title: "Study Dashboard",
+    desc: "Subject cards, flashcard statistics, deadlines, and study timer",
+    prompt:
+      "Build a study dashboard with subject cards, flashcard review stats, upcoming deadlines, and study timer.",
+  },
+  {
+    title: "Quiz App",
+    desc: "Interactive question banks, multi-choice scoring, and review mode",
+    prompt:
+      "Build a quiz app with question banks, interactive choices, score calculation, and review mode.",
+  },
+  {
+    title: "Finance Tracker",
+    desc: "Income and expense records with category breakdown and budget summary",
+    prompt:
+      "Build a finance tracker for income, expenses, category breakdown, and monthly budget summary.",
+  },
+  {
+    title: "Media Organizer",
+    desc: "Catalog books, games, movies, personal ratings, and wishlist",
+    prompt:
+      "Build a media organizer to catalog books, movies, games, ratings, and wishlist.",
+  },
+  {
+    title: "Personal Dashboard",
+    desc: "Daily agenda, quick metrics, high-priority actions, and notes",
+    prompt:
+      "Build a personal dashboard with daily agenda, quick actions, metric cards, and notes.",
+  },
+];
+
+function computeLifecyclePhase(
+  actions: string[],
+  streaming: boolean,
+): {
+  phase: "understanding" | "building" | "checking" | "ready";
+  index: number;
+} {
+  const combined = actions.join(" ").toLowerCase();
+  if (
+    combined.includes("validat") ||
+    combined.includes("check") ||
+    combined.includes("verif")
+  ) {
+    return { phase: "checking", index: 2 };
+  }
+  if (
+    streaming ||
+    combined.includes("stream") ||
+    combined.includes("patch") ||
+    combined.includes("build") ||
+    combined.includes("generat")
+  ) {
+    return { phase: "building", index: 1 };
+  }
+  if (actions.length > 0) {
+    return { phase: "understanding", index: 0 };
+  }
+  return { phase: "understanding", index: 0 };
+}
+
+function humanizeActionLabel(raw: string): string {
+  if (raw.startsWith("operation.") || raw.includes("execute_sql")) {
+    return "Refining application components…";
+  }
+  return raw;
+}
+
   if (messages.length === 0 && !liveHere) {
     return (
       <div className="message-list">
-        <div className="empty-state">
-          <h3>{EMPTY_STATES.emptyChat.title}</h3>
-          <p>{EMPTY_STATES.emptyChat.body}</p>
-          <div className="button-row empty-state-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => {
-                document.getElementById("composer-input")?.focus();
-              }}
-            >
-              {EMPTY_STATES.emptyChat.primaryCta}
-            </button>
+        <div className="chat-starter-container">
+          <div className="empty-state" style={{ padding: 0 }}>
+            <h3>{EMPTY_STATES.emptyChat.title}</h3>
+            <p>{EMPTY_STATES.emptyChat.body}</p>
+          </div>
+
+          <h4 className="chat-starter-heading">Quick Starters</h4>
+          <div className="chat-starter-grid" role="group" aria-label="Suggested starter applications">
+            {STARTER_PROMPTS.map((starter) => (
+              <button
+                key={starter.title}
+                type="button"
+                className="chat-starter-card"
+                onClick={() => {
+                  window.dispatchEvent(
+                    new CustomEvent("coreside:prefill-composer", {
+                      detail: { text: starter.prompt },
+                    }),
+                  );
+                }}
+              >
+                <span className="chat-starter-title">{starter.title}</span>
+                <span className="chat-starter-desc">{starter.desc}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="button-row empty-state-actions" style={{ justifyContent: "center", marginTop: "var(--space-2)" }}>
             <button
               type="button"
               className="btn btn-secondary"
@@ -158,6 +261,7 @@ export function MessageList() {
   });
   const liveEvents = visibleActions.map((label) => ({ label }));
   const showLiveActionLog = shouldShowActionLog(actionLogMode, liveEvents);
+  const lifecycle = computeLifecyclePhase(visibleActions, Boolean(streamingText));
 
   return (
     <div className="message-list" ref={listRef} aria-live="polite">
@@ -174,6 +278,42 @@ export function MessageList() {
           <div className="message-meta">
             <span>Coreside agent</span>
           </div>
+
+          {/* Human-Readable Generation Lifecycle Indicator */}
+          <div className="generation-lifecycle" aria-label="Generation progress">
+            <div
+              className={`lifecycle-step ${
+                lifecycle.index === 0 ? "active" : lifecycle.index > 0 ? "complete" : ""
+              }`}
+            >
+              <span className="step-dot" /> Understanding
+            </div>
+            <span className="lifecycle-arrow">→</span>
+            <div
+              className={`lifecycle-step ${
+                lifecycle.index === 1 ? "active" : lifecycle.index > 1 ? "complete" : ""
+              }`}
+            >
+              <span className="step-dot" /> Building
+            </div>
+            <span className="lifecycle-arrow">→</span>
+            <div
+              className={`lifecycle-step ${
+                lifecycle.index === 2 ? "active" : lifecycle.index > 2 ? "complete" : ""
+              }`}
+            >
+              <span className="step-dot" /> Checking
+            </div>
+            <span className="lifecycle-arrow">→</span>
+            <div
+              className={`lifecycle-step ${
+                lifecycle.phase === "ready" ? "active complete" : ""
+              }`}
+            >
+              <span className="step-dot" /> Ready
+            </div>
+          </div>
+
           {showLiveActionLog && visibleActions.length > 0 ? (
             <ul className="agent-action-log" aria-label="Action log">
               {visibleActions.map((label, index) => (
@@ -181,7 +321,7 @@ export function MessageList() {
                   key={`${index}-${label}`}
                   className={index === visibleActions.length - 1 ? "current" : ""}
                 >
-                  {label}
+                  {humanizeActionLabel(label)}
                 </li>
               ))}
             </ul>
@@ -191,7 +331,7 @@ export function MessageList() {
               latestAction &&
               !latestAction.toLowerCase().includes("model") &&
               !latestAction.toLowerCase().includes("unavailable")
-                ? latestAction
+                ? humanizeActionLabel(latestAction)
                 : "Working…"}
             </p>
           )}

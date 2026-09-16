@@ -176,10 +176,12 @@ pub fn apply_transaction_deferred(
     let mut previous = json!({});
     let mut surfaces = Vec::new();
     let mut conflicts = Vec::new();
+    let mut initial_revisions: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
 
     for op in &txn.operations {
         if let Some(sid) = op.target.surface_id.as_ref() {
             if let Ok(s) = get_surface(db, sid) {
+                initial_revisions.entry(sid.clone()).or_insert(s.current_revision);
                 previous.as_object_mut().unwrap().insert(
                     sid.clone(),
                     json!({ "revision": s.current_revision, "definition": s.definition }),
@@ -194,7 +196,7 @@ pub fn apply_transaction_deferred(
 
     let mut failed = false;
     for op in &txn.operations {
-        match apply_one(db, op, &txn, deferred) {
+        match apply_one(db, op, &txn, &initial_revisions, deferred) {
             Ok(Some(s)) => surfaces.push(s),
             Ok(None) => {}
             Err(e) => {
@@ -259,6 +261,7 @@ fn apply_one(
     db: &mut Database,
     op: &AppOperation,
     txn: &AppTransactionRecord,
+    initial_revisions: &std::collections::HashMap<String, i64>,
     deferred: &mut Vec<super::outbox::DeferredBusEffect>,
 ) -> Result<Option<SurfaceRecord>, String> {
     match op.op_type.as_str() {
@@ -322,6 +325,13 @@ fn apply_one(
                 .cloned()
                 .and_then(|v| serde_json::from_value(v).ok())
                 .unwrap_or_default();
+            let init_rev = initial_revisions.get(sid).copied();
+            let effective_base = match (op.base_revision, init_rev) {
+                (Some(base), Some(init)) if base == init => Some(surface.current_revision),
+                (Some(base), _) if base == surface.current_revision => Some(surface.current_revision),
+                (Some(base), _) => Some(base),
+                (None, _) => None,
+            };
             if op.op_type.starts_with("component.") {
                 let cid = op.target.component_id.as_deref();
                 let policy = resolve_policy_for_apply(db, sid, cid, &op.payload);
@@ -331,7 +341,7 @@ fn apply_one(
                     &op.op_type,
                     cid,
                     op.target.parent_id.as_deref(),
-                    op.base_revision,
+                    effective_base,
                     surface.current_revision,
                     &op.payload,
                 )
@@ -396,7 +406,7 @@ fn apply_one(
                     .get("changeSummary")
                     .and_then(|v| v.as_str())
                     .unwrap_or("patch"),
-                op.base_revision,
+                effective_base,
             )
             .map_err(|e| e.to_string())?;
             Ok(Some(s))
@@ -578,6 +588,13 @@ fn apply_one(
             if let Some(obj) = def_value.as_object_mut() {
                 obj.insert("layout".into(), norm_layout.clone());
             }
+            let init_rev = initial_revisions.get(sid).copied();
+            let effective_base = match (op.base_revision, init_rev) {
+                (Some(base), Some(init)) if base == init => Some(surface.current_revision),
+                (Some(base), _) if base == surface.current_revision => Some(surface.current_revision),
+                (Some(base), _) => Some(base),
+                (None, _) => None,
+            };
             let s = update_surface_definition(
                 db,
                 sid,
@@ -586,7 +603,7 @@ fn apply_one(
                     .get("changeSummary")
                     .and_then(|v| v.as_str())
                     .unwrap_or("layout.update"),
-                op.base_revision,
+                effective_base,
             )
             .map_err(|e| e.to_string())?;
             let layout_str = crate::ai::layout_type_string(&norm_layout);
@@ -970,6 +987,92 @@ mod tests {
             after_surface.capability_packs,
             before_surface.capability_packs
         );
+    }
+
+    #[test]
+    fn apply_sequential_operations_same_surface_shared_base_revision() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "SeqTxn", None).unwrap();
+        let def = json!({
+            "id": "seq-surface",
+            "name": "Sequential Surface",
+            "layout": "stack",
+            "components": [
+                {"id": "c0", "type": "text", "props": {"text": "Initial"}}
+            ]
+        });
+        let surface =
+            create_inline_surface(&mut db, &conv.id, None, None, "Sequential Surface", &def, &[])
+                .unwrap();
+        let initial_rev = surface.current_revision;
+
+        let mut op1 = op(
+            "component.insert",
+            Some(&surface.id),
+            json!({
+                "component": {"id": "c1", "type": "text", "props": {"text": "Child 1"}}
+            }),
+        );
+        op1.base_revision = Some(initial_rev);
+
+        let mut op2 = op(
+            "component.insert",
+            Some(&surface.id),
+            json!({
+                "component": {"id": "c2", "type": "text", "props": {"text": "Child 2"}}
+            }),
+        );
+        // Sibling op in the same model turn shares initial_rev
+        op2.base_revision = Some(initial_rev);
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "sequential-inserts",
+            &[op1, op2],
+            false,
+        )
+        .unwrap();
+
+        let result = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(result.transaction.status, "applied");
+        assert!(result.conflicts.is_empty());
+
+        let updated_surface = get_surface(&db, &surface.id).unwrap();
+        assert_eq!(updated_surface.current_revision, initial_rev + 2);
+        let comps = updated_surface
+            .definition
+            .get("components")
+            .and_then(|v| v.as_array())
+            .unwrap();
+        assert_eq!(comps.len(), 3);
+        assert_eq!(comps[1]["id"], "c1");
+        assert_eq!(comps[2]["id"], "c2");
+
+        // Adversarial test: operation with stale base revision before transaction start must fail
+        let mut stale_op = op(
+            "component.insert",
+            Some(&surface.id),
+            json!({
+                "component": {"id": "c3", "type": "text", "props": {"text": "Child 3"}}
+            }),
+        );
+        stale_op.base_revision = Some(initial_rev - 1);
+        let stale_txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "stale-insert",
+            &[stale_op],
+            false,
+        )
+        .unwrap();
+        let stale_result = apply_transaction(&mut db, &stale_txn.id).unwrap();
+        assert_eq!(stale_result.transaction.status, "failed");
+        assert!(!stale_result.conflicts.is_empty());
     }
 }
 

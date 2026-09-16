@@ -230,7 +230,7 @@ export function wallpaperDataAttribute(resolved: ResolvedWallpaper): string | un
 export interface WallpaperPresetDefinition {
   id: string;
   name: string;
-  category: "ambient" | "motion" | "solid" | "legacy";
+  category: "ambient" | "minimal" | "space" | "particles" | "rain" | "motion" | "solid" | "legacy";
   description: string;
   config: SchemaWallpaperConfig;
   previewColors: [string, string, string?];
@@ -240,7 +240,7 @@ export const CURATED_WALLPAPER_PRESETS: WallpaperPresetDefinition[] = [
   {
     id: "obsidian",
     name: "Obsidian",
-    category: "ambient",
+    category: "minimal",
     description: "Deep charcoal with subtle obsidian undertones",
     config: {
       schemaVersion: "1",
@@ -252,6 +252,36 @@ export const CURATED_WALLPAPER_PRESETS: WallpaperPresetDefinition[] = [
       reducedMotionFallback: "#0d0f12",
     },
     previewColors: ["#0d0f12", "#14171d", "#1a1d24"],
+  },
+  {
+    id: "soft-graphite",
+    name: "Soft Graphite",
+    category: "minimal",
+    description: "Neutral, glare-free dark matte finish",
+    config: {
+      schemaVersion: "1",
+      type: "static-color",
+      color: "#16181d",
+      opacity: 1,
+      reducedMotionFallback: "#16181d",
+    },
+    previewColors: ["#16181d", "#16181d"],
+  },
+  {
+    id: "paper-light",
+    name: "Paper / Light",
+    category: "minimal",
+    description: "Warm neutral parchment for high-contrast day focus",
+    config: {
+      schemaVersion: "1",
+      type: "ambient-gradient",
+      color: "#f4f4f0",
+      secondaryColor: "#e8e8e0",
+      gradientAngle: 180,
+      opacity: 0.95,
+      reducedMotionFallback: "#f4f4f0",
+    },
+    previewColors: ["#f4f4f0", "#eeeeea", "#e8e8e0"],
   },
   {
     id: "blue-hour",
@@ -270,39 +300,6 @@ export const CURATED_WALLPAPER_PRESETS: WallpaperPresetDefinition[] = [
     previewColors: ["#0b1426", "#111c38", "#172554"],
   },
   {
-    id: "aurora-mist",
-    name: "Aurora Mist",
-    category: "motion",
-    description: "Slow-moving soft emerald and teal mist",
-    config: {
-      schemaVersion: "1",
-      type: "canvas-preset",
-      preset: "aurora",
-      color: "#064e3b",
-      secondaryColor: "#0f766e",
-      opacity: 0.45,
-      reducedMotionFallback: "#064e3b",
-      extra: { speed: 0.6, density: 0.4 },
-    },
-    previewColors: ["#064e3b", "#0d5c52", "#0f766e"],
-  },
-  {
-    id: "deep-space",
-    name: "Deep Space",
-    category: "ambient",
-    description: "Expansive cosmic dark with gentle violet glow",
-    config: {
-      schemaVersion: "1",
-      type: "ambient-gradient",
-      color: "#09090b",
-      secondaryColor: "#1e1b4b",
-      gradientAngle: 210,
-      opacity: 0.9,
-      reducedMotionFallback: "#09090b",
-    },
-    previewColors: ["#09090b", "#13122c", "#1e1b4b"],
-  },
-  {
     id: "warm-dusk",
     name: "Warm Dusk",
     category: "ambient",
@@ -317,36 +314,6 @@ export const CURATED_WALLPAPER_PRESETS: WallpaperPresetDefinition[] = [
       reducedMotionFallback: "#1c1214",
     },
     previewColors: ["#1c1214", "#24171c", "#2d1b24"],
-  },
-  {
-    id: "soft-graphite",
-    name: "Soft Graphite",
-    category: "solid",
-    description: "Neutral, glare-free dark matte finish",
-    config: {
-      schemaVersion: "1",
-      type: "static-color",
-      color: "#16181d",
-      opacity: 1,
-      reducedMotionFallback: "#16181d",
-    },
-    previewColors: ["#16181d", "#16181d"],
-  },
-  {
-    id: "paper-light",
-    name: "Paper / Light",
-    category: "ambient",
-    description: "Warm neutral parchment for high-contrast day focus",
-    config: {
-      schemaVersion: "1",
-      type: "ambient-gradient",
-      color: "#f4f4f0",
-      secondaryColor: "#e8e8e0",
-      gradientAngle: 180,
-      opacity: 0.95,
-      reducedMotionFallback: "#f4f4f0",
-    },
-    previewColors: ["#f4f4f0", "#eeeeea", "#e8e8e0"],
   },
   {
     id: "muted-ocean",
@@ -381,9 +348,41 @@ export const CURATED_WALLPAPER_PRESETS: WallpaperPresetDefinition[] = [
     previewColors: ["#161218", "#1d1720", "#251c28"],
   },
   {
+    id: "deep-space",
+    name: "Deep Space",
+    category: "space",
+    description: "Expansive cosmic dark with gentle violet glow",
+    config: {
+      schemaVersion: "1",
+      type: "ambient-gradient",
+      color: "#09090b",
+      secondaryColor: "#1e1b4b",
+      gradientAngle: 210,
+      opacity: 0.9,
+      reducedMotionFallback: "#09090b",
+    },
+    previewColors: ["#09090b", "#13122c", "#1e1b4b"],
+  },
+  {
+    id: "cosmic-void",
+    name: "Cosmic Void",
+    category: "space",
+    description: "Deep starlit darkness with subtle stellar glow",
+    config: {
+      schemaVersion: "1",
+      type: "ambient-gradient",
+      color: "#050608",
+      secondaryColor: "#0f172a",
+      gradientAngle: 180,
+      opacity: 0.92,
+      reducedMotionFallback: "#050608",
+    },
+    previewColors: ["#050608", "#0a0e18", "#0f172a"],
+  },
+  {
     id: "geometric-drift",
     name: "Geometric Drift",
-    category: "motion",
+    category: "particles",
     description: "Gentle floating particles with slow, restrained drift",
     config: {
       schemaVersion: "1",
@@ -396,6 +395,40 @@ export const CURATED_WALLPAPER_PRESETS: WallpaperPresetDefinition[] = [
       extra: { speed: 0.4, density: 0.35 },
     },
     previewColors: ["#0f172a", "#1e293b", "#475569"],
+  },
+  {
+    id: "gentle-mist",
+    name: "Gentle Mist",
+    category: "rain",
+    description: "Delicate rainfall streaks with soft ambient diffusion",
+    config: {
+      schemaVersion: "1",
+      type: "canvas-preset",
+      preset: "rain",
+      color: "#475569",
+      secondaryColor: "#64748b",
+      opacity: 0.25,
+      reducedMotionFallback: "#090d16",
+      extra: { speed: 0.5, density: 0.3 },
+    },
+    previewColors: ["#090d16", "#131c2e", "#475569"],
+  },
+  {
+    id: "aurora-mist",
+    name: "Aurora Mist",
+    category: "motion",
+    description: "Slow-moving soft emerald and teal mist",
+    config: {
+      schemaVersion: "1",
+      type: "canvas-preset",
+      preset: "aurora",
+      color: "#064e3b",
+      secondaryColor: "#0f766e",
+      opacity: 0.45,
+      reducedMotionFallback: "#064e3b",
+      extra: { speed: 0.6, density: 0.4 },
+    },
+    previewColors: ["#064e3b", "#0d5c52", "#0f766e"],
   },
   // Legacy presets preserved for backward compatibility
   {
