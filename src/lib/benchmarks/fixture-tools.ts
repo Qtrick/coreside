@@ -671,4 +671,342 @@ export const FIXTURE_TOOLS: Record<string, ToolDefinition> = {
       },
     ],
   },
+
+  study_dashboard: {
+    id: "tool-study-dashboard",
+    name: "Study & Exam Preparation Dashboard",
+    description: "Subject mastery tracking, study progress, active decks, and review schedule",
+    layout: {
+      type: "dashboard",
+      columns: 3,
+      gap: "md",
+    },
+    components: [
+      {
+        id: "study-header",
+        type: "heading",
+        layoutRole: "header",
+        props: { text: "Exam Preparation: Computer Science & Systems", level: 2 },
+      },
+      {
+        id: "stat-hours",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: { title: "Study Time", content: "24.5 hrs this week" },
+      },
+      {
+        id: "stat-cards",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: { title: "Cards Mastered", content: "342 / 400 (85%)" },
+      },
+      {
+        id: "stat-retention",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: { title: "Retention Rate", content: "91.4% Target met" },
+      },
+      {
+        id: "study-progress-bar",
+        type: "progress",
+        layoutRole: "main",
+        colSpan: 2,
+        props: { label: "Semester Syllabus Completion", value: 85, max: 100 },
+      },
+      {
+        id: "study-quick-input",
+        type: "textInput",
+        valueKey: "studySessionNotes",
+        layoutRole: "sidebar",
+        props: { label: "Session Notes", placeholder: "Key takeaway from today's session" },
+      },
+      {
+        id: "study-deck-table",
+        type: "dataTable",
+        layoutRole: "main",
+        colSpan: 3,
+        props: {
+          title: "Active Study Modules",
+          columns: [
+            { id: "module", label: "Module" },
+            { id: "dueCards", label: "Due Cards" },
+            { id: "retention", label: "Estimated Mastery" },
+            { id: "lastReviewed", label: "Last Session" },
+          ],
+          rows: [
+            { module: "Distributed Consensus (Raft/Paxos)", dueCards: "18 cards", retention: "88%", lastReviewed: "Yesterday" },
+            { module: "Memory Safety & Lifetime Semantics", dueCards: "5 cards", retention: "96%", lastReviewed: "2 days ago" },
+            { module: "SQLite Query Optimizer & Indexes", dueCards: "12 cards", retention: "90%", lastReviewed: "Today" },
+          ],
+        },
+      },
+    ],
+  },
+
+  personal_dashboard: {
+    id: "tool-personal-dashboard",
+    name: "Daily Personal Command Center",
+    description: "Daily overview with agenda, focus priorities, habit metrics, and quick scratchpad",
+    layout: {
+      type: "dashboard",
+      columns: 3,
+      gap: "md",
+    },
+    components: [
+      {
+        id: "pd-header",
+        type: "heading",
+        layoutRole: "header",
+        props: { text: "Daily Overview — Tuesday, Sep 16", level: 2 },
+      },
+      {
+        id: "stat-focus-time",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: { title: "Deep Work", content: "3h 45m logged" },
+      },
+      {
+        id: "stat-habits-done",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: { title: "Habits Completed", content: "4 of 5" },
+      },
+      {
+        id: "stat-energy",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: { title: "Focus Energy", content: "High (Optimal)" },
+      },
+      {
+        id: "pd-checklist",
+        type: "checklist",
+        layoutRole: "main",
+        colSpan: 2,
+        props: {
+          title: "Today's Core Focus",
+          items: [
+            { id: "item-1", text: "Complete Coreside Search Gateway audit", checked: true },
+            { id: "item-2", text: "Verify prompt-injection boundaries", checked: true },
+            { id: "item-3", text: "Run visual responsiveness suite", checked: true },
+          ],
+        },
+      },
+      {
+        id: "pd-notes-sidebar",
+        type: "textArea",
+        valueKey: "dailyScratchpad",
+        layoutRole: "sidebar",
+        props: { label: "Quick Scratchpad", placeholder: "Capture ephemeral ideas here..." },
+      },
+    ],
+  },
+
+  crud_inventory: {
+    id: "tool-inventory-manager",
+    name: "Hardware & Asset Inventory",
+    description: "Multi-row asset database with stock levels, category filters, and restock actions",
+    layout: {
+      type: "dashboard",
+      columns: 3,
+      gap: "md",
+    },
+    components: [
+      {
+        id: "inv-header",
+        type: "heading",
+        layoutRole: "header",
+        props: { text: "Hardware Lab & Inventory Ledger", level: 2 },
+      },
+      {
+        id: "inv-stat-items",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: { title: "Total SKUs", content: "148 Distinct Assets" },
+      },
+      {
+        id: "inv-stat-low-stock",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: { title: "Low Stock Alerts", content: "3 Items Need Reorder" },
+      },
+      {
+        id: "inv-stat-valuation",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: { title: "Inventory Value", content: "$34,820.00" },
+      },
+      {
+        id: "inv-input-sku",
+        type: "textInput",
+        valueKey: "newSkuName",
+        layoutRole: "sidebar",
+        props: { label: "Item SKU / Name", placeholder: "e.g. M3 Pro Display Adapter" },
+      },
+      {
+        id: "inv-input-qty",
+        type: "numberInput",
+        valueKey: "newSkuQty",
+        layoutRole: "sidebar",
+        props: { label: "Quantity", min: 1, max: 500 },
+      },
+      {
+        id: "inv-btn-add",
+        type: "button",
+        layoutRole: "sidebar",
+        props: { label: "Record Asset Inflow", variant: "primary" },
+      },
+      {
+        id: "inv-table",
+        type: "dataTable",
+        layoutRole: "main",
+        colSpan: 2,
+        props: {
+          title: "Tracked Assets",
+          columns: [
+            { id: "sku", label: "SKU" },
+            { id: "category", label: "Category" },
+            { id: "stock", label: "In Stock" },
+            { id: "status", label: "Stock Level" },
+          ],
+          rows: [
+            { sku: "DISP-USB4-4K", category: "Displays", stock: "14 units", status: "Optimal" },
+            { sku: "MCU-ESP32-S3", category: "Microcontrollers", stock: "45 units", status: "Optimal" },
+            { sku: "NVME-2TB-GEN4", category: "Storage", stock: "2 units", status: "Low Stock" },
+          ],
+        },
+      },
+    ],
+  },
+
+  notes_workspace: {
+    id: "tool-notes-workspace",
+    name: "Technical Research & Notes Workspace",
+    description: "Two-pane research workspace with topic directory, code editor, and markdown notes",
+    layout: {
+      type: "split",
+      gap: "md",
+    },
+    components: [
+      {
+        id: "notes-heading",
+        type: "heading",
+        layoutRole: "header",
+        props: { text: "Research Notes: Offline Capabilities & Sync", level: 2 },
+      },
+      {
+        id: "notes-topic-list",
+        type: "list",
+        layoutRole: "sidebar",
+        colSpan: 1,
+        props: {
+          title: "Knowledge Notebooks",
+          items: [
+            { id: "nb-1", label: "Architecture: Typed UI Bounds" },
+            { id: "nb-2", label: "Security: SSRF Prevention Matrix" },
+            { id: "nb-3", label: "Persistence: Transaction Base Revisions" },
+          ],
+        },
+      },
+      {
+        id: "notes-editor",
+        type: "codeEditor",
+        valueKey: "currentNoteBody",
+        layoutRole: "main",
+        colSpan: 2,
+        props: {
+          label: "Research Synthesis & Spec",
+          language: "markdown",
+        },
+      },
+    ],
+  },
+
+  planner_schedule: {
+    id: "tool-planner-schedule",
+    name: "Execution Planner & Schedule",
+    description: "Timeline planner with time-blocked priorities, calendar intervals, and milestone tracking",
+    layout: {
+      type: "dashboard",
+      columns: 3,
+      gap: "md",
+    },
+    components: [
+      {
+        id: "planner-header",
+        type: "heading",
+        layoutRole: "header",
+        props: { text: "Weekly Sprint Planner & Milestones", level: 2 },
+      },
+      {
+        id: "planner-stat-events",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: { title: "Milestones", content: "6 Scheduled" },
+      },
+      {
+        id: "planner-stat-critical",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: { title: "Hard Deadlines", content: "2 Pending" },
+      },
+      {
+        id: "planner-stat-buffer",
+        type: "card",
+        layoutRole: "stat",
+        colSpan: 1,
+        props: { title: "Sprint Buffer", content: "8.0 hrs allocated" },
+      },
+      {
+        id: "planner-input-event",
+        type: "textInput",
+        valueKey: "plannerEventTitle",
+        layoutRole: "sidebar",
+        props: { label: "Add Milestone", placeholder: "e.g. Supabase Gateway deploy" },
+      },
+      {
+        id: "planner-input-date",
+        type: "dateInput",
+        valueKey: "plannerEventDate",
+        layoutRole: "sidebar",
+        props: { label: "Target Date" },
+      },
+      {
+        id: "planner-btn-save",
+        type: "button",
+        layoutRole: "sidebar",
+        props: { label: "Commit Milestone", variant: "primary" },
+      },
+      {
+        id: "planner-schedule-table",
+        type: "dataTable",
+        layoutRole: "main",
+        colSpan: 2,
+        props: {
+          title: "Sprint Schedule",
+          columns: [
+            { id: "time", label: "Date / Time" },
+            { id: "event", label: "Milestone" },
+            { id: "owner", label: "Owner" },
+            { id: "status", label: "Status" },
+          ],
+          rows: [
+            { time: "2026-09-16 10:00", event: "Exa Gateway Integration", owner: "Backend", status: "Verified" },
+            { time: "2026-09-16 14:00", event: "Multi-signal Search Re-ranking", owner: "Rust Engine", status: "Verified" },
+            { time: "2026-09-16 17:00", event: "Visual Benchmark Suite", owner: "Frontend", status: "In Progress" },
+          ],
+        },
+      },
+    ],
+  },
 };

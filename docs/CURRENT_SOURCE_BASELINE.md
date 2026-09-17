@@ -12,9 +12,9 @@
 | --- | --- |
 | Path | `/Users/qunyingfan/Coreside` |
 | Branch | `main` |
-| Commit | `1839c1bd1f8baad098dc3fb2b60de7e52c09a863` |
+| Commit | `27e8d7620974d2ba6587eff02b4603bb7ff8ba49` |
 | Dirty | Yes (development evidence only) |
-| Source fingerprint | `b1afd5ce6e10ac82bbd86efacf33c8ba88724978f0019886238dc21033ad8c06` |
+| Source fingerprint | `14478f491690ac54df98fa0cebcb44da995bffc5203ff04699bd446451e2c349` |
 
 ## Uploaded archive
 
@@ -63,7 +63,7 @@
 | Comparison status | compared_against_prior_extract |
 | Only in active | 29 |
 | Only in archive | 1 |
-| Changed | 84 |
+| Changed | 85 |
 
 ## Generation command
 

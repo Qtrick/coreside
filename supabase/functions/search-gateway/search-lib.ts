@@ -158,7 +158,9 @@ function isPrivateOrLocalHost(host: string): boolean {
     normalized.startsWith("fc") ||
     normalized.startsWith("fd") ||
     normalized.startsWith("fe80:") ||
-    normalized.startsWith("::ffff:")
+    normalized.startsWith("::ffff:") ||
+    /^\d+$/.test(normalized) ||
+    /^0x[0-9a-f]+$/i.test(normalized)
   ) return true;
   const ipv4 = normalized.split(".").map(Number);
   if (ipv4.length !== 4 || ipv4.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
@@ -193,6 +195,14 @@ export function sanitizePromptInjection(text: string): string {
   return clean;
 }
 
+function isValidPublicUrl(url: URL): boolean {
+  if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+  if (url.username || url.password) return false;
+  if (url.port && url.port !== "80" && url.port !== "443") return false;
+  if (isPrivateOrLocalHost(url.hostname)) return false;
+  return true;
+}
+
 /** Convert an upstream Linkup result into Coreside's stable source shape. Provider
  * URLs remain untrusted and must at least be public HTTP(S) before desktop use. */
 export function normalizeProviderResults(payload: unknown, maxResults: number): unknown[] {
@@ -208,9 +218,7 @@ export function normalizeProviderResults(payload: unknown, maxResults: number): 
     if (typeof source.url !== "string") continue;
     let url: URL;
     try { url = new URL(source.url); } catch { continue; }
-    const host = url.hostname.toLowerCase();
-    if (url.protocol !== "https:" && url.protocol !== "http:") continue;
-    if (isPrivateOrLocalHost(host)) continue;
+    if (!isValidPublicUrl(url)) continue;
     if (seen.has(url.href)) continue;
     seen.add(url.href);
     const rawTitle = typeof source.name === "string" && source.name.trim() ? source.name.slice(0, 400) : url.href;
@@ -222,6 +230,47 @@ export function normalizeProviderResults(payload: unknown, maxResults: number): 
       date: typeof source.date === "string" ? source.date.slice(0, 80) : null,
       rank: normalized.length + 1,
       provider: "linkup",
+    });
+    if (normalized.length >= maxResults) break;
+  }
+  return normalized;
+}
+
+/** Convert an upstream Exa result into Coreside's stable source shape. */
+export function normalizeExaResults(payload: unknown, maxResults: number): unknown[] {
+  if (!payload || typeof payload !== "object") return [];
+  const body = payload as Record<string, unknown>;
+  const rows = Array.isArray(body.results) ? body.results : [];
+  const seen = new Set<string>();
+  const normalized: Record<string, unknown>[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const source = row as Record<string, unknown>;
+    if (typeof source.url !== "string") continue;
+    let url: URL;
+    try { url = new URL(source.url); } catch { continue; }
+    if (!isValidPublicUrl(url)) continue;
+    if (seen.has(url.href)) continue;
+    seen.add(url.href);
+
+    const rawTitle = typeof source.title === "string" && source.title.trim()
+      ? source.title.slice(0, 400)
+      : url.href;
+
+    let rawSnippet = "";
+    if (Array.isArray(source.highlights) && source.highlights.length > 0) {
+      rawSnippet = source.highlights.filter((h) => typeof h === "string").join(" ").slice(0, 4000);
+    } else if (typeof source.text === "string" && source.text.trim()) {
+      rawSnippet = source.text.slice(0, 4000);
+    }
+
+    normalized.push({
+      title: sanitizePromptInjection(rawTitle),
+      url: url.href,
+      snippet: sanitizePromptInjection(rawSnippet),
+      date: typeof source.publishedDate === "string" ? source.publishedDate.slice(0, 80) : null,
+      rank: normalized.length + 1,
+      provider: "exa",
     });
     if (normalized.length >= maxResults) break;
   }
@@ -242,9 +291,7 @@ export function normalizeFirecrawlResults(payload: unknown, maxResults: number):
     if (!rawUrl) continue;
     let url: URL;
     try { url = new URL(rawUrl); } catch { continue; }
-    const host = url.hostname.toLowerCase();
-    if (url.protocol !== "https:" && url.protocol !== "http:") continue;
-    if (isPrivateOrLocalHost(host)) continue;
+    if (!isValidPublicUrl(url)) continue;
     if (seen.has(url.href)) continue;
     seen.add(url.href);
 
@@ -286,8 +333,7 @@ export function normalizeFirecrawlScrapeResult(payload: unknown, fallbackUrl: st
   const targetUrl = typeof meta.sourceURL === "string" && meta.sourceURL.trim() ? meta.sourceURL.trim() : fallbackUrl;
   let url: URL;
   try { url = new URL(targetUrl); } catch { return []; }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return [];
-  if (isPrivateOrLocalHost(url.hostname.toLowerCase())) return [];
+  if (!isValidPublicUrl(url)) return [];
 
   const rawTitle = typeof meta.title === "string" && meta.title.trim()
     ? meta.title

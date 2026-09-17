@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   boundSearchResults,
+  normalizeExaResults,
   normalizeFirecrawlResults,
   normalizeFirecrawlScrapeResult,
   normalizeProviderResults,
@@ -39,10 +40,41 @@ describe("search-gateway Linkup normalization", () => {
         { type: "text", url: "http://[::ffff:127.0.0.1]/private" },
         { type: "text", url: "http://[fe80::1]/private" },
         { type: "text", url: "file:///etc/passwd" },
+        { type: "text", url: "http://admin:secret@example.com/a" },
+        { type: "text", url: "https://example.com:8080/a" },
         { type: "image", url: "https://example.com/image" },
       ],
     }, 5);
     expect(results).toEqual([expect.objectContaining({ url: "https://example.com/a", provider: "linkup" })]);
+  });
+});
+
+describe("search-gateway Exa normalization", () => {
+  it("normalizes results with highlights and extracts metadata", () => {
+    const results = normalizeExaResults({
+      results: [
+        {
+          id: "exa-1",
+          title: "Exa Neural Search",
+          url: "https://example.com/neural",
+          publishedDate: "2026-09-14",
+          highlights: ["Deep semantic search overview.", "Second highlight sentence."],
+        },
+        {
+          id: "exa-2",
+          title: "Private Target",
+          url: "http://127.0.0.1/private",
+          text: "Should be filtered",
+        },
+      ],
+    }, 5);
+    expect(results).toHaveLength(1);
+    const first = results[0] as Record<string, unknown>;
+    expect(first.url).toBe("https://example.com/neural");
+    expect(first.provider).toBe("exa");
+    expect(first.snippet).toBe("Deep semantic search overview. Second highlight sentence.");
+    expect(first.date).toBe("2026-09-14");
+    expect(first.rank).toBe(1);
   });
 });
 

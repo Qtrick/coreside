@@ -9,6 +9,7 @@ import {
   parseSearchReserveRpcResult,
   parseSearchSettleRpcResult,
   normalizeProviderResults,
+  normalizeExaResults,
   normalizeFirecrawlResults,
   normalizeFirecrawlScrapeResult,
   type SearchRequestBody,
@@ -160,14 +161,17 @@ Deno.serve(async (req) => {
     return consumerError("Unauthorized", 401, origin);
   }
 
-  // Supported upstream providers: Linkup and Firecrawl.
+  // Supported upstream providers: Linkup, Exa, and Firecrawl.
   const linkupKey =
     Deno.env.get("LINKUP_API_KEY")?.trim() ||
     Deno.env.get("LINKUP_SECRET_KEY")?.trim();
   const firecrawlKey =
     Deno.env.get("FIRECRAWL_API_KEY")?.trim() ||
     Deno.env.get("FIRECRAWL_SECRET_KEY")?.trim();
-  if (!linkupKey && !firecrawlKey) {
+  const exaKey =
+    Deno.env.get("EXA_API_KEY")?.trim() ||
+    Deno.env.get("EXA_SECRET_KEY")?.trim();
+  if (!linkupKey && !firecrawlKey && !exaKey) {
     return consumerError("Coreside Search is not configured", 503, origin);
   }
 
@@ -329,11 +333,11 @@ Deno.serve(async (req) => {
       body.query.startsWith("https://") ||
       Boolean(body.url);
 
-    // If direct URL and Firecrawl is available, attempt scraping first
+    // 1. Direct URL: Firecrawl v2 scrape takes top priority
     if (isDirectUrl && firecrawlKey) {
       const targetUrl = body.url || body.query;
       try {
-        const scrapeResp = await fetch("https://api.firecrawl.dev/v1/scrape", {
+        const scrapeResp = await fetch("https://api.firecrawl.dev/v2/scrape", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${firecrawlKey}`,
@@ -342,6 +346,7 @@ Deno.serve(async (req) => {
           body: JSON.stringify({
             url: targetUrl,
             formats: ["markdown"],
+            onlyMainContent: true,
           }),
           signal: upstreamAbort.signal,
         });
@@ -360,7 +365,96 @@ Deno.serve(async (req) => {
       }
     }
 
-    // If results are still empty, try Linkup if configured
+    // 2. Deep research intent: Parallel discovery (Linkup + Exa) when both keys available
+    if (results.length === 0 && body.intent === "deep_research" && (linkupKey || exaKey)) {
+      const promises: Promise<unknown[]>[] = [];
+
+      if (linkupKey) {
+        promises.push(
+          (async () => {
+            try {
+              const resp = await fetch("https://api.linkup.so/v1/search", {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${linkupKey}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  q: body.query,
+                  depth: "standard",
+                  outputType: "searchResults",
+                  maxResults: numResults,
+                }),
+                signal: upstreamAbort.signal,
+              });
+              if (resp.ok) {
+                const payload = await readUpstreamJsonBounded(resp, MAX_UPSTREAM_RESPONSE_BYTES);
+                return normalizeProviderResults(payload, numResults);
+              }
+            } catch {
+              hadUpstreamError = true;
+            }
+            return [];
+          })(),
+        );
+      }
+
+      if (exaKey) {
+        promises.push(
+          (async () => {
+            try {
+              const resp = await fetch("https://api.exa.ai/search", {
+                method: "POST",
+                headers: {
+                  "x-api-key": exaKey,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  query: body.query,
+                  numResults,
+                  type: "neural",
+                  contents: {
+                    highlights: { numSentences: 3 },
+                  },
+                }),
+                signal: upstreamAbort.signal,
+              });
+              if (resp.ok) {
+                const payload = await readUpstreamJsonBounded(resp, MAX_UPSTREAM_RESPONSE_BYTES);
+                return normalizeExaResults(payload, numResults);
+              }
+            } catch {
+              hadUpstreamError = true;
+            }
+            return [];
+          })(),
+        );
+      }
+
+      const settled = await Promise.allSettled(promises);
+      const merged: unknown[] = [];
+      const seenUrls = new Set<string>();
+      for (const res of settled) {
+        if (res.status === "fulfilled" && Array.isArray(res.value)) {
+          for (const item of res.value) {
+            if (item && typeof item === "object") {
+              const u = (item as Record<string, unknown>).url;
+              if (typeof u === "string" && !seenUrls.has(u)) {
+                seenUrls.add(u);
+                merged.push(item);
+              }
+            }
+          }
+        }
+      }
+
+      if (merged.length > 0) {
+        results = merged.slice(0, numResults);
+        usedProvider = "hybrid";
+      }
+    }
+
+    // 3. Linkup discovery (standard / fast)
     if (results.length === 0 && linkupKey) {
       try {
         const linkupResp = await fetch("https://api.linkup.so/v1/search", {
@@ -371,7 +465,7 @@ Deno.serve(async (req) => {
           },
           body: JSON.stringify({
             q: body.query,
-            depth: "fast",
+            depth: body.intent === "news" ? "fast" : "standard",
             outputType: "searchResults",
             maxResults: numResults,
           }),
@@ -393,10 +487,45 @@ Deno.serve(async (req) => {
       }
     }
 
-    // If results are still empty and Firecrawl is configured, fallback to Firecrawl search
+    // 4. Exa discovery (neural/semantic discovery fallback or primary)
+    if (results.length === 0 && exaKey) {
+      try {
+        const exaResp = await fetch("https://api.exa.ai/search", {
+          method: "POST",
+          headers: {
+            "x-api-key": exaKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            query: body.query,
+            numResults,
+            type: body.intent === "deep_research" ? "neural" : "auto",
+            contents: {
+              highlights: { numSentences: 3 },
+            },
+          }),
+          signal: upstreamAbort.signal,
+        });
+        if (exaResp.ok) {
+          const payload = await readUpstreamJsonBounded(exaResp, MAX_UPSTREAM_RESPONSE_BYTES);
+          if (payload && typeof payload === "object") {
+            results = normalizeExaResults(payload, numResults);
+            if (results.length > 0) {
+              usedProvider = "exa";
+            }
+          }
+        } else {
+          hadUpstreamError = true;
+        }
+      } catch {
+        hadUpstreamError = true;
+      }
+    }
+
+    // 5. Firecrawl v2 search fallback
     if (results.length === 0 && firecrawlKey) {
       try {
-        const firecrawlResp = await fetch("https://api.firecrawl.dev/v1/search", {
+        const firecrawlResp = await fetch("https://api.firecrawl.dev/v2/search", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${firecrawlKey}`,
@@ -405,7 +534,7 @@ Deno.serve(async (req) => {
           body: JSON.stringify({
             query: body.query,
             limit: numResults,
-            scrapeOptions: { formats: ["markdown"] },
+            scrapeOptions: { formats: ["markdown"], onlyMainContent: true },
           }),
           signal: upstreamAbort.signal,
         });

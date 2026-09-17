@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-16T19:40:47.921Z",
-  "commit": "1839c1bd1f8baad098dc3fb2b60de7e52c09a863",
+  "generatedAt": "2026-09-16T20:43:00.876Z",
+  "commit": "27e8d7620974d2ba6587eff02b4603bb7ff8ba49",
   "dirty": true,
-  "sourceFingerprint": "b1afd5ce6e10ac82bbd86efacf33c8ba88724978f0019886238dc21033ad8c06",
+  "sourceFingerprint": "14478f491690ac54df98fa0cebcb44da995bffc5203ff04699bd446451e2c349",
   "packageLockHash": "f99da7c99dc5e2db93567632e2c36d36796c4b3ea8cf6a575a3f337bb6b9d641",
   "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
   "platform": "darwin",

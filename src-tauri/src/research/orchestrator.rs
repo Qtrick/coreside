@@ -150,6 +150,14 @@ pub fn canonicalize_url(raw_url: &str) -> Option<String> {
 
 /// Deduplicate search results by canonical URL while preserving the richest snippet/content.
 pub fn deduplicate_results(results: Vec<WebSearchResult>) -> Vec<WebSearchResult> {
+    deduplicate_and_rank_results(results, "")
+}
+
+/// Deduplicate search results by canonical URL, merge metadata/provenance, and re-rank with query terms.
+pub fn deduplicate_and_rank_results(
+    results: Vec<WebSearchResult>,
+    query: &str,
+) -> Vec<WebSearchResult> {
     let mut seen_urls: HashSet<String> = HashSet::new();
     let mut deduplicated: Vec<WebSearchResult> = Vec::new();
 
@@ -160,24 +168,41 @@ pub fn deduplicate_results(results: Vec<WebSearchResult>) -> Vec<WebSearchResult
         if seen_urls.insert(canonical) {
             deduplicated.push(result);
         } else {
-            // If already seen, check if this instance has a better snippet or content
+            // If already seen, merge the richest snippet, content, highlights, or age
             if let Some(existing) = deduplicated
                 .iter_mut()
                 .find(|r| r.canonical_url.as_ref() == result.canonical_url.as_ref())
             {
-                if existing.snippet.is_none() && result.snippet.is_some() {
+                if (existing.snippet.is_none()
+                    || existing.snippet.as_ref().is_some_and(|s| s.len() < 50))
+                    && result.snippet.is_some()
+                {
                     existing.snippet = result.snippet;
                 }
                 if existing.content.is_none() && result.content.is_some() {
                     existing.content = result.content;
                 }
+                if existing.highlights.is_none() && result.highlights.is_some() {
+                    existing.highlights = result.highlights;
+                }
+                if existing.age.is_none() && result.age.is_some() {
+                    existing.age = result.age;
+                }
+                if let (Some(p1), Some(p2)) = (&existing.provider, &result.provider) {
+                    if p1 != p2 && !p1.contains(p2.as_str()) {
+                        existing.retrieval_method = Some(format!("{p1}+{p2}"));
+                    }
+                }
             }
         }
     }
 
-    // Re-rank
-    for (i, r) in deduplicated.iter_mut().enumerate() {
-        r.rank = i + 1;
+    if !query.trim().is_empty() {
+        super::ranking::rank_search_results(&mut deduplicated, query);
+    } else {
+        for (i, r) in deduplicated.iter_mut().enumerate() {
+            r.rank = i + 1;
+        }
     }
 
     deduplicated

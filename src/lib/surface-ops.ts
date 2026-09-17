@@ -220,3 +220,45 @@ export function mergeStateForDefinitionPatch(args: {
   }
   return merged;
 }
+
+/**
+ * Safely duplicates a component tree:
+ * 1. Generates fresh, unique IDs for the root and all recursive descendants.
+ * 2. Isolates preservation keys so the duplicated instance does not steal focus/caret.
+ * 3. Disambiguates interactive input `valueKey` bindings (e.g. `title` -> `title_copy_<suffix>`)
+ *    so edits to the clone do not clobber the original's live state.
+ * 4. Preserves shared read-only collections (rowsKey, dataKey, itemsKey) so the clone displays
+ *    the expected dataset without broken bindings.
+ */
+export function safeDuplicateComponent(
+  component: ToolComponent,
+  idSuffix: string = Math.random().toString(36).substring(2, 8),
+): ToolComponent {
+  const cloneNode = (node: ToolComponent): ToolComponent => {
+    const newId = `${node.type}-${idSuffix}-${Math.random().toString(36).substring(2, 6)}`;
+    const clonedProps: Record<string, unknown> = node.props ? { ...node.props } : {};
+
+    // Disambiguate valueKey for inputs so typing in one does not mutate the other
+    if (typeof clonedProps.valueKey === "string" && clonedProps.valueKey.trim()) {
+      clonedProps.valueKey = `${clonedProps.valueKey}_copy_${idSuffix}`;
+    }
+
+    // Isolate preservation keys if present
+    if (typeof clonedProps.preservationKey === "string" && clonedProps.preservationKey.trim()) {
+      clonedProps.preservationKey = `${clonedProps.preservationKey}_copy_${idSuffix}`;
+    }
+
+    // Recursively clone children with fresh IDs
+    const children = node.children?.map((child) => cloneNode(child));
+
+    return {
+      ...node,
+      id: newId,
+      props: clonedProps,
+      children: children && children.length > 0 ? children : undefined,
+    };
+  };
+
+  return cloneNode(component);
+}
+

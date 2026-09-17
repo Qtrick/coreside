@@ -169,8 +169,9 @@ impl SearchProvider for HybridSearchProvider {
         };
 
         // Post-processing across all search results:
-        // 1. Deduplicate across providers
-        response.results = super::orchestrator::deduplicate_results(response.results);
+        // 1. Deduplicate across providers and re-rank with multi-signal score
+        response.results =
+            super::orchestrator::deduplicate_and_rank_results(response.results, &req.query);
         // 2. Sanitize prompt injection in titles, snippets, and contents
         for r in &mut response.results {
             r.title = super::orchestrator::sanitize_prompt_injection(&r.title);
@@ -301,65 +302,101 @@ impl HybridSearchProvider {
         let intent =
             super::orchestrator::classify_research_intent(&req.query, req.domain.as_deref());
 
-        // 1. Try Linkup (fast general discovery)
-        let mut response: Option<WebSearchResponse> = None;
-        if has_linkup_key() {
-            match linkup_search(&req.query, count, None).await {
-                Ok(resp) if !resp.results.is_empty() => {
-                    response = Some(resp);
-                }
-                Ok(empty_resp) => {
-                    // Empty from primary: keep as candidate if fallbacks also fail
-                    response = Some(empty_resp);
-                }
-                Err(e) => {
-                    tracing::warn!(error = ?e, "linkup search failed, falling back to next provider");
+        let mut candidates: Vec<WebSearchResult> = Vec::new();
+        let mut primary_notice: Option<String> = None;
+
+        // For DeepResearch intent with both Linkup and Exa configured, query both in parallel
+        if intent == crate::search::ResearchIntent::DeepResearch
+            && has_linkup_key()
+            && has_exa_key()
+        {
+            let (linkup_res, exa_res) = tokio::join!(
+                linkup_search(&req.query, count, None),
+                self.exa_discover(req, count, None)
+            );
+            match linkup_res {
+                Ok(resp) => candidates.extend(resp.results),
+                Err(e) => tracing::warn!(error = ?e, "parallel linkup search failed"),
+            }
+            match exa_res {
+                Ok(resp) => candidates.extend(resp.results),
+                Err(e) => tracing::warn!(error = ?e, "parallel exa search failed"),
+            }
+            // If both failed or returned empty, try Firecrawl as fallback
+            if candidates.is_empty() && has_firecrawl_key() {
+                if let Ok(resp) = firecrawl_search(&req.query, count, None).await {
+                    candidates.extend(resp.results);
                 }
             }
-        }
-
-        // 2. Try Exa (semantic / neural discovery) if Linkup not configured or returned empty/failed
-        if response.as_ref().map_or(true, |r| r.results.is_empty()) && has_exa_key() {
-            match self.exa_discover(req, count, None).await {
-                Ok(resp) if !resp.results.is_empty() => {
-                    response = Some(resp);
-                }
-                Ok(empty_resp) => {
-                    if response.is_none() {
-                        response = Some(empty_resp);
+        } else {
+            // Standard / Lookup / News sequential discovery pipeline with intelligent fallback:
+            // 1. Try Linkup (fast general discovery)
+            if has_linkup_key() {
+                match linkup_search(&req.query, count, None).await {
+                    Ok(resp) if !resp.results.is_empty() => {
+                        candidates = resp.results;
+                    }
+                    Ok(empty_resp) => {
+                        primary_notice = empty_resp.notice;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = ?e, "linkup search failed, falling back to next provider");
                     }
                 }
-                Err(e) => {
-                    tracing::warn!(error = ?e, "exa search failed, falling back to next provider");
-                }
             }
-        }
 
-        // 3. Try Firecrawl (deep extraction / fallback search)
-        if response.as_ref().map_or(true, |r| r.results.is_empty()) && has_firecrawl_key() {
-            match firecrawl_search(&req.query, count, None).await {
-                Ok(resp) if !resp.results.is_empty() => {
-                    response = Some(resp);
-                }
-                Ok(empty_resp) => {
-                    if response.is_none() {
-                        response = Some(empty_resp);
+            // 2. Try Exa (semantic / neural discovery) if Linkup not configured or returned empty/failed
+            if candidates.is_empty() && has_exa_key() {
+                match self.exa_discover(req, count, None).await {
+                    Ok(resp) if !resp.results.is_empty() => {
+                        candidates = resp.results;
+                    }
+                    Ok(empty_resp) => {
+                        if primary_notice.is_none() {
+                            primary_notice = empty_resp.notice;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = ?e, "exa search failed, falling back to next provider");
                     }
                 }
-                Err(e) => {
-                    tracing::warn!(error = ?e, "firecrawl search failed");
+            }
+
+            // 3. Try Firecrawl (deep extraction / fallback search)
+            if candidates.is_empty() && has_firecrawl_key() {
+                match firecrawl_search(&req.query, count, None).await {
+                    Ok(resp) if !resp.results.is_empty() => {
+                        candidates = resp.results;
+                    }
+                    Ok(empty_resp) => {
+                        if primary_notice.is_none() {
+                            primary_notice = empty_resp.notice;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = ?e, "firecrawl search failed");
+                    }
                 }
             }
         }
 
-        let mut final_response = match response {
-            Some(resp) => resp,
-            None => WebSearchResponse {
-                query: req.query.clone(),
-                provider: PROVIDER_ID.into(),
-                results: vec![],
-                session_id: None,
-                notice: Some(NEEDS_EXA_OR_SEED_MESSAGE.into()),
+        let ranked_results = if !candidates.is_empty() {
+            super::orchestrator::deduplicate_and_rank_results(candidates, &req.query)
+        } else {
+            vec![]
+        };
+
+        let has_no_results = ranked_results.is_empty();
+        let mut final_response = WebSearchResponse {
+            query: req.query.clone(),
+            provider: PROVIDER_ID.into(),
+            results: ranked_results,
+            session_id: None,
+            notice: if has_no_results && !has_linkup_key() && !has_exa_key() && !has_firecrawl_key()
+            {
+                Some(NEEDS_EXA_OR_SEED_MESSAGE.into())
+            } else {
+                primary_notice
             },
         };
 

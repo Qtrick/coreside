@@ -27,6 +27,7 @@ import {
   makeRemoveComponentOp,
   makeReplaceComponentOp,
   makeUpdatePropsOp,
+  safeDuplicateComponent,
 } from "@/lib/surface-ops";
 
 type CustomizeModeProps = {
@@ -68,16 +69,21 @@ const PALETTE_ITEMS: PaletteItem[] = [
   { type: "text", name: "Text", category: "text", description: "Paragraph or explanatory text", defaultProps: { text: "Description text goes here." } },
   { type: "stat", name: "Metric Stat", category: "text", description: "Large number display with label", defaultProps: { label: "Total Count", value: "0" } },
   { type: "badge", name: "Badge", category: "text", description: "Status or category tag", defaultProps: { label: "Active", variant: "primary" } },
+  { type: "progress", name: "Progress Bar", category: "text", description: "Visual completion progress", defaultProps: { value: 50, max: 100, label: "Progress" } },
+  { type: "emptyState", name: "Empty State", category: "text", description: "Callout for empty collections", defaultProps: { title: "No records yet", description: "Add your first entry to get started." } },
   { type: "divider", name: "Divider", category: "text", description: "Horizontal dividing line", defaultProps: {} },
 
   // Inputs
   { type: "textInput", name: "Text Input", category: "inputs", description: "Single-line text entry", defaultProps: { label: "Field Name", placeholder: "Enter text...", valueKey: "inputDraft" } },
   { type: "textArea", name: "Text Area", category: "inputs", description: "Multi-line text entry", defaultProps: { label: "Notes", placeholder: "Enter details...", valueKey: "notesDraft" } },
   { type: "numberInput", name: "Number Input", category: "inputs", description: "Numeric field with stepper", defaultProps: { label: "Quantity", min: 0, max: 100, valueKey: "quantity" } },
+  { type: "slider", name: "Range Slider", category: "inputs", description: "Continuous or stepped range slider", defaultProps: { label: "Intensity", min: 0, max: 100, step: 5, valueKey: "rangeValue" } },
   { type: "select", name: "Dropdown Select", category: "inputs", description: "Choose one option from list", defaultProps: { label: "Category", options: [{ label: "Option A", value: "a" }, { label: "Option B", value: "b" }], valueKey: "selectedCategory" } },
+  { type: "radioGroup", name: "Radio Group", category: "inputs", description: "Single choice from visible radio items", defaultProps: { label: "Priority", options: [{ label: "Standard", value: "std" }, { label: "Urgent", value: "urg" }], valueKey: "selectedPriority" } },
   { type: "checkbox", name: "Checkbox", category: "inputs", description: "Toggle boolean checkbox", defaultProps: { label: "Enable feature", valueKey: "featureEnabled" } },
   { type: "switch", name: "Toggle Switch", category: "inputs", description: "Sleek toggle switch", defaultProps: { label: "Notifications", valueKey: "notificationsOn" } },
   { type: "dateInput", name: "Date Input", category: "inputs", description: "Calendar date picker", defaultProps: { label: "Due Date", valueKey: "dueDate" } },
+  { type: "mediaPicker", name: "Media Picker", category: "inputs", description: "Secure media asset selector", defaultProps: { label: "Attachment", allowedTypes: ["image/png", "image/jpeg"], valueKey: "selectedMediaAssetId" } },
 
   // Actions
   { type: "button", name: "Button", category: "actions", description: "Clickable button with actions", defaultProps: { label: "Submit", variant: "primary" } },
@@ -87,16 +93,22 @@ const PALETTE_ITEMS: PaletteItem[] = [
   { type: "dataTable", name: "Data Table", category: "data", description: "Structured table with sorting & selection", defaultProps: { rowsKey: "records", columns: [{ key: "title", label: "Title" }, { key: "status", label: "Status" }], selectionKey: "selectedRecordId" } },
   { type: "table", name: "Simple Table", category: "data", description: "Lightweight table", defaultProps: { columns: [{ key: "name", label: "Name" }, { key: "value", label: "Value" }] } },
   { type: "list", name: "List View", category: "data", description: "Itemized list of records", defaultProps: { itemsKey: "items" } },
+  { type: "checklist", name: "Checklist", category: "data", description: "Interactive task list with check state", defaultProps: { itemsKey: "tasks", selectionKey: "completedTasks" } },
+  { type: "codeEditor", name: "Code Editor", category: "data", description: "Monospace text/code block", defaultProps: { language: "json", valueKey: "codeContent" } },
+  { type: "audioPlayer", name: "Audio Player", category: "data", description: "Media audio player control", defaultProps: { title: "Audio Preview", src: "" } },
 
   // Charts
   { type: "chartLine", name: "Line Chart", category: "charts", description: "Trend over time", defaultProps: { title: "Activity Trend", dataKey: "trendData" } },
   { type: "chartBar", name: "Bar Chart", category: "charts", description: "Category comparison", defaultProps: { title: "Performance by Category", dataKey: "barData" } },
   { type: "chartPie", name: "Pie Chart", category: "charts", description: "Proportion breakdown", defaultProps: { title: "Distribution", dataKey: "pieData" } },
+  { type: "chartDonut", name: "Donut Chart", category: "charts", description: "Ring proportion chart", defaultProps: { title: "Composition", dataKey: "donutData" } },
   { type: "chartArea", name: "Area Chart", category: "charts", description: "Filled trend chart", defaultProps: { title: "Cumulative Volume", dataKey: "areaData" } },
+  { type: "chartScatter", name: "Scatter Plot", category: "charts", description: "2D point correlation chart", defaultProps: { title: "Correlation", dataKey: "scatterData" } },
 
   // Layout
   { type: "container", name: "Container", category: "layout", description: "Box container for grouping", defaultProps: {} },
   { type: "card", name: "Card Panel", category: "layout", description: "Elevated panel with border", defaultProps: { title: "Panel Title" } },
+  { type: "tabs", name: "Tabs", category: "layout", description: "Tabbed container for switching panes", defaultProps: { tabs: [{ id: "tab1", label: "Overview" }, { id: "tab2", label: "Details" }] } },
   { type: "row", name: "Horizontal Row", category: "layout", description: "Flex row for side-by-side items", defaultProps: {} },
   { type: "column", name: "Vertical Column", category: "layout", description: "Flex column for stacked items", defaultProps: {} },
 ];
@@ -307,11 +319,7 @@ export function CustomizeMode({
   const duplicateSelected = async () => {
     if (!selected) return;
     const row = rows.find((r) => r.component.id === selected.id);
-    const newId = `${selected.type}-${Date.now().toString(36)}`;
-    const cloned: ToolComponent = {
-      ...JSON.parse(JSON.stringify(selected)),
-      id: newId,
-    };
+    const cloned = safeDuplicateComponent(selected);
     await runOps(
       [
         makeInsertComponentOp({
@@ -324,7 +332,7 @@ export function CustomizeMode({
       ],
       "Component duplicated",
     );
-    setSelectedId(newId);
+    setSelectedId(cloned.id);
   };
 
   const deleteSelected = async () => {
