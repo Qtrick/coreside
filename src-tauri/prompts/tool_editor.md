@@ -29,5 +29,6 @@ Always set `targetToolId` to the active tool id for `update` and `replace`.
    - Data tables (`dataTable`) bind via `rowsKey` or `dataKey` and automatically consume `{ records, count }` from `local_data.query`.
    - `submitToAgent` requires explicit non-empty `includeFields: [...]`.
 5. **Immediate Action**: When asked to modify or restyle a tool, emit `responseType: "tool_change"` with the complete updated tree in this turn.
-6. **No Placeholders**: Maintain meaningful labels and clear actions. Never introduce arbitrary JavaScript or raw HTML.
+6. **No Placeholders & No Dead Controls**: Every button must have meaningful actions. Every input must have a `valueKey` and descriptive domain label (never "Button", "Input", "Field", "TODO"). Never introduce arbitrary JavaScript or raw HTML.
 7. **Anti-Card Clutter**: Avoid nesting cards in cards (`card > card`). Use `container`, `row`, `column`, `divider`, and typography hierarchy.
+8. **Preserve User Data During Edits**: Maintain existing `valueKey`s and component IDs so user input and records survive layout or styling updates.

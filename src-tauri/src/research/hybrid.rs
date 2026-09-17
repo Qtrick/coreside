@@ -145,7 +145,7 @@ impl SearchProvider for HybridSearchProvider {
                 }
                 if results.is_empty() && has_exa_key() {
                     if let Ok(resp) = self
-                        .exa_discover(req, count, Some(vec![domain.clone()]))
+                        .exa_discover(req, count, Some(vec![domain.clone()]), true)
                         .await
                     {
                         results = resp.results;
@@ -312,7 +312,7 @@ impl HybridSearchProvider {
         {
             let (linkup_res, exa_res) = tokio::join!(
                 linkup_search(&req.query, count, None),
-                self.exa_discover(req, count, None)
+                self.exa_discover(req, count, None, false)
             );
             match linkup_res {
                 Ok(resp) => candidates.extend(resp.results),
@@ -347,7 +347,7 @@ impl HybridSearchProvider {
 
             // 2. Try Exa (semantic / neural discovery) if Linkup not configured or returned empty/failed
             if candidates.is_empty() && has_exa_key() {
-                match self.exa_discover(req, count, None).await {
+                match self.exa_discover(req, count, None, false).await {
                     Ok(resp) if !resp.results.is_empty() => {
                         candidates = resp.results;
                     }
@@ -417,6 +417,7 @@ impl HybridSearchProvider {
         req: &SearchRequest,
         count: usize,
         include_domains: Option<Vec<String>>,
+        enrich_immediately: bool,
     ) -> Result<WebSearchResponse, SearchError> {
         let profile = {
             let db = self.db.lock();
@@ -465,7 +466,7 @@ impl HybridSearchProvider {
 
         // Optionally enrich top N via Crawl4AI; keep Exa highlights if crawl fails.
         let crawl_n = profile.max_crawl_pages().min(results.len());
-        if crawl_n > 0 {
+        if enrich_immediately && crawl_n > 0 {
             results = enrich_with_crawl(&self.crawl, results, crawl_n).await;
         }
 
@@ -514,40 +515,83 @@ fn map_exa_results(results: &[crate::exa::ExaResult], limit: usize) -> Vec<WebSe
     out
 }
 
+async fn fetch_single_enrichment(
+    crawl: &Crawl4aiSearchProvider,
+    url: String,
+) -> Option<(Option<String>, Option<String>)> {
+    // Try Crawl4AI first (local, free, fast).
+    if let Ok(page) = crawl.fetch_page(&url).await {
+        let title = page.title.filter(|t| !t.trim().is_empty());
+        let excerpt = bound_text(&page.text, 400);
+        let snippet = if !excerpt.trim().is_empty() {
+            Some(excerpt)
+        } else {
+            None
+        };
+        return Some((title, snippet));
+    }
+    // Firecrawl fallback for difficult pages (JS-heavy, PDFs, etc.).
+    if has_firecrawl_key() {
+        if let Ok(page) = firecrawl_scrape(&url).await {
+            let title = page.title.filter(|t| !t.trim().is_empty());
+            let excerpt = bound_text(&page.text, 400);
+            let snippet = if !excerpt.trim().is_empty() {
+                Some(excerpt)
+            } else {
+                None
+            };
+            return Some((title, snippet));
+        }
+    }
+    None
+}
+
 async fn enrich_with_crawl(
     crawl: &Crawl4aiSearchProvider,
     mut results: Vec<WebSearchResult>,
     crawl_n: usize,
 ) -> Vec<WebSearchResult> {
-    for result in results.iter_mut().take(crawl_n) {
-        // Try Crawl4AI first (local, free, fast).
-        if let Ok(page) = crawl.fetch_page(&result.url).await {
-            if result.title.trim().is_empty() || result.title == result.url {
-                if let Some(t) = page.title.filter(|t| !t.trim().is_empty()) {
-                    result.title = t;
-                }
+    if results.is_empty() || crawl_n == 0 {
+        return results;
+    }
+
+    // Skip candidates that already have full content or rich snippets (>= 200 chars) with highlights
+    let candidates_to_enrich: Vec<(usize, String)> = results
+        .iter()
+        .enumerate()
+        .take(crawl_n)
+        .filter(|(_, r)| {
+            let has_rich_content = r.content.is_some()
+                || (r.snippet.as_deref().map_or(0, |s| s.len()) >= 200 && r.highlights.is_some());
+            !has_rich_content
+        })
+        .map(|(idx, r)| (idx, r.url.clone()))
+        .collect();
+
+    if candidates_to_enrich.is_empty() {
+        return results;
+    }
+
+    // Run enrichment concurrently across selected candidates (bounded to crawl_n)
+    let futures: Vec<_> = candidates_to_enrich
+        .iter()
+        .map(|(_, url)| fetch_single_enrichment(crawl, url.clone()))
+        .collect();
+
+    let enriched_data = futures_util::future::join_all(futures).await;
+
+    for ((idx, _), enrichment) in candidates_to_enrich.into_iter().zip(enriched_data) {
+        if let Some((new_title, new_snippet)) = enrichment {
+            let result = &mut results[idx];
+            if (result.title.trim().is_empty() || result.title == result.url) && new_title.is_some() {
+                result.title = new_title.unwrap();
             }
-            let excerpt = bound_text(&page.text, 400);
-            if !excerpt.trim().is_empty() {
-                result.snippet = Some(excerpt);
-            }
-            continue;
-        }
-        // Firecrawl fallback for difficult pages (JS-heavy, PDFs, etc.).
-        if has_firecrawl_key() {
-            if let Ok(page) = firecrawl_scrape(&result.url).await {
-                if result.title.trim().is_empty() || result.title == result.url {
-                    if let Some(t) = page.title.filter(|t| !t.trim().is_empty()) {
-                        result.title = t;
-                    }
-                }
-                let excerpt = bound_text(&page.text, 400);
-                if !excerpt.trim().is_empty() {
-                    result.snippet = Some(excerpt);
-                }
+            if let Some(snippet) = new_snippet {
+                result.snippet = Some(snippet);
             }
         }
     }
+
     results
 }
 
@@ -596,5 +640,23 @@ mod tests {
     #[test]
     fn saver_crawl_bound() {
         assert_eq!(SearchProfile::Saver.max_crawl_pages(), 2);
+    }
+
+    #[tokio::test]
+    async fn enrich_skips_when_rich_content_present() {
+        let supervisor = Arc::new(CrawlerSupervisor::new());
+        let crawl = Crawl4aiSearchProvider::new(supervisor);
+        let items = vec![WebSearchResult {
+            id: "1".into(),
+            title: "Already Rich".into(),
+            url: "https://example.com/page".into(),
+            content: Some("Full content already fetched".into()),
+            snippet: Some("Snippet".into()),
+            ..Default::default()
+        }];
+        let enriched = enrich_with_crawl(&crawl, items.clone(), 1).await;
+        assert_eq!(enriched.len(), 1);
+        assert_eq!(enriched[0].title, "Already Rich");
+        assert_eq!(enriched[0].content.as_deref(), Some("Full content already fetched"));
     }
 }

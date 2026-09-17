@@ -272,15 +272,13 @@ export function ToolRenderer({
 
   const setValue = useCallback(
     (key: string, value: unknown) => {
-      if (isCustomizing) return;
       onStateChange({ ...stateRef.current, [key]: value });
     },
-    [isCustomizing, onStateChange],
+    [onStateChange],
   );
 
   const setValueOptimistic = useCallback(
     (key: string, value: unknown) => {
-      if (isCustomizing) return;
       const next = { ...stateRef.current, [key]: value };
       if (onPersistState) {
         void onPersistState(next).catch(() => {
@@ -290,7 +288,7 @@ export function ToolRenderer({
         onStateChange(next);
       }
     },
-    [isCustomizing, onPersistState, onStateChange],
+    [onPersistState, onStateChange],
   );
 
   const getValue = useCallback(
@@ -335,8 +333,17 @@ export function ToolRenderer({
           };
           findInTree(tool.components ?? []);
           if (deepest) {
-            e.stopPropagation();
             onSelectComponent(deepest);
+            // Allow native form control and editable interaction (focus, typing, toggle)
+            // instead of swallowing the click event. Only stop propagation on container cards/badges.
+            const isInteractiveControl = Boolean(
+              target.closest(
+                "input, textarea, select, button, a, [contenteditable='true'], [role='button'], [role='switch'], [role='checkbox'], [role='tab']",
+              ) && !target.closest(".tr-item-badge, .tr-item-border, .tr-customize-handle"),
+            );
+            if (!isInteractiveControl) {
+              e.stopPropagation();
+            }
           }
         }
       }

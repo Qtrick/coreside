@@ -43,14 +43,14 @@ export function parseSearchBody(raw: unknown): SearchRequestBody | null {
   }
 
   let targetUrl: string | undefined = undefined;
-  if (typeof body.url === "string" && body.url.trim().length > 0 && body.url.trim().length <= 2048) {
-    try {
-      const parsed = new URL(body.url.trim());
-      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-        targetUrl = parsed.href;
+  if (typeof body.url === "string") {
+    const trimmedUrl = body.url.trim();
+    if (trimmedUrl.length > 0) {
+      const check = validatePublicWebUrl(trimmedUrl);
+      if (!check.valid || !check.url) {
+        return null;
       }
-    } catch {
-      // ignore invalid optional url
+      targetUrl = check.url.href;
     }
   }
 
@@ -146,33 +146,150 @@ export function boundSearchResults(
   });
 }
 
-function isPrivateOrLocalHost(host: string): boolean {
+function parseIpv4Octets(str: string): number[] | null {
+  const parts = str.split(".");
+  if (parts.length !== 4) return null;
+  const octets: number[] = [];
+  for (const p of parts) {
+    let num: number;
+    if (/^0x[0-9a-f]+$/i.test(p)) {
+      num = parseInt(p, 16);
+    } else if (/^0[0-7]+$/.test(p)) {
+      num = parseInt(p, 8);
+    } else if (/^\d+$/.test(p)) {
+      num = parseInt(p, 10);
+    } else {
+      return null;
+    }
+    if (Number.isNaN(num) || num < 0 || num > 255) return null;
+    octets.push(num);
+  }
+  return octets;
+}
+
+function isPrivateIpv4Octets(octets: number[]): boolean {
+  const [a, b, c] = octets;
+  if (a === 0) return true; // 0.0.0.0/8 Current network
+  if (a === 10) return true; // 10.0.0.0/8 Private RFC 1918
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 Carrier-grade NAT
+  if (a === 127) return true; // 127.0.0.0/8 Loopback
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16 Link-local / Cloud metadata (AWS/GCP/Azure)
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12 Private RFC 1918
+  if (a === 192 && b === 0 && (c === 0 || c === 2)) return true; // 192.0.0.0/24, 192.0.2.0/24 (TEST-NET-1)
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16 Private RFC 1918
+  if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 Benchmarking
+  if (a === 198 && b === 51 && c === 100) return true; // 198.51.100.0/24 (TEST-NET-2)
+  if (a === 203 && b === 0 && c === 113) return true; // 203.0.113.0/24 (TEST-NET-3)
+  if (a >= 224 && a <= 239) return true; // 224.0.0.0/4 Multicast
+  if (a >= 240) return true; // 240.0.0.0/4 Reserved & 255.255.255.255 Broadcast
+  return false;
+}
+
+export function isPrivateOrLocalHost(host: string): boolean {
   const normalized = host.toLowerCase().replace(/^\[|\]$/g, "");
+  if (!normalized) return true;
+
+  // Named localhost and internal cloud metadata
   if (
     normalized === "localhost" ||
-    normalized === "::1" ||
-    normalized === "0.0.0.0" ||
+    normalized === "metadata.google.internal" ||
+    normalized === "instance-data" ||
+    normalized === "ip6-localhost" ||
+    normalized === "ip6-loopback" ||
     normalized.endsWith(".localhost") ||
     normalized.endsWith(".local") ||
     normalized.endsWith(".internal") ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    normalized.startsWith("fe80:") ||
-    normalized.startsWith("::ffff:") ||
-    /^\d+$/.test(normalized) ||
-    /^0x[0-9a-f]+$/i.test(normalized)
-  ) return true;
-  const ipv4 = normalized.split(".").map(Number);
-  if (ipv4.length !== 4 || ipv4.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    normalized.endsWith(".arpa")
+  ) {
+    return true;
+  }
+
+  // Pure integer / decimal representation (e.g. 2130706433 -> 127.0.0.1)
+  if (/^\d+$/.test(normalized)) {
+    const intVal = Number(normalized);
+    if (!Number.isSafeInteger(intVal) || intVal < 0 || intVal > 0xffffffff) return true;
+    const octets = [
+      (intVal >>> 24) & 255,
+      (intVal >>> 16) & 255,
+      (intVal >>> 8) & 255,
+      intVal & 255,
+    ];
+    return isPrivateIpv4Octets(octets);
+  }
+
+  // Hexadecimal representation (e.g. 0x7f000001 -> 127.0.0.1)
+  if (/^0x[0-9a-f]+$/i.test(normalized)) {
+    const intVal = parseInt(normalized, 16);
+    if (Number.isNaN(intVal) || intVal < 0 || intVal > 0xffffffff) return true;
+    const octets = [
+      (intVal >>> 24) & 255,
+      (intVal >>> 16) & 255,
+      (intVal >>> 8) & 255,
+      intVal & 255,
+    ];
+    return isPrivateIpv4Octets(octets);
+  }
+
+  // Dotted IPv4 (standard decimal, octal, or hex parts)
+  const octets = parseIpv4Octets(normalized);
+  if (octets) {
+    return isPrivateIpv4Octets(octets);
+  }
+
+  // IPv6 address checks
+  if (normalized.includes(":")) {
+    if (
+      normalized === "::1" ||
+      normalized === "::" ||
+      normalized === "0:0:0:0:0:0:0:1" ||
+      normalized === "0:0:0:0:0:0:0:0"
+    ) {
+      return true;
+    }
+    // Unique local addresses fc00::/7 (starts with fc or fd)
+    if (normalized.startsWith("fc") || normalized.startsWith("fd")) {
+      return true;
+    }
+    // Link-local fe80::/10 (starts with fe8, fe9, fea, feb)
+    if (/^fe[89ab]/i.test(normalized)) {
+      return true;
+    }
+    // Multicast ff00::/8
+    if (normalized.startsWith("ff")) {
+      return true;
+    }
+    // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1 or normalized ::ffff:7f00:1 or 0:0:0:0:0:ffff:...)
+    if (normalized.includes("ffff:")) {
+      const idx = normalized.indexOf("ffff:");
+      const rest = normalized.slice(idx + 5);
+      if (rest.includes(".")) {
+        const oct = parseIpv4Octets(rest);
+        if (oct) return isPrivateIpv4Octets(oct);
+      }
+      const hexes = rest.split(":");
+      if (hexes.length === 2) {
+        const n1 = parseInt(hexes[0], 16);
+        const n2 = parseInt(hexes[1], 16);
+        if (!Number.isNaN(n1) && !Number.isNaN(n2)) {
+          return isPrivateIpv4Octets([
+            (n1 >>> 8) & 255,
+            n1 & 255,
+            (n2 >>> 8) & 255,
+            n2 & 255,
+          ]);
+        }
+      } else if (hexes.length === 1) {
+        const n = parseInt(hexes[0], 16);
+        if (!Number.isNaN(n)) {
+          return isPrivateIpv4Octets([0, 0, (n >>> 8) & 255, n & 255]);
+        }
+      }
+      return true;
+    }
     return false;
   }
-  return (
-    ipv4[0] === 0 || ipv4[0] === 10 || ipv4[0] === 127 ||
-    (ipv4[0] === 100 && ipv4[1] >= 64 && ipv4[1] <= 127) ||
-    (ipv4[0] === 169 && ipv4[1] === 254) ||
-    (ipv4[0] === 172 && ipv4[1] >= 16 && ipv4[1] <= 31) ||
-    (ipv4[0] === 192 && ipv4[1] === 168)
-  );
+
+  return false;
 }
 
 export function sanitizePromptInjection(text: string): string {
@@ -195,12 +312,41 @@ export function sanitizePromptInjection(text: string): string {
   return clean;
 }
 
-function isValidPublicUrl(url: URL): boolean {
-  if (url.protocol !== "https:" && url.protocol !== "http:") return false;
-  if (url.username || url.password) return false;
-  if (url.port && url.port !== "80" && url.port !== "443") return false;
-  if (isPrivateOrLocalHost(url.hostname)) return false;
-  return true;
+export function validatePublicWebUrl(raw: string): { valid: boolean; url?: URL; reason?: string } {
+  if (typeof raw !== "string") return { valid: false, reason: "url_not_string" };
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 2048) {
+    return { valid: false, reason: "url_invalid_length" };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return { valid: false, reason: "url_parse_failed" };
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { valid: false, reason: "unsupported_protocol" };
+  }
+
+  if (parsed.username || parsed.password) {
+    return { valid: false, reason: "credentials_not_allowed" };
+  }
+
+  if (parsed.port && parsed.port !== "80" && parsed.port !== "443") {
+    return { valid: false, reason: "non_standard_port" };
+  }
+
+  if (isPrivateOrLocalHost(parsed.hostname)) {
+    return { valid: false, reason: "private_or_reserved_host" };
+  }
+
+  return { valid: true, url: parsed };
+}
+
+export function isValidPublicUrl(url: URL): boolean {
+  return validatePublicWebUrl(url.href).valid;
 }
 
 /** Convert an upstream Linkup result into Coreside's stable source shape. Provider

@@ -256,6 +256,10 @@ pub fn sanitize_prompt_injection(raw_text: &str) -> String {
         ("assistant:", "[neutralized_role]:"),
         ("reveal your api key", "[neutralized_secret_request]"),
         ("print your instructions", "[neutralized_instruction_leak]"),
+        ("system override", "[neutralized_override]"),
+        ("override instructions", "[neutralized_override]"),
+        ("developer mode", "[neutralized_override]"),
+        ("jailbreak", "[neutralized_override]"),
     ];
 
     for (target, replacement) in dangerous_phrases {

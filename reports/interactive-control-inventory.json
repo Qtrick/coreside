@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-16T19:34:54.487Z",
-  "commit": "1839c1bd1f8baad098dc3fb2b60de7e52c09a863",
+  "generatedAt": "2026-09-17T01:25:11.906Z",
+  "commit": "70c027c58dd6845b6d92a7027aecea5432c6d0de",
   "dirty": true,
   "command": "audit:interactive-controls",
   "evidenceLevel": "Scaffolded",
   "note": "Static regex inventory only — not runtime interactivity proof.",
   "filesScanned": 87,
   "filesWithControls": 65,
-  "approximateTotalControls": 718,
+  "approximateTotalControls": 719,
   "files": [
     {
       "file": "src/components/action-log/ActionLog.tsx",
@@ -634,9 +634,10 @@
     },
     {
       "file": "src/components/tool-renderer/ToolRenderer.tsx",
-      "approximateControlCount": 3,
+      "approximateControlCount": 4,
       "counts": {
         "button": 1,
+        "role_button": 1,
         "onClick": 2
       },
       "flags": {}

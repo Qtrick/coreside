@@ -71,9 +71,38 @@ Declare `actions` on interactive components (`button`, etc.) to mutate tool stat
 4. **Data Tables**: `dataTable` binds via `rowsKey` or `dataKey` (e.g. `rowsKey: "tasksResult"`). It automatically unwraps `{ records, count }` returned by `local_data.query`. It supports row selection via `props.selectionKey: "selectedTaskId"`.
 5. **Real Charts**: `chartLine`, `chartArea`, `chartBar`, `chartPie`, `chartDonut`, and `chartScatter` render distinct SVG visualizations bound to `dataKey` or `valueKey`.
 
+## State-First Architecture Thinking
+Before generating components, determine the state and action contract:
+1. **What data exists?** (e.g. `items` array, `filter` string, `selectedId`, `stats`)
+2. **What state is transient vs persistent?** (e.g. draft inputs vs saved records)
+3. **What can the user change?** Connect every interactive input to a `valueKey` and every action button to declarative mutations or registered actions.
+4. **No Dead Controls**: Every button must have an explicit `actions` array (`setValue`, `appendItem`, `updateItem`, `removeItem`, `toggle`, `invokeRegisteredAction`, or `submitToAgent`). Never generate buttons that do nothing when clicked.
+5. **No Generic Placeholders**: Never use placeholder text like `"Button"`, `"Input"`, `"Field"`, `"Lorem Ipsum"`, `"Coming Soon"`, `"TODO"`, or `"Click here"`. Every component label, placeholder, and heading must directly reflect the user's specific domain and workflow.
+
+## Canonical Application Patterns
+
+### Pattern 1: Study / Task Planner (Dashboard Archetype)
+- `layout`: `{ "type": "dashboard", "columns": 2, "density": "compact" }`
+- `header`: Title heading + filter segmented buttons (`setValue: filter = "all" | "active" | "done"`).
+- `stats`: 3 compact stat cards (`Total Tasks`, `Completed`, `Streak/Score`) bound to state or props.
+- `main`: `checklist` or `dataTable` bound to `itemsKey: "tasks"` with status toggle actions.
+- `sidebar`: Quick-add container with `textInput` (`valueKey: "newTaskTitle"`), `select` (`valueKey: "priority"`), and `button` (`actions: [appendItem, setValue reset]`).
+
+### Pattern 2: CRUD Expense / Inventory Tracker (Split/Dashboard Archetype)
+- `layout`: `{ "type": "split", "splitRatio": "1:2" }`
+- `sidebar`: Form container with `numberInput` (`valueKey: "amount"`), `select` (`valueKey: "category"`), `textInput` (`valueKey: "note"`), and submit button executing `local_data.write`.
+- `main`: `dataTable` with `rowsKey: "records"`, columns for date, category, amount, actions (delete button executing `local_data.delete`). Header shows total expense summary `stat`.
+
+### Pattern 3: Research & Evidence Organizer (Content/Dashboard Archetype)
+- `layout`: `{ "type": "dashboard", "columns": 2 }`
+- `stats`: Source count, verified citations count, research status badge.
+- `main`: List of verified sources with key takeaways, publication dates, and link buttons executing `external_link.open`.
+- `sidebar` or `detail`: `textArea` bound to `valueKey: "researchNotes"` for user synthesis and persistent takeaways.
+
 ## Design & Engineering Rules
 1. **Never build generic single-column widget piles.** Use cards, grids, and stats rows with intentional hierarchy.
-2. **Component IDs must be unique, stable, and semantic** (e.g. `fn-monthly-chart`, `hb-streak-stat`). Never use random hashes that break state persistence across edits.
+2. **Component IDs must be unique, stable, and semantic** (e.g. `sp-summary-stats`, `sp-task-table`). Never use random hashes that break state persistence across edits.
 3. **No Empty Stubs**: Every input must have a descriptive `props.label` (never `"Input"` or `"Field"`). Headings must have non-empty `props.text`.
 4. **Zero Raw Code**: No arbitrary JS, script tags, external CDNs, or raw HTML strings. All logic is expressed through declarative props and registered actions.
 5. **Responsive by Default**: Layouts must look polished both in narrow chat side-panels (~400px) and wide tool windows (~1000px). Use `collapseAt` (`"mobile"` | `"tablet"`) appropriately.
+6. **Graceful Empty States**: Include `emptyState` components with helpful messages and actionable buttons when collections or queries have zero items.

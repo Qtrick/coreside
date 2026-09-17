@@ -12,6 +12,7 @@ import {
   normalizeExaResults,
   normalizeFirecrawlResults,
   normalizeFirecrawlScrapeResult,
+  validatePublicWebUrl,
   type SearchRequestBody,
 } from "./search-lib.ts";
 
@@ -335,7 +336,18 @@ Deno.serve(async (req) => {
 
     // 1. Direct URL: Firecrawl v2 scrape takes top priority
     if (isDirectUrl && firecrawlKey) {
-      const targetUrl = body.url || body.query;
+      const candidateUrl = body.url || body.query;
+      const urlCheck = validatePublicWebUrl(candidateUrl);
+      if (!urlCheck.valid || !urlCheck.url) {
+        await adminClient.rpc("fail_hosted_search_request", {
+          p_user_id: user.id,
+          p_request_id: requestId,
+          p_idempotency_key: body.idempotencyKey,
+          p_failure_reason: "invalid_public_url",
+        });
+        return consumerError("Invalid or private URL destination", 400, origin);
+      }
+      const targetUrl = urlCheck.url.href;
       try {
         const scrapeResp = await fetch("https://api.firecrawl.dev/v2/scrape", {
           method: "POST",

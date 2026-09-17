@@ -10,6 +10,7 @@ import {
   parseSearchReserveRpcResult,
   parseSearchSettleRpcResult,
   sanitizePromptInjection,
+  validatePublicWebUrl,
 } from "./search-lib.ts";
 
 describe("search-gateway parseSearchBody", () => {
@@ -26,6 +27,104 @@ describe("search-gateway parseSearchBody", () => {
     expect(
       parseSearchBody({ query: "x".repeat(600), idempotencyKey: "k" }),
     ).toBeNull();
+  });
+
+  it("accepts valid public target URL in body", () => {
+    expect(
+      parseSearchBody({
+        query: "cats",
+        idempotencyKey: "k1",
+        url: "https://example.com/article",
+      }),
+    ).toEqual({
+      query: "cats",
+      idempotencyKey: "k1",
+      numResults: 5,
+      url: "https://example.com/article",
+    });
+  });
+
+  it("rejects private or malicious target URLs in body", () => {
+    expect(
+      parseSearchBody({
+        query: "cats",
+        idempotencyKey: "k1",
+        url: "http://127.0.0.1/admin",
+      }),
+    ).toBeNull();
+
+    expect(
+      parseSearchBody({
+        query: "cats",
+        idempotencyKey: "k1",
+        url: "http://169.254.169.254/latest/meta-data",
+      }),
+    ).toBeNull();
+
+    expect(
+      parseSearchBody({
+        query: "cats",
+        idempotencyKey: "k1",
+        url: "http://[::1]:80/",
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("search-gateway validatePublicWebUrl (SSRF defense)", () => {
+  it("blocks private IPv4 addresses and aliases", () => {
+    expect(validatePublicWebUrl("http://localhost/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://127.0.0.1/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://0.0.0.0/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://10.0.0.1/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://172.16.0.1/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://192.168.1.1/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://100.64.0.1/").valid).toBe(false);
+  });
+
+  it("blocks cloud metadata endpoints", () => {
+    expect(validatePublicWebUrl("http://169.254.169.254/latest/meta-data").valid).toBe(false);
+    expect(validatePublicWebUrl("http://metadata.google.internal/computeMetadata/v1/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://instance-data/").valid).toBe(false);
+  });
+
+  it("blocks IPv4 representation tricks (decimal, hex, octal)", () => {
+    // 2130706433 is 127.0.0.1
+    expect(validatePublicWebUrl("http://2130706433/").valid).toBe(false);
+    // 0x7f000001 is 127.0.0.1
+    expect(validatePublicWebUrl("http://0x7f000001/").valid).toBe(false);
+    // 0177.0.0.1 is octal 127.0.0.1
+    expect(validatePublicWebUrl("http://0177.0.0.1/").valid).toBe(false);
+  });
+
+  it("blocks IPv6 loopback, link-local, ULA, and IPv4-mapped addresses", () => {
+    expect(validatePublicWebUrl("http://[::1]/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://[::]/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://[fe80::1]/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://[fc00::1]/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://[fd12::1]/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://[ff02::1]/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://[::ffff:127.0.0.1]/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://[::ffff:169.254.169.254]/").valid).toBe(false);
+  });
+
+  it("blocks non-standard ports and embedded credentials", () => {
+    expect(validatePublicWebUrl("http://user:pass@example.com/").valid).toBe(false);
+    expect(validatePublicWebUrl("https://example.com:8443/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://example.com:22/").valid).toBe(false);
+    expect(validatePublicWebUrl("http://example.com:8080/").valid).toBe(false);
+  });
+
+  it("blocks non-http schemes", () => {
+    expect(validatePublicWebUrl("file:///etc/passwd").valid).toBe(false);
+    expect(validatePublicWebUrl("ftp://example.com/").valid).toBe(false);
+    expect(validatePublicWebUrl("javascript:alert(1)").valid).toBe(false);
+  });
+
+  it("allows legitimate public web URLs on standard ports", () => {
+    expect(validatePublicWebUrl("https://example.com/article").valid).toBe(true);
+    expect(validatePublicWebUrl("http://example.org:80/path").valid).toBe(true);
+    expect(validatePublicWebUrl("https://sub.domain.co.uk:443/search?q=test").valid).toBe(true);
   });
 });
 
