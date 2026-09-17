@@ -8,7 +8,7 @@ import {
 } from "@/lib/route-navigation";
 import type { ActionOutcome, ApplicationManifest } from "@/types/application-kernel";
 import type { RouteState } from "@/types/runtime-v2";
-import type { ToolDefinition, ToolState } from "@/types/tool";
+import type { ToolComponent, ToolDefinition, ToolState } from "@/types/tool";
 import { ToolRenderer } from "./ToolRenderer";
 
 type AppRouteShellProps = {
@@ -21,6 +21,9 @@ type AppRouteShellProps = {
   surfaceId?: string | null;
   conversationId?: string | null;
   projectId?: string | null;
+  isCustomizing?: boolean;
+  selectedComponentId?: string | null;
+  onSelectComponent?: (component: ToolComponent) => void;
   onSubmitToAgent?: (payload: {
     toolId: string;
     eventName: string;
@@ -40,6 +43,9 @@ export function AppRouteShell({
   surfaceId,
   conversationId,
   projectId,
+  isCustomizing,
+  selectedComponentId,
+  onSelectComponent,
   onSubmitToAgent,
   onPendingApproval,
 }: AppRouteShellProps) {
@@ -200,6 +206,9 @@ export function AppRouteShell({
           surfaceId={surfaceId ?? activeTool.id}
           conversationId={conversationId}
           projectId={projectId}
+          isCustomizing={isCustomizing}
+          selectedComponentId={selectedComponentId}
+          onSelectComponent={onSelectComponent}
           onPendingApproval={onPendingApproval}
         />
       ) : (

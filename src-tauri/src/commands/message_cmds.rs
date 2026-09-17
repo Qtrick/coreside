@@ -1800,31 +1800,52 @@ async fn send_message_inner(
     let mut live_text_accum = String::new();
     let mut last_preview = String::new();
     let mut text_seq: u64 = 0;
-    let turn_idem_key = format!("turn-idem-{}", Uuid::new_v4());
-    let turn_record = {
+    let turn_idem_key = format!("turn-{}", user_message.id);
+    let (turn_id, attempt_id, has_turn_record) = {
         let db = state.db.lock();
-        crate::runtime_v2::create_turn(
+        if let Ok(existing) =
+            crate::runtime_v2::get_turn_by_idempotency(&db, &conversation_id, &turn_idem_key)
+        {
+            if matches!(
+                existing.state,
+                crate::runtime_v2::TurnState::Failed
+                    | crate::runtime_v2::TurnState::InterruptedRecoverable
+            ) {
+                if let Ok(retried) =
+                    crate::runtime_v2::begin_retry_attempt(&db, &existing.id, &existing.attempt_id)
+                {
+                    (retried.id, retried.attempt_id, true)
+                } else {
+                    (existing.id, existing.attempt_id, true)
+                }
+            } else {
+                (existing.id, existing.attempt_id, true)
+            }
+        } else if let Ok(rec) = crate::runtime_v2::create_turn(
             &db,
             &conversation_id,
             project_id.as_deref(),
             &turn_idem_key,
             Some("interactive"),
-        )
-        .ok()
+        ) {
+            let _ = crate::runtime_v2::transition_turn(
+                &db,
+                &rec.id,
+                &rec.attempt_id,
+                crate::runtime_v2::TurnState::Claimed,
+                Default::default(),
+            );
+            (rec.id, rec.attempt_id, true)
+        } else {
+            (
+                Uuid::new_v4().to_string(),
+                Uuid::new_v4().to_string(),
+                false,
+            )
+        }
     };
-    let (turn_id, attempt_id) = match &turn_record {
-        Some(rec) => (rec.id.clone(), rec.attempt_id.clone()),
-        None => (Uuid::new_v4().to_string(), Uuid::new_v4().to_string()),
-    };
-    if turn_record.is_some() {
+    if has_turn_record {
         let db = state.db.lock();
-        let _ = crate::runtime_v2::transition_turn(
-            &db,
-            &turn_id,
-            &attempt_id,
-            crate::runtime_v2::TurnState::Claimed,
-            Default::default(),
-        );
         let _ = crate::runtime_v2::transition_turn(
             &db,
             &turn_id,
@@ -1929,7 +1950,7 @@ async fn send_message_inner(
     let mut resolved = match resolved {
         Ok(r) => r,
         Err(e) => {
-            if turn_record.is_some() {
+            if has_turn_record {
                 let db = state.db.lock();
                 let (cat, msg) = if matches!(e, crate::ai::AiError::Cancelled) {
                     ("cancelled", "User cancelled request")
@@ -2230,7 +2251,7 @@ async fn send_message_inner(
         resolved = match follow_up {
             Ok(r) => r,
             Err(e) => {
-                if turn_record.is_some() {
+                if has_turn_record {
                     let db = state.db.lock();
                     let (cat, msg) = if matches!(e, crate::ai::AiError::Cancelled) {
                         ("cancelled", "User cancelled request")
@@ -2298,7 +2319,7 @@ async fn send_message_inner(
         parsed.payload.normalize_for_frontend();
     }
 
-    if turn_record.is_some() {
+    if has_turn_record {
         let db = state.db.lock();
         let _ = crate::runtime_v2::transition_turn(
             &db,
@@ -2874,7 +2895,7 @@ async fn send_message_inner(
         }
     };
 
-    if turn_record.is_some() {
+    if has_turn_record {
         let db = state.db.lock();
         let _ = crate::runtime_v2::transition_turn(
             &db,
@@ -3114,4 +3135,20 @@ pub fn discard_tool_change(
     db::update_message_metadata(&mut db, &message_id, &meta)?;
     msg.metadata = Some(meta);
     Ok(msg)
+}
+
+#[tauri::command]
+pub fn list_interrupted_turns(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    limit: Option<usize>,
+) -> Result<Vec<crate::runtime_v2::TurnJournalRecord>, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    crate::runtime_v2::list_conversation_recoverable_turns(
+        &db,
+        &conversation_id,
+        limit.unwrap_or(20),
+    )
+    .map_err(|e| CommandError::new("db_error", e.to_string()))
 }

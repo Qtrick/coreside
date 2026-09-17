@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-interrupted-turns"
+description = "Enables the list_interrupted_turns command without any pre-configured scope."
+commands.allow = ["list_interrupted_turns"]
+
+[[permission]]
+identifier = "deny-list-interrupted-turns"
+description = "Denies the list_interrupted_turns command without any pre-configured scope."
+commands.deny = ["list_interrupted_turns"]

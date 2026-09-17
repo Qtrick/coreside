@@ -633,6 +633,12 @@
           "markdownDescription": "Enables the delete_snapshot_cmd command without any pre-configured scope."
         },
         {
+          "description": "Enables the diff_branch_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-diff-branch-cmd",
+          "markdownDescription": "Enables the diff_branch_cmd command without any pre-configured scope."
+        },
+        {
           "description": "Enables the discard_kernel_proposal command without any pre-configured scope.",
           "type": "string",
           "const": "allow-discard-kernel-proposal",
@@ -1255,6 +1261,12 @@
           "type": "string",
           "const": "allow-list-export-formats",
           "markdownDescription": "Enables the list_export_formats command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_interrupted_turns command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-interrupted-turns",
+          "markdownDescription": "Enables the list_interrupted_turns command without any pre-configured scope."
         },
         {
           "description": "Enables the list_managed_backups command without any pre-configured scope.",
@@ -1971,6 +1983,12 @@
           "markdownDescription": "Denies the delete_snapshot_cmd command without any pre-configured scope."
         },
         {
+          "description": "Denies the diff_branch_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-diff-branch-cmd",
+          "markdownDescription": "Denies the diff_branch_cmd command without any pre-configured scope."
+        },
+        {
           "description": "Denies the discard_kernel_proposal command without any pre-configured scope.",
           "type": "string",
           "const": "deny-discard-kernel-proposal",
@@ -2593,6 +2611,12 @@
           "type": "string",
           "const": "deny-list-export-formats",
           "markdownDescription": "Denies the list_export_formats command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_interrupted_turns command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-interrupted-turns",
+          "markdownDescription": "Denies the list_interrupted_turns command without any pre-configured scope."
         },
         {
           "description": "Denies the list_managed_backups command without any pre-configured scope.",

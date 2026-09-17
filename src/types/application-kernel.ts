@@ -39,11 +39,12 @@ export interface ActionDescriptor {
   risk: ActionRisk;
   critical: boolean;
   permissionCategory: string;
+  stateBindable?: boolean;
   descriptorHash?: string;
 }
 
 export type ActionOutcome =
-  | { status: "ok"; data: unknown }
+  | { status: "ok"; data: unknown; stateBindable?: boolean }
   | { status: "error"; code: string; message: string }
   | {
       status: "pendingApproval";

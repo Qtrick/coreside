@@ -166,7 +166,11 @@ function add(gate) {
 }
 
 // Always-run light gates
-add(runGate("doctor", "npm", ["run", "doctor"]));
+add(
+  runGate("doctor", "npm", ["run", "doctor"], {
+    env: { RUNNING_RELEASE_EVIDENCE: "1" },
+  }),
+);
 add(
   runGate("package-json-parse", "node", [
     "--input-type=module",

@@ -24,6 +24,7 @@ use crate::application_kernel::permissions::has_permission;
 pub enum ActionOutcome {
     Ok {
         data: Value,
+        state_bindable: bool,
     },
     Error {
         code: String,
@@ -321,7 +322,10 @@ fn run(
             if let Some(grant) = used_grant.as_ref() {
                 let _ = grants::consume_once_grant(db, grant);
             }
-            ActionOutcome::Ok { data }
+            ActionOutcome::Ok {
+                data,
+                state_bindable: descriptor.state_bindable,
+            }
         }
         Err(failure) => failure,
     }
@@ -922,7 +926,7 @@ mod tests {
             &json!({ "modelId": "note" }),
             None,
         );
-        assert!(matches!(outcome, ActionOutcome::Ok { ref data }
+        assert!(matches!(outcome, ActionOutcome::Ok { ref data, .. }
             if data.get("count").and_then(|v| v.as_u64()) == Some(0)));
     }
 

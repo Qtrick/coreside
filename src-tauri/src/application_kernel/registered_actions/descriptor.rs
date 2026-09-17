@@ -51,15 +51,21 @@ pub struct ActionDescriptor {
     pub risk: ActionRisk,
     pub critical: bool,
     pub permission_category: String,
+    #[serde(default = "default_state_bindable")]
+    pub state_bindable: bool,
+}
+
+fn default_state_bindable() -> bool {
+    true
 }
 
 impl ActionDescriptor {
     /// Stable identity of an action's *authority surface*.
     ///
-    /// The hash covers name, input schema, risk, critical flag, and permission
-    /// category. `title` and `description` are intentionally excluded so that
-    /// improving user-facing wording does not silently invalidate every stored
-    /// grant; anything that changes what the action can do does invalidate them.
+    /// The hash covers name, input schema, risk, critical flag, permission
+    /// category, and state bindability. `title` and `description` are intentionally
+    /// excluded so that improving user-facing wording does not silently invalidate
+    /// every stored grant; anything that changes what the action can do does invalidate them.
     pub fn descriptor_hash(&self) -> String {
         sha256_hex(&canonical_json(&json!({
             "name": self.name,
@@ -67,6 +73,7 @@ impl ActionDescriptor {
             "risk": self.risk.as_str(),
             "critical": self.critical,
             "permissionCategory": self.permission_category,
+            "stateBindable": self.state_bindable,
         })))
     }
 
@@ -79,6 +86,7 @@ impl ActionDescriptor {
             "risk": self.risk.as_str(),
             "critical": self.critical,
             "permissionCategory": self.permission_category,
+            "stateBindable": self.state_bindable,
             "descriptorHash": self.descriptor_hash(),
         })
     }
@@ -139,6 +147,7 @@ fn descriptor(
     risk: ActionRisk,
     critical: bool,
     permission_category: &str,
+    state_bindable: bool,
 ) -> ActionDescriptor {
     ActionDescriptor {
         name: name.into(),
@@ -148,6 +157,7 @@ fn descriptor(
         risk,
         critical,
         permission_category: permission_category.into(),
+        state_bindable,
     }
 }
 
@@ -169,6 +179,7 @@ pub static BUNDLED_ACTIONS: Lazy<Vec<ActionDescriptor>> = Lazy::new(|| {
             ActionRisk::Read,
             false,
             "local_data.read",
+            true,
         ),
         descriptor(
             "local_data.write",
@@ -187,6 +198,7 @@ pub static BUNDLED_ACTIONS: Lazy<Vec<ActionDescriptor>> = Lazy::new(|| {
             ActionRisk::Write,
             false,
             "local_data.write",
+            true,
         ),
         descriptor(
             "local_data.delete",
@@ -200,6 +212,7 @@ pub static BUNDLED_ACTIONS: Lazy<Vec<ActionDescriptor>> = Lazy::new(|| {
             ActionRisk::Destructive,
             false,
             "local_data.write",
+            true,
         ),
         descriptor(
             "tool_state.set",
@@ -216,6 +229,7 @@ pub static BUNDLED_ACTIONS: Lazy<Vec<ActionDescriptor>> = Lazy::new(|| {
             ActionRisk::Write,
             false,
             "local_data.write",
+            true,
         ),
         descriptor(
             "web_search.request",
@@ -233,6 +247,7 @@ pub static BUNDLED_ACTIONS: Lazy<Vec<ActionDescriptor>> = Lazy::new(|| {
             ActionRisk::Write,
             false,
             "web_search.request",
+            false,
         ),
         descriptor(
             "media.read",
@@ -248,6 +263,7 @@ pub static BUNDLED_ACTIONS: Lazy<Vec<ActionDescriptor>> = Lazy::new(|| {
             ActionRisk::Read,
             false,
             "media.read",
+            true,
         ),
         descriptor(
             "external_link.open",
@@ -261,6 +277,7 @@ pub static BUNDLED_ACTIONS: Lazy<Vec<ActionDescriptor>> = Lazy::new(|| {
             ActionRisk::Write,
             false,
             "external_link.open",
+            false,
         ),
         descriptor(
             "export.prepare",
@@ -276,6 +293,7 @@ pub static BUNDLED_ACTIONS: Lazy<Vec<ActionDescriptor>> = Lazy::new(|| {
             ActionRisk::Write,
             true,
             "export.prepare",
+            false,
         ),
         descriptor(
             "automation.propose",
@@ -294,6 +312,7 @@ pub static BUNDLED_ACTIONS: Lazy<Vec<ActionDescriptor>> = Lazy::new(|| {
             ActionRisk::Write,
             false,
             "automation.propose",
+            false,
         ),
         descriptor(
             "agent.submit_event",
@@ -311,6 +330,7 @@ pub static BUNDLED_ACTIONS: Lazy<Vec<ActionDescriptor>> = Lazy::new(|| {
             ActionRisk::Write,
             false,
             "project_context.read",
+            false,
         ),
     ]
 });
@@ -348,6 +368,10 @@ pub fn registered_actions_catalog_markdown() -> String {
             action.permission_category
         ));
         out.push_str(&format!("- **Risk Level**: `{}`\n", action.risk.as_str()));
+        out.push_str(&format!(
+            "- **State Bindable**: `{}`\n",
+            action.state_bindable
+        ));
         let schema_str = serde_json::to_string(&action.input_schema).unwrap_or_default();
         out.push_str(&format!("- **Input Schema**: `{schema_str}`\n\n"));
     }
@@ -397,6 +421,10 @@ mod tests {
         let mut reshaped = base.clone();
         reshaped.input_schema = json!({ "type": "object", "properties": {} });
         assert_ne!(base.descriptor_hash(), reshaped.descriptor_hash());
+
+        let mut reclassified = base.clone();
+        reclassified.state_bindable = false;
+        assert_ne!(base.descriptor_hash(), reclassified.descriptor_hash());
     }
 
     #[test]
@@ -422,5 +450,20 @@ mod tests {
         assert!(BUNDLED_ACTIONS
             .iter()
             .any(|d| d.risk == ActionRisk::Destructive));
+    }
+
+    #[test]
+    fn state_bindable_classification_is_principled() {
+        assert!(find_action("local_data.query").unwrap().state_bindable);
+        assert!(find_action("local_data.write").unwrap().state_bindable);
+        assert!(find_action("local_data.delete").unwrap().state_bindable);
+        assert!(find_action("tool_state.set").unwrap().state_bindable);
+        assert!(find_action("media.read").unwrap().state_bindable);
+
+        assert!(!find_action("web_search.request").unwrap().state_bindable);
+        assert!(!find_action("external_link.open").unwrap().state_bindable);
+        assert!(!find_action("export.prepare").unwrap().state_bindable);
+        assert!(!find_action("automation.propose").unwrap().state_bindable);
+        assert!(!find_action("agent.submit_event").unwrap().state_bindable);
     }
 }

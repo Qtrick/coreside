@@ -332,52 +332,9 @@ pub async fn fetch_web_page_cmd(
 ) -> Result<crate::search::FetchedWebPage, CommandError> {
     state.require_profile()?;
 
-    // Structured retrieval policy for known URLs:
-    // 1. Try Firecrawl first if configured (clean Markdown extraction, JS rendering)
-    if crate::firecrawl::has_key() {
-        match crate::firecrawl::scrape(&input.url).await {
-            Ok(page) => return Ok(page),
-            Err(e) => {
-                tracing::warn!(error = ?e, "firecrawl scrape failed, falling back to next retriever")
-            }
-        }
-    }
-
-    // 2. Try Crawl4AI if local supervisor is ready (local-first, free)
-    let report = detect_installation();
-    if report.state == InstallationState::Ready {
-        let _ = super::crawler_cmds::sync_resource_profile(&state).await;
-        let provider = Crawl4aiSearchProvider::new(state.crawler.clone());
-        match provider.fetch_page(&input.url).await {
-            Ok(page) => return Ok(page),
-            Err(e) => {
-                tracing::warn!(error = ?e, "crawl4ai fetch failed, falling back to next retriever")
-            }
-        }
-    }
-
-    // 3. Try Linkup reader endpoint if configured
-    if has_linkup_key() {
-        match crate::linkup::fetch_page(&input.url).await {
-            Ok(page) => return Ok(page),
-            Err(e) => tracing::warn!(error = ?e, "linkup fetch failed"),
-        }
-    }
-
-    if !crate::firecrawl::has_key() && !has_linkup_key() && report.state != InstallationState::Ready
-    {
-        return Err(CommandError::new(
-            "needs_setup",
-            report.reason.unwrap_or_else(|| {
-                "Configure Firecrawl, Linkup, or install Crawl4AI to fetch web pages".into()
-            }),
-        ));
-    }
-
-    Err(CommandError::new(
-        "fetch_failed",
-        format!("Unable to fetch web page from URL: {}", input.url),
-    ))
+    crate::research::fetch_web_page_orchestrated(&input.url, Some(&state.crawler))
+        .await
+        .map_err(|e| CommandError::new("fetch_failed", e.to_string()))
 }
 
 #[cfg(test)]

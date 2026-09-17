@@ -104,6 +104,72 @@ describe("safeDuplicateComponent", () => {
     // Read-only data collection rowsKey is preserved so data still displays
     expect(duplicate.children![1].props?.rowsKey).toBe("sharedTasks");
   });
+
+  it("remaps action targets, componentId, inputFromState, and includeFields to match duplicated inputs", async () => {
+    const { safeDuplicateComponent } = await import("./surface-ops");
+    const original: ToolComponent = {
+      id: "form-group",
+      type: "card",
+      children: [
+        {
+          id: "input-name",
+          type: "textInput",
+          props: { valueKey: "userName" },
+        },
+        {
+          id: "btn-save",
+          type: "button",
+          actions: [
+            {
+              type: "setValue",
+              target: "userName",
+              value: "default",
+            },
+            {
+              type: "submitToAgent",
+              eventName: "saveUser",
+              includeFields: ["userName", "globalConfig"],
+              componentId: "btn-save",
+            },
+            {
+              type: "invokeRegisteredAction",
+              actionName: "local_data.write",
+              input: { modelId: "users" },
+              inputFromState: { name: "userName" },
+              componentId: "btn-save",
+            },
+          ],
+        },
+      ],
+    };
+
+    const duplicate = safeDuplicateComponent(original, "dup2");
+    const dupInput = duplicate.children![0];
+    const dupButton = duplicate.children![1];
+
+    expect(dupInput.props?.valueKey).toBe("userName_copy_dup2");
+    expect(dupButton.actions).toHaveLength(3);
+
+    // 1. setValue target remapped
+    expect(dupButton.actions![0]).toMatchObject({
+      type: "setValue",
+      target: "userName_copy_dup2",
+    });
+
+    // 2. submitToAgent includeFields remapped for local key, preserves globalConfig
+    expect(dupButton.actions![1]).toMatchObject({
+      type: "submitToAgent",
+      includeFields: ["userName_copy_dup2", "globalConfig"],
+      componentId: dupButton.id,
+    });
+
+    // 3. invokeRegisteredAction inputFromState remapped
+    expect(dupButton.actions![2]).toMatchObject({
+      type: "invokeRegisteredAction",
+      inputFromState: { name: "userName_copy_dup2" },
+      componentId: dupButton.id,
+    });
+  });
 });
 
 describe("makeRemoveComponentOp & makeMoveComponentOp", () => {

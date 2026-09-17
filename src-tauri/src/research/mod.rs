@@ -7,6 +7,7 @@ mod hybrid;
 pub mod orchestrator;
 mod provider;
 mod ranking;
+pub mod retrieval;
 
 pub use discovery::{
     classify_discovery_seed, DiscoverySeed, NEEDS_EXA_OR_SEED_MESSAGE, NEEDS_SEED_MESSAGE,
@@ -17,3 +18,4 @@ pub use orchestrator::{
 };
 pub use provider::Crawl4aiSearchProvider;
 pub use ranking::rank_web_candidates;
+pub use retrieval::fetch_web_page_orchestrated;

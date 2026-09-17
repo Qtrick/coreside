@@ -9,7 +9,7 @@ use crate::runtime_v2::packs::CapabilityPackMeta as PackMeta;
 use crate::runtime_v2::{
     self, activate_next, append_ledger_entry, branch_from_message, bundled_packs,
     cancel_queue_item, complete_queue_item, create_inline_surface, create_snapshot, delete_draft,
-    delete_snapshot, enqueue, flush_scheduler, get_continuity, get_draft, get_item,
+    delete_snapshot, diff_branch, enqueue, flush_scheduler, get_continuity, get_draft, get_item,
     get_provider_profile, get_route_state, get_snapshot, get_surface, get_surface_state,
     get_transaction, list_branches, list_diagnostics, list_inline_surfaces, list_ledger_entries,
     list_queue, list_snapshots, list_transactions, list_turn_timeline_events, navigate_route,
@@ -690,6 +690,16 @@ pub fn list_branches_cmd(
     state.require_profile()?;
     let db = state.db.lock();
     Ok(list_branches(&db, &conversation_id)?)
+}
+
+#[tauri::command]
+pub fn diff_branch_cmd(
+    state: State<'_, AppState>,
+    branch_id: String,
+) -> Result<crate::runtime_v2::BranchDiffRecord, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    Ok(diff_branch(&db, &branch_id)?)
 }
 
 #[tauri::command]

@@ -525,7 +525,13 @@ check(
 
 // Missing evidence must not fail doctor: release:evidence runs doctor first
 // (chicken-and-egg). When a file exists, it must be honest and current.
-if (exists("reports/release-evidence.json")) {
+if (process.env.RUNNING_RELEASE_EVIDENCE === "1") {
+  check(
+    "evidence.current_commit",
+    true,
+    "release:evidence is actively regenerating evidence",
+  );
+} else if (exists("reports/release-evidence.json")) {
   let evidenceOk = false;
   let detail = "release-evidence.json unreadable";
   try {

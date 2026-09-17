@@ -554,4 +554,56 @@ describe("collectTargets security boundary", () => {
     expect(result.errors[0]).toContain("outside the current tool scope");
     expect(result.changedKeys).toEqual([]);
   });
+
+  it("blocks non-state-bindable actions from declaring resultKey or writing to state", async () => {
+    const onInvokeRegisteredAction = vi.fn().mockResolvedValue({
+      status: "ok",
+      data: { sensitive: "leaked" },
+    });
+
+    const action: ActionDefinition = {
+      type: "invokeRegisteredAction",
+      actionName: "external_link.open",
+      input: { url: "https://example.com" },
+      resultKey: "linkResult",
+    };
+
+    const result = await applyAction(action, {
+      state: {},
+      toolId: "test-tool",
+      allowedTargets: new Set(["linkResult"]),
+      onInvokeRegisteredAction,
+    });
+
+    expect(onInvokeRegisteredAction).not.toHaveBeenCalled();
+    expect(result.errors.some((e) => e.includes("does not allow binding outputs to state"))).toBe(true);
+    expect(result.state).toEqual({});
+  });
+
+  it("blocks action outcome if outcome explicitly declares stateBindable false", async () => {
+    const onInvokeRegisteredAction = vi.fn().mockResolvedValue({
+      status: "ok",
+      data: { secret: "do-not-bind" },
+      stateBindable: false,
+    });
+
+    const action: ActionDefinition = {
+      type: "invokeRegisteredAction",
+      actionName: "local_data.query",
+      input: { modelId: "notes" },
+      resultKey: "queryResult",
+    };
+
+    const result = await applyAction(action, {
+      state: {},
+      toolId: "test-tool",
+      allowedTargets: new Set(["queryResult"]),
+      onInvokeRegisteredAction,
+    });
+
+    expect(onInvokeRegisteredAction).toHaveBeenCalled();
+    expect(result.errors.some((e) => e.includes("not state-bindable"))).toBe(true);
+    expect(result.state).toEqual({});
+  });
 });
+

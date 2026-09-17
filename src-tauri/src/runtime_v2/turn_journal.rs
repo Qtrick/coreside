@@ -380,6 +380,21 @@ pub fn list_recoverable_turns(db: &Database, limit: usize) -> DbResult<Vec<TurnJ
     ids.into_iter().map(|id| get_turn(db, &id)).collect()
 }
 
+pub fn list_conversation_recoverable_turns(
+    db: &Database,
+    conversation_id: &str,
+    limit: usize,
+) -> DbResult<Vec<TurnJournalRecord>> {
+    let mut stmt = db.conn().prepare(
+        "SELECT id FROM turn_journal WHERE conversation_id = ?1 AND state = 'interrupted_recoverable'
+         ORDER BY updated_at ASC LIMIT ?2",
+    )?;
+    let ids: Vec<String> = stmt
+        .query_map(params![conversation_id, limit as i64], |r| r.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.into_iter().map(|id| get_turn(db, &id)).collect()
+}
+
 /// Append a conversation-scoped event after durable commit (cursor resume).
 /// Sequence allocation uses a dedicated counter row — not `MAX(sequence)+1`.
 pub fn append_conversation_event(

@@ -30,9 +30,11 @@ Framing for progressive ops: **NDJSON** stream events (`turn.started`, `assistan
 | Migration | `src-tauri/migrations/012_runtime_v2.sql` |
 | Inline UI | `src/components/chat/InlineSurface.tsx` |
 
-## Conflict handling
+## Conflict handling and isolation
 
 `component.*` ops require matching `baseRevision`. Stale patches fail closed (no silent overwrite). Full `tool.full_replace` remains available as fallback.
+`Audience` routing strictly enforces cross-project and cross-chat boundaries, ensuring transactions in Project A never touch surfaces in Project B. `FutureParticipants` records historical intent without mutating live active surfaces.
+Branch diffing (`diff_branch_cmd`) computes message deltas and component structural differences without requiring destructive restoration.
 
 ## Capability packs
 

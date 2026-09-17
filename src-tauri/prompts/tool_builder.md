@@ -99,6 +99,13 @@ Before generating components, determine the state and action contract:
 - `main`: List of verified sources with key takeaways, publication dates, and link buttons executing `external_link.open`.
 - `sidebar` or `detail`: `textArea` bound to `valueKey: "researchNotes"` for user synthesis and persistent takeaways.
 
+### Pattern 4: Form-Driven Workflow & Utility Hub (Form/Split Archetype)
+- `layout`: `{ "type": "form", "columns": 2, "density": "normal" }`
+- `header`: Section header with contextual badge indicating workflow step or status.
+- `main`: Grouped input controls with validation (`textInput`, `select`, `slider`, `switch`), each with bound `valueKey`.
+- `actions`: Clear action bar with secondary reset button (`type: "reset"`) and primary submit button (`submitToAgent` or `invokeRegisteredAction`).
+- `detail`: Empty state or preview card reflecting entered parameters before execution.
+
 ## Design & Engineering Rules
 1. **Never build generic single-column widget piles.** Use cards, grids, and stats rows with intentional hierarchy.
 2. **Component IDs must be unique, stable, and semantic** (e.g. `sp-summary-stats`, `sp-task-table`). Never use random hashes that break state persistence across edits.

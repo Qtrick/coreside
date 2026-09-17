@@ -276,6 +276,41 @@ pub fn validate_model_operations(operations: &[AppOperation]) -> Result<(), Stri
                 crate::security::assert_not_protected(id)?;
             }
         }
+        if let Some(aud) = &op.audience {
+            match aud {
+                Audience::CurrentSurface => {
+                    if op.target.surface_id.is_none() && op.target.tool_id.is_none() {
+                        return Err(format!(
+                            "operation '{}' with audience CurrentSurface must specify surfaceId or toolId target",
+                            op.id
+                        ));
+                    }
+                }
+                Audience::CurrentChat => {
+                    if op.target.conversation_id.is_none()
+                        && op.target.surface_id.is_none()
+                        && op.target.message_id.is_none()
+                    {
+                        return Err(format!(
+                            "operation '{}' with audience CurrentChat must specify conversationId, surfaceId, or messageId target",
+                            op.id
+                        ));
+                    }
+                }
+                Audience::CurrentProject => {
+                    if op.target.project_id.is_none()
+                        && op.target.surface_id.is_none()
+                        && op.target.tool_id.is_none()
+                    {
+                        return Err(format!(
+                            "operation '{}' with audience CurrentProject must specify projectId, surfaceId, or toolId target",
+                            op.id
+                        ));
+                    }
+                }
+                Audience::CurrentUser | Audience::FutureParticipants => {}
+            }
+        }
         if let Ok(bytes) = serde_json::to_vec(&op.payload) {
             if bytes.len() > MAX_DEFINITION_JSON_BYTES {
                 return Err("operation payload too large".into());
@@ -322,6 +357,41 @@ pub fn validate_operations(operations: &[AppOperation]) -> Result<(), String> {
         if let Some(tool) = op.payload.get("tool") {
             if let Some(id) = tool.get("id").and_then(|v| v.as_str()) {
                 crate::security::assert_not_protected(id)?;
+            }
+        }
+        if let Some(aud) = &op.audience {
+            match aud {
+                Audience::CurrentSurface => {
+                    if op.target.surface_id.is_none() && op.target.tool_id.is_none() {
+                        return Err(format!(
+                            "operation '{}' with audience CurrentSurface must specify surfaceId or toolId target",
+                            op.id
+                        ));
+                    }
+                }
+                Audience::CurrentChat => {
+                    if op.target.conversation_id.is_none()
+                        && op.target.surface_id.is_none()
+                        && op.target.message_id.is_none()
+                    {
+                        return Err(format!(
+                            "operation '{}' with audience CurrentChat must specify conversationId, surfaceId, or messageId target",
+                            op.id
+                        ));
+                    }
+                }
+                Audience::CurrentProject => {
+                    if op.target.project_id.is_none()
+                        && op.target.surface_id.is_none()
+                        && op.target.tool_id.is_none()
+                    {
+                        return Err(format!(
+                            "operation '{}' with audience CurrentProject must specify projectId, surfaceId, or toolId target",
+                            op.id
+                        ));
+                    }
+                }
+                Audience::CurrentUser | Audience::FutureParticipants => {}
             }
         }
         if let Ok(bytes) = serde_json::to_vec(&op.payload) {

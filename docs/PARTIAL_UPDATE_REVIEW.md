@@ -38,7 +38,7 @@ For the exhaustive 2026-07-18 audit, see:
 | Hidden iframe form submission | In-process action dispatch |
 | CDN libraries | Bundled capability packs |
 | Fork pages | Local chat branches + read-only snapshots |
-| DO WebSocket multiuser | Deferred; `audience` extension point only |
+| DO WebSocket multiuser | Adapted as deterministic Audience routing (`CurrentUser`, `CurrentSurface`, `CurrentChat`, `CurrentProject`, and `FutureParticipants` journal record) with project/chat isolation |
 
 ## 3. Ideas rejected
 

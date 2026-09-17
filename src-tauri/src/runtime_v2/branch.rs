@@ -30,6 +30,29 @@ pub struct SnapshotRecord {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SurfaceDiffSummary {
+    pub surface_id: String,
+    pub name: String,
+    pub status: String,
+    pub changed_components: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchDiffRecord {
+    pub branch_id: String,
+    pub source_conversation_id: String,
+    pub branch_conversation_id: String,
+    pub fork_message_id: Option<String>,
+    pub source_message_count: usize,
+    pub branch_message_count: usize,
+    pub unique_source_messages: usize,
+    pub unique_branch_messages: usize,
+    pub surfaces: Vec<SurfaceDiffSummary>,
+}
+
 fn conversation_project_id(db: &Database, conversation_id: &str) -> Option<String> {
     db.conn()
         .query_row(
@@ -286,6 +309,157 @@ pub fn list_snapshots(db: &Database, conversation_id: &str) -> DbResult<Vec<Snap
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
 }
 
+pub fn get_branch(db: &Database, id: &str) -> DbResult<ChatBranchRecord> {
+    db.conn()
+        .query_row(
+            "SELECT id, source_conversation_id, source_message_id, new_conversation_id, branch_name, created_at
+             FROM chat_branches WHERE id = ?1",
+            [id],
+            |row| {
+                Ok(ChatBranchRecord {
+                    id: row.get(0)?,
+                    source_conversation_id: row.get(1)?,
+                    source_message_id: row.get(2)?,
+                    new_conversation_id: row.get(3)?,
+                    branch_name: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            },
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(format!("branch {id}")),
+            other => DbError::Sqlite(other),
+        })
+}
+
+/// Calculate a non-destructive diff between a branch and its parent conversation.
+pub fn diff_branch(db: &Database, branch_id: &str) -> DbResult<BranchDiffRecord> {
+    let branch = get_branch(db, branch_id)?;
+    let source_msgs = crate::db::get_messages(db, &branch.source_conversation_id)?;
+    let branch_msgs = crate::db::get_messages(db, &branch.new_conversation_id)?;
+
+    let fork_idx = branch
+        .source_message_id
+        .as_deref()
+        .and_then(|mid| source_msgs.iter().position(|m| m.id == mid));
+
+    let shared_count = fork_idx.map(|idx| idx + 1).unwrap_or(0);
+    let unique_source = source_msgs.len().saturating_sub(shared_count);
+    let unique_branch = branch_msgs.len().saturating_sub(shared_count);
+
+    let source_surfs = list_inline_surfaces(db, &branch.source_conversation_id)?;
+    let branch_surfs = list_inline_surfaces(db, &branch.new_conversation_id)?;
+
+    let mut surfaces_diff = Vec::new();
+
+    for b_surf in &branch_surfs {
+        let matching_source = source_surfs.iter().find(|s| {
+            s.name == b_surf.name
+                || b_surf
+                    .definition
+                    .get("_branchedFrom")
+                    .and_then(|v| v.as_str())
+                    == Some(&s.instance_id)
+        });
+
+        if let Some(s_surf) = matching_source {
+            let changed_comps = diff_surface_components(&s_surf.definition, &b_surf.definition);
+            let mut clean_s = s_surf.definition.clone();
+            let mut clean_b = b_surf.definition.clone();
+            if let Some(obj) = clean_s.as_object_mut() {
+                obj.remove("_branchedFrom");
+            }
+            if let Some(obj) = clean_b.as_object_mut() {
+                obj.remove("_branchedFrom");
+            }
+            let status = if changed_comps.is_empty() && clean_s == clean_b {
+                "identical".to_string()
+            } else {
+                "modified".to_string()
+            };
+            surfaces_diff.push(SurfaceDiffSummary {
+                surface_id: b_surf.id.clone(),
+                name: b_surf.name.clone(),
+                status,
+                changed_components: changed_comps,
+            });
+        } else {
+            surfaces_diff.push(SurfaceDiffSummary {
+                surface_id: b_surf.id.clone(),
+                name: b_surf.name.clone(),
+                status: "added".to_string(),
+                changed_components: vec![],
+            });
+        }
+    }
+
+    for s_surf in &source_surfs {
+        let matching_branch = branch_surfs.iter().any(|b| {
+            b.name == s_surf.name
+                || b.definition.get("_branchedFrom").and_then(|v| v.as_str())
+                    == Some(&s_surf.instance_id)
+        });
+        if !matching_branch {
+            surfaces_diff.push(SurfaceDiffSummary {
+                surface_id: s_surf.id.clone(),
+                name: s_surf.name.clone(),
+                status: "removed".to_string(),
+                changed_components: vec![],
+            });
+        }
+    }
+
+    Ok(BranchDiffRecord {
+        branch_id: branch.id,
+        source_conversation_id: branch.source_conversation_id,
+        branch_conversation_id: branch.new_conversation_id,
+        fork_message_id: branch.source_message_id,
+        source_message_count: source_msgs.len(),
+        branch_message_count: branch_msgs.len(),
+        unique_source_messages: unique_source,
+        unique_branch_messages: unique_branch,
+        surfaces: surfaces_diff,
+    })
+}
+
+fn diff_surface_components(def_a: &Value, def_b: &Value) -> Vec<String> {
+    let empty = vec![];
+    let comps_a = def_a
+        .get("components")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+    let comps_b = def_b
+        .get("components")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+
+    let mut changed = Vec::new();
+    let mut map_a = std::collections::HashMap::new();
+    for c in comps_a {
+        if let Some(id) = c.get("id").and_then(|v| v.as_str()) {
+            map_a.insert(id, c);
+        }
+    }
+
+    for c in comps_b {
+        if let Some(id) = c.get("id").and_then(|v| v.as_str()) {
+            if let Some(a_comp) = map_a.remove(id) {
+                if a_comp != c {
+                    changed.push(id.to_string());
+                }
+            } else {
+                changed.push(id.to_string());
+            }
+        }
+    }
+
+    for id in map_a.keys() {
+        changed.push(id.to_string());
+    }
+
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,6 +534,88 @@ mod tests {
         assert!(
             err.to_string().contains("branch limit"),
             "expected branch limit error, got {err}"
+        );
+    }
+
+    #[test]
+    fn diff_branch_detects_message_and_surface_changes() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("branch_diff.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Root Chat", None).unwrap();
+        let m1 = crate::db::insert_message(&mut db, &conv.id, "user", "Message 1", None).unwrap();
+        let _m2 =
+            crate::db::insert_message(&mut db, &conv.id, "assistant", "Message 2", None).unwrap();
+
+        let def = json!({
+            "id": "tool-1",
+            "name": "Planner",
+            "layout": "stack",
+            "components": [
+                {"id": "comp-header", "type": "heading", "props": {"text": "Original Header"}},
+                {"id": "comp-content", "type": "text", "props": {"text": "Original Body"}}
+            ]
+        });
+        let _s = super::super::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Planner",
+            &def,
+            &[],
+        )
+        .unwrap();
+
+        let (branch, branch_surfs) = branch_from_message(
+            &mut db,
+            &conv.id,
+            &m1.id,
+            "Alternative Flow",
+            DEFAULT_WORKSPACE_ID,
+        )
+        .unwrap();
+
+        // 1. Initially right after branch: source has 2 messages, branch has 1 message, surface identical
+        let diff_initial = diff_branch(&db, &branch.id).unwrap();
+        assert_eq!(diff_initial.source_message_count, 2);
+        assert_eq!(diff_initial.branch_message_count, 1);
+        assert_eq!(diff_initial.unique_source_messages, 1);
+        assert_eq!(diff_initial.unique_branch_messages, 0);
+        assert_eq!(diff_initial.surfaces.len(), 1);
+        assert_eq!(diff_initial.surfaces[0].status, "identical");
+
+        // 2. Add message to branch and modify branch surface component
+        let _m_branch = crate::db::insert_message(
+            &mut db,
+            &branch.new_conversation_id,
+            "user",
+            "Branch specific message",
+            None,
+        )
+        .unwrap();
+
+        let branch_surf_id = &branch_surfs[0].id;
+        let mut modified_def = def.clone();
+        modified_def["components"][0]["props"]["text"] = json!("Branch Changed Header");
+        super::super::surfaces::update_surface_definition(
+            &mut db,
+            branch_surf_id,
+            &modified_def,
+            "Updated header in branch",
+            None,
+        )
+        .unwrap();
+
+        let diff_after = diff_branch(&db, &branch.id).unwrap();
+        assert_eq!(diff_after.source_message_count, 2);
+        assert_eq!(diff_after.branch_message_count, 2);
+        assert_eq!(diff_after.unique_source_messages, 1);
+        assert_eq!(diff_after.unique_branch_messages, 1);
+        assert_eq!(diff_after.surfaces.len(), 1);
+        assert_eq!(diff_after.surfaces[0].status, "modified");
+        assert_eq!(
+            diff_after.surfaces[0].changed_components,
+            vec!["comp-header"]
         );
     }
 }

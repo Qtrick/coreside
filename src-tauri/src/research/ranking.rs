@@ -10,10 +10,7 @@ pub fn rank_web_candidates(
     query: &str,
     limit: usize,
 ) -> Vec<WebSearchResult> {
-    let q = query.trim().to_lowercase();
-    let terms: Vec<&str> = q.split_whitespace().filter(|t| t.len() > 2).collect();
-
-    let mut scored: Vec<(f64, WebSearchResult)> = Vec::new();
+    let mut results: Vec<WebSearchResult> = Vec::new();
     for (i, c) in candidates.iter().enumerate() {
         let url_raw = c
             .get("url")
@@ -39,42 +36,27 @@ pub fn rank_web_candidates(
             .and_then(|v| v.as_str())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
-        let base = c.get("score").and_then(|v| v.as_f64()).unwrap_or(0.5);
-        let hay = format!(
-            "{} {} {}",
-            title.to_lowercase(),
-            snippet.as_deref().unwrap_or("").to_lowercase(),
-            url.to_lowercase()
-        );
-        let overlap = terms.iter().filter(|t| hay.contains(*t)).count() as f64;
-        let score = base + overlap * 0.5 - (i as f64) * 0.001;
         let domain = safe_url.host_str().map(|h| h.to_string());
-        scored.push((
-            score,
-            WebSearchResult {
-                id: format!("crawl-{}", i + 1),
-                title: if title.is_empty() {
-                    domain.clone().unwrap_or_else(|| url.clone())
-                } else {
-                    title
-                },
-                url,
-                display_domain: domain,
-                snippet,
-                age: None,
-                rank: 0,
-                score: Some(score),
-                ..Default::default()
+        results.push(WebSearchResult {
+            id: format!("crawl-{}", i + 1),
+            title: if title.is_empty() {
+                domain.clone().unwrap_or_else(|| url.clone())
+            } else {
+                title
             },
-        ));
+            url,
+            display_domain: domain,
+            snippet,
+            age: None,
+            rank: i + 1,
+            provider: Some("crawl4ai".into()),
+            score: c.get("score").and_then(|v| v.as_f64()),
+            ..Default::default()
+        });
     }
 
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    let results: Vec<_> = scored
-        .into_iter()
-        .take(limit.max(1))
-        .map(|(_, r)| r)
-        .collect();
+    rank_search_results(&mut results, query);
+    results.truncate(limit.max(1));
     normalize_web_results(results)
 }
 

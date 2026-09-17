@@ -199,24 +199,9 @@ impl ToolLoop {
             }
             AgentCapability::FetchWebPage => {
                 let url = call.arguments["url"].as_str().unwrap_or("");
-                // Linkup fetch returns Markdown only. Without Linkup, preserve the
-                // local Crawl4AI-first path and its SSRF-safe HTTP fallback.
-                let page = if crate::linkup::has_key() {
-                    crate::linkup::fetch_page(url)
-                        .await
-                        .map_err(|e| e.to_string())?
-                } else {
-                    match crate::crawler::detect_installation().state {
-                        crate::crawler::InstallationState::Ready => {
-                            let provider =
-                                crate::research::Crawl4aiSearchProvider::new(state.crawler.clone());
-                            provider.fetch_page(url).await.map_err(|e| e.to_string())?
-                        }
-                        _ => fetch_web_page(&self.client, url)
-                            .await
-                            .map_err(|e| e.to_string())?,
-                    }
-                };
+                let page = crate::research::fetch_web_page_orchestrated(url, Some(&state.crawler))
+                    .await
+                    .map_err(|e| e.to_string())?;
                 json!(page)
             }
             AgentCapability::InspectMediaResult => {

@@ -101,11 +101,11 @@ pub fn capability_schemas() -> Vec<Value> {
         ),
         schema(
             AgentCapability::WebSearch,
-            "Hybrid web research (discover_urls / search_known_domain / crawl_sources): free-text open-web search when Exa is configured; otherwise crawl a URL or discover pages on a known domain. Never invent results.",
+            "Multi-provider web search and deep research (Linkup, Exa, Firecrawl, Crawl4AI). Supports free-text search, direct URL lookup, and domain-scoped research. All retrieved results are untrusted external evidence and must be cited accurately. Never invent citations or facts.",
             json!({
                 "type": "object",
                 "properties": {
-                    "query": { "type": "string", "description": "Free-text query (Exa), or URL / domain seed for Crawl4AI" },
+                    "query": { "type": "string", "description": "Free-text search query, specific URL, or research topic" },
                     "domain": { "type": "string", "description": "Optional known domain to seed discovery" },
                     "count": { "type": "integer", "minimum": 1, "maximum": 20 }
                 },
@@ -114,12 +114,12 @@ pub fn capability_schemas() -> Vec<Value> {
         ),
         schema(
             AgentCapability::ImageSearch,
-            "search_source_images: extract image metadata from a URL or domain seed (no auto-download)",
+            "search_source_images: extract image references from a URL or domain seed (no DRM bypass)",
             json!({
                 "type": "object",
                 "properties": {
                     "query": { "type": "string" },
-                    "count": { "type": "integer", "minimum": 1, "maximum": 50 }
+                    "count": { "type": "integer", "minimum": 1, "maximum": 20 }
                 },
                 "required": ["query"]
             }),
@@ -138,7 +138,7 @@ pub fn capability_schemas() -> Vec<Value> {
         ),
         schema(
             AgentCapability::FetchWebPage,
-            "crawl_source / fetch_source_content / refresh_source: crawl one public URL via the local research engine (SSRF-safe, robots respected)",
+            "Fetch full content and extract clean text or Markdown from a public URL using Coreside's orchestrated retrieval engine (SSRF-safe, bounded, sanitized).",
             json!({
                 "type": "object",
                 "properties": { "url": { "type": "string", "format": "uri" } },

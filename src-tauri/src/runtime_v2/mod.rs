@@ -29,8 +29,9 @@ pub use app_routes::{
 };
 #[allow(unused_imports)]
 pub use branch::{
-    branch_from_message, create_snapshot, delete_snapshot, get_snapshot, list_branches,
-    list_snapshots, ChatBranchRecord, SnapshotRecord,
+    branch_from_message, create_snapshot, delete_snapshot, diff_branch, get_branch, get_snapshot,
+    list_branches, list_snapshots, BranchDiffRecord, ChatBranchRecord, SnapshotRecord,
+    SurfaceDiffSummary,
 };
 #[allow(unused_imports)]
 pub use context_ledger::{
@@ -112,7 +113,8 @@ pub use transactions::{
 #[allow(unused_imports)]
 pub use turn_journal::{
     begin_retry_attempt, create_turn, get_turn, get_turn_by_idempotency,
-    mark_interrupted_in_flight, transition_turn, TurnJournalRecord, TurnPatch, TurnState,
+    list_conversation_recoverable_turns, list_recoverable_turns, mark_interrupted_in_flight,
+    transition_turn, TurnJournalRecord, TurnPatch, TurnState,
 };
 pub use turn_timeline::{
     list_turn_timeline_events, try_append_turn_timeline_event, TurnTimelineEvent,

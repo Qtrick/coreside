@@ -497,6 +497,9 @@ export function ToolCanvas() {
             surfaceId={surfaceId}
             conversationId={activeConversationId}
             projectId={activeProjectId}
+            isCustomizing={isCustomizing}
+            selectedComponentId={selectedComponentId}
+            onSelectComponent={(c) => setSelectedComponentId(c.id)}
             onPendingApproval={onPendingApproval}
           />
         ) : (

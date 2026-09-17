@@ -240,8 +240,7 @@ export interface WallpaperPresetDefinition {
     | "motion"
     | "media"
     | "custom"
-    | "solid"
-    | "legacy";
+    | "solid";
   description: string;
   config: SchemaWallpaperConfig;
   previewColors: [string, string, string?];
@@ -508,12 +507,12 @@ export const CURATED_WALLPAPER_PRESETS: WallpaperPresetDefinition[] = [
     },
     previewColors: ["#064e3b", "#0d5c52", "#0f766e"],
   },
-  // Legacy presets preserved for backward compatibility
+  // Classic presets categorized within the canonical taxonomy
   {
     id: "matrix",
-    name: "Matrix (Legacy)",
-    category: "legacy",
-    description: "Falling glyphs (legacy developer effect)",
+    name: "Matrix",
+    category: "motion",
+    description: "Falling digital glyphs",
     config: {
       schemaVersion: "1",
       type: "canvas-preset",
@@ -528,8 +527,8 @@ export const CURATED_WALLPAPER_PRESETS: WallpaperPresetDefinition[] = [
   },
   {
     id: "rain",
-    name: "Rain (Legacy)",
-    category: "legacy",
+    name: "Rain",
+    category: "rain",
     description: "Gentle rainfall streaks",
     config: {
       schemaVersion: "1",
@@ -545,8 +544,8 @@ export const CURATED_WALLPAPER_PRESETS: WallpaperPresetDefinition[] = [
   },
   {
     id: "pulse",
-    name: "Pulse (Legacy)",
-    category: "legacy",
+    name: "Pulse",
+    category: "ambient",
     description: "Slow radial breathing glow",
     config: {
       schemaVersion: "1",

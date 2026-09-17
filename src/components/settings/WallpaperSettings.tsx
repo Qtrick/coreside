@@ -61,7 +61,7 @@ export function WallpaperSettings() {
   const [techDetail, setTechDetail] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<
-    "all" | "featured" | "ambient" | "minimal" | "space" | "particles" | "rain" | "motion" | "solid" | "legacy" | "media"
+    "all" | "featured" | "ambient" | "minimal" | "space" | "particles" | "rain" | "motion" | "solid" | "media"
   >("all");
 
   const [previewPreset, setPreviewPreset] = useState<WallpaperPresetDefinition | null>(null);
@@ -513,7 +513,7 @@ export function WallpaperSettings() {
 
       {/* Category Tabs */}
       <div className="wallpaper-category-tabs" role="tablist" aria-label="Wallpaper categories">
-        {(["all", "featured", "ambient", "minimal", "space", "particles", "rain", "motion", "media", "solid", "legacy"] as const).map((cat) => (
+        {(["all", "featured", "ambient", "minimal", "space", "particles", "rain", "motion", "media", "solid"] as const).map((cat) => (
           <button
             key={cat}
             type="button"
@@ -540,9 +540,7 @@ export function WallpaperSettings() {
                             ? "Motion"
                             : cat === "media"
                               ? "Media Library"
-                              : cat === "solid"
-                                ? "Custom / Solid"
-                                : "Legacy"}
+                              : "Custom / Solid"}
           </button>
         ))}
       </div>

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use super::operations::{validate_operations, AppOperation};
+use super::operations::{validate_operations, AppOperation, Audience};
 use super::packs::{validate_definition_components, validate_tool_components_for_packs};
 use super::patch::apply_component_op;
 use super::preservation::{
@@ -267,6 +267,92 @@ fn apply_one(
     initial_revisions: &std::collections::HashMap<String, i64>,
     deferred: &mut Vec<super::outbox::DeferredBusEffect>,
 ) -> Result<Option<SurfaceRecord>, String> {
+    // Audience routing enforcement
+    if let Some(aud) = &op.audience {
+        match aud {
+            Audience::FutureParticipants => {
+                // Operations intended for future participants or template instantiation
+                // are preserved in transaction history without mutating live session surfaces.
+                return Ok(None);
+            }
+            Audience::CurrentSurface => {
+                if op.target.surface_id.is_none() && op.target.tool_id.is_none() {
+                    return Err(format!(
+                        "operation '{}' specifies CurrentSurface audience but lacks surfaceId or toolId target",
+                        op.id
+                    ));
+                }
+            }
+            Audience::CurrentChat => {
+                if let (Some(txn_chat), Some(op_chat)) = (
+                    txn.conversation_id.as_deref(),
+                    op.target.conversation_id.as_deref(),
+                ) {
+                    if !txn_chat.is_empty() && !op_chat.is_empty() && txn_chat != op_chat {
+                        return Err(format!(
+                            "cross-chat violation: operation '{}' targeting conversation '{}' does not match transaction conversation '{}'",
+                            op.id, op_chat, txn_chat
+                        ));
+                    }
+                }
+            }
+            Audience::CurrentProject => {
+                if let (Some(txn_proj), Some(op_proj)) =
+                    (txn.project_id.as_deref(), op.target.project_id.as_deref())
+                {
+                    if !txn_proj.is_empty() && !op_proj.is_empty() && txn_proj != op_proj {
+                        return Err(format!(
+                            "cross-project violation: operation '{}' targeting project '{}' does not match transaction project '{}'",
+                            op.id, op_proj, txn_proj
+                        ));
+                    }
+                }
+            }
+            Audience::CurrentUser => {}
+        }
+    }
+
+    // Cross-project and cross-chat isolation enforcement on surface targets
+    if let Some(sid) = op.target.surface_id.as_deref() {
+        if let Ok(target_surface) = get_surface(db, sid) {
+            if let (Some(txn_proj), Some(surf_proj)) = (
+                txn.project_id.as_deref(),
+                target_surface.project_id.as_deref(),
+            ) {
+                if !txn_proj.is_empty() && !surf_proj.is_empty() && txn_proj != surf_proj {
+                    return Err(format!(
+                        "cross-project violation: transaction in project '{}' cannot mutate surface '{}' belonging to project '{}'",
+                        txn_proj, sid, surf_proj
+                    ));
+                }
+            }
+            if let (Some(op_proj), Some(surf_proj)) = (
+                op.target.project_id.as_deref(),
+                target_surface.project_id.as_deref(),
+            ) {
+                if !op_proj.is_empty() && !surf_proj.is_empty() && op_proj != surf_proj {
+                    return Err(format!(
+                        "cross-project violation: operation '{}' targeting project '{}' cannot mutate surface '{}' belonging to project '{}'",
+                        op.id, op_proj, sid, surf_proj
+                    ));
+                }
+            }
+            if op.audience == Some(Audience::CurrentChat) {
+                if let (Some(txn_chat), Some(surf_chat)) = (
+                    txn.conversation_id.as_deref(),
+                    target_surface.conversation_id.as_deref(),
+                ) {
+                    if !txn_chat.is_empty() && !surf_chat.is_empty() && txn_chat != surf_chat {
+                        return Err(format!(
+                            "cross-chat violation: operation '{}' in conversation '{}' cannot mutate surface '{}' belonging to conversation '{}'",
+                            op.id, txn_chat, sid, surf_chat
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     match op.op_type.as_str() {
         "chat.inline_surface_create" => {
             let conversation_id = op
@@ -434,6 +520,16 @@ fn apply_one(
                     .unwrap_or(&tool.id),
             );
             if let Ok(existing) = get_surface(db, &existing_surface_id) {
+                if let (Some(txn_proj), Some(surf_proj)) =
+                    (txn.project_id.as_deref(), existing.project_id.as_deref())
+                {
+                    if !txn_proj.is_empty() && !surf_proj.is_empty() && txn_proj != surf_proj {
+                        return Err(format!(
+                            "cross-project violation: transaction in project '{}' cannot replace tool surface '{}' belonging to project '{}'",
+                            txn_proj, existing.id, surf_proj
+                        ));
+                    }
+                }
                 let allowed = if existing.capability_packs.is_empty() {
                     super::packs::required_packs_for_definition(&existing.definition)?
                 } else {
@@ -1087,6 +1183,144 @@ mod tests {
         let stale_result = apply_transaction(&mut db, &stale_txn.id).unwrap();
         assert_eq!(stale_result.transaction.status, "failed");
         assert!(!stale_result.conflicts.is_empty());
+    }
+
+    #[test]
+    fn test_audience_routing_and_future_participants() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Test", None).unwrap();
+        let def = json!({
+            "id": "aud-tool",
+            "name": "Audience Tool",
+            "layout": "stack",
+            "components": [{"id": "c0", "type": "text", "props": {"text": "init"}}]
+        });
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            Some("proj-1"),
+            "Audience Test",
+            &def,
+            &[],
+        )
+        .unwrap();
+
+        let initial_rev = surface.current_revision;
+
+        // 1. FutureParticipants operation should be preserved in txn log but not mutate live surface
+        let mut fp_op = op(
+            "component.insert",
+            Some(&surface.id),
+            json!({
+                "component": {"id": "c-fp", "type": "text", "props": {"text": "Future only"}}
+            }),
+        );
+        fp_op.audience = Some(Audience::FutureParticipants);
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            Some("proj-1"),
+            None,
+            "future-participants-txn",
+            &[fp_op],
+            false,
+        )
+        .unwrap();
+
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "applied");
+        // Live surface revision unchanged!
+        let current_surf = get_surface(&db, &surface.id).unwrap();
+        assert_eq!(current_surf.current_revision, initial_rev);
+        let comps = current_surf
+            .definition
+            .get("components")
+            .and_then(|v| v.as_array())
+            .unwrap();
+        assert_eq!(comps.len(), 1); // "c-fp" not inserted into live surface
+
+        // 2. CurrentSurface audience requires surface target
+        let mut bad_cs_op = op(
+            "component.insert",
+            None,
+            json!({
+                "component": {"id": "c-bad", "type": "text", "props": {"text": "No surface"}}
+            }),
+        );
+        bad_cs_op.target.surface_id = None;
+        bad_cs_op.target.tool_id = None;
+        bad_cs_op.audience = Some(Audience::CurrentSurface);
+
+        let bad_txn_res = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            Some("proj-1"),
+            None,
+            "bad-cs-txn",
+            &[bad_cs_op],
+            false,
+        );
+        assert!(bad_txn_res.is_err());
+    }
+
+    #[test]
+    fn test_cross_project_isolation_boundary() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Test", None).unwrap();
+        let def = json!({
+            "id": "proj-tool",
+            "name": "Project Tool",
+            "layout": "stack",
+            "components": [{"id": "c0", "type": "text", "props": {"text": "init"}}]
+        });
+        let surface_a = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            Some("project-alpha"),
+            "Project A Surface",
+            &def,
+            &[],
+        )
+        .unwrap();
+
+        // Transaction in project-beta attempts to mutate surface_a in project-alpha
+        let mut attack_op = op(
+            "component.insert",
+            Some(&surface_a.id),
+            json!({
+                "component": {"id": "c-infiltrate", "type": "text", "props": {"text": "Infiltrate"}}
+            }),
+        );
+        attack_op.audience = Some(Audience::CurrentProject);
+
+        let txn_b = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            Some("project-beta"),
+            None,
+            "cross-project-attack",
+            &[attack_op],
+            false,
+        )
+        .unwrap();
+
+        let apply_res = apply_transaction(&mut db, &txn_b.id).unwrap();
+        assert_eq!(apply_res.transaction.status, "failed");
+        assert!(
+            apply_res
+                .conflicts
+                .iter()
+                .any(|c| c.contains("cross-project violation")),
+            "Expected cross-project violation conflict, got: {:?}",
+            apply_res.conflicts
+        );
+
+        // Verify surface_a is completely unmodified
+        let surf_after = get_surface(&db, &surface_a.id).unwrap();
+        assert_eq!(surf_after.current_revision, surface_a.current_revision);
     }
 }
 

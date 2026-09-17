@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-diff-branch-cmd"
+description = "Enables the diff_branch_cmd command without any pre-configured scope."
+commands.allow = ["diff_branch_cmd"]
+
+[[permission]]
+identifier = "deny-diff-branch-cmd"
+description = "Denies the diff_branch_cmd command without any pre-configured scope."
+commands.deny = ["diff_branch_cmd"]

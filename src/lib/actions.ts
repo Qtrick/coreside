@@ -115,6 +115,13 @@ export function collectDeclaredBindings(
           typeof action.resultKey === "string" &&
           action.resultKey.trim()
         ) {
+          if (
+            action.type === "invokeRegisteredAction" &&
+            action.actionName &&
+            !isStateBindableAction(action.actionName)
+          ) {
+            continue;
+          }
           const rk = action.resultKey.trim();
           into.resultTargets.add(rk);
           into.writable.add(rk);
@@ -143,8 +150,20 @@ export function collectTargets(
 
 const MAX_ACTION_DEPTH = 12;
 
+export const NON_STATE_BINDABLE_ACTIONS = new Set<string>([
+  "external_link.open",
+  "export.prepare",
+  "web_search.request",
+  "automation.propose",
+  "agent.submit_event",
+]);
+
+export function isStateBindableAction(actionName: string): boolean {
+  return !NON_STATE_BINDABLE_ACTIONS.has(actionName);
+}
+
 export type RegisteredActionOutcome =
-  | { status: "ok"; data?: unknown }
+  | { status: "ok"; data?: unknown; stateBindable?: boolean }
   | { status: "pendingApproval"; approvalId?: string; reason?: string }
   | { status: "error"; message: string }
   | { status: "blocked"; reason: string }
@@ -400,9 +419,15 @@ export function applyAction(
         if (hasUnauthorized) {
           break;
         }
-        if (action.resultKey && !ensureWritable(action.resultKey)) {
-          errors.push(`Result target "${action.resultKey}" is outside the current tool scope`);
-          break;
+        if (action.resultKey) {
+          if (!isStateBindableAction(action.actionName)) {
+            errors.push(`Action "${action.actionName}" does not allow binding outputs to state`);
+            break;
+          }
+          if (!ensureWritable(action.resultKey)) {
+            errors.push(`Result target "${action.resultKey}" is outside the current tool scope`);
+            break;
+          }
         }
         const task = options.onInvokeRegisteredAction({
           toolId: options.toolId,
@@ -415,6 +440,10 @@ export function applyAction(
           pendingTasks.push(
             task.then((outcome) => {
               if (outcome && typeof outcome === "object" && outcome.status === "ok" && action.resultKey) {
+                if (outcome.stateBindable === false || !isStateBindableAction(action.actionName)) {
+                  errors.push(`Action "${action.actionName}" is not state-bindable`);
+                  return;
+                }
                 state[action.resultKey] = outcome.data;
                 changedKeys.push(action.resultKey);
               }
@@ -505,9 +534,15 @@ export async function applyActionsAsync(
         }
       }
       if (hasUnauthorized) break;
-      if (action.resultKey && !checkTargetWritable(action.resultKey, options)) {
-        errors.push(`Result target "${action.resultKey}" is outside the current tool scope`);
-        break;
+      if (action.resultKey) {
+        if (!isStateBindableAction(action.actionName)) {
+          errors.push(`Action "${action.actionName}" does not allow binding outputs to state`);
+          break;
+        }
+        if (!checkTargetWritable(action.resultKey, options)) {
+          errors.push(`Result target "${action.resultKey}" is outside the current tool scope`);
+          break;
+        }
       }
 
       try {
@@ -522,6 +557,10 @@ export async function applyActionsAsync(
         if (outcome && typeof outcome === "object") {
           if (outcome.status === "ok") {
             if (action.resultKey) {
+              if (outcome.stateBindable === false || !isStateBindableAction(action.actionName)) {
+                errors.push(`Action "${action.actionName}" is not state-bindable`);
+                break;
+              }
               // Merge result into current state instead of overwriting.
               // The action result updates only the resultKey; all other
               // state (including user edits made during the async gap)

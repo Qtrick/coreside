@@ -6,20 +6,22 @@ Consumer-facing name: **Web Research** / **Web Search**. Internal infrastructure
 
 | Layer | Role |
 | --- | --- |
-| **Linkup** | Default indexed discovery and normal public-page retrieval (optional BYOK or hosted secret) |
+| **Linkup** | Default indexed discovery and sourced search results (BYOK or hosted secret) |
+| **Exa** | Semantic search discovery, highlights, and domain-targeted research |
+| **Firecrawl** | Clean markdown web scraping and extraction with source URL validation |
 | **Crawl4AI** | Advanced local crawl, extraction, robots, and browser workflows |
-| **Exa** | Optional compatibility discovery provider |
 
 See [EXA_INTEGRATION.md](./EXA_INTEGRATION.md), [SEARCH_OPTIMIZATION.md](./SEARCH_OPTIMIZATION.md), and [CRAWL4AI_INTEGRATION.md](./CRAWL4AI_INTEGRATION.md).
 
-## Behavior
+## Unified Retrieval Orchestration
 
-- Free-text queries use Linkup `fast` + `searchResults` when configured. This returns sources only; Coreside chooses follow-ups, synthesis, and citations.
-- Direct URLs use Linkup Markdown fetch when Linkup is configured; otherwise they use the SSRF-safe local fetch/crawler path. Crawl4AI remains the advanced path.
-- Exa remains an optional compatibility fallback when Linkup is unavailable.
-- Without a discovery provider, free-text returns an honest setup notice (no fake SERP).
-- Historical Brave citations remain readable; Brave is not the active provider.
+All web fetching across the application kernel, search commands, and agent tool loops passes through an authoritative orchestrator (`src-tauri/src/research/retrieval.rs`):
+
+1. **SSRF Guard**: Resolves public DNS, validates all IP destinations (blocking IPv4/IPv6 private ranges, loopback, multicast, link-local, 6to4, Teredo, documentation, and benchmark blocks), and pins destination sockets.
+2. **Retrieval Hierarchy**: Crawl4AI (local advanced extraction) $\to$ Firecrawl (clean markdown scrape) $\to$ Linkup (content fetch) $\to$ Pinned-DNS local HTTP client.
+3. **Prompt-Injection Sanitization**: Strips adversarial override instructions (`ignore previous instructions`, `system prompt:`, `authorize`, `eval(...)`), bounding untrusted web text into strictly isolated reference evidence.
+4. **Evidence Provenance Contract**: Search results distinguish discovery metadata (`fetched_at: None`) from full page content retrieval.
 
 ## Settings
 
-Development/BYOK: configure Linkup via `LINKUP_API_KEY` in `.env` or the OS-keyring path. Hosted deployments use the Supabase Edge Function's `LINKUP_API_KEY` secret; it is never sent to the desktop. Install Crawl4AI with `npm run crawl4ai:setup` for advanced workflows. See [CLOUD_HOSTING.md](./CLOUD_HOSTING.md).
+Development/BYOK: configure search keys via `.env` or the OS-keyring path (`LINKUP_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`). Hosted deployments use the Supabase Edge Function's search secrets; credentials are never sent to the desktop. Install Crawl4AI with `npm run crawl4ai:setup` for advanced workflows. See [CLOUD_HOSTING.md](./CLOUD_HOSTING.md).

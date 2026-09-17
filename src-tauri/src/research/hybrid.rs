@@ -52,7 +52,7 @@ impl HybridSearchProvider {
         &self,
         raw_url: &str,
     ) -> Result<crate::search::FetchedWebPage, SearchError> {
-        self.crawl.fetch_page(raw_url).await
+        super::retrieval::fetch_web_page_orchestrated(raw_url, Some(&self.supervisor)).await
     }
 }
 
@@ -508,7 +508,7 @@ fn map_exa_results(results: &[crate::exa::ExaResult], limit: usize) -> Vec<WebSe
             provider: Some("exa".into()),
             canonical_url: Some(safe_url.to_string()),
             highlights: r.highlights.clone(),
-            fetched_at: Some(crate::db::now_rfc3339()),
+            fetched_at: None,
             retrieval_method: Some("exa_search".into()),
             ..Default::default()
         });

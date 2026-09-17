@@ -122,6 +122,7 @@ function RenderNode({
   toolId,
   isCustomizing,
   selectedComponentId,
+  onSelectComponent,
 }: {
   component: ToolComponent;
   resetKey?: string;
@@ -129,6 +130,7 @@ function RenderNode({
   toolId?: string | null;
   isCustomizing?: boolean;
   selectedComponentId?: string | null;
+  onSelectComponent?: (component: ToolComponent) => void;
 }) {
   const Node = resolveComponent(component.type);
   const renderChild = (child: ToolComponent) => (
@@ -140,10 +142,25 @@ function RenderNode({
       toolId={toolId}
       isCustomizing={isCustomizing}
       selectedComponentId={selectedComponentId}
+      onSelectComponent={onSelectComponent}
     />
   );
 
   const isSelected = isCustomizing && selectedComponentId === component.id;
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (!isCustomizing || !onSelectComponent) return;
+    onSelectComponent(component);
+    const target = e.target as HTMLElement | null;
+    const isInteractiveControl = Boolean(
+      target?.closest(
+        "input, textarea, select, button, a, [contenteditable='true'], [role='button'], [role='switch'], [role='checkbox'], [role='tab']",
+      ) && !target?.closest(".tr-item-badge, .tr-item-border, .tr-customize-handle"),
+    );
+    if (!isInteractiveControl) {
+      e.stopPropagation();
+    }
+  };
 
   return (
     <ToolErrorBoundary
@@ -157,6 +174,7 @@ function RenderNode({
         data-component-id={component.id}
         data-component-type={component.type}
         data-is-selected={isSelected ? "true" : undefined}
+        onClick={isCustomizing ? handleClick : undefined}
       >
         <Node component={component} renderChild={renderChild} />
       </div>
@@ -400,6 +418,7 @@ export function ToolRenderer({
               toolId={tool.id}
               isCustomizing={isCustomizing}
               selectedComponentId={selectedComponentId}
+              onSelectComponent={onSelectComponent}
             />
           )}
         />
