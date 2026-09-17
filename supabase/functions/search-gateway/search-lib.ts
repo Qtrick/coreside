@@ -504,3 +504,288 @@ export function normalizeFirecrawlScrapeResult(payload: unknown, fallbackUrl: st
     },
   ];
 }
+
+const TRACKING_PARAMS = new Set([
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "fbclid",
+  "gclid",
+  "gbraid",
+  "wbraid",
+  "msclkid",
+  "_hsenc",
+  "_hsmi",
+  "mc_cid",
+  "mc_eid",
+  "ref",
+  "source",
+]);
+
+/** URL canonicalization: strip tracking parameters, fragments, and redundant trailing slashes. */
+export function canonicalizeUrl(rawUrl: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return rawUrl;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return rawUrl;
+  }
+  parsed.hash = "";
+  parsed.hostname = parsed.hostname.toLowerCase();
+
+  const keysToDelete: string[] = [];
+  for (const key of parsed.searchParams.keys()) {
+    if (TRACKING_PARAMS.has(key.toLowerCase())) {
+      keysToDelete.push(key);
+    }
+  }
+  for (const key of keysToDelete) {
+    parsed.searchParams.delete(key);
+  }
+
+  if (parsed.pathname.length > 1 && parsed.pathname.endsWith("/")) {
+    parsed.pathname = parsed.pathname.slice(0, -1);
+  }
+
+  return parsed.href;
+}
+
+const STOP_WORDS = new Set([
+  "the", "and", "for", "with", "what", "how", "are", "this", "that", "from",
+  "when", "where", "which", "who", "why", "can", "you", "does", "about",
+  "into", "over", "after", "before", "between", "some", "then",
+]);
+
+export interface SearchResultItem {
+  title: string;
+  url: string;
+  snippet?: string;
+  content?: string;
+  highlights?: string[];
+  date?: string | null;
+  rank?: number;
+  provider?: string;
+  canonicalUrl?: string;
+  retrievalMethod?: string;
+  score?: number;
+  provenance?: {
+    discoveryProvider: string;
+    originalUrl: string;
+    canonicalUrl?: string;
+    contentFetched: boolean;
+    contributingSources: string[];
+    rankingStage?: string;
+    rawProviderScore?: number;
+  };
+  [key: string]: unknown;
+}
+
+/** Multi-signal ranking matching desktop Rust ranking algorithm. */
+export function rankSearchResults(
+  results: SearchResultItem[],
+  query: string,
+): SearchResultItem[] {
+  const q = query.trim().toLowerCase();
+  const terms = q
+    .split(/[^a-zA-Z0-9]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 2 && !STOP_WORDS.has(t));
+
+  const cleanQuery = q.trim();
+  const hasPhrase = cleanQuery.length >= 4 && cleanQuery.includes(" ");
+
+  const scored: { score: number; origIdx: number }[] = results.map((r, origIdx) => {
+    let score = 1.0;
+
+    // 1. Initial provider baseline
+    switch (r.provider) {
+      case "exa":
+        score += 0.4;
+        break;
+      case "linkup":
+        score += 0.35;
+        break;
+      case "firecrawl":
+        score += 0.3;
+        break;
+      case "crawl4ai":
+        score += 0.25;
+        break;
+      default:
+        score += 0.2;
+    }
+
+    // 2. Lexical overlap with stop-word normalized terms
+    const titleLower = (r.title || "").toLowerCase();
+    const snippetLower = (r.snippet || "").toLowerCase();
+    const urlLower = (r.url || "").toLowerCase();
+
+    for (const term of terms) {
+      if (titleLower.includes(term)) score += 0.8;
+      if (snippetLower.includes(term)) score += 0.4;
+      if (urlLower.includes(term)) score += 0.3;
+    }
+
+    // 3. Exact phrase match bonus
+    if (hasPhrase) {
+      if (titleLower.includes(cleanQuery)) {
+        score += 1.2;
+      } else if (snippetLower.includes(cleanQuery)) {
+        score += 0.6;
+      }
+    }
+
+    // 4. Primary source / authority boost
+    try {
+      const hostname = new URL(r.url).hostname.toLowerCase();
+      if (
+        hostname.startsWith("docs.") ||
+        hostname.startsWith("developer.") ||
+        hostname === "github.com" ||
+        hostname.endsWith(".github.io") ||
+        hostname === "arxiv.org" ||
+        hostname === "developer.mozilla.org" ||
+        hostname === "wikipedia.org"
+      ) {
+        score += 0.35;
+      }
+    } catch {
+      // ignore
+    }
+
+    // 5. Content richness bonus
+    if (r.content) score += 0.5;
+    if (Array.isArray(r.highlights) && r.highlights.length > 0) score += 0.3;
+
+    // 6. Freshness bonus
+    if (r.date) score += 0.1;
+
+    // 7. Position tie-breaker
+    score -= origIdx * 0.05;
+
+    return { score, origIdx };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  // Domain diversity pass: apply slight dampening if the same domain dominates top results
+  const domainCounts = new Map<string, number>();
+  const diversified: { finalScore: number; origIdx: number }[] = [];
+
+  for (const { score, origIdx } of scored) {
+    let finalScore = score;
+    const r = results[origIdx];
+    try {
+      const domain = new URL(r.url).hostname.toLowerCase();
+      const count = domainCounts.get(domain) ?? 0;
+      if (count >= 2) {
+        finalScore -= (count - 1) * 0.25;
+      }
+      domainCounts.set(domain, count + 1);
+    } catch {
+      // ignore
+    }
+    diversified.push({ finalScore, origIdx });
+  }
+
+  diversified.sort((a, b) => b.finalScore - a.finalScore);
+
+  const out: SearchResultItem[] = [];
+  for (let i = 0; i < diversified.length; i++) {
+    const { finalScore, origIdx } = diversified[i];
+    const r = { ...results[origIdx] };
+    r.rank = i + 1;
+    r.score = Math.round(finalScore * 100) / 100;
+    const provider = r.provider || "unknown";
+    r.provenance = {
+      discoveryProvider: r.provenance?.discoveryProvider || provider,
+      originalUrl: r.provenance?.originalUrl || r.url,
+      canonicalUrl: r.canonicalUrl || r.url,
+      contentFetched: Boolean(r.content),
+      contributingSources: r.provenance?.contributingSources || [provider],
+      rankingStage: "multi_signal_ranked",
+      rawProviderScore: r.score,
+    };
+    out.push(r);
+  }
+
+  return out;
+}
+
+/** Deduplicate search results by canonical URL, merge metadata/provenance, and re-rank with query terms. */
+export function deduplicateAndRankResults(
+  results: unknown[],
+  query: string,
+  maxResults: number,
+): SearchResultItem[] {
+  const seenUrls = new Set<string>();
+  const deduplicated: SearchResultItem[] = [];
+
+  for (const raw of results) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = { ...(raw as Record<string, unknown>) } as SearchResultItem;
+    if (typeof item.url !== "string") continue;
+
+    const canonical = canonicalizeUrl(item.url);
+    item.canonicalUrl = canonical;
+    const provider = item.provider || "unknown";
+    if (!item.provenance) {
+      item.provenance = {
+        discoveryProvider: provider,
+        originalUrl: item.url,
+        canonicalUrl: canonical,
+        contentFetched: Boolean(item.content),
+        contributingSources: [provider],
+        rankingStage: "normalized",
+        rawProviderScore: typeof item.score === "number" ? item.score : undefined,
+      };
+    }
+
+    if (!seenUrls.has(canonical)) {
+      seenUrls.add(canonical);
+      deduplicated.push(item);
+    } else {
+      const existing = deduplicated.find((r) => r.canonicalUrl === canonical);
+      if (existing) {
+        if (
+          (!existing.snippet || existing.snippet.length < 50) &&
+          item.snippet &&
+          item.snippet.length >= 50
+        ) {
+          existing.snippet = item.snippet;
+        }
+        if (!existing.content && item.content) {
+          existing.content = item.content;
+        }
+        if ((!existing.highlights || existing.highlights.length === 0) && item.highlights) {
+          existing.highlights = item.highlights;
+        }
+        if (!existing.date && item.date) {
+          existing.date = item.date;
+        }
+        if (existing.provider && item.provider && existing.provider !== item.provider) {
+          if (!existing.retrievalMethod) {
+            existing.retrievalMethod = `${existing.provider}+${item.provider}`;
+          }
+        }
+        if (existing.provenance && item.provider) {
+          if (!existing.provenance.contributingSources.includes(item.provider)) {
+            existing.provenance.contributingSources.push(item.provider);
+          }
+          if (item.content) {
+            existing.provenance.contentFetched = true;
+          }
+        }
+      }
+    }
+  }
+
+  const ranked = rankSearchResults(deduplicated, query);
+  return ranked.slice(0, maxResults);
+}
+

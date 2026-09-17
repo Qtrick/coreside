@@ -145,6 +145,7 @@ fn is_private_or_reserved(ip: IpAddr) -> bool {
 }
 
 fn is_private_v4(ip: Ipv4Addr) -> bool {
+    let octets = ip.octets();
     ip.is_private()
         || ip.is_loopback()
         || ip.is_link_local()
@@ -152,13 +153,20 @@ fn is_private_v4(ip: Ipv4Addr) -> bool {
         || ip.is_broadcast()
         || ip.is_multicast()
         || ip.is_documentation()
-        || ip.octets()[0] == 0
-        || matches!(ip.octets(), [127, _, _, _])
-        || matches!(ip.octets(), [10, _, _, _])
-        || matches!(ip.octets(), [172, b, _, _] if (16..=31).contains(&b))
-        || matches!(ip.octets(), [192, 168, _, _])
-        || matches!(ip.octets(), [169, 254, _, _])
-        || matches!(ip.octets(), [100, 64..=127, _, _])
+        || octets[0] == 0
+        || octets[0] >= 240 // Class E / Reserved (RFC 1112)
+        || matches!(octets, [127, _, _, _])
+        || matches!(octets, [10, _, _, _])
+        || matches!(octets, [172, b, _, _] if (16..=31).contains(&b))
+        || matches!(octets, [192, 168, _, _])
+        || matches!(octets, [169, 254, _, _])
+        || matches!(octets, [100, 64..=127, _, _]) // CGNAT (RFC 6598)
+        || matches!(octets, [198, 18..=19, _, _]) // Benchmark testing (RFC 2544)
+        || matches!(octets, [192, 0, 0, _]) // IETF Protocol Assignments (RFC 6890)
+        || matches!(octets, [192, 0, 2, _]) // TEST-NET-1 (RFC 5737)
+        || matches!(octets, [198, 51, 100, _]) // TEST-NET-2 (RFC 5737)
+        || matches!(octets, [203, 0, 113, _]) // TEST-NET-3 (RFC 5737)
+        || matches!(octets, [192, 88, 99, _]) // 6to4 Anycast Relay (RFC 7526)
 }
 
 fn is_private_v6(ip: Ipv6Addr) -> bool {
@@ -182,6 +190,43 @@ fn is_private_v6(ip: Ipv6Addr) -> bool {
         );
         return is_private_v4(v4);
     }
+    // 6to4 (2002::/16) — segs[1] and segs[2] contain embedded IPv4
+    if segs[0] == 0x2002 {
+        let v4 = Ipv4Addr::new(
+            (segs[1] >> 8) as u8,
+            segs[1] as u8,
+            (segs[2] >> 8) as u8,
+            segs[2] as u8,
+        );
+        if is_private_v4(v4) {
+            return true;
+        }
+    }
+    // Teredo (2001:0000::/32) — client IPv4 is XOR-inverted in segs[6..7]
+    if segs[0] == 0x2001 && segs[1] == 0x0000 {
+        let inv_6 = !segs[6];
+        let inv_7 = !segs[7];
+        let v4 = Ipv4Addr::new(
+            (inv_6 >> 8) as u8,
+            inv_6 as u8,
+            (inv_7 >> 8) as u8,
+            inv_7 as u8,
+        );
+        if is_private_v4(v4) {
+            return true;
+        }
+    }
+    // Documentation (2001:db8::/32) & Benchmarking (2001:2::/48) & Discard (100::/64)
+    if segs[0] == 0x2001 && segs[1] == 0x0db8 {
+        return true;
+    }
+    if segs[0] == 0x2001 && segs[1] == 0x0002 {
+        return true;
+    }
+    if segs[0] == 0x0100 && segs[1] == 0 && segs[2] == 0 && segs[3] == 0 {
+        return true;
+    }
+
     ip.is_loopback()
         || ip.is_unique_local()
         || ip.is_unicast_link_local()
@@ -261,5 +306,24 @@ mod tests {
     #[test]
     fn rejects_multicast_ipv6() {
         assert!(validate_public_http_url("http://[ff02::1]/").is_err());
+    }
+
+    #[test]
+    fn rejects_class_e_and_benchmark_ranges() {
+        assert!(validate_public_http_url("http://240.0.0.1/").is_err());
+        assert!(validate_public_http_url("http://250.1.2.3/").is_err());
+        assert!(validate_public_http_url("http://198.18.0.1/").is_err());
+        assert!(validate_public_http_url("http://198.19.255.255/").is_err());
+        assert!(validate_public_http_url("http://192.0.0.1/").is_err());
+    }
+
+    #[test]
+    fn rejects_ipv6_documentation_and_tunneling_private_ips() {
+        // Documentation prefix (2001:db8::/32)
+        assert!(validate_public_http_url("http://[2001:db8::1]/").is_err());
+        // 6to4 (2002::/16) encapsulating 10.0.0.1 (0a00:0001)
+        assert!(validate_public_http_url("http://[2002:0a00:0001::]/").is_err());
+        // 6to4 encapsulating 192.168.1.1 (c0a8:0101)
+        assert!(validate_public_http_url("http://[2002:c0a8:0101::]/").is_err());
     }
 }

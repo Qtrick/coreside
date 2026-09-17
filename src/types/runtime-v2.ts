@@ -192,3 +192,17 @@ export type SurfaceDraftConflict = {
   agentDraft?: unknown | null;
   formId?: string | null;
 };
+
+export type ScheduleAndApplyResult = {
+  scheduled: ScheduledPatch[];
+  applied: Array<{
+    transactionId?: string;
+    status: string;
+    apply?: {
+      transactionId?: string;
+      surfaces?: Array<{ id: string; currentRevision: number }>;
+    };
+  }>;
+  superseded: string[];
+};
+

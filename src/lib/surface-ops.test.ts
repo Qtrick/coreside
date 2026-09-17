@@ -106,3 +106,30 @@ describe("safeDuplicateComponent", () => {
   });
 });
 
+describe("makeRemoveComponentOp & makeMoveComponentOp", () => {
+  it("creates valid AppOperation structures with required targeting", async () => {
+    const { makeRemoveComponentOp, makeMoveComponentOp } = await import("./surface-ops");
+    const removeOp = makeRemoveComponentOp({
+      surfaceId: "surf-1",
+      componentId: "comp-a",
+      baseRevision: 3,
+    });
+    expect(removeOp.type).toBe("component.remove");
+    expect(removeOp.target.surfaceId).toBe("surf-1");
+    expect(removeOp.target.componentId).toBe("comp-a");
+    expect(removeOp.baseRevision).toBe(3);
+
+    const moveOp = makeMoveComponentOp({
+      surfaceId: "surf-1",
+      componentId: "comp-b",
+      parentId: "parent-x",
+      index: 2,
+      baseRevision: 4,
+    });
+    expect(moveOp.type).toBe("component.move");
+    expect(moveOp.target.componentId).toBe("comp-b");
+    expect(moveOp.target.parentId).toBe("parent-x");
+    expect(moveOp.payload).toEqual({ index: 2 });
+    expect(moveOp.baseRevision).toBe(4);
+  });
+});

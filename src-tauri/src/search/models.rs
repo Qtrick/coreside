@@ -73,6 +73,44 @@ pub struct WebSearchResult {
     pub retrieval_method: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub score: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<SearchResultProvenance>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResultProvenance {
+    pub discovery_provider: String,
+    pub original_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical_url: Option<String>,
+    pub content_fetched: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fetched_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contributing_sources: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ranking_stage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_provider_score: Option<f64>,
+}
+
+impl WebSearchResult {
+    pub fn ensure_provenance(&mut self) {
+        if self.provenance.is_none() {
+            let provider = self.provider.clone().unwrap_or_else(|| "unknown".into());
+            self.provenance = Some(SearchResultProvenance {
+                discovery_provider: provider.clone(),
+                original_url: self.url.clone(),
+                canonical_url: self.canonical_url.clone(),
+                content_fetched: self.content.is_some(),
+                fetched_at: self.fetched_at.clone(),
+                contributing_sources: vec![provider],
+                ranking_stage: Some("normalized".into()),
+                raw_provider_score: self.score,
+            });
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

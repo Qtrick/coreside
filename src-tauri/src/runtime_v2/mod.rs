@@ -109,6 +109,11 @@ pub use transactions::{
     apply_transaction, apply_transaction_with_bus, create_transaction, get_transaction,
     list_transactions, undo_transaction, AppTransactionRecord, ApplyResult,
 };
+#[allow(unused_imports)]
+pub use turn_journal::{
+    begin_retry_attempt, create_turn, get_turn, get_turn_by_idempotency,
+    mark_interrupted_in_flight, transition_turn, TurnJournalRecord, TurnPatch, TurnState,
+};
 pub use turn_timeline::{
     list_turn_timeline_events, try_append_turn_timeline_event, TurnTimelineEvent,
 };

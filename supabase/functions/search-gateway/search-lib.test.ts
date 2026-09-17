@@ -11,6 +11,9 @@ import {
   parseSearchSettleRpcResult,
   sanitizePromptInjection,
   validatePublicWebUrl,
+  canonicalizeUrl,
+  rankSearchResults,
+  deduplicateAndRankResults,
 } from "./search-lib.ts";
 
 describe("search-gateway parseSearchBody", () => {
@@ -253,4 +256,72 @@ describe("search-gateway Firecrawl normalization", () => {
     expect(first.title).toBe("Scraped Article");
   });
 });
+
+describe("search-gateway canonicalizeUrl", () => {
+  it("strips tracking parameters, fragments, and trailing slashes", () => {
+    const raw = "https://EXAMPLE.com/docs/guide/?utm_source=twitter&utm_medium=social&fbclid=123#section-1";
+    const canonical = canonicalizeUrl(raw);
+    expect(canonical).toBe("https://example.com/docs/guide");
+  });
+
+  it("preserves non-tracking query parameters", () => {
+    const raw = "https://example.com/search?q=rust&utm_campaign=winter";
+    const canonical = canonicalizeUrl(raw);
+    expect(canonical).toBe("https://example.com/search?q=rust");
+  });
+});
+
+describe("search-gateway deduplicateAndRankResults", () => {
+  it("deduplicates by canonical URL and merges provider provenance", () => {
+    const rawResults = [
+      {
+        url: "https://example.com/docs/react?utm_source=twitter",
+        title: "React Overview",
+        snippet: "Short",
+        provider: "linkup",
+      },
+      {
+        url: "https://example.com/docs/react?fbclid=xyz",
+        title: "React Full Guide",
+        snippet: "This is a much longer and more informative snippet explaining React components in depth.",
+        provider: "exa",
+        content: "Complete guide content here",
+      },
+    ];
+
+    const deduplicated = deduplicateAndRankResults(rawResults, "React components", 5);
+    expect(deduplicated).toHaveLength(1);
+    const item = deduplicated[0];
+    expect(item.canonicalUrl).toBe("https://example.com/docs/react");
+    expect(item.content).toBe("Complete guide content here");
+    expect(item.retrievalMethod).toBe("linkup+exa");
+    expect(item.provenance?.contributingSources).toContain("linkup");
+    expect(item.provenance?.contributingSources).toContain("exa");
+    expect(item.provenance?.contentFetched).toBe(true);
+    expect(item.provenance?.rankingStage).toBe("multi_signal_ranked");
+  });
+
+  it("applies multi-signal ranking and domain diversity", () => {
+    const items = [
+      {
+        url: "https://blog.example.com/post1",
+        title: "Random post",
+        snippet: "Something unrelated",
+        provider: "linkup",
+      },
+      {
+        url: "https://docs.rust-lang.org/book/ch01.html",
+        title: "Rust Programming Language Book Chapter 1",
+        snippet: "Getting started with Rust programming language and tools",
+        provider: "exa",
+      },
+    ];
+
+    const ranked = deduplicateAndRankResults(items, "Rust programming", 5);
+    expect(ranked[0].url).toContain("rust-lang.org");
+    expect(ranked[0].rank).toBe(1);
+    expect(ranked[0].score).toBeGreaterThan(ranked[1].score ?? 0);
+  });
+});
+
 

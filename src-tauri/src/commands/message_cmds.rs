@@ -1800,8 +1800,43 @@ async fn send_message_inner(
     let mut live_text_accum = String::new();
     let mut last_preview = String::new();
     let mut text_seq: u64 = 0;
-    // Stable id for this send_message turn's Text events (registry follow-up).
-    let turn_id = Uuid::new_v4().to_string();
+    let turn_idem_key = format!("turn-idem-{}", Uuid::new_v4());
+    let turn_record = {
+        let db = state.db.lock();
+        crate::runtime_v2::create_turn(
+            &db,
+            &conversation_id,
+            project_id.as_deref(),
+            &turn_idem_key,
+            Some("interactive"),
+        )
+        .ok()
+    };
+    let (turn_id, attempt_id) = match &turn_record {
+        Some(rec) => (rec.id.clone(), rec.attempt_id.clone()),
+        None => (Uuid::new_v4().to_string(), Uuid::new_v4().to_string()),
+    };
+    if turn_record.is_some() {
+        let db = state.db.lock();
+        let _ = crate::runtime_v2::transition_turn(
+            &db,
+            &turn_id,
+            &attempt_id,
+            crate::runtime_v2::TurnState::Claimed,
+            Default::default(),
+        );
+        let _ = crate::runtime_v2::transition_turn(
+            &db,
+            &turn_id,
+            &attempt_id,
+            crate::runtime_v2::TurnState::ProviderStarted,
+            crate::runtime_v2::TurnPatch {
+                provider: Some(access.credentials.provider.clone()),
+                model: Some(model_preference.clone()),
+                ..Default::default()
+            },
+        );
+    }
     let progressive_ops_enabled = provider_supports_progressive_ops(&access.credentials.provider);
     // Progressive coreside.ops.v1 parser — preview only until valid terminal.
     // Do not bind turnId/attemptId until the runtime advertises them to the
@@ -1823,7 +1858,7 @@ async fn send_message_inner(
             system_prompt: system_prompt.clone(),
             messages: chat_messages.clone(),
             cancel: cancel.clone(),
-            idempotency_key: Some(Uuid::new_v4().to_string()),
+            idempotency_key: Some(turn_idem_key.clone()),
         },
         move |label| {
             let key = api_key_for_cb.as_deref();
@@ -1894,6 +1929,25 @@ async fn send_message_inner(
     let mut resolved = match resolved {
         Ok(r) => r,
         Err(e) => {
+            if turn_record.is_some() {
+                let db = state.db.lock();
+                let (cat, msg) = if matches!(e, crate::ai::AiError::Cancelled) {
+                    ("cancelled", "User cancelled request")
+                } else {
+                    ("provider_error", e.code())
+                };
+                let _ = crate::runtime_v2::transition_turn(
+                    &db,
+                    &turn_id,
+                    &attempt_id,
+                    crate::runtime_v2::TurnState::Failed,
+                    crate::runtime_v2::TurnPatch {
+                        error_category: Some(cat.into()),
+                        error_message: Some(msg.into()),
+                        ..Default::default()
+                    },
+                );
+            }
             if matches!(e, crate::ai::AiError::Cancelled) {
                 preview_txn.mark_interrupted();
                 note_timeline(state, &conversation_id, &turn_id, "cancellation", json!({}));
@@ -2176,6 +2230,25 @@ async fn send_message_inner(
         resolved = match follow_up {
             Ok(r) => r,
             Err(e) => {
+                if turn_record.is_some() {
+                    let db = state.db.lock();
+                    let (cat, msg) = if matches!(e, crate::ai::AiError::Cancelled) {
+                        ("cancelled", "User cancelled request")
+                    } else {
+                        ("provider_error", e.code())
+                    };
+                    let _ = crate::runtime_v2::transition_turn(
+                        &db,
+                        &turn_id,
+                        &attempt_id,
+                        crate::runtime_v2::TurnState::Failed,
+                        crate::runtime_v2::TurnPatch {
+                            error_category: Some(cat.into()),
+                            error_message: Some(msg.into()),
+                            ..Default::default()
+                        },
+                    );
+                }
                 if matches!(e, crate::ai::AiError::Cancelled) {
                     preview_txn.mark_interrupted();
                     note_timeline(state, &conversation_id, &turn_id, "cancellation", json!({}));
@@ -2223,6 +2296,24 @@ async fn send_message_inner(
             CommandError::sanitized("parse", e, api_key_ref)
         })?;
         parsed.payload.normalize_for_frontend();
+    }
+
+    if turn_record.is_some() {
+        let db = state.db.lock();
+        let _ = crate::runtime_v2::transition_turn(
+            &db,
+            &turn_id,
+            &attempt_id,
+            crate::runtime_v2::TurnState::TypedTerminal,
+            Default::default(),
+        );
+        let _ = crate::runtime_v2::transition_turn(
+            &db,
+            &turn_id,
+            &attempt_id,
+            crate::runtime_v2::TurnState::Finalizing,
+            Default::default(),
+        );
     }
 
     state.take_request(&request_key);
@@ -2783,6 +2874,27 @@ async fn send_message_inner(
         }
     };
 
+    if turn_record.is_some() {
+        let db = state.db.lock();
+        let _ = crate::runtime_v2::transition_turn(
+            &db,
+            &turn_id,
+            &attempt_id,
+            crate::runtime_v2::TurnState::Committed,
+            crate::runtime_v2::TurnPatch {
+                provisional_text: Some(parsed.payload.assistant_message.clone()),
+                ..Default::default()
+            },
+        );
+        let _ = crate::runtime_v2::transition_turn(
+            &db,
+            &turn_id,
+            &attempt_id,
+            crate::runtime_v2::TurnState::Published,
+            Default::default(),
+        );
+    }
+
     note_timeline(state, &conversation_id, &turn_id, "completion", json!({}));
 
     // Bind inline surfaces created this turn to the assistant message when unset,
@@ -2964,7 +3076,9 @@ mod citation_integrity_tests {
         assert_eq!(grounded[0].url, "https://docs.example.com/api");
         assert!(!grounded[0].title.contains("System override"));
         assert!(!grounded[0].title.contains("Ignore previous instructions"));
-        assert!(grounded[0].title.contains("[neutralized_instruction_override]"));
+        assert!(grounded[0]
+            .title
+            .contains("[neutralized_instruction_override]"));
         assert!(grounded[0].title.contains("[neutralized_override]"));
     }
 

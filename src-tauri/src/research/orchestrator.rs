@@ -164,6 +164,7 @@ pub fn deduplicate_and_rank_results(
     for mut result in results {
         let canonical = canonicalize_url(&result.url).unwrap_or_else(|| result.url.clone());
         result.canonical_url = Some(canonical.clone());
+        result.ensure_provenance();
 
         if seen_urls.insert(canonical) {
             deduplicated.push(result);
@@ -191,6 +192,16 @@ pub fn deduplicate_and_rank_results(
                 if let (Some(p1), Some(p2)) = (&existing.provider, &result.provider) {
                     if p1 != p2 && !p1.contains(p2.as_str()) {
                         existing.retrieval_method = Some(format!("{p1}+{p2}"));
+                    }
+                }
+                existing.ensure_provenance();
+                if let Some(prov) = existing.provenance.as_mut() {
+                    let other_prov = result.provider.unwrap_or_else(|| "unknown".into());
+                    if !prov.contributing_sources.contains(&other_prov) {
+                        prov.contributing_sources.push(other_prov);
+                    }
+                    if existing.content.is_some() {
+                        prov.content_fetched = true;
                     }
                 }
             }
@@ -332,31 +343,19 @@ mod tests {
             url: "https://example.com/post?utm_source=rss".into(),
             display_domain: Some("example.com".into()),
             snippet: Some("Snippet 1".into()),
-            age: None,
             rank: 1,
             provider: Some("linkup".into()),
-            canonical_url: None,
-            content: None,
-            highlights: None,
-            fetched_at: None,
-            retrieval_method: None,
-            score: None,
+            ..Default::default()
         };
         let r2 = WebSearchResult {
             id: "2".into(),
             title: "Article".into(),
             url: "https://example.com/post#comments".into(),
             display_domain: Some("example.com".into()),
-            snippet: None,
-            age: None,
             rank: 2,
             provider: Some("firecrawl".into()),
-            canonical_url: None,
             content: Some("Full content".into()),
-            highlights: None,
-            fetched_at: None,
-            retrieval_method: None,
-            score: None,
+            ..Default::default()
         };
 
         let deduped = deduplicate_results(vec![r1, r2]);
@@ -364,6 +363,15 @@ mod tests {
         assert_eq!(deduped[0].snippet.as_deref(), Some("Snippet 1"));
         assert_eq!(deduped[0].content.as_deref(), Some("Full content"));
         assert_eq!(deduped[0].rank, 1);
+        assert!(deduped[0].provenance.is_some());
+        let prov = deduped[0].provenance.as_ref().unwrap();
+        assert!(prov.contributing_sources.contains(&"linkup".to_string()));
+        assert!(prov.contributing_sources.contains(&"firecrawl".to_string()));
+        assert_eq!(
+            prov.canonical_url.as_deref(),
+            Some("https://example.com/post")
+        );
+        assert!(prov.content_fetched);
     }
 
     #[test]

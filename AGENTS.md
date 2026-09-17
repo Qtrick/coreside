@@ -69,9 +69,31 @@ Project-scoped Codex agent definitions reside under `.codex/agents/`.
 
 ---
 
-## 7. Mandatory Session Close: Suggested Commit Message
-ALWAYS, after every work session, the agent (Codex, Cursor, Antigravity, or any other AI assistant) MUST provide a suggested commit message following Conventional Commits standards:
-- **Prefixes**: Standard types such as `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`, `perf:`, `build:` (optionally with scope e.g., `feat(dock):`, `fix(migration):`).
+## 7. Mandatory Session Close: Suggested Commit Message & Shared Discipline
+ALWAYS, after every work session, the agent (Codex, Cursor, Antigravity, Claude Code, OpenCode, or any other AI assistant) MUST provide a suggested commit message following Conventional Commits standards:
+- **Format**: Conventional Commits standard (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`, `perf:`, `build:`, optionally scoped, e.g., `feat(search):`, `fix(runtime):`).
 - **Subject**: Imperative mood, lowercase, concise (50-72 chars max), no trailing period.
-- **Body**: Detailed breakdown explaining *what* changed and *why*, referencing specific files, components, models, and evidence/testing outcomes.
+- **Copy/Paste-Safe Rules (STRICT)**:
+  - MUST NOT contain any double quote (`"`) characters anywhere in the commit message.
+  - MUST NOT wrap the subject line in surrounding quotation marks (single or double).
+  - MUST NOT wrap the subject line in Markdown code fences or backticks when presented for copying.
+  - MUST NOT prepend `git commit -m` or shell commands unless explicitly requested by the user.
+  - The final response should provide the subject on a clean, single line:
+    Suggested Conventional Commit:
+    feat(scope): concise imperative subject
+- **Body**: Detailed breakdown explaining *what* changed and *why*, referencing specific files, components, models, and evidence/testing outcomes (without using double quotes).
 - **Footer**: Any breaking change notes, issue references, or release milestone tags.
+
+---
+
+## 8. Shared Cross-Agent Operating Protocol
+Every AI assistant operating in this repository must uphold these shared behaviors:
+1. **Inspect before modifying**: Read actual source code; do not assume documented functionality exists without inspecting implementations.
+2. **Research before deciding**: Verify third-party APIs and protocols rather than assuming legacy behavior.
+3. **Implement, do not merely recommend**: When an issue is within scope, build the minimal production-quality fix rather than writing a TODO or audit-only note.
+4. **Test rigorously**: Add regression coverage for every bug fix or architectural addition. Never weaken tests to force a pass.
+5. **Review integrated diff**: Audit the live diff for race conditions, security boundaries, and persistence. Repair conclusive issues immediately.
+6. **Integrity of claims**: Never claim production readiness or visual verification without active, reproducible evidence.
+7. **No unprompted git mutations**: Never run `git add`, `git commit`, or `git push` automatically without explicit user instruction.
+8. **Preserve user work**: Keep unrelated modified files intact.
+9. **Standard close**: Conclude with `git status --short` and the copy/paste-safe suggested Conventional Commit.

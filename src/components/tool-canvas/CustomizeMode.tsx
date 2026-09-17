@@ -16,7 +16,9 @@ import {
   Layout,
   Type,
   CheckCircle2,
+  Undo2,
 } from "lucide-react";
+import { api } from "@/lib/tauri";
 import type { ToolComponent, ToolDefinition, LayoutRole } from "@/types/tool";
 import {
   applyDirectManipulationOps,
@@ -162,6 +164,7 @@ export function CustomizeMode({
   const [error, setError] = useState<string | null>(null);
   const [showPalette, setShowPalette] = useState(false);
   const [paletteCategory, setPaletteCategory] = useState<string>("all");
+  const [undoStack, setUndoStack] = useState<string[]>([]);
 
   const rows = useMemo(
     () => flattenComponents(tool.components ?? []),
@@ -205,12 +208,36 @@ export function CustomizeMode({
     setError(null);
     setSuccessMsg(null);
     try {
-      await applyDirectManipulationOps({
+      const patches = await applyDirectManipulationOps({
         conversationId,
         surfaceId,
         operations,
       });
+      if (Array.isArray(patches)) {
+        for (const patch of patches) {
+          if (patch.transactionId) {
+            setUndoStack((prev) => [...prev, patch.transactionId!]);
+          }
+        }
+      }
       if (successNote) setSuccessMsg(successNote);
+      onApplied?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleUndo = async () => {
+    if (undoStack.length === 0) return;
+    const lastTxnId = undoStack[undoStack.length - 1];
+    setBusy(true);
+    setError(null);
+    try {
+      await api.undoTransaction(lastTxnId);
+      setUndoStack((prev) => prev.slice(0, -1));
+      setSuccessMsg("Undid last change");
       onApplied?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -422,6 +449,17 @@ export function CustomizeMode({
               <span className="muted">Click any component to inspect</span>
             </div>
             <div className="button-row">
+              {undoStack.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-secondary"
+                  disabled={busy}
+                  onClick={() => void handleUndo()}
+                  title="Undo last change"
+                >
+                  <Undo2 size={14} aria-hidden /> Undo
+                </button>
+              )}
               <button
                 type="button"
                 className={`btn btn-sm ${showPalette ? "btn-primary" : "btn-secondary"}`}

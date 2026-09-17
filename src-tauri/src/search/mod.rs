@@ -27,7 +27,8 @@ pub use history::{
 pub use images::image_search;
 pub use models::{
     FetchedWebPage, ImageSearchResponse, ImageSearchResult, ResearchIntent, SafeSearchLevel,
-    VideoSearchResponse, VideoSearchResult, WebSearchResponse, WebSearchResult,
+    SearchResultProvenance, VideoSearchResponse, VideoSearchResult, WebSearchResponse,
+    WebSearchResult,
 };
 pub use normalization::{
     bound_text, normalize_image_results, normalize_video_results, normalize_web_results,

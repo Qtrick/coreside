@@ -310,6 +310,7 @@ pub async fn search(
                 fetched_at: Some(crate::db::now_rfc3339()),
                 retrieval_method: Some("firecrawl_search".into()),
                 score: None,
+                ..Default::default()
             })
         })
         .collect::<Vec<_>>();
@@ -376,7 +377,8 @@ pub async fn scrape(raw_url: &str) -> Result<FetchedWebPage, SearchError> {
     let final_url = data
         .metadata
         .as_ref()
-        .and_then(|m| m.source_url.clone())
+        .and_then(|m| m.source_url.as_deref())
+        .and_then(|u| validate_public_http_url(u).ok().map(|url| url.to_string()))
         .unwrap_or_else(|| safe_url.to_string());
     Ok(FetchedWebPage {
         url: safe_url.to_string(),
@@ -447,5 +449,21 @@ mod tests {
         assert!(parsed.success);
         assert_eq!(parsed.data.len(), 1);
         assert_eq!(parsed.credits_used, Some(2));
+    }
+
+    #[test]
+    fn scrape_metadata_rejects_ssrf_source_url() {
+        let safe_url = "https://example.com/article";
+        let bad_source = "http://169.254.169.254/latest/meta-data";
+        let resolved = Some(bad_source)
+            .and_then(|u| validate_public_http_url(u).ok().map(|url| url.to_string()))
+            .unwrap_or_else(|| safe_url.to_string());
+        assert_eq!(resolved, safe_url);
+
+        let good_source = "https://1.1.1.1/canonical-article";
+        let resolved_good = Some(good_source)
+            .and_then(|u| validate_public_http_url(u).ok().map(|url| url.to_string()))
+            .unwrap_or_else(|| safe_url.to_string());
+        assert_eq!(resolved_good, good_source);
     }
 }

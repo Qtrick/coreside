@@ -95,6 +95,7 @@ impl SearchProvider for HybridSearchProvider {
                                 fetched_at: Some(crate::db::now_rfc3339()),
                                 retrieval_method: Some("firecrawl_scrape".into()),
                                 score: None,
+                                ..Default::default()
                             };
                             WebSearchResponse {
                                 query: req.query.clone(),
@@ -583,7 +584,8 @@ async fn enrich_with_crawl(
     for ((idx, _), enrichment) in candidates_to_enrich.into_iter().zip(enriched_data) {
         if let Some((new_title, new_snippet)) = enrichment {
             let result = &mut results[idx];
-            if (result.title.trim().is_empty() || result.title == result.url) && new_title.is_some() {
+            if (result.title.trim().is_empty() || result.title == result.url) && new_title.is_some()
+            {
                 result.title = new_title.unwrap();
             }
             if let Some(snippet) = new_snippet {
@@ -657,6 +659,9 @@ mod tests {
         let enriched = enrich_with_crawl(&crawl, items.clone(), 1).await;
         assert_eq!(enriched.len(), 1);
         assert_eq!(enriched[0].title, "Already Rich");
-        assert_eq!(enriched[0].content.as_deref(), Some("Full content already fetched"));
+        assert_eq!(
+            enriched[0].content.as_deref(),
+            Some("Full content already fetched")
+        );
     }
 }

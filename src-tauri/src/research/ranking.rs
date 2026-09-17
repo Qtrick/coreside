@@ -79,9 +79,9 @@ pub fn rank_web_candidates(
 }
 
 const STOP_WORDS: &[&str] = &[
-    "the", "and", "for", "with", "what", "how", "are", "this", "that", "from",
-    "when", "where", "which", "who", "why", "can", "you", "does", "about",
-    "into", "over", "after", "before", "between", "some", "then",
+    "the", "and", "for", "with", "what", "how", "are", "this", "that", "from", "when", "where",
+    "which", "who", "why", "can", "you", "does", "about", "into", "over", "after", "before",
+    "between", "some", "then",
 ];
 
 /// Multi-signal ranking for normalized search results from one or more providers.
@@ -179,7 +179,8 @@ pub fn rank_search_results(results: &mut Vec<WebSearchResult>, query: &str) {
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
     // Domain diversity pass: apply slight dampening if the same domain dominates top results
-    let mut domain_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut domain_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
     let mut diversified: Vec<(f64, usize)> = Vec::with_capacity(scored.len());
 
     for (score, orig_idx) in scored {
@@ -207,6 +208,10 @@ pub fn rank_search_results(results: &mut Vec<WebSearchResult>, query: &str) {
         if let Some(mut r) = orig_map.remove(&orig_idx) {
             r.rank = new_rank + 1;
             r.score = Some((final_score * 100.0).round() / 100.0);
+            r.ensure_provenance();
+            if let Some(prov) = r.provenance.as_mut() {
+                prov.ranking_stage = Some("multi_signal_ranked".into());
+            }
             results.push(r);
         }
     }
@@ -290,7 +295,9 @@ mod tests {
                 title: "Architecture Guide".into(),
                 url: "https://example.com/guide".into(),
                 display_domain: Some("example.com".into()),
-                snippet: Some("A comprehensive study on \"local-first architecture\" in 2026".into()),
+                snippet: Some(
+                    "A comprehensive study on \"local-first architecture\" in 2026".into(),
+                ),
                 rank: 2,
                 provider: Some("linkup".into()),
                 ..Default::default()

@@ -51,9 +51,13 @@ pub fn run() {
         "Coreside starting"
     );
 
+    #[allow(unused_mut)]
     let (mut database, bootstrap) = db::open_profile_or_shell();
     if bootstrap.is_ready() {
         let _ = db::ensure_default_workspace(&database);
+        if let Err(e) = crate::runtime_v2::mark_interrupted_in_flight(&database) {
+            tracing::warn!(error = %e, "failed to mark interrupted in-flight turns");
+        }
         #[cfg(feature = "e2e")]
         e2e_support::maybe_seed(&mut database);
     } else {

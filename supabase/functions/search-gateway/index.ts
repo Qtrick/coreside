@@ -13,6 +13,7 @@ import {
   normalizeFirecrawlResults,
   normalizeFirecrawlScrapeResult,
   validatePublicWebUrl,
+  deduplicateAndRankResults,
   type SearchRequestBody,
 } from "./search-lib.ts";
 
@@ -445,23 +446,14 @@ Deno.serve(async (req) => {
 
       const settled = await Promise.allSettled(promises);
       const merged: unknown[] = [];
-      const seenUrls = new Set<string>();
       for (const res of settled) {
         if (res.status === "fulfilled" && Array.isArray(res.value)) {
-          for (const item of res.value) {
-            if (item && typeof item === "object") {
-              const u = (item as Record<string, unknown>).url;
-              if (typeof u === "string" && !seenUrls.has(u)) {
-                seenUrls.add(u);
-                merged.push(item);
-              }
-            }
-          }
+          merged.push(...res.value);
         }
       }
 
       if (merged.length > 0) {
-        results = merged.slice(0, numResults);
+        results = deduplicateAndRankResults(merged, body.query, numResults);
         usedProvider = "hybrid";
       }
     }

@@ -236,6 +236,26 @@ function CanvasWallpaper({
     let particles: Particle[] = [];
     const t0 = performance.now();
 
+    // Cache particle sprite on offscreen canvas to avoid thousands of createRadialGradient allocations per second
+    const spriteSize = 64;
+    let particleSprite: HTMLCanvasElement | null = null;
+    if (typeof document !== "undefined") {
+      const offscreen = document.createElement("canvas");
+      offscreen.width = spriteSize;
+      offscreen.height = spriteSize;
+      const offCtx = offscreen.getContext("2d");
+      if (offCtx) {
+        const half = spriteSize / 2;
+        const aura = offCtx.createRadialGradient(half, half, half * 0.08, half, half, half);
+        aura.addColorStop(0, color);
+        aura.addColorStop(0.4, secondaryColor);
+        aura.addColorStop(1, "transparent");
+        offCtx.fillStyle = aura;
+        offCtx.fillRect(0, 0, spriteSize, spriteSize);
+        particleSprite = offscreen;
+      }
+    }
+
     const spawn = () => {
       const count = Math.round(40 + density * 120);
       particles = Array.from({ length: count }, () => ({
@@ -369,15 +389,20 @@ function CanvasWallpaper({
             const particleAlpha = opacity * p.a * (0.7 + 0.3 * Math.sin(t * 2 + p.x));
             ctx.globalAlpha = Math.min(1, Math.max(0.05, particleAlpha));
 
-            // Soft glow aura
-            const aura = ctx.createRadialGradient(p.x, p.y, p.r * 0.2, p.x, p.y, p.r * 2.8);
-            aura.addColorStop(0, color);
-            aura.addColorStop(0.4, secondaryColor);
-            aura.addColorStop(1, "transparent");
-            ctx.fillStyle = aura;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, p.r * 2.8, 0, Math.PI * 2);
-            ctx.fill();
+            // Soft glow aura (using offscreen sprite cache for 60fps GC-free rendering)
+            const drawR = p.r * 2.8;
+            if (particleSprite) {
+              ctx.drawImage(particleSprite, p.x - drawR, p.y - drawR, drawR * 2, drawR * 2);
+            } else {
+              const aura = ctx.createRadialGradient(p.x, p.y, p.r * 0.2, p.x, p.y, p.r * 2.8);
+              aura.addColorStop(0, color);
+              aura.addColorStop(0.4, secondaryColor);
+              aura.addColorStop(1, "transparent");
+              ctx.fillStyle = aura;
+              ctx.beginPath();
+              ctx.arc(p.x, p.y, p.r * 2.8, 0, Math.PI * 2);
+              ctx.fill();
+            }
 
             // Core luminous point
             ctx.fillStyle = "#ffffff";

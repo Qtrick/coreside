@@ -129,8 +129,8 @@ export async function applyDirectManipulationOps(args: {
   conversationId?: string | null;
   surfaceId: string;
   operations: AppOperation[];
-}): Promise<void> {
-  await api.schedulePatches({
+}): Promise<import("@/types/runtime-v2").ScheduledPatch[]> {
+  return await api.schedulePatches({
     conversationId: args.conversationId ?? null,
     surfaceId: args.surfaceId,
     priority: "direct_user_interaction",
