@@ -607,6 +607,33 @@ describe("collectTargets security boundary", () => {
     expect(result.errors.some((e) => e.includes("not state-bindable"))).toBe(true);
     expect(result.state).toEqual({});
   });
+
+  it("blocks action outcome if outcome sensitivity is privileged or ephemeral even if stateBindable was true", async () => {
+    const onInvokeRegisteredAction = vi.fn().mockResolvedValue({
+      status: "ok",
+      data: { secretToken: "sensitive-token-123" },
+      stateBindable: true,
+      sensitivity: "privileged",
+    });
+
+    const action: ActionDefinition = {
+      type: "invokeRegisteredAction",
+      actionName: "local_data.query",
+      input: { modelId: "notes" },
+      resultKey: "queryResult",
+    };
+
+    const result = await applyAction(action, {
+      state: {},
+      toolId: "test-tool",
+      allowedTargets: new Set(["queryResult"]),
+      onInvokeRegisteredAction,
+    });
+
+    expect(onInvokeRegisteredAction).toHaveBeenCalled();
+    expect(result.errors.some((e) => e.includes("not state-bindable"))).toBe(true);
+    expect(result.state).toEqual({});
+  });
 });
 
 describe("adversarial security tests", () => {

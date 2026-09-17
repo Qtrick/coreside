@@ -17,6 +17,7 @@ pub enum AgentCapability {
     FetchWebPage,
     InspectMediaResult,
     ImportMediaAsset,
+    GetUiKnowledge,
     NoAction,
 }
 
@@ -31,6 +32,7 @@ impl AgentCapability {
             Self::FetchWebPage => "fetch_web_page",
             Self::InspectMediaResult => "inspect_media_result",
             Self::ImportMediaAsset => "import_media_asset",
+            Self::GetUiKnowledge => "get_ui_knowledge",
             Self::NoAction => "no_action",
         }
     }
@@ -54,6 +56,9 @@ impl AgentCapability {
             "inspect_media_result" => Some(Self::InspectMediaResult),
             "import_media_asset" | "import_media_candidate" => Some(Self::ImportMediaAsset),
             "propose_live_wallpaper" => Some(Self::ImportMediaAsset),
+            "get_ui_knowledge" | "ui_knowledge" | "search_ui_knowledge" => {
+                Some(Self::GetUiKnowledge)
+            }
             "cancel_research" | "no_action" => Some(Self::NoAction),
             _ => None,
         }
@@ -170,6 +175,17 @@ pub fn capability_schemas() -> Vec<Value> {
             }),
         ),
         schema(
+            AgentCapability::GetUiKnowledge,
+            "Retrieve architecture patterns, layout archetypes, component composition guidance, and state lifecycle contracts from Coreside's UI knowledge catalog.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "The UI problem, tool archetype, or component pattern to retrieve (e.g. 'research dashboard', 'settings editor', 'crud table')" }
+                },
+                "required": ["query"]
+            }),
+        ),
+        schema(
             AgentCapability::NoAction,
             "cancel_research / no_action: stop or skip tools for this step",
             json!({ "type": "object", "properties": {} }),
@@ -207,6 +223,9 @@ pub fn validate_tool_call(req: &ToolCallRequest) -> Result<AgentCapability, Stri
             if req.arguments.get("assetId").is_none() && req.arguments.get("resultId").is_none() {
                 return Err("inspect_media_result requires assetId or resultId".into());
             }
+        }
+        AgentCapability::GetUiKnowledge => {
+            require_str(&req.arguments, "query")?;
         }
         AgentCapability::GetProjectSummary | AgentCapability::NoAction => {}
     }

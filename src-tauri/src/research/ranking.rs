@@ -523,5 +523,89 @@ mod tests {
         ];
         rank_search_results(&mut ambig_results, "rust");
         assert_eq!(ambig_results[0].id, "lang");
+
+        // 9. Navigational query: official root domain lookup
+        let mut nav_results = vec![
+            WebSearchResult {
+                id: "third_party_guide".into(),
+                title: "Getting Started with Tauri Framework".into(),
+                url: "https://tutorialspoint.com/tauri-getting-started".into(),
+                display_domain: Some("tutorialspoint.com".into()),
+                ..Default::default()
+            },
+            WebSearchResult {
+                id: "official_home".into(),
+                title: "Tauri Apps: Build smaller, faster, and more secure desktop applications".into(),
+                url: "https://tauri.app/".into(),
+                display_domain: Some("tauri.app".into()),
+                snippet: Some("Tauri is an app construction toolkit that lets you build desktop applications.".into()),
+                ..Default::default()
+            },
+        ];
+        rank_search_results(&mut nav_results, "tauri app homepage");
+        assert_eq!(nav_results[0].id, "official_home");
+
+        // 10. Long-tail conversational technical query
+        let mut longtail_results = vec![
+            WebSearchResult {
+                id: "broad".into(),
+                title: "Async programming in Rust".into(),
+                url: "https://example.com/rust-async".into(),
+                display_domain: Some("example.com".into()),
+                snippet: Some("Overview of futures and tasks in rust async.".into()),
+                ..Default::default()
+            },
+            WebSearchResult {
+                id: "precise_match".into(),
+                title: "Handling backpressure and unbounded memory growth in tokio channels".into(),
+                url: "https://tokio.rs/blog/backpressure".into(),
+                display_domain: Some("tokio.rs".into()),
+                snippet: Some("How to prevent unbounded memory growth by configuring bounded mpsc channel backpressure.".into()),
+                ..Default::default()
+            },
+        ];
+        rank_search_results(
+            &mut longtail_results,
+            "how to avoid unbounded memory growth with backpressure in tokio channels",
+        );
+        assert_eq!(longtail_results[0].id, "precise_match");
+
+        // Aggregate Quantitative Evaluation: Compute MRR and Top-1 across all 10 query classes
+        let test_cases = [
+            (&doc_results, "official"),
+            (&research_results, "paper"),
+            (&news_results, "fresh"),
+            (&company_results, "company"),
+            (&tech_results, "specific"),
+            (&domain_results, "docs_rs"),
+            (&compare_results, "comparison"),
+            (&ambig_results, "lang"),
+            (&nav_results, "official_home"),
+            (&longtail_results, "precise_match"),
+        ];
+
+        let mut reciprocal_ranks = Vec::new();
+        let mut top_1_hits = 0;
+
+        for (results, expected_id) in &test_cases {
+            if let Some(pos) = results.iter().position(|r| r.id == *expected_id) {
+                let rank = pos + 1;
+                reciprocal_ranks.push(1.0 / (rank as f64));
+                if rank == 1 {
+                    top_1_hits += 1;
+                }
+            } else {
+                reciprocal_ranks.push(0.0);
+            }
+        }
+
+        let mrr: f64 = reciprocal_ranks.iter().sum::<f64>() / (test_cases.len() as f64);
+        let top_1_acc = (top_1_hits as f64) / (test_cases.len() as f64);
+
+        assert!(mrr >= 0.95, "MRR must be >= 0.95, got {mrr:.3}");
+        assert!(
+            top_1_acc >= 0.90,
+            "Top-1 accuracy must be >= 0.90, got {top_1_acc:.3}"
+        );
     }
 }

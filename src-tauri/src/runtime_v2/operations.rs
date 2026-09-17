@@ -164,6 +164,12 @@ pub const SUPPORTED_MODEL_OPERATIONS: &[&str] = &[
     "chat.inline_surface_remove",
     "chat.status",
     "chat.notification",
+    "surface.add_section",
+    "surface.remove_section",
+    "surface.update_section",
+    "component.bind_state",
+    "component.bind_action",
+    "component.set_style_token",
 ];
 
 /// Internal operations used by host subsystems and commands (not directly model-facing).

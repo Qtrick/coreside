@@ -330,7 +330,7 @@ pub async fn search(
 /// Scrape a single URL and return clean Markdown.  Used for deep extraction
 /// from pages where provider snippets are insufficient (JS-heavy, PDF, etc.).
 pub async fn scrape(raw_url: &str) -> Result<FetchedWebPage, SearchError> {
-    let safe_url = validate_public_http_url(raw_url)?;
+    let safe_url = crate::search::authorize_remote_provider_fetch(raw_url, "firecrawl")?;
     let credentials = resolve_credentials();
     let key = credentials.api_key.ok_or_else(|| {
         SearchError::NotConfigured("Configure Firecrawl or set FIRECRAWL_API_KEY for scrape".into())

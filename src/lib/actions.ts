@@ -1,4 +1,5 @@
 import type { ActionDefinition, ToolComponent, ToolState } from "@/types/tool";
+import type { OutputSensitivity } from "@/types/application-kernel";
 
 export interface DeclaredBindings {
   readable: Set<string>;
@@ -162,8 +163,13 @@ export function isStateBindableAction(actionName: string): boolean {
   return !NON_STATE_BINDABLE_ACTIONS.has(actionName);
 }
 
+export function isStateBindableSensitivity(sensitivity?: OutputSensitivity): boolean {
+  if (!sensitivity) return true;
+  return sensitivity === "public" || sensitivity === "state_bindable";
+}
+
 export type RegisteredActionOutcome =
-  | { status: "ok"; data?: unknown; stateBindable?: boolean }
+  | { status: "ok"; data?: unknown; stateBindable?: boolean; sensitivity?: OutputSensitivity }
   | { status: "pendingApproval"; approvalId?: string; reason?: string }
   | { status: "error"; message: string }
   | { status: "blocked"; reason: string }
@@ -444,7 +450,11 @@ export function applyAction(
           pendingTasks.push(
             task.then((outcome) => {
               if (outcome && typeof outcome === "object" && outcome.status === "ok" && action.resultKey) {
-                if (!outcome.stateBindable || !isStateBindableAction(action.actionName)) {
+                if (
+                  !outcome.stateBindable ||
+                  !isStateBindableAction(action.actionName) ||
+                  !isStateBindableSensitivity(outcome.sensitivity)
+                ) {
                   errors.push(`Action "${action.actionName}" is not state-bindable`);
                   return;
                 }
@@ -565,7 +575,11 @@ export async function applyActionsAsync(
         if (outcome && typeof outcome === "object") {
           if (outcome.status === "ok") {
             if (action.resultKey) {
-              if (!outcome.stateBindable || !isStateBindableAction(action.actionName)) {
+              if (
+                !outcome.stateBindable ||
+                !isStateBindableAction(action.actionName) ||
+                !isStateBindableSensitivity(outcome.sensitivity)
+              ) {
                 errors.push(`Action "${action.actionName}" is not state-bindable`);
                 break;
               }

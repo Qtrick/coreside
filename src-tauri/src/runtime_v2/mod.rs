@@ -17,11 +17,16 @@ pub mod preview_transaction;
 pub mod progressive_ops;
 pub mod provider_conformance;
 pub mod queue;
+pub mod software_document;
 pub mod streaming;
 pub mod surfaces;
 pub mod transactions;
 pub mod turn_journal;
 pub mod turn_timeline;
+
+pub use software_document::{
+    ActionContract, DocumentSection, RepairNote, SoftwareDocument, StateContract,
+};
 
 #[allow(unused_imports)]
 pub use app_routes::{

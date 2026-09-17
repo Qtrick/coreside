@@ -518,11 +518,162 @@ fn default_schema_version() -> String {
     SCHEMA_VERSION.to_string()
 }
 
+/// Normalizes raw model-generated operation JSON into schema-compliant AppOperation JSON.
+/// Generates missing operation IDs, lifts top-level target properties into `target`,
+/// and packages payload fields into `payload`.
+pub fn normalize_raw_operation(val: &Value, idx: usize) -> Value {
+    let Some(obj) = val.as_object() else {
+        return val.clone();
+    };
+
+    let mut out = obj.clone();
+
+    // 1. Ensure id
+    if !out.contains_key("id")
+        || out
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true)
+    {
+        out.insert(
+            "id".into(),
+            json!(format!("op-{}-{}", idx + 1, uuid::Uuid::new_v4())),
+        );
+    }
+
+    // 2. Ensure type
+    if !out.contains_key("type") {
+        if let Some(op) = out
+            .get("op")
+            .cloned()
+            .or_else(|| out.get("op_type").cloned())
+        {
+            out.insert("type".into(), op);
+        }
+    }
+
+    // 3. Normalize target
+    let mut target = out
+        .get("target")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+
+    let target_fields = [
+        ("surfaceId", "surface_id"),
+        ("surfaceType", "surface_type"),
+        ("instanceId", "instance_id"),
+        ("componentId", "component_id"),
+        ("parentId", "parent_id"),
+        ("toolId", "tool_id"),
+        ("ownerId", "owner_id"),
+        ("panelId", "panel_id"),
+        ("conversationId", "conversation_id"),
+        ("projectId", "project_id"),
+        ("messageId", "message_id"),
+        ("placement", "placement"),
+        ("applicationId", "application_id"),
+        ("modelId", "model_id"),
+    ];
+
+    for (camel, snake) in target_fields {
+        if !target.contains_key(camel) && !target.contains_key(snake) {
+            if let Some(v) = out.get(camel).or_else(|| out.get(snake)) {
+                target.insert(camel.into(), v.clone());
+            }
+        }
+    }
+    out.insert("target".into(), Value::Object(target));
+
+    // 4. Normalize payload
+    let mut payload = out
+        .get("payload")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+
+    let reserved_top_keys = [
+        "id",
+        "type",
+        "op",
+        "op_type",
+        "target",
+        "baseRevision",
+        "base_revision",
+        "transactionGroup",
+        "transaction_group",
+        "idempotencyKey",
+        "idempotency_key",
+        "dependsOn",
+        "depends_on",
+        "requiresApproval",
+        "requires_approval",
+        "destructive",
+        "audience",
+        "payload",
+        "surfaceId",
+        "surface_id",
+        "surfaceType",
+        "surface_type",
+        "instanceId",
+        "instance_id",
+        "componentId",
+        "component_id",
+        "parentId",
+        "parent_id",
+        "toolId",
+        "tool_id",
+        "ownerId",
+        "owner_id",
+        "panelId",
+        "panel_id",
+        "conversationId",
+        "conversation_id",
+        "projectId",
+        "project_id",
+        "messageId",
+        "message_id",
+        "placement",
+        "applicationId",
+        "application_id",
+        "modelId",
+        "model_id",
+    ];
+
+    for (k, v) in obj {
+        if !reserved_top_keys.contains(&k.as_str()) && !payload.contains_key(k) {
+            payload.insert(k.clone(), v.clone());
+        }
+    }
+    out.insert("payload".into(), Value::Object(payload));
+
+    Value::Object(out)
+}
+
 impl AgentResponsePayload {
     pub fn normalize_for_frontend(&mut self) {
         if let Some(tc) = self.tool_change.as_mut() {
             tc.normalize_for_frontend();
         }
+        if let Some(ops) = self.operations.as_mut() {
+            for (idx, op) in ops.iter_mut().enumerate() {
+                *op = normalize_raw_operation(op, idx);
+            }
+        }
+    }
+
+    pub fn normalized_operations(&self) -> Result<Vec<crate::runtime_v2::AppOperation>, String> {
+        let Some(ops_raw) = &self.operations else {
+            return Ok(Vec::new());
+        };
+        let normalized: Vec<Value> = ops_raw
+            .iter()
+            .enumerate()
+            .map(|(idx, val)| normalize_raw_operation(val, idx))
+            .collect();
+        serde_json::from_value(Value::Array(normalized))
+            .map_err(|e| format!("failed to decode normalized operations: {e}"))
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -551,9 +702,7 @@ impl AgentResponsePayload {
             .unwrap_or(false);
 
         if has_ops {
-            let ops: Vec<crate::runtime_v2::AppOperation> =
-                serde_json::from_value(Value::Array(self.operations.clone().unwrap_or_default()))
-                    .map_err(|e| format!("invalid operations: {e}"))?;
+            let ops = self.normalized_operations()?;
             crate::runtime_v2::validate_model_operations(&ops)?;
         }
 
@@ -826,5 +975,36 @@ mod tests {
         assert!(validate_layout(&json!({ "type": "grid", "columns": 7 })).is_err());
         assert!(validate_layout(&json!({ "type": "stack", "gap": "huge" })).is_err());
         assert!(validate_layout(&json!({ "type": "split", "splitRatio": "5:1" })).is_err());
+    }
+
+    #[test]
+    fn test_normalize_raw_operation_lifts_fields_and_adds_id() {
+        let raw = json!({
+            "type": "component.update_props",
+            "surfaceId": "surf-100",
+            "componentId": "btn-search",
+            "props": { "label": "Search PubMed" }
+        });
+
+        let normalized = normalize_raw_operation(&raw, 0);
+        assert!(normalized.get("id").is_some());
+        assert_eq!(
+            normalized.get("target").and_then(|t| t.get("surfaceId")),
+            Some(&json!("surf-100"))
+        );
+        assert_eq!(
+            normalized.get("target").and_then(|t| t.get("componentId")),
+            Some(&json!("btn-search"))
+        );
+        assert_eq!(
+            normalized.get("payload").and_then(|p| p.get("props")),
+            Some(&json!({ "label": "Search PubMed" }))
+        );
+
+        let op: crate::runtime_v2::AppOperation =
+            serde_json::from_value(normalized).expect("deserializes into AppOperation");
+        assert_eq!(op.op_type, "component.update_props");
+        assert_eq!(op.target.surface_id.as_deref(), Some("surf-100"));
+        assert_eq!(op.target.component_id.as_deref(), Some("btn-search"));
     }
 }

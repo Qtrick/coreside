@@ -41,6 +41,43 @@ impl ActionRisk {
     }
 }
 
+/// Sensitivity classification for action execution outputs.
+/// Controls whether and how the result may be bound to durable component state,
+/// inspected by models, or held ephemerally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputSensitivity {
+    /// Publicly shareable and user-visible; safe to bind into durable component state.
+    Public,
+    /// Standard application data; safe to bind to local component state.
+    StateBindable,
+    /// Ephemeral notification/transient result; not permitted to persist into durable state.
+    Ephemeral,
+    /// Privileged/sensitive execution result (e.g. export preparation or secret data); strictly forbidden from component state binding.
+    Privileged,
+}
+
+impl OutputSensitivity {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Public => "public",
+            Self::StateBindable => "state_bindable",
+            Self::Ephemeral => "ephemeral",
+            Self::Privileged => "privileged",
+        }
+    }
+
+    pub fn is_state_bindable(&self) -> bool {
+        matches!(self, Self::Public | Self::StateBindable)
+    }
+}
+
+impl Default for OutputSensitivity {
+    fn default() -> Self {
+        Self::StateBindable
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionDescriptor {
@@ -53,6 +90,8 @@ pub struct ActionDescriptor {
     pub permission_category: String,
     #[serde(default = "default_state_bindable")]
     pub state_bindable: bool,
+    #[serde(default)]
+    pub sensitivity: OutputSensitivity,
 }
 
 fn default_state_bindable() -> bool {
@@ -74,6 +113,7 @@ impl ActionDescriptor {
             "critical": self.critical,
             "permissionCategory": self.permission_category,
             "stateBindable": self.state_bindable,
+            "sensitivity": self.sensitivity.as_str(),
         })))
     }
 
@@ -87,6 +127,7 @@ impl ActionDescriptor {
             "critical": self.critical,
             "permissionCategory": self.permission_category,
             "stateBindable": self.state_bindable,
+            "sensitivity": self.sensitivity.as_str(),
             "descriptorHash": self.descriptor_hash(),
         })
     }
@@ -149,6 +190,15 @@ fn descriptor(
     permission_category: &str,
     state_bindable: bool,
 ) -> ActionDescriptor {
+    let sensitivity = if !state_bindable {
+        if critical || risk == ActionRisk::Destructive {
+            OutputSensitivity::Privileged
+        } else {
+            OutputSensitivity::Ephemeral
+        }
+    } else {
+        OutputSensitivity::StateBindable
+    };
     ActionDescriptor {
         name: name.into(),
         title: title.into(),
@@ -158,6 +208,7 @@ fn descriptor(
         critical,
         permission_category: permission_category.into(),
         state_bindable,
+        sensitivity,
     }
 }
 
@@ -425,6 +476,10 @@ mod tests {
         let mut reclassified = base.clone();
         reclassified.state_bindable = false;
         assert_ne!(base.descriptor_hash(), reclassified.descriptor_hash());
+
+        let mut resensitized = base.clone();
+        resensitized.sensitivity = OutputSensitivity::Privileged;
+        assert_ne!(base.descriptor_hash(), resensitized.descriptor_hash());
     }
 
     #[test]

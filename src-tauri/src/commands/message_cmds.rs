@@ -2527,11 +2527,15 @@ async fn send_message_inner(
         }
 
         let mut operations_from_payload: Option<Vec<crate::runtime_v2::AppOperation>> = None;
-        if let Some(ops_val) = &parsed.payload.operations {
-            if !ops_val.is_empty() {
-                if let Ok(ops) =
-                    serde_json::from_value::<Vec<crate::runtime_v2::AppOperation>>(json!(ops_val))
-                {
+        if parsed
+            .payload
+            .operations
+            .as_ref()
+            .map(|o| !o.is_empty())
+            .unwrap_or(false)
+        {
+            if let Ok(ops) = parsed.payload.normalized_operations() {
+                if !ops.is_empty() {
                     operations_from_payload = Some(ops);
                 }
             }

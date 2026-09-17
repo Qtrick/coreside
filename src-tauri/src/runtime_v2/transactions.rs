@@ -260,6 +260,30 @@ pub fn apply_transaction_deferred(
     })
 }
 
+pub(crate) fn resolve_effective_surface_id(op: &AppOperation) -> Option<String> {
+    op.target
+        .surface_id
+        .clone()
+        .or_else(|| {
+            op.target
+                .tool_id
+                .as_deref()
+                .map(super::surfaces::surface_id_for_tool)
+        })
+        .or_else(|| {
+            op.payload
+                .get("targetToolId")
+                .and_then(|v| v.as_str())
+                .map(super::surfaces::surface_id_for_tool)
+        })
+        .or_else(|| {
+            op.payload
+                .get("surfaceId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+}
+
 fn apply_one(
     db: &mut Database,
     op: &AppOperation,
@@ -312,8 +336,9 @@ fn apply_one(
         }
     }
 
-    // Cross-project and cross-chat isolation enforcement on surface targets
-    if let Some(sid) = op.target.surface_id.as_deref() {
+    // Cross-project and cross-chat isolation enforcement on surface/tool targets
+    let effective_surface_id = resolve_effective_surface_id(op);
+    if let Some(sid) = effective_surface_id.as_deref() {
         if let Ok(target_surface) = get_surface(db, sid) {
             if let (Some(txn_proj), Some(surf_proj)) = (
                 txn.project_id.as_deref(),
@@ -410,11 +435,9 @@ fn apply_one(
         | "component.update_children"
         | "component.update_visibility"
         | "component.update_actions" => {
-            let sid = op
-                .target
-                .surface_id
-                .as_deref()
-                .ok_or_else(|| "surfaceId required".to_string())?;
+            let effective_sid = resolve_effective_surface_id(op)
+                .ok_or_else(|| "surfaceId or toolId required".to_string())?;
+            let sid = &effective_sid;
             let surface = get_surface(db, sid).map_err(|e| e.to_string())?;
             let mut def_value = surface.definition.clone();
             // Definition may be a ToolDefinition-shaped object
@@ -509,6 +532,163 @@ fn apply_one(
                 effective_base,
             )
             .map_err(|e| e.to_string())?;
+            Ok(Some(s))
+        }
+        "surface.add_section"
+        | "surface.remove_section"
+        | "surface.update_section"
+        | "component.bind_state"
+        | "component.bind_action"
+        | "component.set_style_token" => {
+            let effective_sid = resolve_effective_surface_id(op)
+                .ok_or_else(|| "surfaceId or toolId required".to_string())?;
+            let sid = &effective_sid;
+            let surface = get_surface(db, sid).map_err(|e| e.to_string())?;
+            let init_rev = initial_revisions.get(sid).copied();
+            let effective_base = match (op.base_revision, init_rev) {
+                (Some(base), Some(init)) if base == init => Some(surface.current_revision),
+                (Some(base), _) if base == surface.current_revision => {
+                    Some(surface.current_revision)
+                }
+                (Some(base), _) => Some(base),
+                (None, _) => None,
+            };
+
+            let tool_def: ToolDefinition = serde_json::from_value(surface.definition.clone())
+                .unwrap_or_else(|_| ToolDefinition {
+                    id: surface.id.clone(),
+                    name: surface.name.clone(),
+                    description: String::new(),
+                    layout: serde_json::json!({ "type": "single-column" }),
+                    components: surface
+                        .definition
+                        .get("components")
+                        .cloned()
+                        .and_then(|v| serde_json::from_value(v).ok())
+                        .unwrap_or_default(),
+                });
+
+            let mut doc =
+                super::software_document::SoftwareDocument::from_tool_definition(&tool_def);
+
+            match op.op_type.as_str() {
+                "surface.add_section" => {
+                    let section: super::software_document::DocumentSection =
+                        serde_json::from_value(
+                            op.payload
+                                .get("section")
+                                .cloned()
+                                .unwrap_or_else(|| op.payload.clone()),
+                        )
+                        .map_err(|e| format!("invalid section payload: {e}"))?;
+                    let index = op
+                        .payload
+                        .get("index")
+                        .and_then(|v| v.as_u64())
+                        .map(|i| i as usize);
+                    doc.add_section(section, index)?;
+                }
+                "surface.remove_section" => {
+                    let sec_id = op
+                        .payload
+                        .get("sectionId")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| op.target.component_id.as_deref())
+                        .ok_or_else(|| "sectionId required".to_string())?;
+                    doc.remove_section(sec_id)?;
+                }
+                "surface.update_section" => {
+                    let sec_id = op
+                        .payload
+                        .get("sectionId")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| op.target.component_id.as_deref())
+                        .ok_or_else(|| "sectionId required".to_string())?;
+                    let comps: Option<Vec<ToolComponent>> = op
+                        .payload
+                        .get("components")
+                        .cloned()
+                        .and_then(|v| serde_json::from_value(v).ok());
+                    let title = op
+                        .payload
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let layout = op
+                        .payload
+                        .get("layout")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    doc.update_section(sec_id, comps, title, layout)?;
+                }
+                "component.bind_state" => {
+                    let cid = op
+                        .target
+                        .component_id
+                        .as_deref()
+                        .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                        .ok_or_else(|| "componentId required".to_string())?;
+                    let key = op
+                        .payload
+                        .get("key")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| op.payload.get("valueKey").and_then(|v| v.as_str()))
+                        .ok_or_else(|| "key or valueKey required".to_string())?;
+                    let initial_val = op.payload.get("initialValue").cloned();
+                    doc.bind_state(cid, key, initial_val)?;
+                }
+                "component.bind_action" => {
+                    let cid = op
+                        .target
+                        .component_id
+                        .as_deref()
+                        .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                        .ok_or_else(|| "componentId required".to_string())?;
+                    let action: crate::ai::response_schema::ActionDefinition =
+                        serde_json::from_value(
+                            op.payload
+                                .get("action")
+                                .cloned()
+                                .unwrap_or_else(|| op.payload.clone()),
+                        )
+                        .map_err(|e| format!("invalid action payload: {e}"))?;
+                    doc.bind_action(cid, action)?;
+                }
+                "component.set_style_token" => {
+                    let target_id = op
+                        .target
+                        .component_id
+                        .as_deref()
+                        .or_else(|| op.payload.get("targetId").and_then(|v| v.as_str()))
+                        .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                        .ok_or_else(|| "targetId or componentId required".to_string())?;
+                    let token = op
+                        .payload
+                        .get("token")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| "token required".to_string())?;
+                    let val = op
+                        .payload
+                        .get("value")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::Value::Null);
+                    doc.set_style_token(target_id, token, val)?;
+                }
+                _ => {}
+            }
+
+            let _notes = doc.validate_and_repair();
+            let updated_tool = doc.to_tool_definition();
+            let updated_def = serde_json::to_value(&updated_tool).map_err(|e| e.to_string())?;
+
+            let summary = op
+                .payload
+                .get("changeSummary")
+                .and_then(|v| v.as_str())
+                .unwrap_or(op.op_type.as_str());
+
+            let s = update_surface_definition(db, sid, &updated_def, summary, effective_base)
+                .map_err(|e| e.to_string())?;
             Ok(Some(s))
         }
         "surface.create" | "tool.full_replace" => {
@@ -642,20 +822,16 @@ fn apply_one(
             Ok(Some(s))
         }
         "surface.restore" => {
-            let sid = op
-                .target
-                .surface_id
-                .as_deref()
-                .ok_or_else(|| "surfaceId required".to_string())?;
+            let effective_sid = resolve_effective_surface_id(op)
+                .ok_or_else(|| "surfaceId or toolId required".to_string())?;
+            let sid = &effective_sid;
             let s = restore_surface(db, sid).map_err(|e| e.to_string())?;
             Ok(Some(s))
         }
         "state.set" | "state.patch" => {
-            let sid = op
-                .target
-                .surface_id
-                .as_deref()
-                .ok_or_else(|| "surfaceId required".to_string())?;
+            let effective_sid = resolve_effective_surface_id(op)
+                .ok_or_else(|| "surfaceId or toolId required".to_string())?;
+            let sid = &effective_sid;
             let incoming = op
                 .payload
                 .get("state")

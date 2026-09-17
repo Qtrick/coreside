@@ -10,6 +10,7 @@ mod mock;
 mod models;
 mod normalization;
 mod provider;
+mod provider_policy;
 mod registry;
 mod safety;
 mod videos;
@@ -34,6 +35,10 @@ pub use normalization::{
     bound_text, normalize_image_results, normalize_video_results, normalize_web_results,
 };
 pub use provider::{SearchProvider, SearchRequest};
+pub use provider_policy::{
+    authorize_coreside_pinned_fetch, authorize_remote_provider_fetch, authorize_sidecar_crawl,
+    FetchChannel,
+};
 pub use registry::SearchRegistry;
 pub use safety::validate_public_http_url;
 pub use videos::video_search;

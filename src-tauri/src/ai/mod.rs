@@ -24,6 +24,7 @@ pub mod response_schema;
 mod settings_change;
 mod structured_user_input;
 mod tool_loop;
+pub mod ui_knowledge;
 
 pub use access_mode::{resolve_access_presentation, AiAccessPresentation, DisclosurePolicy};
 

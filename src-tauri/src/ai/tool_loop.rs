@@ -259,6 +259,26 @@ impl ToolLoop {
                     }
                 })
             }
+            AgentCapability::GetUiKnowledge => {
+                let query = call.arguments["query"].as_str().unwrap_or("");
+                let matches = super::ui_knowledge::search_ui_knowledge(query);
+                json!({
+                    "query": query,
+                    "count": matches.len(),
+                    "knowledge": matches
+                        .iter()
+                        .map(|item| {
+                            json!({
+                                "id": item.id,
+                                "title": item.title,
+                                "category": item.category,
+                                "summary": item.summary,
+                                "guidance": item.architecture_guidance,
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+            }
             AgentCapability::NoAction => json!({ "status": "noop" }),
         };
 

@@ -38,8 +38,9 @@ pub fn validate_public_http_url(raw: &str) -> Result<Url, SearchError> {
     Ok(validate_and_pin_public_http_url(raw)?.url)
 }
 
-/// Validate scheme/host policy and resolve DNS once for connection pinning.
-pub fn validate_and_pin_public_http_url(raw: &str) -> Result<PinnedPublicUrl, SearchError> {
+/// Validate scheme, port, credentials, blocked hosts, and IP literals without DNS resolution.
+/// Used for provider-side delegation policies where local DNS does not control remote fetching.
+pub fn validate_public_url_structure(raw: &str) -> Result<Url, SearchError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err(SearchError::Invalid("URL is required".into()));
@@ -91,6 +92,27 @@ pub fn validate_and_pin_public_http_url(raw: &str) -> Result<PinnedPublicUrl, Se
         if is_private_or_reserved(ip) {
             return Err(SearchError::SsrfBlocked(format!("private IP: {ip}")));
         }
+    }
+
+    if host.starts_with('[') && host.ends_with(']') {
+        let inner = &host[1..host.len() - 1];
+        if let Ok(ip) = IpAddr::from_str(inner) {
+            if is_private_or_reserved(ip) {
+                return Err(SearchError::SsrfBlocked(format!("private IP: {ip}")));
+            }
+        }
+    }
+
+    Ok(url)
+}
+
+/// Validate scheme/host policy and resolve DNS once for connection pinning.
+pub fn validate_and_pin_public_http_url(raw: &str) -> Result<PinnedPublicUrl, SearchError> {
+    let url = validate_public_url_structure(raw)?;
+    let host = url.host_str().unwrap();
+    let port = url.port_or_known_default().unwrap();
+
+    if let Ok(ip) = IpAddr::from_str(host) {
         return Ok(PinnedPublicUrl {
             url,
             addrs: vec![SocketAddr::new(ip, port)],
@@ -100,9 +122,6 @@ pub fn validate_and_pin_public_http_url(raw: &str) -> Result<PinnedPublicUrl, Se
     if host.starts_with('[') && host.ends_with(']') {
         let inner = &host[1..host.len() - 1];
         if let Ok(ip) = IpAddr::from_str(inner) {
-            if is_private_or_reserved(ip) {
-                return Err(SearchError::SsrfBlocked(format!("private IP: {ip}")));
-            }
             return Ok(PinnedPublicUrl {
                 url,
                 addrs: vec![SocketAddr::new(ip, port)],
@@ -110,7 +129,7 @@ pub fn validate_and_pin_public_http_url(raw: &str) -> Result<PinnedPublicUrl, Se
         }
     }
 
-    let addrs = resolve_public_host_addrs(&host_lower, port)?;
+    let addrs = resolve_public_host_addrs(&host.to_lowercase(), port)?;
     Ok(PinnedPublicUrl { url, addrs })
 }
 

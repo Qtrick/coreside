@@ -12,7 +12,7 @@ use super::approvals::{self, call_hash, input_preview};
 use super::audit::{self, AuditInput};
 use super::breakers::{self, BreakerTrip};
 use super::context::{ActionRunContext, Presence, Venue};
-use super::descriptor::{find_action, ActionDescriptor};
+use super::descriptor::{find_action, ActionDescriptor, OutputSensitivity};
 use super::grants;
 use super::handlers;
 use super::policy::{decide, ActionPolicyDecision, PolicyFacts};
@@ -25,6 +25,8 @@ pub enum ActionOutcome {
     Ok {
         data: Value,
         state_bindable: bool,
+        #[serde(default)]
+        sensitivity: OutputSensitivity,
     },
     Error {
         code: String,
@@ -325,6 +327,7 @@ fn run(
             ActionOutcome::Ok {
                 data,
                 state_bindable: descriptor.state_bindable,
+                sensitivity: descriptor.sensitivity,
             }
         }
         Err(failure) => failure,

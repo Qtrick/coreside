@@ -31,6 +31,8 @@ export interface ApplicationManifest {
 
 export type ActionRisk = "read" | "write" | "destructive";
 
+export type OutputSensitivity = "public" | "state_bindable" | "ephemeral" | "privileged";
+
 export interface ActionDescriptor {
   name: string;
   title: string;
@@ -40,11 +42,12 @@ export interface ActionDescriptor {
   critical: boolean;
   permissionCategory: string;
   stateBindable?: boolean;
+  sensitivity?: OutputSensitivity;
   descriptorHash?: string;
 }
 
 export type ActionOutcome =
-  | { status: "ok"; data: unknown; stateBindable: boolean }
+  | { status: "ok"; data: unknown; stateBindable: boolean; sensitivity?: OutputSensitivity }
   | { status: "error"; code: string; message: string }
   | {
       status: "pendingApproval";
