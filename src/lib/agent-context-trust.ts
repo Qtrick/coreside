@@ -46,7 +46,10 @@ export function envelopeUntrustedContent(
     .split("")
     .filter((ch) => ch.charCodeAt(0) !== 0)
     .join("")
-    .replace(/<\/?system>/gi, "[filtered]")
+    .replace(
+      /<\/?system>|<\|im_start\|>|<\|im_end\|>|<\|system\|>|\[INST\]|<<SYS>>|<endoftext>|<\|reserved_[^|]*\|>/gi,
+      "[filtered]",
+    )
     .slice(0, 50_000);
   return {
     trust,

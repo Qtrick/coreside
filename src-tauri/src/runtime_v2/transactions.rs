@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::operations::{validate_operations, AppOperation, Audience};
 use super::packs::{validate_definition_components, validate_tool_components_for_packs};
-use super::patch::apply_component_op;
+use super::patch::{apply_component_op, find_component, find_component_mut};
 use super::preservation::{
     apply_preservation_on_replace, invalidate_component_live_state, resolve_policy_for_apply,
     upsert_preservation,
@@ -446,15 +446,8 @@ fn apply_one(
                 .cloned()
                 .and_then(|v| serde_json::from_value(v).ok())
                 .unwrap_or_default();
-            let init_rev = initial_revisions.get(sid).copied();
-            let effective_base = match (op.base_revision, init_rev) {
-                (Some(base), Some(init)) if base == init => Some(surface.current_revision),
-                (Some(base), _) if base == surface.current_revision => {
-                    Some(surface.current_revision)
-                }
-                (Some(base), _) => Some(base),
-                (None, _) => None,
-            };
+            let effective_base =
+                effective_base_revision(op, surface.current_revision, initial_revisions, sid);
             if op.op_type.starts_with("component.") {
                 let cid = op.target.component_id.as_deref();
                 let policy = resolve_policy_for_apply(db, sid, cid, &op.payload);
@@ -544,15 +537,8 @@ fn apply_one(
                 .ok_or_else(|| "surfaceId or toolId required".to_string())?;
             let sid = &effective_sid;
             let surface = get_surface(db, sid).map_err(|e| e.to_string())?;
-            let init_rev = initial_revisions.get(sid).copied();
-            let effective_base = match (op.base_revision, init_rev) {
-                (Some(base), Some(init)) if base == init => Some(surface.current_revision),
-                (Some(base), _) if base == surface.current_revision => {
-                    Some(surface.current_revision)
-                }
-                (Some(base), _) => Some(base),
-                (None, _) => None,
-            };
+            let effective_base =
+                effective_base_revision(op, surface.current_revision, initial_revisions, sid);
 
             let tool_def: ToolDefinition = serde_json::from_value(surface.definition.clone())
                 .unwrap_or_else(|_| ToolDefinition {
@@ -874,15 +860,8 @@ fn apply_one(
             if let Some(obj) = def_value.as_object_mut() {
                 obj.insert("layout".into(), norm_layout.clone());
             }
-            let init_rev = initial_revisions.get(sid).copied();
-            let effective_base = match (op.base_revision, init_rev) {
-                (Some(base), Some(init)) if base == init => Some(surface.current_revision),
-                (Some(base), _) if base == surface.current_revision => {
-                    Some(surface.current_revision)
-                }
-                (Some(base), _) => Some(base),
-                (None, _) => None,
-            };
+            let effective_base =
+                effective_base_revision(op, surface.current_revision, initial_revisions, sid);
             let s = update_surface_definition(
                 db,
                 sid,
@@ -1576,35 +1555,22 @@ mod tests {
     }
 }
 
-fn find_component<'a>(nodes: &'a [ToolComponent], id: &str) -> Option<&'a ToolComponent> {
-    for n in nodes {
-        if n.id == id {
-            return Some(n);
-        }
-        if let Some(ch) = &n.children {
-            if let Some(found) = find_component(ch, id) {
-                return Some(found);
-            }
-        }
+/// Compute the effective base revision for sequential operations within a transaction.
+/// When multiple ops target the same surface with the same base_revision, the first op
+/// advances the revision and subsequent ops see the updated revision.
+fn effective_base_revision(
+    op: &AppOperation,
+    surface_revision: i64,
+    initial_revisions: &std::collections::HashMap<String, i64>,
+    surface_id: &str,
+) -> Option<i64> {
+    let init_rev = initial_revisions.get(surface_id).copied();
+    match (op.base_revision, init_rev) {
+        (Some(base), Some(init)) if base == init => Some(surface_revision),
+        (Some(base), _) if base == surface_revision => Some(surface_revision),
+        (Some(base), _) => Some(base),
+        (None, _) => None,
     }
-    None
-}
-
-fn find_component_mut<'a>(
-    nodes: &'a mut [ToolComponent],
-    id: &str,
-) -> Option<&'a mut ToolComponent> {
-    for n in nodes {
-        if n.id == id {
-            return Some(n);
-        }
-        if let Some(ch) = n.children.as_mut() {
-            if let Some(found) = find_component_mut(ch, id) {
-                return Some(found);
-            }
-        }
-    }
-    None
 }
 
 fn prop_preservation_key(comp: &ToolComponent) -> Option<&str> {

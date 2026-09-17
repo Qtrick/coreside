@@ -60,6 +60,7 @@ objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage", "NSMe
 embed_plist = "1.2"
 
 [dev-dependencies]
+filetime = "0.2"
 
 [features]
 default = ["custom-protocol"]

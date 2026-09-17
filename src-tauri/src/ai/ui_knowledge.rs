@@ -142,15 +142,26 @@ pub fn relevant_ui_knowledge_markdown(query: &str) -> String {
     out
 }
 
-/// Markdown catalog of all available design archetypes and patterns.
+/// Compact index of available UI knowledge patterns for prompt injection.
+/// Returns only titles and keywords so the model knows what exists,
+/// without dumping full architecture guidance into every prompt.
+/// Use the `GetUiKnowledge` tool for on-demand detailed retrieval.
 pub fn ui_knowledge_catalog_markdown() -> String {
-    let mut out = String::from("## Coreside UI Architecture Knowledge Base\n\n");
+    let mut out = String::from(
+        "## Coreside UI Knowledge (compact index)\n\n\
+         Available patterns (use GetUiKnowledge tool for full guidance):\n",
+    );
     for item in UI_KNOWLEDGE_BASE {
-        out.push_str(&format!("### {} (`{}`)\n", item.title, item.id));
-        out.push_str(&format!("Category: {}\n\n", item.category));
-        out.push_str(&format!("{}\n\n", item.summary));
-        out.push_str(&format!("{}\n\n", item.architecture_guidance));
+        out.push_str(&format!(
+            "- **{}** `{}` — keywords: {}\n",
+            item.title,
+            item.id,
+            item.keywords.join(", "),
+        ));
     }
+    out.push_str(
+        "\nUse GetUiKnowledge(item_id) to retrieve full architecture guidance for a specific pattern.",
+    );
     out
 }
 
@@ -174,5 +185,22 @@ mod tests {
         let md = relevant_ui_knowledge_markdown("research papers");
         assert!(md.contains("Personal Research & Discovery Dashboard"));
         assert!(md.contains("Information Architecture"));
+    }
+
+    #[test]
+    fn compact_index_is_shorter_than_full_catalog() {
+        let compact = ui_knowledge_catalog_markdown();
+        // Compact index should be under 1000 chars (vs ~4500 for full dump)
+        assert!(
+            compact.len() < 1000,
+            "compact index too large: {} chars",
+            compact.len()
+        );
+        // But should still list all patterns
+        assert!(compact.contains("pattern-research-dashboard"));
+        assert!(compact.contains("pattern-settings-editor"));
+        assert!(compact.contains("pattern-crud-tracker"));
+        assert!(compact.contains("pattern-multi-step-workflow"));
+        assert!(compact.contains("state-lifecycle-rules"));
     }
 }

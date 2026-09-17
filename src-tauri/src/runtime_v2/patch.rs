@@ -109,6 +109,39 @@ fn collect_ids(
     Ok(())
 }
 
+/// Find a component by id in an immutable tree.
+pub fn find_component<'a>(nodes: &'a [ToolComponent], id: &str) -> Option<&'a ToolComponent> {
+    for n in nodes {
+        if n.id == id {
+            return Some(n);
+        }
+        if let Some(ch) = &n.children {
+            if let Some(found) = find_component(ch, id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+/// Find a component by id in a mutable tree.
+pub fn find_component_mut<'a>(
+    nodes: &'a mut [ToolComponent],
+    id: &str,
+) -> Option<&'a mut ToolComponent> {
+    for n in nodes {
+        if n.id == id {
+            return Some(n);
+        }
+        if let Some(ch) = n.children.as_mut() {
+            if let Some(found) = find_component_mut(ch, id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
 pub fn assert_tree_limits(components: &[ToolComponent]) -> PatchResult<()> {
     super::packs::validate_tool_components(components).map_err(|e| {
         if e.contains("duplicate component id:") {

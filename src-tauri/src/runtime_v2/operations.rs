@@ -235,10 +235,12 @@ pub fn is_known_operation_type(op: &str) -> bool {
     is_supported_model_operation(op) || is_internal_operation(op) || is_reserved_operation(op)
 }
 
-/// Validate a list of operations for model-facing responses.
-/// Only operations in SUPPORTED_MODEL_OPERATIONS are allowed.
-/// Internal and reserved operations must only come from host subsystems.
-pub fn validate_model_operations(operations: &[AppOperation]) -> Result<(), String> {
+/// Shared validation core for operation lists.
+/// `require_model_ops` restricts to SUPPORTED_MODEL_OPERATIONS only (rejecting internal/reserved).
+fn validate_operations_inner(
+    operations: &[AppOperation],
+    require_model_ops: bool,
+) -> Result<(), String> {
     if operations.len() > MAX_OPERATIONS_PER_TURN {
         return Err(format!(
             "operations exceeds max of {MAX_OPERATIONS_PER_TURN}"
@@ -253,19 +255,23 @@ pub fn validate_model_operations(operations: &[AppOperation]) -> Result<(), Stri
         if !seen_ids.insert(op.id.clone()) {
             return Err(format!("duplicate operation.id: {}", op.id));
         }
-        if !is_supported_model_operation(&op.op_type) {
-            if is_internal_operation(&op.op_type) {
-                return Err(format!(
-                    "internal operation '{}' is not allowed in model responses",
-                    op.op_type
-                ));
+        if require_model_ops {
+            if !is_supported_model_operation(&op.op_type) {
+                if is_internal_operation(&op.op_type) {
+                    return Err(format!(
+                        "internal operation '{}' is not allowed in model responses",
+                        op.op_type
+                    ));
+                }
+                if is_reserved_operation(&op.op_type) {
+                    return Err(format!(
+                        "reserved operation '{}' is not allowed in model responses",
+                        op.op_type
+                    ));
+                }
+                return Err(format!("unknown operation type: {}", op.op_type));
             }
-            if is_reserved_operation(&op.op_type) {
-                return Err(format!(
-                    "reserved operation '{}' is not allowed in model responses",
-                    op.op_type
-                ));
-            }
+        } else if !is_known_operation_type(&op.op_type) {
             return Err(format!("unknown operation type: {}", op.op_type));
         }
         if let Some(g) = &op.transaction_group {
@@ -317,69 +323,71 @@ pub fn validate_model_operations(operations: &[AppOperation]) -> Result<(), Stri
                 Audience::CurrentUser | Audience::FutureParticipants => {}
             }
         }
-        // Semantic validation of required target fields and schemas
-        match op.op_type.as_str() {
-            "component.insert" => {
-                if op.target.surface_id.is_none() && op.target.tool_id.is_none() {
-                    return Err(format!(
-                        "operation '{}' of type '{}' requires surfaceId or toolId target",
-                        op.id, op.op_type
-                    ));
-                }
-                if !op
-                    .payload
-                    .get("component")
-                    .map(|c| c.is_object())
-                    .unwrap_or(false)
-                {
-                    return Err(format!(
-                        "operation '{}' of type 'component.insert' requires a 'component' object payload",
-                        op.id
-                    ));
-                }
-            }
-            "component.remove"
-            | "component.replace"
-            | "component.update_actions"
-            | "component.update_children"
-            | "component.update_visibility" => {
-                if op.target.component_id.is_none() && op.payload.get("componentId").is_none() {
-                    return Err(format!(
-                        "operation '{}' of type '{}' requires componentId target or payload",
-                        op.id, op.op_type
-                    ));
-                }
-            }
-            "component.update_props" => {
-                if op.target.component_id.is_none()
-                    && op.target.surface_id.is_none()
-                    && op.payload.get("componentId").is_none()
-                {
-                    return Err(format!(
-                        "operation '{}' of type 'component.update_props' requires target",
-                        op.id
-                    ));
-                }
-            }
-            "chat.inline_surface_create" => {
-                if !op
-                    .payload
-                    .get("definition")
-                    .map(|d| d.is_object())
-                    .unwrap_or(false)
-                    && !op
+        // Semantic validation of required target fields and schemas (model-facing only)
+        if require_model_ops {
+            match op.op_type.as_str() {
+                "component.insert" => {
+                    if op.target.surface_id.is_none() && op.target.tool_id.is_none() {
+                        return Err(format!(
+                            "operation '{}' of type '{}' requires surfaceId or toolId target",
+                            op.id, op.op_type
+                        ));
+                    }
+                    if !op
                         .payload
-                        .get("tool")
-                        .map(|t| t.is_object())
+                        .get("component")
+                        .map(|c| c.is_object())
                         .unwrap_or(false)
-                {
-                    return Err(format!(
-                        "operation '{}' of type 'chat.inline_surface_create' requires a 'definition' or 'tool' object payload",
-                        op.id
-                    ));
+                    {
+                        return Err(format!(
+                            "operation '{}' of type 'component.insert' requires a 'component' object payload",
+                            op.id
+                        ));
+                    }
                 }
+                "component.remove"
+                | "component.replace"
+                | "component.update_actions"
+                | "component.update_children"
+                | "component.update_visibility" => {
+                    if op.target.component_id.is_none() && op.payload.get("componentId").is_none() {
+                        return Err(format!(
+                            "operation '{}' of type '{}' requires componentId target or payload",
+                            op.id, op.op_type
+                        ));
+                    }
+                }
+                "component.update_props" => {
+                    if op.target.component_id.is_none()
+                        && op.target.surface_id.is_none()
+                        && op.payload.get("componentId").is_none()
+                    {
+                        return Err(format!(
+                            "operation '{}' of type 'component.update_props' requires target",
+                            op.id
+                        ));
+                    }
+                }
+                "chat.inline_surface_create" => {
+                    if !op
+                        .payload
+                        .get("definition")
+                        .map(|d| d.is_object())
+                        .unwrap_or(false)
+                        && !op
+                            .payload
+                            .get("tool")
+                            .map(|t| t.is_object())
+                            .unwrap_or(false)
+                    {
+                        return Err(format!(
+                            "operation '{}' of type 'chat.inline_surface_create' requires a 'definition' or 'tool' object payload",
+                            op.id
+                        ));
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         }
         if let Ok(bytes) = serde_json::to_vec(&op.payload) {
             if bytes.len() > MAX_DEFINITION_JSON_BYTES {
@@ -395,87 +403,17 @@ pub fn validate_model_operations(operations: &[AppOperation]) -> Result<(), Stri
     Ok(())
 }
 
+/// Validate a list of operations for model-facing responses.
+/// Only operations in SUPPORTED_MODEL_OPERATIONS are allowed.
+/// Internal and reserved operations must only come from host subsystems.
+pub fn validate_model_operations(operations: &[AppOperation]) -> Result<(), String> {
+    validate_operations_inner(operations, true)
+}
+
 /// Validate a list of application operations (trusted boundary).
 /// Accepts all known operation types including internal and reserved.
 pub fn validate_operations(operations: &[AppOperation]) -> Result<(), String> {
-    if operations.len() > MAX_OPERATIONS_PER_TURN {
-        return Err(format!(
-            "operations exceeds max of {MAX_OPERATIONS_PER_TURN}"
-        ));
-    }
-    let mut groups = std::collections::HashSet::new();
-    let mut seen_ids = std::collections::HashSet::new();
-    for op in operations {
-        if op.id.trim().is_empty() {
-            return Err("operation.id must be non-empty".into());
-        }
-        if !seen_ids.insert(op.id.clone()) {
-            return Err(format!("duplicate operation.id: {}", op.id));
-        }
-        if !is_known_operation_type(&op.op_type) {
-            return Err(format!("unknown operation type: {}", op.op_type));
-        }
-        if let Some(g) = &op.transaction_group {
-            groups.insert(g.clone());
-        }
-        if let Some(sid) = op.target.surface_id.as_ref() {
-            crate::security::assert_not_protected(sid)?;
-        }
-        if let Some(tid) = op.target.tool_id.as_ref() {
-            crate::security::assert_not_protected(tid)?;
-        }
-        if let Some(tool) = op.payload.get("tool") {
-            if let Some(id) = tool.get("id").and_then(|v| v.as_str()) {
-                crate::security::assert_not_protected(id)?;
-            }
-        }
-        if let Some(aud) = &op.audience {
-            match aud {
-                Audience::CurrentSurface => {
-                    if op.target.surface_id.is_none() && op.target.tool_id.is_none() {
-                        return Err(format!(
-                            "operation '{}' with audience CurrentSurface must specify surfaceId or toolId target",
-                            op.id
-                        ));
-                    }
-                }
-                Audience::CurrentChat => {
-                    if op.target.conversation_id.is_none()
-                        && op.target.surface_id.is_none()
-                        && op.target.message_id.is_none()
-                    {
-                        return Err(format!(
-                            "operation '{}' with audience CurrentChat must specify conversationId, surfaceId, or messageId target",
-                            op.id
-                        ));
-                    }
-                }
-                Audience::CurrentProject => {
-                    if op.target.project_id.is_none()
-                        && op.target.surface_id.is_none()
-                        && op.target.tool_id.is_none()
-                    {
-                        return Err(format!(
-                            "operation '{}' with audience CurrentProject must specify projectId, surfaceId, or toolId target",
-                            op.id
-                        ));
-                    }
-                }
-                Audience::CurrentUser | Audience::FutureParticipants => {}
-            }
-        }
-        if let Ok(bytes) = serde_json::to_vec(&op.payload) {
-            if bytes.len() > MAX_DEFINITION_JSON_BYTES {
-                return Err("operation payload too large".into());
-            }
-        }
-    }
-    if groups.len() > MAX_TRANSACTION_GROUPS_PER_TURN {
-        return Err(format!(
-            "transaction groups exceed max of {MAX_TRANSACTION_GROUPS_PER_TURN}"
-        ));
-    }
-    Ok(())
+    validate_operations_inner(operations, false)
 }
 
 impl AgentResponseV2 {
