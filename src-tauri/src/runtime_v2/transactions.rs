@@ -540,22 +540,19 @@ fn apply_one(
             let effective_base =
                 effective_base_revision(op, surface.current_revision, initial_revisions, sid);
 
-            let tool_def: ToolDefinition = serde_json::from_value(surface.definition.clone())
-                .unwrap_or_else(|_| ToolDefinition {
-                    id: surface.id.clone(),
-                    name: surface.name.clone(),
-                    description: String::new(),
-                    layout: serde_json::json!({ "type": "single-column" }),
-                    components: surface
-                        .definition
-                        .get("components")
-                        .cloned()
-                        .and_then(|v| serde_json::from_value(v).ok())
-                        .unwrap_or_default(),
-                });
-
-            let mut doc =
-                super::software_document::SoftwareDocument::from_tool_definition(&tool_def);
+            // LOSSLESS LOAD: Use from_value() which detects persisted SoftwareDocument format
+            // (has `sections` key) and deserializes directly, preserving state_contracts,
+            // action_contracts, design_tokens, capability_packs, and section hierarchy.
+            // Falls back to from_tool_definition() only for legacy ToolDefinition-format definitions.
+            let mut doc = super::software_document::SoftwareDocument::from_value(
+                &surface.definition,
+            )
+            .map_err(|e| {
+                format!(
+                    "failed to load SoftwareDocument for surface '{}': {e}",
+                    sid
+                )
+            })?;
 
             match op.op_type.as_str() {
                 "surface.add_section" => {
@@ -664,8 +661,10 @@ fn apply_one(
             }
 
             let _notes = doc.validate_and_repair();
-            let updated_tool = doc.to_tool_definition();
-            let updated_def = serde_json::to_value(&updated_tool).map_err(|e| e.to_string())?;
+            // LOSSLESS PERSIST: Serialize as SoftwareDocument JSON (not back to ToolDefinition).
+            // This preserves state_contracts, action_contracts, design_tokens, capability_packs,
+            // and region hierarchy across all semantic edit operations.
+            let updated_def = serde_json::to_value(&doc).map_err(|e| e.to_string())?;
 
             let summary = op
                 .payload
@@ -1552,6 +1551,269 @@ mod tests {
             .unwrap();
         assert_eq!(comps.len(), 1);
         assert_eq!(comps[0]["id"], "c0");
+    }
+
+    /// P0 regression test: semantic edits must not destroy SoftwareDocument metadata.
+    ///
+    /// Previously, `surface.add_section` and `component.bind_state` parsed the persisted definition
+    /// as a flat ToolDefinition, then reconstructed a fresh SoftwareDocument from components only —
+    /// silently discarding state_contracts, action_contracts, design_tokens, and capability_packs.
+    ///
+    /// This test proves that those document-level fields survive a `component.bind_state` edit
+    /// and a `surface.add_section` edit.  It would fail against the old implementation.
+    #[test]
+    fn software_document_metadata_survives_semantic_edit() {
+        use crate::runtime_v2::software_document::{
+            ActionContract, DocumentSection, SoftwareDocument, StateContract, StateScope,
+        };
+
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "DocIntegrity", None)
+            .unwrap();
+
+        // Build a rich SoftwareDocument with state_contracts, action_contracts,
+        // design_tokens, capability_packs.
+        let mut doc = SoftwareDocument::new("doc-integrity-test", "Document Integrity Test");
+        doc.description = Some("P0 regression surface".into());
+        doc.capability_packs = vec!["coreside.core".into(), "coreside.charts".into()];
+        doc.design_tokens = Some(json!({ "density": "compact", "accent": "blue" }));
+        doc.state_contracts = vec![
+            StateContract {
+                key: "user_notes".into(),
+                type_name: "string".into(),
+                initial_value: json!(""),
+                scope: StateScope::Persistent,
+                description: Some("User notes field".into()),
+                preservation_policy: Some("preserve".into()),
+            },
+            StateContract {
+                key: "selected_tab".into(),
+                type_name: "string".into(),
+                initial_value: json!("tab-1"),
+                scope: StateScope::Session,
+                description: None,
+                preservation_policy: None,
+            },
+        ];
+        doc.action_contracts = vec![ActionContract {
+            action_id: "btn-save-notes-action".into(),
+            action_name: "tool_state.set".into(),
+            description: Some("Saves notes to persistent state".into()),
+            result_key: Some("saveResult".into()),
+            input_from_state: Some(std::collections::HashMap::from([(
+                "value".into(),
+                "user_notes".into(),
+            )])),
+        }];
+        let section = DocumentSection {
+            id: "main".into(),
+            role: Some("content".into()),
+            layout: Some("stack".into()),
+            components: vec![ToolComponent {
+                id: "notes-input".into(),
+                component_type: "textArea".into(),
+                value_key: Some("user_notes".into()),
+                props: Some(json!({ "placeholder": "Write notes here..." })),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        doc.sections.push(section);
+
+        // Persist as a SoftwareDocument (not ToolDefinition).
+        let doc_value = serde_json::to_value(&doc).unwrap();
+        let packs: Vec<String> = vec!["coreside.core".to_string(), "coreside.charts".to_string()];
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Document Integrity Test",
+            &doc_value,
+            &packs,
+        )
+        .unwrap();
+
+        // --- Apply a component.bind_state operation ---
+        // This previously destroyed the SoftwareDocument metadata.
+        let bind_op = AppOperation {
+            id: format!("op-{}", Uuid::new_v4()),
+            op_type: "component.bind_state".into(),
+            target: OperationTarget {
+                surface_id: Some(surface.id.clone()),
+                component_id: Some("notes-input".into()),
+                ..Default::default()
+            },
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({
+                "key": "user_notes",
+                "initialValue": ""
+            }),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        };
+        let txn1 = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "bind state",
+            &[bind_op],
+            false,
+        )
+        .unwrap();
+        let result1 = apply_transaction(&mut db, &txn1.id).unwrap();
+        assert_eq!(
+            result1.transaction.status, "applied",
+            "bind_state transaction must apply"
+        );
+
+        // Reload and verify ALL document-level metadata is intact.
+        let updated = get_surface(&db, &surface.id).unwrap();
+        let loaded_doc = SoftwareDocument::from_value(&updated.definition)
+            .expect("reloaded definition must deserialize as SoftwareDocument");
+
+        assert_eq!(
+            loaded_doc.id, "doc-integrity-test",
+            "document id must survive semantic edit"
+        );
+        assert_eq!(
+            loaded_doc.description.as_deref(),
+            Some("P0 regression surface"),
+            "document description must survive semantic edit"
+        );
+        assert!(
+            loaded_doc.capability_packs.contains(&"coreside.charts".to_string()),
+            "capability_packs must survive: got {:?}",
+            loaded_doc.capability_packs
+        );
+        assert!(
+            loaded_doc.design_tokens.is_some(),
+            "design_tokens must survive semantic edit"
+        );
+        assert_eq!(
+            loaded_doc.design_tokens.as_ref().unwrap()["density"],
+            json!("compact"),
+            "design_tokens values must be intact"
+        );
+        let has_notes_contract = loaded_doc
+            .state_contracts
+            .iter()
+            .any(|sc| sc.key == "user_notes");
+        assert!(
+            has_notes_contract,
+            "state_contract 'user_notes' must survive: got {:?}",
+            loaded_doc
+                .state_contracts
+                .iter()
+                .map(|sc| &sc.key)
+                .collect::<Vec<_>>()
+        );
+        let notes_scope = loaded_doc
+            .state_contracts
+            .iter()
+            .find(|sc| sc.key == "user_notes")
+            .map(|sc| sc.scope);
+        assert_eq!(
+            notes_scope,
+            Some(StateScope::Persistent),
+            "state scope must be preserved"
+        );
+        let has_selected_tab = loaded_doc
+            .state_contracts
+            .iter()
+            .any(|sc| sc.key == "selected_tab");
+        assert!(
+            has_selected_tab,
+            "state_contract 'selected_tab' must survive: got {:?}",
+            loaded_doc
+                .state_contracts
+                .iter()
+                .map(|sc| &sc.key)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            loaded_doc.action_contracts.len(),
+            1,
+            "action_contracts must survive: got {:?}",
+            loaded_doc.action_contracts
+        );
+        assert_eq!(
+            loaded_doc.action_contracts[0].action_id,
+            "btn-save-notes-action"
+        );
+
+        // --- Apply a surface.add_section operation ---
+        let add_section_op = AppOperation {
+            id: format!("op-{}", Uuid::new_v4()),
+            op_type: "surface.add_section".into(),
+            target: OperationTarget {
+                surface_id: Some(surface.id.clone()),
+                ..Default::default()
+            },
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({
+                "section": {
+                    "id": "sidebar",
+                    "role": "sidebar",
+                    "layout": "stack",
+                    "components": []
+                }
+            }),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        };
+        let txn2 = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "add sidebar section",
+            &[add_section_op],
+            false,
+        )
+        .unwrap();
+        let result2 = apply_transaction(&mut db, &txn2.id).unwrap();
+        assert_eq!(result2.transaction.status, "applied");
+
+        // Verify AGAIN that all metadata survives the second edit too.
+        let updated2 = get_surface(&db, &surface.id).unwrap();
+        let loaded_doc2 = SoftwareDocument::from_value(&updated2.definition)
+            .expect("definition must still be a SoftwareDocument after add_section");
+        assert!(
+            loaded_doc2.sections.iter().any(|s| s.id == "sidebar"),
+            "sidebar section must be present"
+        );
+        assert!(
+            loaded_doc2.sections.iter().any(|s| s.id == "main"),
+            "main section must still be present"
+        );
+        assert!(
+            loaded_doc2
+                .capability_packs
+                .contains(&"coreside.charts".to_string()),
+            "capability_packs must still be intact after add_section"
+        );
+        assert!(
+            loaded_doc2
+                .state_contracts
+                .iter()
+                .any(|sc| sc.key == "user_notes"),
+            "state_contracts must still be intact after add_section"
+        );
+        assert_eq!(
+            loaded_doc2.action_contracts.len(),
+            1,
+            "action_contracts must still be intact after add_section"
+        );
     }
 }
 

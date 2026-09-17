@@ -4,7 +4,7 @@
 //! information architecture, layout patterns, state lifecycles, and component
 //! compositions without bloating every prompt.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UiKnowledgeItem {
@@ -90,6 +90,73 @@ pub static UI_KNOWLEDGE_BASE: &[UiKnowledgeItem] = &[
    - *Populated State*: Normal functional interface.
 2. **Preservation Keys**: When replacing or updating component trees, preserve user inputs by maintaining identical `id` and `valueKey` bindings.
 3. **Draft Safety**: User form inputs must survive partial layout updates and background patch applications."#,
+    },
+    UiKnowledgeItem {
+        id: "ui-anti-patterns",
+        title: "UI Anti-Patterns & Common Pitfalls to Avoid",
+        category: "anti-pattern",
+        keywords: &["anti-pattern", "card soup", "dead buttons", "overflow", "bloat", "nesting", "bad ui"],
+        summary: "Critical mistakes to avoid: card soup, generic dashboard syndrome, dead buttons, and state-destructive edits.",
+        architecture_guidance: r#"### Critical Anti-Patterns to Avoid
+1. **Card Soup**: Do NOT wrap every single text snippet or stat in an isolated border-card. Group related metrics into cohesive surfaces.
+2. **Generic Dashboard Syndrome**: Avoid rendering 10 disconnected placeholder charts without real user workflows or actionable buttons.
+3. **Dead Controls**: Every button must bind to an action (`invokeRegisteredAction`) or state change. Do not emit decorative buttons that do nothing.
+4. **Layout Overflow & Mobile Clipping**: Do not hardcode fixed pixel widths (>300px) that cause horizontal scrolling in narrow/chat-adjacent panels (~360px-400px).
+5. **State-Destructive Updates**: Never replace an entire form tree when the user only asked to change a label or add a field. Use targeted patches to preserve user input.
+6. **Excessive Nested Containers**: Keep DOM depth shallow (< 6 levels); avoid `<card><card><container><card>...`."#,
+    },
+    UiKnowledgeItem {
+        id: "responsive-surface-design",
+        title: "Responsive Breakpoints & Narrow Surface Guidelines",
+        category: "responsive",
+        keywords: &["responsive", "mobile", "breakpoints", "narrow", "chat", "width", "layout"],
+        summary: "Guidelines for fluid adaptability across chat-adjacent sidebars (~360-400px), tablets (~600-768px), and wide monitors (1000px+).",
+        architecture_guidance: r#"### Responsive Layout Breakpoints
+1. **Chat-Adjacent / Narrow Panel (~360px - 400px)**:
+   - Single-column vertical stack.
+   - Collapse grids into vertical cards or compact lists.
+   - Ensure touch targets are at least 36px tall with 8px margins.
+2. **Compact Tablet (~600px - 768px)**:
+   - 2-column layout max.
+   - Toolbar wraps or uses icon buttons with accessible aria labels.
+3. **Desktop & Wide Surfaces (~1000px+)**:
+   - Multi-column dashboards (e.g. sidebar 280px, main canvas flex, inspector 320px).
+   - High data density tables with horizontal scrolling only within the table body, not the whole viewport."#,
+    },
+    UiKnowledgeItem {
+        id: "pattern-dense-table",
+        title: "Dense Data Tables & Exploration Surfaces",
+        category: "archetype",
+        keywords: &["table", "data", "dense", "rows", "columns", "sorting", "filter", "pagination"],
+        summary: "High-density data presentation with sorting, column alignment, pagination, and multi-row selection.",
+        architecture_guidance: r#"### Information Architecture
+1. **Table Header Toolbar**: Quick filter search, column visibility toggle, and export or bulk action trigger.
+2. **Column Headers**: Clickable sort indicators, explicit text alignment (left for strings, right for numbers/currency).
+3. **Pagination / Infinite Scroll Footer**: Shows total record count, current page range, and page navigation buttons.
+4. **Row Actions**: Contextual actions (edit, delete, view detail) placed in the last sticky column."#,
+    },
+    UiKnowledgeItem {
+        id: "pattern-detail-inspector",
+        title: "Split-View & Inspector Detail Pattern",
+        category: "archetype",
+        keywords: &["split", "inspector", "detail", "master-detail", "drawer", "sidebar"],
+        summary: "Master-detail surface where selecting an entity in the primary list dynamically updates the contextual inspector.",
+        architecture_guidance: r#"### Information Architecture
+1. **Master Pane (Left / Primary)**: List or table displaying entity summaries. Selecting an item sets `state.selectedEntityId`.
+2. **Detail Inspector (Right / Drawer)**: Detailed property inspector, activity logs, and edit fields for the selected entity.
+3. **Empty Inspector State**: When `state.selectedEntityId` is null, render an inviting placeholder: 'Select an item to view details'."#,
+    },
+    UiKnowledgeItem {
+        id: "interaction-visual-hierarchy",
+        title: "Visual Hierarchy, Micro-interactions & Action Contracts",
+        category: "interaction",
+        keywords: &["hierarchy", "actions", "primary", "secondary", "destructive", "contrast", "tokens"],
+        summary: "Designing prominent visual paths: one primary action per view, muted secondary actions, and protected destructive triggers.",
+        architecture_guidance: r#"### Hierarchy & Interaction Standards
+1. **One Primary Action**: Every section or surface should have at most ONE primary action (solid fill/high contrast).
+2. **Secondary Actions**: Use outline or ghost styling for secondary actions (cancel, refresh, export).
+3. **Destructive Actions**: Always use danger color tokens, place them away from primary buttons, and require two-step confirmation for unrecoverable deletes.
+4. **Micro-Feedback**: Provide instant optimistic visual feedback when buttons are clicked (spinner or disabled state during in-flight action)."#,
     },
 ];
 
@@ -178,6 +245,10 @@ mod tests {
         let settings = search_ui_knowledge("preferences and toggles");
         assert!(!settings.is_empty());
         assert_eq!(settings[0].id, "pattern-settings-editor");
+
+        let anti = search_ui_knowledge("card soup and dead buttons");
+        assert!(!anti.is_empty());
+        assert_eq!(anti[0].id, "ui-anti-patterns");
     }
 
     #[test]
@@ -190,9 +261,9 @@ mod tests {
     #[test]
     fn compact_index_is_shorter_than_full_catalog() {
         let compact = ui_knowledge_catalog_markdown();
-        // Compact index should be under 1000 chars (vs ~4500 for full dump)
+        // Compact index should be under 2000 chars (vs >15000 for full dump)
         assert!(
-            compact.len() < 1000,
+            compact.len() < 2000,
             "compact index too large: {} chars",
             compact.len()
         );
@@ -202,5 +273,7 @@ mod tests {
         assert!(compact.contains("pattern-crud-tracker"));
         assert!(compact.contains("pattern-multi-step-workflow"));
         assert!(compact.contains("state-lifecycle-rules"));
+        assert!(compact.contains("ui-anti-patterns"));
+        assert!(compact.contains("responsive-surface-design"));
     }
 }

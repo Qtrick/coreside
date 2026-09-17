@@ -10,12 +10,17 @@ use super::errors::SearchError;
 const BLOCKED_HOSTS: &[&str] = &[
     "localhost",
     "localhost.localdomain",
+    "ip6-localhost",
+    "ip6-loopback",
     "127.0.0.1",
     "::1",
     "0.0.0.0",
     "[::1]",
     "metadata.google.internal",
     "metadata.goog",
+    "169.254.169.254",
+    "instance-data",
+    "instance-data.ec2.internal",
 ];
 
 /// Validated public URL plus the socket addresses the HTTP client must use.
@@ -73,6 +78,13 @@ pub fn validate_public_url_structure(raw: &str) -> Result<Url, SearchError> {
     if host_lower.ends_with(".localhost")
         || host_lower.ends_with(".local")
         || host_lower.ends_with(".internal")
+        || host_lower.ends_with(".lan")
+        || host_lower.ends_with(".corp")
+        || host_lower.ends_with(".home")
+        || host_lower.ends_with(".arpa")
+        || host_lower.ends_with(".onion")
+        || host_lower.ends_with(".intranet")
+        || host_lower.ends_with(".private")
     {
         return Err(SearchError::SsrfBlocked(format!("blocked host: {host}")));
     }
@@ -294,6 +306,13 @@ mod tests {
     fn rejects_internal_and_metadata_hosts() {
         assert!(validate_public_http_url("http://metadata.google.internal/").is_err());
         assert!(validate_public_http_url("http://foo.internal/bar").is_err());
+        assert!(validate_public_http_url("http://router.lan/config").is_err());
+        assert!(validate_public_http_url("http://payroll.corp/auth").is_err());
+        assert!(validate_public_http_url("http://device.home/admin").is_err());
+        assert!(validate_public_http_url("http://gateway.intranet/api").is_err());
+        assert!(validate_public_http_url("http://secret.onion/").is_err());
+        assert!(validate_public_http_url("http://instance-data/latest/meta-data").is_err());
+        assert!(validate_public_http_url("http://ip6-localhost/").is_err());
     }
 
     #[test]

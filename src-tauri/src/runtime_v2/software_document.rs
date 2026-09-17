@@ -16,7 +16,10 @@ use crate::ai::response_schema::{ActionDefinition, ToolComponent, ToolDefinition
 /// A semantic section in a Software Document.
 /// Sections provide stable addresses for partial updates (akin to Partial Update markers
 /// or Chrome declarative partial-update templates) while preserving security boundaries.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// A semantic section or region in a Software Document.
+/// Regions provide stable addresses for partial updates (akin to Partial Update markers
+/// or Chrome declarative partial-update templates) while preserving security boundaries.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentSection {
     pub id: String,
@@ -26,10 +29,40 @@ pub struct DocumentSection {
     pub role: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_region_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub responsive: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
     #[serde(default)]
     pub components: Vec<ToolComponent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Value>,
+}
+
+/// Explicit State Scope separating persistent, session, ephemeral, in-flight, and error states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StateScope {
+    /// Persisted across turns and saved to disk.
+    Persistent,
+    /// Preserved in-session across turns/interactions, reset on app restart.
+    Session,
+    /// Component-local ephemeral state (hover, open dropdown, active focus).
+    Ephemeral,
+    /// Pending async action, submitting, or optimistic mutation state.
+    InFlight,
+    /// Query failure, network error, or validation failure state.
+    Error,
+}
+
+impl Default for StateScope {
+    fn default() -> Self {
+        Self::Persistent
+    }
 }
 
 /// Explicit contract for state managed by the application.
@@ -41,8 +74,12 @@ pub struct StateContract {
     pub type_name: String,
     #[serde(default)]
     pub initial_value: Value,
+    #[serde(default)]
+    pub scope: StateScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preservation_policy: Option<String>,
 }
 
 fn default_type_name() -> String {
@@ -113,6 +150,18 @@ impl SoftwareDocument {
         }
     }
 
+    /// Load or convert a JSON Value into a SoftwareDocument without losing contracts.
+    pub fn from_value(val: &Value) -> Result<Self, String> {
+        if val.get("sections").is_some() {
+            serde_json::from_value(val.clone())
+                .map_err(|e| format!("failed to deserialize SoftwareDocument: {e}"))
+        } else {
+            let tool: ToolDefinition = serde_json::from_value(val.clone())
+                .map_err(|e| format!("failed to parse ToolDefinition: {e}"))?;
+            Ok(Self::from_tool_definition(&tool))
+        }
+    }
+
     /// Convert a flat ToolDefinition into a structured SoftwareDocument.
     pub fn from_tool_definition(tool: &ToolDefinition) -> Self {
         let mut doc = Self::new(&tool.id, &tool.name);
@@ -152,6 +201,10 @@ impl SoftwareDocument {
                 },
                 role: Some("content".into()),
                 layout: Some("stack".into()),
+                parent_region_id: None,
+                slot: None,
+                responsive: None,
+                instance_id: None,
                 components: comps,
                 metadata: None,
             });
@@ -203,6 +256,10 @@ impl SoftwareDocument {
                 title: None,
                 role: Some("content".into()),
                 layout: Some("stack".into()),
+                parent_region_id: None,
+                slot: None,
+                responsive: None,
+                instance_id: None,
                 components: Vec::new(),
                 metadata: None,
             });
@@ -227,6 +284,196 @@ impl SoftwareDocument {
         }
 
         notes
+    }
+
+    /// Find a semantic region by ID.
+    pub fn find_region(&self, id: &str) -> Option<&DocumentSection> {
+        self.sections.iter().find(|s| s.id == id)
+    }
+
+    /// Find a mutable semantic region by ID.
+    pub fn find_region_mut(&mut self, id: &str) -> Option<&mut DocumentSection> {
+        self.sections.iter_mut().find(|s| s.id == id)
+    }
+
+    /// Compute deterministic hierarchy path for a region (e.g. "surface/main/results").
+    pub fn get_region_path(&self, id: &str) -> Option<String> {
+        let mut curr = self.find_region(id)?;
+        let mut segments = vec![curr.id.clone()];
+        while let Some(ref parent_id) = curr.parent_region_id {
+            if let Some(parent) = self.find_region(parent_id) {
+                segments.push(parent.id.clone());
+                curr = parent;
+            } else {
+                break;
+            }
+        }
+        segments.push(self.id.clone());
+        segments.reverse();
+        Some(segments.join("/"))
+    }
+
+    /// Get all direct child regions of a parent region.
+    pub fn get_child_regions(&self, parent_id: &str) -> Vec<&DocumentSection> {
+        self.sections
+            .iter()
+            .filter(|s| s.parent_region_id.as_deref() == Some(parent_id))
+            .collect()
+    }
+
+    /// Move a component from one region to another with optional target index.
+    pub fn move_component(
+        &mut self,
+        component_id: &str,
+        target_region_id: &str,
+        target_index: Option<usize>,
+    ) -> Result<(), String> {
+        // First find and extract the component
+        let mut extracted: Option<ToolComponent> = None;
+        for sec in &mut self.sections {
+            if let Some(pos) = sec.components.iter().position(|c| c.id == component_id) {
+                extracted = Some(sec.components.remove(pos));
+                break;
+            }
+        }
+        let mut comp = extracted.ok_or_else(|| format!("component '{component_id}' not found"))?;
+
+        // Update component's section prop if present
+        if let Some(Value::Object(ref mut map)) = comp.props {
+            map.insert("section".into(), json!(target_region_id));
+        }
+
+        // Insert into target region
+        let target_sec = self
+            .find_region_mut(target_region_id)
+            .ok_or_else(|| format!("target region '{target_region_id}' not found"))?;
+
+        match target_index {
+            Some(idx) if idx <= target_sec.components.len() => {
+                target_sec.components.insert(idx, comp);
+            }
+            _ => {
+                target_sec.components.push(comp);
+            }
+        }
+        Ok(())
+    }
+
+    /// Reorder components in a region by given ID sequence.
+    pub fn reorder_components(
+        &mut self,
+        region_id: &str,
+        component_ids: &[String],
+    ) -> Result<(), String> {
+        let sec = self
+            .find_region_mut(region_id)
+            .ok_or_else(|| format!("region '{region_id}' not found"))?;
+
+        let mut comp_map: HashMap<String, ToolComponent> = HashMap::new();
+        for c in sec.components.drain(..) {
+            comp_map.insert(c.id.clone(), c);
+        }
+
+        for id in component_ids {
+            if let Some(c) = comp_map.remove(id) {
+                sec.components.push(c);
+            }
+        }
+        // Append any components that were not mentioned in the order list
+        for (_, c) in comp_map {
+            sec.components.push(c);
+        }
+        Ok(())
+    }
+
+    /// Update region layout and responsive configuration.
+    pub fn update_region_layout(
+        &mut self,
+        region_id: &str,
+        layout: Option<String>,
+        responsive: Option<Value>,
+    ) -> Result<(), String> {
+        let sec = self
+            .find_region_mut(region_id)
+            .ok_or_else(|| format!("region '{region_id}' not found"))?;
+        if let Some(l) = layout {
+            sec.layout = Some(l);
+        }
+        if let Some(r) = responsive {
+            sec.responsive = Some(r);
+        }
+        Ok(())
+    }
+
+    /// Find a component along with its enclosing section/region.
+    pub fn find_component_with_region(
+        &self,
+        component_id: &str,
+    ) -> Option<(&DocumentSection, &ToolComponent)> {
+        for sec in &self.sections {
+            for comp in &sec.components {
+                if comp.id == component_id {
+                    return Some((sec, comp));
+                }
+            }
+        }
+        None
+    }
+
+    /// Update or declare state scope for an existing or new key.
+    pub fn update_state_scope(&mut self, key: &str, scope: StateScope) -> Result<(), String> {
+        if let Some(contract) = self.state_contracts.iter_mut().find(|sc| sc.key == key) {
+            contract.scope = scope;
+        } else {
+            self.state_contracts.push(StateContract {
+                key: key.to_string(),
+                type_name: "string".to_string(),
+                initial_value: Value::Null,
+                scope,
+                description: None,
+                preservation_policy: Some("preserve".into()),
+            });
+        }
+        Ok(())
+    }
+
+    /// Filter and preserve state values according to state contracts.
+    /// Ephemeral and InFlight states are safely discarded, while Persistent and Session
+    /// states are preserved across model update turns.
+    pub fn preserve_state_values(
+        &self,
+        previous_state: &HashMap<String, Value>,
+    ) -> HashMap<String, Value> {
+        let mut preserved = HashMap::new();
+        for (k, v) in previous_state {
+            if let Some(contract) = self.state_contracts.iter().find(|sc| &sc.key == k) {
+                if contract.scope != StateScope::Ephemeral && contract.scope != StateScope::InFlight
+                {
+                    preserved.insert(k.clone(), v.clone());
+                }
+            } else {
+                // If not explicitly declared ephemeral, preserve by default for safety
+                preserved.insert(k.clone(), v.clone());
+            }
+        }
+        preserved
+    }
+
+    /// Filter state by explicit scope.
+    pub fn filter_state_by_scope(
+        &self,
+        active_state: &HashMap<String, Value>,
+        scope: StateScope,
+    ) -> HashMap<String, Value> {
+        let mut filtered = HashMap::new();
+        for (k, v) in active_state {
+            if let Some(contract) = self.state_contracts.iter().find(|sc| &sc.key == k) {
+                if contract.scope == scope {
+                    filtered.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        filtered
     }
 
     /// Add a new section at the specified index or end.
@@ -325,7 +572,9 @@ impl SoftwareDocument {
                 key: key.to_string(),
                 type_name: "string".to_string(),
                 initial_value: initial_value.unwrap_or(Value::Null),
+                scope: StateScope::Persistent,
                 description: Some(format!("Bound to component '{component_id}'")),
+                preservation_policy: Some("preserve".into()),
             });
         }
 
@@ -476,10 +725,12 @@ fn repair_component(
                 key: vkey.to_string(),
                 type_name: "string".to_string(),
                 initial_value: Value::Null,
+                scope: StateScope::Persistent,
                 description: Some(format!(
                     "Auto-repaired state contract for component '{}'",
                     comp.id
                 )),
+                preservation_policy: Some("preserve".into()),
             });
             notes.push(RepairNote {
                 kind: "added_missing_state_contract".into(),
@@ -518,7 +769,7 @@ mod tests {
                 props: Some(json!({ "dense": true })),
                 ..Default::default()
             }],
-            metadata: None,
+            ..Default::default()
         };
 
         assert!(doc.add_section(section, None).is_ok());
@@ -544,9 +795,6 @@ mod tests {
         let mut doc = SoftwareDocument::new("doc-test", "Test");
         let section = DocumentSection {
             id: "main".into(),
-            title: None,
-            role: None,
-            layout: None,
             components: vec![
                 ToolComponent {
                     id: "btn-1".into(),
@@ -565,7 +813,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
-            metadata: None,
+            ..Default::default()
         };
         doc.add_section(section, None).unwrap();
 
@@ -581,5 +829,138 @@ mod tests {
             doc.sections[0].components[0].id,
             doc.sections[0].components[1].id
         );
+    }
+
+    #[test]
+    fn test_regional_hierarchy_and_targeting() {
+        let mut doc = SoftwareDocument::new("doc-surface", "Multi-Region Surface");
+
+        let header = DocumentSection {
+            id: "header".into(),
+            title: Some("Header".into()),
+            role: Some("header".into()),
+            ..Default::default()
+        };
+        let main = DocumentSection {
+            id: "main".into(),
+            title: Some("Main Body".into()),
+            role: Some("content".into()),
+            ..Default::default()
+        };
+        let sidebar = DocumentSection {
+            id: "sidebar".into(),
+            title: Some("Sidebar Filters".into()),
+            role: Some("sidebar".into()),
+            parent_region_id: Some("main".into()),
+            slot: Some("left".into()),
+            components: vec![ToolComponent {
+                id: "filter-input".into(),
+                component_type: "input".into(),
+                value_key: Some("active_filter".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let content_area = DocumentSection {
+            id: "content-area".into(),
+            title: Some("Data Grid".into()),
+            role: Some("content".into()),
+            parent_region_id: Some("main".into()),
+            slot: Some("center".into()),
+            components: vec![ToolComponent {
+                id: "grid-1".into(),
+                component_type: "data-table".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        doc.add_section(header, None).unwrap();
+        doc.add_section(main, None).unwrap();
+        doc.add_section(sidebar, None).unwrap();
+        doc.add_section(content_area, None).unwrap();
+
+        assert_eq!(doc.sections.len(), 4);
+
+        // Test regional queries
+        let children = doc.get_child_regions("main");
+        assert_eq!(children.len(), 2);
+        assert!(children.iter().any(|c| c.id == "sidebar"));
+        assert!(children.iter().any(|c| c.id == "content-area"));
+
+        let path = doc.get_region_path("sidebar");
+        assert_eq!(path.as_deref(), Some("doc-surface/main/sidebar"));
+
+        // Test component lookup with region
+        let (found_sec, found_comp) = doc.find_component_with_region("filter-input").unwrap();
+        assert_eq!(found_comp.id, "filter-input");
+        assert_eq!(found_sec.id, "sidebar");
+
+        // Move component between regions
+        assert!(doc
+            .move_component("filter-input", "content-area", Some(0))
+            .is_ok());
+        let (new_sec, _) = doc.find_component_with_region("filter-input").unwrap();
+        assert_eq!(new_sec.id, "content-area");
+    }
+
+    #[test]
+    fn test_state_scopes_and_preservation() {
+        let mut doc = SoftwareDocument::new("doc-stateful", "Stateful App");
+
+        doc.state_contracts.push(StateContract {
+            key: "user_draft".into(),
+            type_name: "string".into(),
+            initial_value: json!("draft text"),
+            description: None,
+            scope: StateScope::Persistent,
+            preservation_policy: Some("keep_on_patch".into()),
+        });
+        doc.state_contracts.push(StateContract {
+            key: "selected_tab".into(),
+            type_name: "string".into(),
+            initial_value: json!("tab-1"),
+            description: None,
+            scope: StateScope::Session,
+            preservation_policy: None,
+        });
+        doc.state_contracts.push(StateContract {
+            key: "is_loading".into(),
+            type_name: "boolean".into(),
+            initial_value: json!(false),
+            description: None,
+            scope: StateScope::InFlight,
+            preservation_policy: None,
+        });
+
+        let mut active_state = HashMap::new();
+        active_state.insert("user_draft".into(), json!("user modified text"));
+        active_state.insert("selected_tab".into(), json!("tab-2"));
+        active_state.insert("is_loading".into(), json!(true));
+        active_state.insert("untracked_scratch".into(), json!("temp"));
+
+        // Filter persistent states
+        let persistent = doc.filter_state_by_scope(&active_state, StateScope::Persistent);
+        assert_eq!(persistent.len(), 1);
+        assert_eq!(
+            persistent.get("user_draft").unwrap(),
+            &json!("user modified text")
+        );
+        assert!(!persistent.contains_key("selected_tab"));
+        assert!(!persistent.contains_key("is_loading"));
+
+        // Filter session states
+        let session = doc.filter_state_by_scope(&active_state, StateScope::Session);
+        assert_eq!(session.len(), 1);
+        assert_eq!(session.get("selected_tab").unwrap(), &json!("tab-2"));
+
+        // Preserve state values according to declared scopes
+        let preserved = doc.preserve_state_values(&active_state);
+        assert_eq!(
+            preserved.get("user_draft").unwrap(),
+            &json!("user modified text")
+        );
+        assert_eq!(preserved.get("selected_tab").unwrap(), &json!("tab-2"));
+        assert!(!preserved.contains_key("is_loading"));
     }
 }

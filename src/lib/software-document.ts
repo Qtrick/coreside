@@ -11,11 +11,25 @@
 import { z } from "zod";
 import type { ActionDefinition, ToolComponent, ToolDefinition } from "@/types/tool";
 
+export const StateScopeSchema = z.enum([
+  "persistent",
+  "session",
+  "ephemeral",
+  "in_flight",
+  "error",
+]);
+
+export type StateScope = z.infer<typeof StateScopeSchema>;
+
 export const DocumentSectionSchema = z.object({
   id: z.string().min(1),
   title: z.string().optional(),
   role: z.string().optional(),
   layout: z.string().optional(),
+  parentRegionId: z.string().optional(),
+  slot: z.string().optional(),
+  responsive: z.record(z.unknown()).optional(),
+  instanceId: z.string().optional(),
   components: z.array(z.any()).default([]),
   metadata: z.record(z.unknown()).optional(),
 });
@@ -25,6 +39,10 @@ export type DocumentSection = {
   title?: string;
   role?: string;
   layout?: string;
+  parentRegionId?: string;
+  slot?: string;
+  responsive?: Record<string, unknown>;
+  instanceId?: string;
   components: ToolComponent[];
   metadata?: Record<string, unknown>;
 };
@@ -34,6 +52,8 @@ export const StateContractSchema = z.object({
   type: z.string().default("string"),
   initialValue: z.unknown().default(null),
   description: z.string().optional(),
+  scope: StateScopeSchema.default("persistent"),
+  preservationPolicy: z.string().optional(),
 });
 
 export type StateContract = z.infer<typeof StateContractSchema>;
@@ -237,6 +257,7 @@ export function validateAndRepair(doc: SoftwareDocument): {
           key: vk,
           type: "string",
           initialValue: null,
+          scope: "persistent",
           description: `Auto-declared from component '${comp.id}'`,
         });
         notes.push({
@@ -373,6 +394,7 @@ export function bindState(
       key,
       type: "string",
       initialValue,
+      scope: "persistent",
       description: `Bound to component '${componentId}'`,
     });
   }
@@ -482,3 +504,172 @@ export function setStyleToken(
 
   return cloned;
 }
+
+/**
+ * Find a section/region by ID.
+ */
+export function findRegion(
+  doc: SoftwareDocument,
+  regionId: string
+): DocumentSection | undefined {
+  return doc.sections.find((s) => s.id === regionId);
+}
+
+/**
+ * Get all child regions of a parent region.
+ */
+export function getChildRegions(
+  doc: SoftwareDocument,
+  parentRegionId: string
+): DocumentSection[] {
+  return doc.sections.filter((s) => s.parentRegionId === parentRegionId);
+}
+
+/**
+ * Get the hierarchical address path for a region (e.g. "doc-1/main/sidebar").
+ */
+export function getRegionPath(
+  doc: SoftwareDocument,
+  regionId: string
+): string | undefined {
+  let curr = findRegion(doc, regionId);
+  if (!curr) return undefined;
+
+  const segments: string[] = [curr.id];
+  while (curr.parentRegionId) {
+    const parent = findRegion(doc, curr.parentRegionId);
+    if (parent) {
+      segments.push(parent.id);
+      curr = parent;
+    } else {
+      break;
+    }
+  }
+  segments.push(doc.id);
+  segments.reverse();
+  return segments.join("/");
+}
+
+/**
+ * Find a component along with its enclosing section/region.
+ */
+export function findComponentWithRegion(
+  doc: SoftwareDocument,
+  componentId: string
+): { section: DocumentSection; component: ToolComponent } | undefined {
+  for (const section of doc.sections) {
+    for (const comp of section.components) {
+      if (comp.id === componentId) {
+        return { section, component: comp };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Move a component from one region to another with optional target index.
+ */
+export function moveComponent(
+  doc: SoftwareDocument,
+  componentId: string,
+  targetRegionId: string,
+  targetIndex?: number
+): SoftwareDocument {
+  const cloned: SoftwareDocument = JSON.parse(JSON.stringify(doc));
+
+  let extracted: ToolComponent | undefined;
+  for (const sec of cloned.sections) {
+    const pos = sec.components.findIndex((c) => c.id === componentId);
+    if (pos !== -1) {
+      extracted = sec.components.splice(pos, 1)[0];
+      break;
+    }
+  }
+
+  if (!extracted) {
+    throw new Error(`component '${componentId}' not found`);
+  }
+
+  if (extracted.props && typeof extracted.props === "object") {
+    extracted.props.section = targetRegionId;
+  }
+
+  const targetSec = cloned.sections.find((s) => s.id === targetRegionId);
+  if (!targetSec) {
+    throw new Error(`target region '${targetRegionId}' not found`);
+  }
+
+  if (
+    typeof targetIndex === "number" &&
+    targetIndex >= 0 &&
+    targetIndex <= targetSec.components.length
+  ) {
+    targetSec.components.splice(targetIndex, 0, extracted);
+  } else {
+    targetSec.components.push(extracted);
+  }
+
+  return cloned;
+}
+
+/**
+ * Update layout and responsive configurations for a region.
+ */
+export function updateRegionLayout(
+  doc: SoftwareDocument,
+  regionId: string,
+  layout?: string,
+  responsive?: Record<string, unknown>
+): SoftwareDocument {
+  const cloned: SoftwareDocument = JSON.parse(JSON.stringify(doc));
+  const sec = cloned.sections.find((s) => s.id === regionId);
+  if (!sec) {
+    throw new Error(`region '${regionId}' not found`);
+  }
+  if (layout !== undefined) sec.layout = layout;
+  if (responsive !== undefined) sec.responsive = responsive;
+  return cloned;
+}
+
+/**
+ * Filter state by explicit scope.
+ */
+export function filterStateByScope(
+  doc: SoftwareDocument,
+  activeState: Record<string, unknown>,
+  scope: StateScope
+): Record<string, unknown> {
+  const filtered: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(activeState)) {
+    const contract = doc.stateContracts.find((sc) => sc.key === k);
+    if (contract && contract.scope === scope) {
+      filtered[k] = v;
+    }
+  }
+  return filtered;
+}
+
+/**
+ * Filter and preserve state values according to state contracts.
+ * Ephemeral and InFlight states are discarded, while Persistent and Session states are kept.
+ */
+export function preserveStateValues(
+  doc: SoftwareDocument,
+  previousState: Record<string, unknown>
+): Record<string, unknown> {
+  const preserved: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(previousState)) {
+    const contract = doc.stateContracts.find((sc) => sc.key === k);
+    if (contract) {
+      if (contract.scope !== "ephemeral" && contract.scope !== "in_flight") {
+        preserved[k] = v;
+      }
+    } else {
+      // Unspecified keys are preserved by default for safety
+      preserved[k] = v;
+    }
+  }
+  return preserved;
+}
+

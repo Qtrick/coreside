@@ -66,12 +66,12 @@ pub fn run() {
         if let Ok(paths) = app_paths::AppPaths::resolve() {
             let report = cache_cleaner::clean_stale_caches(&paths);
             let total_removed = report.stale_restore_staging_removed
-                + report.stale_backup_staging_removed
+                + report.stale_attachment_staging_removed
                 + report.orphaned_temp_files_removed;
             if total_removed > 0 || report.crawler_bytes_freed > 0 || !report.errors.is_empty() {
                 tracing::info!(
                     restore_staging = report.stale_restore_staging_removed,
-                    attachment_staging = report.stale_backup_staging_removed,
+                    attachment_staging = report.stale_attachment_staging_removed,
                     orphaned_temps = report.orphaned_temp_files_removed,
                     crawler_freed = %cache_cleaner::format_bytes(report.crawler_bytes_freed),
                     errors = report.errors.len(),

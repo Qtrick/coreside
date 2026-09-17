@@ -4,10 +4,18 @@ import {
   addSection,
   bindAction,
   bindState,
+  filterStateByScope,
+  findComponentWithRegion,
+  findRegion,
   fromToolDefinition,
+  getChildRegions,
+  getRegionPath,
+  moveComponent,
+  preserveStateValues,
   removeSection,
   setStyleToken,
   toToolDefinition,
+  updateRegionLayout,
   updateSection,
   validateAndRepair,
 } from "./software-document";
@@ -190,4 +198,142 @@ describe("SoftwareDocument (UI IR)", () => {
     expect(repairedDoc.stateContracts.some((s) => s.key === "orphanedKey")).toBe(true);
     expect(notes.some((n) => n.kind === "auto_declared_state_contract")).toBe(true);
   });
+
+  it("supports regional hierarchy, parent-child addressing, and moving components", () => {
+    let doc = fromToolDefinition({
+      id: "tool-regional-surface",
+      name: "Regional Surface",
+      description: "Regional surface description",
+      version: 1,
+      components: [],
+    });
+
+    doc = addSection(doc, {
+      id: "header",
+      role: "header",
+      title: "App Header",
+      components: [],
+    });
+
+    doc = addSection(doc, {
+      id: "main",
+      role: "content",
+      title: "Main Content",
+      components: [],
+    });
+
+    doc = addSection(doc, {
+      id: "filters-slot",
+      role: "sidebar",
+      title: "Filters",
+      parentRegionId: "main",
+      slot: "left",
+      components: [
+        {
+          id: "input-filter",
+          type: "textInput",
+          props: { placeholder: "Filter items..." },
+        },
+      ],
+    });
+
+    doc = addSection(doc, {
+      id: "results-slot",
+      role: "content",
+      title: "Results",
+      parentRegionId: "main",
+      slot: "center",
+      components: [],
+    });
+
+    // Check regional parent-child relationships
+    const children = getChildRegions(doc, "main");
+    expect(children.length).toBe(2);
+    expect(children.map((c) => c.id)).toEqual(["filters-slot", "results-slot"]);
+
+    // Check hierarchical region path
+    const path = getRegionPath(doc, "filters-slot");
+    expect(path).toBe("tool-regional-surface/main/filters-slot");
+
+    // Component lookup with region
+    const compWithRegion = findComponentWithRegion(doc, "input-filter");
+    expect(compWithRegion).toBeDefined();
+    expect(compWithRegion?.section.id).toBe("filters-slot");
+    expect(compWithRegion?.component.id).toBe("input-filter");
+
+    // Move component from filters-slot to results-slot
+    doc = moveComponent(doc, "input-filter", "results-slot", 0);
+    const moved = findComponentWithRegion(doc, "input-filter");
+    expect(moved?.section.id).toBe("results-slot");
+    expect(moved?.component.props?.section).toBe("results-slot");
+
+    // Update region layout and responsive configuration
+    doc = updateRegionLayout(doc, "results-slot", "grid", { cols: 2, breakpoint: 768 });
+    const updatedSec = findRegion(doc, "results-slot");
+    expect(updatedSec?.layout).toBe("grid");
+    expect(updatedSec?.responsive).toEqual({ cols: 2, breakpoint: 768 });
+  });
+
+  it("manages explicit state scopes and preserves persistent/session state across updates", () => {
+    const doc = fromToolDefinition({
+      id: "tool-stateful-app",
+      name: "Stateful App",
+      description: "Stateful app description",
+      version: 1,
+      components: [],
+    });
+
+    doc.stateContracts.push({
+      key: "search_query",
+      type: "string",
+      initialValue: "",
+      scope: "persistent",
+      preservationPolicy: "keep_on_patch",
+    });
+
+    doc.stateContracts.push({
+      key: "selected_index",
+      type: "number",
+      initialValue: 0,
+      scope: "session",
+    });
+
+    doc.stateContracts.push({
+      key: "dropdown_open",
+      type: "boolean",
+      initialValue: false,
+      scope: "ephemeral",
+    });
+
+    doc.stateContracts.push({
+      key: "is_submitting",
+      type: "boolean",
+      initialValue: false,
+      scope: "in_flight",
+    });
+
+    const activeState: Record<string, unknown> = {
+      search_query: "Quantum biology",
+      selected_index: 3,
+      dropdown_open: true,
+      is_submitting: true,
+      untracked_field: "some user value",
+    };
+
+    // Filter by scope
+    const persistent = filterStateByScope(doc, activeState, "persistent");
+    expect(persistent).toEqual({ search_query: "Quantum biology" });
+
+    const session = filterStateByScope(doc, activeState, "session");
+    expect(session).toEqual({ selected_index: 3 });
+
+    // Preserve states: Ephemeral & in_flight discarded; persistent, session & untracked preserved
+    const preserved = preserveStateValues(doc, activeState);
+    expect(preserved.search_query).toBe("Quantum biology");
+    expect(preserved.selected_index).toBe(3);
+    expect(preserved.untracked_field).toBe("some user value");
+    expect(preserved.dropdown_open).toBeUndefined();
+    expect(preserved.is_submitting).toBeUndefined();
+  });
 });
+
