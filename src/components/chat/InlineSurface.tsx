@@ -96,6 +96,8 @@ export function InlineSurfaceCard({
   const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [a11yWarn, setA11yWarn] = useState<string | null>(null);
+  const [isCustomizing, setIsCustomizing] = useState(false);
+  const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
   // Real kernel application id for crash strikes — never invent from toolId.
   const [kernelApplicationId, setKernelApplicationId] = useState<string | null>(
     null,
@@ -352,6 +354,11 @@ export function InlineSurfaceCard({
             conversationId={conversationId}
             tool={tool}
             baseRevision={surface.currentRevision}
+            compact
+            enabled={isCustomizing}
+            onToggleEnabled={() => setIsCustomizing((v) => !v)}
+            selectedId={selectedComponentId}
+            onSelectId={setSelectedComponentId}
             onApplied={() => {
               void api.getSurface(surface.id).then(setSurface).catch(() => undefined);
             }}
@@ -428,6 +435,9 @@ export function InlineSurfaceCard({
             state={state}
             onStateChange={handleStateChange}
             onPersistState={persistState}
+            isCustomizing={isCustomizing}
+            selectedComponentId={selectedComponentId}
+            onSelectComponent={(c) => setSelectedComponentId(c.id)}
             // Prefer a real kernel application id when present; never invent one
             // solely so render failures can advance crash_count for legacy tools.
             applicationId={kernelApplicationId}

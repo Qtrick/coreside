@@ -103,6 +103,7 @@ function CanvasWallpaper({
     let viewH = window.innerHeight;
     let resizeRaf = 0;
     let hidden = document.visibilityState === "hidden";
+    let isWindowBlurred = false;
     const webDriver = webDriverSession();
     /** Matrix-only: repaint after resize when WebDriver keeps visibilityState hidden. */
     let repaintMatrixIfHidden: (() => void) | undefined;
@@ -165,7 +166,7 @@ function CanvasWallpaper({
 
       const draw = (force = false) => {
         if (!running) return;
-        if (hidden && !force && !webDriver) {
+        if ((hidden || isWindowBlurred) && !force && !webDriver) {
           return;
         }
         const w = viewW;
@@ -209,16 +210,29 @@ function CanvasWallpaper({
 
       const onMatrixVisibility = () => {
         hidden = document.visibilityState === "hidden";
-        if (!hidden && !reduced && running) {
+        if (!hidden && !isWindowBlurred && !reduced && running) {
           cancelAnimationFrame(raf);
           raf = requestAnimationFrame(() => draw());
         } else if (hidden) {
           cancelAnimationFrame(raf);
         }
       };
+      const onMatrixBlur = () => {
+        isWindowBlurred = true;
+        cancelAnimationFrame(raf);
+      };
+      const onMatrixFocus = () => {
+        isWindowBlurred = false;
+        if (!hidden && !reduced && running) {
+          cancelAnimationFrame(raf);
+          raf = requestAnimationFrame(() => draw());
+        }
+      };
       document.addEventListener("visibilitychange", onMatrixVisibility);
       window.addEventListener("pageshow", onMatrixVisibility);
       window.addEventListener("pagehide", onMatrixVisibility);
+      window.addEventListener("blur", onMatrixBlur);
+      window.addEventListener("focus", onMatrixFocus);
 
       return () => {
         running = false;
@@ -228,6 +242,8 @@ function CanvasWallpaper({
         document.removeEventListener("visibilitychange", onMatrixVisibility);
         window.removeEventListener("pageshow", onMatrixVisibility);
         window.removeEventListener("pagehide", onMatrixVisibility);
+        window.removeEventListener("blur", onMatrixBlur);
+        window.removeEventListener("focus", onMatrixFocus);
         ro?.disconnect();
       };
     }
@@ -277,7 +293,7 @@ function CanvasWallpaper({
 
     const drawFrame = (now: number) => {
       if (!running) return;
-      if (hidden) {
+      if ((hidden || isWindowBlurred) && !webDriver) {
         return;
       }
       const w = viewW;
@@ -422,16 +438,29 @@ function CanvasWallpaper({
 
     const onFrameVisibility = () => {
       hidden = document.visibilityState === "hidden";
-      if (!hidden && !reduced && running) {
+      if (!hidden && !isWindowBlurred && !reduced && running) {
         cancelAnimationFrame(raf);
         raf = requestAnimationFrame(drawFrame);
       } else if (hidden) {
         cancelAnimationFrame(raf);
       }
     };
+    const onWindowBlur = () => {
+      isWindowBlurred = true;
+      cancelAnimationFrame(raf);
+    };
+    const onWindowFocus = () => {
+      isWindowBlurred = false;
+      if (!hidden && !reduced && running) {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(drawFrame);
+      }
+    };
     document.addEventListener("visibilitychange", onFrameVisibility);
     window.addEventListener("pageshow", onFrameVisibility);
     window.addEventListener("pagehide", onFrameVisibility);
+    window.addEventListener("blur", onWindowBlur);
+    window.addEventListener("focus", onWindowFocus);
 
     raf = requestAnimationFrame(drawFrame);
     return () => {
@@ -442,6 +471,8 @@ function CanvasWallpaper({
       document.removeEventListener("visibilitychange", onFrameVisibility);
       window.removeEventListener("pageshow", onFrameVisibility);
       window.removeEventListener("pagehide", onFrameVisibility);
+      window.removeEventListener("blur", onWindowBlur);
+      window.removeEventListener("focus", onWindowFocus);
       ro?.disconnect();
     };
   }, [kind, color, secondaryColor, speed, density, opacity, reduced]);

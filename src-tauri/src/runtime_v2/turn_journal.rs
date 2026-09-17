@@ -395,6 +395,41 @@ pub fn list_conversation_recoverable_turns(
     ids.into_iter().map(|id| get_turn(db, &id)).collect()
 }
 
+/// Compact old finalized or failed turns in the journal.
+///
+/// Retention & compaction eligibility rules:
+/// - Active/in-flight states (`created`, `claimed`, `reserved`, `provider_started`, `streaming`, `typed_terminal`, `finalizing`) are NEVER deleted.
+/// - `interrupted_recoverable` states are NEVER deleted (they await recovery/retry).
+/// - Finalized successful states (`committed`, `published`) are pruned only if `finalized_at` is older than `finalized_retention_days`.
+/// - Terminal failed states (`failed`) are pruned only if `finalized_at` is older than `failed_retention_days`.
+///
+/// Executes inside an unchecked transaction to ensure atomicity.
+pub fn compact_turn_journal(
+    db: &Database,
+    finalized_retention_days: u32,
+    failed_retention_days: u32,
+) -> DbResult<usize> {
+    let tx = db.conn().unchecked_transaction()?;
+    let deleted = tx.execute(
+        "DELETE FROM turn_journal
+         WHERE (
+             state IN ('committed', 'published')
+             AND finalized_at IS NOT NULL
+             AND datetime(finalized_at) <= datetime('now', '-' || ?1 || ' days')
+         ) OR (
+             state = 'failed'
+             AND finalized_at IS NOT NULL
+             AND datetime(finalized_at) <= datetime('now', '-' || ?2 || ' days')
+         )",
+        params![
+            finalized_retention_days as i64,
+            failed_retention_days as i64
+        ],
+    )?;
+    tx.commit()?;
+    Ok(deleted)
+}
+
 /// Append a conversation-scoped event after durable commit (cursor resume).
 /// Sequence allocation uses a dedicated counter row — not `MAX(sequence)+1`.
 pub fn append_conversation_event(
@@ -608,5 +643,72 @@ mod tests {
         let b = create_turn(&db, "c1", None, "same-key", None).unwrap();
         assert_eq!(a.id, b.id);
         assert_eq!(a.attempt_id, b.attempt_id);
+    }
+
+    #[test]
+    fn compact_turn_journal_retention_rules() {
+        let db = db();
+
+        // 1. In-flight turn (claimed) - should NEVER be deleted
+        let inflight = create_turn(&db, "c1", None, "idem-inflight", None).unwrap();
+        transition_turn(
+            &db,
+            &inflight.id,
+            &inflight.attempt_id,
+            TurnState::Claimed,
+            TurnPatch::default(),
+        )
+        .unwrap();
+
+        // 2. Interrupted recoverable - should NEVER be deleted
+        let interrupted = create_turn(&db, "c1", None, "idem-interrupted", None).unwrap();
+        transition_turn(
+            &db,
+            &interrupted.id,
+            &interrupted.attempt_id,
+            TurnState::Claimed,
+            TurnPatch::default(),
+        )
+        .unwrap();
+        mark_interrupted_in_flight(&db).unwrap();
+
+        // 3. Recent committed turn - finalized now, retention 30 days -> preserved
+        let recent_committed = create_turn(&db, "c1", None, "idem-recent-com", None).unwrap();
+        let now_str = now_rfc3339();
+        db.conn()
+            .execute(
+                "UPDATE turn_journal SET state = 'committed', finalized_at = ?1 WHERE id = ?2",
+                [&now_str, &recent_committed.id],
+            )
+            .unwrap();
+
+        // 4. Old committed turn - backdate finalized_at to 2020 -> pruned
+        let old_committed = create_turn(&db, "c1", None, "idem-old-com", None).unwrap();
+        db.conn()
+            .execute(
+                "UPDATE turn_journal SET state = 'committed', finalized_at = '2020-01-01T00:00:00Z' WHERE id = ?1",
+                [&old_committed.id],
+            )
+            .unwrap();
+
+        // 5. Old failed turn - backdate to 2020 -> pruned
+        let old_failed = create_turn(&db, "c1", None, "idem-old-fail", None).unwrap();
+        db.conn()
+            .execute(
+                "UPDATE turn_journal SET state = 'failed', finalized_at = '2020-01-01T00:00:00Z' WHERE id = ?1",
+                [&old_failed.id],
+            )
+            .unwrap();
+
+        // Run compaction: 30 days for committed, 14 days for failed
+        let pruned = compact_turn_journal(&db, 30, 14).unwrap();
+        assert_eq!(pruned, 2); // old_committed and old_failed pruned
+
+        // Verify active and recoverable remain intact
+        assert!(get_turn(&db, &inflight.id).is_ok());
+        assert!(get_turn(&db, &interrupted.id).is_ok());
+        assert!(get_turn(&db, &recent_committed.id).is_ok());
+        assert!(get_turn(&db, &old_committed.id).is_err());
+        assert!(get_turn(&db, &old_failed.id).is_err());
     }
 }

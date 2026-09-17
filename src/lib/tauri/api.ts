@@ -868,6 +868,10 @@ export const api = {
   }) => invoke<unknown>("branch_conversation_cmd", { args }),
   listBranches: (conversationId: string) =>
     invoke<Record<string, unknown>[]>("list_branches_cmd", { conversationId }),
+  diffBranch: (branchId: string) =>
+    invoke<import("@/types/runtime-v2").BranchDiffRecord>("diff_branch_cmd", {
+      branchId,
+    }),
   createSnapshot: (
     conversationId: string,
     projectId?: string | null,

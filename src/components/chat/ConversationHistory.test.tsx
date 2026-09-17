@@ -17,6 +17,7 @@ vi.mock("@/lib/tauri", () => ({
     listTurnTimeline: vi.fn(),
     listDiagnostics: vi.fn(),
     branchConversation: vi.fn(),
+    diffBranch: vi.fn(),
     createSnapshot: vi.fn(),
     getSnapshot: vi.fn(),
     applyOperations: vi.fn(),
@@ -330,4 +331,67 @@ describe("ConversationHistory", () => {
     expect(api.applyOperations).not.toHaveBeenCalled();
     expect(api.undoTransaction).not.toHaveBeenCalled();
   });
+
+  it("compares branch non-destructively and displays diff summary", async () => {
+    vi.mocked(api.listBranches).mockResolvedValue([
+      {
+        id: "branch-1",
+        branchName: "Experimental",
+        newConversationId: "conv-exp",
+        createdAt: "2026-08-03T12:00:00Z",
+      },
+    ]);
+    vi.mocked(api.diffBranch).mockResolvedValue({
+      branchId: "branch-1",
+      sourceConversationId: "conv-1",
+      branchConversationId: "conv-exp",
+      forkMessageId: null,
+      sourceMessageCount: 3,
+      branchMessageCount: 6,
+      uniqueSourceMessages: 0,
+      uniqueBranchMessages: 3,
+      surfaces: [
+        {
+          surfaceId: "surf-1",
+          name: "Task Board",
+          status: "modified",
+          changedComponents: ["task-list", "add-btn"],
+        },
+      ],
+    });
+
+    render(<ConversationHistory conversationId="conv-1" />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open conversation history" }),
+    );
+
+    expect(await screen.findByText("Experimental")).toBeInTheDocument();
+
+    const compareBtn = screen.getByRole("button", {
+      name: "Compare branch Experimental",
+    });
+    fireEvent.click(compareBtn);
+
+    await waitFor(() => {
+      expect(api.diffBranch).toHaveBeenCalledWith("branch-1");
+    });
+
+    expect(
+      await screen.findByText("Branch Comparison"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Branch messages: 6/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Task Board/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/task-list, add-btn/i),
+    ).toBeInTheDocument();
+
+    // Close diff panel
+    fireEvent.click(screen.getByRole("button", { name: "Close branch comparison" }));
+    expect(screen.queryByText("Branch Comparison")).not.toBeInTheDocument();
+  });
 });
+

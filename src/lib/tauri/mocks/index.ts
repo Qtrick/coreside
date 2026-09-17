@@ -2407,6 +2407,7 @@ export async function mockInvoke<T>(
       return {
         status: "ok",
         data: { action: request.actionName },
+        stateBindable: true,
       } satisfies ActionOutcome as T;
     }
 
@@ -2663,6 +2664,20 @@ export async function mockInvoke<T>(
         payload: { readOnly: true, messages: [], transactions: [] },
         createdAt: now(),
       } as T;
+    case "diff_branch_cmd": {
+      const a = (args ?? {}) as { branchId?: string };
+      return {
+        branchId: a.branchId ?? "branch-mock",
+        sourceConversationId: "conv-source",
+        branchConversationId: "conv-branch",
+        forkMessageId: null,
+        sourceMessageCount: 5,
+        branchMessageCount: 7,
+        uniqueSourceMessages: 0,
+        uniqueBranchMessages: 2,
+        surfaces: [],
+      } as T;
+    }
     case "branch_conversation_cmd": {
       const a = (args as { args?: Record<string, unknown> })?.args ?? {};
       return [

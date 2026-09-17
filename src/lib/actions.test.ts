@@ -263,7 +263,7 @@ describe("collectTargets security boundary", () => {
 
     const onInvokeRegisteredAction = vi.fn().mockImplementation(async (params) => {
       if (params.actionName === "local_data.write") {
-        return { status: "ok", data: { recordId: "rec-1", created: true } };
+        return { status: "ok", data: { recordId: "rec-1", created: true }, stateBindable: true };
       }
       if (params.actionName === "local_data.query") {
         return {
@@ -272,9 +272,10 @@ describe("collectTargets security boundary", () => {
             records: [{ _id: "rec-1", title: "Complete audit" }],
             count: 1,
           },
+          stateBindable: true,
         };
       }
-      return { status: "ok", data: null };
+      return { status: "ok", data: null, stateBindable: true };
     });
 
     const actions = [
@@ -447,7 +448,7 @@ describe("collectTargets security boundary", () => {
           priority: params.input.priority,
         };
         dbRecords.push(record);
-        return { status: "ok", data: record };
+        return { status: "ok", data: record, stateBindable: true };
       }
       if (params.actionName === "local_data.query") {
         return {
@@ -456,13 +457,14 @@ describe("collectTargets security boundary", () => {
             records: [...dbRecords],
             count: dbRecords.length,
           },
+          stateBindable: true,
         };
       }
       if (params.actionName === "local_data.delete") {
         dbRecords = dbRecords.filter((r) => r.id !== params.input.id);
-        return { status: "ok", data: { deleted: true } };
+        return { status: "ok", data: { deleted: true }, stateBindable: true };
       }
-      return { status: "ok", data: null };
+      return { status: "ok", data: null, stateBindable: true };
     });
 
     // Step 1: Create a record and refresh query
@@ -604,6 +606,206 @@ describe("collectTargets security boundary", () => {
     expect(onInvokeRegisteredAction).toHaveBeenCalled();
     expect(result.errors.some((e) => e.includes("not state-bindable"))).toBe(true);
     expect(result.state).toEqual({});
+  });
+});
+
+describe("adversarial security tests", () => {
+  it("rejects malformed registered action names (missing dot)", () => {
+    const onInvokeRegisteredAction = vi.fn();
+    const result = applyAction(
+      {
+        type: "invokeRegisteredAction",
+        actionName: "maliciousaction",
+        input: {},
+      },
+      {
+        state: {},
+        toolId: "test-tool",
+        allowedTargets: new Set(),
+        onInvokeRegisteredAction,
+      },
+    );
+
+    expect(onInvokeRegisteredAction).not.toHaveBeenCalled();
+    expect(result.errors.some((e) => e.includes("Invalid registered action name"))).toBe(true);
+  });
+
+  it("rejects action names with uppercase characters", () => {
+    const onInvokeRegisteredAction = vi.fn();
+    const result = applyAction(
+      {
+        type: "invokeRegisteredAction",
+        actionName: "local_data.Execute",
+        input: {},
+      },
+      {
+        state: {},
+        toolId: "test-tool",
+        allowedTargets: new Set(),
+        onInvokeRegisteredAction,
+      },
+    );
+
+    expect(onInvokeRegisteredAction).not.toHaveBeenCalled();
+    expect(result.errors.some((e) => e.includes("Invalid registered action name"))).toBe(true);
+  });
+
+  it("rejects action names with wildcard characters", () => {
+    const onInvokeRegisteredAction = vi.fn();
+    const result = applyAction(
+      {
+        type: "invokeRegisteredAction",
+        actionName: "shell.*",
+        input: {},
+      },
+      {
+        state: {},
+        toolId: "test-tool",
+        allowedTargets: new Set(),
+        onInvokeRegisteredAction,
+      },
+    );
+
+    expect(onInvokeRegisteredAction).not.toHaveBeenCalled();
+    expect(result.errors.some((e) => e.includes("Invalid registered action name"))).toBe(true);
+  });
+
+  it("rejects action names with special characters", () => {
+    const onInvokeRegisteredAction = vi.fn();
+    const result = applyAction(
+      {
+        type: "invokeRegisteredAction",
+        actionName: "local_data; DROP TABLE",
+        input: {},
+      },
+      {
+        state: {},
+        toolId: "test-tool",
+        allowedTargets: new Set(),
+        onInvokeRegisteredAction,
+      },
+    );
+
+    expect(onInvokeRegisteredAction).not.toHaveBeenCalled();
+    expect(result.errors.some((e) => e.includes("Invalid registered action name"))).toBe(true);
+  });
+
+  it("fails closed when outcome stateBindable is undefined (missing)", async () => {
+    const onInvokeRegisteredAction = vi.fn().mockResolvedValue({
+      status: "ok",
+      data: { leaked: "data" },
+    });
+
+    const action: ActionDefinition = {
+      type: "invokeRegisteredAction",
+      actionName: "local_data.query",
+      input: { modelId: "notes" },
+      resultKey: "queryResult",
+    };
+
+    const result = await applyAction(action, {
+      state: {},
+      toolId: "test-tool",
+      allowedTargets: new Set(["queryResult"]),
+      onInvokeRegisteredAction,
+    });
+
+    expect(onInvokeRegisteredAction).toHaveBeenCalled();
+    expect(result.errors.some((e) => e.includes("not state-bindable"))).toBe(true);
+    expect(result.state).toEqual({});
+  });
+
+  it("submitToAgent rejects empty includeFields", () => {
+    const onSubmitToAgent = vi.fn();
+    applyAction(
+      {
+        type: "submitToAgent",
+        eventName: "test",
+        includeFields: [],
+      },
+      {
+        state: { field: "value" },
+        toolId: "test-tool",
+        allowedTargets: new Set(["field"]),
+        onSubmitToAgent,
+      },
+    );
+
+    expect(onSubmitToAgent).not.toHaveBeenCalled();
+  });
+
+  it("component IDs do not authorize state access", () => {
+    const result = applyAction(
+      {
+        type: "setValue",
+        target: "secret-input-component-id",
+        value: "injected",
+      },
+      {
+        state: { "secret-input-component-id": "original" },
+        toolId: "test-tool",
+        allowedTargets: new Set(),
+      },
+    );
+
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.state["secret-input-component-id"]).toBe("original");
+  });
+
+  it("arbitrary props.target does not authorize state access", () => {
+    const result = applyAction(
+      {
+        type: "setValue",
+        target: "adminState",
+        value: "escalated",
+      },
+      {
+        state: { adminState: "restricted" },
+        toolId: "test-tool",
+        allowedTargets: new Set(),
+      },
+    );
+
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.state.adminState).toBe("restricted");
+  });
+
+  it("nested component cannot access parent state outside declared bindings", () => {
+    const onInvokeRegisteredAction = vi.fn();
+    const result = applyAction(
+      {
+        type: "invokeRegisteredAction",
+        actionName: "local_data.write",
+        input: {},
+        inputFromState: { body: "parentSecret" },
+      },
+      {
+        state: { parentSecret: "sensitive" },
+        toolId: "test-tool",
+        allowedTargets: new Set(),
+        onInvokeRegisteredAction,
+      },
+    );
+
+    expect(onInvokeRegisteredAction).not.toHaveBeenCalled();
+    expect(result.errors.some((e) => e.includes("outside the current tool scope"))).toBe(true);
+  });
+
+  it("action loop depth is enforced", () => {
+    const actions: ActionDefinition[] = Array.from({ length: 15 }, (_, i) => ({
+      type: "setValue" as const,
+      target: `key${i}`,
+      value: i,
+    }));
+
+    const result = applyActions(actions, {
+      state: {},
+      toolId: "test-tool",
+      allowedTargets: new Set(["key0", "key1", "key2", "key3", "key4", "key5", "key6", "key7", "key8", "key9", "key10", "key11", "key12"]),
+      depth: 0,
+    });
+
+    expect(result.errors.some((e) => e.includes("Action loop protection triggered"))).toBe(true);
   });
 });
 

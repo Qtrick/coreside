@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { ModalPortal } from "@/components/ui/ModalPortal";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/stores/app-store";
+import type { BranchDiffRecord } from "@/types/runtime-v2";
 import {
   REPLAY_STEP_MS,
   redactDiagnosticJson,
@@ -328,6 +329,7 @@ export function ConversationHistory({
   const [timelineRows, setTimelineRows] = useState<TimelineRow[]>([]);
   const [diagnostics, setDiagnostics] = useState<unknown[]>([]);
   const [snapshotDetail, setSnapshotDetail] = useState<string | null>(null);
+  const [diffDetail, setDiffDetail] = useState<BranchDiffRecord | null>(null);
   const [branchName, setBranchName] = useState("");
   const [snapshotDesc, setSnapshotDesc] = useState("");
   const loadGenRef = useRef(0);
@@ -397,6 +399,7 @@ export function ConversationHistory({
     setTimelineRows([]);
     setDiagnostics([]);
     setSnapshotDetail(null);
+    setDiffDetail(null);
     setError(null);
     setBranchName("");
     setSnapshotDesc("");
@@ -433,6 +436,19 @@ export function ConversationHistory({
       await loadTab("branches");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create branch");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const viewBranchDiff = async (branchId: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const diff = await api.diffBranch(branchId);
+      setDiffDetail(diff);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not compute branch diff");
     } finally {
       setBusy(false);
     }
@@ -553,6 +569,7 @@ export function ConversationHistory({
                     aria-selected={tab === t.id}
                     onClick={() => {
                       setSnapshotDetail(null);
+                      setDiffDetail(null);
                       setTab(t.id);
                     }}
                   >
@@ -603,21 +620,81 @@ export function ConversationHistory({
                                 {formatTime(b.createdAt)}
                               </span>
                             </div>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-compact"
-                              aria-label={`Open branch ${b.branchName}`}
-                              onClick={() => {
-                                setOpen(false);
-                                void navigateToChat(b.newConversationId);
-                              }}
-                            >
-                              Open
-                            </button>
+                            <div style={{ display: "flex", gap: "0.35rem" }}>
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-compact"
+                                aria-label={`Compare branch ${b.branchName}`}
+                                disabled={busy}
+                                onClick={() => void viewBranchDiff(b.id)}
+                              >
+                                Compare
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-compact"
+                                aria-label={`Open branch ${b.branchName}`}
+                                onClick={() => {
+                                  setOpen(false);
+                                  void navigateToChat(b.newConversationId);
+                                }}
+                              >
+                                Open
+                              </button>
+                            </div>
                           </li>
                         ))}
                       </ul>
                     )}
+                    {diffDetail ? (
+                      <div
+                        className="conversation-history-detail"
+                        aria-label="Branch comparison summary"
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            marginBottom: "0.4rem",
+                          }}
+                        >
+                          <strong>Branch Comparison</strong>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-compact"
+                            onClick={() => setDiffDetail(null)}
+                            aria-label="Close branch comparison"
+                          >
+                            Close
+                          </button>
+                        </div>
+                        <p className="muted" style={{ margin: "0 0 0.4rem" }}>
+                          Branch messages: {diffDetail.branchMessageCount} (+{diffDetail.uniqueBranchMessages} unique)
+                          {" · "}
+                          Source messages: {diffDetail.sourceMessageCount} (+{diffDetail.uniqueSourceMessages} unique)
+                        </p>
+                        {diffDetail.surfaces.length > 0 ? (
+                          <div>
+                            <strong>Surfaces:</strong>
+                            <ul style={{ margin: "0.25rem 0 0", paddingLeft: "1.2rem" }}>
+                              {diffDetail.surfaces.map((s) => (
+                                <li key={s.surfaceId}>
+                                  <strong>{s.name}</strong> ({s.status})
+                                  {s.changedComponents.length > 0
+                                    ? ` — changed components: ${s.changedComponents.join(", ")}`
+                                    : ""}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : (
+                          <p className="muted" style={{ margin: 0 }}>
+                            No surface differences detected.
+                          </p>
+                        )}
+                      </div>
+                    ) : null}
                   </section>
                 ) : null}
 

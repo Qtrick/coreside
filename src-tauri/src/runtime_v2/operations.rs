@@ -159,7 +159,6 @@ pub const SUPPORTED_MODEL_OPERATIONS: &[&str] = &[
     "data.record_create",
     "data.record_update",
     "data.record_delete",
-    "data.migrate",
     "chat.inline_surface_create",
     "chat.inline_surface_update",
     "chat.inline_surface_remove",
@@ -169,6 +168,7 @@ pub const SUPPORTED_MODEL_OPERATIONS: &[&str] = &[
 
 /// Internal operations used by host subsystems and commands (not directly model-facing).
 pub const INTERNAL_OPERATIONS: &[&str] = &[
+    "data.migrate",
     "surface.update_metadata",
     "surface.move",
     "surface.duplicate",
@@ -310,6 +310,70 @@ pub fn validate_model_operations(operations: &[AppOperation]) -> Result<(), Stri
                 }
                 Audience::CurrentUser | Audience::FutureParticipants => {}
             }
+        }
+        // Semantic validation of required target fields and schemas
+        match op.op_type.as_str() {
+            "component.insert" => {
+                if op.target.surface_id.is_none() && op.target.tool_id.is_none() {
+                    return Err(format!(
+                        "operation '{}' of type '{}' requires surfaceId or toolId target",
+                        op.id, op.op_type
+                    ));
+                }
+                if !op
+                    .payload
+                    .get("component")
+                    .map(|c| c.is_object())
+                    .unwrap_or(false)
+                {
+                    return Err(format!(
+                        "operation '{}' of type 'component.insert' requires a 'component' object payload",
+                        op.id
+                    ));
+                }
+            }
+            "component.remove"
+            | "component.replace"
+            | "component.update_actions"
+            | "component.update_children"
+            | "component.update_visibility" => {
+                if op.target.component_id.is_none() && op.payload.get("componentId").is_none() {
+                    return Err(format!(
+                        "operation '{}' of type '{}' requires componentId target or payload",
+                        op.id, op.op_type
+                    ));
+                }
+            }
+            "component.update_props" => {
+                if op.target.component_id.is_none()
+                    && op.target.surface_id.is_none()
+                    && op.payload.get("componentId").is_none()
+                {
+                    return Err(format!(
+                        "operation '{}' of type 'component.update_props' requires target",
+                        op.id
+                    ));
+                }
+            }
+            "chat.inline_surface_create" => {
+                if !op
+                    .payload
+                    .get("definition")
+                    .map(|d| d.is_object())
+                    .unwrap_or(false)
+                    && !op
+                        .payload
+                        .get("tool")
+                        .map(|t| t.is_object())
+                        .unwrap_or(false)
+                {
+                    return Err(format!(
+                        "operation '{}' of type 'chat.inline_surface_create' requires a 'definition' or 'tool' object payload",
+                        op.id
+                    ));
+                }
+            }
+            _ => {}
         }
         if let Ok(bytes) = serde_json::to_vec(&op.payload) {
             if bytes.len() > MAX_DEFINITION_JSON_BYTES {

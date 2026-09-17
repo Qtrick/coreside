@@ -87,14 +87,21 @@ pub fn rank_search_results(results: &mut Vec<WebSearchResult>, query: &str) {
         .map(|(orig_idx, r)| {
             let mut score = 1.0;
 
-            // 1. Initial provider baseline
-            match r.provider.as_deref() {
-                Some("exa") => score += 0.4,
-                Some("linkup") => score += 0.35,
-                Some("firecrawl") => score += 0.3,
-                Some("crawl4ai") => score += 0.25,
-                _ => score += 0.2,
-            }
+            // 1. Normalized upstream provider confidence (bounded to [0.0, 0.3], no arbitrary vendor bias)
+            // If the provider supplies a relevance score, normalize to [0.0, 1.0]; otherwise use neutral 0.5.
+            let provider_conf = r
+                .score
+                .map(|s| {
+                    if (0.0..=1.0).contains(&s) {
+                        s
+                    } else if s > 1.0 {
+                        (s / 100.0).clamp(0.0, 1.0)
+                    } else {
+                        0.5
+                    }
+                })
+                .unwrap_or(0.5);
+            score += provider_conf * 0.3;
 
             // 2. Lexical overlap with stop-word normalized terms
             let title_lower = r.title.to_lowercase();
@@ -339,5 +346,182 @@ mod tests {
         rank_search_results(&mut results, "rust compiler performance");
         // Due to authority boost and diversity dampening on monopoly.com, the official docs source ranks high
         assert!(results.iter().take(2).any(|r| r.id == "4"));
+    }
+
+    #[test]
+    fn benchmark_corpus_covers_eight_query_classes() {
+        // 1. Documentation query: official docs should rank top
+        let mut doc_results = vec![
+            WebSearchResult {
+                id: "blog".into(),
+                title: "How I use Arc in my project".into(),
+                url: "https://myblog.dev/arc".into(),
+                display_domain: Some("myblog.dev".into()),
+                snippet: Some("A blog post about Arc pointers".into()),
+                ..Default::default()
+            },
+            WebSearchResult {
+                id: "official".into(),
+                title: "std::sync::Arc - Rust".into(),
+                url: "https://docs.rust-lang.org/std/sync/struct.Arc.html".into(),
+                display_domain: Some("docs.rust-lang.org".into()),
+                snippet: Some("Thread-safe reference-counting pointer.".into()),
+                ..Default::default()
+            },
+        ];
+        rank_search_results(&mut doc_results, "rust std::sync::Arc documentation");
+        assert_eq!(doc_results[0].id, "official");
+
+        // 2. Research query: academic source / arxiv should be boosted
+        let mut research_results = vec![
+            WebSearchResult {
+                id: "general".into(),
+                title: "Transformers are cool".into(),
+                url: "https://medium.com/transformers".into(),
+                display_domain: Some("medium.com".into()),
+                ..Default::default()
+            },
+            WebSearchResult {
+                id: "paper".into(),
+                title: "Efficient Transformer Attention Mechanisms".into(),
+                url: "https://arxiv.org/abs/2009.06732".into(),
+                display_domain: Some("arxiv.org".into()),
+                snippet: Some(
+                    "A survey of attention mechanisms and computational efficiency.".into(),
+                ),
+                ..Default::default()
+            },
+        ];
+        rank_search_results(
+            &mut research_results,
+            "transformer attention mechanisms efficiency",
+        );
+        assert_eq!(research_results[0].id, "paper");
+
+        // 3. Current news query: freshness signal contributes
+        let mut news_results = vec![
+            WebSearchResult {
+                id: "old".into(),
+                title: "Browser release history from 2018".into(),
+                url: "https://example.com/2018".into(),
+                ..Default::default()
+            },
+            WebSearchResult {
+                id: "fresh".into(),
+                title: "Latest Browser Release Updates".into(),
+                url: "https://example.com/latest".into(),
+                snippet: Some("New version release notes and updates.".into()),
+                age: Some("2 hours ago".into()),
+                fetched_at: Some("2026-09-17T12:00:00Z".into()),
+                ..Default::default()
+            },
+        ];
+        rank_search_results(&mut news_results, "latest browser release updates");
+        assert_eq!(news_results[0].id, "fresh");
+
+        // 4. Known company query: exact phrase and domain match
+        let mut company_results = vec![
+            WebSearchResult {
+                id: "unrelated".into(),
+                title: "History of the name Claude".into(),
+                url: "https://names.org/claude".into(),
+                ..Default::default()
+            },
+            WebSearchResult {
+                id: "company".into(),
+                title: "Anthropic Claude Architecture".into(),
+                url: "https://anthropic.com/research/claude".into(),
+                display_domain: Some("anthropic.com".into()),
+                snippet: Some(
+                    "Detailed technical report on the Anthropic Claude architecture.".into(),
+                ),
+                ..Default::default()
+            },
+        ];
+        rank_search_results(&mut company_results, "Anthropic Claude Architecture");
+        assert_eq!(company_results[0].id, "company");
+
+        // 5. Technical question: exact phrase in snippet boosts resolution
+        let mut tech_results = vec![
+            WebSearchResult {
+                id: "generic".into(),
+                title: "SQL Databases".into(),
+                url: "https://example.com/sql".into(),
+                ..Default::default()
+            },
+            WebSearchResult {
+                id: "specific".into(),
+                title: "SQLite Foreign Key Support".into(),
+                url: "https://sqlite.org/foreignkeys.html".into(),
+                display_domain: Some("sqlite.org".into()),
+                snippet: Some(
+                    "How to configure sqlite foreign key cascade on delete actions.".into(),
+                ),
+                ..Default::default()
+            },
+        ];
+        rank_search_results(&mut tech_results, "sqlite foreign key cascade on delete");
+        assert_eq!(tech_results[0].id, "specific");
+
+        // 6. Domain-specific query: URL / domain terms match
+        let mut domain_results = vec![
+            WebSearchResult {
+                id: "other".into(),
+                title: "Tauri Commands Guide".into(),
+                url: "https://random-forum.com/t/123".into(),
+                ..Default::default()
+            },
+            WebSearchResult {
+                id: "docs_rs".into(),
+                title: "tauri::command in tauri - Rust".into(),
+                url: "https://docs.rs/tauri/latest/tauri/attr.command.html".into(),
+                display_domain: Some("docs.rs".into()),
+                ..Default::default()
+            },
+        ];
+        rank_search_results(&mut domain_results, "site:docs.rs tauri commands");
+        assert_eq!(domain_results[0].id, "docs_rs");
+
+        // 7. Multi-source comparison: query terms in title & snippet
+        let mut compare_results = vec![
+            WebSearchResult {
+                id: "single".into(),
+                title: "All about PostgreSQL".into(),
+                url: "https://example.com/postgres".into(),
+                ..Default::default()
+            },
+            WebSearchResult {
+                id: "comparison".into(),
+                title: "PostgreSQL vs SQLite for Local Embedded Storage".into(),
+                url: "https://example.com/compare".into(),
+                snippet: Some("In-depth trade-off comparison between postgresql and sqlite for local embedded use.".into()),
+                ..Default::default()
+            },
+        ];
+        rank_search_results(&mut compare_results, "postgresql vs sqlite local embedded");
+        assert_eq!(compare_results[0].id, "comparison");
+
+        // 8. Ambiguous query: content availability & authority resolve precedence
+        let mut ambig_results = vec![
+            WebSearchResult {
+                id: "metal".into(),
+                title: "Rust oxide on steel".into(),
+                url: "https://metals.com/rust".into(),
+                ..Default::default()
+            },
+            WebSearchResult {
+                id: "lang".into(),
+                title: "Rust Programming Language".into(),
+                url: "https://www.rust-lang.org/".into(),
+                display_domain: Some("rust-lang.org".into()),
+                content: Some(
+                    "A language empowering everyone to build reliable and efficient software."
+                        .into(),
+                ),
+                ..Default::default()
+            },
+        ];
+        rank_search_results(&mut ambig_results, "rust");
+        assert_eq!(ambig_results[0].id, "lang");
     }
 }

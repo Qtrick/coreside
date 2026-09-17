@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeStateForDefinitionPatch } from "./surface-ops";
+import { mergeStateForDefinitionPatch, safeDuplicateComponent } from "./surface-ops";
 import type { ToolComponent } from "@/types/tool";
 
 describe("mergeStateForDefinitionPatch", () => {
@@ -197,5 +197,66 @@ describe("makeRemoveComponentOp & makeMoveComponentOp", () => {
     expect(moveOp.target.parentId).toBe("parent-x");
     expect(moveOp.payload).toEqual({ index: 2 });
     expect(moveOp.baseRevision).toBe(4);
+  });
+});
+
+describe("safeDuplicateComponent", () => {
+  it("remaps selectionKey to prevent shared selection state", () => {
+    const table: ToolComponent = {
+      id: "data-table",
+      type: "dataTable",
+      props: {
+        rowsKey: "records",
+        selectionKey: "selectedRecordId",
+        columns: [{ key: "title", label: "Title" }],
+      },
+    };
+
+    const dup = safeDuplicateComponent(table, "test1");
+
+    expect(dup.id).not.toBe("data-table");
+    expect(dup.props?.selectionKey).not.toBe("selectedRecordId");
+    expect(dup.props?.selectionKey).toContain("selectedRecordId_copy_test1");
+    expect(dup.props?.rowsKey).toBe("records");
+  });
+
+  it("remaps selectionKey in nested components", () => {
+    const container: ToolComponent = {
+      id: "container",
+      type: "container",
+      props: {},
+      children: [
+        {
+          id: "inner-table",
+          type: "dataTable",
+          props: {
+            rowsKey: "items",
+            selectionKey: "selectedItemId",
+          },
+        },
+      ],
+    };
+
+    const dup = safeDuplicateComponent(container, "nest1");
+    const innerTable = dup.children![0];
+
+    expect(innerTable.props?.selectionKey).not.toBe("selectedItemId");
+    expect(innerTable.props?.selectionKey).toContain("selectedItemId_copy_nest1");
+  });
+
+  it("preserves shared data keys (rowsKey, dataKey) without remapping", () => {
+    const table: ToolComponent = {
+      id: "shared-table",
+      type: "dataTable",
+      props: {
+        rowsKey: "sharedRecords",
+        selectionKey: "selectedId",
+      },
+    };
+
+    const dup = safeDuplicateComponent(table, "share1");
+
+    expect(dup.props?.rowsKey).toBe("sharedRecords");
+    expect(dup.props?.selectionKey).toContain("selectedId_copy_share1");
   });
 });

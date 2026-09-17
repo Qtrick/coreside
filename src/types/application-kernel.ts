@@ -44,7 +44,7 @@ export interface ActionDescriptor {
 }
 
 export type ActionOutcome =
-  | { status: "ok"; data: unknown; stateBindable?: boolean }
+  | { status: "ok"; data: unknown; stateBindable: boolean }
   | { status: "error"; code: string; message: string }
   | {
       status: "pendingApproval";

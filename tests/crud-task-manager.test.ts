@@ -53,6 +53,7 @@ describe("CRUD Task Manager Acceptance & Authority Suite", () => {
             priority: payload.input.priority,
             status: "Open",
           },
+          stateBindable: true,
         };
       }
       if (payload.actionName === "local_data.query") {
@@ -62,9 +63,10 @@ describe("CRUD Task Manager Acceptance & Authority Suite", () => {
             { id: "TSK-1", title: "Existing task", priority: "Low", status: "Open" },
             { id: "TSK-2", title: "Implement security boundary test", priority: "High", status: "Open" },
           ],
+          stateBindable: true,
         };
       }
-      return { status: "ok", data: {} };
+      return { status: "ok", data: {}, stateBindable: true };
     });
 
     const btn = tool.components.find((c) => c.id === "btn-add-task");
@@ -115,15 +117,17 @@ describe("CRUD Task Manager Acceptance & Authority Suite", () => {
         return {
           status: "ok",
           data: { deletedId: payload.input.id },
+          stateBindable: true,
         };
       }
       if (payload.actionName === "local_data.query") {
         return {
           status: "ok",
           data: [],
+          stateBindable: true,
         };
       }
-      return { status: "ok", data: {} };
+      return { status: "ok", data: {}, stateBindable: true };
     });
 
     const btn = tool.components.find((c) => c.id === "btn-delete-task");

@@ -407,6 +407,10 @@ export function applyAction(
         break;
       }
       {
+        if (!action.actionName || !/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(action.actionName)) {
+          errors.push(`Invalid registered action name: "${action.actionName ?? ""}"`);
+          break;
+        }
         const input: Record<string, unknown> = { ...(action.input ?? {}) };
         let hasUnauthorized = false;
         for (const [key, stateKey] of Object.entries(action.inputFromState ?? {})) {
@@ -440,7 +444,7 @@ export function applyAction(
           pendingTasks.push(
             task.then((outcome) => {
               if (outcome && typeof outcome === "object" && outcome.status === "ok" && action.resultKey) {
-                if (outcome.stateBindable === false || !isStateBindableAction(action.actionName)) {
+                if (!outcome.stateBindable || !isStateBindableAction(action.actionName)) {
                   errors.push(`Action "${action.actionName}" is not state-bindable`);
                   return;
                 }
@@ -523,6 +527,10 @@ export async function applyActionsAsync(
         errors.push("invokeRegisteredAction is not available in this context");
         break;
       }
+      if (!action.actionName || !/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(action.actionName)) {
+        errors.push(`Invalid registered action name: "${action.actionName ?? ""}"`);
+        break;
+      }
       let hasUnauthorized = false;
       const input: Record<string, unknown> = { ...(action.input ?? {}) };
       for (const [key, stateKey] of Object.entries(action.inputFromState ?? {})) {
@@ -557,7 +565,7 @@ export async function applyActionsAsync(
         if (outcome && typeof outcome === "object") {
           if (outcome.status === "ok") {
             if (action.resultKey) {
-              if (outcome.stateBindable === false || !isStateBindableAction(action.actionName)) {
+              if (!outcome.stateBindable || !isStateBindableAction(action.actionName)) {
                 errors.push(`Action "${action.actionName}" is not state-bindable`);
                 break;
               }

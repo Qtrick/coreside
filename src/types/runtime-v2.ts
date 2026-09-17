@@ -206,3 +206,23 @@ export type ScheduleAndApplyResult = {
   superseded: string[];
 };
 
+export type SurfaceDiffSummary = {
+  surfaceId: string;
+  name: string;
+  status: string;
+  changedComponents: string[];
+};
+
+export type BranchDiffRecord = {
+  branchId: string;
+  sourceConversationId: string;
+  branchConversationId: string;
+  forkMessageId?: string | null;
+  sourceMessageCount: number;
+  branchMessageCount: number;
+  uniqueSourceMessages: number;
+  uniqueBranchMessages: number;
+  surfaces: SurfaceDiffSummary[];
+};
+
+

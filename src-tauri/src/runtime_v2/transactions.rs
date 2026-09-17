@@ -337,17 +337,26 @@ fn apply_one(
                     ));
                 }
             }
-            if op.audience == Some(Audience::CurrentChat) {
-                if let (Some(txn_chat), Some(surf_chat)) = (
-                    txn.conversation_id.as_deref(),
-                    target_surface.conversation_id.as_deref(),
-                ) {
-                    if !txn_chat.is_empty() && !surf_chat.is_empty() && txn_chat != surf_chat {
-                        return Err(format!(
-                            "cross-chat violation: operation '{}' in conversation '{}' cannot mutate surface '{}' belonging to conversation '{}'",
-                            op.id, txn_chat, sid, surf_chat
-                        ));
-                    }
+            if let (Some(txn_chat), Some(surf_chat)) = (
+                txn.conversation_id.as_deref(),
+                target_surface.conversation_id.as_deref(),
+            ) {
+                if !txn_chat.is_empty() && !surf_chat.is_empty() && txn_chat != surf_chat {
+                    return Err(format!(
+                        "cross-chat violation: operation '{}' in conversation '{}' cannot mutate surface '{}' belonging to conversation '{}'",
+                        op.id, txn_chat, sid, surf_chat
+                    ));
+                }
+            }
+            if let (Some(op_chat), Some(surf_chat)) = (
+                op.target.conversation_id.as_deref(),
+                target_surface.conversation_id.as_deref(),
+            ) {
+                if !op_chat.is_empty() && !surf_chat.is_empty() && op_chat != surf_chat {
+                    return Err(format!(
+                        "cross-chat violation: operation '{}' targeting conversation '{}' cannot mutate surface '{}' belonging to conversation '{}'",
+                        op.id, op_chat, sid, surf_chat
+                    ));
                 }
             }
         }
@@ -1321,6 +1330,73 @@ mod tests {
         // Verify surface_a is completely unmodified
         let surf_after = get_surface(&db, &surface_a.id).unwrap();
         assert_eq!(surf_after.current_revision, surface_a.current_revision);
+    }
+
+    #[test]
+    fn test_cross_chat_isolation_boundary() {
+        let mut db = test_db();
+        let conv_a = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat A", None).unwrap();
+        let conv_b = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat B", None).unwrap();
+
+        let def = json!({
+            "id": "chat-tool",
+            "name": "Chat Tool",
+            "layout": "stack",
+            "components": [{"id": "c0", "type": "text", "props": {"text": "init"}}]
+        });
+        let surface_a = create_inline_surface(
+            &mut db,
+            &conv_a.id,
+            None,
+            Some("proj-shared"),
+            "Surface in Chat A",
+            &def,
+            &[],
+        )
+        .unwrap();
+
+        // Transaction in conv_b attempts to mutate surface_a in conv_a
+        let mut attack_op = op(
+            "component.insert",
+            Some(&surface_a.id),
+            json!({
+                "component": {"id": "c-infiltrate", "type": "text", "props": {"text": "Infiltrate"}}
+            }),
+        );
+        attack_op.audience = Some(Audience::CurrentChat);
+
+        let txn_b = create_transaction(
+            &mut db,
+            Some(&conv_b.id),
+            Some("proj-shared"),
+            None,
+            "cross-chat-attack",
+            &[attack_op],
+            false,
+        )
+        .unwrap();
+
+        let apply_res = apply_transaction(&mut db, &txn_b.id).unwrap();
+        assert_eq!(apply_res.transaction.status, "failed");
+        assert!(
+            apply_res
+                .conflicts
+                .iter()
+                .any(|c| c.contains("cross-chat violation")),
+            "Expected cross-chat violation conflict, got: {:?}",
+            apply_res.conflicts
+        );
+
+        // Verify surface_a is completely unmodified
+        let surf_after = get_surface(&db, &surface_a.id).unwrap();
+        assert_eq!(surf_after.current_revision, surface_a.current_revision);
+        let comps = surf_after
+            .definition
+            .get("components")
+            .and_then(|v| v.as_array())
+            .unwrap();
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0]["id"], "c0");
     }
 }
 

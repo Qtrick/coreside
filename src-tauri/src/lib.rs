@@ -58,6 +58,9 @@ pub fn run() {
         if let Err(e) = crate::runtime_v2::mark_interrupted_in_flight(&database) {
             tracing::warn!(error = %e, "failed to mark interrupted in-flight turns");
         }
+        if let Err(e) = crate::runtime_v2::compact_turn_journal(&database, 30, 14) {
+            tracing::warn!(error = %e, "failed to compact turn journal on startup");
+        }
         #[cfg(feature = "e2e")]
         e2e_support::maybe_seed(&mut database);
     } else {

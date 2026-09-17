@@ -260,6 +260,13 @@ export function safeDuplicateComponent(
       }
     }
 
+    if (typeof node.props?.selectionKey === "string" && node.props.selectionKey.trim()) {
+      const selKey = (node.props.selectionKey as string).trim();
+      if (!keyMap.has(selKey)) {
+        keyMap.set(selKey, `${selKey}_copy_${idSuffix}`);
+      }
+    }
+
     node.children?.forEach(preScan);
   };
 
@@ -316,6 +323,10 @@ export function safeDuplicateComponent(
 
     if (typeof clonedProps.preservationKey === "string" && keyMap.has(clonedProps.preservationKey)) {
       clonedProps.preservationKey = keyMap.get(clonedProps.preservationKey);
+    }
+
+    if (typeof clonedProps.selectionKey === "string" && keyMap.has(clonedProps.selectionKey)) {
+      clonedProps.selectionKey = keyMap.get(clonedProps.selectionKey);
     }
 
     const remappedActions = node.actions?.map((act) => remapAction(act, node.id));
