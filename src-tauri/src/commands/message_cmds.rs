@@ -2652,6 +2652,8 @@ async fn send_message_inner(
                             operations,
                             source_type: "agent".into(),
                             from_agent: true,
+                            model: Some(resolved.model_used.clone()),
+                            provider: Some(resolved.response.provider_id.clone()),
                         },
                         false,
                     )

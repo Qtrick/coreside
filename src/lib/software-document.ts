@@ -164,11 +164,17 @@ export function toToolDefinition(doc: SoftwareDocument): ToolDefinition {
     }
   }
 
+  // Derive layout from designTokens.layout, falling back to single-column
+  const layout =
+    doc.designTokens && typeof doc.designTokens === "object" && "layout" in doc.designTokens
+      ? (doc.designTokens as Record<string, unknown>).layout
+      : { type: "single-column" };
+
   return {
     id: doc.id,
     name: doc.title,
     description: doc.description || "",
-    layout: { type: "single-column" },
+    layout: layout as ToolDefinition["layout"],
     components: allComponents,
     version: doc.version,
   };
@@ -536,7 +542,13 @@ export function getRegionPath(
   if (!curr) return undefined;
 
   const segments: string[] = [curr.id];
+  const visited = new Set<string>();
+  visited.add(curr.id);
   while (curr.parentRegionId) {
+    if (visited.has(curr.parentRegionId)) {
+      return undefined; // cycle detected
+    }
+    visited.add(curr.parentRegionId);
     const parent = findRegion(doc, curr.parentRegionId);
     if (parent) {
       segments.push(parent.id);

@@ -232,11 +232,19 @@ impl SoftwareDocument {
             }
         }
 
+        // Derive layout from design_tokens.layout, falling back to single-column
+        let layout = self
+            .design_tokens
+            .as_ref()
+            .and_then(|dt| dt.get("layout"))
+            .cloned()
+            .unwrap_or_else(|| json!({ "type": "single-column" }));
+
         ToolDefinition {
             id: self.id.clone(),
             name: self.title.clone(),
             description: self.description.clone().unwrap_or_default(),
-            layout: json!({ "type": "single-column" }),
+            layout,
             components: all_components,
         }
     }

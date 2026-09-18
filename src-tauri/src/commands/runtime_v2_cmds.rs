@@ -294,6 +294,8 @@ pub struct SchedulePatchesArgs {
     pub from_agent: Option<bool>,
     pub apply_immediately: Option<bool>,
     pub approval_granted: Option<bool>,
+    pub model: Option<String>,
+    pub provider: Option<String>,
 }
 
 #[tauri::command]
@@ -316,6 +318,8 @@ pub fn schedule_patches_cmd(
         operations: args.operations,
         source_type: args.source_type,
         from_agent: args.from_agent.unwrap_or(false),
+        model: args.model,
+        provider: args.provider,
     };
     if args.apply_immediately.unwrap_or(false) {
         let mut bus = state.event_bus.lock();

@@ -564,6 +564,18 @@ fn apply_one(
                                 .unwrap_or_else(|| op.payload.clone()),
                         )
                         .map_err(|e| format!("invalid section payload: {e}"))?;
+                    // Validate section components against surface capability packs
+                    if !section.components.is_empty() {
+                        let allowed = if surface.capability_packs.is_empty() {
+                            super::packs::required_packs_for_definition(&surface.definition)?
+                        } else {
+                            super::packs::normalize_capability_packs(&surface.capability_packs)?
+                        };
+                        super::packs::validate_tool_components_for_packs(
+                            &section.components,
+                            &allowed,
+                        )?;
+                    }
                     let index = op
                         .payload
                         .get("index")

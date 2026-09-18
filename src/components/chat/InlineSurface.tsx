@@ -21,18 +21,28 @@ import {
 import { mergeStateForDefinitionPatch } from "@/lib/surface-ops";
 import { verifySurfaceElement } from "@/lib/visual-verification";
 import { persistenceScheduler } from "@/lib/persistence-scheduler";
+import { toToolDefinition, SoftwareDocumentSchema } from "@/lib/software-document";
 import type { SurfaceRecord } from "@/types/runtime-v2";
 import type { ToolDefinition, ToolState } from "@/types/tool";
 import { useAppStore } from "@/stores/app-store";
 
 function asToolDefinition(surface: SurfaceRecord): ToolDefinition {
-  const def = surface.definition as ToolDefinition;
+  const def = surface.definition as Record<string, unknown>;
+  // Detect SoftwareDocument format (has `sections` key) and convert losslessly
+  if (def && Array.isArray(def.sections) && !("components" in def)) {
+    const parsed = SoftwareDocumentSchema.safeParse(def);
+    if (parsed.success) {
+      return toToolDefinition(parsed.data);
+    }
+  }
+  // Legacy ToolDefinition format
+  const toolDef = def as ToolDefinition;
   return {
-    id: def.id || surface.id,
-    name: def.name || surface.name || "Inline surface",
-    description: def.description ?? "",
-    layout: def.layout ?? { type: "single-column" },
-    components: Array.isArray(def.components) ? def.components : [],
+    id: (toolDef.id as string) || surface.id,
+    name: (toolDef.name as string) || surface.name || "Inline surface",
+    description: (toolDef.description as string) ?? "",
+    layout: (toolDef.layout as ToolDefinition["layout"]) ?? { type: "single-column" },
+    components: Array.isArray(toolDef.components) ? toolDef.components : [],
     version: surface.currentRevision,
   };
 }
