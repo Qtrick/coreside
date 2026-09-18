@@ -169,11 +169,20 @@ fn queued_bytes(db: &Database) -> DbResult<usize> {
     Ok(bytes as usize)
 }
 
-pub fn enforce_queue_limits(db: &Database, additional_bytes: usize) -> DbResult<()> {
+/// Enforce backpressure limits before inserting `batch_count` new items with `additional_bytes`.
+///
+/// P0.3 fix: both count and byte checks account for the ENTIRE incoming batch atomically,
+/// not just each item individually. This prevents a batch of N items from collectively
+/// overflowing a queue that individually passes per-item checks.
+pub fn enforce_queue_limits(
+    db: &Database,
+    batch_count: usize,
+    additional_bytes: usize,
+) -> DbResult<()> {
     let count = queued_count(db)?;
-    if count >= MAX_PATCH_QUEUE {
+    if count + batch_count > MAX_PATCH_QUEUE {
         return Err(DbError::Invalid(format!(
-            "patch queue full: max {MAX_PATCH_QUEUE} items"
+            "patch queue full: max {MAX_PATCH_QUEUE} items (current {count}, adding {batch_count})"
         )));
     }
     let bytes = queued_bytes(db)?;
@@ -220,7 +229,8 @@ pub fn schedule_patches(db: &mut Database, req: &ScheduleRequest) -> DbResult<Ve
     let payload_bytes: usize = serde_json::to_string(&req.operations)
         .map(|s| s.len())
         .unwrap_or(0);
-    enforce_queue_limits(db, payload_bytes)?;
+    // P0.3: pass the full batch count so the limit is checked atomically.
+    enforce_queue_limits(db, req.operations.len(), payload_bytes)?;
 
     let mut scheduled = Vec::new();
     let now = now_rfc3339();
@@ -229,6 +239,21 @@ pub fn schedule_patches(db: &mut Database, req: &ScheduleRequest) -> DbResult<Ve
         [],
         |r| r.get(0),
     )?;
+
+    // P0.4: supersede old previews ONCE for the entire batch before any insertion.
+    // This prevents sibling operations in the same batch from mutually superseding each other.
+    let preview_batch_id = if req.priority == PatchPriority::ActiveTurnPreview {
+        let batch_id = format!("preview-batch-{}", Uuid::new_v4());
+        let surface_id = req
+            .surface_id
+            .as_deref()
+            .or_else(|| req.operations.first().and_then(|o| o.target.surface_id.as_deref()));
+        let _ = supersede_preview_items(db, surface_id, &batch_id)?;
+        Some(batch_id)
+    } else {
+        None
+    };
+    let _ = preview_batch_id; // recorded in supersession; not currently persisted per-op
 
     for (i, op) in req.operations.iter().enumerate() {
         let id = format!("patch-{}", Uuid::new_v4());
@@ -239,10 +264,6 @@ pub fn schedule_patches(db: &mut Database, req: &ScheduleRequest) -> DbResult<Ve
             .surface_id
             .as_deref()
             .or(op.target.surface_id.as_deref());
-
-        if req.priority == PatchPriority::ActiveTurnPreview {
-            let _ = supersede_preview_items(db, surface_id, &id)?;
-        }
 
         db.conn().execute(
             "INSERT INTO patch_scheduler_items (
@@ -666,7 +687,7 @@ mod tests {
     fn backpressure_limit() {
         let db = test_db();
         for _ in 0..MAX_PATCH_QUEUE {
-            enforce_queue_limits(&db, 1).unwrap();
+            enforce_queue_limits(&db, 1, 1).unwrap();
             db.conn()
                 .execute(
                     "INSERT INTO patch_scheduler_items (id, operation_id, priority, status, payload_json)
@@ -675,7 +696,31 @@ mod tests {
                 )
                 .unwrap();
         }
-        assert!(enforce_queue_limits(&db, 1).is_err());
+        // Queue is now full. Adding 1 more must fail.
+        assert!(enforce_queue_limits(&db, 1, 1).is_err());
+    }
+
+    #[test]
+    fn backpressure_batch_count_overflow() {
+        // P0.3: batch of N items must be rejected atomically even if queue has MAX-1 items.
+        let db = test_db();
+        // Fill queue to MAX - 1.
+        for _ in 0..MAX_PATCH_QUEUE - 1 {
+            db.conn()
+                .execute(
+                    "INSERT INTO patch_scheduler_items (id, operation_id, priority, status, payload_json)
+                     VALUES (?1, ?2, 'approved_persistent_change', 'queued', '{}')",
+                    params![format!("p-{}", Uuid::new_v4()), format!("op-{}", Uuid::new_v4())],
+                )
+                .unwrap();
+        }
+        // One item individually passes.
+        assert!(enforce_queue_limits(&db, 1, 0).is_ok());
+        // But a batch of 3 must fail since MAX-1 + 3 > MAX.
+        assert!(
+            enforce_queue_limits(&db, 3, 0).is_err(),
+            "batch exceeding MAX_PATCH_QUEUE must be rejected atomically"
+        );
     }
 
     #[test]

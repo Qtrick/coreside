@@ -329,6 +329,10 @@ impl SoftwareDocument {
 
     /// Move a component from one region to another with optional target index.
     /// Validates all preconditions before any mutation.
+    ///
+    /// Same-region moves: the target index is relative to the list BEFORE removal.
+    /// When moving within the same region, the removal of the source component
+    /// shifts all subsequent indices down by 1, so we adjust accordingly.
     pub fn move_component(
         &mut self,
         component_id: &str,
@@ -342,7 +346,7 @@ impl SoftwareDocument {
             .components
             .len();
 
-        // 2. Validate target index if provided.
+        // 2. Validate target index if provided (before removal — upper bound is len).
         if let Some(idx) = target_index {
             if idx > target_len {
                 return Err(format!(
@@ -351,7 +355,28 @@ impl SoftwareDocument {
             }
         }
 
-        // 3. Find and extract the component from source region.
+        // 3. Determine source region and position for same-region adjustment.
+        let source_info: Option<(String, usize)> = self.sections.iter().find_map(|sec| {
+            sec.components
+                .iter()
+                .position(|c| c.id == component_id)
+                .map(|pos| (sec.id.clone(), pos))
+        });
+        let (source_region_id, source_pos) = source_info
+            .ok_or_else(|| format!("component '{component_id}' not found"))?;
+
+        // 4. Compute adjusted target index for same-region moves.
+        // Removing the source shifts indices at or after source_pos down by 1.
+        let adjusted_index = target_index.map(|idx| {
+            if source_region_id == target_region_id && source_pos < idx {
+                // ponytail: after removal, the slot we want has shifted left by 1.
+                idx.saturating_sub(1)
+            } else {
+                idx
+            }
+        });
+
+        // 5. Find and extract the component from source region.
         let mut extracted: Option<ToolComponent> = None;
         for sec in &mut self.sections {
             if let Some(pos) = sec.components.iter().position(|c| c.id == component_id) {
@@ -362,15 +387,15 @@ impl SoftwareDocument {
         let mut comp =
             extracted.ok_or_else(|| format!("component '{component_id}' not found"))?;
 
-        // 4. Update component's section prop if present.
+        // 6. Update component's section prop if present.
         if let Some(Value::Object(ref mut map)) = comp.props {
             map.insert("section".into(), json!(target_region_id));
         }
 
-        // 5. Insert into target region.
+        // 7. Insert into target region with adjusted index.
         // Safe to unwrap: we validated target exists in step 1.
         let target_sec = self.find_region_mut(target_region_id).unwrap();
-        match target_index {
+        match adjusted_index {
             Some(idx) => {
                 target_sec.components.insert(idx, comp);
             }
@@ -509,6 +534,11 @@ impl SoftwareDocument {
     }
 
     /// Add a new section at the specified index or end.
+    ///
+    /// Validates:
+    /// - ID must be non-empty and unique.
+    /// - If `parent_region_id` is provided, the parent must already exist.
+    /// - A section may not declare itself as its own parent.
     pub fn add_section(
         &mut self,
         mut section: DocumentSection,
@@ -519,6 +549,20 @@ impl SoftwareDocument {
         }
         if self.sections.iter().any(|s| s.id == section.id) {
             return Err(format!("section with id '{}' already exists", section.id));
+        }
+        // P0.7: validate parent_region_id if provided.
+        if let Some(ref pid) = section.parent_region_id {
+            if *pid == section.id {
+                return Err(format!(
+                    "section '{}' cannot be its own parent",
+                    section.id
+                ));
+            }
+            if !self.sections.iter().any(|s| &s.id == pid) {
+                return Err(format!(
+                    "parent region '{pid}' does not exist; add the parent before its children"
+                ));
+            }
         }
         // Ensure default layout role if not provided
         if section.role.is_none() {
@@ -540,12 +584,48 @@ impl SoftwareDocument {
     }
 
     /// Remove a section by its ID.
+    ///
+    /// Rejects removal if any other section declares this section as its parent,
+    /// to prevent orphaning children with dangling parent references.
+    /// Use `remove_section_recursive()` to explicitly remove a subtree.
     pub fn remove_section(&mut self, section_id: &str) -> Result<DocumentSection, String> {
+        // P0.6: protect against orphaned child regions.
+        let has_children = self
+            .sections
+            .iter()
+            .any(|s| s.parent_region_id.as_deref() == Some(section_id));
+        if has_children {
+            return Err(format!(
+                "cannot remove section '{section_id}': it has child sections that would be orphaned"
+            ));
+        }
         if let Some(pos) = self.sections.iter().position(|s| s.id == section_id) {
             Ok(self.sections.remove(pos))
         } else {
             Err(format!("section '{section_id}' not found"))
         }
+    }
+
+    /// Recursively remove a section and all its descendants.
+    /// Returns the IDs of all removed sections.
+    pub fn remove_section_recursive(&mut self, section_id: &str) -> Result<Vec<String>, String> {
+        if !self.sections.iter().any(|s| s.id == section_id) {
+            return Err(format!("section '{section_id}' not found"));
+        }
+        // Collect all descendant IDs via BFS.
+        let mut to_remove: Vec<String> = Vec::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(section_id.to_string());
+        while let Some(curr_id) = queue.pop_front() {
+            to_remove.push(curr_id.clone());
+            for s in &self.sections {
+                if s.parent_region_id.as_deref() == Some(&curr_id) {
+                    queue.push_back(s.id.clone());
+                }
+            }
+        }
+        self.sections.retain(|s| !to_remove.contains(&s.id));
+        Ok(to_remove)
     }
 
     /// Update section components or attributes.
@@ -998,87 +1078,109 @@ mod tests {
 
     #[test]
     fn test_region_cycle_detection_self_cycle() {
+        // P0.7: add_section now prevents self-reference through the API.
+        // To test that get_region_path handles cycles gracefully, we inject one
+        // directly into sections (simulating external deserialization or DB corruption).
         let mut doc = SoftwareDocument::new("doc-cycle", "Cycle Test");
-        let sec = DocumentSection {
+        // Direct injection bypasses add_section validation — testing defensive get_region_path.
+        doc.sections.push(DocumentSection {
             id: "a".into(),
-            parent_region_id: Some("a".into()), // self-cycle
+            parent_region_id: Some("a".into()), // self-cycle: injected directly
             ..Default::default()
-        };
-        doc.add_section(sec, None).unwrap();
+        });
         // get_region_path must return None, not loop forever
         assert_eq!(doc.get_region_path("a"), None);
     }
 
     #[test]
-    fn test_region_cycle_detection_two_node_cycle() {
-        let mut doc = SoftwareDocument::new("doc-cycle2", "Cycle Test 2");
-        doc.add_section(
+    fn test_add_section_rejects_self_parent() {
+        // P0.7: add_section must reject a section that names itself as parent.
+        let mut doc = SoftwareDocument::new("doc-self-parent", "Self Parent Test");
+        let result = doc.add_section(
             DocumentSection {
                 id: "a".into(),
-                parent_region_id: Some("b".into()),
-                ..Default::default()
-            },
-            None,
-        )
-        .unwrap();
-        doc.add_section(
-            DocumentSection {
-                id: "b".into(),
                 parent_region_id: Some("a".into()),
                 ..Default::default()
             },
             None,
-        )
-        .unwrap();
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("own parent"));
+        // Section must not have been added.
+        assert!(doc.sections.is_empty());
+    }
+
+    #[test]
+    fn test_region_cycle_detection_two_node_cycle() {
+        // Inject a two-node cycle directly (not via add_section which would reject it).
+        let mut doc = SoftwareDocument::new("doc-cycle2", "Cycle Test 2");
+        doc.sections.push(DocumentSection {
+            id: "a".into(),
+            parent_region_id: Some("b".into()),
+            ..Default::default()
+        });
+        doc.sections.push(DocumentSection {
+            id: "b".into(),
+            parent_region_id: Some("a".into()),
+            ..Default::default()
+        });
         assert_eq!(doc.get_region_path("a"), None);
         assert_eq!(doc.get_region_path("b"), None);
     }
 
     #[test]
+    fn test_add_section_rejects_nonexistent_parent() {
+        // P0.7: add_section must reject a section whose parent doesn't exist yet.
+        let mut doc = SoftwareDocument::new("doc-orphan", "Orphan Test");
+        let result = doc.add_section(
+            DocumentSection {
+                id: "child".into(),
+                parent_region_id: Some("nonexistent-parent".into()),
+                ..Default::default()
+            },
+            None,
+        );
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("does not exist"),
+            "error must mention parent does not exist"
+        );
+        assert!(doc.sections.is_empty());
+    }
+
+    #[test]
     fn test_region_cycle_detection_three_node_cycle() {
+        // Inject a three-node cycle directly.
         let mut doc = SoftwareDocument::new("doc-cycle3", "Cycle Test 3");
-        doc.add_section(
-            DocumentSection {
-                id: "a".into(),
-                parent_region_id: Some("b".into()),
-                ..Default::default()
-            },
-            None,
-        )
-        .unwrap();
-        doc.add_section(
-            DocumentSection {
-                id: "b".into(),
-                parent_region_id: Some("c".into()),
-                ..Default::default()
-            },
-            None,
-        )
-        .unwrap();
-        doc.add_section(
-            DocumentSection {
-                id: "c".into(),
-                parent_region_id: Some("a".into()),
-                ..Default::default()
-            },
-            None,
-        )
-        .unwrap();
+        doc.sections.push(DocumentSection {
+            id: "a".into(),
+            parent_region_id: Some("b".into()),
+            ..Default::default()
+        });
+        doc.sections.push(DocumentSection {
+            id: "b".into(),
+            parent_region_id: Some("c".into()),
+            ..Default::default()
+        });
+        doc.sections.push(DocumentSection {
+            id: "c".into(),
+            parent_region_id: Some("a".into()),
+            ..Default::default()
+        });
         assert_eq!(doc.get_region_path("a"), None);
     }
 
     #[test]
     fn test_region_cycle_detection_missing_parent() {
+        // P0.7 prevents adding orphans via add_section, but if one is injected
+        // directly, get_region_path should stop gracefully at the missing parent.
         let mut doc = SoftwareDocument::new("doc-missing", "Missing Parent");
-        doc.add_section(
-            DocumentSection {
-                id: "orphan".into(),
-                parent_region_id: Some("nonexistent".into()),
-                ..Default::default()
-            },
-            None,
-        )
-        .unwrap();
+        // Direct injection — bypasses add_section validation.
+        doc.sections.push(DocumentSection {
+            id: "orphan".into(),
+            parent_region_id: Some("nonexistent".into()),
+            ..Default::default()
+        });
         // Should stop at the missing parent, not loop
         let path = doc.get_region_path("orphan");
         assert_eq!(path.as_deref(), Some("doc-missing/orphan"));
@@ -1380,4 +1482,198 @@ mod tests {
         assert_eq!(doc.sections[1].components.len(), 1);
         assert_eq!(doc.sections[1].components[0].id, "widget");
     }
+
+    // P0.5: same-region move edge cases — these previously panicked.
+
+    fn make_region_with_three_comps(region_id: &str) -> DocumentSection {
+        DocumentSection {
+            id: region_id.into(),
+            components: vec![
+                ToolComponent {
+                    id: "A".into(),
+                    component_type: "text".into(),
+                    ..Default::default()
+                },
+                ToolComponent {
+                    id: "B".into(),
+                    component_type: "text".into(),
+                    ..Default::default()
+                },
+                ToolComponent {
+                    id: "C".into(),
+                    component_type: "text".into(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }
+    }
+
+    fn ids(sec: &DocumentSection) -> Vec<&str> {
+        sec.components.iter().map(|c| c.id.as_str()).collect()
+    }
+
+    #[test]
+    fn test_same_region_move_first_to_last() {
+        // P0.5: move A (pos 0) to end (index 3 = original length). Previously panicked.
+        let mut doc = SoftwareDocument::new("doc-sr1", "Same Region 1");
+        doc.add_section(make_region_with_three_comps("main"), None)
+            .unwrap();
+        // target_index = 3 means "after C" in the original list.
+        assert!(doc.move_component("A", "main", Some(3)).is_ok());
+        assert_eq!(ids(&doc.sections[0]), vec!["B", "C", "A"]);
+    }
+
+    #[test]
+    fn test_same_region_move_last_to_first() {
+        // P0.5: move C (pos 2) to index 0.
+        let mut doc = SoftwareDocument::new("doc-sr2", "Same Region 2");
+        doc.add_section(make_region_with_three_comps("main"), None)
+            .unwrap();
+        assert!(doc.move_component("C", "main", Some(0)).is_ok());
+        assert_eq!(ids(&doc.sections[0]), vec!["C", "A", "B"]);
+    }
+
+    #[test]
+    fn test_same_region_move_middle_to_end() {
+        // P0.5: move B (pos 1) to index 3 (end). After removal B pos=1 is gone,
+        // so len=2; adjusted index = 3-1 = 2, which is valid.
+        let mut doc = SoftwareDocument::new("doc-sr3", "Same Region 3");
+        doc.add_section(make_region_with_three_comps("main"), None)
+            .unwrap();
+        assert!(doc.move_component("B", "main", Some(3)).is_ok());
+        assert_eq!(ids(&doc.sections[0]), vec!["A", "C", "B"]);
+    }
+
+    #[test]
+    fn test_same_region_move_to_same_position() {
+        // Moving to the same position is a no-op (A stays at 0).
+        let mut doc = SoftwareDocument::new("doc-sr4", "Same Region 4");
+        doc.add_section(make_region_with_three_comps("main"), None)
+            .unwrap();
+        assert!(doc.move_component("A", "main", Some(0)).is_ok());
+        assert_eq!(ids(&doc.sections[0]), vec!["A", "B", "C"]);
+    }
+
+    #[test]
+    fn test_same_region_move_no_index() {
+        // Move to end (no index) in same region: A goes to the end.
+        let mut doc = SoftwareDocument::new("doc-sr5", "Same Region 5");
+        doc.add_section(make_region_with_three_comps("main"), None)
+            .unwrap();
+        assert!(doc.move_component("A", "main", None).is_ok());
+        assert_eq!(ids(&doc.sections[0]), vec!["B", "C", "A"]);
+    }
+
+    // P0.6: remove_section must protect against orphaned children.
+
+    #[test]
+    fn test_remove_section_rejects_parent_with_children() {
+        let mut doc = SoftwareDocument::new("doc-rem", "Remove Test");
+        doc.add_section(
+            DocumentSection {
+                id: "parent".into(),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        doc.add_section(
+            DocumentSection {
+                id: "child".into(),
+                parent_region_id: Some("parent".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        let result = doc.remove_section("parent");
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("orphaned"),
+            "error must mention orphaning"
+        );
+        // Both sections must still be there.
+        assert_eq!(doc.sections.len(), 2);
+    }
+
+    #[test]
+    fn test_remove_section_leaf_succeeds() {
+        let mut doc = SoftwareDocument::new("doc-rem2", "Remove Test 2");
+        doc.add_section(
+            DocumentSection {
+                id: "parent".into(),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        doc.add_section(
+            DocumentSection {
+                id: "leaf".into(),
+                parent_region_id: Some("parent".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        // Remove the leaf — no children, must succeed.
+        let removed = doc.remove_section("leaf");
+        assert!(removed.is_ok());
+        assert_eq!(removed.unwrap().id, "leaf");
+        assert_eq!(doc.sections.len(), 1);
+    }
+
+    #[test]
+    fn test_remove_section_recursive_removes_subtree() {
+        let mut doc = SoftwareDocument::new("doc-rec-rem", "Recursive Remove");
+        doc.add_section(
+            DocumentSection {
+                id: "root".into(),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        doc.add_section(
+            DocumentSection {
+                id: "child".into(),
+                parent_region_id: Some("root".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        doc.add_section(
+            DocumentSection {
+                id: "grandchild".into(),
+                parent_region_id: Some("child".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        // Also a sibling of child.
+        doc.add_section(
+            DocumentSection {
+                id: "sibling".into(),
+                parent_region_id: Some("root".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+
+        let removed = doc.remove_section_recursive("child").unwrap();
+        assert!(removed.contains(&"child".to_string()));
+        assert!(removed.contains(&"grandchild".to_string()));
+        assert!(!removed.contains(&"sibling".to_string()));
+        // root and sibling remain; child and grandchild are gone.
+        assert_eq!(doc.sections.len(), 2);
+        assert!(doc.find_region("root").is_some());
+        assert!(doc.find_region("sibling").is_some());
+        assert!(doc.find_region("child").is_none());
+        assert!(doc.find_region("grandchild").is_none());
+    }
 }
+

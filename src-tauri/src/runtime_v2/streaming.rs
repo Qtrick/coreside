@@ -6,12 +6,17 @@
 //! Production path (`push` / `finish`) accepts only canonical `StreamEvent`
 //! envelopes. Bare `AppOperation` / `AgentResponseV2` are limited to the
 //! explicitly named legacy/compat harvest path.
+//!
+//! Security: all model-originated operations — whether canonical or legacy —
+//! must pass `validate_model_operations()` before being recorded. This is a
+//! defense-in-depth boundary: the legacy path must not silently bypass the
+//! model allowlist, even when parsing post-hoc buffered provider output.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::limits::{MAX_DEFINITION_JSON_BYTES, MAX_OPERATIONS_PER_TURN, MAX_PATCH_QUEUE_BYTES};
-use super::operations::{AgentResponseV2, AppOperation};
+use super::operations::{validate_model_operations, AgentResponseV2, AppOperation};
 
 /// Max bytes for one NDJSON frame (aligned with surface definition ceiling).
 pub const MAX_FRAME_BYTES: usize = MAX_DEFINITION_JSON_BYTES;
@@ -370,6 +375,10 @@ impl NdjsonFrameParser {
     }
 
     /// Legacy/compat: StreamEvent, bare AppOperation, or AgentResponseV2.
+    ///
+    /// Security: model-allowlist is enforced here for bare AppOperation and
+    /// AgentResponseV2 paths. The canonical StreamEvent path delegates to
+    /// record_stream_event which calls record_operation with the same check.
     fn parse_line_legacy(&mut self, line: &str) -> Result<StreamEvent, String> {
         if !line.starts_with('{') || !line.ends_with('}') {
             return Err(stream_err(
@@ -388,6 +397,13 @@ impl NdjsonFrameParser {
             return Ok(ev);
         }
         if let Ok(op) = serde_json::from_value::<AppOperation>(value.clone()) {
+            // P0 security: enforce model allowlist — legacy path must not bypass it.
+            validate_model_operations(std::slice::from_ref(&op)).map_err(|e| {
+                stream_err(
+                    StreamParseErrorKind::Unrecognized,
+                    format!("model operation rejected: {e}"),
+                )
+            })?;
             self.record_operation(op.clone())?;
             return Ok(StreamEvent::OperationFrameCompleted { operation: op });
         }
@@ -400,7 +416,15 @@ impl NdjsonFrameParser {
                     format!("operations exceed max of {MAX_OPERATIONS}"),
                 ));
             }
-            // Validate the whole batch before mutating seen/completed sets.
+            // P0 security: validate whole batch against model allowlist before
+            // mutating any parser state (atomic reject-or-accept).
+            validate_model_operations(&resp.operations).map_err(|e| {
+                stream_err(
+                    StreamParseErrorKind::Unrecognized,
+                    format!("model operation batch rejected: {e}"),
+                )
+            })?;
+            // Validate the whole batch for duplicates before mutating seen/completed sets.
             let mut batch_ids = std::collections::HashSet::with_capacity(resp.operations.len());
             for op in &resp.operations {
                 if !batch_ids.insert(op.id.clone()) || self.seen_operation_ids.contains(&op.id) {
@@ -711,4 +735,129 @@ mod tests {
         assert_eq!(kind, StreamParseErrorKind::LimitExceeded);
         assert!(fatal);
     }
+
+    // P0 security: legacy path must enforce model allowlist.
+    // Internal and reserved operations must never be harvestable via legacy streams.
+
+    #[test]
+    fn legacy_parser_rejects_internal_operation_bare() {
+        // state.reset is an INTERNAL operation — model must never emit it.
+        let mut p = NdjsonFrameParser::new();
+        let bad = json!({
+            "id": "op-internal",
+            "type": "state.reset",
+            "target": {"surfaceId": "s1"},
+            "payload": {}
+        })
+        .to_string()
+            + "\n";
+        let events = p.push_legacy_compat(&bad);
+        assert_eq!(events.len(), 1);
+        assert!(events[0].is_err(), "internal op must be rejected");
+        assert!(
+            events[0]
+                .as_ref()
+                .err()
+                .map(|e| e.contains("rejected") || e.contains("internal"))
+                .unwrap_or(false),
+            "error must mention rejection: {:?}",
+            events[0]
+        );
+        // No operation must be recorded.
+        assert!(p.completed_operations().is_empty());
+    }
+
+    #[test]
+    fn legacy_parser_rejects_reserved_operation_bare() {
+        // layout.move_panel is RESERVED — model must never emit it.
+        let mut p = NdjsonFrameParser::new();
+        let bad = json!({
+            "id": "op-reserved",
+            "type": "layout.move_panel",
+            "target": {"surfaceId": "s1"},
+            "payload": {}
+        })
+        .to_string()
+            + "\n";
+        let events = p.push_legacy_compat(&bad);
+        assert_eq!(events.len(), 1);
+        assert!(events[0].is_err(), "reserved op must be rejected");
+        assert!(p.completed_operations().is_empty());
+    }
+
+    #[test]
+    fn legacy_agent_response_rejects_internal_op_atomically() {
+        // A batch containing one valid and one internal op must be entirely rejected.
+        let mut p = NdjsonFrameParser::new();
+        let bad_batch = json!({
+            "schemaVersion": "2",
+            "assistantMessage": "hi",
+            "operations": [
+                {
+                    "id": "op-good",
+                    "type": "component.update_props",
+                    "target": {"surfaceId": "s1", "componentId": "c1"},
+                    "payload": {"props": {"text": "hello"}}
+                },
+                {
+                    "id": "op-bad",
+                    "type": "route.navigate",
+                    "target": {},
+                    "payload": {}
+                }
+            ]
+        })
+        .to_string()
+            + "\n";
+        let events = p.push_legacy_compat(&bad_batch);
+        assert_eq!(events.len(), 1);
+        assert!(events[0].is_err(), "batch with internal op must be rejected");
+        // Neither operation must be recorded (atomic rejection).
+        assert!(
+            p.completed_operations().is_empty(),
+            "no operations must be recorded after batch rejection"
+        );
+    }
+
+    #[test]
+    fn legacy_agent_response_rejects_reserved_op_atomically() {
+        let mut p = NdjsonFrameParser::new();
+        let bad_batch = json!({
+            "schemaVersion": "2",
+            "assistantMessage": "hi",
+            "operations": [
+                {
+                    "id": "op-reserved",
+                    "type": "automation.create",
+                    "target": {},
+                    "payload": {}
+                }
+            ]
+        })
+        .to_string()
+            + "\n";
+        let events = p.push_legacy_compat(&bad_batch);
+        assert_eq!(events.len(), 1);
+        assert!(events[0].is_err(), "batch with reserved op must be rejected");
+        assert!(p.completed_operations().is_empty());
+    }
+
+    #[test]
+    fn legacy_parser_allows_valid_model_operations() {
+        // Valid model-facing ops must still work through the legacy path.
+        let mut p = NdjsonFrameParser::new();
+        let good = json!({
+            "id": "op-ok",
+            "type": "component.update_props",
+            "target": {"surfaceId": "s1", "componentId": "c1"},
+            "payload": {"props": {"label": "Save"}}
+        })
+        .to_string()
+            + "\n";
+        let events = p.push_legacy_compat(&good);
+        assert_eq!(events.len(), 1);
+        assert!(events[0].is_ok(), "valid model op must be accepted");
+        assert_eq!(p.completed_operations().len(), 1);
+    }
 }
+
