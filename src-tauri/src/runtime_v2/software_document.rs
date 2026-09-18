@@ -297,10 +297,16 @@ impl SoftwareDocument {
     }
 
     /// Compute deterministic hierarchy path for a region (e.g. "surface/main/results").
+    /// Returns None if the region is not found or a cycle is detected in the parent chain.
     pub fn get_region_path(&self, id: &str) -> Option<String> {
         let mut curr = self.find_region(id)?;
         let mut segments = vec![curr.id.clone()];
+        let mut visited = HashSet::new();
+        visited.insert(curr.id.clone());
         while let Some(ref parent_id) = curr.parent_region_id {
+            if !visited.insert(parent_id.clone()) {
+                return None; // cycle detected
+            }
             if let Some(parent) = self.find_region(parent_id) {
                 segments.push(parent.id.clone());
                 curr = parent;
@@ -322,13 +328,30 @@ impl SoftwareDocument {
     }
 
     /// Move a component from one region to another with optional target index.
+    /// Validates all preconditions before any mutation.
     pub fn move_component(
         &mut self,
         component_id: &str,
         target_region_id: &str,
         target_index: Option<usize>,
     ) -> Result<(), String> {
-        // First find and extract the component
+        // 1. Validate target region exists.
+        let target_len = self
+            .find_region(target_region_id)
+            .ok_or_else(|| format!("target region '{target_region_id}' not found"))?
+            .components
+            .len();
+
+        // 2. Validate target index if provided.
+        if let Some(idx) = target_index {
+            if idx > target_len {
+                return Err(format!(
+                    "target index {idx} exceeds region length {target_len}"
+                ));
+            }
+        }
+
+        // 3. Find and extract the component from source region.
         let mut extracted: Option<ToolComponent> = None;
         for sec in &mut self.sections {
             if let Some(pos) = sec.components.iter().position(|c| c.id == component_id) {
@@ -336,23 +359,22 @@ impl SoftwareDocument {
                 break;
             }
         }
-        let mut comp = extracted.ok_or_else(|| format!("component '{component_id}' not found"))?;
+        let mut comp =
+            extracted.ok_or_else(|| format!("component '{component_id}' not found"))?;
 
-        // Update component's section prop if present
+        // 4. Update component's section prop if present.
         if let Some(Value::Object(ref mut map)) = comp.props {
             map.insert("section".into(), json!(target_region_id));
         }
 
-        // Insert into target region
-        let target_sec = self
-            .find_region_mut(target_region_id)
-            .ok_or_else(|| format!("target region '{target_region_id}' not found"))?;
-
+        // 5. Insert into target region.
+        // Safe to unwrap: we validated target exists in step 1.
+        let target_sec = self.find_region_mut(target_region_id).unwrap();
         match target_index {
-            Some(idx) if idx <= target_sec.components.len() => {
+            Some(idx) => {
                 target_sec.components.insert(idx, comp);
             }
-            _ => {
+            None => {
                 target_sec.components.push(comp);
             }
         }
@@ -360,6 +382,7 @@ impl SoftwareDocument {
     }
 
     /// Reorder components in a region by given ID sequence.
+    /// Unspecified components retain their previous relative order.
     pub fn reorder_components(
         &mut self,
         region_id: &str,
@@ -369,20 +392,29 @@ impl SoftwareDocument {
             .find_region_mut(region_id)
             .ok_or_else(|| format!("region '{region_id}' not found"))?;
 
+        // Record original order of all components before any mutation.
+        let original_order: Vec<String> = sec.components.iter().map(|c| c.id.clone()).collect();
         let mut comp_map: HashMap<String, ToolComponent> = HashMap::new();
         for c in sec.components.drain(..) {
             comp_map.insert(c.id.clone(), c);
         }
 
+        // Place requested components in the specified order.
+        let mut new_components = Vec::new();
         for id in component_ids {
             if let Some(c) = comp_map.remove(id) {
-                sec.components.push(c);
+                new_components.push(c);
             }
         }
-        // Append any components that were not mentioned in the order list
-        for (_, c) in comp_map {
-            sec.components.push(c);
+
+        // Append unspecified components in their original relative order.
+        for id in &original_order {
+            if let Some(c) = comp_map.remove(id) {
+                new_components.push(c);
+            }
         }
+
+        sec.components = new_components;
         Ok(())
     }
 
@@ -962,5 +994,390 @@ mod tests {
         );
         assert_eq!(preserved.get("selected_tab").unwrap(), &json!("tab-2"));
         assert!(!preserved.contains_key("is_loading"));
+    }
+
+    #[test]
+    fn test_region_cycle_detection_self_cycle() {
+        let mut doc = SoftwareDocument::new("doc-cycle", "Cycle Test");
+        let sec = DocumentSection {
+            id: "a".into(),
+            parent_region_id: Some("a".into()), // self-cycle
+            ..Default::default()
+        };
+        doc.add_section(sec, None).unwrap();
+        // get_region_path must return None, not loop forever
+        assert_eq!(doc.get_region_path("a"), None);
+    }
+
+    #[test]
+    fn test_region_cycle_detection_two_node_cycle() {
+        let mut doc = SoftwareDocument::new("doc-cycle2", "Cycle Test 2");
+        doc.add_section(
+            DocumentSection {
+                id: "a".into(),
+                parent_region_id: Some("b".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        doc.add_section(
+            DocumentSection {
+                id: "b".into(),
+                parent_region_id: Some("a".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(doc.get_region_path("a"), None);
+        assert_eq!(doc.get_region_path("b"), None);
+    }
+
+    #[test]
+    fn test_region_cycle_detection_three_node_cycle() {
+        let mut doc = SoftwareDocument::new("doc-cycle3", "Cycle Test 3");
+        doc.add_section(
+            DocumentSection {
+                id: "a".into(),
+                parent_region_id: Some("b".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        doc.add_section(
+            DocumentSection {
+                id: "b".into(),
+                parent_region_id: Some("c".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        doc.add_section(
+            DocumentSection {
+                id: "c".into(),
+                parent_region_id: Some("a".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(doc.get_region_path("a"), None);
+    }
+
+    #[test]
+    fn test_region_cycle_detection_missing_parent() {
+        let mut doc = SoftwareDocument::new("doc-missing", "Missing Parent");
+        doc.add_section(
+            DocumentSection {
+                id: "orphan".into(),
+                parent_region_id: Some("nonexistent".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        // Should stop at the missing parent, not loop
+        let path = doc.get_region_path("orphan");
+        assert_eq!(path.as_deref(), Some("doc-missing/orphan"));
+    }
+
+    #[test]
+    fn test_region_valid_deep_hierarchy_path() {
+        let mut doc = SoftwareDocument::new("doc-deep", "Deep Hierarchy");
+        doc.add_section(
+            DocumentSection {
+                id: "root".into(),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        doc.add_section(
+            DocumentSection {
+                id: "level1".into(),
+                parent_region_id: Some("root".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        doc.add_section(
+            DocumentSection {
+                id: "level2".into(),
+                parent_region_id: Some("level1".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        let path = doc.get_region_path("level2");
+        assert_eq!(path.as_deref(), Some("doc-deep/root/level1/level2"));
+    }
+
+    #[test]
+    fn test_reorder_deterministic_unspecified_order() {
+        let mut doc = SoftwareDocument::new("doc-reorder", "Reorder Test");
+        doc.add_section(
+            DocumentSection {
+                id: "main".into(),
+                components: vec![
+                    ToolComponent {
+                        id: "A".into(),
+                        component_type: "text".into(),
+                        ..Default::default()
+                    },
+                    ToolComponent {
+                        id: "B".into(),
+                        component_type: "text".into(),
+                        ..Default::default()
+                    },
+                    ToolComponent {
+                        id: "C".into(),
+                        component_type: "text".into(),
+                        ..Default::default()
+                    },
+                    ToolComponent {
+                        id: "D".into(),
+                        component_type: "text".into(),
+                        ..Default::default()
+                    },
+                    ToolComponent {
+                        id: "E".into(),
+                        component_type: "text".into(),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+
+        // Request D, B as the specified order
+        doc.reorder_components("main", &["D".into(), "B".into()])
+            .unwrap();
+
+        let ids: Vec<&str> = doc.sections[0]
+            .components
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        // Specified: D, B. Unspecified (original relative order): A, C, E
+        assert_eq!(ids, vec!["D", "B", "A", "C", "E"]);
+    }
+
+    #[test]
+    fn test_reorder_all_specified() {
+        let mut doc = SoftwareDocument::new("doc-reorder2", "Reorder Test 2");
+        doc.add_section(
+            DocumentSection {
+                id: "main".into(),
+                components: vec![
+                    ToolComponent {
+                        id: "A".into(),
+                        component_type: "text".into(),
+                        ..Default::default()
+                    },
+                    ToolComponent {
+                        id: "B".into(),
+                        component_type: "text".into(),
+                        ..Default::default()
+                    },
+                    ToolComponent {
+                        id: "C".into(),
+                        component_type: "text".into(),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+
+        // Complete reorder
+        doc.reorder_components("main", &["C".into(), "A".into(), "B".into()])
+            .unwrap();
+
+        let ids: Vec<&str> = doc.sections[0]
+            .components
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["C", "A", "B"]);
+    }
+
+    #[test]
+    fn test_reorder_partial_specified_preserves_order() {
+        let mut doc = SoftwareDocument::new("doc-reorder3", "Reorder Test 3");
+        doc.add_section(
+            DocumentSection {
+                id: "main".into(),
+                components: vec![
+                    ToolComponent {
+                        id: "A".into(),
+                        component_type: "text".into(),
+                        ..Default::default()
+                    },
+                    ToolComponent {
+                        id: "B".into(),
+                        component_type: "text".into(),
+                        ..Default::default()
+                    },
+                    ToolComponent {
+                        id: "C".into(),
+                        component_type: "text".into(),
+                        ..Default::default()
+                    },
+                    ToolComponent {
+                        id: "D".into(),
+                        component_type: "text".into(),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+
+        // Only specify B
+        doc.reorder_components("main", &["B".into()]).unwrap();
+
+        let ids: Vec<&str> = doc.sections[0]
+            .components
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        // B first, then A, C, E (original order minus B)
+        assert_eq!(ids, vec!["B", "A", "C", "D"]);
+    }
+
+    #[test]
+    fn test_move_component_validates_destination_before_mutation() {
+        let mut doc = SoftwareDocument::new("doc-move", "Move Test");
+        doc.add_section(
+            DocumentSection {
+                id: "source".into(),
+                components: vec![ToolComponent {
+                    id: "widget".into(),
+                    component_type: "button".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+
+        // Try to move to nonexistent region — must fail and leave source untouched
+        let result = doc.move_component("widget", "nonexistent", None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+
+        // Source component must still be there
+        assert_eq!(doc.sections[0].components.len(), 1);
+        assert_eq!(doc.sections[0].components[0].id, "widget");
+    }
+
+    #[test]
+    fn test_move_component_validates_index_before_mutation() {
+        let mut doc = SoftwareDocument::new("doc-move2", "Move Test 2");
+        doc.add_section(
+            DocumentSection {
+                id: "source".into(),
+                components: vec![ToolComponent {
+                    id: "widget".into(),
+                    component_type: "button".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        doc.add_section(
+            DocumentSection {
+                id: "target".into(),
+                components: vec![],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+
+        // Index 5 exceeds target length 0
+        let result = doc.move_component("widget", "target", Some(5));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("exceeds"));
+
+        // Source untouched
+        assert_eq!(doc.sections[0].components.len(), 1);
+        assert_eq!(doc.sections[0].components[0].id, "widget");
+    }
+
+    #[test]
+    fn test_move_component_validates_source_before_mutation() {
+        let mut doc = SoftwareDocument::new("doc-move3", "Move Test 3");
+        doc.add_section(
+            DocumentSection {
+                id: "source".into(),
+                components: vec![],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        doc.add_section(
+            DocumentSection {
+                id: "target".into(),
+                components: vec![],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+
+        // Component doesn't exist
+        let result = doc.move_component("nonexistent", "target", None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_move_component_success() {
+        let mut doc = SoftwareDocument::new("doc-move4", "Move Test 4");
+        doc.add_section(
+            DocumentSection {
+                id: "source".into(),
+                components: vec![ToolComponent {
+                    id: "widget".into(),
+                    component_type: "button".into(),
+                    props: Some(json!({"label": "Click"})),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        doc.add_section(
+            DocumentSection {
+                id: "target".into(),
+                components: vec![],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+
+        assert!(doc.move_component("widget", "target", Some(0)).is_ok());
+        // Source empty, target has the component
+        assert_eq!(doc.sections[0].components.len(), 0);
+        assert_eq!(doc.sections[1].components.len(), 1);
+        assert_eq!(doc.sections[1].components[0].id, "widget");
     }
 }
