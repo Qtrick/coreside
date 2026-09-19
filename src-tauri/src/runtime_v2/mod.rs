@@ -34,9 +34,9 @@ pub use app_routes::{
 };
 #[allow(unused_imports)]
 pub use branch::{
-    branch_from_message, create_snapshot, delete_snapshot, diff_branch, get_branch, get_snapshot,
-    list_branches, list_snapshots, BranchDiffRecord, ChatBranchRecord, SnapshotRecord,
-    SurfaceDiffSummary,
+    branch_from_message, create_snapshot, create_turn_checkpoint, delete_snapshot, diff_branch,
+    get_branch, get_snapshot, list_branches, list_snapshots, BranchDiffRecord, ChatBranchRecord,
+    SnapshotRecord, SurfaceDiffSummary,
 };
 #[allow(unused_imports)]
 pub use context_ledger::{

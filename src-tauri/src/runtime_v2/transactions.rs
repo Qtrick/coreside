@@ -17,7 +17,7 @@ use super::surfaces::{
 };
 use crate::ai::{ToolComponent, ToolDefinition};
 use crate::db::{now_rfc3339, Database, DbError, DbResult};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -451,10 +451,16 @@ fn apply_one(
             // mutate the SoftwareDocument directly to preserve regions, layout, contracts, and packs.
             let is_structured = surface.definition.get("sections").is_some();
             let def_value = if is_structured {
-                let mut doc = super::software_document::SoftwareDocument::from_value(&surface.definition)
+                let original_doc = super::software_document::SoftwareDocument::from_value(&surface.definition)
                     .map_err(|e| format!("failed to load SoftwareDocument for surface '{sid}': {e}"))?;
+                let mut doc = original_doc.clone();
                 doc.apply_operation(op)?;
                 let _notes = doc.validate_and_repair();
+                super::software_document::admit_software_document(
+                    Some(&original_doc),
+                    &doc,
+                    &surface.capability_packs,
+                )?;
                 serde_json::to_value(&doc).map_err(|e| e.to_string())?
             } else {
                 let mut def_value = surface.definition.clone();
@@ -700,7 +706,13 @@ fn apply_one(
                 _ => {}
             }
 
+            let original_doc = super::software_document::SoftwareDocument::from_value(&surface.definition).ok();
             let _notes = doc.validate_and_repair();
+            super::software_document::admit_software_document(
+                original_doc.as_ref(),
+                &doc,
+                &surface.capability_packs,
+            )?;
             // LOSSLESS PERSIST: Serialize as SoftwareDocument JSON (not back to ToolDefinition).
             // This preserves state_contracts, action_contracts, design_tokens, capability_packs,
             // and region hierarchy across all semantic edit operations.
@@ -857,26 +869,69 @@ fn apply_one(
             let effective_sid = resolve_effective_surface_id(op)
                 .ok_or_else(|| "surfaceId or toolId required".to_string())?;
             let sid = &effective_sid;
+            let surface = get_surface(db, sid).map_err(|e| e.to_string())?;
+
+            // Load contracts if surface has SoftwareDocument definition
+            let doc = super::software_document::SoftwareDocument::from_value(&surface.definition).ok();
+
             let incoming = op
                 .payload
                 .get("state")
                 .cloned()
-                .unwrap_or(op.payload.clone());
-            let state = if op.op_type == "state.patch" {
-                let mut current =
-                    super::surfaces::get_surface_state(db, sid).unwrap_or_else(|_| json!({}));
-                // Same deep-merge as PreviewTransaction — shallow keys would diverge.
-                super::surfaces::merge_json_objects(&mut current, &incoming);
-                current
+                .unwrap_or_else(|| op.payload.clone());
+
+            // Extract touched keys
+            let touched_keys: Vec<String> = if let Some(key) = op.payload.get("key").and_then(|v| v.as_str()) {
+                vec![key.to_string()]
+            } else if let Some(obj) = incoming.as_object() {
+                obj.keys().cloned().collect()
             } else {
-                incoming
+                vec![]
             };
-            super::surfaces::save_surface_state(db, sid, &state).map_err(|e| e.to_string())?;
-            // Personal tools read `tool_state` in the canvas — mirror only on durable apply.
-            if let Ok(surface) = get_surface(db, sid) {
-                if let Some(tool_id) = surface.tool_id.as_deref().filter(|t| !t.is_empty()) {
-                    crate::db::save_tool_state(db, tool_id, &state).map_err(|e| e.to_string())?;
+
+            // Enforce state contracts on every touched key
+            if let Some(ref d) = doc {
+                for k in &touched_keys {
+                    let sc = d.state_contracts.iter().find(|s| &s.key == k).ok_or_else(|| {
+                        format!("state key '{k}' has no declared state contract on surface '{sid}'")
+                    })?;
+                    if sc.write_policy == "readonly" {
+                        return Err(format!("cannot write to readonly state key '{k}' on surface '{sid}'"));
+                    }
+                    if sc.read_policy == "restricted" || sc.sensitivity.as_deref() == Some("sensitive") {
+                        return Err(format!("cannot write to restricted/sensitive state key '{k}' on surface '{sid}'"));
+                    }
                 }
+            }
+
+            // Load current state fail-closed (or default to empty object if no state yet)
+            let mut current = super::surfaces::get_surface_state(db, sid).map_err(|e| e.to_string())?;
+
+            // Apply updates while preserving unrelated state
+            if let Some(key) = op.payload.get("key").and_then(|v| v.as_str()) {
+                let val = op.payload.get("value").cloned().unwrap_or(Value::Null);
+                if let Some(map) = current.as_object_mut() {
+                    map.insert(key.to_string(), val);
+                }
+            } else if op.op_type == "state.patch" {
+                super::surfaces::merge_json_objects(&mut current, &incoming);
+            } else if let Some(obj) = incoming.as_object() {
+                // In state.set with an object, update the specified keys only — never wipe undeclared/unrelated state!
+                if let Some(cur_map) = current.as_object_mut() {
+                    for (k, v) in obj {
+                        cur_map.insert(k.clone(), v.clone());
+                    }
+                } else {
+                    current = incoming;
+                }
+            } else {
+                current = incoming;
+            }
+
+            super::surfaces::save_surface_state(db, sid, &current).map_err(|e| e.to_string())?;
+            // Personal tools read `tool_state` in the canvas — mirror only on durable apply.
+            if let Some(tool_id) = surface.tool_id.as_deref().filter(|t| !t.is_empty()) {
+                crate::db::save_tool_state(db, tool_id, &current).map_err(|e| e.to_string())?;
             }
             Ok(Some(get_surface(db, sid).map_err(|e| e.to_string())?))
         }
@@ -1099,25 +1154,47 @@ pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<App
             [transaction_id],
             |r| r.get::<_, Option<String>>(0),
         )
-        .unwrap_or(None);
-    if let Some(prev) = prev_json {
-        if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&prev) {
-            for (sid, snap) in map {
-                if let Some(def) = snap.get("definition") {
-                    let _ = update_surface_definition(db, &sid, def, "undo transaction", None);
-                }
-                if let Some(st) = snap.get("state") {
-                    let _ = super::surfaces::save_surface_state(db, &sid, st);
-                }
+        .optional()?.flatten();
+    let prev = prev_json.ok_or_else(|| {
+        DbError::Invalid(format!("transaction '{transaction_id}' has no previous snapshot to undo to"))
+    })?;
+
+    let map = match serde_json::from_str::<Value>(&prev) {
+        Ok(Value::Object(m)) => m,
+        Ok(_) => return Err(DbError::Invalid("invalid snapshot JSON structure".into())),
+        Err(e) => return Err(DbError::Invalid(format!("corrupt snapshot JSON: {e}"))),
+    };
+
+    db.conn().execute_batch("SAVEPOINT undo_sp").map_err(DbError::Sqlite)?;
+
+    let res = (|| -> DbResult<()> {
+        for (sid, snap) in &map {
+            if let Some(def) = snap.get("definition") {
+                update_surface_definition(db, sid, def, "undo transaction", None)?;
+            }
+            if let Some(st) = snap.get("state") {
+                super::surfaces::save_surface_state(db, sid, st)?;
             }
         }
+        let now = now_rfc3339();
+        db.conn().execute(
+            "UPDATE app_transactions SET status = 'reverted', reverted_at = ?1 WHERE id = ?2",
+            params![now, transaction_id],
+        )?;
+        Ok(())
+    })();
+
+    match res {
+        Ok(()) => {
+            let _ = db.conn().execute_batch("RELEASE SAVEPOINT undo_sp");
+            get_transaction(db, transaction_id)
+        }
+        Err(e) => {
+            let _ = db.conn().execute_batch("ROLLBACK TO SAVEPOINT undo_sp");
+            let _ = db.conn().execute_batch("RELEASE SAVEPOINT undo_sp");
+            Err(e)
+        }
     }
-    let now = now_rfc3339();
-    db.conn().execute(
-        "UPDATE app_transactions SET status = 'reverted', reverted_at = ?1 WHERE id = ?2",
-        params![now, transaction_id],
-    )?;
-    get_transaction(db, transaction_id)
 }
 
 /// List recent transactions for a conversation (replay / undo UI).
@@ -1639,6 +1716,15 @@ mod tests {
                 preservation_policy: None,
                 ..Default::default()
             },
+            StateContract {
+                key: "saveResult".into(),
+                type_name: "object".into(),
+                initial_value: json!(null),
+                scope: StateScope::Session,
+                description: Some("Action result".into()),
+                preservation_policy: None,
+                ..Default::default()
+            },
         ];
         doc.action_contracts = vec![ActionContract {
             action_id: "btn-save-notes-action".into(),
@@ -1714,7 +1800,8 @@ mod tests {
         let result1 = apply_transaction(&mut db, &txn1.id).unwrap();
         assert_eq!(
             result1.transaction.status, "applied",
-            "bind_state transaction must apply"
+            "bind_state transaction must apply, conflicts: {:?}",
+            result1.conflicts
         );
 
         // Reload and verify ALL document-level metadata is intact.

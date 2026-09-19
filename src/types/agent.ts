@@ -320,7 +320,7 @@ export type AppInfo = z.infer<typeof AppInfoSchema>;
 export const AppSettingsSchema = z.object({
   theme: ThemePreferenceSchema.default("system"),
   sidebarCollapsed: z.boolean().optional().default(false),
-  /** `"auto"` or a concrete model id such as `gemini-3.5-flash`. */
+  /** `"auto"` or a concrete model id such as `gemini-3.8-flash`. */
   preferredModel: z.string().optional().default("auto"),
   /** Follow macOS (default) or manual Classic/Split Dock tile. */
   dockIcon: z

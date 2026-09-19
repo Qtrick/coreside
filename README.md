@@ -113,7 +113,7 @@ CLAUDE_API_KEY=
 
 You can keep multiple provider keys in `.env` and switch later with `AI_PROVIDER`. Only **Gemini** is implemented today; OpenAI and Anthropic/Claude keys are accepted so future adapters can use them without reshaping `.env`.
 
-Default Gemini model when unset: `gemini-3.5-flash`.
+Default Gemini model when unset: `gemini-3.8-flash`.
 
 Never commit a populated `.env`. The file is gitignored (`.env` and `.env.*`, with `.env.example` kept).
 

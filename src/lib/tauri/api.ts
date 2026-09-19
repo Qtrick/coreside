@@ -943,6 +943,14 @@ export const api = {
 
   // Application Kernel
   kernelCapabilityCatalog: () => invoke<Record<string, unknown>>("kernel_capability_catalog"),
+  kernelGetProposal: (proposalId: string) =>
+    invoke<Record<string, unknown>>("kernel_get_proposal", { proposalId }),
+  kernelListPendingProposals: (conversationId?: string | null) =>
+    invoke<Record<string, unknown>[]>("kernel_list_pending_proposals", {
+      conversationId: conversationId ?? null,
+    }),
+  kernelDecideProposal: (proposalId: string, approve: boolean) =>
+    invoke<Record<string, unknown>>("kernel_decide_proposal", { proposalId, approve }),
   kernelApplyChange: (request: Record<string, unknown>) =>
     invoke<Record<string, unknown>>("kernel_apply_change", { request }),
   kernelCompileIntent: (intent: Record<string, unknown>) =>

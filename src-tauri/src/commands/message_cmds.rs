@@ -2881,6 +2881,13 @@ async fn send_message_inner(
                     |e| CommandError::new("storage", sanitize_error(&e.to_string(), None)),
                 )?;
             }
+            // Create an exact turn-boundary checkpoint for exact branching and replay
+            let _ = crate::runtime_v2::create_turn_checkpoint(
+                &mut db,
+                &conversation_id,
+                parsed.payload.turn_id.as_deref(),
+                &assistant.id,
+            );
             Ok(assistant)
         })();
         match commit {

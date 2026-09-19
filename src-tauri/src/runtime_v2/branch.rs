@@ -64,6 +64,60 @@ fn conversation_project_id(db: &Database, conversation_id: &str) -> Option<Strin
         .flatten()
 }
 
+/// Create an exact turn boundary checkpoint containing surfaces, states, revisions, and routes.
+pub fn create_turn_checkpoint(
+    db: &mut Database,
+    conversation_id: &str,
+    turn_id: Option<&str>,
+    message_id: &str,
+) -> DbResult<String> {
+    let surfaces = super::surfaces::list_inline_surfaces(db, conversation_id)?;
+    let mut surfaces_map = serde_json::Map::new();
+    for s in surfaces {
+        let (state, state_rev) = super::surfaces::get_surface_state_with_revision(db, &s.id)
+            .unwrap_or_else(|_| (json!({}), 1));
+        let def_rev = s.current_revision;
+        surfaces_map.insert(
+            s.id.clone(),
+            json!({
+                "id": s.id,
+                "name": s.name,
+                "definition": s.definition,
+                "capabilityPacks": s.capability_packs,
+                "currentRevision": def_rev,
+                "state": state,
+                "stateRevision": state_rev,
+                "projectId": s.project_id,
+            }),
+        );
+    }
+    let snapshot = json!({
+        "conversationId": conversation_id,
+        "messageId": message_id,
+        "turnId": turn_id,
+        "surfaces": surfaces_map,
+    });
+    let snapshot_json = serde_json::to_string(&snapshot)?;
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(snapshot_json.as_bytes());
+    let checkpoint_hash = hex::encode(hasher.finalize());
+    let id = format!("chk-{}", Uuid::new_v4());
+    let now = now_rfc3339();
+
+    db.conn().execute(
+        "INSERT INTO conversation_checkpoints (
+            id, conversation_id, turn_id, message_id, checkpoint_hash, snapshot_json, created_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(conversation_id, message_id) DO UPDATE SET
+            checkpoint_hash = excluded.checkpoint_hash,
+            snapshot_json = excluded.snapshot_json,
+            created_at = excluded.created_at",
+        params![id, conversation_id, turn_id, message_id, checkpoint_hash, snapshot_json, now],
+    )?;
+    Ok(id)
+}
+
 /// Branch a conversation from a message (inclusive of that message and earlier).
 pub fn branch_from_message(
     db: &mut Database,
@@ -105,82 +159,134 @@ pub fn branch_from_message(
             crate::db::insert_message(db, &new_conv.id, &m.role, &m.content, m.metadata.as_ref())?;
         }
 
-        let next_msg_created_at = messages.get(cut + 1).map(|m| m.created_at.clone());
-
-        let subsequent_prev_snapshots: Vec<String> = if let Some(ref cutoff) = next_msg_created_at {
-            let mut stmt = db.conn().prepare(
-                "SELECT previous_snapshot_json FROM app_transactions
-                 WHERE conversation_id = ?1 AND created_at >= ?2 AND status = 'applied' AND previous_snapshot_json IS NOT NULL
-                 ORDER BY created_at ASC",
-            )?;
-            let rows = stmt.query_map(params![source_conversation_id, cutoff], |row| {
-                row.get::<_, String>(0)
-            })?;
-            rows.filter_map(|r| r.ok()).collect()
-        } else {
-            Vec::new()
-        };
+        // Check for an exact turn boundary checkpoint first
+        let checkpoint_row: Option<(String, String)> = db
+            .conn()
+            .query_row(
+                "SELECT checkpoint_hash, snapshot_json FROM conversation_checkpoints
+                 WHERE conversation_id = ?1 AND message_id = ?2",
+                params![source_conversation_id, source_message_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
 
         let mut cloned_surfaces = Vec::new();
-        for surface in list_inline_surfaces(db, source_conversation_id)? {
-            // Query surface_versions for the highest revision valid up to the cut message.
-            // If there is a subsequent message, the cutoff is strictly before that next message.
-            let historical_row: Option<(i64, String)> = if let Some(ref cutoff) = next_msg_created_at {
-                db.conn().query_row(
-                    "SELECT revision, definition_json FROM surface_versions
-                     WHERE surface_id = ?1 AND created_at < ?2
-                     ORDER BY revision DESC LIMIT 1",
-                    params![surface.id, cutoff],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                ).optional()?
-            } else {
-                db.conn().query_row(
-                    "SELECT revision, definition_json FROM surface_versions
-                     WHERE surface_id = ?1
-                     ORDER BY revision DESC LIMIT 1",
-                    params![surface.id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                ).optional()?
-            };
 
-            // If no version existed before the next message cut,
-            // the surface was created after the message, so do not copy it into the branch.
-            let (_rev, def_json_str) = match historical_row {
-                Some(row) => row,
-                None => continue,
-            };
+        if let Some((_hash, snapshot_json)) = checkpoint_row {
+            let snap: Value = serde_json::from_str(&snapshot_json)
+                .map_err(|e| DbError::Invalid(format!("corrupt checkpoint snapshot: {e}")))?;
+            let surfaces_obj = snap
+                .get("surfaces")
+                .and_then(|v| v.as_object())
+                .ok_or_else(|| DbError::Invalid("corrupt checkpoint surfaces".into()))?;
 
-            let mut def = serde_json::from_str::<Value>(&def_json_str)
-                .unwrap_or_else(|_| surface.definition.clone());
-            if let Some(obj) = def.as_object_mut() {
-                obj.insert("_branchedFrom".into(), json!(surface.instance_id));
+            for (_orig_id, sval) in surfaces_obj {
+                let name = sval
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Surface");
+                let def = sval.get("definition").ok_or_else(|| {
+                    DbError::Invalid("corrupt surface definition in checkpoint".into())
+                })?;
+                let packs: Vec<String> = sval
+                    .get("capabilityPacks")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                let project_id = sval.get("projectId").and_then(|v| v.as_str());
+
+                let mut branched_def = def.clone();
+                if let Some(obj) = branched_def.as_object_mut() {
+                    obj.insert("_branchedFrom".into(), json!(sval.get("id")));
+                }
+
+                let created = super::surfaces::create_inline_surface(
+                    db,
+                    &new_conv.id,
+                    None,
+                    project_id,
+                    name,
+                    &branched_def,
+                    &packs,
+                )?;
+
+                if let Some(state) = sval.get("state") {
+                    super::surfaces::save_surface_state(db, &created.id, state)?;
+                }
+                cloned_surfaces.push(created);
             }
-            let created = super::surfaces::create_inline_surface(
-                db,
-                &new_conv.id,
-                None,
-                surface.project_id.as_deref(),
-                &surface.name,
-                &def,
-                &surface.capability_packs,
-            )?;
+        } else {
+            // Fallback for legacy messages prior to migration 027
+            let next_msg_created_at = messages.get(cut + 1).map(|m| m.created_at.clone());
 
-            // Restore historical surface state
-            let mut historical_state = super::surfaces::get_surface_state(db, &surface.id)
-                .unwrap_or_else(|_| json!({}));
-            for prev_str in &subsequent_prev_snapshots {
-                if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(prev_str) {
-                    if let Some(surface_snap) = map.get(&surface.id) {
-                        if let Some(st) = surface_snap.get("state") {
-                            historical_state = st.clone();
-                            break;
+            let subsequent_prev_snapshots: Vec<String> = if let Some(ref cutoff) = next_msg_created_at {
+                let mut stmt = db.conn().prepare(
+                    "SELECT previous_snapshot_json FROM app_transactions
+                     WHERE conversation_id = ?1 AND created_at >= ?2 AND status = 'applied' AND previous_snapshot_json IS NOT NULL
+                     ORDER BY created_at ASC",
+                )?;
+                let rows = stmt.query_map(params![source_conversation_id, cutoff], |row| {
+                    row.get::<_, String>(0)
+                })?;
+                rows.filter_map(|r| r.ok()).collect()
+            } else {
+                Vec::new()
+            };
+
+            for surface in list_inline_surfaces(db, source_conversation_id)? {
+                let historical_row: Option<(i64, String)> = if let Some(ref cutoff) = next_msg_created_at {
+                    db.conn().query_row(
+                        "SELECT revision, definition_json FROM surface_versions
+                         WHERE surface_id = ?1 AND created_at < ?2
+                         ORDER BY revision DESC LIMIT 1",
+                        params![surface.id, cutoff],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    ).optional()?
+                } else {
+                    db.conn().query_row(
+                        "SELECT revision, definition_json FROM surface_versions
+                         WHERE surface_id = ?1
+                         ORDER BY revision DESC LIMIT 1",
+                        params![surface.id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    ).optional()?
+                };
+
+                let (_rev, def_json_str) = match historical_row {
+                    Some(row) => row,
+                    None => continue,
+                };
+
+                let mut def = serde_json::from_str::<Value>(&def_json_str)
+                    .unwrap_or_else(|_| surface.definition.clone());
+                if let Some(obj) = def.as_object_mut() {
+                    obj.insert("_branchedFrom".into(), json!(surface.instance_id));
+                }
+                let created = super::surfaces::create_inline_surface(
+                    db,
+                    &new_conv.id,
+                    None,
+                    surface.project_id.as_deref(),
+                    &surface.name,
+                    &def,
+                    &surface.capability_packs,
+                )?;
+
+                let mut historical_state = super::surfaces::get_surface_state(db, &surface.id)
+                    .unwrap_or_else(|_| json!({}));
+                for prev_str in &subsequent_prev_snapshots {
+                    if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(prev_str) {
+                        if let Some(surface_snap) = map.get(&surface.id) {
+                            if let Some(st) = surface_snap.get("state") {
+                                historical_state = st.clone();
+                                break;
+                            }
                         }
                     }
                 }
-            }
 
-            let _ = super::surfaces::save_surface_state(db, &created.id, &historical_state);
-            cloned_surfaces.push(created);
+                let _ = super::surfaces::save_surface_state(db, &created.id, &historical_state);
+                cloned_surfaces.push(created);
+            }
         }
 
         let id = format!("br-{}", Uuid::new_v4());
@@ -238,6 +344,23 @@ pub fn create_snapshot(
     // delete older snapshots without saving a replacement.
     let messages = crate::db::get_messages(db, conversation_id)?;
     let surfaces = list_inline_surfaces(db, conversation_id)?;
+    let surfaces_json: Vec<Value> = surfaces
+        .iter()
+        .map(|s| {
+            let (st, st_rev) = super::surfaces::get_surface_state_with_revision(db, &s.id)
+                .unwrap_or_else(|_| (json!({}), 1));
+            json!({
+                "id": s.id,
+                "instanceId": s.instance_id,
+                "name": s.name,
+                "definition": s.definition,
+                "revision": s.current_revision,
+                "state": st,
+                "stateRevision": st_rev,
+            })
+        })
+        .collect();
+
     let txns = super::transactions::list_transactions(db, conversation_id, 100)?;
     let payload = json!({
         "conversationId": conversation_id,
@@ -248,13 +371,7 @@ pub fn create_snapshot(
             "content": m.content,
             "createdAt": m.created_at,
         })).collect::<Vec<_>>(),
-        "inlineSurfaces": surfaces.iter().map(|s| json!({
-            "id": s.id,
-            "instanceId": s.instance_id,
-            "name": s.name,
-            "definition": s.definition,
-            "revision": s.current_revision,
-        })).collect::<Vec<_>>(),
+        "inlineSurfaces": surfaces_json,
         "transactions": txns.iter().map(|t| json!({
             "id": t.id,
             "summary": t.summary,
@@ -314,27 +431,37 @@ pub fn create_snapshot(
 }
 
 pub fn get_snapshot(db: &Database, id: &str) -> DbResult<SnapshotRecord> {
-    db.conn()
+    let (id_val, conv_id, proj_id, desc, payload_json, created_at): (
+        String,
+        String,
+        Option<String>,
+        String,
+        String,
+        String,
+    ) = db
+        .conn()
         .query_row(
             "SELECT id, conversation_id, project_id, description, read_only_payload_json, created_at
              FROM conversation_snapshots WHERE id = ?1",
             [id],
-            |row| {
-                let payload_json: String = row.get(4)?;
-                Ok(SnapshotRecord {
-                    id: row.get(0)?,
-                    conversation_id: row.get(1)?,
-                    project_id: row.get(2)?,
-                    description: row.get(3)?,
-                    payload: serde_json::from_str(&payload_json).unwrap_or(Value::Null),
-                    created_at: row.get(5)?,
-                })
-            },
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(format!("snapshot {id}")),
             other => DbError::Sqlite(other),
-        })
+        })?;
+
+    let payload: Value = serde_json::from_str(&payload_json)
+        .map_err(|e| DbError::Invalid(format!("corrupt snapshot JSON in snapshot {id_val}: {e}")))?;
+
+    Ok(SnapshotRecord {
+        id: id_val,
+        conversation_id: conv_id,
+        project_id: proj_id,
+        description: desc,
+        payload,
+        created_at,
+    })
 }
 
 pub fn delete_snapshot(db: &mut Database, id: &str) -> DbResult<()> {
@@ -791,5 +918,98 @@ mod tests {
             .and_then(|v| v.as_str());
         assert_eq!(text_in_b2, Some("v2"));
         assert!(branch2_surfs.iter().any(|s| s.name == "Surface B"));
+    }
+
+    #[test]
+    fn exact_turn_checkpoint_branch_restoration() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("chk_branch.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "ChkConv", None).unwrap();
+
+        let def1 = json!({
+            "id": "surf_a",
+            "name": "Surface A",
+            "layout": "stack",
+            "components": [{"id": "t1", "type": "text", "props": {"text": "v1"}}]
+        });
+        let surf_a =
+            super::super::surfaces::create_inline_surface(&mut db, &conv.id, None, None, "Surface A", &def1, &[])
+                .unwrap();
+
+        super::super::surfaces::save_surface_state(&mut db, &surf_a.id, &json!({ "counter": 42 }))
+            .unwrap();
+
+        let m1 = crate::db::insert_message(&mut db, &conv.id, "user", "start", None).unwrap();
+        let m2 = crate::db::insert_message(&mut db, &conv.id, "assistant", "done", None).unwrap();
+
+        // Create turn checkpoint at message m2
+        let chk_id = create_turn_checkpoint(&mut db, &conv.id, Some("turn-1"), &m2.id).unwrap();
+        assert!(!chk_id.is_empty());
+
+        // Now mutate live surface A to v2 and counter 999
+        let def2 = json!({
+            "id": "surf_a",
+            "name": "Surface A",
+            "layout": "stack",
+            "components": [{"id": "t1", "type": "text", "props": {"text": "v2"}}]
+        });
+        super::super::surfaces::update_surface_definition(&mut db, &surf_a.id, &def2, "bump to v2", Some(1))
+            .unwrap();
+        super::super::surfaces::save_surface_state(&mut db, &surf_a.id, &json!({ "counter": 999 }))
+            .unwrap();
+
+        // And create a new surface B in the live conversation after the checkpoint
+        let def_b = json!({
+            "id": "surf_b",
+            "name": "Surface B",
+            "layout": "stack",
+            "components": [{"id": "t2", "type": "text", "props": {"text": "later"}}]
+        });
+        let _surf_b = super::super::surfaces::create_inline_surface(&mut db, &conv.id, None, None, "Surface B", &def_b, &[])
+            .unwrap();
+
+        // Branch from m2 (which has the checkpoint)
+        let (_branch, branch_surfs) = branch_from_message(
+            &mut db,
+            &conv.id,
+            &m2.id,
+            "Exact Checkpoint Branch",
+            DEFAULT_WORKSPACE_ID,
+        )
+        .unwrap();
+
+        // Must only contain Surface A
+        assert_eq!(branch_surfs.len(), 1);
+        assert_eq!(branch_surfs[0].name, "Surface A");
+
+        // Definition must be v1 from checkpoint
+        let text_in_branch = branch_surfs[0]
+            .definition
+            .pointer("/components/0/props/text")
+            .and_then(|v| v.as_str());
+        assert_eq!(text_in_branch, Some("v1"));
+
+        // State must be counter: 42 from checkpoint (NOT 999)
+        let branch_state = super::super::surfaces::get_surface_state(&db, &branch_surfs[0].id).unwrap();
+        assert_eq!(branch_state.get("counter").and_then(|v| v.as_i64()), Some(42));
+
+        // Corrupt checkpoint fail-closed test
+        db.conn()
+            .execute(
+                "UPDATE conversation_checkpoints SET snapshot_json = '{invalid_json' WHERE message_id = ?1",
+                [&m2.id],
+            )
+            .unwrap();
+
+        let corrupt_err = branch_from_message(
+            &mut db,
+            &conv.id,
+            &m2.id,
+            "Corrupt Checkpoint Branch",
+            DEFAULT_WORKSPACE_ID,
+        )
+        .unwrap_err();
+
+        assert!(matches!(corrupt_err, DbError::Invalid(_)));
     }
 }

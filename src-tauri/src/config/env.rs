@@ -18,7 +18,7 @@ use serde::Serialize;
 pub const DEFAULT_PROVIDER: &str = "gemini";
 pub const DEFAULT_LOG_LEVEL: &str = "info";
 
-pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.5-flash";
+pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.8-flash";
 pub const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 
 pub const DEFAULT_OPENAI_MODEL: &str = "gpt-4.1-mini";

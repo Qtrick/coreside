@@ -390,11 +390,6 @@ fn extend_model_options_for_provider(options: &mut Vec<ModelOption>, provider: &
                     description: Some("Recommended — state-of-the-art Flash GA".into()),
                 },
                 ModelOption {
-                    id: "gemini-3.5-flash".into(),
-                    label: "Gemini 3.5 Flash".into(),
-                    description: Some("Fast agentic Flash".into()),
-                },
-                ModelOption {
                     id: "gemini-3.1-flash-lite".into(),
                     label: "Gemini 3.1 Flash-Lite".into(),
                     description: Some("Lowest latency / cost".into()),

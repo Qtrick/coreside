@@ -75,7 +75,12 @@ pub fn upsert_surface_from_tool(
     let mut doc = super::software_document::SoftwareDocument::from_tool_definition(&def);
     if let Some((_, _, _, existing_definition_json)) = existing.as_ref() {
         if let Ok(existing_doc) = super::software_document::SoftwareDocument::from_value(&serde_json::from_str(existing_definition_json)?) {
-            // Preserve custom section roles/metadata/layout from existing_doc if section id matches
+            // Preserve trusted contracts, capability packs, design tokens, and custom section metadata from existing_doc
+            doc.state_contracts = existing_doc.state_contracts.clone();
+            doc.action_contracts = existing_doc.action_contracts.clone();
+            doc.design_tokens = existing_doc.design_tokens.clone();
+            doc.capability_packs = existing_doc.capability_packs.clone();
+
             for sec in &mut doc.sections {
                 if let Some(existing_sec) = existing_doc.sections.iter().find(|s| s.id == sec.id) {
                     if existing_sec.role.is_some() {
@@ -237,9 +242,12 @@ pub fn get_surface(db: &Database, id: &str) -> DbResult<SurfaceRecord> {
             |row| {
                 let def_json: String = row.get(11)?;
                 let packs_json: String = row.get(15)?;
-                let definition: Value = serde_json::from_str(&def_json).unwrap_or(Value::Null);
-                let capability_packs: Vec<String> =
-                    serde_json::from_str(&packs_json).unwrap_or_default();
+                let definition: Value = serde_json::from_str(&def_json).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(11, rusqlite::types::Type::Text, Box::new(e))
+                })?;
+                let capability_packs: Vec<String> = serde_json::from_str(&packs_json).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(15, rusqlite::types::Type::Text, Box::new(e))
+                })?;
                 Ok(SurfaceRecord {
                     id: row.get(0)?,
                     instance_id: row.get(1)?,
@@ -420,31 +428,62 @@ pub fn update_surface_definition(
         "UPDATE surfaces SET definition_json = ?1, current_revision = ?2, capability_packs_json = ?3, updated_at = ?4, name = COALESCE(json_extract(?1, '$.name'), name) WHERE id = ?5",
         params![def_json, next, serde_json::to_string(&effective_packs)?, now, surface_id],
     )?;
+    let (curr_state_json, curr_state_rev): (Option<String>, i64) = db
+        .conn()
+        .query_row(
+            "SELECT state_json, state_revision FROM surface_state WHERE surface_id = ?1",
+            [surface_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap_or((None, 1));
+
     let version_id = format!("sv-{}", Uuid::new_v4());
     db.conn().execute(
-        "INSERT INTO surface_versions (id, surface_id, revision, definition_json, change_summary, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![version_id, surface_id, next, def_json, change_summary, now],
+        "INSERT INTO surface_versions (id, surface_id, revision, definition_json, change_summary, state_json, state_revision, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![version_id, surface_id, next, def_json, change_summary, curr_state_json, curr_state_rev, now],
     )?;
 
-    // Keep linked tool in sync when this is a tool surface
+    // Keep linked tool in sync when this is a tool surface via canonical projection
     if let Some(tool_id) = current.tool_id.as_ref() {
-        if let Ok(tool) = serde_json::from_value::<ToolDefinition>(definition.clone()) {
-            let layout = layout_type_string(&tool.layout);
-            db.conn().execute(
-                "UPDATE tools SET name = ?1, description = ?2, layout = ?3, definition_json = ?4,
-                 current_version = ?5, updated_at = ?6 WHERE id = ?7",
-                params![
-                    tool.name,
-                    tool.description,
-                    layout,
-                    def_json,
-                    next,
-                    now,
-                    tool_id
-                ],
-            )?;
-        }
+        let tool: ToolDefinition = if definition.get("sections").is_some() {
+            if let Ok(doc) = super::software_document::SoftwareDocument::from_value(definition) {
+                doc.to_tool_definition()
+            } else {
+                serde_json::from_value::<ToolDefinition>(definition.clone())
+                    .unwrap_or_else(|_| ToolDefinition {
+                        id: tool_id.clone(),
+                        name: current.name.clone(),
+                        description: String::new(),
+                        layout: serde_json::json!({ "type": "single-column" }),
+                        components: Vec::new(),
+                    })
+            }
+        } else {
+            serde_json::from_value::<ToolDefinition>(definition.clone())
+                .unwrap_or_else(|_| ToolDefinition {
+                    id: tool_id.clone(),
+                    name: current.name.clone(),
+                    description: String::new(),
+                    layout: serde_json::json!({ "type": "single-column" }),
+                    components: Vec::new(),
+                })
+        };
+        let layout = layout_type_string(&tool.layout);
+        let tool_def_json = serde_json::to_string(&tool)?;
+        db.conn().execute(
+            "UPDATE tools SET name = ?1, description = ?2, layout = ?3, definition_json = ?4,
+             current_version = ?5, updated_at = ?6 WHERE id = ?7",
+            params![
+                tool.name,
+                tool.description,
+                layout,
+                tool_def_json,
+                next,
+                now,
+                tool_id
+            ],
+        )?;
     }
     get_surface(db, surface_id)
 }
@@ -491,6 +530,11 @@ pub fn promote_inline_to_tool(
 }
 
 pub fn get_surface_state(db: &Database, surface_id: &str) -> DbResult<Value> {
+    let (val, _) = get_surface_state_with_revision(db, surface_id)?;
+    Ok(val)
+}
+
+pub fn get_surface_state_with_revision(db: &Database, surface_id: &str) -> DbResult<(Value, i64)> {
     let _: String = db
         .conn()
         .query_row("SELECT id FROM surfaces WHERE id = ?1", [surface_id], |r| {
@@ -503,15 +547,19 @@ pub fn get_surface_state(db: &Database, surface_id: &str) -> DbResult<Value> {
             other => DbError::Sqlite(other),
         })?;
     match db.conn().query_row(
-        "SELECT state_json FROM surface_state WHERE surface_id = ?1",
+        "SELECT state_json, state_revision FROM surface_state WHERE surface_id = ?1",
         [surface_id],
         |row| {
             let s: String = row.get(0)?;
-            Ok(serde_json::from_str(&s).unwrap_or(Value::Object(Default::default())))
+            let rev: i64 = row.get(1)?;
+            let val = serde_json::from_str(&s).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+            })?;
+            Ok((val, rev))
         },
     ) {
         Ok(v) => Ok(v),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Value::Object(Default::default())),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok((Value::Object(Default::default()), 1)),
         Err(other) => Err(DbError::Sqlite(other)),
     }
 }
@@ -534,8 +582,8 @@ pub fn save_surface_state(db: &mut Database, surface_id: &str, state: &Value) ->
     }
     let now = now_rfc3339();
     db.conn().execute(
-        "INSERT INTO surface_state (surface_id, state_json, updated_at) VALUES (?1, ?2, ?3)
-         ON CONFLICT(surface_id) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at",
+        "INSERT INTO surface_state (surface_id, state_json, state_revision, updated_at) VALUES (?1, ?2, 1, ?3)
+         ON CONFLICT(surface_id) DO UPDATE SET state_json = excluded.state_json, state_revision = surface_state.state_revision + 1, updated_at = excluded.updated_at",
         params![surface_id, state_json, now],
     )?;
     Ok(())

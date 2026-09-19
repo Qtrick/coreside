@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-16T19:35:48.157Z",
-  "commit": "1839c1bd1f8baad098dc3fb2b60de7e52c09a863",
+  "generatedAt": "2026-09-19T20:26:31.019Z",
+  "commit": "d1918e188d9675034b789cf0ba3510ffc20c1723",
   "dirty": true,
-  "sourceFingerprint": "3639d324318ba0d83e8cb4047cc05bfd6ea5b4222be21b2f7ae859561c007d97",
+  "sourceFingerprint": "ba425b39cbd67aaf2ef2d9e1b1364662c3b061055a68ac6faf06bbef8daad33f",
   "packageLockHash": "f99da7c99dc5e2db93567632e2c36d36796c4b3ea8cf6a575a3f337bb6b9d641",
-  "cargoLockHash": "4b118413c6104abc1eab2df0455e2d2218df058c59c075866191c677709d0729",
+  "cargoLockHash": "b64ad87161713f19b77675d96b38081e050c78ec6b8e3d6b3e00f26b49bfbd67",
   "platform": "darwin",
   "architecture": "arm64",
   "buildMode": "development",
@@ -37,7 +37,7 @@
       "id": "true-streaming",
       "name": "True streaming (chat_stream / TextDelta)",
       "state": "Integrated – Not Verified",
-      "notes": "True streaming desktop claim withheld. (prior evidence c089831) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "True streaming desktop claim withheld.",
       "evidence": [
         "reports/true-streaming-results.json"
       ]
@@ -46,7 +46,7 @@
       "id": "channel-scoped-streaming",
       "name": "Channel-scoped turn streaming",
       "state": "Integrated – Not Verified",
-      "notes": "Channel-scoped streaming desktop claim withheld. (prior evidence c089831) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Channel-scoped streaming desktop claim withheld.",
       "evidence": [
         "reports/scoped-streaming-results.json",
         "reports/stream-eavesdropping-results.json"
@@ -56,7 +56,7 @@
       "id": "wallpaper-atomic-settings",
       "name": "Wallpaper atomic appearance writes",
       "state": "Integrated – Not Verified",
-      "notes": "Wallpaper atomic settings desktop claim withheld. (prior evidence c089831) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Wallpaper atomic settings desktop claim withheld.",
       "evidence": [
         "reports/wallpaper-settings-results.json",
         "reports/wallpaper-visual-results.json"
@@ -128,7 +128,7 @@
       "id": "e2e-1-14",
       "name": "Desktop E2E Journeys 1–14",
       "state": "Integrated – Not Verified",
-      "notes": "e2e-results.json is on c089831, not HEAD — re-run e2e to claim Desktop Verified.",
+      "notes": "e2e status=not_run — not a full Desktop Verified suite pass.",
       "evidence": [
         "reports/e2e-results.json",
         "reports/true-streaming-results.json",
@@ -141,7 +141,7 @@
       "id": "e2e-12-13",
       "name": "Desktop E2E Journey 12 / 13",
       "state": "Integrated – Not Verified",
-      "notes": "Journey 12/13 evidence not on HEAD. (prior evidence c089831) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Journey 12/13 not both passed on this HEAD.",
       "evidence": [
         "reports/true-streaming-results.json",
         "reports/wallpaper-visual-results.json"
@@ -151,7 +151,7 @@
       "id": "e2e-14-eavesdrop",
       "name": "Tool-window stream eavesdropping denial",
       "state": "Integrated – Not Verified",
-      "notes": "Journey 14 eavesdrop desktop claim withheld. (prior evidence c089831) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Journey 14 eavesdrop desktop claim withheld.",
       "evidence": [
         "reports/stream-eavesdropping-results.json"
       ]

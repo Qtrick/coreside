@@ -54,7 +54,6 @@ pub fn auto_model_candidates(provider: &str, configured_default: &str) -> Vec<St
         "gemini" => {
             for id in [
                 "gemini-3.8-flash",
-                "gemini-3.5-flash",
                 "gemini-3.1-flash-lite",
                 "gemini-2.5-flash",
                 "gemini-2.5-pro",

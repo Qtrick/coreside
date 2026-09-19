@@ -70,6 +70,40 @@ pub fn kernel_capability_catalog() -> Value {
 }
 
 #[tauri::command]
+pub fn kernel_get_proposal(
+    state: State<'_, AppState>,
+    proposal_id: String,
+) -> Result<crate::application_kernel::KernelChangeProposalRecord, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    crate::application_kernel::get_proposal(&db, &proposal_id).map_err(map_kernel)
+}
+
+#[tauri::command]
+pub fn kernel_list_pending_proposals(
+    state: State<'_, AppState>,
+    conversation_id: Option<String>,
+) -> Result<Vec<crate::application_kernel::KernelChangeProposalRecord>, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    crate::application_kernel::list_pending_proposals(&db, conversation_id.as_deref()).map_err(map_kernel)
+}
+
+#[tauri::command]
+pub fn kernel_decide_proposal(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    proposal_id: String,
+    approve: bool,
+) -> Result<ChangeResult, CommandError> {
+    state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
+    let mut db = state.db.lock();
+    let mut bus = state.event_bus.lock();
+    crate::application_kernel::decide_proposal(&mut db, Some(&mut bus), &proposal_id, approve).map_err(map_kernel)
+}
+
+#[tauri::command]
 pub fn kernel_apply_change(
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
@@ -77,9 +111,22 @@ pub fn kernel_apply_change(
 ) -> Result<ChangeResult, CommandError> {
     state.require_profile()?;
     require_main_for_sensitive_kernel(&window)?;
+    // If proposalId is supplied, route through decide_proposal (ignoring frontend operations)
+    if let Some(ref pid) = request.proposal_id {
+        let mut db = state.db.lock();
+        let mut bus = state.event_bus.lock();
+        let result = crate::application_kernel::decide_proposal(
+            &mut db,
+            Some(&mut bus),
+            pid,
+            request.approval_granted,
+        )
+        .map_err(map_kernel)?;
+        return Ok(result);
+    }
     // IPC from the UI is always user-initiated; never allow agent self-approval.
     request.source_type = "user".into();
-    if request.proposal_id.is_none() && request.operations.is_empty() {
+    if request.operations.is_empty() {
         return Err(CommandError::new("invalid", "operations or proposalId required"));
     }
     let mut db = state.db.lock();
@@ -513,6 +560,54 @@ pub fn kernel_invoke_registered_action(
                 surface.tool_id.as_deref(),
                 &surface.id,
             )?;
+        }
+    }
+    if let Some(ref app_id) = request.application_id {
+        let db = state.db.lock();
+        let manifest_rec = get_manifest(&db, app_id).map_err(CommandError::from)?;
+        if let Some(ref surface_id) = request.surface_id {
+            let surface =
+                crate::runtime_v2::get_surface(&db, surface_id).map_err(CommandError::from)?;
+            let belongs = surface.tool_id.as_deref() == Some(app_id.as_str())
+                || manifest_rec
+                    .manifest
+                    .surfaces
+                    .iter()
+                    .any(|s| s.surface_id == *surface_id);
+            if !belongs {
+                return Err(CommandError::new(
+                    "forbidden",
+                    "Surface does not belong to application",
+                ));
+            }
+            if let Some(ref proj_id) = request.project_id {
+                if surface.project_id.as_deref().is_some_and(|p| p != proj_id) {
+                    return Err(CommandError::new(
+                        "forbidden",
+                        "Cross-project surface action invocation rejected",
+                    ));
+                }
+            }
+            if let Some(ref conv_id) = request.conversation_id {
+                if surface.conversation_id.as_deref().is_some_and(|c| c != conv_id) {
+                    return Err(CommandError::new(
+                        "forbidden",
+                        "Cross-conversation surface action invocation rejected",
+                    ));
+                }
+            }
+            if let Some(ref comp_id) = request.component_id {
+                if let Ok(doc) =
+                    crate::runtime_v2::SoftwareDocument::from_value(&surface.definition)
+                {
+                    if doc.find_component(comp_id).is_none() {
+                        return Err(CommandError::new(
+                            "forbidden",
+                            "Component does not belong to surface",
+                        ));
+                    }
+                }
+            }
         }
     }
     let venue = if request.application_id.is_some() {

@@ -257,10 +257,15 @@ pub fn apply_change(
             if let Some(sid) = sid_opt {
                 if !base_revisions.contains_key(&sid) {
                     let rev: i64 = db.conn().query_row(
-                        "SELECT revision FROM surfaces WHERE id = ?",
+                        "SELECT current_revision FROM surfaces WHERE id = ?",
                         rusqlite::params![sid],
                         |r| r.get(0),
-                    ).unwrap_or(0);
+                    ).map_err(|e| match e {
+                        rusqlite::Error::QueryReturnedNoRows => {
+                            KernelError::Validation(format!("Target surface {sid} not found"))
+                        }
+                        other => KernelError::Db(crate::db::DbError::Sqlite(other)),
+                    })?;
                     base_revisions.insert(sid, rev);
                 }
             }
@@ -279,7 +284,7 @@ pub fn apply_change(
         let ops_json = serde_json::to_string(&req.operations).unwrap_or_else(|_| "[]".into());
         let base_revs_json = serde_json::to_string(&base_revisions).unwrap_or_else(|_| "{}".into());
 
-        let _ = db.conn().execute(
+        db.conn().execute(
             "INSERT INTO kernel_change_proposals (
                 id, conversation_id, turn_id, summary, risk, impact_summary,
                 exact_operations_json, exact_operations_hash, base_revisions_json, source_type,
@@ -301,7 +306,7 @@ pub fn apply_change(
                 now,
                 expires_at,
             ],
-        );
+        ).map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
 
         return Ok(ChangeResult {
             apply: None,
@@ -492,62 +497,129 @@ pub fn apply_change(
 }
 
 /// Decide (approve or reject) a frozen kernel change proposal with single-use CAS semantics.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KernelChangeProposalRecord {
+    pub id: String,
+    pub conversation_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub summary: String,
+    pub risk: String,
+    pub impact_summary: String,
+    pub exact_operations: Vec<AppOperation>,
+    pub exact_operations_hash: String,
+    pub base_revisions: HashMap<String, i64>,
+    pub source_type: String,
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub status: String,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub expires_at: Option<String>,
+    pub decided_at: Option<String>,
+    pub applied_at: Option<String>,
+    pub transaction_id: Option<String>,
+}
+
+fn parse_proposal_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<KernelChangeProposalRecord> {
+    let ops_json: String = r.get(6)?;
+    let base_revs_json: String = r.get(8)?;
+    let ops: Vec<AppOperation> = serde_json::from_str(&ops_json).unwrap_or_default();
+    let base_revisions: HashMap<String, i64> = serde_json::from_str(&base_revs_json).unwrap_or_default();
+    Ok(KernelChangeProposalRecord {
+        id: r.get(0)?,
+        conversation_id: r.get(1)?,
+        turn_id: r.get(2)?,
+        summary: r.get(3)?,
+        risk: r.get(4)?,
+        impact_summary: r.get(5)?,
+        exact_operations: ops,
+        exact_operations_hash: r.get(7)?,
+        base_revisions,
+        source_type: r.get(9)?,
+        model: r.get(10)?,
+        provider: r.get(11)?,
+        status: r.get(12)?,
+        error: r.get(13)?,
+        created_at: r.get(14)?,
+        expires_at: r.get(15)?,
+        decided_at: r.get(16)?,
+        applied_at: r.get(17)?,
+        transaction_id: r.get(18)?,
+    })
+}
+
+pub fn get_proposal(db: &Database, proposal_id: &str) -> Result<KernelChangeProposalRecord, KernelError> {
+    db.conn()
+        .query_row(
+            "SELECT id, conversation_id, turn_id, summary, risk, impact_summary, \
+                    exact_operations_json, exact_operations_hash, base_revisions_json, \
+                    source_type, model, provider, status, error, created_at, expires_at, \
+                    decided_at, applied_at, transaction_id \
+             FROM kernel_change_proposals WHERE id = ?",
+            rusqlite::params![proposal_id],
+            parse_proposal_row,
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                KernelError::Validation(format!("Proposal {proposal_id} not found"))
+            }
+            other => KernelError::Db(crate::db::DbError::Sqlite(other)),
+        })
+}
+
+pub fn list_pending_proposals(
+    db: &Database,
+    conversation_id: Option<&str>,
+) -> Result<Vec<KernelChangeProposalRecord>, KernelError> {
+    let mut sql = "SELECT id, conversation_id, turn_id, summary, risk, impact_summary, \
+                          exact_operations_json, exact_operations_hash, base_revisions_json, \
+                          source_type, model, provider, status, error, created_at, expires_at, \
+                          decided_at, applied_at, transaction_id \
+                   FROM kernel_change_proposals WHERE status = 'pending'".to_string();
+    if conversation_id.is_some() {
+        sql.push_str(" AND conversation_id = ? ORDER BY created_at DESC");
+    } else {
+        sql.push_str(" ORDER BY created_at DESC");
+    }
+
+    let mut stmt = db.conn().prepare(&sql).map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
+    let rows = if let Some(cid) = conversation_id {
+        stmt.query_map(rusqlite::params![cid], parse_proposal_row)
+    } else {
+        stmt.query_map([], parse_proposal_row)
+    }
+    .map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
+
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?);
+    }
+    Ok(out)
+}
+
+/// Decide (approve or reject) a frozen kernel change proposal with atomic single-use CAS semantics.
 pub fn decide_proposal(
     db: &mut Database,
     bus: Option<&mut crate::runtime_v2::EventBus>,
     proposal_id: &str,
     approve: bool,
 ) -> Result<ChangeResult, KernelError> {
-    struct Row {
-        conversation_id: Option<String>,
-        turn_id: Option<String>,
-        summary: String,
-        risk: String,
-        impact_summary: String,
-        operations_json: String,
-        operations_hash: String,
-        base_revisions_json: String,
-        status: String,
-        expires_at: Option<String>,
-    }
+    let now = chrono::Utc::now();
+    let proposal = get_proposal(db, proposal_id)?;
 
-    let row = db
-        .conn()
-        .query_row(
-            "SELECT conversation_id, turn_id, summary, risk, impact_summary, \
-                    exact_operations_json, exact_operations_hash, base_revisions_json, status, expires_at \
-             FROM kernel_change_proposals WHERE id = ?",
-            rusqlite::params![proposal_id],
-            |r| {
-                Ok(Row {
-                    conversation_id: r.get(0)?,
-                    turn_id: r.get(1)?,
-                    summary: r.get(2)?,
-                    risk: r.get(3)?,
-                    impact_summary: r.get(4)?,
-                    operations_json: r.get(5)?,
-                    operations_hash: r.get(6)?,
-                    base_revisions_json: r.get(7)?,
-                    status: r.get(8)?,
-                    expires_at: r.get(9)?,
-                })
-            },
-        )
-        .map_err(|e| KernelError::Validation(format!("Proposal {proposal_id} not found: {e}")))?;
-
-    if row.status != "pending" {
+    if proposal.status != "pending" {
         return Err(KernelError::Validation(format!(
             "Proposal {proposal_id} is already {} (cannot decide)",
-            row.status
+            proposal.status
         )));
     }
 
-    let now = chrono::Utc::now();
-    if let Some(exp_str) = &row.expires_at {
+    if let Some(exp_str) = &proposal.expires_at {
         if let Ok(exp) = chrono::DateTime::parse_from_rfc3339(exp_str) {
             if now > exp {
                 let _ = db.conn().execute(
-                    "UPDATE kernel_change_proposals SET status = 'expired' WHERE id = ? AND status = 'pending'",
+                    "UPDATE kernel_change_proposals SET status = 'expired', error = 'Proposal has expired' WHERE id = ? AND status = 'pending'",
                     rusqlite::params![proposal_id],
                 );
                 return Err(KernelError::Validation("Proposal has expired".into()));
@@ -556,15 +628,18 @@ pub fn decide_proposal(
     }
 
     if !approve {
-        let _ = db.conn().execute(
+        let updated = db.conn().execute(
             "UPDATE kernel_change_proposals SET status = 'rejected', decided_at = ? WHERE id = ? AND status = 'pending'",
             rusqlite::params![now.to_rfc3339(), proposal_id],
-        );
+        ).map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
+        if updated == 0 {
+            return Err(KernelError::Validation("Proposal was already claimed or decided concurrently".into()));
+        }
         return Ok(ChangeResult {
             apply: None,
             proposal_id: Some(proposal_id.to_string()),
-            risk: row.risk,
-            impact_summary: row.impact_summary,
+            risk: proposal.risk,
+            impact_summary: proposal.impact_summary,
             policy: PolicyDecision {
                 decision: "denied_by_user".into(),
                 message: "Proposal rejected by user".into(),
@@ -572,73 +647,169 @@ pub fn decide_proposal(
             },
             verification: None,
             operations: None,
-            summary: Some(row.summary),
+            summary: Some(proposal.summary),
             outcome: CommitOutcome::RejectedValidation,
             conflicts: vec![],
         });
     }
 
-    // Check base revisions for staleness
-    let base_revisions: HashMap<String, i64> = serde_json::from_str(&row.base_revisions_json)
-        .unwrap_or_default();
-    for (sid, expected_rev) in &base_revisions {
-        let current_rev: Option<i64> = db
-            .conn()
-            .query_row(
-                "SELECT revision FROM surfaces WHERE id = ?",
-                rusqlite::params![sid],
-                |r| r.get(0),
-            )
-            .ok();
-        if let Some(actual) = current_rev {
-            if actual != *expected_rev {
+    // Atomic BEGIN IMMEDIATE covering CAS claim, staleness verification, operations apply, and proposal status commit
+    db.conn()
+        .execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
+
+    // 1. Single-use CAS claim inside transaction
+    let updated = db.conn().execute(
+        "UPDATE kernel_change_proposals SET status = 'applying', decided_at = ? WHERE id = ? AND status = 'pending'",
+        rusqlite::params![now.to_rfc3339(), proposal_id],
+    ).map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
+
+    if updated == 0 {
+        let _ = db.conn().execute_batch("ROLLBACK");
+        return Err(KernelError::Validation("Proposal was already claimed or decided concurrently".into()));
+    }
+
+    // 2. Check base revisions against surfaces using `current_revision` column!
+    for (sid, expected_rev) in &proposal.base_revisions {
+        let current_rev_res: Result<i64, _> = db.conn().query_row(
+            "SELECT current_revision FROM surfaces WHERE id = ?",
+            rusqlite::params![sid],
+            |r| r.get(0),
+        );
+        match current_rev_res {
+            Ok(actual) if actual == *expected_rev => {
+                // Revision matches
+            }
+            Ok(actual) => {
+                let stale_msg = format!("Proposal is stale: surface {sid} revision moved from {expected_rev} to {actual}");
                 let _ = db.conn().execute(
-                    "UPDATE kernel_change_proposals SET status = 'stale', decided_at = ?, error = ? WHERE id = ?",
-                    rusqlite::params![now.to_rfc3339(), "Target surface revision changed", proposal_id],
+                    "UPDATE kernel_change_proposals SET status = 'stale', error = ? WHERE id = ?",
+                    rusqlite::params![stale_msg, proposal_id],
                 );
-                return Err(KernelError::RevisionConflict(format!(
-                    "Proposal is stale: surface {sid} revision moved from {expected_rev} to {actual}"
-                )));
+                let _ = db.conn().execute_batch("COMMIT");
+                return Err(KernelError::RevisionConflict(stale_msg));
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                let stale_msg = format!("Proposal is stale: target surface {sid} no longer exists");
+                let _ = db.conn().execute(
+                    "UPDATE kernel_change_proposals SET status = 'stale', error = ? WHERE id = ?",
+                    rusqlite::params![stale_msg, proposal_id],
+                );
+                let _ = db.conn().execute_batch("COMMIT");
+                return Err(KernelError::RevisionConflict(stale_msg));
+            }
+            Err(e) => {
+                let _ = db.conn().execute_batch("ROLLBACK");
+                return Err(KernelError::Db(crate::db::DbError::Sqlite(e)));
             }
         }
     }
 
-    // Parse and verify hash of exact frozen operations
-    let ops: Vec<AppOperation> = serde_json::from_str(&row.operations_json)
-        .map_err(|e| KernelError::Validation(format!("Corrupt operations in proposal: {e}")))?;
-
+    // 3. Verify operations hash
     let hash_payload = serde_json::json!({
-        "operations": &ops,
-        "base_revisions": &base_revisions,
-        "summary": &row.summary,
-        "conversation_id": &row.conversation_id,
+        "operations": &proposal.exact_operations,
+        "base_revisions": &proposal.base_revisions,
+        "summary": &proposal.summary,
+        "conversation_id": &proposal.conversation_id,
     });
     let expected_hash = registered_actions::canonical::hash_value(&hash_payload);
-    if expected_hash != row.operations_hash {
+    if expected_hash != proposal.exact_operations_hash {
+        let _ = db.conn().execute(
+            "UPDATE kernel_change_proposals SET status = 'failed', error = 'Proposal operations hash mismatch (tampered payload)' WHERE id = ?",
+            rusqlite::params![proposal_id],
+        );
+        let _ = db.conn().execute_batch("COMMIT");
         return Err(KernelError::Validation("Proposal operations hash mismatch (tampered payload)".into()));
     }
 
-    // Atomic CAS claim: pending -> approved (single-use!)
-    let updated = db
-        .conn()
-        .execute(
-            "UPDATE kernel_change_proposals SET status = 'approved', decided_at = ? WHERE id = ? AND status = 'pending'",
-            rusqlite::params![now.to_rfc3339(), proposal_id],
-        )
-        .map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
+    // 4. Apply frozen operations
+    let ops = proposal.exact_operations;
+    let mut deferred = Vec::new();
+    let txn_res = create_transaction(
+        db,
+        proposal.conversation_id.as_deref(),
+        None,
+        proposal.turn_id.as_deref(),
+        &proposal.summary,
+        &ops,
+        false,
+    );
+    let txn = match txn_res {
+        Ok(t) => t,
+        Err(e) => {
+            let _ = db.conn().execute_batch("ROLLBACK");
+            let _ = db.conn().execute(
+                "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
+                rusqlite::params![e.to_string(), proposal_id],
+            );
+            return Err(KernelError::Db(e));
+        }
+    };
 
-    if updated == 0 {
-        return Err(KernelError::Validation("Proposal was already claimed or decided concurrently".into()));
+    if let Err(e) = data::apply_kernel_operations(db, &ops) {
+        let _ = db.conn().execute_batch("ROLLBACK");
+        let _ = db.conn().execute(
+            "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
+            rusqlite::params![e.to_string(), proposal_id],
+        );
+        return Err(KernelError::Db(e));
     }
 
-    // Apply exact frozen operations
+    if let Err(e) = manifest::apply_manifest_operations(db, &ops) {
+        let _ = db.conn().execute_batch("ROLLBACK");
+        let _ = db.conn().execute(
+            "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
+            rusqlite::params![e.to_string(), proposal_id],
+        );
+        return Err(KernelError::Db(e));
+    }
+
+    let apply_res = apply_transaction_deferred(db, &txn.id, &mut deferred);
+    let apply = match apply_res {
+        Ok(a) => a,
+        Err(e) => {
+            let _ = db.conn().execute_batch("ROLLBACK");
+            let _ = db.conn().execute(
+                "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
+                rusqlite::params![e.to_string(), proposal_id],
+            );
+            return Err(KernelError::Db(e));
+        }
+    };
+
+    if apply.transaction.status != "applied" || !apply.conflicts.is_empty() {
+        let err_msg = format!("Application conflicts: {:?}", apply.conflicts);
+        let _ = db.conn().execute_batch("ROLLBACK");
+        let _ = db.conn().execute(
+            "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
+            rusqlite::params![err_msg, proposal_id],
+        );
+        return Ok(ChangeResult {
+            apply: None,
+            proposal_id: Some(proposal_id.to_string()),
+            risk: proposal.risk,
+            impact_summary: proposal.impact_summary,
+            policy: PolicyDecision {
+                decision: "conflicted".into(),
+                message: "Conflicts during proposal application".into(),
+                action: "apply_operations".into(),
+            },
+            verification: None,
+            operations: None,
+            summary: Some(proposal.summary),
+            outcome: CommitOutcome::Conflicted,
+            conflicts: apply.conflicts,
+        });
+    }
+
+    // Record provenance and outbox
     let change_req = ChangeRequest {
-        proposal_id: None,
-        conversation_id: row.conversation_id,
+        proposal_id: Some(proposal_id.to_string()),
+        conversation_id: proposal.conversation_id.clone(),
         project_id: None,
-        turn_id: row.turn_id,
-        summary: row.summary,
-        operations: ops,
+        turn_id: proposal.turn_id.clone(),
+        summary: proposal.summary.clone(),
+        operations: ops.clone(),
         silent: false,
         source_type: "user".into(),
         provider: None,
@@ -646,25 +817,64 @@ pub fn decide_proposal(
         require_approval: false,
         approval_granted: true,
     };
+    let _ = record_provenance(db, &txn.id, &change_req, "applied", Some("passed"), None);
 
-    let result = apply_change(db, bus, change_req);
-    match result {
-        Ok(change_result) => {
-            let txn_id = change_result.apply.as_ref().map(|a| a.transaction.id.as_str());
-            let _ = db.conn().execute(
-                "UPDATE kernel_change_proposals SET status = 'applied', applied_at = ?, transaction_id = ? WHERE id = ?",
-                rusqlite::params![chrono::Utc::now().to_rfc3339(), txn_id, proposal_id],
-            );
-            Ok(change_result)
-        }
-        Err(e) => {
+    let verification = testing::verify_after_change(db, &ops).ok();
+
+    for (i, effect) in deferred.iter().enumerate() {
+        if let Err(e) = enqueue_outbox(
+            db,
+            Some(&txn.id),
+            proposal.conversation_id.as_deref(),
+            proposal.turn_id.as_deref(),
+            None,
+            i as i64,
+            effect,
+        ) {
+            let _ = db.conn().execute_batch("ROLLBACK");
             let _ = db.conn().execute(
                 "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
-                rusqlite::params![e.user_message(), proposal_id],
+                rusqlite::params![e.to_string(), proposal_id],
             );
-            Err(e)
+            return Err(KernelError::Db(e));
         }
     }
+
+    // 5. Atomic proposal status update to 'applied' with transaction_id and applied_at
+    if let Err(e) = db.conn().execute(
+        "UPDATE kernel_change_proposals SET status = 'applied', applied_at = ?, transaction_id = ? WHERE id = ?",
+        rusqlite::params![chrono::Utc::now().to_rfc3339(), txn.id, proposal_id],
+    ) {
+        let _ = db.conn().execute_batch("ROLLBACK");
+        return Err(KernelError::Db(crate::db::DbError::Sqlite(e)));
+    }
+
+    // 6. Single COMMIT for all changes!
+    db.conn()
+        .execute_batch("COMMIT")
+        .map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
+
+    // 7. Flush outbox after commit
+    if let Some(bus) = bus {
+        let _ = flush_pending_outbox(db, Some(bus));
+    }
+
+    Ok(ChangeResult {
+        apply: Some(apply),
+        proposal_id: Some(proposal_id.to_string()),
+        risk: proposal.risk,
+        impact_summary: proposal.impact_summary,
+        policy: PolicyDecision {
+            decision: "approved".into(),
+            message: "Proposal approved and applied".into(),
+            action: "apply_operations".into(),
+        },
+        verification,
+        operations: None,
+        summary: Some(proposal.summary),
+        outcome: CommitOutcome::Committed,
+        conflicts: vec![],
+    })
 }
 
 /// Compact capability introspection for the agent (bounded).
@@ -910,7 +1120,10 @@ mod tests {
             "id": "d",
             "name": "Inline",
             "layout": "stack",
-            "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+            "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}],
+            "stateContracts": [
+                { "key": "x" }
+            ]
         });
         let surface =
             create_inline_surface(&mut db, &conv.id, None, None, "Inline", &def, &[]).unwrap();
@@ -948,16 +1161,13 @@ mod tests {
     #[test]
     fn failed_batch_does_not_persist_subscription_or_bus_effects() {
         use crate::runtime_v2::EventBus;
+
         let mut db = test_db();
         let mut bus = EventBus::new();
-        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Bus", None).unwrap();
-        let def = json!({
-            "id": "d",
-            "name": "Inline",
-            "layout": "stack",
-            "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
-        });
-        let surface = create_inline_surface(&mut db, &conv.id, None, None, "S", &def, &[]).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "bus-fail", None).unwrap();
+        let def = json!({ "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}] });
+        let surface =
+            create_inline_surface(&mut db, &conv.id, None, None, "Inline", &def, &[]).unwrap();
 
         let mut sub = op("subscription.create");
         sub.target.surface_id = Some(surface.id.clone());
@@ -1012,5 +1222,165 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pending_outbox, 0);
+    }
+
+    #[test]
+    fn proposal_revision_staleness_protection() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "stale-test", None).unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Target Surface",
+            &json!({ "components": [] }),
+            &["coreside.core".into()],
+        )
+        .unwrap();
+
+        assert_eq!(surface.current_revision, 1);
+
+        // Create a strong operation targeting this surface that requires approval
+        let mut delete_op = op("surface.delete");
+        delete_op.target.surface_id = Some(surface.id.clone());
+        delete_op.requires_approval = Some(true);
+
+        let change_res = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                turn_id: Some("turn-stale-1".into()),
+                summary: "delete proposal".into(),
+                operations: vec![delete_op],
+                require_approval: true,
+                approval_granted: false,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let proposal_id = change_res.proposal_id.expect("expected proposal for strong change");
+        let proposal = get_proposal(&db, &proposal_id).unwrap();
+        assert_eq!(proposal.status, "pending");
+
+        // Now mutate surface definition, which increments its revision to 2
+        let updated = crate::runtime_v2::surfaces::update_surface_definition(
+            &mut db,
+            &surface.id,
+            &json!({ "components": [] }),
+            "bump revision",
+            Some(1),
+        )
+        .unwrap();
+        assert_eq!(updated.current_revision, 2);
+
+        // Attempting to decide/approve the proposal must fail due to revision conflict!
+        let err = decide_proposal(&mut db, None, &proposal_id, true).unwrap_err();
+        assert!(matches!(err, KernelError::RevisionConflict(_)));
+
+        // Proposal status must authoritatively become stale
+        let stale_proposal = get_proposal(&db, &proposal_id).unwrap();
+        assert_eq!(stale_proposal.status, "stale");
+
+        // Surface must NOT have been deleted
+        let surf = get_surface(&db, &surface.id).unwrap();
+        assert_eq!(surf.id, surface.id);
+    }
+
+    #[test]
+    fn proposal_single_use_cas_and_tamper_protection() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "cas-test", None).unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "CAS Surface",
+            &json!({ "components": [] }),
+            &["coreside.core".into()],
+        )
+        .unwrap();
+
+        // Create an operation requiring approval
+        let mut add_op = op("component.insert");
+        add_op.target.surface_id = Some(surface.id.clone());
+        add_op.payload = json!({
+            "component": { "id": "c_cas", "type": "text", "props": { "text": "CAS approved" } }
+        });
+        add_op.requires_approval = Some(true);
+
+        let change_res = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                turn_id: Some("turn-cas-1".into()),
+                summary: "insert component".into(),
+                operations: vec![add_op],
+                require_approval: true,
+                approval_granted: false,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let proposal_id = change_res.proposal_id.expect("proposal expected");
+
+        // Tamper test: modify exact_operations_json directly in the database
+        db.conn()
+            .execute(
+                "UPDATE kernel_change_proposals SET exact_operations_json = '[]' WHERE id = ?1",
+                [&proposal_id],
+            )
+            .unwrap();
+
+        let tamper_err = decide_proposal(&mut db, None, &proposal_id, true).unwrap_err();
+        assert!(
+            matches!(tamper_err, KernelError::Validation(ref msg) if msg.contains("hash mismatch")),
+            "Expected hash mismatch on tampered operations, got: {:?}",
+            tamper_err
+        );
+
+        // Now create a valid proposal and test single-use CAS
+        let mut valid_op = op("component.insert");
+        valid_op.target.surface_id = Some(surface.id.clone());
+        valid_op.payload = json!({
+            "component": { "id": "c_valid", "type": "text", "props": { "text": "Valid insert" } }
+        });
+        valid_op.requires_approval = Some(true);
+
+        let valid_change = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                turn_id: Some("turn-cas-2".into()),
+                summary: "valid insert".into(),
+                operations: vec![valid_op],
+                require_approval: true,
+                approval_granted: false,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let valid_proposal_id = valid_change.proposal_id.expect("proposal expected");
+
+        // First approval succeeds
+        let applied_res = decide_proposal(&mut db, None, &valid_proposal_id, true).unwrap();
+        assert!(applied_res.is_committed());
+
+        let prop = get_proposal(&db, &valid_proposal_id).unwrap();
+        assert_eq!(prop.status, "applied");
+
+        // Second approval must fail closed via CAS
+        let second_err = decide_proposal(&mut db, None, &valid_proposal_id, true).unwrap_err();
+        assert!(matches!(second_err, KernelError::Validation(_)));
     }
 }

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-15T02:33:59.758Z",
-  "commit": "b491c6ab77ad9edd11f5e2aa4435f43d81449e8d",
+  "generatedAt": "2026-09-19T20:26:36.460Z",
+  "commit": "d1918e188d9675034b789cf0ba3510ffc20c1723",
   "dirty": true,
   "command": "assurance:report",
   "exitStatus": "failed",
@@ -20,7 +20,13 @@
       "file": "command-authority-results.json",
       "status": "stale_commit",
       "reportCommit": "2b502278ede0d0db57fe16f77ef1e282a92fd0d1",
-      "activeCommit": "b491c6ab77ad9edd11f5e2aa4435f43d81449e8d"
+      "activeCommit": "d1918e188d9675034b789cf0ba3510ffc20c1723"
+    },
+    {
+      "severity": "P1",
+      "file": "evidence-manifest.json",
+      "status": "integrity_failed",
+      "detail": "findings=1"
     }
   ],
   "localFirstVerdict": "Not ready",

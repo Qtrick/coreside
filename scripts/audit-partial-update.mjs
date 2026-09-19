@@ -49,7 +49,11 @@ function nowIso() {
 }
 
 function sha256File(filePath) {
-  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+  try {
+    return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+  } catch {
+    return null;
+  }
 }
 
 function run(cmd, args, opts = {}) {
@@ -1238,8 +1242,8 @@ function main() {
   const dirty = git(["status", "--porcelain"]).length > 0;
   const sourceFingerprint = loadSourceFingerprint();
 
-  const archivePresent = fs.existsSync(PARTIAL_UPDATE_ARCHIVE);
-  const observedSha = archivePresent ? sha256File(PARTIAL_UPDATE_ARCHIVE) : null;
+  const observedSha = sha256File(PARTIAL_UPDATE_ARCHIVE);
+  const archivePresent = observedSha !== null;
   const archiveStatus = !archivePresent
     ? "archive_unavailable"
     : observedSha === EXPECTED_PARTIAL_UPDATE_SHA256

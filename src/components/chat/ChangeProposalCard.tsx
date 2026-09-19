@@ -1,19 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAppStore } from "@/stores/app-store";
+import { api } from "@/lib/tauri";
 
 /**
  * Risk-based change proposal card in the chat stream.
- * Technical JSON is not shown unless Developer Mode is used later.
+ * Loads authoritative proposal from the database row.
  */
 export function ChangeProposalCard({
   proposalId,
-  summary,
-  impactSummary,
-  risk,
-  operations,
+  summary: initialSummary,
+  impactSummary: initialImpactSummary,
+  risk: initialRisk,
+  operations: initialOperations,
   messageId,
   conversationId,
-  status,
+  status: initialStatus,
 }: {
   proposalId: string;
   summary: string;
@@ -28,8 +29,47 @@ export function ChangeProposalCard({
   const discardPending = useAppStore((s) => s.discardPendingKernelProposal);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [proposalData, setProposalData] = useState<{
+    summary: string;
+    impactSummary: string;
+    risk: string;
+    status: string;
+    operations: unknown[];
+    error?: string | null;
+  } | null>(null);
 
-  if (status === "applied" || status === "discarded") {
+  useEffect(() => {
+    let active = true;
+    if (!proposalId) return;
+    api
+      .kernelGetProposal(proposalId)
+      .then((rec) => {
+        if (!active) return;
+        setProposalData({
+          summary: (rec.summary as string) || initialSummary,
+          impactSummary: (rec.impactSummary as string) || initialImpactSummary,
+          risk: (rec.risk as string) || initialRisk,
+          status: (rec.status as string) || initialStatus || "pending",
+          operations: (rec.exactOperations as unknown[]) || initialOperations,
+          error: (rec.error as string) || null,
+        });
+      })
+      .catch(() => {
+        // Fallback to props
+      });
+    return () => {
+      active = false;
+    };
+  }, [proposalId, initialSummary, initialImpactSummary, initialRisk, initialStatus, initialOperations]);
+
+  const currentStatus = proposalData?.status ?? initialStatus ?? "pending";
+  const summary = proposalData?.summary ?? initialSummary;
+  const impactSummary = proposalData?.impactSummary ?? initialImpactSummary;
+  const risk = proposalData?.risk ?? initialRisk;
+  const operations = proposalData?.operations ?? initialOperations;
+  const proposalError = proposalData?.error ?? error;
+
+  if (currentStatus === "applied" || currentStatus === "discarded" || currentStatus === "rejected") {
     return (
       <aside
         className="change-proposal"
@@ -37,8 +77,32 @@ export function ChangeProposalCard({
         style={{ margin: "0.75rem 0" }}
       >
         <p className="muted" style={{ margin: 0 }}>
-          Change {status}
+          Change {currentStatus}
           {proposalId ? ` · ${proposalId.slice(0, 12)}…` : ""}
+        </p>
+      </aside>
+    );
+  }
+
+  if (currentStatus === "stale" || currentStatus === "expired" || currentStatus === "failed") {
+    return (
+      <aside
+        className="change-proposal"
+        aria-label="Proposed change unresolved"
+        style={{
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          padding: "0.85rem 1rem",
+          margin: "0.75rem 0",
+          background: "var(--core-muted-overlay, var(--surface-muted, var(--surface)))",
+        }}
+      >
+        <p style={{ margin: 0 }}>
+          <strong>Proposal {currentStatus}</strong>{" "}
+          <span className="muted">({proposalId.slice(0, 12)}…)</span>
+        </p>
+        <p className="muted" style={{ margin: "0.35rem 0 0" }}>
+          {proposalError || `This proposal can no longer be applied (${currentStatus}).`}
         </p>
       </aside>
     );

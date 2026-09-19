@@ -207,11 +207,22 @@ impl SoftwareDocument {
         } else {
             let tool: ToolDefinition = serde_json::from_value(val.clone())
                 .map_err(|e| format!("failed to parse ToolDefinition: {e}"))?;
-            Ok(Self::from_tool_definition(&tool))
+            let mut doc = Self::from_tool_definition(&tool);
+            if let Some(sc) = val.get("stateContracts").or_else(|| val.get("state_contracts")) {
+                if let Ok(contracts) = serde_json::from_value::<Vec<StateContract>>(sc.clone()) {
+                    doc.state_contracts = contracts;
+                }
+            }
+            if let Some(ac) = val.get("actionContracts").or_else(|| val.get("action_contracts")) {
+                if let Ok(contracts) = serde_json::from_value::<Vec<ActionContract>>(ac.clone()) {
+                    doc.action_contracts = contracts;
+                }
+            }
+            Ok(doc)
         }
     }
 
-    /// Convert a flat ToolDefinition into a structured SoftwareDocument.
+    /// Convert a flat or structured ToolDefinition into a structured SoftwareDocument.
     pub fn from_tool_definition(tool: &ToolDefinition) -> Self {
         let mut doc = Self::new(&tool.id, &tool.name);
         doc.layout = Some(tool.layout.clone());
@@ -220,6 +231,125 @@ impl SoftwareDocument {
         } else {
             Some(tool.description.clone())
         };
+
+        // Check if components contain synthetic section containers
+        let has_synthetic_sections = tool.components.iter().any(|c| {
+            c.component_type == "container"
+                && (c.id.starts_with("section-")
+                    || c.props
+                        .as_ref()
+                        .and_then(|p| p.get("syntheticSection"))
+                        .and_then(|v| v.as_bool())
+                        == Some(true))
+        });
+
+        if has_synthetic_sections {
+            fn unpack_container(comp: &ToolComponent, doc: &mut SoftwareDocument) {
+                let props = comp.props.as_ref();
+                let sec_id = props
+                    .and_then(|p| p.get("section"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| {
+                        comp.id
+                            .strip_prefix("section-")
+                            .unwrap_or(&comp.id)
+                            .to_string()
+                    });
+                let title = props
+                    .and_then(|p| p.get("title"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let role = props
+                    .and_then(|p| p.get("sectionRole"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| comp.layout_role.clone());
+                let layout = props
+                    .and_then(|p| p.get("sectionLayout"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let parent_region_id = props
+                    .and_then(|p| p.get("parentRegionId"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let slot = props
+                    .and_then(|p| p.get("slot"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let mut leaf_components = Vec::new();
+                let mut child_containers = Vec::new();
+                if let Some(ref children) = comp.children {
+                    for child in children {
+                        let is_child_sec = child.component_type == "container"
+                            && (child.id.starts_with("section-")
+                                || child
+                                    .props
+                                    .as_ref()
+                                    .and_then(|p| p.get("syntheticSection"))
+                                    .and_then(|v| v.as_bool())
+                                    == Some(true));
+                        if is_child_sec {
+                            child_containers.push(child);
+                        } else {
+                            leaf_components.push(child.clone());
+                        }
+                    }
+                }
+
+                doc.sections.push(DocumentSection {
+                    id: sec_id,
+                    title,
+                    role,
+                    layout,
+                    parent_region_id,
+                    slot,
+                    responsive: None,
+                    instance_id: None,
+                    components: leaf_components,
+                    metadata: None,
+                });
+
+                for child_sec in child_containers {
+                    unpack_container(child_sec, doc);
+                }
+            }
+
+            for comp in &tool.components {
+                let is_sec = comp.component_type == "container"
+                    && (comp.id.starts_with("section-")
+                        || comp
+                            .props
+                            .as_ref()
+                            .and_then(|p| p.get("syntheticSection"))
+                            .and_then(|v| v.as_bool())
+                            == Some(true));
+                if is_sec {
+                    unpack_container(comp, &mut doc);
+                } else {
+                    // Collect loose components into a main section
+                    if let Some(main_sec) = doc.sections.iter_mut().find(|s| s.id == "main") {
+                        main_sec.components.push(comp.clone());
+                    } else {
+                        doc.sections.push(DocumentSection {
+                            id: "main".into(),
+                            title: None,
+                            role: Some("content".into()),
+                            layout: Some("stack".into()),
+                            parent_region_id: None,
+                            slot: None,
+                            responsive: None,
+                            instance_id: None,
+                            components: vec![comp.clone()],
+                            metadata: None,
+                        });
+                    }
+                }
+            }
+
+            return doc;
+        }
 
         // Group components by section if explicit in props, or organize into main
         let mut section_map: HashMap<String, Vec<ToolComponent>> = HashMap::new();
@@ -265,13 +395,55 @@ impl SoftwareDocument {
 
     /// Render/flatten SoftwareDocument into a ToolDefinition for runtime presentation.
     pub fn to_tool_definition(&self) -> ToolDefinition {
-        let mut all_components = Vec::new();
+        // Derive layout from self.layout or design_tokens.layout, falling back to single-column
+        let layout = self
+            .layout
+            .clone()
+            .or_else(|| {
+                self.design_tokens
+                    .as_ref()
+                    .and_then(|dt| dt.get("layout"))
+                    .cloned()
+            })
+            .unwrap_or_else(|| json!({ "type": "single-column" }));
 
+        // Check if there is multi-section or structured hierarchy
+        let has_rich_structure = self.sections.len() > 1
+            || self.sections.iter().any(|s| {
+                s.parent_region_id.is_some() || s.role.is_some() || s.layout.is_some()
+            });
+
+        if !has_rich_structure {
+            let mut all_components = Vec::new();
+            for section in &self.sections {
+                for comp in &section.components {
+                    let mut c = comp.clone();
+                    // Ensure section tagging and hierarchy metadata is recorded in component props
+                    let mut props = c.props.unwrap_or_else(|| json!({}));
+                    if let Value::Object(ref mut map) = props {
+                        if !map.contains_key("section") {
+                            map.insert("section".into(), json!(section.id));
+                        }
+                    }
+                    c.props = Some(props);
+                    all_components.push(c);
+                }
+            }
+            return ToolDefinition {
+                id: self.id.clone(),
+                name: self.title.clone(),
+                description: self.description.clone().unwrap_or_default(),
+                layout,
+                components: all_components,
+            };
+        }
+
+        // Build hierarchical container projection
+        let mut containers: HashMap<String, ToolComponent> = HashMap::new();
         for section in &self.sections {
-            for comp in &section.components {
-                let mut c = comp.clone();
-                // Ensure section tagging and hierarchy metadata is recorded in component props
-                let mut props = c.props.unwrap_or_else(|| json!({}));
+            let mut section_components = section.components.clone();
+            for comp in &mut section_components {
+                let mut props = comp.props.take().unwrap_or_else(|| json!({}));
                 if let Value::Object(ref mut map) = props {
                     if !map.contains_key("section") {
                         map.insert("section".into(), json!(section.id));
@@ -286,40 +458,77 @@ impl SoftwareDocument {
                             map.insert("sectionLayout".into(), json!(sec_layout));
                         }
                     }
-                    if let Some(ref parent_reg) = section.parent_region_id {
-                        if !map.contains_key("parentRegionId") {
-                            map.insert("parentRegionId".into(), json!(parent_reg));
-                        }
-                    }
-                    if let Some(ref slot) = section.slot {
-                        if !map.contains_key("slot") {
-                            map.insert("slot".into(), json!(slot));
-                        }
-                    }
                 }
-                c.props = Some(props);
-                all_components.push(c);
+                comp.props = Some(props);
+            }
+
+            let container_id = format!("section-{}", section.id);
+            let sec_props = json!({
+                "section": section.id,
+                "title": section.title,
+                "sectionRole": section.role,
+                "sectionLayout": section.layout,
+                "parentRegionId": section.parent_region_id,
+                "slot": section.slot,
+                "syntheticSection": true,
+            });
+
+            containers.insert(
+                section.id.clone(),
+                ToolComponent {
+                    id: container_id,
+                    component_type: "container".into(),
+                    value_key: None,
+                    props: Some(sec_props),
+                    children: Some(section_components),
+                    actions: None,
+                    layout_role: section.role.clone(),
+                    col_span: None,
+                    row_span: None,
+                },
+            );
+        }
+
+        let mut child_ids = HashSet::new();
+        for section in &self.sections {
+            if let Some(ref pid) = section.parent_region_id {
+                if containers.contains_key(pid) {
+                    child_ids.insert(section.id.clone());
+                }
             }
         }
 
-        // Derive layout from self.layout or design_tokens.layout, falling back to single-column
-        let layout = self
-            .layout
-            .clone()
-            .or_else(|| {
-                self.design_tokens
-                    .as_ref()
-                    .and_then(|dt| dt.get("layout"))
-                    .cloned()
-            })
-            .unwrap_or_else(|| json!({ "type": "single-column" }));
+        for section in &self.sections {
+            if let Some(ref pid) = section.parent_region_id {
+                if let Some(child_comp) = containers.remove(&section.id) {
+                    if let Some(parent_comp) = containers.get_mut(pid) {
+                        if let Some(ref mut children) = parent_comp.children {
+                            children.push(child_comp);
+                        } else {
+                            parent_comp.children = Some(vec![child_comp]);
+                        }
+                    } else {
+                        containers.insert(section.id.clone(), child_comp);
+                    }
+                }
+            }
+        }
+
+        let mut root_components = Vec::new();
+        for section in &self.sections {
+            if !child_ids.contains(&section.id) {
+                if let Some(comp) = containers.remove(&section.id) {
+                    root_components.push(comp);
+                }
+            }
+        }
 
         ToolDefinition {
             id: self.id.clone(),
             name: self.title.clone(),
             description: self.description.clone().unwrap_or_default(),
             layout,
-            components: all_components,
+            components: root_components,
         }
     }
 
@@ -1370,13 +1579,132 @@ pub fn admit_software_document(
         }
     }
 
+    // 5. Component state and action binding verification
+    for sec in &candidate.sections {
+        for comp in &sec.components {
+            validate_component_bindings(comp, &candidate.state_contracts, &candidate.action_contracts)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_component_bindings(
+    comp: &ToolComponent,
+    contracts: &[StateContract],
+    action_contracts: &[ActionContract],
+) -> Result<(), String> {
+    // 1. Validate value_key binding
+    if let Some(ref vk) = comp.value_key {
+        if !vk.is_empty() {
+            let sc = contracts.iter().find(|s| &s.key == vk).ok_or_else(|| {
+                format!(
+                    "component '{}' binds to undeclared state contract key '{vk}'",
+                    comp.id
+                )
+            })?;
+            if sc.read_policy == "restricted" || sc.sensitivity.as_deref() == Some("sensitive") {
+                return Err(format!(
+                    "component '{}' binds to restricted/sensitive state key '{vk}'",
+                    comp.id
+                ));
+            }
+        }
+    }
+
+    // 2. Validate props binding keys (valueKey, rowsKey, dataKey, selectionKey)
+    if let Some(Value::Object(ref map)) = comp.props {
+        for binding_prop in &["valueKey", "rowsKey", "dataKey", "selectionKey"] {
+            if let Some(Value::String(ref vk)) = map.get(*binding_prop) {
+                if !vk.is_empty() {
+                    let sc = contracts.iter().find(|s| &s.key == vk).ok_or_else(|| {
+                        format!(
+                            "component '{}' prop '{binding_prop}' binds to undeclared state contract key '{vk}'",
+                            comp.id
+                        )
+                    })?;
+                    if sc.read_policy == "restricted" || sc.sensitivity.as_deref() == Some("sensitive") {
+                        return Err(format!(
+                            "component '{}' prop '{binding_prop}' binds to restricted/sensitive state key '{vk}'",
+                            comp.id
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Validate actions
+    if let Some(ref actions) = comp.actions {
+        for action in actions {
+            match action {
+                crate::ai::ActionDefinition::InvokeRegisteredAction {
+                    action_name,
+                    result_key,
+                    input_from_state,
+                    ..
+                } => {
+                    let _ac = action_contracts
+                        .iter()
+                        .find(|a| &a.action_id == action_name)
+                        .ok_or_else(|| {
+                            format!(
+                                "component '{}' invokes action '{action_name}' without trusted ActionContract",
+                                comp.id
+                            )
+                        })?;
+                    if let Some(ref rk) = result_key {
+                        let sc = contracts.iter().find(|s| &s.key == rk).ok_or_else(|| {
+                            format!(
+                                "component '{}' action '{action_name}' resultKey '{rk}' references undeclared state contract",
+                                comp.id
+                            )
+                        })?;
+                        if sc.write_policy == "readonly" {
+                            return Err(format!(
+                                "component '{}' action '{action_name}' resultKey '{rk}' references readonly state contract",
+                                comp.id
+                            ));
+                        }
+                    }
+                    if let Some(ref inputs) = input_from_state {
+                        for (_param, skey) in inputs {
+                            let sc = contracts.iter().find(|s| &s.key == skey).ok_or_else(|| {
+                                format!(
+                                    "component '{}' action '{action_name}' inputFromState references undeclared state contract '{skey}'",
+                                    comp.id
+                                )
+                            })?;
+                            if sc.read_policy == "restricted"
+                                || sc.sensitivity.as_deref() == Some("sensitive")
+                            {
+                                return Err(format!(
+                                    "component '{}' action '{action_name}' binds restricted/sensitive state key '{skey}' to input",
+                                    comp.id
+                                ));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // 4. Validate nested children
+    if let Some(ref children) = comp.children {
+        for child in children {
+            validate_component_bindings(child, contracts, action_contracts)?;
+        }
+    }
+
     Ok(())
 }
 
 fn repair_component(
     comp: &mut ToolComponent,
     seen_ids: &mut HashSet<String>,
-    declared_state: &mut HashSet<String>,
+    _declared_state: &mut HashSet<String>,
     contracts: &mut Vec<StateContract>,
     notes: &mut Vec<RepairNote>,
 ) {
@@ -1420,9 +1748,31 @@ fn repair_component(
             }
             true
         });
+
+        // Strip unauthorized state binding props (valueKey, rowsKey, dataKey, selectionKey)
+        for binding_prop in &["valueKey", "rowsKey", "dataKey", "selectionKey"] {
+            if let Some(Value::String(ref vkey)) = map.get(*binding_prop).cloned() {
+                if !vkey.is_empty() {
+                    let is_unauthorized = if let Some(existing_contract) = contracts.iter().find(|sc| &sc.key == vkey) {
+                        existing_contract.read_policy == "restricted"
+                            || existing_contract.sensitivity.as_deref() == Some("sensitive")
+                    } else {
+                        true
+                    };
+                    if is_unauthorized {
+                        map.remove(*binding_prop);
+                        notes.push(RepairNote {
+                            kind: "stripped_unauthorized_state_binding".into(),
+                            target_id: comp.id.clone(),
+                            detail: format!("Stripped unauthorized state binding prop '{binding_prop}' for key '{vkey}'"),
+                        });
+                    }
+                }
+            }
+        }
     }
 
-    // Validate or register state contracts for bound value keys
+    // Validate or strip state bindings for bound value keys
     let vkey_opt = comp.value_key.clone();
     if let Some(vkey) = vkey_opt.as_deref() {
         if !vkey.is_empty() {
@@ -1438,16 +1788,12 @@ fn repair_component(
                         detail: format!("Stripped unauthorized access to restricted state key '{vkey}'"),
                     });
                 }
-            } else if declared_state.insert(vkey.to_string()) {
-                contracts.push(StateContract::new(
-                    vkey,
-                    Value::Null,
-                    StateScope::Persistent,
-                ));
+            } else {
+                comp.value_key = None;
                 notes.push(RepairNote {
-                    kind: "added_missing_state_contract".into(),
+                    kind: "stripped_unauthorized_state_binding".into(),
                     target_id: comp.id.clone(),
-                    detail: format!("Created implicit state contract for valueKey '{vkey}'"),
+                    detail: format!("Stripped state binding for undeclared state key '{vkey}'"),
                 });
             }
         }
@@ -1456,7 +1802,7 @@ fn repair_component(
     // Recursively repair children
     if let Some(ref mut children) = comp.children {
         for child in children {
-            repair_component(child, seen_ids, declared_state, contracts, notes);
+            repair_component(child, seen_ids, _declared_state, contracts, notes);
         }
     }
 }
@@ -1488,19 +1834,107 @@ mod tests {
         assert!(doc.add_section(section, None).is_ok());
         assert_eq!(doc.sections.len(), 1);
 
-        // Self-repair adds missing state contract
+        // Self-repair strips undeclared state binding without inventing authority
         let notes = doc.validate_and_repair();
         assert!(!notes.is_empty());
-        assert!(doc
-            .state_contracts
-            .iter()
-            .any(|sc| sc.key == "selectedPaper"));
+        assert!(notes.iter().any(|n| n.kind == "stripped_unauthorized_state_binding"));
+        assert_eq!(doc.sections[0].components[0].value_key, None);
+
+        // When a trusted state contract is explicitly declared:
+        doc.state_contracts.push(StateContract::new(
+            "selectedPaper",
+            Value::Null,
+            StateScope::Persistent,
+        ));
+        doc.sections[0].components[0].value_key = Some("selectedPaper".into());
+        let notes2 = doc.validate_and_repair();
+        assert!(notes2.is_empty() || !notes2.iter().any(|n| n.kind == "stripped_unauthorized_state_binding"));
+        assert_eq!(doc.sections[0].components[0].value_key, Some("selectedPaper".into()));
+
+        // Admission succeeds with trusted contract
+        assert!(admit_software_document(None, &doc, &[]).is_ok());
 
         // Render to tool definition
         let tool = doc.to_tool_definition();
         assert_eq!(tool.id, "doc-research");
-        assert_eq!(tool.components.len(), 1);
-        assert_eq!(tool.components[0].id, "paper-list");
+        assert!(!tool.components.is_empty());
+    }
+
+    #[test]
+    fn test_admit_rejects_undeclared_or_restricted_state() {
+        let mut doc = SoftwareDocument::new("doc-sec", "Security Test");
+        let section = DocumentSection {
+            id: "main".into(),
+            components: vec![ToolComponent {
+                id: "input-1".into(),
+                component_type: "textInput".into(),
+                value_key: Some("secretKey".into()),
+                props: Some(json!({ "label": "Secret" })),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        doc.sections.push(section);
+
+        // Undeclared state binding -> rejected by admission
+        let packs = vec!["coreside.core".to_string()];
+        let err = admit_software_document(None, &doc, &packs).unwrap_err();
+        assert!(err.contains("undeclared state contract key 'secretKey'"), "Actual err was: {err}");
+
+        // Declare contract as restricted/sensitive -> rejected by admission
+        let mut restricted_contract = StateContract::new("secretKey", Value::Null, StateScope::Persistent);
+        restricted_contract.read_policy = "restricted".into();
+        doc.state_contracts.push(restricted_contract);
+
+        let err2 = admit_software_document(None, &doc, &packs).unwrap_err();
+        assert!(err2.contains("restricted/sensitive state key 'secretKey'"));
+    }
+
+    #[test]
+    fn test_section_hierarchy_round_trip_preservation() {
+        let mut doc = SoftwareDocument::new("doc-hierarchy", "Hierarchy Test");
+        doc.sections.push(DocumentSection {
+            id: "header".into(),
+            title: Some("Header Section".into()),
+            role: Some("navigation".into()),
+            layout: Some("stack".into()),
+            parent_region_id: None,
+            slot: None,
+            responsive: None,
+            instance_id: None,
+            components: vec![ToolComponent {
+                id: "nav-title".into(),
+                component_type: "heading".into(),
+                ..Default::default()
+            }],
+            metadata: None,
+        });
+        doc.sections.push(DocumentSection {
+            id: "sub-sidebar".into(),
+            title: Some("Sub Sidebar".into()),
+            role: Some("sidebar".into()),
+            layout: Some("stack".into()),
+            parent_region_id: Some("header".into()),
+            slot: Some("left".into()),
+            responsive: None,
+            instance_id: None,
+            components: vec![ToolComponent {
+                id: "nav-link".into(),
+                component_type: "button".into(),
+                ..Default::default()
+            }],
+            metadata: None,
+        });
+
+        let tool = doc.to_tool_definition();
+        // Check that synthetic section containers preserved the hierarchy
+        let round_trip = SoftwareDocument::from_tool_definition(&tool);
+        assert_eq!(round_trip.sections.len(), 2);
+        assert_eq!(round_trip.sections[0].id, "header");
+        assert_eq!(round_trip.sections[0].role.as_deref(), Some("navigation"));
+        assert_eq!(round_trip.sections[1].id, "sub-sidebar");
+        assert_eq!(round_trip.sections[1].parent_region_id.as_deref(), Some("header"));
+        assert_eq!(round_trip.sections[1].components[0].id, "nav-link");
     }
 
     #[test]

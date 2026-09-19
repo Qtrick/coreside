@@ -2561,20 +2561,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const pending = get().pendingKernelProposal;
     if (!pending) return;
     try {
-      const result = await api.kernelApplyChange({
-        proposalId: pending.proposalId,
-        summary: pending.summary,
-        operations: pending.operations,
-        silent: false,
-        sourceType: "user",
-        requireApproval: false,
-        approvalGranted: true,
-        conversationId: pending.conversationId,
-        projectId: null,
-        turnId: null,
-        provider: null,
-        model: null,
-      });
+      const result = await api.kernelDecideProposal(pending.proposalId, true);
       const apply = result.apply as { conflicts?: string[] } | undefined;
       if (apply?.conflicts && apply.conflicts.length > 0) {
         if (
@@ -2634,6 +2621,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
   discardPendingKernelProposal: async () => {
     const pending = get().pendingKernelProposal;
     if (!pending) return;
+    try {
+      await api.kernelDecideProposal(pending.proposalId, false);
+    } catch {
+      // best-effort proposal rejection
+    }
     try {
       await api.setKernelProposalStatus(pending.messageId, "discarded");
     } catch {

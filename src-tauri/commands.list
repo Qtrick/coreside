@@ -93,6 +93,7 @@ kernel_compile_intent
 kernel_create_job
 kernel_data_model_summary
 kernel_decide_approval
+kernel_decide_proposal
 kernel_ensure_tool_manifest
 kernel_enter_safe_startup
 kernel_export_package
@@ -100,6 +101,7 @@ kernel_export_package_bytes
 kernel_garbage_collect
 kernel_get_job
 kernel_get_manifest
+kernel_get_proposal
 kernel_get_recovery_state
 kernel_grant_permission
 kernel_import_package
@@ -110,6 +112,7 @@ kernel_list_audit_events
 kernel_list_build_failures
 kernel_list_manifests
 kernel_list_pending_approvals
+kernel_list_pending_proposals
 kernel_list_permissions
 kernel_list_registered_actions
 kernel_list_runtime_grants

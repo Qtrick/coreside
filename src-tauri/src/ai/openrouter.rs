@@ -220,6 +220,26 @@ impl OpenRouterProvider {
         let Ok(value) = serde_json::from_str::<Value>(data) else {
             return Ok(false);
         };
+        // Check for mid-stream provider error payload
+        if let Some(err) = value.get("error") {
+            let msg = err
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("mid-stream error from provider");
+            return Err(AiError::Provider(format!("OpenRouter stream error: {msg}")));
+        }
+        // Check for finish_reason == "error"
+        if let Some(choices) = value.get("choices").and_then(|c| c.as_array()) {
+            for choice in choices {
+                if let Some(reason) = choice.get("finish_reason").and_then(|r| r.as_str()) {
+                    if reason == "error" {
+                        return Err(AiError::Provider(
+                            "stream terminated with error finish reason".into(),
+                        ));
+                    }
+                }
+            }
+        }
         if let Some(m) = value.get("model").and_then(|v| v.as_str()) {
             *model = m.to_string();
         }
@@ -324,6 +344,12 @@ impl OpenRouterProvider {
                         .await?;
                 }
             }
+        }
+
+        if full_text.trim().is_empty() {
+            return Err(AiError::Provider(
+                "OpenRouter stream completed without text content".into(),
+            ));
         }
         Ok((full_text, usage, model))
     }

@@ -482,17 +482,17 @@ export async function mockInvoke<T>(
       return {
         provider: "gemini",
         selected: mockDb.settings.preferredModel ?? "auto",
-        autoResolvesTo: "gemini-3.5-flash",
+        autoResolvesTo: "gemini-3.8-flash",
         options: [
           {
             id: "auto",
             label: "Auto",
-            description: "Uses the active provider default (gemini-3.5-flash)",
+            description: "Uses the active provider default (gemini-3.8-flash)",
           },
           {
-            id: "gemini-3.5-flash",
-            label: "Gemini 3.5 Flash",
-            description: "Recommended — fast agentic Flash",
+            id: "gemini-3.8-flash",
+            label: "Gemini 3.8 Flash",
+            description: "Recommended — state-of-the-art Flash GA",
           },
           {
             id: "gemini-3.1-flash-lite",

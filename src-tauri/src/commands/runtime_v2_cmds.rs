@@ -310,16 +310,24 @@ pub fn schedule_patches_cmd(
     let mut db = state.db.lock();
     let priority = PatchPriority::parse(&args.priority)
         .ok_or_else(|| CommandError::new("invalid", "unknown patch priority"))?;
+
+    // P0 security boundary: frontend IPC cannot forge agent authority or bypass approval gates.
+    let trusted_source = if args.source_type == "direct_manipulation" {
+        "direct_manipulation"
+    } else {
+        "user"
+    };
+
     let req = ScheduleRequest {
         conversation_id: args.conversation_id,
         turn_id: args.turn_id,
         surface_id: args.surface_id,
         priority,
         operations: args.operations,
-        source_type: args.source_type,
-        from_agent: args.from_agent.unwrap_or(false),
-        model: args.model,
-        provider: args.provider,
+        source_type: trusted_source.into(),
+        from_agent: false,
+        model: None,
+        provider: None,
     };
     if args.apply_immediately.unwrap_or(false) {
         let mut bus = state.event_bus.lock();
@@ -328,7 +336,7 @@ pub fn schedule_patches_cmd(
             &mut db,
             &mut bus_opt,
             req,
-            args.approval_granted.unwrap_or(true),
+            true, // User direct manipulation is self-authorized
         )?;
         return Ok(result.scheduled);
     }
@@ -339,8 +347,8 @@ pub fn schedule_patches_cmd(
 pub fn flush_patch_scheduler_cmd(
     state: State<'_, AppState>,
     conversation_id: Option<String>,
-    source_type: Option<String>,
-    approval_granted: Option<bool>,
+    _source_type: Option<String>,
+    _approval_granted: Option<bool>,
 ) -> Result<Vec<crate::application_kernel::ChangeResult>, CommandError> {
     state.require_profile()?;
     state
@@ -349,12 +357,13 @@ pub fn flush_patch_scheduler_cmd(
     let mut db = state.db.lock();
     let mut bus = state.event_bus.lock();
     let mut bus_opt = Some(&mut *bus);
+    // IPC flush is always user-initiated; agent changes in queue still require explicit approval
     Ok(flush_scheduler(
         &mut db,
         &mut bus_opt,
         conversation_id.as_deref(),
-        source_type.as_deref().unwrap_or("user"),
-        approval_granted.unwrap_or(true),
+        "user",
+        true,
     )?)
 }
 

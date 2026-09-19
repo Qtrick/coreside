@@ -533,12 +533,23 @@ pub fn flush_scheduler(
     let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
     let mut missing_dep_patches: HashSet<String> = HashSet::new();
 
+    // Map both patch id and operation_id to patch id in current queued set
+    let mut op_to_patch_id: HashMap<String, String> = HashMap::new();
+    for (id, patch) in &patches {
+        op_to_patch_id.insert(id.clone(), id.clone());
+        op_to_patch_id.insert(patch.operation_id.clone(), id.clone());
+    }
+
     for (id, patch) in &patches {
         in_degree.entry(id.clone()).or_insert(0);
         for dep_id in &patch.depends_on {
-            if patches.contains_key(dep_id) {
+            let resolved_dep_id = op_to_patch_id
+                .get(dep_id)
+                .cloned()
+                .unwrap_or_else(|| dep_id.clone());
+            if patches.contains_key(&resolved_dep_id) {
                 dependents
-                    .entry(dep_id.clone())
+                    .entry(resolved_dep_id.clone())
                     .or_default()
                     .push(id.clone());
                 *in_degree.entry(id.clone()).or_insert(0) += 1;
@@ -546,7 +557,7 @@ pub fn flush_scheduler(
                 let is_applied: bool = db
                     .conn()
                     .query_row(
-                        "SELECT 1 FROM patch_scheduler_items WHERE id = ?1 AND status = 'applied'",
+                        "SELECT 1 FROM patch_scheduler_items WHERE (id = ?1 OR operation_id = ?1) AND status = 'applied'",
                         [dep_id],
                         |_| Ok(true),
                     )
@@ -560,6 +571,20 @@ pub fn flush_scheduler(
 
     let now = now_rfc3339();
 
+    // Transitive failure propagation: any patch depending on a missing or failed patch is dependency_failed
+    let mut failed_dep_patches: HashSet<String> = HashSet::new();
+    let mut fail_queue: VecDeque<String> = missing_dep_patches.iter().cloned().collect();
+
+    while let Some(failed_id) = fail_queue.pop_front() {
+        if let Some(deps) = dependents.get(&failed_id) {
+            for dep_id in deps {
+                if !missing_dep_patches.contains(dep_id) && failed_dep_patches.insert(dep_id.clone()) {
+                    fail_queue.push_back(dep_id.clone());
+                }
+            }
+        }
+    }
+
     // Patches with missing dependencies fail closed! Never executed!
     for id in &missing_dep_patches {
         db.conn().execute(
@@ -570,10 +595,20 @@ pub fn flush_scheduler(
         in_degree.remove(id);
     }
 
+    // Patches whose dependencies failed or were missing fail closed as dependency_failed!
+    for id in &failed_dep_patches {
+        db.conn().execute(
+            "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
+             error_category = 'dependency_failed' WHERE id = ?2 AND status = 'queued'",
+            params![now, id],
+        )?;
+        in_degree.remove(id);
+    }
+
     // Ready queue with deterministic sorting: (sequence_number, id)
     let mut ready: Vec<String> = in_degree
         .iter()
-        .filter(|(id, d)| **d == 0 && !missing_dep_patches.contains(*id))
+        .filter(|(id, d)| **d == 0 && !missing_dep_patches.contains(*id) && !failed_dep_patches.contains(*id))
         .map(|(id, _)| id.clone())
         .collect();
 
@@ -594,7 +629,7 @@ pub fn flush_scheduler(
             for dep_id in deps {
                 if let Some(deg) = in_degree.get_mut(dep_id) {
                     *deg -= 1;
-                    if *deg == 0 && !missing_dep_patches.contains(dep_id) {
+                    if *deg == 0 && !missing_dep_patches.contains(dep_id) && !failed_dep_patches.contains(dep_id) {
                         newly_ready.push(dep_id.clone());
                     }
                 }
@@ -612,9 +647,9 @@ pub fn flush_scheduler(
         }
     }
 
-    // Any remaining items in in_degree with deg > 0 are dependency cycles! Fail closed!
+    // Any remaining items in in_degree with deg > 0 are true dependency cycles! Fail closed!
     for (id, deg) in &in_degree {
-        if *deg > 0 && !missing_dep_patches.contains(id) {
+        if *deg > 0 && !missing_dep_patches.contains(id) && !failed_dep_patches.contains(id) {
             db.conn().execute(
                 "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
                  error_category = 'dependency_cycle' WHERE id = ?2 AND status = 'queued'",
@@ -913,5 +948,78 @@ mod tests {
         let ops = vec![simple_op("a", vec![]), simple_op("b", vec!["a".into()])];
         let order = topological_order(&ops).unwrap();
         assert_eq!(order, vec![0, 1]);
+    }
+
+    #[test]
+    fn transitive_dependency_failure_propagation() {
+        let mut db = test_db();
+        let ops = vec![
+            simple_op("op_a", vec!["op_nonexistent".into()]),
+            simple_op("op_b", vec!["op_a".into()]),
+            simple_op("op_c", vec!["op_b".into()]),
+        ];
+        let req = ScheduleRequest {
+            conversation_id: Some("conv-sched-1".into()),
+            turn_id: Some("turn-1".into()),
+            surface_id: None,
+            priority: PatchPriority::ApprovedPersistentChange,
+            operations: ops,
+            source_type: "user".into(),
+            from_agent: false,
+            model: None,
+            provider: None,
+        };
+        let scheduled = schedule_patches(&mut db, &req).unwrap();
+        assert_eq!(scheduled.len(), 3);
+
+        let patch_a_id = &scheduled[0].id;
+        let patch_b_id = &scheduled[1].id;
+        let patch_c_id = &scheduled[2].id;
+
+        // Flush the scheduler
+        let _ = flush_scheduler(&mut db, &mut None, Some("conv-sched-1"), "user", true).unwrap();
+
+        // Check statuses and error_categories
+        let patch_a = get_scheduled_patch(&db, patch_a_id).unwrap();
+        assert_eq!(patch_a.status, "failed");
+        let cat_a: String = db
+            .conn()
+            .query_row(
+                "SELECT error_category FROM patch_scheduler_items WHERE id = ?1",
+                [patch_a_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cat_a, "dependency_missing");
+
+        let patch_b = get_scheduled_patch(&db, patch_b_id).unwrap();
+        assert_eq!(patch_b.status, "failed");
+        let cat_b: String = db
+            .conn()
+            .query_row(
+                "SELECT error_category FROM patch_scheduler_items WHERE id = ?1",
+                [patch_b_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            cat_b, "dependency_failed",
+            "Dependent of missing patch must be dependency_failed, not dependency_cycle"
+        );
+
+        let patch_c = get_scheduled_patch(&db, patch_c_id).unwrap();
+        assert_eq!(patch_c.status, "failed");
+        let cat_c: String = db
+            .conn()
+            .query_row(
+                "SELECT error_category FROM patch_scheduler_items WHERE id = ?1",
+                [patch_c_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            cat_c, "dependency_failed",
+            "Transitive dependent must be dependency_failed, not dependency_cycle"
+        );
     }
 }

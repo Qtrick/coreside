@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-get-proposal"
+description = "Enables the kernel_get_proposal command without any pre-configured scope."
+commands.allow = ["kernel_get_proposal"]
+
+[[permission]]
+identifier = "deny-kernel-get-proposal"
+description = "Denies the kernel_get_proposal command without any pre-configured scope."
+commands.deny = ["kernel_get_proposal"]

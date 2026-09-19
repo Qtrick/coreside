@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kernel-list-pending-proposals"
+description = "Enables the kernel_list_pending_proposals command without any pre-configured scope."
+commands.allow = ["kernel_list_pending_proposals"]
+
+[[permission]]
+identifier = "deny-kernel-list-pending-proposals"
+description = "Denies the kernel_list_pending_proposals command without any pre-configured scope."
+commands.deny = ["kernel_list_pending_proposals"]
