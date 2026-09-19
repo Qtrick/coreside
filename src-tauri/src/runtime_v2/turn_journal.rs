@@ -476,6 +476,57 @@ pub fn append_conversation_event(
     Ok((id, seq))
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationEventRecord {
+    pub id: String,
+    pub conversation_id: String,
+    pub sequence: i64,
+    pub turn_id: Option<String>,
+    pub attempt_id: Option<String>,
+    pub event_type: String,
+    pub payload: Value,
+    pub created_at: String,
+}
+
+pub fn get_conversation_events(
+    db: &Database,
+    conversation_id: &str,
+    after_sequence: Option<i64>,
+    limit: Option<i64>,
+) -> DbResult<Vec<ConversationEventRecord>> {
+    let after_seq = after_sequence.unwrap_or(0);
+    let lim = limit.unwrap_or(100).clamp(1, 500);
+    let mut stmt = db.conn().prepare(
+        "SELECT id, conversation_id, sequence, turn_id, attempt_id, event_type, payload_json, created_at
+         FROM conversation_event_log
+         WHERE conversation_id = ?1 AND sequence > ?2
+         ORDER BY sequence ASC
+         LIMIT ?3",
+    )?;
+    let rows = stmt.query_map(params![conversation_id, after_seq, lim], |r| {
+        let payload_json: String = r.get(6)?;
+        let payload = serde_json::from_str(&payload_json).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e))
+        })?;
+        Ok(ConversationEventRecord {
+            id: r.get(0)?,
+            conversation_id: r.get(1)?,
+            sequence: r.get(2)?,
+            turn_id: r.get(3)?,
+            attempt_id: r.get(4)?,
+            event_type: r.get(5)?,
+            payload,
+            created_at: r.get(7)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

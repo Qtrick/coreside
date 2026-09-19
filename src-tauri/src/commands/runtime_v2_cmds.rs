@@ -9,17 +9,18 @@ use crate::runtime_v2::packs::CapabilityPackMeta as PackMeta;
 use crate::runtime_v2::{
     self, activate_next, append_ledger_entry, branch_from_message, bundled_packs,
     cancel_queue_item, complete_queue_item, create_inline_surface, create_snapshot, delete_draft,
-    delete_snapshot, diff_branch, enqueue, flush_scheduler, get_continuity, get_draft, get_item,
-    get_provider_profile, get_route_state, get_snapshot, get_surface, get_surface_state,
-    get_transaction, list_branches, list_diagnostics, list_inline_surfaces, list_ledger_entries,
-    list_queue, list_snapshots, list_transactions, list_turn_timeline_events, navigate_route,
-    promote_inline_to_tool, recover_stale_active, remove_queued, save_continuity, save_draft,
-    save_surface_state, schedule_and_apply, schedule_patches, set_route_state, store_diagnostics,
+    delete_snapshot, diff_branch, enqueue, ensure_initial_route, flush_scheduler, get_continuity,
+    get_conversation_events, get_draft, get_item, get_provider_profile, get_route_state,
+    get_snapshot, get_surface, get_surface_state, get_transaction, list_branches, list_diagnostics,
+    list_inline_surfaces, list_ledger_entries, list_queue, list_snapshots, list_transactions,
+    list_turn_timeline_events, navigate_route, promote_inline_to_tool, recover_stale_active,
+    remove_queued, route_back, route_forward, save_continuity, save_draft, save_surface_state,
+    schedule_and_apply, schedule_patches, set_route_state, store_diagnostics, surfaces,
     suspend_surface, undo_transaction, update_surface_definition, AgentResponseV2, AppOperation,
     AppTransactionRecord, ApplyResult, ChatBranchRecord, ContextLedgerEntry, ContinuitySnapshot,
-    NavigateResult, PatchPriority, ProviderConformanceRecord, QueueItem, RouteState,
-    ScheduleRequest, ScheduledPatch, SnapshotRecord, SurfaceDraft, SurfaceRecord, SuspensionState,
-    TurnTimelineEvent,
+    ConversationEventRecord, NavigateResult, PatchPriority, ProviderConformanceRecord, QueueItem,
+    RouteState, ScheduleRequest, ScheduledPatch, SnapshotRecord, SurfaceDraft, SurfaceRecord,
+    SuspensionState, TurnTimelineEvent,
 };
 use crate::state::AppState;
 use crate::windows;
@@ -185,12 +186,19 @@ pub fn save_surface_state_cmd(
     state: State<'_, AppState>,
     surface_id: String,
     state_json: Value,
-) -> Result<(), CommandError> {
+    expected_state_revision: Option<i64>,
+) -> Result<i64, CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
     let surface = get_surface(&db, &surface_id)?;
     windows::enforce_caller_surface_scope(&window, surface.tool_id.as_deref(), &surface.id)?;
-    Ok(save_surface_state(&mut db, &surface_id, &state_json)?)
+    let (_merged, new_rev) = surfaces::save_surface_state_user_cas(
+        &mut db,
+        &surface_id,
+        expected_state_revision,
+        &state_json,
+    )?;
+    Ok(new_rev)
 }
 
 #[tauri::command]
@@ -369,16 +377,18 @@ pub fn flush_patch_scheduler_cmd(
 
 #[tauri::command]
 pub fn get_route_state_cmd(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     application_id: String,
-    window_id: Option<String>,
+    _window_id: Option<String>,
 ) -> Result<RouteState, CommandError> {
     state.require_profile()?;
+    let effective_window = window.label();
     let db = state.db.lock();
     Ok(get_route_state(
         &db,
         &application_id,
-        window_id.as_deref().unwrap_or("main"),
+        effective_window,
     )?)
 }
 
@@ -395,15 +405,17 @@ pub struct SetRouteStateArgs {
 
 #[tauri::command]
 pub fn set_route_state_cmd(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     args: SetRouteStateArgs,
 ) -> Result<RouteState, CommandError> {
     state.require_profile()?;
+    let effective_window = window.label();
     let mut db = state.db.lock();
     Ok(set_route_state(
         &mut db,
         &args.application_id,
-        args.window_id.as_deref().unwrap_or("main"),
+        effective_window,
         args.current_route_id.as_deref(),
         &args.route_params,
         &args.history,
@@ -423,18 +435,73 @@ pub struct NavigateRouteArgs {
 
 #[tauri::command]
 pub fn navigate_route_cmd(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     args: NavigateRouteArgs,
 ) -> Result<NavigateResult, CommandError> {
     state.require_profile()?;
+    let effective_window = window.label();
     let mut db = state.db.lock();
     Ok(navigate_route(
         &mut db,
         &args.application_id,
-        args.window_id.as_deref().unwrap_or("main"),
+        effective_window,
         &args.route_id,
         &args.route_params,
         args.push_history.unwrap_or(true),
+    )?)
+}
+
+#[tauri::command]
+pub fn route_back_cmd(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    application_id: String,
+) -> Result<NavigateResult, CommandError> {
+    state.require_profile()?;
+    let effective_window = window.label();
+    let mut db = state.db.lock();
+    Ok(route_back(&mut db, &application_id, effective_window)?)
+}
+
+#[tauri::command]
+pub fn route_forward_cmd(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    application_id: String,
+) -> Result<NavigateResult, CommandError> {
+    state.require_profile()?;
+    let effective_window = window.label();
+    let mut db = state.db.lock();
+    Ok(route_forward(&mut db, &application_id, effective_window)?)
+}
+
+#[tauri::command]
+pub fn ensure_initial_route_cmd(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    application_id: String,
+) -> Result<RouteState, CommandError> {
+    state.require_profile()?;
+    let effective_window = window.label();
+    let mut db = state.db.lock();
+    Ok(ensure_initial_route(&mut db, &application_id, effective_window)?)
+}
+
+#[tauri::command]
+pub fn get_conversation_events_cmd(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    after_sequence: Option<i64>,
+    limit: Option<i64>,
+) -> Result<Vec<ConversationEventRecord>, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    Ok(get_conversation_events(
+        &db,
+        &conversation_id,
+        after_sequence,
+        limit,
     )?)
 }
 

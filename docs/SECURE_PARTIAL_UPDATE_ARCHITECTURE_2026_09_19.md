@@ -144,7 +144,39 @@ Draft Ops ──> Preview Transaction (Inert, no IPC/DB side effects)
 
 ---
 
-## 12. Remaining Known Gaps
+## 12. Deep Runtime V2 Hardening & State Authority Architecture
+
+### 12.1 State Contract Authority and Self-Authorization Prevention
+- **Contract Origin Tracking**: `StateContract` carries an explicit `origin` field (`user`, `model`, `system`).
+- **Opaque Key Protection**: When admitting candidate `SoftwareDocument` updates (`admit_software_document_with_state`), models cannot create new contracts over existing opaque state keys already stored in `surface_state`.
+- **Policy Monotonicity**: Models are strictly blocked from broadening read/write policies (e.g., restricted -> public, readonly -> writable) or stripping sensitivity markers from existing contracts.
+- **Contract Preservation on Full Replace**: Candidate full replacement documents preserve existing trusted contracts rather than wiping them.
+
+### 12.2 Fail-Closed OCC State Revision CAS
+- **Optimistic Concurrency Control**: Kernel state saves enforce conditional CAS updates:
+  `UPDATE surface_state SET state_json = ?, state_revision = state_revision + 1 WHERE surface_id = ? AND state_revision = ?`
+- **Revision Conflict Rejection**: If the expected revision does not match, zero rows are updated, and the operation fails closed with a typed `RevisionConflict` error.
+- **Direct User Command Validation**: `save_surface_state_cmd` validates surface scope, checks SoftwareDocument contracts, and enforces expected `state_revision`.
+
+### 12.3 Elimination of Split-Brain State Authority
+- **Canonical Applications**: Load canonical SoftwareDocument definitions and `surface_state` via `api.getSurface` and `api.getSurfaceState`. State writes persist through `api.saveSurfaceState` with OCC revision checking.
+- **Legacy Tools Boundary**: Unmanaged personal tools continue to use isolated `tool_state` without polluting canonical application tables or runtime V2 state contracts.
+
+### 12.4 Resilient Queue Recovery and Turn Journal Reconciliation
+- **Stale Active Turn Recovery**: `recover_stale_active` cross-references the linked `turn_journal` entry:
+  - If the turn journal reached a committed/published state, the queue item is marked completed (preventing duplicate execution).
+  - If the turn was only created/claimed, it is safely requeued.
+  - If interrupted mid-execution, it is marked failed with durable diagnostics.
+- **Crash Reconciler**: `recover_scheduler` detects transactions committed prior to an unexpected application crash and marks matching scheduler rows `applied` rather than re-executing.
+
+### 12.5 Multi-Route Isolation and Ephemeral Preview Routing
+- **Per-Surface Route State**: `AppRouteShell` scopes state per surface across multi-surface applications (`/dashboard`, `/tasks`), preventing route switching from polluting peer surface states.
+- **Fail-Closed Route Fallback**: Missing route surfaces render bounded error states instead of falling back to arbitrary sibling surfaces.
+- **Preview Route Ephemerality**: In preview mode, route state is managed purely in React state with zero IPC calls to `getRouteState`, `setRouteState`, or `navigateRoute`.
+
+---
+
+## 13. Remaining Known Gaps
 
 1. **Direct Package Verification**: Packaged `.dmg` smoke execution requires an environment with macOS bundle signing tools.
 2. **External Archive Mounts**: Standalone zip archives (`Coreside Chat AI.zip`, `Partial Update Main.zip`) reside in unmounted user folders; verified via repository-local code and test fixtures.
@@ -152,15 +184,17 @@ Draft Ops ──> Preview Transaction (Inert, no IPC/DB side effects)
 
 ---
 
-## 13. Test and Evidence Status
+## 14. Test and Evidence Status
 
-- **Rust Application Kernel Tests**: 118 passed, 0 failed.
-- **Rust Patch Scheduler Tests**: 6 passed, 0 failed.
-- **Rust Branch & Checkpoint Tests**: 6 passed, 0 failed.
-- **Rust SoftwareDocument Tests**: 28 passed, 0 failed.
-- **Rust Transaction & Undo Tests**: 7 passed, 0 failed.
-- **Rust Migration Fixtures**: 16 passed, 0 failed.
+- **Rust Library Tests (`cargo test --lib`)**: 778 passed, 0 failed, 0 ignored.
+  - `application_kernel`: 118 passed, 0 failed.
+  - `runtime_v2::patch_scheduler`: 6 passed, 0 failed.
+  - `runtime_v2::branch`: 6 passed, 0 failed.
+  - `runtime_v2::software_document`: 28 passed, 0 failed.
+  - `runtime_v2::transactions`: 7 passed, 0 failed.
+  - `runtime_v2::queue`: 2 passed, 0 failed.
+  - `db::migration_fixtures`: 16 passed, 0 failed (all migrations 001 through 028 verified).
 - **Frontend Typecheck (`tsc --noEmit`)**: Clean (0 errors).
 - **Frontend Vitest Suite**: 51 test files passed, 479 tests passed, 0 failed.
-- **Tauri Capability Audit**: Passed (0 policy violations).
-- **Evidence Manifest**: Passed (`evidence-manifest OK`).
+- **Tauri Capability Audit (`npm run audit:tauri-capabilities`)**: Passed (0 policy violations).
+- **Whitespace / Git Diff Check (`git diff --check`)**: Clean (0 issues).

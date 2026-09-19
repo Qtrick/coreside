@@ -86,6 +86,12 @@ pub struct StateContract {
     pub write_policy: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensitivity: Option<String>,
+    #[serde(default = "default_origin")]
+    pub origin: String,
+}
+
+fn default_origin() -> String {
+    "user".to_string()
 }
 
 fn default_type_name() -> String {
@@ -112,6 +118,7 @@ impl StateContract {
             read_policy: "public".into(),
             write_policy: "model".into(),
             sensitivity: None,
+            origin: default_origin(),
         }
     }
 }
@@ -128,6 +135,7 @@ impl Default for StateContract {
             read_policy: default_read_policy(),
             write_policy: default_write_policy(),
             sensitivity: None,
+            origin: default_origin(),
         }
     }
 }
@@ -170,6 +178,8 @@ pub struct SoftwareDocument {
     #[serde(default)]
     pub sections: Vec<DocumentSection>,
     #[serde(default)]
+    pub components: Vec<ToolComponent>,
+    #[serde(default)]
     pub state_contracts: Vec<StateContract>,
     #[serde(default)]
     pub action_contracts: Vec<ActionContract>,
@@ -192,6 +202,7 @@ impl SoftwareDocument {
             version: 1,
             layout: None,
             sections: Vec::new(),
+            components: Vec::new(),
             state_contracts: Vec::new(),
             action_contracts: Vec::new(),
             design_tokens: None,
@@ -199,25 +210,44 @@ impl SoftwareDocument {
         }
     }
 
+    pub fn flatten_components(&self) -> Vec<ToolComponent> {
+        let mut out = Vec::new();
+        for sec in &self.sections {
+            for c in &sec.components {
+                out.push(c.clone());
+            }
+        }
+        out
+    }
+
+    pub fn sync_components(&mut self) {
+        self.components = self.flatten_components();
+    }
+
     /// Load or convert a JSON Value into a SoftwareDocument without losing contracts.
     pub fn from_value(val: &Value) -> Result<Self, String> {
         if val.get("sections").is_some() {
-            serde_json::from_value(val.clone())
-                .map_err(|e| format!("failed to deserialize SoftwareDocument: {e}"))
+            let mut doc: Self = serde_json::from_value(val.clone())
+                .map_err(|e| format!("failed to deserialize SoftwareDocument: {e}"))?;
+            if doc.components.is_empty() && !doc.sections.is_empty() {
+                doc.sync_components();
+            }
+            Ok(doc)
         } else {
             let tool: ToolDefinition = serde_json::from_value(val.clone())
                 .map_err(|e| format!("failed to parse ToolDefinition: {e}"))?;
             let mut doc = Self::from_tool_definition(&tool);
             if let Some(sc) = val.get("stateContracts").or_else(|| val.get("state_contracts")) {
-                if let Ok(contracts) = serde_json::from_value::<Vec<StateContract>>(sc.clone()) {
-                    doc.state_contracts = contracts;
-                }
+                let contracts: Vec<StateContract> = serde_json::from_value(sc.clone())
+                    .map_err(|e| format!("invalid state contracts: {e}"))?;
+                doc.state_contracts = contracts;
             }
             if let Some(ac) = val.get("actionContracts").or_else(|| val.get("action_contracts")) {
-                if let Ok(contracts) = serde_json::from_value::<Vec<ActionContract>>(ac.clone()) {
-                    doc.action_contracts = contracts;
-                }
+                let contracts: Vec<ActionContract> = serde_json::from_value(ac.clone())
+                    .map_err(|e| format!("invalid action contracts: {e}"))?;
+                doc.action_contracts = contracts;
             }
+            doc.sync_components();
             Ok(doc)
         }
     }
@@ -348,6 +378,7 @@ impl SoftwareDocument {
                 }
             }
 
+            doc.sync_components();
             return doc;
         }
 
@@ -390,6 +421,22 @@ impl SoftwareDocument {
             });
         }
 
+        if doc.sections.is_empty() {
+            doc.sections.push(DocumentSection {
+                id: "main".into(),
+                title: None,
+                role: Some("content".into()),
+                layout: Some("stack".into()),
+                parent_region_id: None,
+                slot: None,
+                responsive: None,
+                instance_id: None,
+                components: Vec::new(),
+                metadata: None,
+            });
+        }
+
+        doc.sync_components();
         doc
     }
 
@@ -818,7 +865,19 @@ impl SoftwareDocument {
         } else if let Some(first) = self.sections.first_mut() {
             first
         } else {
-            return Err("cannot insert component: document has no sections".into());
+            self.sections.push(DocumentSection {
+                id: "main".into(),
+                title: None,
+                role: Some("content".into()),
+                layout: Some("stack".into()),
+                parent_region_id: None,
+                slot: None,
+                responsive: None,
+                instance_id: None,
+                components: Vec::new(),
+                metadata: None,
+            });
+            self.sections.first_mut().unwrap()
         };
 
         match target_index {
@@ -1342,6 +1401,7 @@ impl SoftwareDocument {
             }
             _ => {}
         }
+        self.sync_components();
         Ok(())
     }
 }
@@ -1442,6 +1502,17 @@ pub fn admit_software_document(
     candidate: &SoftwareDocument,
     allowed_packs: &[String],
 ) -> Result<(), String> {
+    admit_software_document_with_state(existing, candidate, allowed_packs, None, false)
+}
+
+/// Admission validation with state authority and customize mode context.
+pub fn admit_software_document_with_state(
+    existing: Option<&SoftwareDocument>,
+    candidate: &SoftwareDocument,
+    allowed_packs: &[String],
+    surface_state: Option<&Value>,
+    is_user_customizing: bool,
+) -> Result<(), String> {
     // 1. Structure
     if candidate.id.trim().is_empty() {
         return Err("software document id cannot be empty".into());
@@ -1518,16 +1589,68 @@ pub fn admit_software_document(
         }
     }
 
-    if let Some(existing_doc) = existing {
-        for sc in &candidate.state_contracts {
-            if let Some(existing_sc) = existing_doc.state_contracts.iter().find(|s| s.key == sc.key) {
-                if (existing_sc.read_policy == "restricted"
-                    || existing_sc.sensitivity.as_deref() == Some("sensitive"))
-                    && sc.read_policy != "restricted"
-                {
+    if !is_user_customizing {
+        // Rule A: Existing opaque key protection.
+        // A model cannot create a contract for an already-existing state key that had no contract.
+        if let Some(Value::Object(ref state_map)) = surface_state {
+            for state_key in state_map.keys() {
+                let existed_in_contracts = existing
+                    .map(|e| e.state_contracts.iter().any(|c| &c.key == state_key))
+                    .unwrap_or(false);
+                if !existed_in_contracts && candidate.state_contracts.iter().any(|c| &c.key == state_key) {
                     return Err(format!(
-                        "cannot broaden access to sensitive/restricted state key '{}'",
-                        sc.key
+                        "cannot create state contract for existing opaque state key '{state_key}'"
+                    ));
+                }
+            }
+        }
+
+        // Rule B: Existing trusted contract preservation and anti-broadening.
+        if let Some(existing_doc) = existing {
+            for sc in &candidate.state_contracts {
+                if let Some(existing_sc) = existing_doc.state_contracts.iter().find(|s| s.key == sc.key) {
+                    if (existing_sc.read_policy == "restricted"
+                        || existing_sc.sensitivity.as_deref() == Some("sensitive"))
+                        && sc.read_policy != "restricted"
+                    {
+                        return Err(format!(
+                            "cannot broaden read policy of sensitive/restricted state key '{}'",
+                            sc.key
+                        ));
+                    }
+                    if existing_sc.write_policy == "readonly" && sc.write_policy != "readonly" {
+                        return Err(format!(
+                            "cannot broaden write policy of readonly state key '{}'",
+                            sc.key
+                        ));
+                    }
+                    if existing_sc.write_policy == "user" && sc.write_policy == "model" {
+                        return Err(format!(
+                            "cannot broaden write policy from user-only to model for state key '{}'",
+                            sc.key
+                        ));
+                    }
+                    if existing_sc.sensitivity.as_deref() == Some("sensitive")
+                        && sc.sensitivity.as_deref() != Some("sensitive")
+                    {
+                        return Err(format!(
+                            "cannot remove sensitivity classification from state key '{}'",
+                            sc.key
+                        ));
+                    }
+                }
+            }
+
+            // Rule C: Omission protection.
+            // Model replacement cannot omit pre-existing restricted/sensitive/readonly contracts.
+            for existing_sc in &existing_doc.state_contracts {
+                let is_protected = existing_sc.read_policy == "restricted"
+                    || existing_sc.sensitivity.as_deref() == Some("sensitive")
+                    || existing_sc.write_policy == "readonly";
+                if is_protected && !candidate.state_contracts.iter().any(|c| c.key == existing_sc.key) {
+                    return Err(format!(
+                        "replacement cannot omit protected state contract '{}'",
+                        existing_sc.key
                     ));
                 }
             }
@@ -1609,6 +1732,16 @@ fn validate_component_bindings(
                     comp.id
                 ));
             }
+            let is_input_component = matches!(
+                comp.component_type.as_str(),
+                "input" | "textarea" | "select" | "checkbox" | "date_picker" | "number_input"
+            );
+            if is_input_component && sc.write_policy == "readonly" {
+                return Err(format!(
+                    "input component '{}' cannot bind to readonly state key '{vk}'",
+                    comp.id
+                ));
+            }
         }
     }
 
@@ -1629,6 +1762,12 @@ fn validate_component_bindings(
                             comp.id
                         ));
                     }
+                    if *binding_prop == "selectionKey" && sc.write_policy == "readonly" {
+                        return Err(format!(
+                            "component '{}' prop 'selectionKey' cannot bind to readonly state key '{vk}'",
+                            comp.id
+                        ));
+                    }
                 }
             }
         }
@@ -1646,7 +1785,11 @@ fn validate_component_bindings(
                 } => {
                     let _ac = action_contracts
                         .iter()
-                        .find(|a| &a.action_id == action_name)
+                        .find(|a| {
+                            &a.action_name == action_name
+                                || &a.action_id == action_name
+                                || a.action_id == format!("{}-{}", comp.id, action_name.replace('.', "-"))
+                        })
                         .ok_or_else(|| {
                             format!(
                                 "component '{}' invokes action '{action_name}' without trusted ActionContract",

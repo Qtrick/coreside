@@ -83,6 +83,7 @@ impl From<crate::db::DbError> for CommandError {
     fn from(value: crate::db::DbError) -> Self {
         match &value {
             crate::db::DbError::NotFound(msg) => Self::new("not_found", msg.clone()),
+            crate::db::DbError::Conflict(msg) => Self::new("conflict", msg.clone()),
             crate::db::DbError::Invalid(msg) => {
                 let code = if msg.starts_with("revision_conflict") {
                     "conflict"

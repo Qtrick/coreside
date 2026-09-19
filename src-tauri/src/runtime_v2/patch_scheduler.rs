@@ -10,7 +10,7 @@ use super::operations::{validate_operations, AppOperation};
 use crate::application_kernel::{apply_change, ChangeRequest, ChangeResult};
 use crate::db::{now_rfc3339, Database, DbError, DbResult};
 use crate::runtime_v2::EventBus;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
@@ -381,8 +381,12 @@ fn parse_patch_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledPatch> 
             .unwrap_or(PatchPriority::ApprovedPersistentChange),
         status: row.get(7)?,
         sequence_number: row.get(8)?,
-        depends_on: serde_json::from_str(&depends_json).unwrap_or_default(),
-        payload: serde_json::from_str(&payload_json).unwrap_or(Value::Null),
+        depends_on: serde_json::from_str(&depends_json).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(9, rusqlite::types::Type::Text, Box::new(e))
+        })?,
+        payload: serde_json::from_str(&payload_json).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(10, rusqlite::types::Type::Text, Box::new(e))
+        })?,
         created_at: row.get(11)?,
         applied_at: row.get(12)?,
         failed_at: row.get(13)?,
@@ -498,6 +502,57 @@ pub fn topological_order(ops: &[AppOperation]) -> Result<Vec<usize>, String> {
     Ok(order)
 }
 
+/// Reconcile patch scheduler state against committed transactions after a restart or crash.
+/// If an operation in patch_scheduler_items was already committed in app_transactions or
+/// app_operations, updates the scheduler status to 'applied' with its transaction_id
+/// instead of executing duplicate mutations.
+pub fn recover_scheduler(db: &mut Database) -> DbResult<u64> {
+    let now = now_rfc3339();
+    let mut stmt = db.conn().prepare(
+        "SELECT id, operation_id, turn_id FROM patch_scheduler_items WHERE status = 'queued'",
+    )?;
+    let queued_items: Vec<(String, String, Option<String>)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut reconciled = 0u64;
+    for (patch_id, op_id, turn_id) in queued_items {
+        // 1. Check if app_operations already applied this operation_id
+        let committed_txn: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT transaction_id FROM app_operations WHERE id = ?1 AND apply_status = 'applied' LIMIT 1",
+                [&op_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+
+        let txn_id = if committed_txn.is_some() {
+            committed_txn
+        } else if let Some(ref tid) = turn_id {
+            // 2. Check if transaction for this turn_id committed
+            db.conn()
+                .query_row(
+                    "SELECT id FROM app_transactions WHERE turn_id = ?1 AND status = 'applied' LIMIT 1",
+                    [tid],
+                    |r| r.get(0),
+                )
+                .optional()?
+        } else {
+            None
+        };
+
+        if let Some(t_id) = txn_id {
+            db.conn().execute(
+                "UPDATE patch_scheduler_items SET status = 'applied', applied_at = ?1, transaction_id = ?2 WHERE id = ?3",
+                params![now, t_id, patch_id],
+            )?;
+            reconciled += 1;
+        }
+    }
+    Ok(reconciled)
+}
+
 pub fn flush_scheduler(
     db: &mut Database,
     bus: &mut Option<&mut EventBus>,
@@ -505,6 +560,9 @@ pub fn flush_scheduler(
     source_type: &str,
     approval_granted: bool,
 ) -> DbResult<Vec<ChangeResult>> {
+    // Reconcile against committed transactions first
+    let _ = recover_scheduler(db)?;
+
     let mut query = String::from("SELECT id FROM patch_scheduler_items WHERE status = 'queued'");
     if conversation_id.is_some() {
         query.push_str(" AND conversation_id = ?1");

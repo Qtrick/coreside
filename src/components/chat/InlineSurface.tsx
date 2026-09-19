@@ -264,7 +264,9 @@ export function InlineSurfaceCard({
       void persistenceScheduler.schedule(
         `surface:${surface.id}`,
         next,
-        (_key, s) => api.saveSurfaceState(surface.id, s),
+        async (_key, s) => {
+          await api.saveSurfaceState(surface.id, s);
+        },
         {
           onRollback: (restored) => {
             setState(restored);
@@ -280,7 +282,9 @@ export function InlineSurfaceCard({
       setState(next);
       await persistenceScheduler.flush(
         `surface:${surface.id}`,
-        (_key, s) => api.saveSurfaceState(surface.id, s),
+        async (_key, s) => {
+          await api.saveSurfaceState(surface.id, s);
+        },
       );
     },
     [surface.id],
@@ -290,7 +294,9 @@ export function InlineSurfaceCard({
     return () => {
       void persistenceScheduler.flush(
         `surface:${surface.id}`,
-        (_key, s) => api.saveSurfaceState(surface.id, s),
+        async (_key, s) => {
+          await api.saveSurfaceState(surface.id, s);
+        },
       );
     };
   }, [surface.id]);

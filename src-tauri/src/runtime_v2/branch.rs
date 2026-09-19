@@ -73,9 +73,12 @@ pub fn create_turn_checkpoint(
 ) -> DbResult<String> {
     let surfaces = super::surfaces::list_inline_surfaces(db, conversation_id)?;
     let mut surfaces_map = serde_json::Map::new();
-    for s in surfaces {
-        let (state, state_rev) = super::surfaces::get_surface_state_with_revision(db, &s.id)
-            .unwrap_or_else(|_| (json!({}), 1));
+    let mut app_id: Option<String> = None;
+    for s in &surfaces {
+        if app_id.is_none() && s.tool_id.is_some() {
+            app_id = s.tool_id.clone();
+        }
+        let (state, state_rev) = super::surfaces::get_surface_state_with_revision(db, &s.id)?;
         let def_rev = s.current_revision;
         surfaces_map.insert(
             s.id.clone(),
@@ -105,15 +108,54 @@ pub fn create_turn_checkpoint(
     let id = format!("chk-{}", Uuid::new_v4());
     let now = now_rfc3339();
 
+    let manifest_json = if let Some(ref app) = app_id {
+        crate::application_kernel::manifest::get_manifest(db, app)
+            .ok()
+            .and_then(|m| serde_json::to_string(&m.manifest).ok())
+    } else {
+        None
+    };
+    let routes_json = if let Some(ref app) = app_id {
+        crate::runtime_v2::app_routes::get_route_state(db, app, "main")
+            .ok()
+            .and_then(|r| serde_json::to_string(&r).ok())
+    } else {
+        None
+    };
+    let data_models_json = if let Some(ref app) = app_id {
+        crate::application_kernel::data::list_models(db, app)
+            .ok()
+            .and_then(|m| serde_json::to_string(&m).ok())
+    } else {
+        None
+    };
+
     db.conn().execute(
         "INSERT INTO conversation_checkpoints (
-            id, conversation_id, turn_id, message_id, checkpoint_hash, snapshot_json, created_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            id, conversation_id, turn_id, message_id, checkpoint_hash, snapshot_json, created_at,
+            application_id, manifest_json, routes_json, data_models_json
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(conversation_id, message_id) DO UPDATE SET
             checkpoint_hash = excluded.checkpoint_hash,
             snapshot_json = excluded.snapshot_json,
+            application_id = excluded.application_id,
+            manifest_json = excluded.manifest_json,
+            routes_json = excluded.routes_json,
+            data_models_json = excluded.data_models_json,
             created_at = excluded.created_at",
-        params![id, conversation_id, turn_id, message_id, checkpoint_hash, snapshot_json, now],
+        params![
+            id,
+            conversation_id,
+            turn_id,
+            message_id,
+            checkpoint_hash,
+            snapshot_json,
+            now,
+            app_id,
+            manifest_json,
+            routes_json,
+            data_models_json,
+        ],
     )?;
     Ok(id)
 }
@@ -160,19 +202,21 @@ pub fn branch_from_message(
         }
 
         // Check for an exact turn boundary checkpoint first
-        let checkpoint_row: Option<(String, String)> = db
+        let checkpoint_row: Option<(String, String, String)> = db
             .conn()
             .query_row(
-                "SELECT checkpoint_hash, snapshot_json FROM conversation_checkpoints
+                "SELECT id, checkpoint_hash, snapshot_json FROM conversation_checkpoints
                  WHERE conversation_id = ?1 AND message_id = ?2",
                 params![source_conversation_id, source_message_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
 
         let mut cloned_surfaces = Vec::new();
+        let mut chk_id_opt: Option<String> = None;
 
-        if let Some((_hash, snapshot_json)) = checkpoint_row {
+        if let Some((chk_id, _hash, snapshot_json)) = checkpoint_row {
+            chk_id_opt = Some(chk_id);
             let snap: Value = serde_json::from_str(&snapshot_json)
                 .map_err(|e| DbError::Invalid(format!("corrupt checkpoint snapshot: {e}")))?;
             let surfaces_obj = snap
@@ -194,10 +238,7 @@ pub fn branch_from_message(
                     .unwrap_or_default();
                 let project_id = sval.get("projectId").and_then(|v| v.as_str());
 
-                let mut branched_def = def.clone();
-                if let Some(obj) = branched_def.as_object_mut() {
-                    obj.insert("_branchedFrom".into(), json!(sval.get("id")));
-                }
+                let branched_def = def.clone();
 
                 let created = super::surfaces::create_inline_surface(
                     db,
@@ -256,11 +297,8 @@ pub fn branch_from_message(
                     None => continue,
                 };
 
-                let mut def = serde_json::from_str::<Value>(&def_json_str)
+                let def = serde_json::from_str::<Value>(&def_json_str)
                     .unwrap_or_else(|_| surface.definition.clone());
-                if let Some(obj) = def.as_object_mut() {
-                    obj.insert("_branchedFrom".into(), json!(surface.instance_id));
-                }
                 let created = super::surfaces::create_inline_surface(
                     db,
                     &new_conv.id,
@@ -291,17 +329,26 @@ pub fn branch_from_message(
 
         let id = format!("br-{}", Uuid::new_v4());
         let now = now_rfc3339();
+        let prov_json = json!({
+            "sourceConversationId": source_conversation_id,
+            "sourceMessageId": source_message_id,
+            "checkpointId": chk_id_opt,
+            "exact": chk_id_opt.is_some(),
+        }).to_string();
+
         db.conn().execute(
             "INSERT INTO chat_branches (
-                id, source_conversation_id, source_message_id, new_conversation_id, branch_name, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                id, source_conversation_id, source_message_id, new_conversation_id, branch_name, created_at, checkpoint_id, provenance_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 id,
                 source_conversation_id,
                 source_message_id,
                 new_conv.id,
                 branch_name,
-                now
+                now,
+                chk_id_opt,
+                prov_json,
             ],
         )?;
 
@@ -560,7 +607,8 @@ pub fn diff_branch(db: &Database, branch_id: &str) -> DbResult<BranchDiffRecord>
 
     for b_surf in &branch_surfs {
         let matching_source = source_surfs.iter().find(|s| {
-            s.name == b_surf.name
+            s.id == b_surf.id
+                || s.name == b_surf.name
                 || b_surf
                     .definition
                     .get("_branchedFrom")
@@ -570,15 +618,7 @@ pub fn diff_branch(db: &Database, branch_id: &str) -> DbResult<BranchDiffRecord>
 
         if let Some(s_surf) = matching_source {
             let changed_comps = diff_surface_components(&s_surf.definition, &b_surf.definition);
-            let mut clean_s = s_surf.definition.clone();
-            let mut clean_b = b_surf.definition.clone();
-            if let Some(obj) = clean_s.as_object_mut() {
-                obj.remove("_branchedFrom");
-            }
-            if let Some(obj) = clean_b.as_object_mut() {
-                obj.remove("_branchedFrom");
-            }
-            let status = if changed_comps.is_empty() && clean_s == clean_b {
+            let status = if changed_comps.is_empty() {
                 "identical".to_string()
             } else {
                 "modified".to_string()
@@ -601,7 +641,8 @@ pub fn diff_branch(db: &Database, branch_id: &str) -> DbResult<BranchDiffRecord>
 
     for s_surf in &source_surfs {
         let matching_branch = branch_surfs.iter().any(|b| {
-            b.name == s_surf.name
+            b.id == s_surf.id
+                || b.name == s_surf.name
                 || b.definition.get("_branchedFrom").and_then(|v| v.as_str())
                     == Some(&s_surf.instance_id)
         });
@@ -628,16 +669,27 @@ pub fn diff_branch(db: &Database, branch_id: &str) -> DbResult<BranchDiffRecord>
     })
 }
 
+fn extract_components(def: &Value) -> Vec<&Value> {
+    if let Some(sections) = def.get("sections").and_then(|v| v.as_array()) {
+        let mut res = Vec::new();
+        for sec in sections {
+            if let Some(comps) = sec.get("components").and_then(|v| v.as_array()) {
+                res.extend(comps.iter());
+            }
+        }
+        if !res.is_empty() {
+            return res;
+        }
+    }
+    if let Some(arr) = def.get("components").and_then(|v| v.as_array()) {
+        return arr.iter().collect();
+    }
+    vec![]
+}
+
 fn diff_surface_components(def_a: &Value, def_b: &Value) -> Vec<String> {
-    let empty = vec![];
-    let comps_a = def_a
-        .get("components")
-        .and_then(|v| v.as_array())
-        .unwrap_or(&empty);
-    let comps_b = def_b
-        .get("components")
-        .and_then(|v| v.as_array())
-        .unwrap_or(&empty);
+    let comps_a = extract_components(def_a);
+    let comps_b = extract_components(def_b);
 
     let mut changed = Vec::new();
     let mut map_a = std::collections::HashMap::new();

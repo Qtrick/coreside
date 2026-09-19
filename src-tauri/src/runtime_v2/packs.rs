@@ -311,19 +311,26 @@ pub fn validate_definition_components_for_packs(
     allowed_pack_ids: &[String],
 ) -> Result<(), String> {
     let mut all_components = Vec::new();
-    if let Some(components_val) = definition.get("components") {
+    let has_sections = definition
+        .get("sections")
+        .and_then(|v| v.as_array())
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
+
+    if has_sections {
+        if let Some(sections_val) = definition.get("sections").and_then(|v| v.as_array()) {
+            for section in sections_val {
+                if let Some(sec_comps) = section.get("components") {
+                    let comps: Vec<crate::ai::ToolComponent> = serde_json::from_value(sec_comps.clone())
+                        .map_err(|e| format!("invalid section component definition: {e}"))?;
+                    all_components.extend(comps);
+                }
+            }
+        }
+    } else if let Some(components_val) = definition.get("components") {
         let components: Vec<crate::ai::ToolComponent> = serde_json::from_value(components_val.clone())
             .map_err(|e| format!("invalid component definition: {e}"))?;
         all_components.extend(components);
-    }
-    if let Some(sections_val) = definition.get("sections").and_then(|v| v.as_array()) {
-        for section in sections_val {
-            if let Some(sec_comps) = section.get("components") {
-                let comps: Vec<crate::ai::ToolComponent> = serde_json::from_value(sec_comps.clone())
-                    .map_err(|e| format!("invalid section component definition: {e}"))?;
-                all_components.extend(comps);
-            }
-        }
     }
     if all_components.is_empty() {
         return Ok(());

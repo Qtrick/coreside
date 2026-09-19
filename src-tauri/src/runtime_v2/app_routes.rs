@@ -94,6 +94,47 @@ pub fn navigate_route(
     route_params: &Value,
     push_history: bool,
 ) -> DbResult<NavigateResult> {
+    // 1. Bound route params
+    let params_str = route_params.to_string();
+    if params_str.len() > 16384 {
+        return Err(DbError::Invalid(
+            "Route parameters exceed maximum allowed size of 16KB".to_string(),
+        ));
+    }
+    if route_id.trim().is_empty() || route_id.len() > 128 {
+        return Err(DbError::Invalid("Invalid route id".to_string()));
+    }
+
+    // 2. Validate route membership against manifest if manifest exists
+    if let Ok(manifest_rec) = crate::application_kernel::manifest::get_manifest(db, application_id) {
+        if !manifest_rec.manifest.routes.is_empty() {
+            let matching_route = manifest_rec
+                .manifest
+                .routes
+                .iter()
+                .find(|r| r.route_id == route_id);
+            match matching_route {
+                None => {
+                    return Err(DbError::Invalid(format!(
+                        "Route '{route_id}' is not declared in application '{application_id}' manifest"
+                    )));
+                }
+                Some(r) => {
+                    if let Some(ref surface_id) = r.surface_id {
+                        // Check surface ownership
+                        if let Ok(surf) = crate::runtime_v2::surfaces::get_surface(db, surface_id) {
+                            if surf.tool_id.as_deref() != Some(application_id) || surf.archived {
+                                return Err(DbError::Invalid(format!(
+                                    "Surface '{surface_id}' for route '{route_id}' does not belong to application or is archived"
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let existing = get_route_state(db, application_id, window_id).ok();
     if let Some(ref state) = existing {
         let same_route = state.current_route_id.as_deref() == Some(route_id);
@@ -112,15 +153,7 @@ pub fn navigate_route(
         .unwrap_or_default();
     let mut index = existing.as_ref().map(|s| s.history_index).unwrap_or(0);
     if push_history {
-        if let Some(ref state) = existing {
-            if let Some(cur) = state.current_route_id.as_ref() {
-                history.truncate((index + 1) as usize);
-                history.push(json!({
-                    "routeId": cur,
-                    "params": state.route_params,
-                }));
-            }
-        }
+        history.truncate((index + 1).max(0) as usize);
         history.push(json!({
             "routeId": route_id,
             "params": route_params,
@@ -148,16 +181,123 @@ pub fn navigate_route(
     })
 }
 
+pub fn route_back(
+    db: &mut Database,
+    application_id: &str,
+    window_id: &str,
+) -> DbResult<NavigateResult> {
+    let state = get_route_state(db, application_id, window_id)?;
+    if state.history_index <= 0 || state.history.is_empty() {
+        return Ok(NavigateResult {
+            state,
+            changed: false,
+        });
+    }
+    let new_index = (state.history_index - 1) as usize;
+    if let Some(target) = state.history.get(new_index) {
+        let route_id = target
+            .get("routeId")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let params = target.get("params").cloned().unwrap_or(json!({}));
+        let updated = set_route_state(
+            db,
+            application_id,
+            window_id,
+            Some(route_id),
+            &params,
+            &state.history,
+            new_index as i64,
+        )?;
+        Ok(NavigateResult {
+            state: updated,
+            changed: true,
+        })
+    } else {
+        Ok(NavigateResult {
+            state,
+            changed: false,
+        })
+    }
+}
+
+pub fn route_forward(
+    db: &mut Database,
+    application_id: &str,
+    window_id: &str,
+) -> DbResult<NavigateResult> {
+    let state = get_route_state(db, application_id, window_id)?;
+    let max_index = (state.history.len() as i64) - 1;
+    if state.history_index >= max_index || state.history.is_empty() {
+        return Ok(NavigateResult {
+            state,
+            changed: false,
+        });
+    }
+    let new_index = (state.history_index + 1) as usize;
+    if let Some(target) = state.history.get(new_index) {
+        let route_id = target
+            .get("routeId")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let params = target.get("params").cloned().unwrap_or(json!({}));
+        let updated = set_route_state(
+            db,
+            application_id,
+            window_id,
+            Some(route_id),
+            &params,
+            &state.history,
+            new_index as i64,
+        )?;
+        Ok(NavigateResult {
+            state: updated,
+            changed: true,
+        })
+    } else {
+        Ok(NavigateResult {
+            state,
+            changed: false,
+        })
+    }
+}
+
+pub fn ensure_initial_route(
+    db: &mut Database,
+    application_id: &str,
+    window_id: &str,
+) -> DbResult<RouteState> {
+    if let Ok(state) = get_route_state(db, application_id, window_id) {
+        if state.current_route_id.is_some() {
+            return Ok(state);
+        }
+    }
+    let initial_route_id =
+        if let Ok(rec) = crate::application_kernel::manifest::get_manifest(db, application_id) {
+            rec.manifest.routes.first().map(|r| r.route_id.clone())
+        } else {
+            None
+        };
+    let route_id = initial_route_id.unwrap_or_else(|| "main".to_string());
+    navigate_route(db, application_id, window_id, &route_id, &json!({}), false).map(|r| r.state)
+}
+
 fn parse_route_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RouteState> {
     let params_json: String = row.get(4)?;
     let history_json: String = row.get(5)?;
+    let route_params: Value = serde_json::from_str(&params_json).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(e))
+    })?;
+    let history: Vec<Value> = serde_json::from_str(&history_json).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(e))
+    })?;
     Ok(RouteState {
         id: row.get(0)?,
         application_id: row.get(1)?,
         window_id: row.get(2)?,
         current_route_id: row.get(3)?,
-        route_params: serde_json::from_str(&params_json).unwrap_or(json!({})),
-        history: serde_json::from_str(&history_json).unwrap_or_default(),
+        route_params,
+        history,
         history_index: row.get(6)?,
         updated_at: row.get(7)?,
     })
@@ -184,5 +324,28 @@ mod tests {
             navigate_route(&mut db, "app-1", "main", "settings", &json!({}), true).unwrap();
         assert!(result2.changed);
         assert_eq!(result2.state.current_route_id.as_deref(), Some("settings"));
+    }
+
+    #[test]
+    fn route_back_and_forward() {
+        let mut db = test_db();
+        navigate_route(&mut db, "app-1", "main", "step1", &json!({}), true).unwrap();
+        navigate_route(&mut db, "app-1", "main", "step2", &json!({}), true).unwrap();
+        navigate_route(&mut db, "app-1", "main", "step3", &json!({}), true).unwrap();
+
+        let back1 = route_back(&mut db, "app-1", "main").unwrap();
+        assert!(back1.changed);
+        assert_eq!(back1.state.current_route_id.as_deref(), Some("step2"));
+
+        let back2 = route_back(&mut db, "app-1", "main").unwrap();
+        assert!(back2.changed);
+        assert_eq!(back2.state.current_route_id.as_deref(), Some("step1"));
+
+        let back3 = route_back(&mut db, "app-1", "main").unwrap();
+        assert!(!back3.changed);
+
+        let fwd1 = route_forward(&mut db, "app-1", "main").unwrap();
+        assert!(fwd1.changed);
+        assert_eq!(fwd1.state.current_route_id.as_deref(), Some("step2"));
     }
 }

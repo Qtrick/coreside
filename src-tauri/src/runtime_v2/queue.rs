@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::limits::MAX_QUEUED_TURNS;
 use crate::db::{now_rfc3339, Database, DbError, DbResult};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -63,7 +63,9 @@ pub fn get_item(db: &Database, id: &str) -> DbResult<QueueItem> {
                     conversation_id: row.get(1)?,
                     priority: row.get(2)?,
                     status: row.get(3)?,
-                    prompt: serde_json::from_str(&prompt_json).unwrap_or(Value::Null),
+                    prompt: serde_json::from_str(&prompt_json).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(e))
+                    })?,
                     created_at: row.get(5)?,
                     started_at: row.get(6)?,
                     finished_at: row.get(7)?,
@@ -187,15 +189,59 @@ pub fn remove_queued(db: &mut Database, id: &str) -> DbResult<()> {
     Ok(())
 }
 
-/// Recover stale active items after crash (mark failed so queue can proceed).
+/// Recover stale active items after crash by reconciling against the turn journal:
+/// - if turn reached committed/published: mark queue item completed (prevents duplicate execution)
+/// - if turn was only created/claimed: requeue so turn can be safely processed
+/// - otherwise: mark failed after interruption
 pub fn recover_stale_active(db: &mut Database) -> DbResult<u64> {
     let now = now_rfc3339();
-    let n = db.conn().execute(
-        "UPDATE agent_request_queue SET status = 'failed', finished_at = ?1,
-         error_message = 'recovered after interruption' WHERE status = 'active'",
-        [now],
+    let mut stmt = db.conn().prepare(
+        "SELECT id, conversation_id FROM agent_request_queue WHERE status = 'active'",
     )?;
-    Ok(n as u64)
+    let active_items: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut recovered = 0u64;
+    for (item_id, conv_id) in active_items {
+        // Check linked turn journal in this conversation
+        let latest_turn_state: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT state FROM turn_journal WHERE conversation_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                [&conv_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+
+        match latest_turn_state.as_deref() {
+            Some("committed") | Some("published") => {
+                // The turn committed successfully before restart; mark completed
+                db.conn().execute(
+                    "UPDATE agent_request_queue SET status = 'completed', finished_at = ?1 WHERE id = ?2 AND status = 'active'",
+                    params![now, item_id],
+                )?;
+                recovered += 1;
+            }
+            Some("created") | Some("claimed") => {
+                // The turn was only claimed or created but provider never started; safe to requeue
+                db.conn().execute(
+                    "UPDATE agent_request_queue SET status = 'queued', started_at = NULL WHERE id = ?1 AND status = 'active'",
+                    params![item_id],
+                )?;
+                recovered += 1;
+            }
+            _ => {
+                // Provider was started / streaming / failed or turn journal absent; mark failed with reason
+                db.conn().execute(
+                    "UPDATE agent_request_queue SET status = 'failed', finished_at = ?1, error_message = 'recovered after interruption' WHERE id = ?2 AND status = 'active'",
+                    params![now, item_id],
+                )?;
+                recovered += 1;
+            }
+        }
+    }
+    Ok(recovered)
 }
 
 #[cfg(test)]

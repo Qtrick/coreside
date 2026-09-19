@@ -52,11 +52,29 @@ export function AppRouteShell({
   onSubmitToAgent,
   onPendingApproval,
 }: AppRouteShellProps) {
+  const isPreview = mode === "preview";
   const routes = useMemo(() => manifest?.routes ?? [], [manifest?.routes]);
   const [routeState, setRouteState] = useState<RouteState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [perSurfaceState, setPerSurfaceState] = useState<Record<string, ToolState>>({});
 
   const loadRouteState = useCallback(async () => {
+    if (isPreview) {
+      const first = routes[0];
+      if (first) {
+        setRouteState({
+          id: "preview-route-state",
+          applicationId,
+          windowId: "preview",
+          currentRouteId: first.routeId,
+          routeParams: {},
+          history: [{ routeId: first.routeId, params: {} }],
+          historyIndex: 0,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      return;
+    }
     try {
       const next = await api.getRouteState(applicationId);
       setRouteState(next);
@@ -76,7 +94,7 @@ export function AppRouteShell({
       });
       setRouteState(seeded);
     }
-  }, [applicationId, routes]);
+  }, [applicationId, isPreview, routes]);
 
   useEffect(() => {
     if (!routes.length) return;
@@ -93,6 +111,24 @@ export function AppRouteShell({
         routeParams,
       )
     ) {
+      return;
+    }
+    if (isPreview) {
+      setRouteState((prev) => {
+        if (!prev) return null;
+        const newHistory = [
+          ...prev.history.slice(0, prev.historyIndex + 1),
+          { routeId, params: routeParams },
+        ];
+        return {
+          ...prev,
+          currentRouteId: routeId,
+          routeParams,
+          history: newHistory,
+          historyIndex: newHistory.length - 1,
+          updatedAt: new Date().toISOString(),
+        };
+      });
       return;
     }
     const result = await api.navigateRoute({
@@ -113,6 +149,19 @@ export function AppRouteShell({
       params?: Record<string, unknown>;
     };
     if (!entry?.routeId) return;
+    if (isPreview) {
+      setRouteState((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          currentRouteId: entry.routeId!,
+          routeParams: entry.params ?? {},
+          historyIndex: nextIndex,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+      return;
+    }
     const next = await api.setRouteState({
       applicationId,
       currentRouteId: entry.routeId,
@@ -136,6 +185,19 @@ export function AppRouteShell({
       params?: Record<string, unknown>;
     };
     if (!entry?.routeId) return;
+    if (isPreview) {
+      setRouteState((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          currentRouteId: entry.routeId!,
+          routeParams: entry.params ?? {},
+          historyIndex: nextIndex,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+      return;
+    }
     const next = await api.setRouteState({
       applicationId,
       currentRouteId: entry.routeId,
@@ -154,9 +216,51 @@ export function AppRouteShell({
   const activeTool =
     (activeRoute?.surfaceId && surfacesById[activeRoute.surfaceId]) ||
     (activeRoute?.surfaceId && surfacesById[surfaceIdForTool(activeRoute.surfaceId)]) ||
-    Object.values(surfacesById)[0] ||
     null;
-  const routeSurfaceId = activeRoute?.surfaceId ?? surfaceId ?? activeTool?.id;
+  const routeSurfaceId = activeRoute?.surfaceId ?? surfaceId ?? activeTool?.id ?? "";
+
+  // Multi-route state: load and scope state per active surface
+  useEffect(() => {
+    if (!routeSurfaceId || isPreview) return;
+    let cancelled = false;
+    void api.getSurfaceState(routeSurfaceId).then((st) => {
+      if (!cancelled && st && typeof st === "object") {
+        setPerSurfaceState((prev) => ({ ...prev, [routeSurfaceId]: st }));
+      }
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [routeSurfaceId, isPreview]);
+
+  const currentScopedState = useMemo(() => {
+    if (routeSurfaceId && perSurfaceState[routeSurfaceId]) {
+      return perSurfaceState[routeSurfaceId];
+    }
+    return state;
+  }, [routeSurfaceId, perSurfaceState, state]);
+
+  const handleRouteStateChange = useCallback(
+    (nextState: ToolState) => {
+      if (routeSurfaceId) {
+        setPerSurfaceState((prev) => ({ ...prev, [routeSurfaceId]: nextState }));
+      }
+      onStateChange(nextState);
+    },
+    [routeSurfaceId, onStateChange],
+  );
+
+  const handleRoutePersistState = useCallback(
+    async (nextState: ToolState) => {
+      if (routeSurfaceId && !isPreview) {
+        await api.saveSurfaceState(routeSurfaceId, nextState).catch(() => {});
+      }
+      if (onPersistState) {
+        await onPersistState(nextState);
+      }
+    },
+    [routeSurfaceId, isPreview, onPersistState],
+  );
 
   return (
     <div className="app-route-shell" data-application-id={applicationId}>
@@ -203,9 +307,9 @@ export function AppRouteShell({
       {activeTool ? (
         <ToolRenderer
           tool={activeTool}
-          state={state}
-          onStateChange={onStateChange}
-          onPersistState={onPersistState}
+          state={currentScopedState}
+          onStateChange={handleRouteStateChange}
+          onPersistState={handleRoutePersistState}
           onSubmitToAgent={onSubmitToAgent}
           applicationId={applicationId}
           surfaceId={routeSurfaceId}

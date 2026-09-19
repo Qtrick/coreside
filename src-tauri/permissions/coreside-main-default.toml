@@ -57,6 +57,7 @@ permissions = [
   "allow-get-bootstrap-status",
   "allow-get-chat-attachment-src",
   "allow-get-continuity-cmd",
+  "allow-get-conversation-events-cmd",
   "allow-get-crawler-cache-stats",
   "allow-get-crawler-installation",
   "allow-get-crawler-status",

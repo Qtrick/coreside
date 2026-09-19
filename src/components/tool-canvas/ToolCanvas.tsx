@@ -18,6 +18,8 @@ import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
 import { classifyToolHeaderDensity } from "@/lib/layout-mode";
 import { surfaceIdForTool } from "@/lib/surface-ops";
 import type { ToolDefinition } from "@/types/tool";
+import type { SurfaceRecord } from "@/types/runtime-v2";
+import { toToolDefinition, SoftwareDocumentSchema } from "@/lib/software-document";
 import type {
   ActionOutcome,
   ManifestRecord,
@@ -25,6 +27,25 @@ import type {
 } from "@/types/application-kernel";
 import { useAppStore } from "@/stores/app-store";
 import { getPreviewOverlayForTool } from "@/lib/preview/surface-overlay";
+
+function asToolDefinition(surface: SurfaceRecord): ToolDefinition {
+  const def = surface.definition as Record<string, unknown>;
+  if (def && Array.isArray(def.sections) && !("components" in def)) {
+    const parsed = SoftwareDocumentSchema.safeParse(def);
+    if (parsed.success) {
+      return toToolDefinition(parsed.data);
+    }
+  }
+  const toolDef = def as ToolDefinition;
+  return {
+    id: (toolDef.id as string) || surface.id,
+    name: (toolDef.name as string) || surface.name || "Application",
+    description: (toolDef.description as string) ?? "",
+    layout: (toolDef.layout as ToolDefinition["layout"]) ?? { type: "single-column" },
+    components: Array.isArray(toolDef.components) ? toolDef.components : [],
+    version: surface.currentRevision,
+  };
+}
 
 function isApplicationUnavailable(
   record: ManifestRecord | null,
@@ -90,6 +111,9 @@ export function ToolCanvas() {
   const navigateToSettings = useAppStore((s) => s.navigateToSettings);
   const [manifestRecord, setManifestRecord] = useState<ManifestRecord | null>(null);
   const [recovery, setRecovery] = useState<RecoveryState | null>(null);
+  const [canonicalSurface, setCanonicalSurface] = useState<SurfaceRecord | null>(null);
+  const [canonicalState, setCanonicalState] = useState<Record<string, unknown> | null>(null);
+  const [canonicalRevision, setCanonicalRevision] = useState<number>(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [canvasError, setCanvasError] = useState<string | null>(null);
   const [isCustomizing, setIsCustomizing] = useState(false);
@@ -138,19 +162,69 @@ export function ToolCanvas() {
     [manifestRecord, recovery],
   );
 
+  useEffect(() => {
+    if (!activeTool) {
+      setCanonicalSurface(null);
+      setCanonicalState(null);
+      setCanonicalRevision(0);
+      return;
+    }
+    const sid = surfaceIdForTool(activeTool.id);
+    let cancelled = false;
+    void Promise.all([
+      api.getSurface(sid).catch(() => null),
+      api.getSurfaceState(sid).catch(() => null),
+    ]).then(([surf, st]) => {
+      if (cancelled) return;
+      if (surf) {
+        setCanonicalSurface(surf);
+        setCanonicalState(st ?? {});
+        setCanonicalRevision(surf.currentRevision ?? 0);
+      } else {
+        setCanonicalSurface(null);
+        setCanonicalState(null);
+        setCanonicalRevision(0);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTool?.id]);
+
   const onStateChange = useCallback(
     (state: Record<string, unknown>) => {
-      void updateToolState(state, true);
+      if (canonicalSurface && activeTool) {
+        setCanonicalState(state);
+      } else {
+        void updateToolState(state, true);
+      }
     },
-    [updateToolState],
+    [canonicalSurface, activeTool, updateToolState],
   );
 
   const onPersistState = useCallback(
     async (state: Record<string, unknown>) => {
-      await updateToolState(state, true);
-      await flushToolState(activeTool?.id);
+      if (canonicalSurface && activeTool) {
+        setCanonicalState(state);
+        const sid = surfaceIdForTool(activeTool.id);
+        try {
+          const rev = await api.saveSurfaceState(sid, state, canonicalRevision);
+          setCanonicalRevision(rev);
+        } catch (err) {
+          const [freshSurf, freshState] = await Promise.all([
+            api.getSurface(sid).catch(() => null),
+            api.getSurfaceState(sid).catch(() => null),
+          ]);
+          if (freshSurf) setCanonicalRevision(freshSurf.currentRevision ?? 0);
+          if (freshState) setCanonicalState(freshState);
+          throw err;
+        }
+      } else {
+        await updateToolState(state, true);
+        await flushToolState(activeTool?.id);
+      }
     },
-    [updateToolState, flushToolState, activeTool?.id],
+    [canonicalSurface, activeTool, canonicalRevision, updateToolState, flushToolState],
   );
 
   useEffect(() => {
@@ -280,8 +354,11 @@ export function ToolCanvas() {
       ),
     [previewSurfacesByKey, activeTool?.id, activeConversationId],
   );
-  const renderTool = previewOverlay?.tool ?? activeTool;
-  const renderState = previewOverlay?.state ?? toolState;
+  const canonicalDef = canonicalSurface ? asToolDefinition(canonicalSurface) : null;
+  const renderTool = previewOverlay?.tool ?? canonicalDef ?? activeTool;
+  const renderState =
+    previewOverlay?.state ??
+    (canonicalSurface && canonicalState ? canonicalState : toolState);
   const isPreviewPaint = Boolean(previewOverlay);
 
   const surfacesById = useMemo(() => {

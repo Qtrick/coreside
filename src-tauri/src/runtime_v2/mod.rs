@@ -30,7 +30,8 @@ pub use software_document::{
 
 #[allow(unused_imports)]
 pub use app_routes::{
-    get_route_state, navigate_route, set_route_state, NavigateResult, RouteState,
+    ensure_initial_route, get_route_state, navigate_route, route_back, route_forward,
+    set_route_state, NavigateResult, RouteState,
 };
 #[allow(unused_imports)]
 pub use branch::{
@@ -117,9 +118,10 @@ pub use transactions::{
 };
 #[allow(unused_imports)]
 pub use turn_journal::{
-    begin_retry_attempt, compact_turn_journal, create_turn, get_turn, get_turn_by_idempotency,
-    list_conversation_recoverable_turns, list_recoverable_turns, mark_interrupted_in_flight,
-    transition_turn, TurnJournalRecord, TurnPatch, TurnState,
+    begin_retry_attempt, compact_turn_journal, create_turn, get_conversation_events, get_turn,
+    get_turn_by_idempotency, list_conversation_recoverable_turns, list_recoverable_turns,
+    mark_interrupted_in_flight, transition_turn, ConversationEventRecord, TurnJournalRecord,
+    TurnPatch, TurnState,
 };
 pub use turn_timeline::{
     list_turn_timeline_events, try_append_turn_timeline_event, TurnTimelineEvent,

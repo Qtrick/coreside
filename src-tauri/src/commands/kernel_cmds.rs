@@ -587,6 +587,8 @@ pub fn kernel_invoke_registered_action(
                         "Cross-project surface action invocation rejected",
                     ));
                 }
+            } else if let Some(ref pid) = manifest_rec.manifest.project_id {
+                request.project_id = Some(pid.clone());
             }
             if let Some(ref conv_id) = request.conversation_id {
                 if surface.conversation_id.as_deref().is_some_and(|c| c != conv_id) {
@@ -595,17 +597,22 @@ pub fn kernel_invoke_registered_action(
                         "Cross-conversation surface action invocation rejected",
                     ));
                 }
+            } else if let Some(ref cid) = manifest_rec.manifest.conversation_id {
+                request.conversation_id = Some(cid.clone());
             }
             if let Some(ref comp_id) = request.component_id {
-                if let Ok(doc) =
-                    crate::runtime_v2::SoftwareDocument::from_value(&surface.definition)
-                {
-                    if doc.find_component(comp_id).is_none() {
-                        return Err(CommandError::new(
-                            "forbidden",
-                            "Component does not belong to surface",
-                        ));
-                    }
+                let doc = crate::runtime_v2::SoftwareDocument::from_value(&surface.definition)
+                    .map_err(|e| {
+                        CommandError::new(
+                            "malformed_surface",
+                            format!("Surface definition is malformed: {e}"),
+                        )
+                    })?;
+                if doc.find_component(comp_id).is_none() {
+                    return Err(CommandError::new(
+                        "forbidden",
+                        "Component does not belong to surface",
+                    ));
                 }
             }
         }

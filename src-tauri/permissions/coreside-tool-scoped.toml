@@ -19,5 +19,10 @@ permissions = [
   # Read-only appearance/theme for tool chrome (set_setting stays denied via allowlist).
   "allow-get-settings",
   # Conversation-scoped Sync/Conflict (avoids process-wide agent-turn when subscribed).
-  "allow-subscribe-conversation-sync"
+  "allow-subscribe-conversation-sync",
+  # Scoped route state query and navigation for tool window
+  "allow-get-route-state-cmd",
+  "allow-navigate-route-cmd",
+  # Scoped conversation events
+  "allow-get-conversation-events-cmd"
 ]

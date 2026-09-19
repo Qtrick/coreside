@@ -1,7 +1,7 @@
 //! Surface persistence and lifecycle.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::limits::{
@@ -170,15 +170,46 @@ pub fn create_inline_surface(
     definition: &Value,
     packs: &[String],
 ) -> DbResult<SurfaceRecord> {
+    // Normalize incoming definition to canonical SoftwareDocument
+    let mut def_obj = definition.clone();
+    if let Some(obj) = def_obj.as_object_mut() {
+        if !obj.contains_key("id") {
+            obj.insert("id".into(), json!(Uuid::new_v4().to_string()));
+        }
+        if !obj.contains_key("name") {
+            obj.insert("name".into(), json!(name));
+        }
+    }
+    let mut doc = if definition.get("sections").is_some() || definition.get("schemaVersion").is_some() {
+        super::software_document::SoftwareDocument::from_value(definition)
+            .map_err(|e| DbError::Invalid(format!("malformed software document: {e}")))?
+    } else {
+        let tool_def: ToolDefinition = serde_json::from_value(def_obj)
+            .map_err(|e| DbError::Invalid(format!("malformed surface definition: {e}")))?;
+        super::software_document::SoftwareDocument::from_tool_definition(&tool_def)
+    };
+    doc.sync_components();
+    if doc.title.is_empty() && !name.is_empty() {
+        doc.title = name.to_string();
+    }
     let supplied_packs = normalize_capability_packs(packs).map_err(DbError::Invalid)?;
+    let doc_value = serde_json::to_value(&doc)?;
     let effective_packs = if packs.is_empty() {
-        required_packs_for_definition(definition).map_err(DbError::Invalid)?
+        if !doc.capability_packs.is_empty() {
+            normalize_capability_packs(&doc.capability_packs).map_err(DbError::Invalid)?
+        } else {
+            required_packs_for_definition(&doc_value).map_err(DbError::Invalid)?
+        }
     } else {
         supplied_packs
     };
-    validate_definition_components_for_packs(definition, &effective_packs)
+    doc.capability_packs = effective_packs.clone();
+    super::software_document::admit_software_document(None, &doc, &effective_packs)
+        .map_err(|e| DbError::Invalid(format!("software document admission failed: {e}")))?;
+    let def_value = serde_json::to_value(&doc)?;
+    validate_definition_components_for_packs(&def_value, &effective_packs)
         .map_err(DbError::Invalid)?;
-    let def_json = serde_json::to_string(definition)?;
+    let def_json = serde_json::to_string(&doc)?;
     if def_json.len() > MAX_DEFINITION_JSON_BYTES {
         return Err(DbError::Invalid("surface definition too large".into()));
     }
@@ -589,6 +620,140 @@ pub fn save_surface_state(db: &mut Database, surface_id: &str, state: &Value) ->
     Ok(())
 }
 
+/// Optimistic concurrency control save with atomic CAS condition on state_revision.
+pub fn save_surface_state_occ(
+    db: &mut Database,
+    surface_id: &str,
+    state: &Value,
+    expected_revision: i64,
+) -> DbResult<i64> {
+    if !state.is_object() {
+        return Err(DbError::Invalid("surface state must be a JSON object".into()));
+    }
+    let _: String = db
+        .conn()
+        .query_row("SELECT id FROM surfaces WHERE id = ?1", [surface_id], |r| {
+            r.get(0)
+        })
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                DbError::NotFound(format!("surface {surface_id}"))
+            }
+            other => DbError::Sqlite(other),
+        })?;
+    let state_json = state.to_string();
+    if state_json.len() > MAX_STATE_JSON_BYTES {
+        return Err(DbError::Invalid("surface state too large".into()));
+    }
+    let now = now_rfc3339();
+    let rows = db.conn().execute(
+        "UPDATE surface_state SET state_json = ?1, state_revision = state_revision + 1, updated_at = ?2
+         WHERE surface_id = ?3 AND state_revision = ?4",
+        params![state_json, now, surface_id, expected_revision],
+    )?;
+    if rows == 0 {
+        let current_rev: Option<i64> = db
+            .conn()
+            .query_row(
+                "SELECT state_revision FROM surface_state WHERE surface_id = ?1",
+                [surface_id],
+                |r| r.get(0),
+            )
+            .optional_compat()?;
+        match current_rev {
+            Some(actual) => {
+                return Err(DbError::Conflict(format!(
+                    "state revision conflict on surface '{surface_id}': expected revision {expected_revision}, current revision {actual}"
+                )));
+            }
+            None => {
+                if expected_revision <= 1 {
+                    db.conn().execute(
+                        "INSERT INTO surface_state (surface_id, state_json, state_revision, updated_at)
+                         VALUES (?1, ?2, 1, ?3)",
+                        params![surface_id, state_json, now],
+                    )?;
+                    return Ok(1);
+                } else {
+                    return Err(DbError::Conflict(format!(
+                        "state revision conflict on surface '{surface_id}': expected revision {expected_revision}, but state does not exist"
+                    )));
+                }
+            }
+        }
+    }
+    Ok(expected_revision + 1)
+}
+
+/// User UI state save with contract authorization, opaque state preservation, and OCC.
+pub fn save_surface_state_user_cas(
+    db: &mut Database,
+    surface_id: &str,
+    expected_revision: Option<i64>,
+    patch_or_state: &Value,
+) -> DbResult<(Value, i64)> {
+    if !patch_or_state.is_object() {
+        return Err(DbError::Invalid("surface state must be a JSON object".into()));
+    }
+    let surface = get_surface(db, surface_id)?;
+    let (mut current_state, current_rev) = get_surface_state_with_revision(db, surface_id)?;
+    let exp_rev = match expected_revision {
+        Some(r) => {
+            if r != current_rev {
+                return Err(DbError::Conflict(format!(
+                    "state revision conflict on surface '{surface_id}': expected {r}, current {current_rev}"
+                )));
+            }
+            r
+        }
+        None => current_rev,
+    };
+
+    // If surface has SoftwareDocument, enforce contracts and protect opaque keys
+    if let Ok(doc) = super::software_document::SoftwareDocument::from_value(&surface.definition) {
+        if let Some(patch_obj) = patch_or_state.as_object() {
+            let cur_obj = current_state.as_object();
+            for (key, _) in patch_obj {
+                let contract = doc.state_contracts.iter().find(|sc| &sc.key == key);
+                match contract {
+                    Some(c) => {
+                        if c.write_policy == "readonly" {
+                            return Err(DbError::Invalid(format!(
+                                "cannot write to readonly state key '{key}' on surface '{surface_id}'"
+                            )));
+                        }
+                    }
+                    None => {
+                        // Key not declared in contracts.
+                        // If it existed already in current_state without a contract, it is opaque!
+                        if cur_obj.map(|o| o.contains_key(key)).unwrap_or(false) {
+                            return Err(DbError::Invalid(format!(
+                                "cannot write to undeclared opaque state key '{key}' on surface '{surface_id}'"
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Merge patch into current_state, preserving all other keys (including opaque keys)
+    if let Some(patch_obj) = patch_or_state.as_object() {
+        if let Some(cur_obj) = current_state.as_object_mut() {
+            for (k, v) in patch_obj {
+                cur_obj.insert(k.clone(), v.clone());
+            }
+        } else {
+            current_state = patch_or_state.clone();
+        }
+    } else {
+        current_state = patch_or_state.clone();
+    }
+
+    let next_rev = save_surface_state_occ(db, surface_id, &current_state, exp_rev)?;
+    Ok((current_state, next_rev))
+}
+
 /// Deep-merge object patches for `state.patch` (preview + durable apply must match).
 pub(crate) fn merge_json_objects(target: &mut Value, patch: &Value) {
     match (target, patch) {
@@ -829,10 +994,12 @@ mod tests {
         let err = update_surface_definition(&mut db, &surface.id, &forbidden, "forbidden", None)
             .unwrap_err();
         assert!(err.to_string().contains("has not been granted"));
-        assert_eq!(
-            get_surface(&db, &surface.id).unwrap().definition,
-            minimal_def("Core only")
-        );
+        let surf_doc = crate::runtime_v2::SoftwareDocument::from_value(
+            &get_surface(&db, &surface.id).unwrap().definition,
+        )
+        .unwrap();
+        assert_eq!(surf_doc.title, "Core only");
+        assert_eq!(surf_doc.sections[0].components[0].id, "title");
 
         // Simulate an older row which predates persisted pack identity. The next
         // safe update derives only the packs its already-trusted definition needs.

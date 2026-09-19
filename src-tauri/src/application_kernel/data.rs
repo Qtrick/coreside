@@ -176,6 +176,23 @@ pub fn get_model(
     serde_json::from_str(&json).map_err(|e| DbError::Invalid(e.to_string()))
 }
 
+pub fn list_models(db: &Database, application_id: &str) -> DbResult<Vec<DataModelDefinition>> {
+    let mut stmt = db.conn().prepare(
+        "SELECT definition_json FROM generated_data_models WHERE application_id = ?1",
+    )?;
+    let rows = stmt.query_map([application_id], |r| {
+        let json_str: String = r.get(0)?;
+        serde_json::from_str(&json_str).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+        })
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
 pub fn create_record(
     db: &mut Database,
     application_id: &str,
@@ -266,7 +283,9 @@ pub fn query_records(
         let data_s: String = row.get(2)?;
         let created: String = row.get(3)?;
         let updated: String = row.get(4)?;
-        let mut data: Value = serde_json::from_str(&data_s).unwrap_or(json!({}));
+        let mut data: Value = serde_json::from_str(&data_s).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(e))
+        })?;
         if let Some(obj) = data.as_object_mut() {
             obj.insert("_id".into(), json!(id));
             obj.insert("_version".into(), json!(version));
@@ -275,7 +294,11 @@ pub fn query_records(
         }
         Ok(data)
     })?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -297,146 +320,166 @@ pub fn apply_migration(
     confirm_destructive: bool,
 ) -> DbResult<String> {
     assert_can_write_data(db, application_id)?;
-    let mut def = get_model(db, application_id, model_id)?;
-    let from = def.schema_version;
-    let impact = match migration.migration_type.as_str() {
-        "add_field" => {
-            let fid = migration
-                .field_id
-                .as_deref()
-                .ok_or_else(|| DbError::Invalid("fieldId required".into()))?;
-            let ftype = migration
-                .field_type
-                .as_deref()
-                .ok_or_else(|| DbError::Invalid("fieldType required".into()))?;
-            def.fields.push(DataField {
-                field_id: fid.into(),
-                field_type: ftype.into(),
-                required: migration.required.unwrap_or(false),
-                default: migration.default.clone(),
-                enum_values: None,
-            });
-            format!("Adds field {fid} to model {model_id}")
-        }
-        "rename_field" => {
-            let old = migration
-                .field_id
-                .as_deref()
-                .ok_or_else(|| DbError::Invalid("fieldId required".into()))?;
-            let new = migration
-                .new_field_id
-                .as_deref()
-                .ok_or_else(|| DbError::Invalid("newFieldId required".into()))?;
-            for f in &mut def.fields {
-                if f.field_id == old {
-                    f.field_id = new.into();
-                }
-            }
-            // Rewrite records
-            let records = query_records(
-                db,
-                application_id,
-                model_id,
-                MAX_GENERATED_RECORDS_PER_QUERY,
-            )?;
-            for mut rec in records {
-                if let Some(obj) = rec.as_object_mut() {
-                    if let Some(v) = obj.remove(old) {
-                        obj.insert(new.into(), v);
-                    }
-                    let id = obj
-                        .get("_id")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| DbError::Invalid("record missing _id".into()))?
-                        .to_string();
-                    obj.remove("_id");
-                    obj.remove("_version");
-                    obj.remove("_createdAt");
-                    obj.remove("_updatedAt");
-                    update_record(db, application_id, &id, json!(obj), None)?;
-                }
-            }
-            format!("Renames {old} to {new}")
-        }
-        "remove_field" => {
-            if !confirm_destructive {
-                return Err(DbError::Invalid(
-                    "destructive migration requires confirmation".into(),
-                ));
-            }
-            let fid = migration
-                .field_id
-                .as_deref()
-                .ok_or_else(|| DbError::Invalid("fieldId required".into()))?;
-            def.fields.retain(|f| f.field_id != fid);
-            format!("Removes field {fid} (destructive)")
-        }
-        other => {
-            return Err(DbError::Invalid(format!(
-                "unsupported migration type: {other}"
-            )))
-        }
-    };
+    let sp_name = format!("sp_mig_{}", Uuid::new_v4().simple());
+    db.conn().execute_batch(&format!("SAVEPOINT {sp_name};"))?;
 
-    def.schema_version = from + 1;
-    validate_model(&def).map_err(DbError::Invalid)?;
-    let mid = format!("mig-{}", Uuid::new_v4());
-    let now = now_rfc3339();
-    // Backup snapshot in rollback_json
-    let backup = serde_json::to_string(&get_model(db, application_id, model_id)?)?;
-    db.conn().execute(
-        "INSERT INTO generated_data_migrations (
-            id, application_id, model_id, from_version, to_version, migration_json,
-            impact_summary, status, rollback_json, applied_at, created_at
-         ) VALUES (?1,?2,?3,?4,?5,?6,?7,'applied',?8,?9,?9)",
-        params![
-            mid,
-            application_id,
-            model_id,
-            from,
-            def.schema_version,
-            serde_json::to_string(migration)?,
-            impact,
-            backup,
-            now
-        ],
-    )?;
-    upsert_model(db, application_id, def)?;
-    // Apply defaults to existing records for add_field
-    if migration.migration_type == "add_field" {
-        if let (Some(fid), Some(default)) = (&migration.field_id, &migration.default) {
-            let records = query_records(
-                db,
-                application_id,
-                model_id,
-                MAX_GENERATED_RECORDS_PER_QUERY,
-            )?;
-            for mut rec in records {
-                if let Some(obj) = rec.as_object_mut() {
-                    if !obj.contains_key(fid) {
-                        // A record without `_id` cannot be rewritten; skip it
-                        // rather than panicking part-way through a migration.
-                        let Some(id) = obj.get("_id").and_then(|v| v.as_str()).map(str::to_string)
-                        else {
-                            tracing::warn!(
-                                application_id,
-                                model_id,
-                                "skipped add_field backfill for a record with no id"
-                            );
-                            continue;
-                        };
-                        obj.insert(fid.clone(), default.clone());
+    let res = (|| -> DbResult<String> {
+        let mut def = get_model(db, application_id, model_id)?;
+        let from = def.schema_version;
+        let impact = match migration.migration_type.as_str() {
+            "add_field" => {
+                let fid = migration
+                    .field_id
+                    .as_deref()
+                    .ok_or_else(|| DbError::Invalid("fieldId required".into()))?;
+                let ftype = migration
+                    .field_type
+                    .as_deref()
+                    .ok_or_else(|| DbError::Invalid("fieldType required".into()))?;
+                if def.fields.iter().any(|f| f.field_id == fid) {
+                    return Err(DbError::Invalid(format!("field {fid} already exists")));
+                }
+                def.fields.push(DataField {
+                    field_id: fid.into(),
+                    field_type: ftype.into(),
+                    required: migration.required.unwrap_or(false),
+                    default: migration.default.clone(),
+                    enum_values: None,
+                });
+                format!("Adds field {fid} ({ftype})")
+            }
+            "rename_field" => {
+                let old = migration
+                    .field_id
+                    .as_deref()
+                    .ok_or_else(|| DbError::Invalid("fieldId required".into()))?;
+                let new = migration
+                    .new_field_id
+                    .as_deref()
+                    .ok_or_else(|| DbError::Invalid("newFieldId required".into()))?;
+                let f = def
+                    .fields
+                    .iter_mut()
+                    .find(|f| f.field_id == old)
+                    .ok_or_else(|| DbError::Invalid(format!("field {old} not found")))?;
+                f.field_id = new.into();
+                // Rewrite records
+                let records = query_records(
+                    db,
+                    application_id,
+                    model_id,
+                    MAX_GENERATED_RECORDS_PER_QUERY,
+                )?;
+                for mut rec in records {
+                    if let Some(obj) = rec.as_object_mut() {
+                        if let Some(v) = obj.remove(old) {
+                            obj.insert(new.into(), v);
+                        }
+                        let id = obj
+                            .get("_id")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| DbError::Invalid("record missing _id".into()))?
+                            .to_string();
                         obj.remove("_id");
                         obj.remove("_version");
                         obj.remove("_createdAt");
                         obj.remove("_updatedAt");
-                        let _ = update_record(db, application_id, &id, json!(obj), None);
+                        update_record(db, application_id, &id, json!(obj), None)?;
+                    }
+                }
+                format!("Renames {old} to {new}")
+            }
+            "remove_field" => {
+                if !confirm_destructive {
+                    return Err(DbError::Invalid(
+                        "destructive migration requires confirmation".into(),
+                    ));
+                }
+                let fid = migration
+                    .field_id
+                    .as_deref()
+                    .ok_or_else(|| DbError::Invalid("fieldId required".into()))?;
+                def.fields.retain(|f| f.field_id != fid);
+                format!("Removes field {fid} (destructive)")
+            }
+            other => {
+                return Err(DbError::Invalid(format!(
+                    "unsupported migration type: {other}"
+                )))
+            }
+        };
+
+        def.schema_version = from + 1;
+        validate_model(&def).map_err(DbError::Invalid)?;
+        let mid = format!("mig-{}", Uuid::new_v4());
+        let now = now_rfc3339();
+        // Backup snapshot in rollback_json
+        let backup = serde_json::to_string(&get_model(db, application_id, model_id)?)?;
+        db.conn().execute(
+            "INSERT INTO generated_data_migrations (
+                id, application_id, model_id, from_version, to_version, migration_json,
+                impact_summary, status, rollback_json, applied_at, created_at
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,'applied',?8,?9,?9)",
+            params![
+                mid,
+                application_id,
+                model_id,
+                from,
+                def.schema_version,
+                serde_json::to_string(migration)?,
+                impact,
+                backup,
+                now
+            ],
+        )?;
+        upsert_model(db, application_id, def)?;
+        // Apply defaults to existing records for add_field
+        if migration.migration_type == "add_field" {
+            if let (Some(fid), Some(default)) = (&migration.field_id, &migration.default) {
+                let records = query_records(
+                    db,
+                    application_id,
+                    model_id,
+                    MAX_GENERATED_RECORDS_PER_QUERY,
+                )?;
+                for mut rec in records {
+                    if let Some(obj) = rec.as_object_mut() {
+                        if !obj.contains_key(fid) {
+                            let id = obj
+                                .get("_id")
+                                .and_then(|v| v.as_str())
+                                .ok_or_else(|| DbError::Invalid("record missing _id".into()))?
+                                .to_string();
+                            obj.insert(fid.clone(), default.clone());
+                            obj.remove("_id");
+                            obj.remove("_version");
+                            obj.remove("_createdAt");
+                            obj.remove("_updatedAt");
+                            update_record(db, application_id, &id, json!(obj), None)?;
+                        }
                     }
                 }
             }
         }
+        Ok(impact)
+    })();
+
+    match res {
+        Ok(impact) => {
+            db.conn()
+                .execute_batch(&format!("RELEASE SAVEPOINT {sp_name};"))?;
+            Ok(impact)
+        }
+        Err(err) => {
+            let _ = db
+                .conn()
+                .execute_batch(&format!("ROLLBACK TO SAVEPOINT {sp_name};"));
+            let _ = db
+                .conn()
+                .execute_batch(&format!("RELEASE SAVEPOINT {sp_name};"));
+            Err(err)
+        }
     }
-    Ok(impact)
 }
 
 pub fn apply_kernel_operations(db: &mut Database, ops: &[AppOperation]) -> DbResult<()> {

@@ -694,8 +694,8 @@ export const api = {
     invoke<import("@/types/runtime-v2").SurfaceRecord>("promote_surface_cmd", {
       surfaceId,
     }),
-  saveSurfaceState: (surfaceId: string, stateJson: ToolState) =>
-    invoke<void>("save_surface_state_cmd", { surfaceId, stateJson }),
+  saveSurfaceState: (surfaceId: string, stateJson: ToolState, expectedStateRevision?: number | null) =>
+    invoke<number>("save_surface_state_cmd", { surfaceId, stateJson, expectedStateRevision: expectedStateRevision ?? null }),
   getSurfaceState: (surfaceId: string) =>
     invoke<ToolState>("get_surface_state_cmd", { surfaceId }),
   getDraft: (surfaceId: string, componentId: string, windowId?: string | null) =>

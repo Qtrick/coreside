@@ -134,10 +134,14 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         "027_secure_runtime_proposals_and_state",
         include_str!("../../migrations/027_secure_runtime_proposals_and_state.sql"),
     ),
+    (
+        "028_deep_runtime_v2_hardening",
+        include_str!("../../migrations/028_deep_runtime_v2_hardening.sql"),
+    ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "027_secure_runtime_proposals_and_state";
+pub const LATEST_MIGRATION: &str = "028_deep_runtime_v2_hardening";
 
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -147,6 +151,8 @@ pub enum DbError {
     Serde(#[from] serde_json::Error),
     #[error("not found: {0}")]
     NotFound(String),
+    #[error("conflict: {0}")]
+    Conflict(String),
     #[error("invalid data: {0}")]
     Invalid(String),
 }
