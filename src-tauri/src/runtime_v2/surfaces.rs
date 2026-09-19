@@ -63,7 +63,6 @@ pub fn upsert_surface_from_tool(
     let now = now_rfc3339();
     let mut def = tool.clone();
     def.normalize_for_frontend();
-    let def_json = serde_json::to_string(&def)?;
     let existing: Option<(String, String, String, String)> = db
         .conn()
         .query_row(
@@ -72,6 +71,28 @@ pub fn upsert_surface_from_tool(
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .optional_compat()?;
+
+    let mut doc = super::software_document::SoftwareDocument::from_tool_definition(&def);
+    if let Some((_, _, _, existing_definition_json)) = existing.as_ref() {
+        if let Ok(existing_doc) = super::software_document::SoftwareDocument::from_value(&serde_json::from_str(existing_definition_json)?) {
+            // Preserve custom section roles/metadata/layout from existing_doc if section id matches
+            for sec in &mut doc.sections {
+                if let Some(existing_sec) = existing_doc.sections.iter().find(|s| s.id == sec.id) {
+                    if existing_sec.role.is_some() {
+                        sec.role = existing_sec.role.clone();
+                    }
+                    if existing_sec.layout.is_some() {
+                        sec.layout = existing_sec.layout.clone();
+                    }
+                    if existing_sec.metadata.is_some() {
+                        sec.metadata = existing_sec.metadata.clone();
+                    }
+                }
+            }
+        }
+    }
+    let persisted_def_value = serde_json::to_value(&doc)?;
+    let def_json = serde_json::to_string(&doc)?;
 
     let instance_id = existing
         .as_ref()
@@ -90,10 +111,10 @@ pub fn upsert_surface_from_tool(
             }
         }
         None => {
-            required_packs_for_definition(&serde_json::to_value(&def)?).map_err(DbError::Invalid)?
+            required_packs_for_definition(&persisted_def_value).map_err(DbError::Invalid)?
         }
     };
-    validate_definition_components_for_packs(&serde_json::to_value(&def)?, &packs)
+    validate_definition_components_for_packs(&persisted_def_value, &packs)
         .map_err(DbError::Invalid)?;
     let packs_json = serde_json::to_string(&packs)?;
 
@@ -439,8 +460,14 @@ pub fn promote_inline_to_tool(
             "only inline surfaces can be promoted".into(),
         ));
     }
-    let mut tool: ToolDefinition = serde_json::from_value(surface.definition.clone())
-        .map_err(|e| DbError::Invalid(e.to_string()))?;
+    let mut tool: ToolDefinition = if surface.definition.get("sections").is_some() {
+        let doc = super::software_document::SoftwareDocument::from_value(&surface.definition)
+            .map_err(|e| DbError::Invalid(format!("invalid software document: {e}")))?;
+        doc.to_tool_definition()
+    } else {
+        serde_json::from_value(surface.definition.clone())
+            .map_err(|e| DbError::Invalid(e.to_string()))?
+    };
     if tool.id.trim().is_empty() {
         tool.id = format!("tool-{}", Uuid::new_v4());
     }

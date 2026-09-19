@@ -251,6 +251,7 @@ type AppStore = {
   /** @deprecated Prefer navigateToChat */
   selectConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
+  branchConversation: (sourceMessageId: string, branchName?: string) => Promise<void>;
 
   refreshTools: () => Promise<void>;
   selectTool: (id: string | null) => Promise<void>;
@@ -1840,6 +1841,25 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
+  branchConversation: async (sourceMessageId, branchName) => {
+    const activeConvId = get().activeConversationId;
+    if (!activeConvId) return;
+    try {
+      const res = (await api.branchConversation({
+        sourceConversationId: activeConvId,
+        sourceMessageId,
+        branchName,
+      })) as [{ newConversationId?: string } | null, unknown];
+      const newConvId = res?.[0]?.newConversationId;
+      await get().refreshConversations();
+      if (newConvId) {
+        await get().navigateToChat(newConvId);
+      }
+    } catch (err) {
+      console.error("Failed to branch conversation:", err);
+    }
+  },
+
   refreshTools: async () => {
     const tools = await api.listTools();
     set({ tools });
@@ -2539,9 +2559,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   applyPendingKernelProposal: async () => {
     const pending = get().pendingKernelProposal;
-    if (!pending || pending.operations.length === 0) return;
+    if (!pending) return;
     try {
       const result = await api.kernelApplyChange({
+        proposalId: pending.proposalId,
         summary: pending.summary,
         operations: pending.operations,
         silent: false,

@@ -582,6 +582,7 @@ pub fn apply_operations_cmd(
         &mut db,
         Some(&mut bus),
         crate::application_kernel::ChangeRequest {
+            proposal_id: None,
             conversation_id: args.conversation_id.clone(),
             project_id: args.project_id.clone(),
             turn_id: args.turn_id.clone(),

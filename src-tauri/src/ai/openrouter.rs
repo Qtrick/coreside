@@ -3,17 +3,21 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
 use super::errors::AiError;
 use super::provider::{
-    AgentMessage, AgentRequest, AgentResponse, AiProvider, ProviderHealth, UsageMetadata,
+    AgentMessage, AgentRequest, AgentResponse, AiProvider, ProviderHealth, ProviderStreamEvent,
+    ProviderStreamTx, UsageMetadata,
 };
 use super::response_schema::SCHEMA_VERSION;
 use crate::security::redact_secrets;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
+const MAX_STREAM_EVENTS: usize = 30_000;
+const MAX_STREAM_TEXT_BYTES: usize = 2_000_000;
 
 pub struct OpenRouterProvider {
     api_key: String,
@@ -171,6 +175,159 @@ impl OpenRouterProvider {
         }
     }
 
+    fn stream_delta_text(payload: &Value) -> Option<String> {
+        let delta = payload.pointer("/choices/0/delta")?;
+        if let Some(s) = delta.get("content").and_then(|v| v.as_str()) {
+            if !s.is_empty() {
+                return Some(s.to_string());
+            }
+        }
+        if let Some(arr) = delta.get("content").and_then(|v| v.as_array()) {
+            let mut out = String::new();
+            for part in arr {
+                if let Some(t) = part.get("text").and_then(|t| t.as_str()) {
+                    out.push_str(t);
+                }
+            }
+            if !out.is_empty() {
+                return Some(out);
+            }
+        }
+        None
+    }
+
+    async fn handle_sse_data(
+        &self,
+        data: &str,
+        full_text: &mut String,
+        usage: &mut UsageMetadata,
+        model: &mut String,
+        events: &mut usize,
+        tx: &ProviderStreamTx,
+    ) -> Result<bool, AiError> {
+        let data = data.trim();
+        if data.is_empty() {
+            return Ok(false);
+        }
+        if data == "[DONE]" {
+            return Ok(true);
+        }
+        *events += 1;
+        if *events > MAX_STREAM_EVENTS {
+            return Err(AiError::Provider("stream event count exceeded".into()));
+        }
+        // Malformed JSON: skip the event (do not abort the whole stream).
+        let Ok(value) = serde_json::from_str::<Value>(data) else {
+            return Ok(false);
+        };
+        if let Some(m) = value.get("model").and_then(|v| v.as_str()) {
+            *model = m.to_string();
+        }
+        if value.get("usage").is_some() {
+            *usage = Self::extract_usage(&value);
+            let _ = tx
+                .send(ProviderStreamEvent::UsageUpdated {
+                    usage: usage.clone(),
+                })
+                .await;
+        }
+        if let Some(delta) = Self::stream_delta_text(&value) {
+            if full_text.len().saturating_add(delta.len()) > MAX_STREAM_TEXT_BYTES {
+                return Err(AiError::Provider("stream text exceeded byte limit".into()));
+            }
+            full_text.push_str(&delta);
+            let _ = tx
+                .send(ProviderStreamEvent::TextDelta { text: delta })
+                .await;
+        }
+        Ok(false)
+    }
+
+    async fn consume_sse_chat_stream(
+        &self,
+        response: reqwest::Response,
+        cancel: &CancellationToken,
+        tx: &ProviderStreamTx,
+    ) -> Result<(String, UsageMetadata, String), AiError> {
+        let mut buf: Vec<u8> = Vec::new();
+        let mut full_text = String::new();
+        let mut usage = UsageMetadata::default();
+        let mut model = self.model.clone();
+        let mut events = 0usize;
+        let mut stream = response.bytes_stream();
+
+        loop {
+            let next = tokio::select! {
+                _ = cancel.cancelled() => {
+                    let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
+                    return Err(AiError::Cancelled);
+                }
+                item = stream.next() => item,
+            };
+            match next {
+                None => break,
+                Some(Err(e)) => {
+                    return Err(AiError::Http(redact_secrets(
+                        &e.to_string(),
+                        Some(&self.api_key),
+                    )));
+                }
+                Some(Ok(chunk)) => {
+                    if buf.len().saturating_add(chunk.len()) > MAX_STREAM_TEXT_BYTES {
+                        return Err(AiError::Provider(format!(
+                            "stream exceeded limit of {MAX_STREAM_TEXT_BYTES} bytes"
+                        )));
+                    }
+                    buf.extend_from_slice(&chunk);
+                    while let Some(idx) = buf.iter().position(|&b| b == b'\n') {
+                        let line_bytes = buf.drain(..=idx).collect::<Vec<u8>>();
+                        let line = String::from_utf8_lossy(&line_bytes);
+                        let line = line.trim();
+                        if line.is_empty() || line.starts_with(':') {
+                            continue;
+                        }
+                        let Some(data) = line.strip_prefix("data:") else {
+                            continue;
+                        };
+                        if self
+                            .handle_sse_data(
+                                data,
+                                &mut full_text,
+                                &mut usage,
+                                &mut model,
+                                &mut events,
+                                tx,
+                            )
+                            .await?
+                        {
+                            return Ok((full_text, usage, model));
+                        }
+                    }
+                }
+            }
+        }
+
+        if !buf.is_empty() {
+            let line = String::from_utf8_lossy(&buf);
+            let line = line.trim();
+            if !line.is_empty() && !line.starts_with(':') {
+                if let Some(data) = line.strip_prefix("data:") {
+                    let _ = self
+                        .handle_sse_data(
+                            data,
+                            &mut full_text,
+                            &mut usage,
+                            &mut model,
+                            &mut events,
+                            tx,
+                        )
+                        .await?;
+                }
+            }
+        }
+        Ok((full_text, usage, model))
+    }
+
     /// Lightweight probe — used by health_check fallback (Auto does not probe+chat).
     pub async fn probe_model(&self, cancel: CancellationToken) -> Result<(), AiError> {
         let body = json!({
@@ -265,6 +422,100 @@ impl AiProvider for OpenRouterProvider {
             .and_then(|m| m.as_str())
             .unwrap_or(&self.model)
             .to_string();
+
+        Ok(AgentResponse {
+            raw_text,
+            usage,
+            model,
+            provider_id: self.provider_id().to_string(),
+        })
+    }
+
+    async fn chat_stream(
+        &self,
+        request: AgentRequest,
+        tx: ProviderStreamTx,
+    ) -> Result<AgentResponse, AiError> {
+        if request.cancel.is_cancelled() {
+            let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
+            return Err(AiError::Cancelled);
+        }
+        let messages = Self::build_messages(&request.system_prompt, &request.messages);
+        let _ = SCHEMA_VERSION;
+        let body = json!({
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.4,
+            "stream": true,
+            "response_format": { "type": "json_object" }
+        });
+        let _ = tx
+            .send(ProviderStreamEvent::ResponseStarted {
+                provider_id: self.provider_id().to_string(),
+                model: self.model.clone(),
+                live: true,
+            })
+            .await;
+
+        let url = self.chat_url();
+        let client = self.request_client()?;
+        let req = self.auth_headers(client.post(&url)).json(&body);
+
+        let response = tokio::select! {
+            _ = request.cancel.cancelled() => {
+                let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
+                return Err(AiError::Cancelled);
+            }
+            result = req.send() => {
+                result.map_err(|e| {
+                    if e.is_timeout() {
+                        AiError::Timeout
+                    } else {
+                        AiError::Http(redact_secrets(&e.to_string(), Some(&self.api_key)))
+                    }
+                })?
+            }
+        };
+
+        let status = response.status();
+        if !status.is_success() {
+            let text = super::http_limits::read_response_text_bounded(
+                response,
+                &request.cancel,
+                super::http_limits::MAX_PROVIDER_RESPONSE_BYTES,
+                Some(&self.api_key),
+            )
+            .await
+            .unwrap_or_default();
+            let err_msg = redact_secrets(&text, Some(&self.api_key));
+            let _ = tx
+                .send(ProviderStreamEvent::ResponseFailed {
+                    code: format!("HTTP_{}", status.as_u16()),
+                    message: err_msg.clone(),
+                })
+                .await;
+            return Err(AiError::Provider(format!(
+                "OpenRouter HTTP {}: {}",
+                status.as_u16(),
+                err_msg
+            )));
+        }
+
+        let (raw_text, usage, model) = self
+            .consume_sse_chat_stream(response, &request.cancel, &tx)
+            .await?;
+
+        let _ = tx
+            .send(ProviderStreamEvent::ResponseCompleted {
+                response: AgentResponse {
+                    raw_text: raw_text.clone(),
+                    usage: usage.clone(),
+                    model: model.clone(),
+                    provider_id: self.provider_id().to_string(),
+                },
+                buffered: false,
+            })
+            .await;
 
         Ok(AgentResponse {
             raw_text,

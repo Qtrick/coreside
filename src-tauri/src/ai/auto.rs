@@ -42,10 +42,10 @@ pub fn auto_model_candidates(provider: &str, configured_default: &str) -> Vec<St
         "openrouter" => {
             for id in [
                 "openai/gpt-4o-mini",
+                "google/gemini-3.8-flash",
                 "google/gemini-2.5-flash",
                 "meta-llama/llama-3.3-70b-instruct",
                 "anthropic/claude-sonnet-4.5",
-                "google/gemini-2.0-flash-001",
                 "openrouter/auto",
             ] {
                 push(&mut out, id);
@@ -53,10 +53,10 @@ pub fn auto_model_candidates(provider: &str, configured_default: &str) -> Vec<St
         }
         "gemini" => {
             for id in [
-                "gemini-2.5-flash",
-                "gemini-2.0-flash",
-                "gemini-3.1-flash-lite",
+                "gemini-3.8-flash",
                 "gemini-3.5-flash",
+                "gemini-3.1-flash-lite",
+                "gemini-2.5-flash",
                 "gemini-2.5-pro",
             ] {
                 push(&mut out, id);

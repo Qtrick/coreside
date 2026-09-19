@@ -204,9 +204,23 @@ pub fn validate_component_type_allowed(component_type: &str) -> Result<(), Strin
 
 /// Normalize the explicit capability set for one surface. `coreside.core` is
 /// implicit for every surface; all other packs remain opt-in.
+/// Maps legacy short pack identifiers (e.g. core, base-layout, forms) to namespaced IDs.
 pub fn normalize_capability_packs(pack_ids: &[String]) -> Result<Vec<String>, String> {
     let registry = pack_registry();
-    let mut normalized = pack_ids.to_vec();
+    let mut normalized = Vec::new();
+    for id in pack_ids {
+        let mapped = match id.as_str() {
+            "core" | "base-layout" => "coreside.core",
+            "forms" => "coreside.forms",
+            "charts" => "coreside.charts",
+            "code" => "coreside.code",
+            "svg" => "coreside.svg",
+            "media" => "coreside.media",
+            "canvas" => "coreside.canvas",
+            other => other,
+        };
+        normalized.push(mapped.to_string());
+    }
     normalized.push("coreside.core".into());
     normalized.sort();
     normalized.dedup();
@@ -235,6 +249,11 @@ fn collect_required_packs(value: &Value, packs: &mut Vec<String>) -> Result<(), 
             format!("component type '{component_type}' is not in any enabled capability pack")
         })?;
         packs.push(pack.id);
+    }
+    if let Some(sections) = value.get("sections").and_then(|v| v.as_array()) {
+        for section in sections {
+            collect_required_packs(section, packs)?;
+        }
     }
     if let Some(components) = value.get("components").and_then(|v| v.as_array()) {
         for component in components {
@@ -286,16 +305,30 @@ struct TreeValidationState {
 
 /// Validate a definition against both the global trusted registry and one
 /// surface's assigned packs, enforcing unique IDs, depth, count, and size limits.
+/// Traverses both flat ToolDefinition components and structured SoftwareDocument sections.
 pub fn validate_definition_components_for_packs(
     definition: &Value,
     allowed_pack_ids: &[String],
 ) -> Result<(), String> {
-    let Some(components_val) = definition.get("components") else {
+    let mut all_components = Vec::new();
+    if let Some(components_val) = definition.get("components") {
+        let components: Vec<crate::ai::ToolComponent> = serde_json::from_value(components_val.clone())
+            .map_err(|e| format!("invalid component definition: {e}"))?;
+        all_components.extend(components);
+    }
+    if let Some(sections_val) = definition.get("sections").and_then(|v| v.as_array()) {
+        for section in sections_val {
+            if let Some(sec_comps) = section.get("components") {
+                let comps: Vec<crate::ai::ToolComponent> = serde_json::from_value(sec_comps.clone())
+                    .map_err(|e| format!("invalid section component definition: {e}"))?;
+                all_components.extend(comps);
+            }
+        }
+    }
+    if all_components.is_empty() {
         return Ok(());
-    };
-    let components: Vec<crate::ai::ToolComponent> = serde_json::from_value(components_val.clone())
-        .map_err(|e| format!("invalid component definition: {e}"))?;
-    validate_tool_components_for_packs(&components, allowed_pack_ids)
+    }
+    validate_tool_components_for_packs(&all_components, allowed_pack_ids)
 }
 
 /// Validate a typed component tree (insert/replace/update_children paths).

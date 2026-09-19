@@ -17,6 +17,7 @@ import {
 import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
 import { classifyToolHeaderDensity } from "@/lib/layout-mode";
 import { surfaceIdForTool } from "@/lib/surface-ops";
+import type { ToolDefinition } from "@/types/tool";
 import type {
   ActionOutcome,
   ManifestRecord,
@@ -283,6 +284,16 @@ export function ToolCanvas() {
   const renderState = previewOverlay?.state ?? toolState;
   const isPreviewPaint = Boolean(previewOverlay);
 
+  const surfacesById = useMemo(() => {
+    const map: Record<string, ToolDefinition> = {};
+    if (activeTool) {
+      const current = renderTool ?? activeTool;
+      map[activeTool.id] = current;
+      map[surfaceIdForTool(activeTool.id)] = current;
+    }
+    return map;
+  }, [activeTool, renderTool]);
+
   if (!activeTool) {
     return (
       <section className="tool-canvas" aria-label="App canvas" data-coreside-tour="app-panel">
@@ -486,18 +497,16 @@ export function ToolCanvas() {
           <AppRouteShell
             applicationId={manifest.applicationId || activeTool.id}
             manifest={manifest}
-            surfacesById={{
-              [surfaceIdForTool(activeTool.id)]: renderTool ?? activeTool,
-              [activeTool.id]: renderTool ?? activeTool,
-            }}
+            surfacesById={surfacesById}
             state={renderState}
             onStateChange={isPreviewPaint ? () => undefined : onStateChange}
             onPersistState={isPreviewPaint ? async () => undefined : onPersistState}
-            onSubmitToAgent={onSubmitToAgent}
+            onSubmitToAgent={isPreviewPaint ? undefined : onSubmitToAgent}
             surfaceId={surfaceId}
             conversationId={activeConversationId}
             projectId={activeProjectId}
             isCustomizing={isCustomizing}
+            mode={isPreviewPaint ? "preview" : isCustomizing ? "customize" : "live"}
             selectedComponentId={selectedComponentId}
             onSelectComponent={(c) => setSelectedComponentId(c.id)}
             onPendingApproval={onPendingApproval}
@@ -509,6 +518,7 @@ export function ToolCanvas() {
             onStateChange={isPreviewPaint ? () => undefined : onStateChange}
             onPersistState={isPreviewPaint ? async () => undefined : onPersistState}
             isCustomizing={isCustomizing}
+            mode={isPreviewPaint ? "preview" : isCustomizing ? "customize" : "live"}
             selectedComponentId={selectedComponentId}
             onSelectComponent={(c) => setSelectedComponentId(c.id)}
             // Only a real manifest id — never invent one for legacy tools.
@@ -516,7 +526,7 @@ export function ToolCanvas() {
             surfaceId={surfaceId}
             conversationId={activeConversationId}
             projectId={activeProjectId}
-            onSubmitToAgent={onSubmitToAgent}
+            onSubmitToAgent={isPreviewPaint ? undefined : onSubmitToAgent}
             onPendingApproval={onPendingApproval}
           />
         )}

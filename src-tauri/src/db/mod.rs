@@ -126,10 +126,14 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         "025_patch_scheduler_provenance",
         include_str!("../../migrations/025_patch_scheduler_provenance.sql"),
     ),
+    (
+        "026_kernel_change_proposals",
+        include_str!("../../migrations/026_kernel_change_proposals.sql"),
+    ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "025_patch_scheduler_provenance";
+pub const LATEST_MIGRATION: &str = "026_kernel_change_proposals";
 
 #[derive(Debug, Error)]
 pub enum DbError {

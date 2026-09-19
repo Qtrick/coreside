@@ -119,13 +119,17 @@ pub fn navigate_route(
                     "routeId": cur,
                     "params": state.route_params,
                 }));
-                index = history.len() as i64 - 1;
             }
         }
         history.push(json!({
             "routeId": route_id,
             "params": route_params,
         }));
+        // Bound history to max 50 entries
+        if history.len() > 50 {
+            let start = history.len() - 50;
+            history = history.split_off(start);
+        }
         index = history.len() as i64 - 1;
     }
 

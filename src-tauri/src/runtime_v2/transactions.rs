@@ -185,9 +185,14 @@ pub fn apply_transaction_deferred(
                 initial_revisions
                     .entry(sid.clone())
                     .or_insert(s.current_revision);
+                let current_state = super::surfaces::get_surface_state(db, sid).unwrap_or_else(|_| json!({}));
                 previous.as_object_mut().unwrap().insert(
                     sid.clone(),
-                    json!({ "revision": s.current_revision, "definition": s.definition }),
+                    json!({
+                        "revision": s.current_revision,
+                        "definition": s.definition,
+                        "state": current_state,
+                    }),
                 );
             }
         }
@@ -439,81 +444,95 @@ fn apply_one(
                 .ok_or_else(|| "surfaceId or toolId required".to_string())?;
             let sid = &effective_sid;
             let surface = get_surface(db, sid).map_err(|e| e.to_string())?;
-            let mut def_value = surface.definition.clone();
-            // Definition may be a ToolDefinition-shaped object
-            let mut components: Vec<ToolComponent> = def_value
-                .get("components")
-                .cloned()
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or_default();
             let effective_base =
                 effective_base_revision(op, surface.current_revision, initial_revisions, sid);
-            if op.op_type.starts_with("component.") {
-                let cid = op.target.component_id.as_deref();
-                let policy = resolve_policy_for_apply(db, sid, cid, &op.payload);
-                let old_comp = cid.and_then(|id| find_component(&components, id).cloned());
-                apply_component_op(
-                    &mut components,
-                    &op.op_type,
-                    cid,
-                    op.target.parent_id.as_deref(),
-                    effective_base,
-                    surface.current_revision,
-                    &op.payload,
-                )
-                .map_err(|e| e.to_string())?;
-                if op.op_type == "component.replace" {
-                    if let (Some(old), Some(id)) = (old_comp.as_ref(), cid) {
-                        if let Some(new) = find_component_mut(&mut components, id) {
-                            let preserved = apply_preservation_on_replace(old, new, policy);
-                            if !preserved {
-                                let _ = invalidate_component_live_state(db, sid, id);
-                            } else {
-                                let _ = upsert_preservation(
-                                    db,
-                                    sid,
-                                    id,
-                                    policy,
-                                    prop_preservation_key(new),
-                                    &new.component_type,
-                                    None,
-                                );
+
+            // Canonical SoftwareDocument path: if the definition contains sections,
+            // mutate the SoftwareDocument directly to preserve regions, layout, contracts, and packs.
+            let is_structured = surface.definition.get("sections").is_some();
+            let def_value = if is_structured {
+                let mut doc = super::software_document::SoftwareDocument::from_value(&surface.definition)
+                    .map_err(|e| format!("failed to load SoftwareDocument for surface '{sid}': {e}"))?;
+                doc.apply_operation(op)?;
+                let _notes = doc.validate_and_repair();
+                serde_json::to_value(&doc).map_err(|e| e.to_string())?
+            } else {
+                let mut def_value = surface.definition.clone();
+                // Definition is a flat ToolDefinition-shaped object
+                let mut components: Vec<ToolComponent> = def_value
+                    .get("components")
+                    .cloned()
+                    .and_then(|v| serde_json::from_value(v).ok())
+                    .unwrap_or_default();
+                if op.op_type.starts_with("component.") {
+                    let cid = op.target.component_id.as_deref();
+                    let policy = resolve_policy_for_apply(db, sid, cid, &op.payload);
+                    let old_comp = cid.and_then(|id| find_component(&components, id).cloned());
+                    apply_component_op(
+                        &mut components,
+                        &op.op_type,
+                        cid,
+                        op.target.parent_id.as_deref(),
+                        effective_base,
+                        surface.current_revision,
+                        &op.payload,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    if op.op_type == "component.replace" {
+                        if let (Some(old), Some(id)) = (old_comp.as_ref(), cid) {
+                            if let Some(new) = find_component_mut(&mut components, id) {
+                                let preserved = apply_preservation_on_replace(old, new, policy);
+                                if !preserved {
+                                    let _ = invalidate_component_live_state(db, sid, id);
+                                } else {
+                                    let _ = upsert_preservation(
+                                        db,
+                                        sid,
+                                        id,
+                                        policy,
+                                        prop_preservation_key(new),
+                                        &new.component_type,
+                                        None,
+                                    );
+                                }
                             }
                         }
+                    } else if op.op_type == "component.remove" {
+                        if let Some(id) = cid {
+                            // Removed components must not keep live state/drafts.
+                            let _ = invalidate_component_live_state(db, sid, id);
+                        }
+                    } else if let Some(id) = cid {
+                        // Record policy for future replaces when payload declares one.
+                        if op.payload.get("preservationPolicy").is_some()
+                            || op.payload.get("policy").is_some()
+                        {
+                            let ctype = find_component(&components, id)
+                                .map(|c| c.component_type.clone())
+                                .unwrap_or_else(|| "unknown".into());
+                            let _ = upsert_preservation(
+                                db,
+                                sid,
+                                id,
+                                policy,
+                                find_component(&components, id).and_then(prop_preservation_key),
+                                &ctype,
+                                None,
+                            );
+                        }
                     }
-                } else if op.op_type == "component.remove" {
-                    if let Some(id) = cid {
-                        // Removed components must not keep live state/drafts.
-                        let _ = invalidate_component_live_state(db, sid, id);
-                    }
-                } else if let Some(id) = cid {
-                    // Record policy for future replaces when payload declares one.
-                    if op.payload.get("preservationPolicy").is_some()
-                        || op.payload.get("policy").is_some()
-                    {
-                        let ctype = find_component(&components, id)
-                            .map(|c| c.component_type.clone())
-                            .unwrap_or_else(|| "unknown".into());
-                        let _ = upsert_preservation(
-                            db,
-                            sid,
-                            id,
-                            policy,
-                            find_component(&components, id).and_then(prop_preservation_key),
-                            &ctype,
-                            None,
+                    if let Some(obj) = def_value.as_object_mut() {
+                        obj.insert(
+                            "components".into(),
+                            serde_json::to_value(&components).unwrap(),
                         );
                     }
+                } else if let Some(definition) = op.payload.get("definition") {
+                    def_value = definition.clone();
                 }
-                if let Some(obj) = def_value.as_object_mut() {
-                    obj.insert(
-                        "components".into(),
-                        serde_json::to_value(&components).unwrap(),
-                    );
-                }
-            } else if let Some(definition) = op.payload.get("definition") {
-                def_value = definition.clone();
-            }
+                def_value
+            };
+
             let s = update_surface_definition(
                 db,
                 sid,
@@ -604,6 +623,15 @@ fn apply_one(
                         .get("components")
                         .cloned()
                         .and_then(|v| serde_json::from_value(v).ok());
+                    // Pre-mutation validation: validate components against capability packs before mutating
+                    if let Some(ref new_comps) = comps {
+                        let allowed = if surface.capability_packs.is_empty() {
+                            super::packs::required_packs_for_definition(&surface.definition)?
+                        } else {
+                            super::packs::normalize_capability_packs(&surface.capability_packs)?
+                        };
+                        super::packs::validate_tool_components_for_packs(new_comps, &allowed)?;
+                    }
                     let title = op
                         .payload
                         .get("title")
@@ -1077,6 +1105,9 @@ pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<App
             for (sid, snap) in map {
                 if let Some(def) = snap.get("definition") {
                     let _ = update_surface_definition(db, &sid, def, "undo transaction", None);
+                }
+                if let Some(st) = snap.get("state") {
+                    let _ = super::surfaces::save_surface_state(db, &sid, st);
                 }
             }
         }
@@ -1597,6 +1628,7 @@ mod tests {
                 scope: StateScope::Persistent,
                 description: Some("User notes field".into()),
                 preservation_policy: Some("preserve".into()),
+                ..Default::default()
             },
             StateContract {
                 key: "selected_tab".into(),
@@ -1605,6 +1637,7 @@ mod tests {
                 scope: StateScope::Session,
                 description: None,
                 preservation_policy: None,
+                ..Default::default()
             },
         ];
         doc.action_contracts = vec![ActionContract {
@@ -1625,7 +1658,7 @@ mod tests {
                 id: "notes-input".into(),
                 component_type: "textArea".into(),
                 value_key: Some("user_notes".into()),
-                props: Some(json!({ "placeholder": "Write notes here..." })),
+                props: Some(json!({ "label": "User Notes", "placeholder": "Write notes here..." })),
                 ..Default::default()
             }],
             ..Default::default()

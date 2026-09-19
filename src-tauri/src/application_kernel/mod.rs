@@ -20,6 +20,8 @@ pub mod recovery;
 pub mod registered_actions;
 pub mod testing;
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -46,6 +48,8 @@ pub const MANIFEST_SCHEMA_VERSION: &str = "1";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposal_id: Option<String>,
     pub conversation_id: Option<String>,
     pub project_id: Option<String>,
     pub turn_id: Option<String>,
@@ -57,6 +61,25 @@ pub struct ChangeRequest {
     pub model: Option<String>,
     pub require_approval: bool,
     pub approval_granted: bool,
+}
+
+impl Default for ChangeRequest {
+    fn default() -> Self {
+        Self {
+            proposal_id: None,
+            conversation_id: None,
+            project_id: None,
+            turn_id: None,
+            summary: String::new(),
+            operations: Vec::new(),
+            silent: false,
+            source_type: "user".into(),
+            provider: None,
+            model: None,
+            require_approval: false,
+            approval_granted: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,6 +203,10 @@ pub fn apply_change(
     bus: Option<&mut crate::runtime_v2::EventBus>,
     req: ChangeRequest,
 ) -> Result<ChangeResult, KernelError> {
+    if let Some(proposal_id) = req.proposal_id.as_deref() {
+        return decide_proposal(db, bus, proposal_id, req.approval_granted);
+    }
+
     validate_operations(&req.operations).map_err(KernelError::Validation)?;
     validate_dependency_refs(&req.operations).map_err(KernelError::Validation)?;
     assert_ops_not_protected(&req.operations)?;
@@ -222,7 +249,60 @@ pub fn apply_change(
         || req.require_approval;
 
     if needs_approval && !approval_granted {
+        let mut base_revisions = HashMap::new();
+        for op in &req.operations {
+            let sid_opt = op.target.surface_id.clone().or_else(|| {
+                op.target.tool_id.as_deref().map(crate::runtime_v2::surfaces::surface_id_for_tool)
+            });
+            if let Some(sid) = sid_opt {
+                if !base_revisions.contains_key(&sid) {
+                    let rev: i64 = db.conn().query_row(
+                        "SELECT revision FROM surfaces WHERE id = ?",
+                        rusqlite::params![sid],
+                        |r| r.get(0),
+                    ).unwrap_or(0);
+                    base_revisions.insert(sid, rev);
+                }
+            }
+        }
+
+        let hash_payload = serde_json::json!({
+            "operations": &req.operations,
+            "base_revisions": &base_revisions,
+            "summary": &req.summary,
+            "conversation_id": &req.conversation_id,
+        });
+        let operations_hash = registered_actions::canonical::hash_value(&hash_payload);
         let proposal_id = format!("proposal-{}", Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+        let expires_at = (chrono::Utc::now() + chrono::Duration::hours(24)).to_rfc3339();
+        let ops_json = serde_json::to_string(&req.operations).unwrap_or_else(|_| "[]".into());
+        let base_revs_json = serde_json::to_string(&base_revisions).unwrap_or_else(|_| "{}".into());
+
+        let _ = db.conn().execute(
+            "INSERT INTO kernel_change_proposals (
+                id, conversation_id, turn_id, summary, risk, impact_summary,
+                exact_operations_json, exact_operations_hash, base_revisions_json, source_type,
+                model, provider, status, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+            rusqlite::params![
+                proposal_id,
+                req.conversation_id,
+                req.turn_id,
+                req.summary,
+                risk,
+                impact,
+                ops_json,
+                operations_hash,
+                base_revs_json,
+                req.source_type,
+                req.model,
+                req.provider,
+                now,
+                expires_at,
+            ],
+        );
+
         return Ok(ChangeResult {
             apply: None,
             proposal_id: Some(proposal_id),
@@ -411,6 +491,182 @@ pub fn apply_change(
     }
 }
 
+/// Decide (approve or reject) a frozen kernel change proposal with single-use CAS semantics.
+pub fn decide_proposal(
+    db: &mut Database,
+    bus: Option<&mut crate::runtime_v2::EventBus>,
+    proposal_id: &str,
+    approve: bool,
+) -> Result<ChangeResult, KernelError> {
+    struct Row {
+        conversation_id: Option<String>,
+        turn_id: Option<String>,
+        summary: String,
+        risk: String,
+        impact_summary: String,
+        operations_json: String,
+        operations_hash: String,
+        base_revisions_json: String,
+        status: String,
+        expires_at: Option<String>,
+    }
+
+    let row = db
+        .conn()
+        .query_row(
+            "SELECT conversation_id, turn_id, summary, risk, impact_summary, \
+                    exact_operations_json, exact_operations_hash, base_revisions_json, status, expires_at \
+             FROM kernel_change_proposals WHERE id = ?",
+            rusqlite::params![proposal_id],
+            |r| {
+                Ok(Row {
+                    conversation_id: r.get(0)?,
+                    turn_id: r.get(1)?,
+                    summary: r.get(2)?,
+                    risk: r.get(3)?,
+                    impact_summary: r.get(4)?,
+                    operations_json: r.get(5)?,
+                    operations_hash: r.get(6)?,
+                    base_revisions_json: r.get(7)?,
+                    status: r.get(8)?,
+                    expires_at: r.get(9)?,
+                })
+            },
+        )
+        .map_err(|e| KernelError::Validation(format!("Proposal {proposal_id} not found: {e}")))?;
+
+    if row.status != "pending" {
+        return Err(KernelError::Validation(format!(
+            "Proposal {proposal_id} is already {} (cannot decide)",
+            row.status
+        )));
+    }
+
+    let now = chrono::Utc::now();
+    if let Some(exp_str) = &row.expires_at {
+        if let Ok(exp) = chrono::DateTime::parse_from_rfc3339(exp_str) {
+            if now > exp {
+                let _ = db.conn().execute(
+                    "UPDATE kernel_change_proposals SET status = 'expired' WHERE id = ? AND status = 'pending'",
+                    rusqlite::params![proposal_id],
+                );
+                return Err(KernelError::Validation("Proposal has expired".into()));
+            }
+        }
+    }
+
+    if !approve {
+        let _ = db.conn().execute(
+            "UPDATE kernel_change_proposals SET status = 'rejected', decided_at = ? WHERE id = ? AND status = 'pending'",
+            rusqlite::params![now.to_rfc3339(), proposal_id],
+        );
+        return Ok(ChangeResult {
+            apply: None,
+            proposal_id: Some(proposal_id.to_string()),
+            risk: row.risk,
+            impact_summary: row.impact_summary,
+            policy: PolicyDecision {
+                decision: "denied_by_user".into(),
+                message: "Proposal rejected by user".into(),
+                action: "apply_operations".into(),
+            },
+            verification: None,
+            operations: None,
+            summary: Some(row.summary),
+            outcome: CommitOutcome::RejectedValidation,
+            conflicts: vec![],
+        });
+    }
+
+    // Check base revisions for staleness
+    let base_revisions: HashMap<String, i64> = serde_json::from_str(&row.base_revisions_json)
+        .unwrap_or_default();
+    for (sid, expected_rev) in &base_revisions {
+        let current_rev: Option<i64> = db
+            .conn()
+            .query_row(
+                "SELECT revision FROM surfaces WHERE id = ?",
+                rusqlite::params![sid],
+                |r| r.get(0),
+            )
+            .ok();
+        if let Some(actual) = current_rev {
+            if actual != *expected_rev {
+                let _ = db.conn().execute(
+                    "UPDATE kernel_change_proposals SET status = 'stale', decided_at = ?, error = ? WHERE id = ?",
+                    rusqlite::params![now.to_rfc3339(), "Target surface revision changed", proposal_id],
+                );
+                return Err(KernelError::RevisionConflict(format!(
+                    "Proposal is stale: surface {sid} revision moved from {expected_rev} to {actual}"
+                )));
+            }
+        }
+    }
+
+    // Parse and verify hash of exact frozen operations
+    let ops: Vec<AppOperation> = serde_json::from_str(&row.operations_json)
+        .map_err(|e| KernelError::Validation(format!("Corrupt operations in proposal: {e}")))?;
+
+    let hash_payload = serde_json::json!({
+        "operations": &ops,
+        "base_revisions": &base_revisions,
+        "summary": &row.summary,
+        "conversation_id": &row.conversation_id,
+    });
+    let expected_hash = registered_actions::canonical::hash_value(&hash_payload);
+    if expected_hash != row.operations_hash {
+        return Err(KernelError::Validation("Proposal operations hash mismatch (tampered payload)".into()));
+    }
+
+    // Atomic CAS claim: pending -> approved (single-use!)
+    let updated = db
+        .conn()
+        .execute(
+            "UPDATE kernel_change_proposals SET status = 'approved', decided_at = ? WHERE id = ? AND status = 'pending'",
+            rusqlite::params![now.to_rfc3339(), proposal_id],
+        )
+        .map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
+
+    if updated == 0 {
+        return Err(KernelError::Validation("Proposal was already claimed or decided concurrently".into()));
+    }
+
+    // Apply exact frozen operations
+    let change_req = ChangeRequest {
+        proposal_id: None,
+        conversation_id: row.conversation_id,
+        project_id: None,
+        turn_id: row.turn_id,
+        summary: row.summary,
+        operations: ops,
+        silent: false,
+        source_type: "user".into(),
+        provider: None,
+        model: None,
+        require_approval: false,
+        approval_granted: true,
+    };
+
+    let result = apply_change(db, bus, change_req);
+    match result {
+        Ok(change_result) => {
+            let txn_id = change_result.apply.as_ref().map(|a| a.transaction.id.as_str());
+            let _ = db.conn().execute(
+                "UPDATE kernel_change_proposals SET status = 'applied', applied_at = ?, transaction_id = ? WHERE id = ?",
+                rusqlite::params![chrono::Utc::now().to_rfc3339(), txn_id, proposal_id],
+            );
+            Ok(change_result)
+        }
+        Err(e) => {
+            let _ = db.conn().execute(
+                "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
+                rusqlite::params![e.user_message(), proposal_id],
+            );
+            Err(e)
+        }
+    }
+}
+
 /// Compact capability introspection for the agent (bounded).
 pub fn capability_catalog() -> Value {
     let packs = crate::runtime_v2::packs::bundled_packs();
@@ -589,6 +845,7 @@ mod tests {
                 model: None,
                 require_approval: false,
                 approval_granted: true,
+                proposal_id: None,
             },
         )
         .unwrap();
@@ -638,6 +895,7 @@ mod tests {
                 model: None,
                 require_approval: false,
                 approval_granted: true,
+                proposal_id: None,
             },
         )
         .unwrap_err();
@@ -674,6 +932,7 @@ mod tests {
             model: None,
             require_approval: false,
             approval_granted: true,
+            proposal_id: None,
         };
 
         let first = apply_change(&mut db, None, req.clone()).unwrap();
@@ -730,6 +989,7 @@ mod tests {
                 model: None,
                 require_approval: false,
                 approval_granted: true,
+                proposal_id: None,
             },
         )
         .unwrap();

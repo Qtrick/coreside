@@ -5,6 +5,7 @@ import {
   AlertCircle,
   Check,
   Copy,
+  GitFork,
   Pencil,
   RotateCcw,
 } from "lucide-react";
@@ -34,6 +35,7 @@ function safeMarkdownUrl(url: string): string {
 export function MessageBubble({ message }: { message: ChatMessage }) {
   const retryLastFailed = useAppStore((s) => s.retryLastFailed);
   const editAndResendMessage = useAppStore((s) => s.editAndResendMessage);
+  const branchConversation = useAppStore((s) => s.branchConversation);
   const sending = useAppStore((s) => s.sending);
   const showModelIdentity = Boolean(
     useAppStore((s) => s.aiStatus?.disclosure?.showModelIdentity),
@@ -130,6 +132,16 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
                 title={copied ? "Copied" : "Copy"}
               >
                 {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
+              </button>
+              <button
+                type="button"
+                className="message-action-btn"
+                onClick={() => void branchConversation(message.id)}
+                disabled={sending}
+                aria-label="Fork conversation here"
+                title="Fork conversation here"
+              >
+                <GitFork size={14} aria-hidden />
               </button>
               {isUser && !isError ? (
                 <button

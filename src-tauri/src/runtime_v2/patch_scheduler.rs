@@ -100,6 +100,8 @@ pub struct ScheduledPatch {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -240,8 +242,6 @@ pub fn schedule_patches(db: &mut Database, req: &ScheduleRequest) -> DbResult<Ve
     // P0.3: pass the full batch count so the limit is checked atomically.
     enforce_queue_limits(db, req.operations.len(), payload_bytes)?;
 
-    let mut scheduled = Vec::new();
-    let now = now_rfc3339();
     let base_seq: i64 = db.conn().query_row(
         "SELECT COALESCE(MAX(sequence_number), 0) FROM patch_scheduler_items",
         [],
@@ -261,41 +261,91 @@ pub fn schedule_patches(db: &mut Database, req: &ScheduleRequest) -> DbResult<Ve
     } else {
         None
     };
-    let _ = preview_batch_id; // recorded in supersession; not currently persisted per-op
-
-    for (i, op) in req.operations.iter().enumerate() {
-        let id = format!("patch-{}", Uuid::new_v4());
-        let depends_on = op.depends_on.clone().unwrap_or_default();
-        let depends_json = serde_json::to_string(&depends_on)?;
-        let payload_json = serde_json::to_string(op)?;
-        let surface_id = req
-            .surface_id
-            .as_deref()
-            .or(op.target.surface_id.as_deref());
-
-        db.conn().execute(
-            "INSERT INTO patch_scheduler_items (
-                id, operation_id, turn_id, conversation_id, surface_id, priority, status,
-                sequence_number, depends_on_json, payload_json, created_at, model, provider
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'queued', ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![
-                id,
-                op.id,
-                req.turn_id,
-                req.conversation_id,
-                surface_id,
-                req.priority.as_str(),
-                base_seq + i as i64 + 1,
-                depends_json,
-                payload_json,
-                now,
-                req.model,
-                req.provider,
-            ],
-        )?;
-        scheduled.push(get_scheduled_patch(db, &id)?);
+    let _ = preview_batch_id; // recorded in supersession; not currently persisted per-op    // First pass: generate patch IDs and build operation_id -> patch_id mapping for the batch
+    let mut op_to_patch: HashMap<String, String> = HashMap::new();
+    let mut batch_plan: Vec<(String, &AppOperation)> = Vec::new();
+    for op in &req.operations {
+        let patch_id = format!("patch-{}", Uuid::new_v4());
+        op_to_patch.insert(op.id.clone(), patch_id.clone());
+        batch_plan.push((patch_id, op));
     }
-    Ok(scheduled)
+
+    let now = now_rfc3339();
+
+    // Atomic batch insertion
+    db.conn().execute_batch("SAVEPOINT sched_batch")?;
+    let mut scheduled = Vec::new();
+
+    let insert_result = (|| -> DbResult<Vec<ScheduledPatch>> {
+        for (i, (id, op)) in batch_plan.iter().enumerate() {
+            let mut resolved_deps = Vec::new();
+            if let Some(deps) = &op.depends_on {
+                for dep in deps {
+                    if let Some(mapped_patch_id) = op_to_patch.get(dep) {
+                        resolved_deps.push(mapped_patch_id.clone());
+                    } else {
+                        // Check if dep is an existing operation_id or patch_id
+                        let existing: Option<String> = db
+                            .conn()
+                            .query_row(
+                                "SELECT id FROM patch_scheduler_items WHERE operation_id = ?1 OR id = ?1 LIMIT 1",
+                                [dep],
+                                |r| r.get(0),
+                            )
+                            .ok();
+                        if let Some(exist_id) = existing {
+                            resolved_deps.push(exist_id);
+                        } else {
+                            // Keep dep so flush detects missing dependency and fails closed
+                            resolved_deps.push(dep.clone());
+                        }
+                    }
+                }
+            }
+
+            let depends_json = serde_json::to_string(&resolved_deps)?;
+            let payload_json = serde_json::to_string(op)?;
+            let surface_id = req
+                .surface_id
+                .as_deref()
+                .or(op.target.surface_id.as_deref());
+
+            db.conn().execute(
+                "INSERT INTO patch_scheduler_items (
+                    id, operation_id, turn_id, conversation_id, surface_id, priority, status,
+                    sequence_number, depends_on_json, payload_json, created_at, model, provider, source_type
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'queued', ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                params![
+                    id,
+                    op.id,
+                    req.turn_id,
+                    req.conversation_id,
+                    surface_id,
+                    req.priority.as_str(),
+                    base_seq + i as i64 + 1,
+                    depends_json,
+                    payload_json,
+                    now,
+                    req.model,
+                    req.provider,
+                    req.source_type,
+                ],
+            )?;
+            scheduled.push(get_scheduled_patch(db, id)?);
+        }
+        Ok(scheduled)
+    })();
+
+    match insert_result {
+        Ok(res) => {
+            db.conn().execute_batch("RELEASE sched_batch")?;
+            Ok(res)
+        }
+        Err(e) => {
+            let _ = db.conn().execute_batch("ROLLBACK TO sched_batch");
+            Err(e)
+        }
+    }
 }
 
 pub fn get_scheduled_patch(db: &Database, id: &str) -> DbResult<ScheduledPatch> {
@@ -303,7 +353,7 @@ pub fn get_scheduled_patch(db: &Database, id: &str) -> DbResult<ScheduledPatch> 
         .query_row(
             "SELECT id, operation_id, transaction_id, turn_id, conversation_id, surface_id,
                     priority, status, sequence_number, depends_on_json, payload_json,
-                    created_at, applied_at, failed_at, model, provider
+                    created_at, applied_at, failed_at, model, provider, source_type
              FROM patch_scheduler_items WHERE id = ?1",
             [id],
             parse_patch_row,
@@ -338,6 +388,7 @@ fn parse_patch_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledPatch> 
         failed_at: row.get(13)?,
         model: row.get(14)?,
         provider: row.get(15)?,
+        source_type: row.get(16).ok(),
     })
 }
 
@@ -480,6 +531,8 @@ pub fn flush_scheduler(
     // Kahn's algorithm for dependency-aware ordering
     let mut in_degree: HashMap<String, usize> = HashMap::new();
     let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
+    let mut missing_dep_patches: HashSet<String> = HashSet::new();
+
     for (id, patch) in &patches {
         in_degree.entry(id.clone()).or_insert(0);
         for dep_id in &patch.depends_on {
@@ -489,57 +542,118 @@ pub fn flush_scheduler(
                     .or_default()
                     .push(id.clone());
                 *in_degree.entry(id.clone()).or_insert(0) += 1;
-            }
-        }
-    }
-    let mut queue: VecDeque<String> = in_degree
-        .iter()
-        .filter(|(_, d)| **d == 0)
-        .map(|(id, _)| id.clone())
-        .collect();
-    let mut ordered: Vec<String> = Vec::new();
-    while let Some(id) = queue.pop_front() {
-        ordered.push(id.clone());
-        if let Some(deps) = dependents.get(&id) {
-            for dep_id in deps {
-                let deg = in_degree.get_mut(dep_id).unwrap();
-                *deg -= 1;
-                if *deg == 0 {
-                    queue.push_back(dep_id.clone());
+            } else {
+                let is_applied: bool = db
+                    .conn()
+                    .query_row(
+                        "SELECT 1 FROM patch_scheduler_items WHERE id = ?1 AND status = 'applied'",
+                        [dep_id],
+                        |_| Ok(true),
+                    )
+                    .unwrap_or(false);
+                if !is_applied {
+                    missing_dep_patches.insert(id.clone());
                 }
             }
         }
     }
-    // Patches with unsatisfiable dependencies (missing from queue) go last
-    for id in &ids {
-        if !ordered.contains(id) {
-            ordered.push(id.clone());
+
+    let now = now_rfc3339();
+
+    // Patches with missing dependencies fail closed! Never executed!
+    for id in &missing_dep_patches {
+        db.conn().execute(
+            "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
+             error_category = 'dependency_missing' WHERE id = ?2 AND status = 'queued'",
+            params![now, id],
+        )?;
+        in_degree.remove(id);
+    }
+
+    // Ready queue with deterministic sorting: (sequence_number, id)
+    let mut ready: Vec<String> = in_degree
+        .iter()
+        .filter(|(id, d)| **d == 0 && !missing_dep_patches.contains(*id))
+        .map(|(id, _)| id.clone())
+        .collect();
+
+    ready.sort_by(|a, b| {
+        let pa = patches.get(a);
+        let pb = patches.get(b);
+        let seq_a = pa.map(|p| p.sequence_number).unwrap_or(0);
+        let seq_b = pb.map(|p| p.sequence_number).unwrap_or(0);
+        seq_a.cmp(&seq_b).then_with(|| a.cmp(b))
+    });
+
+    let mut queue: VecDeque<String> = ready.into_iter().collect();
+    let mut ordered: Vec<String> = Vec::new();
+    while let Some(id) = queue.pop_front() {
+        ordered.push(id.clone());
+        if let Some(deps) = dependents.get(&id) {
+            let mut newly_ready = Vec::new();
+            for dep_id in deps {
+                if let Some(deg) = in_degree.get_mut(dep_id) {
+                    *deg -= 1;
+                    if *deg == 0 && !missing_dep_patches.contains(dep_id) {
+                        newly_ready.push(dep_id.clone());
+                    }
+                }
+            }
+            newly_ready.sort_by(|a, b| {
+                let pa = patches.get(a);
+                let pb = patches.get(b);
+                let seq_a = pa.map(|p| p.sequence_number).unwrap_or(0);
+                let seq_b = pb.map(|p| p.sequence_number).unwrap_or(0);
+                seq_a.cmp(&seq_b).then_with(|| a.cmp(b))
+            });
+            for nr in newly_ready {
+                queue.push_back(nr);
+            }
+        }
+    }
+
+    // Any remaining items in in_degree with deg > 0 are dependency cycles! Fail closed!
+    for (id, deg) in &in_degree {
+        if *deg > 0 && !missing_dep_patches.contains(id) {
+            db.conn().execute(
+                "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
+                 error_category = 'dependency_cycle' WHERE id = ?2 AND status = 'queued'",
+                params![now, id],
+            )?;
         }
     }
 
     let mut applied = Vec::new();
-    let now = now_rfc3339();
     for patch_id in ordered {
         let Some(patch) = patches.get(&patch_id) else {
             continue;
         };
         let op: AppOperation = serde_json::from_value(patch.payload.clone())
             .map_err(|e| DbError::Invalid(e.to_string()))?;
+
+        let effective_source_type = patch.source_type.as_deref().unwrap_or("agent");
+        let effective_approval = if effective_source_type == "agent" {
+            false
+        } else {
+            approval_granted
+        };
+
         let result = apply_change(
             db,
             bus.as_deref_mut(),
             ChangeRequest {
+                proposal_id: None,
                 conversation_id: patch.conversation_id.clone(),
                 project_id: None,
                 turn_id: patch.turn_id.clone(),
                 summary: format!("Patch {}", patch.operation_id),
                 operations: vec![op],
                 silent: patch.priority == PatchPriority::ActiveTurnPreview,
-                source_type: source_type.into(),
+                source_type: effective_source_type.into(),
                 provider: patch.provider.clone(),
                 model: patch.model.clone(),
                 require_approval: false,
-                approval_granted,
+                approval_granted: effective_approval,
             },
         )
         .map_err(|e| DbError::Invalid(e.user_message()))?;
@@ -627,6 +741,7 @@ pub fn schedule_and_apply(
         db,
         bus.as_deref_mut(),
         ChangeRequest {
+            proposal_id: None,
             conversation_id: req.conversation_id.clone(),
             project_id: None,
             turn_id: req.turn_id.clone(),
@@ -634,8 +749,8 @@ pub fn schedule_and_apply(
             operations: ordered_ops,
             silent: req.priority == PatchPriority::ActiveTurnPreview,
             source_type: source_type.clone(),
-            provider: None,
-            model: None,
+            provider: req.provider.clone(),
+            model: req.model.clone(),
             require_approval: false,
             approval_granted,
         },

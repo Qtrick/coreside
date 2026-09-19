@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@/lib/tauri";
+import { surfaceIdForTool } from "@/lib/surface-ops";
 import {
   canNavigateBack,
   canNavigateForward,
@@ -22,6 +23,7 @@ type AppRouteShellProps = {
   conversationId?: string | null;
   projectId?: string | null;
   isCustomizing?: boolean;
+  mode?: "live" | "customize" | "preview";
   selectedComponentId?: string | null;
   onSelectComponent?: (component: ToolComponent) => void;
   onSubmitToAgent?: (payload: {
@@ -44,6 +46,7 @@ export function AppRouteShell({
   conversationId,
   projectId,
   isCustomizing,
+  mode,
   selectedComponentId,
   onSelectComponent,
   onSubmitToAgent,
@@ -149,9 +152,11 @@ export function AppRouteShell({
     routes.find((route) => route.routeId === routeState?.currentRouteId) ??
     routes[0];
   const activeTool =
-    activeRoute?.surfaceId && surfacesById[activeRoute.surfaceId]
-      ? surfacesById[activeRoute.surfaceId]
-      : null;
+    (activeRoute?.surfaceId && surfacesById[activeRoute.surfaceId]) ||
+    (activeRoute?.surfaceId && surfacesById[surfaceIdForTool(activeRoute.surfaceId)]) ||
+    Object.values(surfacesById)[0] ||
+    null;
+  const routeSurfaceId = activeRoute?.surfaceId ?? surfaceId ?? activeTool?.id;
 
   return (
     <div className="app-route-shell" data-application-id={applicationId}>
@@ -203,10 +208,11 @@ export function AppRouteShell({
           onPersistState={onPersistState}
           onSubmitToAgent={onSubmitToAgent}
           applicationId={applicationId}
-          surfaceId={surfaceId ?? activeTool.id}
+          surfaceId={routeSurfaceId}
           conversationId={conversationId}
           projectId={projectId}
           isCustomizing={isCustomizing}
+          mode={mode}
           selectedComponentId={selectedComponentId}
           onSelectComponent={onSelectComponent}
           onPendingApproval={onPendingApproval}

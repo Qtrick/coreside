@@ -123,6 +123,7 @@ pub fn apply_tool_change(
         &mut db,
         Some(&mut bus),
         crate::application_kernel::ChangeRequest {
+            proposal_id: None,
             conversation_id: Some(conversation_id.clone()),
             project_id: None,
             turn_id: None,

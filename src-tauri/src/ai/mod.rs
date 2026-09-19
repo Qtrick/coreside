@@ -328,6 +328,11 @@ fn extend_model_options_for_provider(options: &mut Vec<ModelOption>, provider: &
         "openrouter" => {
             options.extend([
                 ModelOption {
+                    id: "google/gemini-3.8-flash".into(),
+                    label: "Gemini 3.8 Flash".into(),
+                    description: Some("Recommended — state-of-the-art Flash GA via OpenRouter".into()),
+                },
+                ModelOption {
                     id: "google/gemini-2.5-flash".into(),
                     label: "Gemini 2.5 Flash".into(),
                     description: Some("Fast via OpenRouter".into()),
@@ -380,9 +385,14 @@ fn extend_model_options_for_provider(options: &mut Vec<ModelOption>, provider: &
         "gemini" => {
             options.extend([
                 ModelOption {
+                    id: "gemini-3.8-flash".into(),
+                    label: "Gemini 3.8 Flash".into(),
+                    description: Some("Recommended — state-of-the-art Flash GA".into()),
+                },
+                ModelOption {
                     id: "gemini-3.5-flash".into(),
                     label: "Gemini 3.5 Flash".into(),
-                    description: Some("Recommended — fast agentic Flash".into()),
+                    description: Some("Fast agentic Flash".into()),
                 },
                 ModelOption {
                     id: "gemini-3.1-flash-lite".into(),

@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::surfaces::{list_inline_surfaces, SurfaceRecord};
 use crate::db::{now_rfc3339, Database, DbError, DbResult};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -72,81 +72,160 @@ pub fn branch_from_message(
     branch_name: &str,
     workspace_id: &str,
 ) -> DbResult<(ChatBranchRecord, Vec<SurfaceRecord>)> {
-    let existing = list_branches(db, source_conversation_id)?;
-    // Depth is approximated by the number of branches already taken from this
-    // conversation. A true tree depth would require walking parent links; this
-    // ceiling still prevents unbounded branching from one chat.
-    if existing.len() >= super::limits::MAX_BRANCH_DEPTH {
-        return Err(DbError::Invalid(format!(
-            "branch limit reached ({})",
-            super::limits::MAX_BRANCH_DEPTH
-        )));
-    }
+    db.conn()
+        .execute_batch("SAVEPOINT branch_sp")
+        .map_err(DbError::Sqlite)?;
 
-    let messages = crate::db::get_messages(db, source_conversation_id)?;
-    let cut = messages
-        .iter()
-        .position(|m| m.id == source_message_id)
-        .ok_or_else(|| DbError::NotFound(format!("message {source_message_id}")))?;
-    let kept = &messages[..=cut];
-
-    let title = if branch_name.trim().is_empty() {
-        "Branch".to_string()
-    } else {
-        format!("{branch_name} (branch)")
-    };
-    let project_id = conversation_project_id(db, source_conversation_id);
-    let new_conv = crate::db::create_conversation(db, workspace_id, &title, project_id.as_deref())?;
-
-    for m in kept {
-        crate::db::insert_message(db, &new_conv.id, &m.role, &m.content, m.metadata.as_ref())?;
-    }
-
-    let mut cloned_surfaces = Vec::new();
-    for surface in list_inline_surfaces(db, source_conversation_id)? {
-        let mut def = surface.definition.clone();
-        if let Some(obj) = def.as_object_mut() {
-            obj.insert("_branchedFrom".into(), json!(surface.instance_id));
+    let res = (|| -> DbResult<(ChatBranchRecord, Vec<SurfaceRecord>)> {
+        let existing = list_branches(db, source_conversation_id)?;
+        if existing.len() >= super::limits::MAX_BRANCH_DEPTH {
+            return Err(DbError::Invalid(format!(
+                "branch limit reached ({})",
+                super::limits::MAX_BRANCH_DEPTH
+            )));
         }
-        let created = super::surfaces::create_inline_surface(
-            db,
-            &new_conv.id,
-            None,
-            surface.project_id.as_deref(),
-            &surface.name,
-            &def,
-            &surface.capability_packs,
+
+        let messages = crate::db::get_messages(db, source_conversation_id)?;
+        let cut = messages
+            .iter()
+            .position(|m| m.id == source_message_id)
+            .ok_or_else(|| DbError::NotFound(format!("message {source_message_id}")))?;
+        let _source_msg = &messages[cut];
+        let kept = &messages[..=cut];
+
+        let title = if branch_name.trim().is_empty() {
+            "Branch".to_string()
+        } else {
+            format!("{branch_name} (branch)")
+        };
+        let project_id = conversation_project_id(db, source_conversation_id);
+        let new_conv = crate::db::create_conversation(db, workspace_id, &title, project_id.as_deref())?;
+
+        for m in kept {
+            crate::db::insert_message(db, &new_conv.id, &m.role, &m.content, m.metadata.as_ref())?;
+        }
+
+        let next_msg_created_at = messages.get(cut + 1).map(|m| m.created_at.clone());
+
+        let subsequent_prev_snapshots: Vec<String> = if let Some(ref cutoff) = next_msg_created_at {
+            let mut stmt = db.conn().prepare(
+                "SELECT previous_snapshot_json FROM app_transactions
+                 WHERE conversation_id = ?1 AND created_at >= ?2 AND status = 'applied' AND previous_snapshot_json IS NOT NULL
+                 ORDER BY created_at ASC",
+            )?;
+            let rows = stmt.query_map(params![source_conversation_id, cutoff], |row| {
+                row.get::<_, String>(0)
+            })?;
+            rows.filter_map(|r| r.ok()).collect()
+        } else {
+            Vec::new()
+        };
+
+        let mut cloned_surfaces = Vec::new();
+        for surface in list_inline_surfaces(db, source_conversation_id)? {
+            // Query surface_versions for the highest revision valid up to the cut message.
+            // If there is a subsequent message, the cutoff is strictly before that next message.
+            let historical_row: Option<(i64, String)> = if let Some(ref cutoff) = next_msg_created_at {
+                db.conn().query_row(
+                    "SELECT revision, definition_json FROM surface_versions
+                     WHERE surface_id = ?1 AND created_at < ?2
+                     ORDER BY revision DESC LIMIT 1",
+                    params![surface.id, cutoff],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                ).optional()?
+            } else {
+                db.conn().query_row(
+                    "SELECT revision, definition_json FROM surface_versions
+                     WHERE surface_id = ?1
+                     ORDER BY revision DESC LIMIT 1",
+                    params![surface.id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                ).optional()?
+            };
+
+            // If no version existed before the next message cut,
+            // the surface was created after the message, so do not copy it into the branch.
+            let (_rev, def_json_str) = match historical_row {
+                Some(row) => row,
+                None => continue,
+            };
+
+            let mut def = serde_json::from_str::<Value>(&def_json_str)
+                .unwrap_or_else(|_| surface.definition.clone());
+            if let Some(obj) = def.as_object_mut() {
+                obj.insert("_branchedFrom".into(), json!(surface.instance_id));
+            }
+            let created = super::surfaces::create_inline_surface(
+                db,
+                &new_conv.id,
+                None,
+                surface.project_id.as_deref(),
+                &surface.name,
+                &def,
+                &surface.capability_packs,
+            )?;
+
+            // Restore historical surface state
+            let mut historical_state = super::surfaces::get_surface_state(db, &surface.id)
+                .unwrap_or_else(|_| json!({}));
+            for prev_str in &subsequent_prev_snapshots {
+                if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(prev_str) {
+                    if let Some(surface_snap) = map.get(&surface.id) {
+                        if let Some(st) = surface_snap.get("state") {
+                            historical_state = st.clone();
+                            break;
+                        }
+                    }
+                }
+            }
+
+            let _ = super::surfaces::save_surface_state(db, &created.id, &historical_state);
+            cloned_surfaces.push(created);
+        }
+
+        let id = format!("br-{}", Uuid::new_v4());
+        let now = now_rfc3339();
+        db.conn().execute(
+            "INSERT INTO chat_branches (
+                id, source_conversation_id, source_message_id, new_conversation_id, branch_name, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                id,
+                source_conversation_id,
+                source_message_id,
+                new_conv.id,
+                branch_name,
+                now
+            ],
         )?;
-        cloned_surfaces.push(created);
+
+        Ok((
+            ChatBranchRecord {
+                id,
+                source_conversation_id: source_conversation_id.into(),
+                source_message_id: Some(source_message_id.into()),
+                new_conversation_id: new_conv.id,
+                branch_name: branch_name.into(),
+                created_at: now,
+            },
+            cloned_surfaces,
+        ))
+    })();
+
+    match res {
+        Ok(val) => {
+            db.conn()
+                .execute_batch("RELEASE SAVEPOINT branch_sp")
+                .map_err(DbError::Sqlite)?;
+            Ok(val)
+        }
+        Err(e) => {
+            let _ = db
+                .conn()
+                .execute_batch("ROLLBACK TO SAVEPOINT branch_sp; RELEASE SAVEPOINT branch_sp");
+            Err(e)
+        }
     }
-
-    let id = format!("br-{}", Uuid::new_v4());
-    let now = now_rfc3339();
-    db.conn().execute(
-        "INSERT INTO chat_branches (
-            id, source_conversation_id, source_message_id, new_conversation_id, branch_name, created_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![
-            id,
-            source_conversation_id,
-            source_message_id,
-            new_conv.id,
-            branch_name,
-            now
-        ],
-    )?;
-
-    Ok((
-        ChatBranchRecord {
-            id,
-            source_conversation_id: source_conversation_id.into(),
-            source_message_id: Some(source_message_id.into()),
-            new_conversation_id: new_conv.id,
-            branch_name: branch_name.into(),
-            created_at: now,
-        },
-        cloned_surfaces,
-    ))
 }
 
 pub fn create_snapshot(
@@ -543,9 +622,6 @@ mod tests {
         let mut db = Database::open_path(&dir.path().join("branch_diff.db")).unwrap();
         let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Root Chat", None).unwrap();
         let m1 = crate::db::insert_message(&mut db, &conv.id, "user", "Message 1", None).unwrap();
-        let _m2 =
-            crate::db::insert_message(&mut db, &conv.id, "assistant", "Message 2", None).unwrap();
-
         let def = json!({
             "id": "tool-1",
             "name": "Planner",
@@ -558,13 +634,16 @@ mod tests {
         let _s = super::super::surfaces::create_inline_surface(
             &mut db,
             &conv.id,
-            None,
+            Some(&m1.id),
             None,
             "Planner",
             &def,
             &[],
         )
         .unwrap();
+
+        let _m2 =
+            crate::db::insert_message(&mut db, &conv.id, "assistant", "Message 2", None).unwrap();
 
         let (branch, branch_surfs) = branch_from_message(
             &mut db,
@@ -617,5 +696,100 @@ mod tests {
             diff_after.surfaces[0].changed_components,
             vec!["comp-header"]
         );
+    }
+
+    #[test]
+    fn test_branch_historical_checkpoint_reconstruction() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("branch_hist.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Hist Chat", None).unwrap();
+
+        let def_a1 = json!({
+            "id": "tool-a",
+            "name": "Surface A",
+            "layout": "stack",
+            "components": [{"id": "comp-1", "type": "text", "props": {"text": "v1"}}]
+        });
+        let m1 = crate::db::insert_message(&mut db, &conv.id, "user", "Message 1", None).unwrap();
+        let surf_a = super::super::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            Some(&m1.id),
+            None,
+            "Surface A",
+            &def_a1,
+            &[],
+        )
+        .unwrap();
+
+        // Later turn: Message 2, update Surface A to revision 2, and create Surface B
+        let m2 = crate::db::insert_message(&mut db, &conv.id, "user", "Message 2", None).unwrap();
+        let mut def_a2 = def_a1.clone();
+        def_a2["components"][0]["props"]["text"] = json!("v2");
+        super::super::surfaces::update_surface_definition(
+            &mut db,
+            &surf_a.id,
+            &def_a2,
+            "Rev 2",
+            None,
+        )
+        .unwrap();
+
+        let def_b = json!({
+            "id": "tool-b",
+            "name": "Surface B",
+            "layout": "stack",
+            "components": [{"id": "comp-b", "type": "text", "props": {"text": "b"}}]
+        });
+        let _surf_b = super::super::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            Some(&m2.id),
+            None,
+            "Surface B",
+            &def_b,
+            &[],
+        )
+        .unwrap();
+
+        // Branch from Message 1:
+        // 1. Must include Surface A, but reconstructed at revision 1 ("v1")!
+        // 2. Must NOT include Surface B (created in message 2)!
+        let (_branch1, branch1_surfs) = branch_from_message(
+            &mut db,
+            &conv.id,
+            &m1.id,
+            "Branch At M1",
+            DEFAULT_WORKSPACE_ID,
+        )
+        .unwrap();
+
+        assert_eq!(branch1_surfs.len(), 1);
+        assert_eq!(branch1_surfs[0].name, "Surface A");
+        let text_in_branch = branch1_surfs[0]
+            .definition
+            .pointer("/components/0/props/text")
+            .and_then(|v| v.as_str());
+        assert_eq!(text_in_branch, Some("v1"));
+
+        // Branch from Message 2:
+        // Must include both Surface A (at revision 2) and Surface B!
+        let (_branch2, branch2_surfs) = branch_from_message(
+            &mut db,
+            &conv.id,
+            &m2.id,
+            "Branch At M2",
+            DEFAULT_WORKSPACE_ID,
+        )
+        .unwrap();
+
+        assert_eq!(branch2_surfs.len(), 2);
+        let surf_a_in_b2 = branch2_surfs.iter().find(|s| s.name == "Surface A").unwrap();
+        let text_in_b2 = surf_a_in_b2
+            .definition
+            .pointer("/components/0/props/text")
+            .and_then(|v| v.as_str());
+        assert_eq!(text_in_b2, Some("v2"));
+        assert!(branch2_surfs.iter().any(|s| s.name == "Surface B"));
     }
 }

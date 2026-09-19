@@ -54,9 +54,22 @@ export const StateContractSchema = z.object({
   description: z.string().optional(),
   scope: StateScopeSchema.default("persistent"),
   preservationPolicy: z.string().optional(),
+  readPolicy: z.string().optional().default("public"),
+  writePolicy: z.string().optional().default("model"),
+  sensitivity: z.string().optional(),
 });
 
-export type StateContract = z.infer<typeof StateContractSchema>;
+export type StateContract = {
+  key: string;
+  type?: string;
+  initialValue?: unknown;
+  description?: string;
+  scope?: StateScope;
+  preservationPolicy?: string;
+  readPolicy?: string;
+  writePolicy?: string;
+  sensitivity?: string;
+};
 
 export const ActionContractSchema = z.object({
   actionId: z.string().min(1),
@@ -81,11 +94,12 @@ export const SoftwareDocumentSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   version: z.number().int().positive().default(1),
+  layout: z.unknown().optional(),
   sections: z.array(DocumentSectionSchema).default([]),
   stateContracts: z.array(StateContractSchema).default([]),
   actionContracts: z.array(ActionContractSchema).default([]),
   designTokens: z.record(z.unknown()).optional(),
-  capabilityPacks: z.array(z.string()).default(["core", "base-layout"]),
+  capabilityPacks: z.array(z.string()).default(["coreside.core"]),
 });
 
 export type SoftwareDocument = {
@@ -93,6 +107,7 @@ export type SoftwareDocument = {
   title: string;
   description?: string;
   version: number;
+  layout?: unknown;
   sections: DocumentSection[];
   stateContracts: StateContract[];
   actionContracts: ActionContract[];
@@ -109,11 +124,12 @@ export function fromToolDefinition(tool: ToolDefinition): SoftwareDocument {
     title: tool.name,
     description: tool.description ? tool.description : undefined,
     version: tool.version ?? 1,
+    layout: tool.layout,
     sections: [],
     stateContracts: [],
     actionContracts: [],
     designTokens: undefined,
-    capabilityPacks: ["core", "base-layout"],
+    capabilityPacks: ["coreside.core"],
   };
 
   const sectionMap = new Map<string, ToolComponent[]>();
@@ -159,14 +175,28 @@ export function toToolDefinition(doc: SoftwareDocument): ToolDefinition {
       if (!props.section) {
         props.section = section.id;
       }
+      if (section.role && !props.sectionRole) {
+        props.sectionRole = section.role;
+      }
+      if (section.layout && !props.sectionLayout) {
+        props.sectionLayout = section.layout;
+      }
+      if (section.parentRegionId && !props.parentRegionId) {
+        props.parentRegionId = section.parentRegionId;
+      }
+      if (section.slot && !props.slot) {
+        props.slot = section.slot;
+      }
       c.props = props;
       allComponents.push(c);
     }
   }
 
-  // Derive layout from designTokens.layout, falling back to single-column
+  // Derive layout from doc.layout or designTokens.layout, falling back to single-column
   const layout =
-    doc.designTokens && typeof doc.designTokens === "object" && "layout" in doc.designTokens
+    doc.layout && typeof doc.layout === "object"
+      ? doc.layout
+      : doc.designTokens && typeof doc.designTokens === "object" && "layout" in doc.designTokens
       ? (doc.designTokens as Record<string, unknown>).layout
       : { type: "single-column" };
 

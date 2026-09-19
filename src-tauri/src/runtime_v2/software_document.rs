@@ -80,10 +80,56 @@ pub struct StateContract {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preservation_policy: Option<String>,
+    #[serde(default = "default_read_policy")]
+    pub read_policy: String,
+    #[serde(default = "default_write_policy")]
+    pub write_policy: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensitivity: Option<String>,
 }
 
 fn default_type_name() -> String {
     "string".to_string()
+}
+
+fn default_read_policy() -> String {
+    "public".to_string()
+}
+
+fn default_write_policy() -> String {
+    "model".to_string()
+}
+
+impl StateContract {
+    pub fn new(key: impl Into<String>, initial_value: Value, scope: StateScope) -> Self {
+        Self {
+            key: key.into(),
+            type_name: "string".to_string(),
+            initial_value,
+            scope,
+            description: None,
+            preservation_policy: Some("preserve".into()),
+            read_policy: "public".into(),
+            write_policy: "model".into(),
+            sensitivity: None,
+        }
+    }
+}
+
+impl Default for StateContract {
+    fn default() -> Self {
+        Self {
+            key: String::new(),
+            type_name: default_type_name(),
+            initial_value: Value::Null,
+            scope: StateScope::Persistent,
+            description: None,
+            preservation_policy: None,
+            read_policy: default_read_policy(),
+            write_policy: default_write_policy(),
+            sensitivity: None,
+        }
+    }
 }
 
 /// Declared action contract for runtime effects.
@@ -119,6 +165,8 @@ pub struct SoftwareDocument {
     pub description: Option<String>,
     #[serde(default = "default_doc_version")]
     pub version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<Value>,
     #[serde(default)]
     pub sections: Vec<DocumentSection>,
     #[serde(default)]
@@ -142,11 +190,12 @@ impl SoftwareDocument {
             title: title.into(),
             description: None,
             version: 1,
+            layout: None,
             sections: Vec::new(),
             state_contracts: Vec::new(),
             action_contracts: Vec::new(),
             design_tokens: None,
-            capability_packs: vec!["core".into(), "base-layout".into()],
+            capability_packs: vec!["coreside.core".into()],
         }
     }
 
@@ -165,6 +214,7 @@ impl SoftwareDocument {
     /// Convert a flat ToolDefinition into a structured SoftwareDocument.
     pub fn from_tool_definition(tool: &ToolDefinition) -> Self {
         let mut doc = Self::new(&tool.id, &tool.name);
+        doc.layout = Some(tool.layout.clone());
         doc.description = if tool.description.is_empty() {
             None
         } else {
@@ -220,11 +270,31 @@ impl SoftwareDocument {
         for section in &self.sections {
             for comp in &section.components {
                 let mut c = comp.clone();
-                // Ensure section tagging is recorded in component props
+                // Ensure section tagging and hierarchy metadata is recorded in component props
                 let mut props = c.props.unwrap_or_else(|| json!({}));
                 if let Value::Object(ref mut map) = props {
                     if !map.contains_key("section") {
                         map.insert("section".into(), json!(section.id));
+                    }
+                    if let Some(ref role) = section.role {
+                        if !map.contains_key("sectionRole") {
+                            map.insert("sectionRole".into(), json!(role));
+                        }
+                    }
+                    if let Some(ref sec_layout) = section.layout {
+                        if !map.contains_key("sectionLayout") {
+                            map.insert("sectionLayout".into(), json!(sec_layout));
+                        }
+                    }
+                    if let Some(ref parent_reg) = section.parent_region_id {
+                        if !map.contains_key("parentRegionId") {
+                            map.insert("parentRegionId".into(), json!(parent_reg));
+                        }
+                    }
+                    if let Some(ref slot) = section.slot {
+                        if !map.contains_key("slot") {
+                            map.insert("slot".into(), json!(slot));
+                        }
                     }
                 }
                 c.props = Some(props);
@@ -232,12 +302,16 @@ impl SoftwareDocument {
             }
         }
 
-        // Derive layout from design_tokens.layout, falling back to single-column
+        // Derive layout from self.layout or design_tokens.layout, falling back to single-column
         let layout = self
-            .design_tokens
-            .as_ref()
-            .and_then(|dt| dt.get("layout"))
-            .cloned()
+            .layout
+            .clone()
+            .or_else(|| {
+                self.design_tokens
+                    .as_ref()
+                    .and_then(|dt| dt.get("layout"))
+                    .cloned()
+            })
             .unwrap_or_else(|| json!({ "type": "single-column" }));
 
         ToolDefinition {
@@ -470,19 +544,159 @@ impl SoftwareDocument {
         Ok(())
     }
 
-    /// Find a component along with its enclosing section/region.
+    /// Find a component along with its enclosing section/region at arbitrary depth.
     pub fn find_component_with_region(
         &self,
         component_id: &str,
     ) -> Option<(&DocumentSection, &ToolComponent)> {
         for sec in &self.sections {
-            for comp in &sec.components {
-                if comp.id == component_id {
-                    return Some((sec, comp));
-                }
+            if let Some(comp) = find_in_tree(&sec.components, component_id) {
+                return Some((sec, comp));
             }
         }
         None
+    }
+
+    /// Find a component by ID at arbitrary depth in any section.
+    pub fn find_component(&self, component_id: &str) -> Option<&ToolComponent> {
+        for sec in &self.sections {
+            if let Some(comp) = find_in_tree(&sec.components, component_id) {
+                return Some(comp);
+            }
+        }
+        None
+    }
+
+    /// Find a mutable reference to a component by ID at arbitrary depth.
+    pub fn find_component_mut(&mut self, component_id: &str) -> Option<&mut ToolComponent> {
+        for sec in &mut self.sections {
+            if let Some(comp) = find_in_tree_mut(&mut sec.components, component_id) {
+                return Some(comp);
+            }
+        }
+        None
+    }
+
+    /// Insert a component at a specified parent, section, or root.
+    pub fn insert_component(
+        &mut self,
+        target_section_id: Option<&str>,
+        target_parent_id: Option<&str>,
+        target_index: Option<usize>,
+        comp: ToolComponent,
+    ) -> Result<(), String> {
+        if self.find_component(&comp.id).is_some() {
+            return Err(format!("component '{}' already exists", comp.id));
+        }
+        if let Some(pid) = target_parent_id {
+            let parent = self
+                .find_component_mut(pid)
+                .ok_or_else(|| format!("parent component '{pid}' not found"))?;
+            let mut children = parent.children.take().unwrap_or_default();
+            match target_index {
+                Some(idx) if idx <= children.len() => children.insert(idx, comp),
+                _ => children.push(comp),
+            }
+            parent.children = Some(children);
+            return Ok(());
+        }
+
+        let sec = if let Some(sid) = target_section_id {
+            self.sections
+                .iter_mut()
+                .find(|s| s.id == sid)
+                .ok_or_else(|| format!("section '{sid}' not found"))?
+        } else if let Some(first) = self.sections.first_mut() {
+            first
+        } else {
+            return Err("cannot insert component: document has no sections".into());
+        };
+
+        match target_index {
+            Some(idx) if idx <= sec.components.len() => sec.components.insert(idx, comp),
+            _ => sec.components.push(comp),
+        }
+        Ok(())
+    }
+
+    /// Remove a component at arbitrary tree depth.
+    pub fn remove_component(&mut self, id: &str) -> Result<ToolComponent, String> {
+        for sec in &mut self.sections {
+            if let Some(removed) = remove_from_tree(&mut sec.components, id) {
+                return Ok(removed);
+            }
+        }
+        Err(format!("component '{id}' not found"))
+    }
+
+    /// Replace a component in-place at arbitrary tree depth.
+    pub fn replace_component(&mut self, id: &str, new_comp: ToolComponent) -> Result<ToolComponent, String> {
+        for sec in &mut self.sections {
+            if let Some(old) = replace_in_tree(&mut sec.components, id, new_comp.clone()) {
+                return Ok(old);
+            }
+        }
+        Err(format!("component '{id}' not found"))
+    }
+
+    /// Move a component from its current position to another section, parent, or index.
+    pub fn move_component_tree(
+        &mut self,
+        id: &str,
+        target_section_id: Option<&str>,
+        target_parent_id: Option<&str>,
+        target_index: Option<usize>,
+    ) -> Result<(), String> {
+        let comp = self.remove_component(id)?;
+        self.insert_component(target_section_id, target_parent_id, target_index, comp)
+    }
+
+    /// Update props of a component at arbitrary tree depth.
+    pub fn update_component_props(&mut self, id: &str, patch_props: &Value) -> Result<(), String> {
+        let comp = self
+            .find_component_mut(id)
+            .ok_or_else(|| format!("component '{id}' not found"))?;
+        let mut props = comp.props.take().unwrap_or_else(|| json!({}));
+        if let (Value::Object(ref mut base), Value::Object(patch)) = (&mut props, patch_props) {
+            for (k, v) in patch {
+                base.insert(k.clone(), v.clone());
+            }
+        } else {
+            props = patch_props.clone();
+        }
+        comp.props = Some(props);
+        Ok(())
+    }
+
+    /// Update children of a component at arbitrary tree depth.
+    pub fn update_component_children(&mut self, id: &str, children: Vec<ToolComponent>) -> Result<(), String> {
+        let comp = self
+            .find_component_mut(id)
+            .ok_or_else(|| format!("component '{id}' not found"))?;
+        comp.children = Some(children);
+        Ok(())
+    }
+
+    /// Update visibility of a component at arbitrary tree depth.
+    pub fn update_component_visibility(&mut self, id: &str, visible: bool) -> Result<(), String> {
+        let comp = self
+            .find_component_mut(id)
+            .ok_or_else(|| format!("component '{id}' not found"))?;
+        let mut props = comp.props.take().unwrap_or_else(|| json!({}));
+        if let Value::Object(ref mut base) = props {
+            base.insert("visible".into(), json!(visible));
+        }
+        comp.props = Some(props);
+        Ok(())
+    }
+
+    /// Update actions of a component at arbitrary tree depth.
+    pub fn update_component_actions(&mut self, id: &str, actions: Vec<ActionDefinition>) -> Result<(), String> {
+        let comp = self
+            .find_component_mut(id)
+            .ok_or_else(|| format!("component '{id}' not found"))?;
+        comp.actions = Some(actions);
+        Ok(())
     }
 
     /// Update or declare state scope for an existing or new key.
@@ -490,14 +704,7 @@ impl SoftwareDocument {
         if let Some(contract) = self.state_contracts.iter_mut().find(|sc| sc.key == key) {
             contract.scope = scope;
         } else {
-            self.state_contracts.push(StateContract {
-                key: key.to_string(),
-                type_name: "string".to_string(),
-                initial_value: Value::Null,
-                scope,
-                description: None,
-                preservation_policy: Some("preserve".into()),
-            });
+            self.state_contracts.push(StateContract::new(key, Value::Null, scope));
         }
         Ok(())
     }
@@ -517,7 +724,6 @@ impl SoftwareDocument {
                     preserved.insert(k.clone(), v.clone());
                 }
             } else {
-                // If not explicitly declared ephemeral, preserve by default for safety
                 preserved.insert(k.clone(), v.clone());
             }
         }
@@ -542,11 +748,6 @@ impl SoftwareDocument {
     }
 
     /// Add a new section at the specified index or end.
-    ///
-    /// Validates:
-    /// - ID must be non-empty and unique.
-    /// - If `parent_region_id` is provided, the parent must already exist.
-    /// - A section may not declare itself as its own parent.
     pub fn add_section(
         &mut self,
         mut section: DocumentSection,
@@ -558,7 +759,6 @@ impl SoftwareDocument {
         if self.sections.iter().any(|s| s.id == section.id) {
             return Err(format!("section with id '{}' already exists", section.id));
         }
-        // P0.7: validate parent_region_id if provided.
         if let Some(ref pid) = section.parent_region_id {
             if *pid == section.id {
                 return Err(format!(
@@ -572,7 +772,6 @@ impl SoftwareDocument {
                 ));
             }
         }
-        // Ensure default layout role if not provided
         if section.role.is_none() {
             section.role = Some("content".into());
         }
@@ -592,12 +791,7 @@ impl SoftwareDocument {
     }
 
     /// Remove a section by its ID.
-    ///
-    /// Rejects removal if any other section declares this section as its parent,
-    /// to prevent orphaning children with dangling parent references.
-    /// Use `remove_section_recursive()` to explicitly remove a subtree.
     pub fn remove_section(&mut self, section_id: &str) -> Result<DocumentSection, String> {
-        // P0.6: protect against orphaned child regions.
         let has_children = self
             .sections
             .iter()
@@ -615,12 +809,10 @@ impl SoftwareDocument {
     }
 
     /// Recursively remove a section and all its descendants.
-    /// Returns the IDs of all removed sections.
     pub fn remove_section_recursive(&mut self, section_id: &str) -> Result<Vec<String>, String> {
         if !self.sections.iter().any(|s| s.id == section_id) {
             return Err(format!("section '{section_id}' not found"));
         }
-        // Collect all descendant IDs via BFS.
         let mut to_remove: Vec<String> = Vec::new();
         let mut queue = std::collections::VecDeque::new();
         queue.push_back(section_id.to_string());
@@ -636,7 +828,7 @@ impl SoftwareDocument {
         Ok(to_remove)
     }
 
-    /// Update section components or attributes.
+    /// Update section components or attributes with pre-mutation validation.
     pub fn update_section(
         &mut self,
         section_id: &str,
@@ -662,69 +854,54 @@ impl SoftwareDocument {
         Ok(())
     }
 
-    /// Bind a component to a state contract, generating one if missing.
+    /// Bind a component to a state contract, enforcing sensitivity and authorization boundaries.
     pub fn bind_state(
         &mut self,
         component_id: &str,
         key: &str,
         initial_value: Option<Value>,
     ) -> Result<(), String> {
-        let mut found = false;
-        for sec in &mut self.sections {
-            for comp in &mut sec.components {
-                if comp.id == component_id {
-                    comp.value_key = Some(key.to_string());
-                    found = true;
-                    break;
-                }
-            }
-            if found {
-                break;
+        // Enforce state authorization boundaries: sensitive or restricted state keys cannot be bound by model
+        if let Some(contract) = self.state_contracts.iter().find(|sc| sc.key == key) {
+            if contract.read_policy == "restricted"
+                || contract.sensitivity.as_deref() == Some("sensitive")
+            {
+                return Err(format!(
+                    "state key '{key}' is restricted/sensitive and cannot be bound by model component"
+                ));
             }
         }
-        if !found {
-            return Err(format!("component '{component_id}' not found"));
-        }
+
+        let comp = self
+            .find_component_mut(component_id)
+            .ok_or_else(|| format!("component '{component_id}' not found"))?;
+        comp.value_key = Some(key.to_string());
 
         // Add state contract if not already defined
         if !self.state_contracts.iter().any(|sc| sc.key == key) {
-            self.state_contracts.push(StateContract {
-                key: key.to_string(),
-                type_name: "string".to_string(),
-                initial_value: initial_value.unwrap_or(Value::Null),
-                scope: StateScope::Persistent,
-                description: Some(format!("Bound to component '{component_id}'")),
-                preservation_policy: Some("preserve".into()),
-            });
+            self.state_contracts.push(StateContract::new(
+                key,
+                initial_value.unwrap_or(Value::Null),
+                StateScope::Persistent,
+            ));
         }
 
         Ok(())
     }
 
-    /// Bind an action contract to a component.
+    /// Bind an action contract to a component at arbitrary tree depth.
     pub fn bind_action(
         &mut self,
         component_id: &str,
         action: ActionDefinition,
     ) -> Result<(), String> {
-        let mut found = false;
-        for sec in &mut self.sections {
-            for comp in &mut sec.components {
-                if comp.id == component_id {
-                    let mut actions = comp.actions.take().unwrap_or_default();
-                    actions.push(action.clone());
-                    comp.actions = Some(actions);
-                    found = true;
-                    break;
-                }
-            }
-            if found {
-                break;
-            }
-        }
-        if !found {
-            return Err(format!("component '{component_id}' not found"));
-        }
+        let comp = self
+            .find_component_mut(component_id)
+            .ok_or_else(|| format!("component '{component_id}' not found"))?;
+
+        let mut actions = comp.actions.take().unwrap_or_default();
+        actions.push(action.clone());
+        comp.actions = Some(actions);
 
         if let ActionDefinition::InvokeRegisteredAction {
             action_name,
@@ -753,12 +930,19 @@ impl SoftwareDocument {
     }
 
     /// Apply a safe design style token (e.g. density, variant, accent).
+    /// Uses an explicit presentation allowlist to prevent unauthorized property mutations.
     pub fn set_style_token(
         &mut self,
         target_id: &str,
         token: &str,
         val: Value,
     ) -> Result<(), String> {
+        if !is_allowed_style_token(token) {
+            return Err(format!(
+                "style token '{token}' is not an allowed presentation token; forbidden mutation rejected"
+            ));
+        }
+
         // First check if target is a section
         if let Some(sec) = self.sections.iter_mut().find(|s| s.id == target_id) {
             let mut meta = sec.metadata.take().unwrap_or_else(|| json!({}));
@@ -769,24 +953,424 @@ impl SoftwareDocument {
             return Ok(());
         }
 
-        // Next check if target is a component
-        for sec in &mut self.sections {
-            for comp in &mut sec.components {
-                if comp.id == target_id {
-                    let mut props = comp.props.take().unwrap_or_else(|| json!({}));
-                    if let Value::Object(ref mut m) = props {
-                        m.insert(token.to_string(), val);
-                    }
-                    comp.props = Some(props);
-                    return Ok(());
-                }
+        // Next check if target is a component at arbitrary depth
+        if let Some(comp) = self.find_component_mut(target_id) {
+            let mut props = comp.props.take().unwrap_or_else(|| json!({}));
+            if let Value::Object(ref mut m) = props {
+                m.insert(token.to_string(), val);
             }
+            comp.props = Some(props);
+            return Ok(());
         }
 
         Err(format!(
             "target '{target_id}' not found as section or component"
         ))
     }
+
+    /// Apply any AppOperation directly to this canonical SoftwareDocument.
+    pub fn apply_operation(&mut self, op: &crate::runtime_v2::operations::AppOperation) -> Result<(), String> {
+        match op.op_type.as_str() {
+            "surface.add_section" => {
+                let section: DocumentSection = serde_json::from_value(
+                    op.payload
+                        .get("section")
+                        .cloned()
+                        .unwrap_or_else(|| op.payload.clone()),
+                )
+                .map_err(|e| format!("invalid section payload: {e}"))?;
+                let index = op
+                    .payload
+                    .get("index")
+                    .and_then(|v| v.as_u64())
+                    .map(|i| i as usize);
+                self.add_section(section, index)?;
+            }
+            "surface.remove_section" => {
+                let sec_id = op
+                    .payload
+                    .get("sectionId")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| op.target.component_id.as_deref())
+                    .ok_or_else(|| "sectionId required".to_string())?;
+                self.remove_section(sec_id)?;
+            }
+            "surface.update_section" => {
+                let sec_id = op
+                    .payload
+                    .get("sectionId")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| op.target.component_id.as_deref())
+                    .ok_or_else(|| "sectionId required".to_string())?;
+                let comps: Option<Vec<ToolComponent>> = op
+                    .payload
+                    .get("components")
+                    .cloned()
+                    .and_then(|v| serde_json::from_value(v).ok());
+                let title = op
+                    .payload
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let layout = op
+                    .payload
+                    .get("layout")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                self.update_section(sec_id, comps, title, layout)?;
+            }
+            "component.insert" => {
+                let comp: ToolComponent = serde_json::from_value(
+                    op.payload
+                        .get("component")
+                        .cloned()
+                        .unwrap_or_else(|| op.payload.clone()),
+                )
+                .map_err(|e| format!("invalid component payload: {e}"))?;
+                let sec_id = op.payload.get("sectionId").and_then(|v| v.as_str());
+                let pid = op.target.parent_id.as_deref()
+                    .or_else(|| op.payload.get("parentId").and_then(|v| v.as_str()));
+                let index = op.payload.get("index").and_then(|v| v.as_u64()).map(|i| i as usize);
+                self.insert_component(sec_id, pid, index, comp)?;
+            }
+            "component.remove" => {
+                let cid = op.target.component_id.as_deref()
+                    .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                    .ok_or_else(|| "componentId required".to_string())?;
+                self.remove_component(cid)?;
+            }
+            "component.replace" => {
+                let cid = op.target.component_id.as_deref()
+                    .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                    .ok_or_else(|| "componentId required".to_string())?;
+                let comp: ToolComponent = serde_json::from_value(
+                    op.payload
+                        .get("component")
+                        .cloned()
+                        .unwrap_or_else(|| op.payload.clone()),
+                )
+                .map_err(|e| format!("invalid component payload: {e}"))?;
+                self.replace_component(cid, comp)?;
+            }
+            "component.move" => {
+                let cid = op.target.component_id.as_deref()
+                    .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                    .ok_or_else(|| "componentId required".to_string())?;
+                let sec_id = op.payload.get("toSectionId").and_then(|v| v.as_str());
+                let pid = op.payload.get("toParentId").and_then(|v| v.as_str());
+                let index = op.payload.get("index").and_then(|v| v.as_u64()).map(|i| i as usize);
+                self.move_component_tree(cid, sec_id, pid, index)?;
+            }
+            "component.update_props" => {
+                let cid = op.target.component_id.as_deref()
+                    .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                    .ok_or_else(|| "componentId required".to_string())?;
+                let props = op.payload.get("props").unwrap_or(&op.payload);
+                self.update_component_props(cid, props)?;
+            }
+            "component.update_children" => {
+                let cid = op.target.component_id.as_deref()
+                    .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                    .ok_or_else(|| "componentId required".to_string())?;
+                let children: Vec<ToolComponent> = serde_json::from_value(
+                    op.payload
+                        .get("children")
+                        .cloned()
+                        .unwrap_or_else(|| json!([])),
+                )
+                .map_err(|e| format!("invalid children payload: {e}"))?;
+                self.update_component_children(cid, children)?;
+            }
+            "component.update_visibility" => {
+                let cid = op.target.component_id.as_deref()
+                    .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                    .ok_or_else(|| "componentId required".to_string())?;
+                let visible = op.payload.get("visible").and_then(|v| v.as_bool()).unwrap_or(true);
+                self.update_component_visibility(cid, visible)?;
+            }
+            "component.update_actions" => {
+                let cid = op.target.component_id.as_deref()
+                    .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                    .ok_or_else(|| "componentId required".to_string())?;
+                let actions: Vec<ActionDefinition> = serde_json::from_value(
+                    op.payload
+                        .get("actions")
+                        .cloned()
+                        .unwrap_or_else(|| json!([])),
+                )
+                .map_err(|e| format!("invalid actions payload: {e}"))?;
+                self.update_component_actions(cid, actions)?;
+            }
+            "component.bind_state" => {
+                let cid = op.target.component_id.as_deref()
+                    .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                    .ok_or_else(|| "componentId required".to_string())?;
+                let key = op.payload.get("key").and_then(|v| v.as_str())
+                    .or_else(|| op.payload.get("valueKey").and_then(|v| v.as_str()))
+                    .ok_or_else(|| "key or valueKey required".to_string())?;
+                let initial_val = op.payload.get("initialValue").cloned();
+                self.bind_state(cid, key, initial_val)?;
+            }
+            "component.bind_action" => {
+                let cid = op.target.component_id.as_deref()
+                    .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                    .ok_or_else(|| "componentId required".to_string())?;
+                let action: ActionDefinition = serde_json::from_value(
+                    op.payload.get("action").cloned().unwrap_or_else(|| op.payload.clone()),
+                )
+                .map_err(|e| format!("invalid action payload: {e}"))?;
+                self.bind_action(cid, action)?;
+            }
+            "component.set_style_token" => {
+                let target_id = op.target.component_id.as_deref()
+                    .or_else(|| op.payload.get("targetId").and_then(|v| v.as_str()))
+                    .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                    .ok_or_else(|| "targetId or componentId required".to_string())?;
+                let token = op.payload.get("token").and_then(|v| v.as_str())
+                    .ok_or_else(|| "token required".to_string())?;
+                let val = op.payload.get("value").cloned().unwrap_or(Value::Null);
+                self.set_style_token(target_id, token, val)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+pub const ALLOWED_STYLE_TOKENS: &[&str] = &[
+    "density",
+    "variant",
+    "accent",
+    "spacing",
+    "theme",
+    "align",
+    "size",
+    "colorScheme",
+    "radius",
+    "elevation",
+    "layoutRole",
+    "colSpan",
+    "rowSpan",
+    "maxWidth",
+    "gap",
+    "fontSize",
+    "fontWeight",
+    "border",
+    "background",
+    "padding",
+    "margin",
+];
+
+pub fn is_allowed_style_token(token: &str) -> bool {
+    ALLOWED_STYLE_TOKENS.contains(&token)
+}
+
+fn find_in_tree<'a>(nodes: &'a [ToolComponent], id: &str) -> Option<&'a ToolComponent> {
+    for n in nodes {
+        if n.id == id {
+            return Some(n);
+        }
+        if let Some(children) = &n.children {
+            if let Some(found) = find_in_tree(children, id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn find_in_tree_mut<'a>(nodes: &'a mut [ToolComponent], id: &str) -> Option<&'a mut ToolComponent> {
+    for n in nodes {
+        if n.id == id {
+            return Some(n);
+        }
+        if let Some(children) = n.children.as_mut() {
+            if let Some(found) = find_in_tree_mut(children, id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn remove_from_tree(nodes: &mut Vec<ToolComponent>, id: &str) -> Option<ToolComponent> {
+    if let Some(pos) = nodes.iter().position(|c| c.id == id) {
+        return Some(nodes.remove(pos));
+    }
+    for n in nodes.iter_mut() {
+        if let Some(children) = n.children.as_mut() {
+            if let Some(removed) = remove_from_tree(children, id) {
+                return Some(removed);
+            }
+        }
+    }
+    None
+}
+
+fn replace_in_tree(nodes: &mut [ToolComponent], id: &str, new_comp: ToolComponent) -> Option<ToolComponent> {
+    let mut to_replace = Some(new_comp);
+    fn inner(nodes: &mut [ToolComponent], id: &str, new_comp: &mut Option<ToolComponent>) -> Option<ToolComponent> {
+        for n in nodes.iter_mut() {
+            if n.id == id {
+                if let Some(replacement) = new_comp.take() {
+                    return Some(std::mem::replace(n, replacement));
+                }
+            }
+            if let Some(children) = n.children.as_mut() {
+                if let Some(old) = inner(children, id, new_comp) {
+                    return Some(old);
+                }
+            }
+        }
+        None
+    }
+    inner(nodes, id, &mut to_replace)
+}
+
+/// Canonical admission validation function for SoftwareDocuments.
+pub fn admit_software_document(
+    existing: Option<&SoftwareDocument>,
+    candidate: &SoftwareDocument,
+    allowed_packs: &[String],
+) -> Result<(), String> {
+    // 1. Structure
+    if candidate.id.trim().is_empty() {
+        return Err("software document id cannot be empty".into());
+    }
+    if candidate.title.trim().is_empty() {
+        return Err("software document title cannot be empty".into());
+    }
+    let mut section_ids = HashSet::new();
+    for sec in &candidate.sections {
+        if sec.id.trim().is_empty() {
+            return Err("section id cannot be empty".into());
+        }
+        if !section_ids.insert(sec.id.clone()) {
+            return Err(format!("duplicate section id '{}'", sec.id));
+        }
+        if let Some(ref pid) = sec.parent_region_id {
+            if pid == &sec.id {
+                return Err(format!("section '{}' cannot be its own parent", sec.id));
+            }
+        }
+    }
+    for sec in &candidate.sections {
+        if let Some(ref pid) = sec.parent_region_id {
+            if !section_ids.contains(pid) {
+                return Err(format!(
+                    "parent region '{pid}' for section '{}' does not exist",
+                    sec.id
+                ));
+            }
+        }
+    }
+    // Region cycle check
+    for sec in &candidate.sections {
+        let mut visited = HashSet::new();
+        visited.insert(sec.id.clone());
+        let mut curr = sec.parent_region_id.as_ref();
+        while let Some(pid) = curr {
+            if !visited.insert(pid.clone()) {
+                return Err(format!(
+                    "cycle detected in region hierarchy involving section '{pid}'"
+                ));
+            }
+            curr = candidate
+                .sections
+                .iter()
+                .find(|s| &s.id == pid)
+                .and_then(|s| s.parent_region_id.as_ref());
+        }
+    }
+
+    // 2. Validate all components against capability packs
+    let mut all_comps = Vec::new();
+    for sec in &candidate.sections {
+        all_comps.extend(sec.components.clone());
+    }
+    super::packs::validate_tool_components_for_packs(&all_comps, allowed_packs)?;
+
+    // 3. State contracts validation & security check
+    let mut state_keys = HashSet::new();
+    for sc in &candidate.state_contracts {
+        if sc.key.trim().is_empty() {
+            return Err("state contract key cannot be empty".into());
+        }
+        if !state_keys.insert(sc.key.clone()) {
+            return Err(format!("duplicate state contract key '{}'", sc.key));
+        }
+        if let Some(ref sens) = sc.sensitivity {
+            if sens == "sensitive" && sc.read_policy != "restricted" {
+                return Err(format!(
+                    "sensitive state contract '{}' must have restricted read policy",
+                    sc.key
+                ));
+            }
+        }
+    }
+
+    if let Some(existing_doc) = existing {
+        for sc in &candidate.state_contracts {
+            if let Some(existing_sc) = existing_doc.state_contracts.iter().find(|s| s.key == sc.key) {
+                if (existing_sc.read_policy == "restricted"
+                    || existing_sc.sensitivity.as_deref() == Some("sensitive"))
+                    && sc.read_policy != "restricted"
+                {
+                    return Err(format!(
+                        "cannot broaden access to sensitive/restricted state key '{}'",
+                        sc.key
+                    ));
+                }
+            }
+        }
+    }
+
+    // 4. Action contracts validation
+    for ac in &candidate.action_contracts {
+        if ac.action_id.trim().is_empty() {
+            return Err("action contract id cannot be empty".into());
+        }
+        if let Some(ref rk) = ac.result_key {
+            let sc = candidate
+                .state_contracts
+                .iter()
+                .find(|s| &s.key == rk)
+                .ok_or_else(|| {
+                    format!(
+                        "action '{}' resultKey '{rk}' references undeclared state contract",
+                        ac.action_id
+                    )
+                })?;
+            if sc.write_policy == "readonly" {
+                return Err(format!(
+                    "action '{}' resultKey '{rk}' references readonly state contract",
+                    ac.action_id
+                ));
+            }
+        }
+        if let Some(ref inputs) = ac.input_from_state {
+            for (_param, skey) in inputs {
+                let sc = candidate
+                    .state_contracts
+                    .iter()
+                    .find(|s| &s.key == skey)
+                    .ok_or_else(|| {
+                        format!(
+                            "action '{}' inputFromState references undeclared state contract '{skey}'",
+                            ac.action_id
+                        )
+                    })?;
+                if sc.read_policy == "restricted" || sc.sensitivity.as_deref() == Some("sensitive") {
+                    return Err(format!(
+                        "action '{}' cannot bind sensitive/restricted state key '{skey}' to input",
+                        ac.action_id
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn repair_component(
@@ -838,25 +1422,34 @@ fn repair_component(
         });
     }
 
-    // Auto-repair missing state contracts for bound value keys
-    if let Some(vkey) = comp.value_key.as_deref() {
-        if !vkey.is_empty() && declared_state.insert(vkey.to_string()) {
-            contracts.push(StateContract {
-                key: vkey.to_string(),
-                type_name: "string".to_string(),
-                initial_value: Value::Null,
-                scope: StateScope::Persistent,
-                description: Some(format!(
-                    "Auto-repaired state contract for component '{}'",
-                    comp.id
-                )),
-                preservation_policy: Some("preserve".into()),
-            });
-            notes.push(RepairNote {
-                kind: "added_missing_state_contract".into(),
-                target_id: comp.id.clone(),
-                detail: format!("Created implicit state contract for valueKey '{vkey}'"),
-            });
+    // Validate or register state contracts for bound value keys
+    let vkey_opt = comp.value_key.clone();
+    if let Some(vkey) = vkey_opt.as_deref() {
+        if !vkey.is_empty() {
+            if let Some(existing_contract) = contracts.iter().find(|sc| sc.key == vkey) {
+                // Reject/strip binding to restricted or sensitive state
+                if existing_contract.read_policy == "restricted"
+                    || existing_contract.sensitivity.as_deref() == Some("sensitive")
+                {
+                    comp.value_key = None;
+                    notes.push(RepairNote {
+                        kind: "stripped_unauthorized_state_binding".into(),
+                        target_id: comp.id.clone(),
+                        detail: format!("Stripped unauthorized access to restricted state key '{vkey}'"),
+                    });
+                }
+            } else if declared_state.insert(vkey.to_string()) {
+                contracts.push(StateContract::new(
+                    vkey,
+                    Value::Null,
+                    StateScope::Persistent,
+                ));
+                notes.push(RepairNote {
+                    kind: "added_missing_state_contract".into(),
+                    target_id: comp.id.clone(),
+                    detail: format!("Created implicit state contract for valueKey '{vkey}'"),
+                });
+            }
         }
     }
 
@@ -1035,6 +1628,7 @@ mod tests {
             description: None,
             scope: StateScope::Persistent,
             preservation_policy: Some("keep_on_patch".into()),
+            ..Default::default()
         });
         doc.state_contracts.push(StateContract {
             key: "selected_tab".into(),
@@ -1043,6 +1637,7 @@ mod tests {
             description: None,
             scope: StateScope::Session,
             preservation_policy: None,
+            ..Default::default()
         });
         doc.state_contracts.push(StateContract {
             key: "is_loading".into(),
@@ -1051,6 +1646,7 @@ mod tests {
             description: None,
             scope: StateScope::InFlight,
             preservation_policy: None,
+            ..Default::default()
         });
 
         let mut active_state = HashMap::new();

@@ -79,8 +79,8 @@ pub fn kernel_apply_change(
     require_main_for_sensitive_kernel(&window)?;
     // IPC from the UI is always user-initiated; never allow agent self-approval.
     request.source_type = "user".into();
-    if request.operations.is_empty() {
-        return Err(CommandError::new("invalid", "operations required"));
+    if request.proposal_id.is_none() && request.operations.is_empty() {
+        return Err(CommandError::new("invalid", "operations or proposalId required"));
     }
     let mut db = state.db.lock();
     let mut bus = state.event_bus.lock();

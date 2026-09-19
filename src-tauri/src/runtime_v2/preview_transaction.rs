@@ -186,7 +186,10 @@ impl PreviewTransaction {
         }
 
         match op.op_type.as_str() {
-            "component.update_props"
+            "surface.add_section"
+            | "surface.remove_section"
+            | "surface.update_section"
+            | "component.update_props"
             | "component.insert"
             | "component.remove"
             | "component.replace"
@@ -194,6 +197,9 @@ impl PreviewTransaction {
             | "component.update_children"
             | "component.update_visibility"
             | "component.update_actions"
+            | "component.bind_state"
+            | "component.bind_action"
+            | "component.set_style_token"
             | "chat.inline_surface_update" => {
                 let sid = op
                     .target
@@ -340,6 +346,26 @@ impl PreviewTransaction {
                 return Ok(());
             }
             return Err("inline surface update missing definition".into());
+        }
+
+        let is_structured = model.definition.get("sections").is_some() || op.op_type.starts_with("surface.");
+        if is_structured {
+            let mut doc = if model.definition.get("sections").is_some() {
+                super::software_document::SoftwareDocument::from_value(&model.definition)
+                    .map_err(|e| format!("invalid software document in preview: {e}"))?
+            } else {
+                let tool_def: crate::ai::ToolDefinition = serde_json::from_value(model.definition.clone())
+                    .map_err(|e| format!("cannot convert definition to software document: {e}"))?;
+                super::software_document::SoftwareDocument::from_tool_definition(&tool_def)
+            };
+
+            doc.apply_operation(op)?;
+            let candidate = serde_json::to_value(&doc)
+                .map_err(|e| format!("cannot serialize software document: {e}"))?;
+            validate_definition_components_for_packs(&candidate, &model.capability_packs)?;
+            model.definition = candidate;
+            model.preview_revision = model.preview_revision.saturating_add(1);
+            return Ok(());
         }
 
         let mut components: Vec<ToolComponent> = model

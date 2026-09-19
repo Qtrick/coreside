@@ -95,6 +95,7 @@ pub fn export_package(db: &Database, application_id: &str) -> Result<AppPackage,
         db,
         PolicyAction::ExportPackage,
         &ChangeRequest {
+            proposal_id: None,
             conversation_id: None,
             project_id: None,
             turn_id: None,
@@ -386,6 +387,7 @@ pub fn import_package(
         db,
         PolicyAction::ImportPackage,
         &ChangeRequest {
+            proposal_id: None,
             conversation_id: None,
             project_id: None,
             turn_id: None,

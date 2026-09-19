@@ -26,6 +26,7 @@ type ToolRendererProps = {
   conversationId?: string | null;
   projectId?: string | null;
   isCustomizing?: boolean;
+  mode?: "live" | "customize" | "preview";
   selectedComponentId?: string | null;
   onSelectComponent?: (component: ToolComponent) => void;
   onSubmitToAgent?: (payload: {
@@ -192,11 +193,16 @@ export function ToolRenderer({
   conversationId,
   projectId,
   isCustomizing,
+  mode,
   selectedComponentId,
   onSelectComponent,
   onSubmitToAgent,
   onPendingApproval,
 }: ToolRendererProps) {
+  const effectiveMode = mode ?? (isCustomizing ? "customize" : "live");
+  const isPreviewMode = effectiveMode === "preview";
+  const isCustomizingMode = effectiveMode === "customize" || isCustomizing;
+
   const declaredBindings = useMemo(
     () => collectDeclaredBindings(tool.components ?? []),
     [tool.components],
@@ -212,8 +218,8 @@ export function ToolRenderer({
 
   const runActions = useCallback(
     async (actions: ActionDefinition[], componentId?: string) => {
-      // In customize mode, generated actions must not fire so user can click to inspect/select.
-      if (isCustomizing) return;
+      // In preview mode or customize mode, generated actions must not fire.
+      if (isPreviewMode || isCustomizingMode) return;
       setActionError(null);
       const normalized = actions.map((action) => {
         if (action.type === "submitToAgent") {
@@ -228,7 +234,7 @@ export function ToolRenderer({
         state: stateRef.current,
         toolId: tool.id,
         bindings: declaredBindings,
-        onSubmitToAgent,
+        onSubmitToAgent: isPreviewMode ? undefined : onSubmitToAgent,
         onInvokeRegisteredAction: async (payload: {
           toolId: string;
           actionName: string;
@@ -236,6 +242,13 @@ export function ToolRenderer({
           componentId?: string;
           resultKey?: string;
         }) => {
+          if (isPreviewMode) {
+            return {
+              status: "blocked" as const,
+              reason: "Actions are inert during speculative preview",
+              durationMs: 0,
+            };
+          }
           const outcome = await api.kernelInvokeRegisteredAction({
             actionName: payload.actionName,
             input: payload.input,
