@@ -174,7 +174,11 @@ pub fn list_pending(db: &mut Database) -> DbResult<Vec<ApprovalRequest>> {
          WHERE status = 'pending' ORDER BY created_at DESC LIMIT 100"
     ))?;
     let rows = stmt.query_map([], map_approval)?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    let mut approvals = Vec::new();
+    for row in rows {
+        approvals.push(row?);
+    }
+    Ok(approvals)
 }
 
 pub fn expire_stale(db: &mut Database) -> DbResult<u64> {

@@ -104,7 +104,13 @@ pub fn spawn_scheduler(app: AppHandle, handle: Arc<SchedulerHandle>) {
             }
             let due = {
                 let db = state.db.lock();
-                db::list_due_automations(&db, &Utc::now().to_rfc3339()).unwrap_or_default()
+                match db::list_due_automations(&db, &Utc::now().to_rfc3339()) {
+                    Ok(list) => list,
+                    Err(e) => {
+                        tracing::error!(error = %e, "failed to list due automations");
+                        Vec::new()
+                    }
+                }
             };
             for automation in due {
                 if !handle.try_begin(&automation.id) {
@@ -139,7 +145,7 @@ fn catch_up_missed(db: &mut Database, handle: &SchedulerHandle) -> Result<(), db
     for automation in overdue {
         if automation.missed_run_policy == MissedRunPolicy::Skip {
             if let Some(next) = compute_next_after(&automation.trigger, now) {
-                let _ = db::update_automation_schedule(
+                if let Err(e) = db::update_automation_schedule(
                     db,
                     &automation.id,
                     Some(&next.to_rfc3339()),
@@ -147,12 +153,16 @@ fn catch_up_missed(db: &mut Database, handle: &SchedulerHandle) -> Result<(), db
                     Some("skipped_missed"),
                     automation.consecutive_failures,
                     automation.enabled,
-                );
+                ) {
+                    tracing::error!(automation_id = %automation.id, error = %e, "failed to update skipped automation schedule");
+                }
             }
             continue;
         }
         if handle.try_begin(&automation.id) {
-            let _ = run_one_db(db, &automation.id);
+            if let Err(e) = run_one_db(db, &automation.id) {
+                tracing::error!(automation_id = %automation.id, error = %e, "failed to run automation during catch-up");
+            }
             handle.end(&automation.id);
         }
     }
@@ -170,7 +180,9 @@ fn pending_approval_total(app: &AppHandle) -> i64 {
 
 fn run_one(state: &AppState, automation_id: &str) {
     let mut db = state.db.lock();
-    let _ = run_one_db(&mut db, automation_id);
+    if let Err(e) = run_one_db(&mut db, automation_id) {
+        tracing::error!(automation_id = %automation_id, error = %e, "automation execution failed");
+    }
 }
 
 fn run_one_db(db: &mut Database, automation_id: &str) -> Result<(), db::DbError> {

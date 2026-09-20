@@ -136,11 +136,13 @@ fn get_permission(
             params![application_id, permission],
             |row| {
                 let scope_s: String = row.get(3)?;
+                let scope = serde_json::from_str(&scope_s)
+                    .map_err(|e| rusqlite::Error::InvalidParameterName(format!("corrupted permission scope for {permission}: {e}")))?;
                 Ok(PermissionGrant {
                     id: row.get(0)?,
                     application_id: row.get(1)?,
                     permission: row.get(2)?,
-                    scope: serde_json::from_str(&scope_s).unwrap_or(serde_json::json!({})),
+                    scope,
                     status: row.get(4)?,
                     grant_source: row.get(5)?,
                     granted_at: row.get(6)?,
@@ -161,18 +163,24 @@ pub fn list_permissions(db: &Database, application_id: &str) -> DbResult<Vec<Per
     )?;
     let rows = stmt.query_map([application_id], |row| {
         let scope_s: String = row.get(3)?;
+        let scope = serde_json::from_str(&scope_s)
+            .map_err(|e| rusqlite::Error::InvalidParameterName(format!("corrupted permission scope: {e}")))?;
         Ok(PermissionGrant {
             id: row.get(0)?,
             application_id: row.get(1)?,
             permission: row.get(2)?,
-            scope: serde_json::from_str(&scope_s).unwrap_or(serde_json::json!({})),
+            scope,
             status: row.get(4)?,
             grant_source: row.get(5)?,
             granted_at: row.get(6)?,
             revoked_at: row.get(7)?,
         })
     })?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    let mut grants = Vec::new();
+    for row in rows {
+        grants.push(row?);
+    }
+    Ok(grants)
 }
 
 pub fn assert_can_write_data(db: &Database, application_id: &str) -> DbResult<()> {

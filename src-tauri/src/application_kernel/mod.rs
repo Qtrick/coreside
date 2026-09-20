@@ -486,11 +486,15 @@ pub fn apply_change(
             Ok(result)
         }
         Ok(result) => {
-            let _ = db.conn().execute_batch("ROLLBACK");
+            if let Err(e) = db.conn().execute_batch("ROLLBACK") {
+                tracing::error!(error = %e, "ROLLBACK failed after non-success outcome");
+            }
             Ok(result)
         }
         Err(e) => {
-            let _ = db.conn().execute_batch("ROLLBACK");
+            if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
+                tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed after error");
+            }
             Err(e)
         }
     }
@@ -688,7 +692,9 @@ pub fn decide_proposal(
     ).map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
 
     if updated == 0 {
-        let _ = db.conn().execute_batch("ROLLBACK");
+        if let Err(e) = db.conn().execute_batch("ROLLBACK") {
+            tracing::error!(error = %e, "ROLLBACK failed after proposal already claimed");
+        }
         return Err(KernelError::Validation("Proposal was already claimed or decided concurrently".into()));
     }
 
@@ -722,7 +728,9 @@ pub fn decide_proposal(
                 return Err(KernelError::RevisionConflict(stale_msg));
             }
             Err(e) => {
-                let _ = db.conn().execute_batch("ROLLBACK");
+                if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
+                    tracing::error!(error = %rb_err, "ROLLBACK failed during revision check");
+                }
                 return Err(KernelError::Db(crate::db::DbError::Sqlite(e)));
             }
         }
@@ -760,7 +768,9 @@ pub fn decide_proposal(
     let txn = match txn_res {
         Ok(t) => t,
         Err(e) => {
-            let _ = db.conn().execute_batch("ROLLBACK");
+            if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
+                tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during transaction creation");
+            }
             let _ = db.conn().execute(
                 "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
                 rusqlite::params![e.to_string(), proposal_id],
@@ -770,7 +780,9 @@ pub fn decide_proposal(
     };
 
     if let Err(e) = data::apply_kernel_operations(db, &ops) {
-        let _ = db.conn().execute_batch("ROLLBACK");
+        if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
+            tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during data operations");
+        }
         let _ = db.conn().execute(
             "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
             rusqlite::params![e.to_string(), proposal_id],
@@ -779,7 +791,9 @@ pub fn decide_proposal(
     }
 
     if let Err(e) = manifest::apply_manifest_operations(db, &ops) {
-        let _ = db.conn().execute_batch("ROLLBACK");
+        if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
+            tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during manifest operations");
+        }
         let _ = db.conn().execute(
             "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
             rusqlite::params![e.to_string(), proposal_id],
@@ -791,7 +805,9 @@ pub fn decide_proposal(
     let apply = match apply_res {
         Ok(a) => a,
         Err(e) => {
-            let _ = db.conn().execute_batch("ROLLBACK");
+            if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
+                tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during deferred apply");
+            }
             let _ = db.conn().execute(
                 "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
                 rusqlite::params![e.to_string(), proposal_id],
@@ -802,7 +818,9 @@ pub fn decide_proposal(
 
     if apply.transaction.status != "applied" || !apply.conflicts.is_empty() {
         let err_msg = format!("Application conflicts: {:?}", apply.conflicts);
-        let _ = db.conn().execute_batch("ROLLBACK");
+        if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
+            tracing::error!(error = %rb_err, "ROLLBACK failed during application conflicts");
+        }
         let _ = db.conn().execute(
             "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
             rusqlite::params![err_msg, proposal_id],
@@ -854,7 +872,9 @@ pub fn decide_proposal(
             i as i64,
             effect,
         ) {
-            let _ = db.conn().execute_batch("ROLLBACK");
+            if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
+                tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during outbox enqueue");
+            }
             let _ = db.conn().execute(
                 "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
                 rusqlite::params![e.to_string(), proposal_id],
@@ -868,7 +888,9 @@ pub fn decide_proposal(
         "UPDATE kernel_change_proposals SET status = 'applied', applied_at = ?, transaction_id = ? WHERE id = ?",
         rusqlite::params![chrono::Utc::now().to_rfc3339(), txn.id, proposal_id],
     ) {
-        let _ = db.conn().execute_batch("ROLLBACK");
+        if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
+            tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during proposal status update");
+        }
         return Err(KernelError::Db(crate::db::DbError::Sqlite(e)));
     }
 

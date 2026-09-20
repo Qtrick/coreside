@@ -2857,7 +2857,7 @@ async fn send_message_inner(
                         .get("eventType")
                         .and_then(|v| v.as_str())
                         .unwrap_or("request_started");
-                    let _ = db::insert_action_event(
+                    if let Err(e) = db::insert_action_event(
                         &mut db,
                         &user_message.id,
                         Some(&conversation_id),
@@ -2865,7 +2865,9 @@ async fn send_message_inner(
                         label,
                         "completed",
                         i as i64,
-                    );
+                    ) {
+                        tracing::warn!(error = %e, "failed to insert action event for audit trail");
+                    }
                 }
             }
             let assistant = db::insert_message(
@@ -2882,12 +2884,14 @@ async fn send_message_inner(
                 )?;
             }
             // Create an exact turn-boundary checkpoint for exact branching and replay
-            let _ = crate::runtime_v2::create_turn_checkpoint(
+            if let Err(e) = crate::runtime_v2::create_turn_checkpoint(
                 &mut db,
                 &conversation_id,
                 parsed.payload.turn_id.as_deref(),
                 &assistant.id,
-            );
+            ) {
+                tracing::warn!(error = %e, "failed to create turn checkpoint");
+            }
             Ok(assistant)
         })();
         match commit {
@@ -2910,7 +2914,7 @@ async fn send_message_inner(
 
     if has_turn_record {
         let db = state.db.lock();
-        let _ = crate::runtime_v2::transition_turn(
+        if let Err(e) = crate::runtime_v2::transition_turn(
             &db,
             &turn_id,
             &attempt_id,
@@ -2919,14 +2923,18 @@ async fn send_message_inner(
                 provisional_text: Some(parsed.payload.assistant_message.clone()),
                 ..Default::default()
             },
-        );
-        let _ = crate::runtime_v2::transition_turn(
+        ) {
+            tracing::warn!(error = %e, "failed to transition turn to Committed state");
+        }
+        if let Err(e) = crate::runtime_v2::transition_turn(
             &db,
             &turn_id,
             &attempt_id,
             crate::runtime_v2::TurnState::Published,
             Default::default(),
-        );
+        ) {
+            tracing::warn!(error = %e, "failed to transition turn to Published state");
+        }
     }
 
     note_timeline(state, &conversation_id, &turn_id, "completion", json!({}));
@@ -2938,11 +2946,13 @@ async fn send_message_inner(
             let db = state.db.lock();
             for surface in surfaces {
                 if let Some(surface_id) = surface.get("id").and_then(|v| v.as_str()) {
-                    let _ = db.conn().execute(
+                    if let Err(e) = db.conn().execute(
                         "UPDATE surfaces SET message_id = ?1
                          WHERE id = ?2 AND conversation_id = ?3 AND message_id IS NULL",
                         rusqlite::params![assistant_message.id, surface_id, conversation_id],
-                    );
+                    ) {
+                        tracing::warn!(error = %e, surface_id = %surface_id, "failed to bind surface to message");
+                    }
                 }
             }
         }
