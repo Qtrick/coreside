@@ -45,6 +45,7 @@ pub fn seed_application(db: &mut Database, application_id: &str, actions: &[&str
         application_action_access: actions.iter().map(|a| a.to_string()).collect(),
         surface_action_access: Default::default(),
         component_action_access: Default::default(),
+        action_descriptor_hashes: Default::default(),
     };
     upsert_manifest(db, manifest).expect("manifest");
     for permission in permissions_for(actions) {

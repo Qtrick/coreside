@@ -107,7 +107,15 @@ fn default_write_policy() -> String {
 }
 
 impl StateContract {
-    pub fn new(key: impl Into<String>, initial_value: Value, scope: StateScope) -> Self {
+    /// Create a new state contract with an explicit origin.
+    /// Use `origin = "model"` for model-declared contracts, `"user"` for user-authorized,
+    /// `"system"` for system-managed, `"legacy"` for pre-contract state.
+    pub fn new_with_origin(
+        key: impl Into<String>,
+        initial_value: Value,
+        scope: StateScope,
+        origin: impl Into<String>,
+    ) -> Self {
         Self {
             key: key.into(),
             type_name: "string".to_string(),
@@ -118,8 +126,25 @@ impl StateContract {
             read_policy: "public".into(),
             write_policy: "model".into(),
             sensitivity: None,
-            origin: default_origin(),
+            origin: origin.into(),
         }
+    }
+
+    /// Create a model-declared state contract.
+    pub fn new_for_model(key: impl Into<String>, initial_value: Value, scope: StateScope) -> Self {
+        Self::new_with_origin(key, initial_value, scope, "model")
+    }
+
+    /// Create a user-authorized state contract (user explicitly defined this key).
+    pub fn new_for_user(key: impl Into<String>, initial_value: Value, scope: StateScope) -> Self {
+        Self::new_with_origin(key, initial_value, scope, "user")
+    }
+
+    /// Legacy compatibility: same as new_with_origin but defaults to "model" origin
+    /// (the safer assumption when provenance is unknown).
+    /// Prefer new_for_model() or new_for_user() at call sites where origin is known.
+    pub fn new(key: impl Into<String>, initial_value: Value, scope: StateScope) -> Self {
+        Self::new_for_model(key, initial_value, scope)
     }
 }
 
@@ -141,11 +166,26 @@ impl Default for StateContract {
 }
 
 /// Declared action contract for runtime effects.
+///
+/// `component_id` is required for Runtime V2 applications; it identifies which component
+/// in the SoftwareDocument declares this action. The kernel verifies this at invocation
+/// time so that a model cannot invoke a contract that belongs to a different component.
+///
+/// `descriptor_hash` is the SHA-256 hex of the canonical bundled ActionDescriptor JSON.
+/// If supplied, the gateway verifies it before execution so that descriptor tampering
+/// is detected at the boundary.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionContract {
     pub action_id: String,
     pub action_name: String,
+    /// The component that declares this action within the SoftwareDocument.
+    /// Required for Runtime V2 canonical applications; optional for legacy compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component_id: Option<String>,
+    /// SHA-256 hex of the bundled ActionDescriptor JSON for tamper detection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descriptor_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1187,6 +1227,8 @@ impl SoftwareDocument {
                 self.action_contracts.push(ActionContract {
                     action_id: act_id,
                     action_name: action_name.clone(),
+                    component_id: Some(component_id.to_string()),
+                    descriptor_hash: None,
                     description: Some(format!("Triggered from component '{component_id}'")),
                     result_key: result_key.clone(),
                     input_from_state: input_from_state.clone(),

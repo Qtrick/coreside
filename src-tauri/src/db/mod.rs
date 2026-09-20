@@ -155,6 +155,11 @@ pub enum DbError {
     Conflict(String),
     #[error("invalid data: {0}")]
     Invalid(String),
+    /// Trusted durable data (persisted in the database) is malformed.
+    /// This is more severe than Invalid — it indicates database corruption or
+    /// a migration bug. Authority-critical paths must fail closed on this.
+    #[error("corrupted data: {0}")]
+    Corrupted(String),
 }
 
 pub type DbResult<T> = Result<T, DbError>;

@@ -103,8 +103,19 @@ pub fn get_transaction(db: &Database, id: &str) -> DbResult<AppTransactionRecord
             [id],
             |row| {
                 let ops_json: String = row.get(6)?;
+                // SECURITY: fail closed — malformed operations_json must not silently
+                // become an empty operation list, which would appear as a valid no-op.
                 let operations: Vec<AppOperation> =
-                    serde_json::from_str(&ops_json).unwrap_or_default();
+                    serde_json::from_str(&ops_json).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            6,
+                            rusqlite::types::Type::Text,
+                            Box::new(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                format!("transaction operations_json malformed: {e}"),
+                            )),
+                        )
+                    })?;
                 Ok(AppTransactionRecord {
                     id: row.get(0)?,
                     turn_id: row.get(1)?,
@@ -445,11 +456,11 @@ fn apply_one(
                 .cloned()
                 .unwrap_or_else(|| op.payload.clone());
             validate_definition_components(&definition)?;
-            let packs: Vec<String> = op
-                .payload
-                .get("capabilityPacks")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
+            let packs: Vec<String> = match op.payload.get("capabilityPacks") {
+                Some(v) => serde_json::from_value(v.clone())
+                    .map_err(|e| format!("invalid capabilityPacks in inline_surface_create: {e}"))?,
+                None => Vec::new(),
+            };
             let s = create_inline_surface(
                 db,
                 conversation_id,
@@ -493,7 +504,7 @@ fn apply_one(
             };
 
             let (current_state, _) = super::surfaces::get_surface_state_with_revision(db, sid)
-                .unwrap_or_else(|_| (json!({}), 1));
+                .map_err(|e| format!("failed to load surface state for surface '{sid}': {e}"))?;
 
             if op.op_type == "chat.inline_surface_update" && op.payload.get("definition").is_some() {
                 let incoming_raw = op.payload.get("definition").unwrap();
@@ -698,7 +709,7 @@ fn apply_one(
             let original_doc = super::software_document::SoftwareDocument::from_value(&surface.definition).ok();
             let _notes = doc.validate_and_repair();
             let (current_state, _) = super::surfaces::get_surface_state_with_revision(db, sid)
-                .unwrap_or_else(|_| (json!({}), 1));
+                .map_err(|e| format!("failed to load surface state for surface '{sid}': {e}"))?;
             super::software_document::admit_software_document_with_state(
                 original_doc.as_ref(),
                 &doc,
@@ -1023,21 +1034,21 @@ fn apply_one(
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("sub-{}", Uuid::new_v4()));
-            let event_types: Vec<String> = op
-                .payload
-                .get("eventTypes")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-            let source_filter: super::events::EventRef = op
-                .payload
-                .get("sourceFilter")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-            let target: super::events::EventRef = op
-                .payload
-                .get("target")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
+            let event_types: Vec<String> = match op.payload.get("eventTypes") {
+                Some(v) => serde_json::from_value(v.clone())
+                    .map_err(|e| format!("invalid eventTypes in subscription.create: {e}"))?,
+                None => Vec::new(),
+            };
+            let source_filter: super::events::EventRef = match op.payload.get("sourceFilter") {
+                Some(v) => serde_json::from_value(v.clone())
+                    .map_err(|e| format!("invalid sourceFilter in subscription.create: {e}"))?,
+                None => Default::default(),
+            };
+            let target: super::events::EventRef = match op.payload.get("target") {
+                Some(v) => serde_json::from_value(v.clone())
+                    .map_err(|e| format!("invalid target in subscription.create: {e}"))?,
+                None => Default::default(),
+            };
             let sub = super::events::Subscription {
                 id: sub_id.clone(),
                 owner_surface_id: owner.into(),
@@ -1756,6 +1767,8 @@ mod tests {
         doc.action_contracts = vec![ActionContract {
             action_id: "btn-save-notes-action".into(),
             action_name: "tool_state.set".into(),
+            component_id: Some("btn-save-notes".into()),
+            descriptor_hash: None,
             description: Some("Saves notes to persistent state".into()),
             result_key: Some("saveResult".into()),
             input_from_state: Some(std::collections::HashMap::from([(

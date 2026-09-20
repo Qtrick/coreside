@@ -480,6 +480,7 @@ mod tests {
                 application_action_access: vec![],
                 surface_action_access: Default::default(),
                 component_action_access: Default::default(),
+                action_descriptor_hashes: Default::default(),
             },
             data_models: vec![],
             records: vec![],

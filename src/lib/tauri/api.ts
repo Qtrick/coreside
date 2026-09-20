@@ -698,6 +698,10 @@ export const api = {
     invoke<number>("save_surface_state_cmd", { surfaceId, stateJson, expectedStateRevision: expectedStateRevision ?? null }),
   getSurfaceState: (surfaceId: string) =>
     invoke<ToolState>("get_surface_state_cmd", { surfaceId }),
+  /** Returns both state and stateRevision atomically. Use instead of getSurface()+getSurfaceState()
+   *  to avoid a TOCTOU race where definition revision and state revision diverge. */
+  getSurfaceStateWithRevision: (surfaceId: string) =>
+    invoke<{ state: ToolState; stateRevision: number }>("get_surface_state_with_revision_cmd", { surfaceId }),
   getDraft: (surfaceId: string, componentId: string, windowId?: string | null) =>
     invoke<import("@/types/runtime-v2").SurfaceDraft | null>("get_draft_cmd", {
       surfaceId,

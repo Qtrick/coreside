@@ -67,6 +67,11 @@ pub struct ApplicationManifest {
     /// application list.
     #[serde(default)]
     pub component_action_access: HashMap<String, Vec<String>>,
+    /// Expected action descriptor hashes for tamper detection, keyed by action name.
+    /// If present, the gateway verifies that the runtime action descriptor hash
+    /// matches this value before invocation.
+    #[serde(default)]
+    pub action_descriptor_hashes: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -211,7 +216,38 @@ fn validate_action_access(m: &ApplicationManifest) -> Result<(), String> {
             }
         }
     }
+    for (name, _) in &m.action_descriptor_hashes {
+        if !m.application_action_access.is_empty() && !m.application_action_access.contains(name) {
+            return Err(format!(
+                "descriptor hash registered for {name}, which the application does not declare"
+            ));
+        }
+    }
     Ok(())
+}
+
+/// Propagate SoftwareDocument action contracts into an ApplicationManifest.
+///
+/// Ensures component-level scoping (`component_action_access`) and tamper-detection
+/// descriptor hashes (`action_descriptor_hashes`) are synchronized into the manifest.
+pub fn sync_software_document_contracts(
+    manifest: &mut ApplicationManifest,
+    doc: &crate::runtime_v2::SoftwareDocument,
+) {
+    for contract in &doc.action_contracts {
+        if let Some(ref comp_id) = contract.component_id {
+            let list = manifest.component_action_access.entry(comp_id.clone()).or_default();
+            if !list.contains(&contract.action_name) {
+                list.push(contract.action_name.clone());
+            }
+        }
+        if let Some(ref hash) = contract.descriptor_hash {
+            manifest.action_descriptor_hashes.insert(contract.action_name.clone(), hash.clone());
+        }
+        if !manifest.application_action_access.is_empty() && !manifest.application_action_access.contains(&contract.action_name) {
+            manifest.application_action_access.push(contract.action_name.clone());
+        }
+    }
 }
 
 pub fn upsert_manifest(db: &mut Database, mut m: ApplicationManifest) -> DbResult<ManifestRecord> {
@@ -291,7 +327,29 @@ pub fn upsert_manifest(db: &mut Database, mut m: ApplicationManifest) -> DbResul
 use rusqlite::OptionalExtension;
 
 pub fn get_manifest(db: &Database, application_id: &str) -> DbResult<ManifestRecord> {
-    db.conn()
+    // SECURITY: we extract raw fields first, then parse manifest_json separately.
+    // A malformed manifest must NEVER silently become an empty "Invalid" manifest — an
+    // empty manifest has no permissions/surfaces/routes, causing false negatives in
+    // authorization checks rather than hard errors.
+    struct RawRow {
+        id: String,
+        instance_id: String,
+        schema_version: String,
+        current_version: i64,
+        last_known_good_version: Option<i64>,
+        manifest_json: String,
+        health_state: String,
+        lifecycle_state: String,
+        disabled: i64,
+        crash_count: i64,
+        project_id: Option<String>,
+        conversation_id: Option<String>,
+        created_at: String,
+        updated_at: String,
+    }
+
+    let raw: Option<RawRow> = db
+        .conn()
         .query_row(
             "SELECT id, application_id, instance_id, schema_version, current_version,
                     last_known_good_version, manifest_json, health_state, lifecycle_state,
@@ -299,45 +357,17 @@ pub fn get_manifest(db: &Database, application_id: &str) -> DbResult<ManifestRec
              FROM application_manifests WHERE application_id = ?1",
             [application_id],
             |row| {
-                let mj: String = row.get(6)?;
-                let manifest: ApplicationManifest =
-                    serde_json::from_str(&mj).unwrap_or_else(|_| ApplicationManifest {
-                        schema_version: "1".into(),
-                        application_id: application_id.into(),
-                        instance_id: row.get::<_, String>(2).unwrap_or_default(),
-                        name: "Invalid".into(),
-                        description: String::new(),
-                        version: row.get(4).unwrap_or(1),
-                        surfaces: vec![],
-                        routes: vec![],
-                        data_models: vec![],
-                        settings: vec![],
-                        capabilities: vec![],
-                        permissions: vec![],
-                        events: vec![],
-                        tests: vec![],
-                        search_keywords: vec![],
-                        tags: vec![],
-                        agent_description: String::new(),
-                        project_id: None,
-                        conversation_id: None,
-                        organization_id: None,
-                        ownership: None,
-                        application_action_access: vec![],
-                        surface_action_access: HashMap::new(),
-                        component_action_access: HashMap::new(),
-                    });
-                Ok(ManifestRecord {
+                Ok(RawRow {
                     id: row.get(0)?,
-                    application_id: row.get(1)?,
+                    // column 1 = application_id (unused; supplied by caller)
                     instance_id: row.get(2)?,
                     schema_version: row.get(3)?,
                     current_version: row.get(4)?,
                     last_known_good_version: row.get(5)?,
-                    manifest,
+                    manifest_json: row.get(6)?,
                     health_state: row.get(7)?,
                     lifecycle_state: row.get(8)?,
-                    disabled: row.get::<_, i64>(9)? != 0,
+                    disabled: row.get(9)?,
                     crash_count: row.get(10)?,
                     project_id: row.get(11)?,
                     conversation_id: row.get(12)?,
@@ -346,12 +376,37 @@ pub fn get_manifest(db: &Database, application_id: &str) -> DbResult<ManifestRec
                 })
             },
         )
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => {
-                DbError::NotFound(format!("application {application_id}"))
-            }
-            other => DbError::Sqlite(other),
-        })
+        .optional()
+        .map_err(DbError::Sqlite)?;
+
+    let raw = raw.ok_or_else(|| DbError::NotFound(format!("application {application_id}")))?;
+
+    // Fail closed: malformed manifest JSON is a hard error, not a fallback.
+    let manifest: ApplicationManifest =
+        serde_json::from_str(&raw.manifest_json).map_err(|e| {
+            DbError::Corrupted(format!(
+                "manifest JSON for application '{}' is malformed: {}",
+                application_id, e
+            ))
+        })?;
+
+    Ok(ManifestRecord {
+        id: raw.id,
+        application_id: application_id.to_string(),
+        instance_id: raw.instance_id,
+        schema_version: raw.schema_version,
+        current_version: raw.current_version,
+        last_known_good_version: raw.last_known_good_version,
+        manifest,
+        health_state: raw.health_state,
+        lifecycle_state: raw.lifecycle_state,
+        disabled: raw.disabled != 0,
+        crash_count: raw.crash_count,
+        project_id: raw.project_id,
+        conversation_id: raw.conversation_id,
+        created_at: raw.created_at,
+        updated_at: raw.updated_at,
+    })
 }
 
 pub fn list_manifests(db: &Database) -> DbResult<Vec<ManifestRecord>> {
@@ -509,6 +564,7 @@ pub fn ensure_manifest_for_tool(
         application_action_access,
         surface_action_access: HashMap::new(),
         component_action_access: HashMap::new(),
+        action_descriptor_hashes: HashMap::new(),
     };
     upsert_manifest(db, m)
 }
@@ -547,6 +603,7 @@ mod tests {
             application_action_access: vec![],
             surface_action_access: HashMap::new(),
             component_action_access: HashMap::new(),
+            action_descriptor_hashes: HashMap::new(),
         }
     }
 
@@ -683,5 +740,62 @@ mod tests {
         m.component_action_access
             .insert("component-1".into(), vec!["local_data.write".into()]);
         assert!(validate_manifest(&m).is_err());
+    }
+
+    #[test]
+    fn get_manifest_fails_closed_on_corrupted_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::Database::open_path(&dir.path().join("corrupt.db")).unwrap();
+        let app_id = "app-corrupted-test";
+        let now = now_rfc3339();
+
+        // Directly insert malformed manifest JSON into the table
+        db.conn()
+            .execute(
+                "INSERT INTO application_manifests (
+                    id, application_id, instance_id, schema_version, current_version,
+                    manifest_json, health_state, lifecycle_state, project_id, conversation_id,
+                    created_at, updated_at
+                ) VALUES (?1, ?2, ?3, '1', 1, '{\"invalid\": [unterminated', 'healthy', 'active', NULL, NULL, ?4, ?4)",
+                rusqlite::params!["rec-1", app_id, "inst-1", now],
+            )
+            .unwrap();
+
+        let res = get_manifest(&db, app_id);
+        assert!(res.is_err());
+        match res.unwrap_err() {
+            crate::db::DbError::Corrupted(msg) => {
+                assert!(msg.contains("is malformed"));
+            }
+            other => panic!("expected DbError::Corrupted, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sync_software_document_contracts_propagates_contracts() {
+        let mut m = sample();
+        let mut doc = crate::runtime_v2::SoftwareDocument::new("doc-1", "Test Doc");
+        doc.action_contracts = vec![
+            crate::runtime_v2::ActionContract {
+                action_id: "act-1".into(),
+                action_name: "local_data.query".into(),
+                component_id: Some("comp-table".into()),
+                descriptor_hash: Some("sha256:abc1234".into()),
+                description: None,
+                result_key: None,
+                input_from_state: None,
+            },
+        ];
+
+        sync_software_document_contracts(&mut m, &doc);
+
+        assert_eq!(
+            m.component_action_access.get("comp-table"),
+            Some(&vec!["local_data.query".to_string()])
+        );
+        assert_eq!(
+            m.action_descriptor_hashes.get("local_data.query"),
+            Some(&"sha256:abc1234".to_string())
+        );
     }
 }

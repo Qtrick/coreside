@@ -214,6 +214,28 @@ pub fn get_surface_state_cmd(
     Ok(get_surface_state(&db, &surface_id)?)
 }
 
+/// Returns the current state value AND the current state revision together.
+/// Use this instead of getSurface() + getSurfaceState() to avoid a TOCTOU race
+/// where the definition revision and state revision might diverge between two calls.
+/// The returned `stateRevision` is the correct value to pass to saveSurfaceState().
+#[tauri::command]
+pub fn get_surface_state_with_revision_cmd(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    surface_id: String,
+) -> Result<serde_json::Value, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    let surface = get_surface(&db, &surface_id)?;
+    windows::enforce_caller_surface_scope(&window, surface.tool_id.as_deref(), &surface.id)?;
+    let (state_val, state_revision) = surfaces::get_surface_state_with_revision(&db, &surface_id)?;
+    Ok(serde_json::json!({
+        "state": state_val,
+        "stateRevision": state_revision,
+    }))
+}
+
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveDraftArgs {

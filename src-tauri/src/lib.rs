@@ -272,6 +272,7 @@ pub fn run() {
             commands::promote_surface_cmd,
             commands::save_surface_state_cmd,
             commands::get_surface_state_cmd,
+            commands::get_surface_state_with_revision_cmd,
             commands::get_draft_cmd,
             commands::save_draft_cmd,
             commands::delete_draft_cmd,

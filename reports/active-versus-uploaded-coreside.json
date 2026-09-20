@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-19T20:25:56.069Z",
-  "commit": "d1918e188d9675034b789cf0ba3510ffc20c1723",
+  "generatedAt": "2026-09-20T04:08:47.713Z",
+  "commit": "ebad035b4636371c6d617c64086d85326f4e967b",
   "dirty": true,
-  "sourceFingerprint": "ba425b39cbd67aaf2ef2d9e1b1364662c3b061055a68ac6faf06bbef8daad33f",
+  "sourceFingerprint": "ede8cbddd112f44aa5ea403dbbc41a055e860414b624a3182a19a27bca77c679",
   "packageLockHash": "f99da7c99dc5e2db93567632e2c36d36796c4b3ea8cf6a575a3f337bb6b9d641",
   "cargoLockHash": "b64ad87161713f19b77675d96b38081e050c78ec6b8e3d6b3e00f26b49bfbd67",
   "platform": "darwin",
@@ -86,7 +86,7 @@
     ],
     "workingTreeRole": "active_working_tree"
   },
-  "activeCommit": "d1918e188d9675034b789cf0ba3510ffc20c1723",
+  "activeCommit": "ebad035b4636371c6d617c64086d85326f4e967b",
   "activeDirty": true,
   "comparison": "archive_unavailable",
   "differences": {

@@ -113,7 +113,10 @@ export function ToolCanvas() {
   const [recovery, setRecovery] = useState<RecoveryState | null>(null);
   const [canonicalSurface, setCanonicalSurface] = useState<SurfaceRecord | null>(null);
   const [canonicalState, setCanonicalState] = useState<Record<string, unknown> | null>(null);
-  const [canonicalRevision, setCanonicalRevision] = useState<number>(0);
+  /** State revision — the monotonic counter for the surface's *state* (not definition).
+   * This is the correct value to pass as expectedStateRevision to saveSurfaceState.
+   * Do NOT use canonicalSurface.currentRevision — that is the *definition* revision. */
+  const [stateRevision, setStateRevision] = useState<number>(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [canvasError, setCanvasError] = useState<string | null>(null);
   const [isCustomizing, setIsCustomizing] = useState(false);
@@ -166,24 +169,28 @@ export function ToolCanvas() {
     if (!activeTool) {
       setCanonicalSurface(null);
       setCanonicalState(null);
-      setCanonicalRevision(0);
+      setStateRevision(0);
       return;
     }
     const sid = surfaceIdForTool(activeTool.id);
     let cancelled = false;
+    // Use getSurfaceStateWithRevision to atomically fetch state + stateRevision.
+    // Previously we called getSurface() + getSurfaceState() and used surf.currentRevision
+    // as the OCC guard — that was WRONG because currentRevision tracks the definition
+    // revision, not the state revision. They are separate monotonic counters.
     void Promise.all([
       api.getSurface(sid).catch(() => null),
-      api.getSurfaceState(sid).catch(() => null),
-    ]).then(([surf, st]) => {
+      api.getSurfaceStateWithRevision(sid).catch(() => null),
+    ]).then(([surf, stWithRev]) => {
       if (cancelled) return;
       if (surf) {
         setCanonicalSurface(surf);
-        setCanonicalState(st ?? {});
-        setCanonicalRevision(surf.currentRevision ?? 0);
+        setCanonicalState(stWithRev?.state ?? {});
+        setStateRevision(stWithRev?.stateRevision ?? 0);
       } else {
         setCanonicalSurface(null);
         setCanonicalState(null);
-        setCanonicalRevision(0);
+        setStateRevision(0);
       }
     });
     return () => {
@@ -208,15 +215,20 @@ export function ToolCanvas() {
         setCanonicalState(state);
         const sid = surfaceIdForTool(activeTool.id);
         try {
-          const rev = await api.saveSurfaceState(sid, state, canonicalRevision);
-          setCanonicalRevision(rev);
+          // Pass stateRevision (not definition revision) as the OCC guard.
+          const newStateRev = await api.saveSurfaceState(sid, state, stateRevision);
+          setStateRevision(newStateRev);
         } catch (err) {
-          const [freshSurf, freshState] = await Promise.all([
+          // On conflict, reload fresh state + revision atomically.
+          const [freshSurf, freshWithRev] = await Promise.all([
             api.getSurface(sid).catch(() => null),
-            api.getSurfaceState(sid).catch(() => null),
+            api.getSurfaceStateWithRevision(sid).catch(() => null),
           ]);
-          if (freshSurf) setCanonicalRevision(freshSurf.currentRevision ?? 0);
-          if (freshState) setCanonicalState(freshState);
+          if (freshSurf) setCanonicalSurface(freshSurf);
+          if (freshWithRev) {
+            setCanonicalState(freshWithRev.state);
+            setStateRevision(freshWithRev.stateRevision);
+          }
           throw err;
         }
       } else {
@@ -224,7 +236,7 @@ export function ToolCanvas() {
         await flushToolState(activeTool?.id);
       }
     },
-    [canonicalSurface, activeTool, canonicalRevision, updateToolState, flushToolState],
+    [canonicalSurface, activeTool, stateRevision, updateToolState, flushToolState],
   );
 
   useEffect(() => {

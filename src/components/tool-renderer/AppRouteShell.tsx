@@ -57,6 +57,7 @@ export function AppRouteShell({
   const [routeState, setRouteState] = useState<RouteState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [perSurfaceState, setPerSurfaceState] = useState<Record<string, ToolState>>({});
+  const [perSurfaceRevision, setPerSurfaceRevision] = useState<Record<string, number>>({});
 
   const loadRouteState = useCallback(async () => {
     if (isPreview) {
@@ -208,30 +209,44 @@ export function AppRouteShell({
     setRouteState(next);
   };
 
-  if (!routes.length) return null;
+  // All hooks MUST come before any early return (React rules of hooks).
+  // The early return is moved to the JSX block below.
 
-  const activeRoute =
-    routes.find((route) => route.routeId === routeState?.currentRouteId) ??
-    routes[0];
-  const activeTool =
-    (activeRoute?.surfaceId && surfacesById[activeRoute.surfaceId]) ||
-    (activeRoute?.surfaceId && surfacesById[surfaceIdForTool(activeRoute.surfaceId)]) ||
-    null;
+  // Compute active route/surface derivations — guarded when routes is empty
+  const activeRoute = routes.length
+    ? (routes.find((route) => route.routeId === routeState?.currentRouteId) ?? routes[0])
+    : undefined;
+  const activeTool = activeRoute
+    ? (activeRoute.surfaceId && surfacesById[activeRoute.surfaceId]) ||
+      (activeRoute.surfaceId && surfacesById[surfaceIdForTool(activeRoute.surfaceId)]) ||
+      null
+    : null;
   const routeSurfaceId = activeRoute?.surfaceId ?? surfaceId ?? activeTool?.id ?? "";
 
-  // Multi-route state: load and scope state per active surface
+  // Multi-route state: load and scope state per active surface with atomic revision
   useEffect(() => {
-    if (!routeSurfaceId || isPreview) return;
+    // Guard: no routes or in preview — do not load from backend
+    if (!routeSurfaceId || !routes.length || isPreview) return;
     let cancelled = false;
-    void api.getSurfaceState(routeSurfaceId).then((st) => {
-      if (!cancelled && st && typeof st === "object") {
-        setPerSurfaceState((prev) => ({ ...prev, [routeSurfaceId]: st }));
-      }
-    }).catch(() => {});
+    void api
+      .getSurfaceStateWithRevision(routeSurfaceId)
+      .then((res) => {
+        if (!cancelled && res?.state && typeof res.state === "object") {
+          setPerSurfaceState((prev) => ({ ...prev, [routeSurfaceId]: res.state as ToolState }));
+          setPerSurfaceRevision((prev) => ({ ...prev, [routeSurfaceId]: res.stateRevision }));
+        }
+      })
+      .catch(() => {
+        void api.getSurfaceState(routeSurfaceId).then((st) => {
+          if (!cancelled && st && typeof st === "object") {
+            setPerSurfaceState((prev) => ({ ...prev, [routeSurfaceId]: st }));
+          }
+        }).catch(() => {});
+      });
     return () => {
       cancelled = true;
     };
-  }, [routeSurfaceId, isPreview]);
+  }, [routeSurfaceId, isPreview, routes.length]);
 
   const currentScopedState = useMemo(() => {
     if (routeSurfaceId && perSurfaceState[routeSurfaceId]) {
@@ -253,14 +268,28 @@ export function AppRouteShell({
   const handleRoutePersistState = useCallback(
     async (nextState: ToolState) => {
       if (routeSurfaceId && !isPreview) {
-        await api.saveSurfaceState(routeSurfaceId, nextState).catch(() => {});
+        const currentRev = perSurfaceRevision[routeSurfaceId];
+        try {
+          const newRev = await api.saveSurfaceState(routeSurfaceId, nextState, currentRev);
+          setPerSurfaceRevision((prev) => ({ ...prev, [routeSurfaceId]: newRev }));
+        } catch {
+          // On OCC conflict or failure, reload authoritative state and revision
+          const fresh = await api.getSurfaceStateWithRevision(routeSurfaceId).catch(() => null);
+          if (fresh) {
+            setPerSurfaceState((prev) => ({ ...prev, [routeSurfaceId]: fresh.state as ToolState }));
+            setPerSurfaceRevision((prev) => ({ ...prev, [routeSurfaceId]: fresh.stateRevision }));
+          }
+        }
       }
       if (onPersistState) {
         await onPersistState(nextState);
       }
     },
-    [routeSurfaceId, isPreview, onPersistState],
+    [routeSurfaceId, isPreview, onPersistState, perSurfaceRevision],
   );
+
+  // Early return is now AFTER all hooks — React rules compliant
+  if (!routes.length) return null;
 
   return (
     <div className="app-route-shell" data-application-id={applicationId}>
@@ -323,9 +352,14 @@ export function AppRouteShell({
         />
       ) : (
         <div className="empty-state">
-          <p>No surface is bound to route {activeRoute?.routeId}.</p>
+          <p>
+            {activeRoute
+              ? `No surface is bound to route ${activeRoute.routeId}.`
+              : "No active route."}
+          </p>
         </div>
       )}
     </div>
   );
 }
+

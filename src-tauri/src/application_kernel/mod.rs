@@ -524,8 +524,31 @@ pub struct KernelChangeProposalRecord {
 fn parse_proposal_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<KernelChangeProposalRecord> {
     let ops_json: String = r.get(6)?;
     let base_revs_json: String = r.get(8)?;
-    let ops: Vec<AppOperation> = serde_json::from_str(&ops_json).unwrap_or_default();
-    let base_revisions: HashMap<String, i64> = serde_json::from_str(&base_revs_json).unwrap_or_default();
+    // SECURITY: fail closed — a malformed ops JSON must not silently become an empty
+    // operation list. An empty list would either do nothing (corrupted proposal applied
+    // as a no-op) or, in the worst case, allow the caller to believe a proposal is valid
+    // when its operations are unreadable. Return an error to propagate to the caller.
+    let ops: Vec<AppOperation> = serde_json::from_str(&ops_json).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(
+            6,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("proposal exact_operations_json is malformed: {e}"),
+            )),
+        )
+    })?;
+    let base_revisions: HashMap<String, i64> =
+        serde_json::from_str(&base_revs_json).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                8,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("proposal base_revisions_json is malformed: {e}"),
+                )),
+            )
+        })?;
     Ok(KernelChangeProposalRecord {
         id: r.get(0)?,
         conversation_id: r.get(1)?,

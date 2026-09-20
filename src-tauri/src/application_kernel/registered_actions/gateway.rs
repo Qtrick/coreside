@@ -205,6 +205,14 @@ fn run(
         Some(app) => has_permission(db, app, &descriptor.permission_category).unwrap_or(false),
         None => ctx.venue == Venue::Chat,
     };
+    // 3b. Component scope enforcement: if this action belongs to a different
+    //     component within the application, block before generic undeclared checks.
+    if let Some(record) = manifest.as_ref() {
+        if let Some(blocked) = enforce_action_contract_component_scope(record, ctx, &descriptor.name) {
+            return blocked;
+        }
+    }
+
     // Declared access and granted permission are always required — even when
     // consuming an approval — so revoking a permission cannot be bypassed by a
     // leftover approved receipt.
@@ -219,6 +227,20 @@ fn run(
             "policy_blocked",
             "This application does not have permission for this capability yet.",
         );
+    }
+
+    // 3c. Descriptor hash tamper verification:
+    // If the manifest specifies an expected descriptor hash for this action, verify it.
+    if let Some(record) = manifest.as_ref() {
+        if let Some(expected_hash) = record.manifest.action_descriptor_hashes.get(&descriptor.name) {
+            let actual_hash = descriptor.descriptor_hash();
+            if actual_hash != *expected_hash {
+                return ActionOutcome::blocked(
+                    "descriptor_tampered",
+                    "The action descriptor has changed since registration and cannot be invoked safely.",
+                );
+            }
+        }
     }
 
     // 4. History-dependent breakers.
@@ -404,6 +426,68 @@ fn action_declared(record: &ManifestRecord, ctx: &ActionRunContext, action: &str
     }
     true
 }
+
+/// Verify that, when the SoftwareDocument contains ActionContracts with an
+/// explicit `component_id`, the requesting context's `component_id` matches.
+///
+/// This prevents a generated surface from invoking an action contract declared
+/// by a *different* component within the same application. The model produces
+/// typed operation lists; this check ensures those lists are scoped to the
+/// component that actually declared the contract.
+///
+/// Returns `None` if the check passes, or `Some(blocked_outcome)` if it fails.
+fn enforce_action_contract_component_scope(
+    record: &ManifestRecord,
+    ctx: &ActionRunContext,
+    action: &str,
+) -> Option<ActionOutcome> {
+    // Only enforce when the request comes with a component_id (present-user UI path).
+    let caller_component = match ctx.component_id.as_deref() {
+        Some(id) if !id.is_empty() => id,
+        _ => return None, // no component scope in request — nothing to enforce
+    };
+
+    // Find any ActionContract for this action that has an explicit component_id.
+    // If a contract exists with a specific component_id that does not match the
+    // caller's component_id, block the call.
+    let contracts = &record.manifest.surfaces;
+    // SoftwareDocument ActionContracts are stored per-surface in the manifest.
+    // For now, iterate all surface definitions that have been registered.
+    // (The richer per-surface contract check is done separately by action_declared.)
+    // Check the application-level action contracts embedded in the manifest surfaces.
+    let _ = contracts; // used for future per-surface contract iteration
+
+    // Check the SoftwareDocument-level action_contracts embedded in the surfaces.
+    // Each surface's definition_json should be parsed if available, but to avoid
+    // re-parsing the full SoftwareDocument at every call, we rely on the
+    // application_kernel's component_action_access map being correctly populated
+    // from the SoftwareDocument at registration time (P0-7 phase 2).
+    //
+    // For Runtime V2 applications that populate component_action_access:
+    // if the action is listed under ANY other component but NOT under the caller's
+    // component, it means the contract belongs to a different component.
+    let other_components_allow = record.manifest.component_action_access
+        .iter()
+        .filter(|(comp_id, _)| *comp_id != caller_component)
+        .any(|(_, allowed_actions)| allowed_actions.iter().any(|a| a == action));
+
+    let caller_component_allows = record.manifest.component_action_access
+        .get(caller_component)
+        .map(|allowed| allowed.iter().any(|a| a == action))
+        .unwrap_or(true); // If no per-component restriction, do not block.
+
+    // Block if: another component explicitly owns this action AND the caller
+    // component is NOT in the allow-list for this action.
+    if other_components_allow && !caller_component_allows {
+        return Some(ActionOutcome::blocked(
+            "component_scope_violation",
+            "This action belongs to a different component and cannot be invoked from this context.",
+        ));
+    }
+
+    None
+}
+
 
 /// Trusted entry for the automation executor: presence is always `away`.
 /// No IPC command can reach this path.
@@ -1010,5 +1094,51 @@ mod tests {
         );
         assert_eq!(outcome_code(&outcome), "blocked:output_too_large");
         assert_eq!(note_count(&db), before);
+    }
+
+    #[test]
+    fn component_scope_violation_blocks_cross_component_call() {
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        let mut record = get_manifest(&db, APP).unwrap().manifest;
+        record
+            .component_action_access
+            .insert("comp-a".into(), vec!["local_data.query".into()]);
+        record
+            .component_action_access
+            .insert("comp-b".into(), vec!["local_data.write".into()]);
+        crate::application_kernel::manifest::upsert_manifest(&mut db, record).unwrap();
+
+        let mut ctx = app_ctx(APP);
+        ctx.component_id = Some("comp-b".into());
+        let outcome = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.query",
+            &json!({ "modelId": "note" }),
+            None,
+        );
+        assert_eq!(outcome_code(&outcome), "blocked:component_scope_violation");
+    }
+
+    #[test]
+    fn descriptor_hash_tamper_detected_at_gateway() {
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        let mut record = get_manifest(&db, APP).unwrap().manifest;
+        record
+            .action_descriptor_hashes
+            .insert("local_data.query".into(), "tampered-hash-value".into());
+        crate::application_kernel::manifest::upsert_manifest(&mut db, record).unwrap();
+
+        let ctx = app_ctx(APP);
+        let outcome = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.query",
+            &json!({ "modelId": "note" }),
+            None,
+        );
+        assert_eq!(outcome_code(&outcome), "blocked:descriptor_tampered");
     }
 }
