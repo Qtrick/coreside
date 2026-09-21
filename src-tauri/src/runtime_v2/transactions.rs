@@ -706,12 +706,16 @@ fn apply_one(
                 _ => {}
             }
 
-            let original_doc = super::software_document::SoftwareDocument::from_value(&surface.definition).ok();
+            // SECURITY: Fail-closed — if the existing surface definition cannot be parsed
+            // as a SoftwareDocument, this is a hard failure for canonical surfaces.
+            // For legacy surfaces, the admission check will handle the None case explicitly.
+            let original_doc = super::software_document::SoftwareDocument::from_value(&surface.definition)
+                .map_err(|e| format!("existing surface definition is malformed: {e}"))?;
             let _notes = doc.validate_and_repair();
             let (current_state, _) = super::surfaces::get_surface_state_with_revision(db, sid)
                 .map_err(|e| format!("failed to load surface state for surface '{sid}': {e}"))?;
             super::software_document::admit_software_document_with_state(
-                original_doc.as_ref(),
+                Some(&original_doc),
                 &doc,
                 &surface.capability_packs,
                 Some(&current_state),
@@ -945,7 +949,16 @@ fn apply_one(
             super::surfaces::save_surface_state_occ(db, sid, &current, current_rev)
                 .map_err(|e| e.to_string())?;
 
-            // Personal tools read `tool_state` in the canvas — mirror only on durable apply.
+            // COMPATIBILITY ADAPTER: Legacy (pre-V2) personal tools still read `tool_state`
+            // from the canvas. Mirror canonical surface_state to tool_state ONLY for legacy
+            // surfaces that are not yet migrated to the canonical surface_state authority.
+            //
+            // SECURITY INVARIANT: For Runtime V2 surfaces, surface_state is the sole authority.
+            // tool_state is a read-only projection for legacy rendering only. The frontend must
+            // never use tool_state as a write authority for Runtime V2 surfaces.
+            //
+            // This adapter exists solely for backward compatibility with pre-V2 tools.
+            // It will be removed once all surfaces are migrated to canonical surface_state.
             if let Some(tool_id) = surface.tool_id.as_deref().filter(|t| !t.is_empty()) {
                 crate::db::save_tool_state(db, tool_id, &current).map_err(|e| e.to_string())?;
             }

@@ -26,6 +26,9 @@ vi.mock("@/lib/tauri", () => ({
     saveSurfaceState: (...args: unknown[]) => mockSaveSurfaceState(...args),
     getRouteState: (...args: unknown[]) => mockGetRouteState(...args),
     setRouteState: vi.fn(),
+    navigateRoute: vi.fn(),
+    routeBack: vi.fn(),
+    routeForward: vi.fn(),
   },
 }));
 
@@ -56,7 +59,6 @@ const baseManifest: ApplicationManifest = {
   applicationActionAccess: [],
   surfaceActionAccess: {},
   componentActionAccess: {},
-  actionDescriptorHashes: {},
 };
 
 describe("AppRouteShell", () => {

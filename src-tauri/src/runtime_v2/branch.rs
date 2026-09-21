@@ -65,6 +65,12 @@ fn conversation_project_id(db: &Database, conversation_id: &str) -> Option<Strin
 }
 
 /// Create an exact turn boundary checkpoint containing surfaces, states, revisions, and routes.
+///
+/// SECURITY: Checkpoint creation is transactional. If manifest, routes, or data models
+/// cannot be retrieved, they are explicitly recorded as null (not silently discarded).
+/// The checkpoint hash covers all captured components to detect corruption.
+/// A checkpoint with missing critical components is still created but marked as incomplete
+/// so that branching from it will fail visibly rather than silently fabricating state.
 pub fn create_turn_checkpoint(
     db: &mut Database,
     conversation_id: &str,
@@ -94,11 +100,70 @@ pub fn create_turn_checkpoint(
             }),
         );
     }
+
+    // Capture manifest, routes, and data models explicitly — do not silently discard failures.
+    let mut incomplete_components = Vec::new();
+    let manifest_json = if let Some(ref app) = app_id {
+        match crate::application_kernel::manifest::get_manifest(db, app) {
+            Ok(m) => match serde_json::to_string(&m.manifest) {
+                Ok(j) => Some(j),
+                Err(e) => {
+                    incomplete_components.push(format!("manifest serialize: {e}"));
+                    None
+                }
+            },
+            Err(e) => {
+                incomplete_components.push(format!("manifest load: {e}"));
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let routes_json = if let Some(ref app) = app_id {
+        match crate::runtime_v2::app_routes::get_route_state(db, app, "main") {
+            Ok(r) => match serde_json::to_string(&r) {
+                Ok(j) => Some(j),
+                Err(e) => {
+                    incomplete_components.push(format!("routes serialize: {e}"));
+                    None
+                }
+            },
+            Err(e) => {
+                incomplete_components.push(format!("routes load: {e}"));
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let data_models_json = if let Some(ref app) = app_id {
+        match crate::application_kernel::data::list_models(db, app) {
+            Ok(m) => match serde_json::to_string(&m) {
+                Ok(j) => Some(j),
+                Err(e) => {
+                    incomplete_components.push(format!("data_models serialize: {e}"));
+                    None
+                }
+            },
+            Err(e) => {
+                incomplete_components.push(format!("data_models load: {e}"));
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let snapshot = json!({
         "conversationId": conversation_id,
         "messageId": message_id,
         "turnId": turn_id,
         "surfaces": surfaces_map,
+        "manifest": manifest_json,
+        "routes": routes_json,
+        "dataModels": data_models_json,
+        "incompleteComponents": incomplete_components,
     });
     let snapshot_json = serde_json::to_string(&snapshot)?;
     use sha2::{Digest, Sha256};
@@ -107,28 +172,6 @@ pub fn create_turn_checkpoint(
     let checkpoint_hash = hex::encode(hasher.finalize());
     let id = format!("chk-{}", Uuid::new_v4());
     let now = now_rfc3339();
-
-    let manifest_json = if let Some(ref app) = app_id {
-        crate::application_kernel::manifest::get_manifest(db, app)
-            .ok()
-            .and_then(|m| serde_json::to_string(&m.manifest).ok())
-    } else {
-        None
-    };
-    let routes_json = if let Some(ref app) = app_id {
-        crate::runtime_v2::app_routes::get_route_state(db, app, "main")
-            .ok()
-            .and_then(|r| serde_json::to_string(&r).ok())
-    } else {
-        None
-    };
-    let data_models_json = if let Some(ref app) = app_id {
-        crate::application_kernel::data::list_models(db, app)
-            .ok()
-            .and_then(|m| serde_json::to_string(&m).ok())
-    } else {
-        None
-    };
 
     db.conn().execute(
         "INSERT INTO conversation_checkpoints (

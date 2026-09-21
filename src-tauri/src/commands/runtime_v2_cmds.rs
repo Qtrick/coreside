@@ -414,6 +414,9 @@ pub fn get_route_state_cmd(
     )?)
 }
 
+/// Set route state — SECURITY: caller-provided history and historyIndex are REJECTED.
+/// The server owns history. Frontend must use navigate_route_cmd, route_back_cmd,
+/// or route_forward_cmd to modify navigation state.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetRouteStateArgs {
@@ -421,8 +424,6 @@ pub struct SetRouteStateArgs {
     pub window_id: Option<String>,
     pub current_route_id: Option<String>,
     pub route_params: Value,
-    pub history: Vec<Value>,
-    pub history_index: i64,
 }
 
 #[tauri::command]
@@ -434,15 +435,18 @@ pub fn set_route_state_cmd(
     state.require_profile()?;
     let effective_window = window.label();
     let mut db = state.db.lock();
-    Ok(set_route_state(
+    // SECURITY: Reject caller-provided history. Use navigate_route for navigation.
+    // For initial seeding, navigate_route with push_history=false handles this safely.
+    let route_id = args.current_route_id.as_deref().unwrap_or("main");
+    let result = crate::runtime_v2::app_routes::navigate_route(
         &mut db,
         &args.application_id,
         effective_window,
-        args.current_route_id.as_deref(),
+        route_id,
         &args.route_params,
-        &args.history,
-        args.history_index,
-    )?)
+        false,
+    )?;
+    Ok(result.state)
 }
 
 #[derive(Debug, Deserialize)]

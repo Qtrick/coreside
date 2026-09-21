@@ -82,8 +82,11 @@ export function executableFromPsArgs(args) {
     /^(.*?\.app\/Contents\/MacOS\/Coreside)(?:\s|$)/,
   );
   if (appMatch) return appMatch[1];
-  // Bare Mach-O: consume through `/Coreside` before argv extras (spaces allowed).
-  const bareMatch = text.match(/^(.+\/Coreside)(?:\s|$)/);
+  // Bare Mach-O: only match actual binaries, not directory paths.
+  // Must be /target/{debug,release}/Coreside (the compiled binary).
+  const bareMatch = text.match(
+    /^(.+\/target\/(?:debug|release)\/Coreside)(?:\s|$)/,
+  );
   if (bareMatch) return bareMatch[1];
   return text.split(/\s+/)[0] || text;
 }

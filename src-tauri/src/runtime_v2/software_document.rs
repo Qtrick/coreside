@@ -1632,6 +1632,33 @@ pub fn admit_software_document_with_state(
     }
 
     if !is_user_customizing {
+        // SECURITY: Rule D: Origin authority enforcement for edits.
+        // When editing an existing document, the model cannot escalate origin from "model"
+        // to "user" for any contract. The kernel derives origin from trusted persisted state.
+        // A model-declared contract with origin "user" would grant the model user-level
+        // authority, which is an escalation attack.
+        if let Some(existing_doc) = existing {
+            for sc in &candidate.state_contracts {
+                if let Some(existing_sc) = existing_doc.state_contracts.iter().find(|s| s.key == sc.key) {
+                    // Cannot escalate from model to user origin
+                    if existing_sc.origin == "model" && sc.origin == "user" {
+                        return Err(format!(
+                            "cannot escalate state contract '{}' origin from 'model' to 'user'",
+                            sc.key
+                        ));
+                    }
+                } else {
+                    // New contract in edit context: reject non-model origins from untrusted sources
+                    if sc.origin != "model" && sc.origin != "system" && sc.origin != "legacy" {
+                        return Err(format!(
+                            "new state contract '{}' cannot declare origin '{}' in edit context",
+                            sc.key, sc.origin
+                        ));
+                    }
+                }
+            }
+        }
+
         // Rule A: Existing opaque key protection.
         // A model cannot create a contract for an already-existing state key that had no contract.
         if let Some(Value::Object(ref state_map)) = surface_state {

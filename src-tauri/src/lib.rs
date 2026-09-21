@@ -281,6 +281,8 @@ pub fn run() {
             commands::get_route_state_cmd,
             commands::set_route_state_cmd,
             commands::navigate_route_cmd,
+            commands::route_back_cmd,
+            commands::route_forward_cmd,
             commands::get_conversation_events_cmd,
             commands::append_context_ledger_cmd,
             commands::list_context_ledger_cmd,

@@ -86,14 +86,14 @@ export function AppRouteShell({
         setRouteState(null);
         return;
       }
-      const seeded = await api.setRouteState({
+      // SECURITY: Server owns history. Use navigateRoute for initial seeding.
+      const result = await api.navigateRoute({
         applicationId,
-        currentRouteId: first.routeId,
+        routeId: first.routeId,
         routeParams: {},
-        history: [{ routeId: first.routeId, params: {} }],
-        historyIndex: 0,
+        pushHistory: false,
       });
-      setRouteState(seeded);
+      setRouteState(result.state);
     }
   }, [applicationId, isPreview, routes]);
 
@@ -144,13 +144,13 @@ export function AppRouteShell({
 
   const goBack = async () => {
     if (!routeState || !canNavigateBack(routeState.historyIndex)) return;
-    const nextIndex = routeState.historyIndex - 1;
-    const entry = routeState.history[nextIndex] as {
-      routeId?: string;
-      params?: Record<string, unknown>;
-    };
-    if (!entry?.routeId) return;
     if (isPreview) {
+      const nextIndex = routeState.historyIndex - 1;
+      const entry = routeState.history[nextIndex] as {
+        routeId?: string;
+        params?: Record<string, unknown>;
+      };
+      if (!entry?.routeId) return;
       setRouteState((prev) => {
         if (!prev) return null;
         return {
@@ -163,14 +163,10 @@ export function AppRouteShell({
       });
       return;
     }
-    const next = await api.setRouteState({
-      applicationId,
-      currentRouteId: entry.routeId,
-      routeParams: entry.params ?? {},
-      history: routeState.history,
-      historyIndex: nextIndex,
-    });
-    setRouteState(next);
+    // SECURITY: Server owns history. Use routeBack command.
+    const result = await api.routeBack(applicationId);
+    if (!result.changed) return;
+    setRouteState(result.state);
   };
 
   const goForward = async () => {
@@ -180,13 +176,13 @@ export function AppRouteShell({
     ) {
       return;
     }
-    const nextIndex = routeState.historyIndex + 1;
-    const entry = routeState.history[nextIndex] as {
-      routeId?: string;
-      params?: Record<string, unknown>;
-    };
-    if (!entry?.routeId) return;
     if (isPreview) {
+      const nextIndex = routeState.historyIndex + 1;
+      const entry = routeState.history[nextIndex] as {
+        routeId?: string;
+        params?: Record<string, unknown>;
+      };
+      if (!entry?.routeId) return;
       setRouteState((prev) => {
         if (!prev) return null;
         return {
@@ -199,14 +195,10 @@ export function AppRouteShell({
       });
       return;
     }
-    const next = await api.setRouteState({
-      applicationId,
-      currentRouteId: entry.routeId,
-      routeParams: entry.params ?? {},
-      history: routeState.history,
-      historyIndex: nextIndex,
-    });
-    setRouteState(next);
+    // SECURITY: Server owns history. Use routeForward command.
+    const result = await api.routeForward(applicationId);
+    if (!result.changed) return;
+    setRouteState(result.state);
   };
 
   // All hooks MUST come before any early return (React rules of hooks).

@@ -768,8 +768,6 @@ export const api = {
     windowId?: string | null;
     currentRouteId?: string | null;
     routeParams: Record<string, unknown>;
-    history: unknown[];
-    historyIndex: number;
   }) =>
     invoke<import("@/types/runtime-v2").RouteState>("set_route_state_cmd", {
       args: {
@@ -790,6 +788,14 @@ export const api = {
         windowId: args.windowId ?? "main",
         routeParams: args.routeParams ?? {},
       },
+    }),
+  routeBack: (applicationId: string) =>
+    invoke<import("@/types/runtime-v2").NavigateResult>("route_back_cmd", {
+      applicationId,
+    }),
+  routeForward: (applicationId: string) =>
+    invoke<import("@/types/runtime-v2").NavigateResult>("route_forward_cmd", {
+      applicationId,
     }),
   appendContextLedger: (args: {
     conversationId: string;
