@@ -377,8 +377,16 @@ fn parse_patch_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledPatch> 
         turn_id: row.get(3)?,
         conversation_id: row.get(4)?,
         surface_id: row.get(5)?,
-        priority: PatchPriority::parse(&priority_str)
-            .unwrap_or(PatchPriority::ApprovedPersistentChange),
+        priority: PatchPriority::parse(&priority_str).ok_or_else(|| {
+            rusqlite::Error::FromSqlConversionFailure(
+                6,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown patch priority: {priority_str}"),
+                )),
+            )
+        })?,
         status: row.get(7)?,
         sequence_number: row.get(8)?,
         depends_on: serde_json::from_str(&depends_json).map_err(|e| {

@@ -212,20 +212,23 @@ pub fn apply_change(
     assert_ops_not_protected(&req.operations)?;
 
     // Recovery Mode: block agent UI mutations while surfaces are disabled.
-    if let Ok(rec) = recovery::get_recovery_state(db) {
-        if (rec.recovery_mode || rec.disable_user_surfaces) && req.source_type == "agent" {
-            let touches_ui = req.operations.iter().any(|op| {
-                let t = op.op_type.as_str();
-                t.starts_with("surface.")
-                    || t.starts_with("component.")
-                    || t.starts_with("layout.")
-                    || t.starts_with("manifest.")
-            });
-            if touches_ui {
-                return Err(KernelError::RecoveryRequired(
-                    "Recovery Mode is active; user surfaces are disabled".into(),
-                ));
-            }
+    // Fail-closed: if recovery state cannot be read, block agent mutations
+    // rather than silently allowing them through.
+    let rec = recovery::get_recovery_state(db).map_err(|e| {
+        KernelError::Validation(format!("unable to read recovery state: {e}"))
+    })?;
+    if (rec.recovery_mode || rec.disable_user_surfaces) && req.source_type == "agent" {
+        let touches_ui = req.operations.iter().any(|op| {
+            let t = op.op_type.as_str();
+            t.starts_with("surface.")
+                || t.starts_with("component.")
+                || t.starts_with("layout.")
+                || t.starts_with("manifest.")
+        });
+        if touches_ui {
+            return Err(KernelError::RecoveryRequired(
+                "Recovery Mode is active; user surfaces are disabled".into(),
+            ));
         }
     }
 
@@ -858,7 +861,13 @@ pub fn decide_proposal(
         require_approval: false,
         approval_granted: true,
     };
-    let _ = record_provenance(db, &txn.id, &change_req, "applied", Some("passed"), None);
+    if let Err(e) = record_provenance(db, &txn.id, &change_req, "applied", Some("passed"), None) {
+        tracing::warn!(
+            transaction_id = %txn.id,
+            error = %e,
+            "provenance recording failed after proposal apply — audit trail gap"
+        );
+    }
 
     let verification = testing::verify_after_change(db, &ops).ok();
 

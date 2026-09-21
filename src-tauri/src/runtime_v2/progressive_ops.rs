@@ -866,4 +866,205 @@ mod tests {
         assert!(p.speculative_operations().is_empty());
         assert!(p.is_halted());
     }
+
+    // P0 progressive binding fail-closed tests: every expected binding must be
+    // present and match exactly.  Missing or wrong values fail closed.
+
+    #[test]
+    fn wrong_turn_id_rejects_start() {
+        let mut p = ProgressiveOpsParser::new(ProgressiveOpsExpect {
+            turn_id: Some("turn-correct".into()),
+            ..Default::default()
+        });
+        let bad = json!({
+            "v": PROGRESSIVE_OPS_V,
+            "type": "start",
+            "groupId": "g1",
+            "turnId": "turn-wrong"
+        })
+        .to_string()
+            + "\n";
+        assert!(p.push(&bad)[0].is_err());
+        assert!(p.durable_operations().is_none());
+    }
+
+    #[test]
+    fn missing_turn_id_when_expected_rejects() {
+        let mut p = ProgressiveOpsParser::new(ProgressiveOpsExpect {
+            turn_id: Some("turn-required".into()),
+            ..Default::default()
+        });
+        let bad = json!({
+            "v": PROGRESSIVE_OPS_V,
+            "type": "start",
+            "groupId": "g1"
+        })
+        .to_string()
+            + "\n";
+        assert!(p.push(&bad)[0].is_err());
+        assert!(p.durable_operations().is_none());
+    }
+
+    #[test]
+    fn wrong_attempt_id_rejects_start() {
+        let mut p = ProgressiveOpsParser::new(ProgressiveOpsExpect {
+            attempt_id: Some("attempt-correct".into()),
+            ..Default::default()
+        });
+        let bad = json!({
+            "v": PROGRESSIVE_OPS_V,
+            "type": "start",
+            "groupId": "g1",
+            "attemptId": "attempt-wrong"
+        })
+        .to_string()
+            + "\n";
+        assert!(p.push(&bad)[0].is_err());
+        assert!(p.durable_operations().is_none());
+    }
+
+    #[test]
+    fn missing_attempt_id_when_expected_rejects() {
+        let mut p = ProgressiveOpsParser::new(ProgressiveOpsExpect {
+            attempt_id: Some("attempt-required".into()),
+            ..Default::default()
+        });
+        let bad = json!({
+            "v": PROGRESSIVE_OPS_V,
+            "type": "start",
+            "groupId": "g1"
+        })
+        .to_string()
+            + "\n";
+        assert!(p.push(&bad)[0].is_err());
+        assert!(p.durable_operations().is_none());
+    }
+
+    #[test]
+    fn wrong_group_id_rejects_op() {
+        let mut p = ProgressiveOpsParser::new(ProgressiveOpsExpect {
+            group_id: Some("group-correct".into()),
+            ..Default::default()
+        });
+        let _ = p.push(
+            &(json!({
+                "v": PROGRESSIVE_OPS_V,
+                "type": "start",
+                "groupId": "group-correct"
+            })
+            .to_string()
+                + "\n"),
+        );
+        let ev = p.push(
+            &(json!({
+                "v": PROGRESSIVE_OPS_V,
+                "type": "op",
+                "groupId": "group-wrong",
+                "frameId": 1,
+                "operation": { "id": "op1", "type": "state.set" }
+            })
+            .to_string()
+                + "\n"),
+        );
+        assert!(ev[0].is_err());
+        assert!(p.durable_operations().is_none());
+    }
+
+    #[test]
+    fn wrong_capability_version_rejects_start() {
+        let mut p = ProgressiveOpsParser::new(ProgressiveOpsExpect {
+            capability_version: Some("2".into()),
+            ..Default::default()
+        });
+        let bad = json!({
+            "v": PROGRESSIVE_OPS_V,
+            "type": "start",
+            "groupId": "g1",
+            "capabilityVersion": "99"
+        })
+        .to_string()
+            + "\n";
+        assert!(p.push(&bad)[0].is_err());
+        assert!(p.durable_operations().is_none());
+    }
+
+    #[test]
+    fn wrong_schema_version_rejects_start() {
+        let mut p = ProgressiveOpsParser::new(ProgressiveOpsExpect {
+            schema_version: "2".into(),
+            ..Default::default()
+        });
+        let bad = json!({
+            "v": PROGRESSIVE_OPS_V,
+            "type": "start",
+            "groupId": "g1",
+            "schemaVersion": "99"
+        })
+        .to_string()
+            + "\n";
+        assert!(p.push(&bad)[0].is_err());
+        assert!(p.durable_operations().is_none());
+    }
+
+    #[test]
+    fn operation_before_start_rejected() {
+        let mut p = parser();
+        let ev = p.push(
+            &(json!({
+                "v": PROGRESSIVE_OPS_V,
+                "type": "op",
+                "groupId": "g1",
+                "frameId": 1,
+                "operation": { "id": "op1", "type": "state.set" }
+            })
+            .to_string()
+                + "\n"),
+        );
+        assert!(ev[0].is_err());
+        assert!(p.durable_operations().is_none());
+    }
+
+    #[test]
+    fn completion_before_start_rejected() {
+        let mut p = parser();
+        let ev = p.push(
+            &(json!({
+                "v": PROGRESSIVE_OPS_V,
+                "type": "complete",
+                "groupId": "g1",
+                "frameId": 1
+            })
+            .to_string()
+                + "\n"),
+        );
+        assert!(ev[0].is_err());
+        assert!(p.durable_operations().is_none());
+    }
+
+    #[test]
+    fn abort_before_start_rejected() {
+        let mut p = parser();
+        let ev = p.push(
+            &(json!({
+                "v": PROGRESSIVE_OPS_V,
+                "type": "abort",
+                "groupId": "g1",
+                "frameId": 1,
+                "reason": "test"
+            })
+            .to_string()
+                + "\n"),
+        );
+        assert!(ev[0].is_err());
+        assert!(p.durable_operations().is_none());
+    }
+
+    #[test]
+    fn second_start_rejected() {
+        let mut p = parser();
+        let _ = p.push(&start_line("g1"));
+        let ev = p.push(&start_line("g1"));
+        assert!(ev[0].is_err());
+        assert!(p.durable_operations().is_none());
+    }
 }

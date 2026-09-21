@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 24 forward migrations (001–024; includes `024_dock_icon_compatibility_repair.sql`)
+**Count:** 28 forward migrations (001–028; includes `028_deep_runtime_v2_hardening.sql`)
 
 ## Inventory
 
@@ -32,6 +32,10 @@
 | 022 | `022_turn_journal_cas_sequences.sql` | Turn journal conversation-scoped idempotency + conversation event sequences |
 | 023 | `023_dock_icon_preference.sql` | Migrate Dock icon `auto`/`dark`/`light` to versioned Follow macOS / manual config |
 | 024 | `024_dock_icon_compatibility_repair.sql` | Repair Dock icon compatibility: preserve legacy split, resolve dual aliases, canonicalize JSON |
+| 025 | `025_patch_scheduler_provenance.sql` | Patch scheduler provenance columns: model, provider, source_type |
+| 026 | `026_kernel_change_proposals.sql` | Kernel change proposals: frozen operations, CAS status, approval lifecycle |
+| 027 | `027_secure_runtime_proposals_and_state.sql` | Secure runtime: state contract origin, proposal operations hash, state revision OCC |
+| 028 | `028_deep_runtime_v2_hardening.sql` | Deep Runtime V2 hardening: conversation event sequences, outbox idempotency, turn journal CAS |
 
 ## What is verified
 
@@ -74,4 +78,4 @@ Fixtures are built programmatically (no committed user databases):
 
 ## Honest assessment
 
-Forward migrations are fixture-tested for common upgrade stops (006, 011–015) and fresh installs through `024_dock_icon_compatibility_repair`. Large-volume and export-after-upgrade assurance remain open.
+Forward migrations are fixture-tested for common upgrade stops (006, 011–015) and fresh installs through `028_deep_runtime_v2_hardening`. Large-volume and export-after-upgrade assurance remain open.

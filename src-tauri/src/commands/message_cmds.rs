@@ -2545,7 +2545,21 @@ async fn send_message_inner(
             match progressive_parser.durable_operations() {
                 Some(durable) => {
                     let durable = durable.to_vec();
-                    if let Some(final_ops) = operations_from_payload.as_ref() {
+                    // P0 defense-in-depth: reject internal/reserved ops at the
+                    // progressive→kernel boundary, even though preview already
+                    // validated each op individually.  Catches any parser-level
+                    // inconsistency that could have slipped through.
+                    if let Err(err) =
+                        crate::runtime_v2::validate_model_operations(&durable)
+                    {
+                        tracing::warn!(
+                            conversation_id = %conversation_id,
+                            error = %err,
+                            "progressive durable operations failed model allowlist — committing zero ops"
+                        );
+                        preview_txn.mark_interrupted();
+                        operations_from_payload = Some(Vec::new());
+                    } else if let Some(final_ops) = operations_from_payload.as_ref() {
                         if let Err(err) =
                             crate::runtime_v2::reconcile_final_operations(&durable, final_ops)
                         {
@@ -2627,7 +2641,15 @@ async fn send_message_inner(
 
         if let Some(operations) = operations_from_payload {
             if !operations.is_empty() {
-                if !state
+                // P0 final gate: reject internal/reserved ops that should never reach the kernel.
+                if let Err(err) = crate::runtime_v2::validate_model_operations(&operations) {
+                    tracing::warn!(
+                        conversation_id = %conversation_id,
+                        error = %err,
+                        "operations failed model allowlist at final gate — dropping"
+                    );
+                    preview_txn.mark_interrupted();
+                } else if !state
                     .quiescence
                     .allows(crate::quiescence::QuiescedSubsystem::PatchScheduler)
                 {

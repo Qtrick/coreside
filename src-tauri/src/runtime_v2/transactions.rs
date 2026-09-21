@@ -286,9 +286,10 @@ pub fn apply_transaction_deferred(
         .execute_batch("RELEASE SAVEPOINT runtime_v2_apply")
         .map_err(DbError::Sqlite)?;
 
-    // Append durable conversation event log for reconnect catch-up
+    // Append durable conversation event log for reconnect catch-up.
+    // Log but do not fail — the transaction already committed successfully.
     if let Some(ref conv_id) = txn.conversation_id {
-        let _ = super::turn_journal::append_conversation_event(
+        if let Err(e) = super::turn_journal::append_conversation_event(
             db,
             conv_id,
             txn.turn_id.as_deref(),
@@ -300,7 +301,13 @@ pub fn apply_transaction_deferred(
                 "operationsCount": txn.operations.len(),
                 "surfaces": surfaces.iter().map(|s| &s.id).collect::<Vec<_>>(),
             }),
-        );
+        ) {
+            tracing::warn!(
+                transaction_id = %transaction_id,
+                error = %e,
+                "conversation event log append failed after commit — reconnect catch-up may miss this event"
+            );
+        }
     }
 
     Ok(ApplyResult {

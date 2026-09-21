@@ -373,7 +373,11 @@ impl PreviewTransaction {
             .get("components")
             .cloned()
             .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
+            .unwrap_or_else(|| {
+                // ponytail: legacy flat definitions without a "components" key
+                // start with an empty component list — acceptable for legacy compat.
+                Vec::new()
+            });
 
         // ponytail: unspecified or turn base_revision matches speculative base: stack on current speculative.
         let effective_base = match op.base_revision {
@@ -671,6 +675,20 @@ fn accept_and_paint(
     seed: &mut impl FnMut(&str) -> Option<PreviewSurfaceModel>,
 ) -> Vec<PreviewOpEvent> {
     let id = operation.id.clone();
+
+    // P0 security: reject internal/reserved operations at the preview trust boundary.
+    // This prevents model-originated privileged operations from reaching either
+    // speculative preview or durable apply via progressive or legacy streaming paths.
+    if let Err(err) = super::operations::validate_model_operations(std::slice::from_ref(&operation))
+    {
+        preview.reject(id.clone(), err.clone());
+        return vec![PreviewOpEvent {
+            operation_id: id,
+            status: "rejected".into(),
+            reason: Some(err),
+            paint: None,
+        }];
+    }
 
     // If this operation has dependencies, check if any are not yet painted
     let has_unpainted_deps = operation.depends_on.as_ref().map_or(false, |deps| {
@@ -1415,5 +1433,98 @@ mod tests {
         })
         .to_string()
             + "\n"
+    }
+
+    // P0 security test: internal/reserved operations must be rejected at
+    // the preview trust boundary (accept_and_paint), preventing them from
+    // reaching either speculative preview or durable apply.
+
+    #[test]
+    fn internal_operation_rejected_at_preview_boundary() {
+        let mut preview = PreviewTransaction::new("turn-security", None);
+        preview.seed_surface(seed_s1());
+        let op: AppOperation = serde_json::from_value(json!({
+            "id": "op-malicious",
+            "type": "permission.grant",
+            "target": {"surfaceId": "s1"},
+            "payload": {}
+        }))
+        .unwrap();
+        let events = accept_and_paint(&mut preview, op, &mut |_| None);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].status, "rejected");
+        let reason = events[0].reason.as_deref().unwrap_or("");
+        assert!(
+            reason.contains("not allowed") || reason.contains("unknown"),
+            "expected rejection reason to mention 'not allowed' or 'unknown', got: {reason}"
+        );
+        assert!(preview.accepted.is_empty());
+        assert_eq!(preview.rejected.len(), 1);
+    }
+
+    #[test]
+    fn reserved_operation_rejected_at_preview_boundary() {
+        let mut preview = PreviewTransaction::new("turn-security-2", None);
+        preview.seed_surface(seed_s1());
+        let op: AppOperation = serde_json::from_value(json!({
+            "id": "op-malicious",
+            "type": "layout.move_panel",
+            "target": {"surfaceId": "s1"},
+            "payload": {}
+        }))
+        .unwrap();
+        let events = accept_and_paint(&mut preview, op, &mut |_| None);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].status, "rejected");
+        let reason = events[0].reason.as_deref().unwrap_or("");
+        assert!(
+            reason.contains("not allowed") || reason.contains("reserved"),
+            "expected rejection reason to mention 'not allowed' or 'reserved', got: {reason}"
+        );
+        assert!(preview.accepted.is_empty());
+    }
+
+    #[test]
+    fn state_reset_rejected_at_preview_boundary() {
+        let mut preview = PreviewTransaction::new("turn-security-3", None);
+        preview.seed_surface(seed_s1());
+        let op: AppOperation = serde_json::from_value(json!({
+            "id": "op-malicious",
+            "type": "state.reset",
+            "target": {"surfaceId": "s1"},
+            "payload": {}
+        }))
+        .unwrap();
+        let events = accept_and_paint(&mut preview, op, &mut |_| None);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].status, "rejected");
+        let reason = events[0].reason.as_deref().unwrap_or("");
+        assert!(
+            reason.contains("not allowed") || reason.contains("internal"),
+            "expected rejection reason to mention 'not allowed' or 'internal', got: {reason}"
+        );
+        assert!(preview.accepted.is_empty());
+    }
+
+    #[test]
+    fn manifest_disable_rejected_at_preview_boundary() {
+        let mut preview = PreviewTransaction::new("turn-security-4", None);
+        preview.seed_surface(seed_s1());
+        let op: AppOperation = serde_json::from_value(json!({
+            "id": "op-malicious",
+            "type": "manifest.disable",
+            "target": {"surfaceId": "s1"},
+            "payload": {}
+        }))
+        .unwrap();
+        let events = accept_and_paint(&mut preview, op, &mut |_| None);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].status, "rejected");
+        let reason = events[0].reason.as_deref().unwrap_or("");
+        assert!(
+            reason.contains("not allowed") || reason.contains("internal"),
+            "expected rejection reason to mention 'not allowed' or 'internal', got: {reason}"
+        );
+        assert!(preview.accepted.is_empty());
     }
 }

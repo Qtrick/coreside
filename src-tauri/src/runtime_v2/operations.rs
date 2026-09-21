@@ -686,4 +686,376 @@ mod tests {
         }];
         assert!(validate_model_operations(&ops).is_ok());
     }
+
+    // P0 security regression tests: every internal/reserved operation must be
+    // rejected from model responses.  A model must never be able to grant
+    // permissions, disable recovery, import/export packages, reset state, or
+    // invoke any other privileged operation.
+
+    #[test]
+    fn rejects_permission_grant_from_model() {
+        let ops = vec![AppOperation {
+            id: "op-malicious".into(),
+            op_type: "permission.grant".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(
+            err.contains("unknown operation") || err.contains("internal operation") || err.contains("reserved operation"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_manifest_disable_from_model() {
+        let ops = vec![AppOperation {
+            id: "op-malicious".into(),
+            op_type: "manifest.disable".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("internal operation"), "{err}");
+    }
+
+    #[test]
+    fn rejects_manifest_restore_from_model() {
+        let ops = vec![AppOperation {
+            id: "op-malicious".into(),
+            op_type: "manifest.restore_last_known_good".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("internal operation"), "{err}");
+    }
+
+    #[test]
+    fn rejects_package_import_from_model() {
+        let ops = vec![AppOperation {
+            id: "op-malicious".into(),
+            op_type: "package.import".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("internal operation"), "{err}");
+    }
+
+    #[test]
+    fn rejects_package_export_from_model() {
+        let ops = vec![AppOperation {
+            id: "op-malicious".into(),
+            op_type: "package.export".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("internal operation"), "{err}");
+    }
+
+    #[test]
+    fn rejects_surface_update_metadata_from_model() {
+        let ops = vec![AppOperation {
+            id: "op-malicious".into(),
+            op_type: "surface.update_metadata".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("internal operation"), "{err}");
+    }
+
+    #[test]
+    fn rejects_surface_duplicate_from_model() {
+        let ops = vec![AppOperation {
+            id: "op-malicious".into(),
+            op_type: "surface.duplicate".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("internal operation"), "{err}");
+    }
+
+    #[test]
+    fn rejects_state_reset_from_model() {
+        let ops = vec![AppOperation {
+            id: "op-malicious".into(),
+            op_type: "state.reset".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("internal operation"), "{err}");
+    }
+
+    #[test]
+    fn rejects_state_delete_key_from_model() {
+        let ops = vec![AppOperation {
+            id: "op-malicious".into(),
+            op_type: "state.delete_key".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("internal operation"), "{err}");
+    }
+
+    #[test]
+    fn rejects_data_migrate_from_model() {
+        let ops = vec![AppOperation {
+            id: "op-malicious".into(),
+            op_type: "data.migrate".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("internal operation"), "{err}");
+    }
+
+    #[test]
+    fn rejects_route_navigate_from_model() {
+        let ops = vec![AppOperation {
+            id: "op-malicious".into(),
+            op_type: "route.navigate".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("internal operation"), "{err}");
+    }
+
+    #[test]
+    fn rejects_setting_create_from_model() {
+        let ops = vec![AppOperation {
+            id: "op-malicious".into(),
+            op_type: "setting.create".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("reserved operation"), "{err}");
+    }
+
+    #[test]
+    fn rejects_automation_create_from_model() {
+        let ops = vec![AppOperation {
+            id: "op-malicious".into(),
+            op_type: "automation.create".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("reserved operation"), "{err}");
+    }
+
+    #[test]
+    fn rejects_unknown_operation_from_model() {
+        let ops = vec![AppOperation {
+            id: "op-malicious".into(),
+            op_type: "shell.exec".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("unknown operation"), "{err}");
+    }
+
+    #[test]
+    fn rejects_mixed_valid_and_invalid_ops() {
+        let ops = vec![
+            AppOperation {
+                id: "op-valid".into(),
+                op_type: "component.update_props".into(),
+                target: OperationTarget {
+                    surface_id: Some("surf-test".into()),
+                    ..Default::default()
+                },
+                base_revision: None,
+                transaction_group: None,
+                idempotency_key: None,
+                depends_on: None,
+                payload: json!({"props": {"text": "hello"}}),
+                requires_approval: None,
+                destructive: None,
+                audience: None,
+            },
+            AppOperation {
+                id: "op-malicious".into(),
+                op_type: "permission.grant".into(),
+                target: OperationTarget::default(),
+                base_revision: None,
+                transaction_group: None,
+                idempotency_key: None,
+                depends_on: None,
+                payload: json!({}),
+                requires_approval: None,
+                destructive: None,
+                audience: None,
+            },
+        ];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(
+            err.contains("unknown operation") || err.contains("internal operation") || err.contains("reserved operation"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn all_internal_operations_are_rejected_from_model() {
+        for op_type in INTERNAL_OPERATIONS {
+            let ops = vec![AppOperation {
+                id: "op-test".into(),
+                op_type: op_type.to_string(),
+                target: OperationTarget::default(),
+                base_revision: None,
+                transaction_group: None,
+                idempotency_key: None,
+                depends_on: None,
+                payload: json!({}),
+                requires_approval: None,
+                destructive: None,
+                audience: None,
+            }];
+            let result = validate_model_operations(&ops);
+            assert!(
+                result.is_err(),
+                "internal operation '{op_type}' should be rejected from model responses"
+            );
+            let err = result.unwrap_err();
+            assert!(
+                err.contains("internal operation"),
+                "error for '{op_type}' should mention 'internal': {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn all_reserved_operations_are_rejected_from_model() {
+        for op_type in RESERVED_OPERATIONS {
+            let ops = vec![AppOperation {
+                id: "op-test".into(),
+                op_type: op_type.to_string(),
+                target: OperationTarget::default(),
+                base_revision: None,
+                transaction_group: None,
+                idempotency_key: None,
+                depends_on: None,
+                payload: json!({}),
+                requires_approval: None,
+                destructive: None,
+                audience: None,
+            }];
+            let result = validate_model_operations(&ops);
+            assert!(
+                result.is_err(),
+                "reserved operation '{op_type}' should be rejected from model responses"
+            );
+            let err = result.unwrap_err();
+            assert!(
+                err.contains("reserved operation"),
+                "error for '{op_type}' should mention 'reserved': {err}"
+            );
+        }
+    }
 }
