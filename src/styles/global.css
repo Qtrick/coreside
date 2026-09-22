@@ -1188,9 +1188,10 @@ body > .window-overlay-root > *,
   min-width: 0;
   min-height: 0;
   max-width: 100%;
-  /* min-width:0 lets the pane shrink; keep overflow:auto so wide tool
-     content can still scroll instead of being clipped. */
-  overflow: auto;
+  /* min-width:0 lets the pane shrink; overflow-y:auto for vertical scroll,
+     overflow-x:hidden prevents page-level horizontal scrollbar from wide tool content. */
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: var(--space-5);
 }
 
@@ -2305,11 +2306,15 @@ body > .window-overlay-root > *,
   margin: 0;
   font-family: var(--font-display);
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .tr-text {
   margin: 0;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .tr-badge {
@@ -2321,6 +2326,10 @@ body > .window-overlay-root > *,
   color: var(--text-secondary);
   font-size: 0.78rem;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .tr-badge.accent {
@@ -2438,6 +2447,9 @@ body > .window-overlay-root > *,
   font-size: 2rem;
   font-weight: 600;
   letter-spacing: -0.03em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .tr-progress {
@@ -4155,7 +4167,7 @@ body > .window-overlay-root > *,
 
 .wallpaper-curated-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr));
   gap: var(--space-3);
   margin-top: var(--space-3);
   margin-bottom: var(--space-4);
@@ -5680,7 +5692,7 @@ body > .window-overlay-root > *,
 
 .chat-starter-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
   gap: var(--space-2);
 }
 

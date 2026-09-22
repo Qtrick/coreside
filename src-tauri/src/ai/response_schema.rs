@@ -667,13 +667,19 @@ impl AgentResponsePayload {
         let Some(ops_raw) = &self.operations else {
             return Ok(Vec::new());
         };
-        let normalized: Vec<Value> = ops_raw
+        let mut ops: Vec<crate::runtime_v2::AppOperation> = ops_raw
             .iter()
             .enumerate()
-            .map(|(idx, val)| normalize_raw_operation(val, idx))
-            .collect();
-        serde_json::from_value(Value::Array(normalized))
-            .map_err(|e| format!("failed to decode normalized operations: {e}"))
+            .map(|(idx, val)| {
+                let normalized = normalize_raw_operation(val, idx);
+                serde_json::from_value::<crate::runtime_v2::AppOperation>(normalized)
+                    .map_err(|e| format!("failed to decode normalized operations: {e}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Convert any legacy `tool_change` operation types to valid v2 operations.
+        ops = crate::runtime_v2::normalize_operations_for_validation(&ops);
+        Ok(ops)
     }
 
     pub fn validate(&self) -> Result<(), String> {

@@ -24,7 +24,8 @@ describe("generated surface containment", () => {
     expect(body).toMatch(/min-width:\s*0/);
     expect(body).toMatch(/min-height:\s*0/);
     expect(body).toMatch(/max-width:\s*100%/);
-    expect(body).toMatch(/overflow:\s*auto/);
+    expect(body).toMatch(/overflow-y:\s*auto/);
+    expect(body).toMatch(/overflow-x:\s*hidden/);
   });
 
   it("makes generated layout primitives shrink or reflow before they widen the host", () => {

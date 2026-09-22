@@ -269,6 +269,12 @@ fn validate_operations_inner(
                         op.op_type
                     ));
                 }
+                if op.op_type == "tool_change" {
+                    return Err(format!(
+                        "operation type 'tool_change' is a v1 response-level type, not a v2 operation; \
+                         use 'surface.create', 'tool.full_replace', or the response-level toolChange field"
+                    ));
+                }
                 return Err(format!("unknown operation type: {}", op.op_type));
             }
         } else if !is_known_operation_type(&op.op_type) {
@@ -406,8 +412,10 @@ fn validate_operations_inner(
 /// Validate a list of operations for model-facing responses.
 /// Only operations in SUPPORTED_MODEL_OPERATIONS are allowed.
 /// Internal and reserved operations must only come from host subsystems.
+/// Automatically converts `tool_change` ops to valid v2 operations before validation.
 pub fn validate_model_operations(operations: &[AppOperation]) -> Result<(), String> {
-    validate_operations_inner(operations, true)
+    let normalized = normalize_operations_for_validation(operations);
+    validate_operations_inner(&normalized, true)
 }
 
 /// Validate a list of application operations (trusted boundary).
@@ -456,6 +464,39 @@ impl AgentResponseV2 {
         }
         Ok(())
     }
+}
+
+/// Try to convert a `tool_change` operation into valid v2 operations.
+/// Returns `None` if the op is not a `tool_change` or conversion fails.
+pub fn try_convert_tool_change_op(op: &AppOperation) -> Option<Vec<AppOperation>> {
+    if op.op_type != "tool_change" {
+        return None;
+    }
+    let tc_val = op
+        .payload
+        .get("toolChange")
+        .or_else(|| op.payload.get("tool_change"))?;
+    let tc: ToolChangePayload = serde_json::from_value(tc_val.clone()).ok()?;
+    let converted = tool_change_to_operations(&tc);
+    if converted.is_empty() {
+        None
+    } else {
+        Some(converted)
+    }
+}
+
+/// Normalize a list of operations, converting any `tool_change` ops to v2.
+/// Used at validation boundaries to handle model-emitted v1-style operations.
+pub fn normalize_operations_for_validation(operations: &[AppOperation]) -> Vec<AppOperation> {
+    let mut result = Vec::with_capacity(operations.len());
+    for op in operations {
+        if let Some(converted) = try_convert_tool_change_op(op) {
+            result.extend(converted);
+        } else {
+            result.push(op.clone());
+        }
+    }
+    result
 }
 
 /// Adapt a v1 tool_change into a v2 operation list.
@@ -1057,5 +1098,113 @@ mod tests {
                 "error for '{op_type}' should mention 'reserved': {err}"
             );
         }
+    }
+
+    #[test]
+    fn tool_change_operation_is_normalized_to_v2() {
+        let ops = vec![AppOperation {
+            id: "op-tc".into(),
+            op_type: "tool_change".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({
+                "toolChange": {
+                    "action": "create",
+                    "tool": {
+                        "id": "my-tool",
+                        "name": "My Tool",
+                        "description": "A tool",
+                        "layout": {"type": "single-column"},
+                        "components": []
+                    },
+                    "changeSummary": "created"
+                }
+            }),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let result = validate_model_operations(&ops);
+        assert!(result.is_ok(), "tool_change should be normalized: {result:?}");
+        let normalized = normalize_operations_for_validation(&ops);
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0].op_type, "surface.create");
+    }
+
+    #[test]
+    fn tool_change_with_malformed_payload_falls_through_to_validation() {
+        let ops = vec![AppOperation {
+            id: "op-tc-bad".into(),
+            op_type: "tool_change".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({"invalid": "payload"}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let result = validate_model_operations(&ops);
+        assert!(result.is_err(), "malformed tool_change should fail validation");
+        let err = result.unwrap_err();
+        assert!(err.contains("tool_change"), "error should mention tool_change: {err}");
+    }
+
+    #[test]
+    fn mixed_operations_with_tool_change_are_normalized() {
+        let ops = vec![
+            AppOperation {
+                id: "op-tc".into(),
+                op_type: "tool_change".into(),
+                target: OperationTarget::default(),
+                base_revision: None,
+                transaction_group: None,
+                idempotency_key: None,
+                depends_on: None,
+                payload: json!({
+                    "toolChange": {
+                        "action": "create",
+                        "tool": {
+                            "id": "my-tool",
+                            "name": "My Tool",
+                            "description": "",
+                            "layout": {"type": "single-column"},
+                            "components": []
+                        },
+                        "changeSummary": "created"
+                    }
+                }),
+                requires_approval: None,
+                destructive: None,
+                audience: None,
+            },
+            AppOperation {
+                id: "op-state".into(),
+                op_type: "state.set".into(),
+                target: OperationTarget {
+                    surface_id: Some("surf-test".into()),
+                    ..Default::default()
+                },
+                base_revision: None,
+                transaction_group: None,
+                idempotency_key: None,
+                depends_on: None,
+                payload: json!({"state": {"key": "value"}}),
+                requires_approval: None,
+                destructive: None,
+                audience: None,
+            },
+        ];
+        let result = validate_model_operations(&ops);
+        assert!(result.is_ok(), "mixed ops should pass: {result:?}");
+        let normalized = normalize_operations_for_validation(&ops);
+        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized[0].op_type, "surface.create");
+        assert_eq!(normalized[1].op_type, "state.set");
     }
 }

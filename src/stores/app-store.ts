@@ -1824,7 +1824,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   deleteConversation: async (id) => {
-    await api.deleteConversation(id);
+    try {
+      await api.deleteConversation(id);
+    } catch (error) {
+      console.error("Failed to delete conversation:", error);
+      throw error;
+    }
     const conversations = get().conversations.filter((c) => c.id !== id);
     set({ conversations });
     if (get().activeConversationId === id) {

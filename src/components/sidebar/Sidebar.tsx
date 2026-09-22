@@ -420,7 +420,10 @@ export function Sidebar() {
           }}
           onDelete={() => {
             if (window.confirm(`Delete "${menuChat.title}"?`)) {
-              void deleteConversation(menuChat.id);
+              deleteConversation(menuChat.id).catch((err) => {
+                console.error("Failed to delete conversation:", err);
+                window.alert("Failed to delete chat. Please try again.");
+              });
             }
           }}
         />

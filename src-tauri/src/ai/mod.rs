@@ -465,8 +465,14 @@ pub fn model_catalog(config: &AppConfig, selected: &str) -> ModelCatalog {
         let trimmed = selected.trim();
         if trimmed.is_empty() {
             "auto".to_string()
-        } else {
+        } else if trimmed == "auto" {
+            "auto".to_string()
+        } else if options.iter().any(|o| o.id == trimmed) {
             trimmed.to_string()
+        } else {
+            // Stale model preference from a previous provider — fall back to auto
+            // rather than silently sending an invalid model ID to the wrong provider.
+            "auto".to_string()
         }
     };
 

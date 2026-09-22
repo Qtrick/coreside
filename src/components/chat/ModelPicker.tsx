@@ -31,20 +31,17 @@ export function ModelPicker() {
   }
 
   const selected = preferredModel || modelCatalog.selected || "auto";
-  const options = modelCatalog.options.some((option) => option.id === selected)
-    ? modelCatalog.options
-    : [
-        ...modelCatalog.options,
-        {
-          id: selected,
-          label: selected,
-          description: "Saved preference",
-        },
-      ];
+  // Only show models that belong to the current provider's catalog.
+  // Stale preferences from a previous provider are silently resolved to Auto
+  // rather than appearing as a misleading "Saved preference" option.
+  const options = modelCatalog.options;
+  const effectiveSelected = options.some((option) => option.id === selected)
+    ? selected
+    : "auto";
 
   const selectedLabel =
-    options.find((o) => o.id === selected)?.label ??
-    (selected === "auto" ? "Auto" : selected);
+    options.find((o) => o.id === effectiveSelected)?.label ??
+    (effectiveSelected === "auto" ? "Auto" : effectiveSelected);
 
   return (
     <div className="model-picker">
@@ -54,7 +51,7 @@ export function ModelPicker() {
       <select
         id="model-picker-select"
         className="model-picker-select"
-        value={selected}
+        value={effectiveSelected}
         disabled={sending || needsSetup}
         onChange={(event) => void setPreferredModel(event.target.value)}
         aria-label="Select AI model"

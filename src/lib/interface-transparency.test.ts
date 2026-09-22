@@ -54,7 +54,7 @@ describe("interface transparency", () => {
     expect(tokens.cardAlpha).toBeGreaterThan(tokens.panelAlpha);
     expect(tokens.controlAlpha).toBeGreaterThan(tokens.panelAlpha);
     expect(tokens.modalAlpha).toBeGreaterThan(tokens.cardAlpha);
-    expect(tokens.cardAlpha).toBeGreaterThanOrEqual(0.58);
+    expect(tokens.cardAlpha).toBeGreaterThanOrEqual(0.35);
     expect(tokens.panelAlpha).toBeLessThanOrEqual(0.55);
   });
 

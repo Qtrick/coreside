@@ -179,17 +179,48 @@ pub fn create_conversation(
 }
 
 pub fn delete_conversation(db: &mut Database, id: &str) -> DbResult<()> {
-    // Fail closed: never leave orphan FTS rows that could leak deleted chat text.
-    crate::projects::remove_conversation_from_index(db, id)?;
-    // Surfaces SET NULL conversation_id — clean drafts while the join still works.
-    let _ = crate::runtime_v2::drafts::delete_drafts_for_conversation(db, id)?;
-    let n = db
-        .conn()
-        .execute("DELETE FROM conversations WHERE id = ?1", [id])?;
-    if n == 0 {
-        return Err(DbError::NotFound(format!("conversation {id}")));
-    }
-    Ok(())
+    // Wrap the full deletion lifecycle in a single transaction so a failure
+    // mid-way never leaves half-deleted state (FTS orphans, draft orphans,
+    // missing conversation row, etc.).
+    db.with_transaction(|conn| {
+        // Fail closed: never leave orphan FTS rows that could leak deleted chat text.
+        conn.execute(
+            "DELETE FROM message_fts WHERE conversation_id = ?1",
+            [id],
+        )?;
+        // Surfaces SET NULL conversation_id — clean drafts while the join still works.
+        conn.execute(
+            "DELETE FROM surface_drafts WHERE surface_id IN (
+                SELECT id FROM surfaces WHERE conversation_id = ?1
+             )",
+            [id],
+        )?;
+        // Clean conversation-owned tables without FK constraints (orphan rows).
+        // These tables reference conversation_id but have no ON DELETE CASCADE.
+        for table in [
+            "turn_journal",
+            "conversation_event_log",
+            "conversation_event_sequences",
+            "commit_event_outbox",
+            "apply_idempotency_outcomes",
+            "chat_attachments",
+            "action_events",
+            "context_ledger_entries",
+            "patch_scheduler_items",
+            "runtime_audit_events",
+            "developer_diagnostics",
+        ] {
+            let _ = conn.execute(
+                &format!("DELETE FROM {table} WHERE conversation_id = ?1"),
+                [id],
+            );
+        }
+        let n = conn.execute("DELETE FROM conversations WHERE id = ?1", [id])?;
+        if n == 0 {
+            return Err(DbError::NotFound(format!("conversation {id}")));
+        }
+        Ok(())
+    })
 }
 
 pub fn touch_conversation(db: &mut Database, id: &str) -> DbResult<()> {

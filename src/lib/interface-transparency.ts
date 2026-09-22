@@ -67,17 +67,21 @@ export function computeInterfaceTransparencyTokens(
   }
 
   const effective = Math.max(0, pref - boost);
-  // t is transparency fraction (0–0.6). At 20% ordinary cards must remain
-  // measurably translucent (not clamp to 1.0). Controls/modals stay stronger.
+  // Perceptual curve: compress low values so 20-60% shows increasingly
+  // visible transparency steps rather than feeling mostly opaque until 50%.
   const t = effective / 100;
-  const panelAlpha = clamp01(1 - t * 1.05);
+  const perceptual = t < 0.5 ? t * t * 2 : t;
+  const panelAlpha = clamp01(1 - perceptual * 1.05);
   const sidebarAlpha =
     panelAlpha >= 1 ? 1 : clamp01(panelAlpha - 0.03);
-  // Was panel+0.18 → cardAlpha 1.0 at 20%. Soften so 20% ≈ 0.88, 40% ≈ 0.76, 60% ≈ 0.64.
-  const cardAlpha = clamp01(Math.max(0.58, panelAlpha + 0.06));
-  const controlAlpha = clamp01(Math.max(0.78, panelAlpha + 0.18));
-  const headerAlpha = clamp01(Math.max(0.72, panelAlpha + 0.08));
-  const modalAlpha = clamp01(Math.max(0.9, panelAlpha + 0.28));
+  // Cards: lower min so max transparency reveals wallpaper through content areas.
+  const cardAlpha = clamp01(Math.max(0.35, panelAlpha + 0.06));
+  // Controls: remain readable but visibly translucent at high transparency.
+  const controlAlpha = clamp01(Math.max(0.55, panelAlpha + 0.18));
+  // Headers: subtle scrim, not opaque.
+  const headerAlpha = clamp01(Math.max(0.45, panelAlpha + 0.08));
+  // Modals: keep stronger surface for transient high-information UI.
+  const modalAlpha = clamp01(Math.max(0.75, panelAlpha + 0.28));
   const scrimAlpha = clamp01(boost / 100 + (effective > 40 ? 0.08 : 0));
 
   return {

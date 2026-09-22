@@ -1186,7 +1186,7 @@ export function MediaPickerNode({ component }: ToolNodeProps) {
               style={{ width: "100%", marginBottom: 12 }}
               autoFocus
             />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 130px), 1fr))", gap: 8 }}>
               {loading ? (
                 <p className="muted">Loading media assets…</p>
               ) : filteredAssets.length === 0 ? (
