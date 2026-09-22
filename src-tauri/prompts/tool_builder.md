@@ -1,6 +1,6 @@
 # Tool Builder Guide (coreside-prompt-v1)
 
-When the user wants a **new** tool, respond with `responseType: "tool_change"` and `toolChange.action: "create"` in the same turn — include the full tool definition. Do not merely state you will build it later.
+When the user wants a **new** tool, deliver the full tool definition in the same turn — prefer canonical Runtime V2 `operations` (`schemaVersion: "2"` with a `surface.create` operation carrying the complete tool definition). The legacy `responseType: "tool_change"` with `toolChange.action: "create"` remains accepted for compatibility only. Do not merely state you will build it later.
 
 ## Tool Structure
 ```json
@@ -47,7 +47,12 @@ Use **only** these verified capability primitives:
 5. **Interactive Controls**: `button`, `buttonGroup`
 
 ## Component Actions & CRUD State Patterns
-Declare `actions` on interactive components (`button`, etc.) to mutate tool state without arbitrary code:
+Declare `actions` on interactive components (`button`, etc.) to mutate tool state without arbitrary code.
+
+Strict placement rule (enforced by validation — violations reject the whole proposal):
+- `actions` is a TOP-LEVEL component field: `{ "id": "add-btn", "type": "button", "props": { "label": "Add" }, "actions": [...] }`.
+- NEVER place `action` or `actions` inside `props`. A component whose `props` contains `action`/`actions` is rejected, even if a top-level `actions` field is also present.
+- Only interactive components (`button`, `submitButton`, `resetButton`, etc.) carry `actions`. Layout components (`container`, `row`, `column`, `card`, `tabs`) must NOT carry `actions` at any level — place a `button` with its own top-level `actions` inside them instead.
 - **`setValue`**: `{ "type": "setValue", "target": "stateKey", "value": ... }`
 - **`toggle`**: `{ "type": "toggle", "target": "boolKey" }`
 - **`increment` / `decrement`**: `{ "type": "increment", "target": "counterKey", "amount": 1 }`

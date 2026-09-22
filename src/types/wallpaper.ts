@@ -136,6 +136,22 @@ export function schemaWallpaperToJson(config: SchemaWallpaperConfig): string {
   });
 }
 
+/**
+ * Built-in workspace default: calm obsidian gradient, no motion, cheap to render.
+ * Applied as a *visual* default only when no wallpaper value was ever persisted
+ * (`globalWallpaperJson == null`). An explicitly cleared wallpaper (`""`) stays
+ * None and is never overwritten.
+ */
+export const DEFAULT_WORKSPACE_WALLPAPER_JSON: string = schemaWallpaperToJson({
+  schemaVersion: "1",
+  type: "ambient-gradient",
+  color: "#0a0c10",
+  secondaryColor: "#1a1d28",
+  gradientAngle: 135,
+  opacity: 0.95,
+  reducedMotionFallback: "#0a0c10",
+});
+
 export function buildStaticColorProposal(
   color: string,
   filter?: WallpaperFilterConfig | null,

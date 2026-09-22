@@ -253,11 +253,37 @@ pub fn apply_change(
 
     if needs_approval && !approval_granted {
         let mut base_revisions = HashMap::new();
+        let mut newly_created_surfaces = std::collections::HashSet::new();
+        for op in &req.operations {
+            if matches!(op.op_type.as_str(), "surface.create" | "chat.inline_surface_create") {
+                if let Some(sid) = op.target.surface_id.clone().or_else(|| {
+                    op.target.tool_id.as_deref().map(crate::runtime_v2::surfaces::surface_id_for_tool)
+                }) {
+                    newly_created_surfaces.insert(sid);
+                }
+                if let Some(sid) = op.payload.get("surfaceId").and_then(|v| v.as_str()) {
+                    newly_created_surfaces.insert(sid.to_string());
+                }
+                if let Some(tid) = op.payload.get("toolId").and_then(|v| v.as_str()) {
+                    newly_created_surfaces.insert(crate::runtime_v2::surfaces::surface_id_for_tool(tid));
+                }
+                if let Some(tool) = op.payload.get("tool").and_then(|t| t.as_object()) {
+                    if let Some(tid) = tool.get("id").and_then(|id| id.as_str()) {
+                        newly_created_surfaces.insert(crate::runtime_v2::surfaces::surface_id_for_tool(tid));
+                    }
+                }
+            }
+        }
+
         for op in &req.operations {
             let sid_opt = op.target.surface_id.clone().or_else(|| {
                 op.target.tool_id.as_deref().map(crate::runtime_v2::surfaces::surface_id_for_tool)
             });
             if let Some(sid) = sid_opt {
+                if newly_created_surfaces.contains(&sid) {
+                    base_revisions.entry(sid).or_insert(0);
+                    continue;
+                }
                 if !base_revisions.contains_key(&sid) {
                     let rev: i64 = db.conn().query_row(
                         "SELECT current_revision FROM surfaces WHERE id = ?",
@@ -722,13 +748,17 @@ pub fn decide_proposal(
                 return Err(KernelError::RevisionConflict(stale_msg));
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => {
-                let stale_msg = format!("Proposal is stale: target surface {sid} no longer exists");
-                let _ = db.conn().execute(
-                    "UPDATE kernel_change_proposals SET status = 'stale', error = ? WHERE id = ?",
-                    rusqlite::params![stale_msg, proposal_id],
-                );
-                let _ = db.conn().execute_batch("COMMIT");
-                return Err(KernelError::RevisionConflict(stale_msg));
+                if *expected_rev == 0 {
+                    // Valid: this surface is newly created by this proposal and does not exist in DB yet.
+                } else {
+                    let stale_msg = format!("Proposal is stale: target surface {sid} no longer exists");
+                    let _ = db.conn().execute(
+                        "UPDATE kernel_change_proposals SET status = 'stale', error = ? WHERE id = ?",
+                        rusqlite::params![stale_msg, proposal_id],
+                    );
+                    let _ = db.conn().execute_batch("COMMIT");
+                    return Err(KernelError::RevisionConflict(stale_msg));
+                }
             }
             Err(e) => {
                 if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
@@ -1436,5 +1466,45 @@ mod tests {
         // Second approval must fail closed via CAS
         let second_err = decide_proposal(&mut db, None, &valid_proposal_id, true).unwrap_err();
         assert!(matches!(second_err, KernelError::Validation(_)));
+    }
+
+    #[test]
+    fn test_live_task_manager_proposal_approval_and_application() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Task Manager Conv", None).unwrap();
+
+        let raw_json = r#"[{"id":"operation-1","type":"surface.create","target":{},"payload":{"components":[{"id":"header","props":{"text":"Task Manager"},"type":"heading"},{"id":"task-filter","props":{"label":"Search Tasks","valueKey":"searchQuery"},"type":"textInput"},{"id":"task-priority","props":{"label":"Filter by Priority","options":[{"label":"All","value":""},{"label":"High","value":"high"},{"label":"Medium","value":"medium"},{"label":"Low","value":"low"}],"valueKey":"priorityFilter"},"type":"select"},{"id":"task-status","props":{"label":"Filter by Status","options":[{"label":"All","value":""},{"label":"Completed","value":"completed"},{"label":"Pending","value":"pending"}],"valueKey":"statusFilter"},"type":"select"},{"id":"task-list","props":{"columns":[{"accessor":"title","header":"Task"},{"accessor":"priority","header":"Priority"},{"accessor":"status","header":"Status"},{"accessor":"actions","header":"Actions"}],"dataKey":"tasks","rowsKey":"tasks"},"type":"dataTable"},{"id":"add-task-container","props":{"actions":[{"target":"newTaskTitle","type":"setValue","value":""},{"target":"newTaskPriority","type":"setValue","value":"medium"},{"target":"newTaskStatus","type":"setValue","value":"pending"}],"label":"Add New Task"},"type":"container"},{"id":"newTaskTitle","props":{"label":"Task Title","valueKey":"newTaskTitle"},"type":"textInput"},{"id":"newTaskPriority","props":{"label":"Priority","options":[{"label":"High","value":"high"},{"label":"Medium","value":"medium"},{"label":"Low","value":"low"}],"valueKey":"newTaskPriority"},"type":"select"},{"id":"newTaskStatus","props":{"label":"Status","options":[{"label":"Pending","value":"pending"},{"label":"Completed","value":"completed"}],"valueKey":"newTaskStatus"},"type":"select"},{"id":"add-task-button","props":{"actions":[{"item":{"priority":"newTaskPriority","status":"newTaskStatus","title":"newTaskTitle"},"target":"tasks","type":"appendItem"},{"target":"newTaskTitle","type":"setValue","value":""},{"target":"newTaskPriority","type":"setValue","value":"medium"},{"target":"newTaskStatus","type":"setValue","value":"pending"}],"label":"Add Task"},"type":"button"},{"id":"delete-task-button","props":{"actions":[{"id":"selectedTaskId","target":"tasks","type":"removeItem"}],"label":"Delete Task"},"type":"button"},{"id":"edit-task-button","props":{"actions":[{"id":"selectedTaskId","patch":{"priority":"newTaskPriority","status":"newTaskStatus","title":"newTaskTitle"},"target":"tasks","type":"updateItem"}],"label":"Edit Task"},"type":"button"}],"description":"A tool for managing tasks with persistent storage, priority, status, and various functionalities.","id":"task-manager","layout":{"columns":2,"density":"compact","type":"dashboard"},"name":"Task Manager"}}]"#;
+
+        let raw_ops: Vec<AppOperation> = serde_json::from_str(raw_json).unwrap();
+        let normalized_ops = crate::runtime_v2::normalize_and_validate_model_operations(&raw_ops)
+            .expect("should normalize and validate");
+
+        let change_res = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                turn_id: Some("turn-tm-1".into()),
+                summary: "Create Task Manager".into(),
+                operations: normalized_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .expect("apply_change must succeed and create proposal");
+
+        let proposal_id = change_res.proposal_id.expect("must produce proposal for agent surface creation");
+        let apply_res = decide_proposal(&mut db, None, &proposal_id, true)
+            .expect("decide_proposal approve must succeed without conflicts");
+
+        assert!(apply_res.is_committed(), "proposal application must be committed, conflicts: {:?}", apply_res.conflicts);
+        assert!(apply_res.conflicts.is_empty(), "conflicts must be empty");
+
+        let prop = get_proposal(&db, &proposal_id).unwrap();
+        assert_eq!(prop.status, "applied");
+
+        let sid = crate::runtime_v2::surfaces::surface_id_for_tool("task-manager");
+        let surface = crate::runtime_v2::surfaces::get_surface(&db, &sid).unwrap();
+        assert_eq!(surface.name, "Task Manager");
     }
 }

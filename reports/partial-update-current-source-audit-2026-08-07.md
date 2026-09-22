@@ -1,10 +1,10 @@
 # Partial Update Current-Source Audit
 
-**Product:** Coreside
-**Access date:** 2026-08-07
-**Generated:** 2026-09-19T21:21:19.200Z
-**Commit:** `972d8b6763f3b262f52c54132b1a75b5316a5f22`
-**Dirty:** yes
+**Product:** Coreside  
+**Access date:** 2026-08-07  
+**Generated:** 2026-09-22T17:37:43.134Z  
+**Commit:** `55e0845007ae1488a785f73601b0d1497cca9a3f`  
+**Dirty:** yes  
 **Public beta:** **NOT READY**
 
 ## Archive

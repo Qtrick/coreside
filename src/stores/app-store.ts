@@ -175,6 +175,8 @@ type AppStore = {
   sending: boolean;
   /** Conversation that owns the in-flight turn; UI live state is scoped to this id. */
   sendingConversationId: string | null;
+  /** Conversations with deletion in flight — guards against double deletion. */
+  deletingConversationIds: string[];
   sendError: string | null;
   agentActions: string[];
   /** Derived view of active-conversation stream text (MessageList compatibility). */
@@ -861,6 +863,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   surfaceDraftConflict: null,
   sending: false,
   sendingConversationId: null,
+  deletingConversationIds: [],
   sendError: null,
   agentActions: [],
   streamingText: null,
@@ -882,20 +885,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
         return;
       }
 
-      const [appInfo, aiStatus, settings, conversations, tools, projects] =
-        await Promise.all([
-          api.getAppInfo(),
-          api.getAiStatus(),
-          api.getSettings(),
-          api.listConversations(),
-          api.listTools(),
-          api.listProjects(),
-        ]);
-
-      // Lazy catalog: only fetch when disclosure allows provider model listing.
-      const modelCatalog = aiStatus.disclosure?.showProviderCatalog
-        ? await api.getModelCatalog()
-        : null;
+      // Phase 1 — critical shell: only what the shell needs to render.
+      // Never block first paint on keychain/provider/catalog work.
+      const [appInfo, settings, conversations] = await Promise.all([
+        api.getAppInfo(),
+        api.getSettings(),
+        api.listConversations(),
+      ]);
 
       const theme = settings.theme ?? "system";
       const resolved = resolveTheme(theme);
@@ -916,7 +912,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
         bootError: null,
         bootstrapStatus: { status: "ready" },
         appInfo,
-        aiStatus,
         theme,
         resolvedTheme: resolved,
         appearance,
@@ -934,7 +929,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
             ? Math.min(0.72, Math.max(0.28, settings.chatToolSplitRatio))
             : 0.5,
         sidebarCollapsed: settings.sidebarCollapsed ?? false,
-        preferredModel: settings.preferredModel ?? modelCatalog?.selected ?? "auto",
+        preferredModel: settings.preferredModel ?? "auto",
         dockIcon: parseDockIconConfig(settings.dockIcon ?? DEFAULT_DOCK_ICON),
         dockIconError: null,
         developerMode: Boolean(settings.developerMode),
@@ -947,16 +942,38 @@ export const useAppStore = create<AppStore>((set, get) => ({
             : settings.actionLogEnabled
               ? "always"
               : "off",
-        modelCatalog,
         conversations,
-        tools,
-        projects,
       });
 
       attachAgentTurnSyncListener(get, set);
 
-      if (conversations.length > 0) {
-        await get().navigateToChat(conversations[0].id);
+      // Phase 2 — secondary hydration: provider status, catalog, tools,
+      // projects. Independent calls settle without blocking each other.
+      const [aiStatus, tools, projects] = await Promise.all([
+        api.getAiStatus().catch(() => null),
+        api.listTools().catch(() => []),
+        api.listProjects().catch(() => []),
+      ]);
+      if (aiStatus) {
+        // Lazy catalog: only fetch when disclosure allows provider model listing.
+        const modelCatalog = aiStatus.disclosure?.showProviderCatalog
+          ? await api.getModelCatalog().catch(() => null)
+          : null;
+        set({
+          aiStatus,
+          modelCatalog,
+          preferredModel:
+            get().preferredModel !== "auto"
+              ? get().preferredModel
+              : (modelCatalog?.selected ?? "auto"),
+        });
+      }
+      set({ tools, projects });
+
+      // Phase 3 — active chat hydration.
+      const current = get().conversations;
+      if (current.length > 0) {
+        await get().navigateToChat(current[0].id);
       }
     } catch (error) {
       set({
@@ -1824,14 +1841,47 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   deleteConversation: async (id) => {
+    // Guard against double deletion (rapid clicks) racing the same IPC.
+    if (get().deletingConversationIds.includes(id)) return;
+    set({
+      deletingConversationIds: [...get().deletingConversationIds, id],
+    });
+    // Cancel in-flight provider work before deleting so the post-provider
+    // commit path cannot resurrect rows after the delete lands.
+    try {
+      await api.cancelRequest(id);
+    } catch {
+      // No active request — proceed with deletion.
+    }
     try {
       await api.deleteConversation(id);
     } catch (error) {
       console.error("Failed to delete conversation:", error);
+      set({
+        deletingConversationIds: get().deletingConversationIds.filter(
+          (c) => c !== id,
+        ),
+      });
       throw error;
     }
     const conversations = get().conversations.filter((c) => c.id !== id);
-    set({ conversations });
+    const turnsById = { ...get().turnsById };
+    const activeTurnIdByConversation = { ...get().activeTurnIdByConversation };
+    const activeTurnId = activeTurnIdByConversation[id];
+    if (activeTurnId) delete turnsById[activeTurnId];
+    delete activeTurnIdByConversation[id];
+    set({
+      conversations,
+      turnsById,
+      activeTurnIdByConversation,
+      previewSurfacesByKey: clearPreviewOverlaysMatching(
+        get().previewSurfacesByKey,
+        { conversationId: id, toolIds: [], surfaceIds: [] },
+      ),
+      deletingConversationIds: get().deletingConversationIds.filter(
+        (c) => c !== id,
+      ),
+    });
     if (get().activeConversationId === id) {
       if (conversations[0]) {
         await get().navigateToChat(conversations[0].id);

@@ -347,4 +347,92 @@ mod tests {
         crate::db::delete_conversation(&mut db, &conv.id).unwrap();
         assert!(get_draft(&db, &surface.id, "t", "main").unwrap().is_none());
     }
+
+    #[test]
+    fn delete_conversation_removes_owned_surfaces_and_fts() {
+        let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "Gone", None)
+                .unwrap();
+        let msg = crate::db::insert_message(&mut db, &conv.id, "user", "secret-searchable-text", None)
+            .unwrap();
+        let surface = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "S",
+            &json!({
+                "id": "d",
+                "name": "S",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        crate::runtime_v2::surfaces::save_surface_state(&mut db, &surface.id, &json!({"t": 1}))
+            .unwrap();
+        // Workspace-owned surface (no conversation) must survive the wipe.
+        db.conn()
+            .execute(
+                "INSERT INTO surfaces (id, instance_id, conversation_id, tool_id, name, definition_json, current_revision, created_at, updated_at)
+                 VALUES ('surf-workspace', 'inst-workspace', NULL, NULL, 'W', '{}', 1, datetime('now'), datetime('now'))",
+                [],
+            )
+            .unwrap();
+
+        // Sanity: the searchable copy exists before deletion.
+        let fts_before: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM message_fts WHERE message_id = ?1",
+                [&msg.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_before, 1);
+
+        crate::db::delete_conversation(&mut db, &conv.id).unwrap();
+
+        // Conversation-owned surface + cascaded versions/state are gone.
+        let owned: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM surfaces WHERE id = ?1",
+                [&surface.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(owned, 0);
+        let state_rows: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM surface_state WHERE surface_id = ?1",
+                [&surface.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(state_rows, 0);
+        // Searchable copy of the deleted message is gone.
+        let fts_rows: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM message_fts WHERE message_id = ?1",
+                [&msg.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_rows, 0);
+        // Workspace-owned surface survives.
+        let kept: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM surfaces WHERE id = 'surf-workspace'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept, 1);
+    }
 }

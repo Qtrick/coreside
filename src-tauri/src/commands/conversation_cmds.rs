@@ -38,6 +38,11 @@ pub fn delete_conversation(
     conversation_id: String,
 ) -> Result<(), CommandError> {
     state.require_profile()?;
+    // Quiesce in-flight provider work first: active_requests is keyed by
+    // conversation, and the post-provider commit path can otherwise resurrect
+    // messages, ledger rows, and action events after the rows are deleted.
+    state.cancel_request(&conversation_id);
+    state.take_request(&conversation_id);
     let mut db = state.db.lock();
     Ok(db::delete_conversation(&mut db, &conversation_id)?)
 }

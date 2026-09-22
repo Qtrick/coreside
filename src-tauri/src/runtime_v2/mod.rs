@@ -58,7 +58,8 @@ pub use drafts::{
 pub use events::{EventBus, EventBusError, EventRef, Subscription, SurfaceEvent};
 #[allow(unused_imports)]
 pub use operations::{
-    normalize_operations_for_validation, tool_change_to_operations, validate_model_operations,
+    normalize_and_validate_model_operations, normalize_operations_for_validation,
+    tool_change_to_operations, try_convert_tool_change_op, validate_model_operations,
     validate_operations, AgentResponseV2, AppOperation, SCHEMA_VERSION_V2,
 };
 pub use outbox::{flush_pending_outbox, CommitOutcome, DeferredBusEffect};

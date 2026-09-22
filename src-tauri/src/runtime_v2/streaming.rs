@@ -16,7 +16,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::limits::{MAX_DEFINITION_JSON_BYTES, MAX_OPERATIONS_PER_TURN, MAX_PATCH_QUEUE_BYTES};
-use super::operations::{validate_model_operations, AgentResponseV2, AppOperation};
+use super::operations::{
+    normalize_and_validate_model_operations, AgentResponseV2, AppOperation,
+};
 
 /// Max bytes for one NDJSON frame (aligned with surface definition ceiling).
 pub const MAX_FRAME_BYTES: usize = MAX_DEFINITION_JSON_BYTES;
@@ -398,12 +400,22 @@ impl NdjsonFrameParser {
         }
         if let Ok(op) = serde_json::from_value::<AppOperation>(value.clone()) {
             // P0 security: enforce model allowlist — legacy path must not bypass it.
-            validate_model_operations(std::slice::from_ref(&op)).map_err(|e| {
-                stream_err(
+            // Record the normalized operation that passed validation, not the pre-image.
+            let normalized =
+                normalize_and_validate_model_operations(std::slice::from_ref(&op)).map_err(
+                    |e| {
+                        stream_err(
+                            StreamParseErrorKind::Unrecognized,
+                            format!("model operation rejected: {e}"),
+                        )
+                    },
+                )?;
+            let Some(op) = normalized.into_iter().next() else {
+                return Err(stream_err(
                     StreamParseErrorKind::Unrecognized,
-                    format!("model operation rejected: {e}"),
-                )
-            })?;
+                    "model operation rejected: empty normalization result",
+                ));
+            };
             self.record_operation(op.clone())?;
             return Ok(StreamEvent::OperationFrameCompleted { operation: op });
         }
@@ -418,15 +430,17 @@ impl NdjsonFrameParser {
             }
             // P0 security: validate whole batch against model allowlist before
             // mutating any parser state (atomic reject-or-accept).
-            validate_model_operations(&resp.operations).map_err(|e| {
-                stream_err(
-                    StreamParseErrorKind::Unrecognized,
-                    format!("model operation batch rejected: {e}"),
-                )
-            })?;
+            // Store the normalized operations that passed validation.
+            let normalized =
+                normalize_and_validate_model_operations(&resp.operations).map_err(|e| {
+                    stream_err(
+                        StreamParseErrorKind::Unrecognized,
+                        format!("model operation batch rejected: {e}"),
+                    )
+                })?;
             // Validate the whole batch for duplicates before mutating seen/completed sets.
-            let mut batch_ids = std::collections::HashSet::with_capacity(resp.operations.len());
-            for op in &resp.operations {
+            let mut batch_ids = std::collections::HashSet::with_capacity(normalized.len());
+            for op in &normalized {
                 if !batch_ids.insert(op.id.clone()) || self.seen_operation_ids.contains(&op.id) {
                     return Err(stream_err(
                         StreamParseErrorKind::Unrecognized,
@@ -434,13 +448,12 @@ impl NdjsonFrameParser {
                     ));
                 }
             }
-            for op in &resp.operations {
+            for op in &normalized {
                 self.seen_operation_ids.insert(op.id.clone());
             }
-            self.completed_operations
-                .extend(resp.operations.iter().cloned());
+            self.completed_operations.extend(normalized.iter().cloned());
             return Ok(StreamEvent::PreviewUpdated {
-                operations: resp.operations,
+                operations: normalized,
             });
         }
         Err(stream_err(
@@ -643,6 +656,38 @@ mod tests {
         assert!(finished[0].is_ok());
         assert_eq!(p.completed_operations().len(), 1);
         assert_eq!(p.completed_operations()[0].id, "op-harvest");
+    }
+
+    #[test]
+    fn legacy_compat_normalizes_tool_change_before_recording() {
+        // A legacy bare tool_change op must be recorded as the canonical v2
+        // operation that passed validation — never the raw legacy type.
+        let mut p = NdjsonFrameParser::new();
+        let bare = json!({
+            "id": "op-tc",
+            "type": "tool_change",
+            "target": {},
+            "payload": {
+                "toolChange": {
+                    "action": "create",
+                    "tool": {
+                        "id": "my-tool",
+                        "name": "My Tool",
+                        "description": "",
+                        "layout": {"type": "single-column"},
+                        "components": []
+                    },
+                    "changeSummary": "created"
+                }
+            }
+        })
+        .to_string();
+        assert!(p.push_legacy_compat(&bare).is_empty());
+        let finished = p.finish_legacy_compat();
+        assert_eq!(finished.len(), 1);
+        assert!(finished[0].is_ok());
+        assert_eq!(p.completed_operations().len(), 1);
+        assert_eq!(p.completed_operations()[0].op_type, "surface.create");
     }
 
     #[test]

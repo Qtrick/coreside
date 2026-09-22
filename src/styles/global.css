@@ -1359,7 +1359,7 @@ body > .window-overlay-root > *,
 
 .settings-layout {
   display: grid;
-  grid-template-columns: minmax(12rem, 15.5rem) minmax(0, 1fr);
+  grid-template-columns: minmax(min(100%, 12rem), 15.5rem) minmax(0, 1fr);
   gap: var(--space-4);
   align-items: start;
   padding: 0 var(--space-5) var(--space-8);
@@ -2095,7 +2095,7 @@ body > .window-overlay-root > *,
 
 .tr-dashboard-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
   gap: var(--space-3);
 }
 
@@ -3889,7 +3889,7 @@ body > .window-overlay-root > *,
 
 .wallpaper-mini-shell {
   margin: var(--space-3) var(--space-3) 96px var(--space-3);
-  background: var(--core-surface-primary, #1e1e2e);
+  background: var(--core-content-overlay, #1e1e2e);
   border: 1px solid var(--core-border, rgba(255, 255, 255, 0.12));
   border-radius: var(--radius-md);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
@@ -3986,7 +3986,7 @@ body > .window-overlay-root > *,
   display: flex;
   flex-direction: column;
   gap: 6px;
-  background: var(--core-surface-primary, rgba(255, 255, 255, 0.02));
+  background: transparent;
 }
 
 .mini-toolbar {
@@ -4093,9 +4093,12 @@ body > .window-overlay-root > *,
   position: absolute;
   inset: auto 0 0 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--space-4);
+  min-width: 0;
+  max-width: 100%;
   padding: var(--space-3) var(--space-4);
   background: linear-gradient(0deg, rgba(10, 10, 15, 0.94) 0%, rgba(10, 10, 15, 0.75) 60%, rgba(10, 10, 15, 0) 100%);
   backdrop-filter: blur(4px);
@@ -4127,20 +4130,24 @@ body > .window-overlay-root > *,
 
 .wallpaper-hero-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-  flex-shrink: 0;
+  min-width: 0;
 }
 
 .wallpaper-tuning-panel {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
+  min-width: 0;
+  max-width: 100%;
   padding: var(--space-3) var(--space-4);
   margin-bottom: var(--space-4);
   border-radius: var(--radius-md);
-  background: var(--core-surface-primary);
+  background: var(--core-card-overlay);
   border: 1px solid var(--core-border);
 }
 
@@ -4176,10 +4183,11 @@ body > .window-overlay-root > *,
 .wallpaper-card-item {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   padding: 0;
   border-radius: var(--radius-md);
   border: 1px solid var(--core-border);
-  background: var(--core-surface-primary);
+  background: var(--core-card-overlay);
   cursor: pointer;
   overflow: hidden;
   text-align: left;
@@ -4261,13 +4269,20 @@ body > .window-overlay-root > *,
 
 .wallpaper-category-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
   margin-bottom: var(--space-3);
   border-bottom: 1px solid var(--core-border);
   padding-bottom: var(--space-1);
 }
 
 .wallpaper-category-tab {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   padding: 0.35rem 0.75rem;
   border: none;
   background: transparent;

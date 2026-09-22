@@ -664,21 +664,32 @@ impl AgentResponsePayload {
     }
 
     pub fn normalized_operations(&self) -> Result<Vec<crate::runtime_v2::AppOperation>, String> {
-        let Some(ops_raw) = &self.operations else {
-            return Ok(Vec::new());
+        let mut ops: Vec<crate::runtime_v2::AppOperation> = if let Some(ops_raw) = &self.operations {
+            ops_raw
+                .iter()
+                .enumerate()
+                .map(|(idx, val)| {
+                    let normalized = normalize_raw_operation(val, idx);
+                    serde_json::from_value::<crate::runtime_v2::AppOperation>(normalized)
+                        .map_err(|e| format!("failed to decode normalized operations: {e}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            Vec::new()
         };
-        let mut ops: Vec<crate::runtime_v2::AppOperation> = ops_raw
-            .iter()
-            .enumerate()
-            .map(|(idx, val)| {
-                let normalized = normalize_raw_operation(val, idx);
-                serde_json::from_value::<crate::runtime_v2::AppOperation>(normalized)
-                    .map_err(|e| format!("failed to decode normalized operations: {e}"))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
 
         // Convert any legacy `tool_change` operation types to valid v2 operations.
         ops = crate::runtime_v2::normalize_operations_for_validation(&ops);
+
+        // If operations is empty but top-level tool_change exists (legacy v1 tool_change response),
+        // translate into canonical v2 operations so the entire system has one authoritative path.
+        if ops.is_empty() {
+            if let Some(tc) = &self.tool_change {
+                ops = crate::runtime_v2::tool_change_to_operations(tc);
+                ops = crate::runtime_v2::normalize_operations_for_validation(&ops);
+            }
+        }
+
         Ok(ops)
     }
 
@@ -688,6 +699,7 @@ impl AgentResponsePayload {
             .as_ref()
             .map(|o| !o.is_empty())
             .unwrap_or(false);
+        let has_tool_change = self.tool_change.is_some();
         let silent = self.silent.unwrap_or(false);
         let has_v2_visible = self
             .assistant_messages
@@ -707,9 +719,11 @@ impl AgentResponsePayload {
             })
             .unwrap_or(false);
 
-        if has_ops {
+        if has_ops || has_tool_change {
             let ops = self.normalized_operations()?;
-            crate::runtime_v2::validate_model_operations(&ops)?;
+            if !ops.is_empty() {
+                crate::runtime_v2::validate_model_operations(&ops)?;
+            }
         }
 
         if self.assistant_message.trim().is_empty()
@@ -718,6 +732,7 @@ impl AgentResponsePayload {
                 ResponseType::Noop | ResponseType::ToolUse
             )
             && !has_ops
+            && !has_tool_change
             && !silent
             && !has_v2_visible
         {

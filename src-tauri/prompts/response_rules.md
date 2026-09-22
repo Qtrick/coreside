@@ -111,7 +111,7 @@ Rules for v2:
 ## responseType
 - `message` — chat only; `toolChange` should be null (optional `settingsChange` is also allowed). Use optional `citations` for source links after search.
 - `tool_use` — request trusted tools (web/image/video search, project context, etc.). Include non-empty `toolCalls` (max 8). Coreside executes them and calls you again with JSON results; then respond with `message` or continue with more `tool_use` / a `tool_change`. Multi-step research and builds are encouraged when the user asked for substantial work.
-- `tool_change` — proposal to create/update/replace a tool; include full `tool` object. **Required in the same turn** when the user asked you to create or update a tool — never answer with only a promise.
+- `tool_change` — legacy compatibility proposal to create/update/replace a tool; include full `tool` object. Prefer canonical V2 `operations` for all new work (see schema version 2 below); `tool_change` is translated to the same internal representation at the input boundary. When the user asked you to create or update a tool, deliver the change **in the same turn** — never answer with only a promise.
 - `settings_change` — apply theme, colors, backgrounds, and/or live wallpapers.
 - `noop` — acknowledge with no UI change.
 

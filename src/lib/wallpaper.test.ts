@@ -3,7 +3,12 @@ import { DEFAULT_WALLPAPER } from "@/types/agent";
 import { activeCanvasPresetId, resolveActiveWallpaper } from "@/lib/wallpaper";
 import type { Project } from "@/types/project";
 import type { Conversation } from "@/types/messages";
-import { buildCanvasPresetProposal, schemaWallpaperToJson } from "@/types/wallpaper";
+import {
+  buildCanvasPresetProposal,
+  DEFAULT_WORKSPACE_WALLPAPER_JSON,
+  parseWallpaperJson,
+  schemaWallpaperToJson,
+} from "@/types/wallpaper";
 
 const baseProject: Project = {
   id: "proj-1",
@@ -99,6 +104,53 @@ describe("resolveActiveWallpaper", () => {
     if (resolved.format === "legacy") {
       expect(resolved.config.kind).toBe("aurora");
     }
+  });
+});
+
+describe("default workspace wallpaper", () => {
+  it("renders the built-in default when nothing was ever persisted", () => {
+    const resolved = resolveActiveWallpaper({
+      view: { kind: "chat", conversationId: "chat-2" },
+      globalWallpaper: DEFAULT_WALLPAPER,
+      globalWallpaperJson: null,
+      conversations: [
+        {
+          ...chatInProject,
+          id: "chat-2",
+          projectId: null,
+        },
+      ],
+      projects: [],
+      activeConversationId: "chat-2",
+      activeProject: null,
+    });
+    expect(resolved.format).toBe("schema");
+    if (resolved.format === "schema") {
+      expect(resolved.config.type).toBe("ambient-gradient");
+    }
+    // The default constant itself must parse to the same schema wallpaper.
+    expect(parseWallpaperJson(DEFAULT_WORKSPACE_WALLPAPER_JSON).format).toBe(
+      "schema",
+    );
+  });
+
+  it("keeps an explicitly cleared wallpaper as none", () => {
+    const resolved = resolveActiveWallpaper({
+      view: { kind: "chat", conversationId: "chat-2" },
+      globalWallpaper: DEFAULT_WALLPAPER,
+      globalWallpaperJson: "",
+      conversations: [
+        {
+          ...chatInProject,
+          id: "chat-2",
+          projectId: null,
+        },
+      ],
+      projects: [],
+      activeConversationId: "chat-2",
+      activeProject: null,
+    });
+    expect(resolved.format).toBe("none");
   });
 });
 

@@ -73,6 +73,11 @@ impl TurnState {
                 | (Claimed, ProviderStarted) // non-hosted
                 | (Reserved, ProviderStarted)
                 | (ProviderStarted, Streaming)
+                // Buffered provider responses never stream live deltas; no
+                // production path records Streaming today, so allow them to
+                // settle the typed response directly instead of breaking the
+                // TypedTerminal → Finalizing → Committed → Published chain.
+                | (ProviderStarted, TypedTerminal)
                 | (Streaming, TypedTerminal)
                 | (TypedTerminal, Finalizing)
                 | (Finalizing, Committed)

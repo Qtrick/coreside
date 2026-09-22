@@ -280,10 +280,31 @@ impl Database {
     where
         F: FnOnce(&Connection) -> DbResult<T>,
     {
-        let tx = self.conn.unchecked_transaction()?;
-        let result = f(&tx)?;
-        tx.commit()?;
-        Ok(result)
+        if !self.conn.is_autocommit() {
+            let sp_name = format!("sp_{}", uuid::Uuid::new_v4().simple());
+            self.conn
+                .execute_batch(&format!("SAVEPOINT {sp_name}"))
+                .map_err(DbError::Sqlite)?;
+            match f(&self.conn) {
+                Ok(result) => {
+                    self.conn
+                        .execute_batch(&format!("RELEASE SAVEPOINT {sp_name}"))
+                        .map_err(DbError::Sqlite)?;
+                    Ok(result)
+                }
+                Err(e) => {
+                    let _ = self.conn.execute_batch(&format!(
+                        "ROLLBACK TO SAVEPOINT {sp_name}; RELEASE SAVEPOINT {sp_name}"
+                    ));
+                    Err(e)
+                }
+            }
+        } else {
+            let tx = self.conn.unchecked_transaction()?;
+            let result = f(&tx)?;
+            tx.commit()?;
+            Ok(result)
+        }
     }
 }
 

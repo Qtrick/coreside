@@ -471,6 +471,29 @@ impl ProgressiveOpsParser {
                 if self.speculative_ops.len() >= MAX_OPERATIONS {
                     return self.fatal(format!("operations exceed max of {MAX_OPERATIONS}"));
                 }
+                // Canonicalize at frame time: a legacy `tool_change` op must become
+                // v2 operations before storage so speculative_ops, durable_operations(),
+                // reconciliation, and the scheduler never see the raw legacy type.
+                // ponytail: single-op expansion only; multi-op expansion is rejected
+                // to keep frameId↔operation mapping 1:1 (upgrade path: buffered groups).
+                let op = match super::operations::try_convert_tool_change_op(&op) {
+                    Some(mut converted) => {
+                        if converted.len() != 1 {
+                            return self.fatal(
+                                "progressive tool_change expansion must yield exactly one operation",
+                            );
+                        }
+                        converted.pop().expect("len checked")
+                    }
+                    None => {
+                        if op.op_type == "tool_change" {
+                            return self.fatal(
+                                "progressive tool_change frame missing convertible toolChange payload",
+                            );
+                        }
+                        op
+                    }
+                };
                 if !self.seen_operation_ids.insert(op.id.clone()) {
                     return self.fatal(format!("duplicate or mutated operation id: {}", op.id));
                 }
@@ -704,6 +727,77 @@ mod tests {
         assert!(p.finish().is_empty());
         assert!(p.durable_operations().is_none());
         assert!(p.discarded());
+        assert!(p.speculative_operations().is_empty());
+    }
+
+    fn tool_change_op_line(group: &str, frame_id: u64, op_id: &str) -> String {
+        json!({
+            "v": PROGRESSIVE_OPS_V,
+            "type": "op",
+            "frameId": frame_id,
+            "groupId": group,
+            "op": {
+                "id": op_id,
+                "type": "tool_change",
+                "target": {},
+                "payload": {
+                    "toolChange": {
+                        "action": "create",
+                        "tool": {
+                            "id": "my-tool",
+                            "name": "My Tool",
+                            "description": "",
+                            "layout": {"type": "single-column"},
+                            "components": []
+                        },
+                        "changeSummary": "created"
+                    }
+                }
+            }
+        })
+        .to_string()
+            + "\n"
+    }
+
+    #[test]
+    fn tool_change_frame_is_stored_canonical() {
+        let mut p = parser();
+        assert!(p.push(&start_line("g1")).iter().all(|e| e.is_ok()));
+        assert!(p
+            .push(&tool_change_op_line("g1", 1, "op-tc"))
+            .iter()
+            .all(|e| e.is_ok()));
+        assert!(p.push(&complete_line("g1", 2)).iter().all(|e| e.is_ok()));
+        let durable = p.durable_operations().expect("complete group is durable");
+        assert_eq!(durable.len(), 1);
+        assert_eq!(durable[0].op_type, "surface.create");
+        assert!(
+            durable.iter().all(|op| op.op_type != "tool_change"),
+            "raw legacy type must never reach durable_operations()"
+        );
+    }
+
+    #[test]
+    fn malformed_tool_change_frame_is_fatal() {
+        let mut p = parser();
+        let _ = p.push(&start_line("g1"));
+        let bad = json!({
+            "v": PROGRESSIVE_OPS_V,
+            "type": "op",
+            "frameId": 1,
+            "groupId": "g1",
+            "op": {
+                "id": "op-bad",
+                "type": "tool_change",
+                "target": {},
+                "payload": {"invalid": "payload"}
+            }
+        })
+        .to_string()
+            + "\n";
+        let ev = p.push(&bad);
+        assert!(ev[0].is_err());
+        assert!(p.durable_operations().is_none());
         assert!(p.speculative_operations().is_empty());
     }
 

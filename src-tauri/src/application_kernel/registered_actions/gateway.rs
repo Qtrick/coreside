@@ -333,7 +333,14 @@ fn run(
 
     // 7. Execute inside a savepoint. A handler error or an oversized result must
     //    not leave a partially committed mutation behind.
+    //    Burn once-grants INSIDE the savepoint using atomic CAS so that failure to burn
+    //    rolls back the mutation, and failure of the mutation rolls back the burn.
     match in_savepoint(db, |db| {
+        if let Some(grant) = used_grant.as_ref() {
+            grants::consume_once_grant(db, grant).map_err(|err| {
+                ActionOutcome::blocked("grant_burn_failed", format!("Failed to burn one-time grant: {err}"))
+            })?;
+        }
         let data = handlers::dispatch(db, ctx, descriptor, input)
             .map_err(|err| ActionOutcome::error(&err.code, err.message))?;
         match breakers::check_output_size(&data) {
@@ -341,17 +348,11 @@ fn run(
             None => Ok(data),
         }
     }) {
-        Ok(data) => {
-            // Once-grants burn only after the mutation is durably committed.
-            if let Some(grant) = used_grant.as_ref() {
-                let _ = grants::consume_once_grant(db, grant);
-            }
-            ActionOutcome::Ok {
-                data,
-                state_bindable: descriptor.state_bindable,
-                sensitivity: descriptor.sensitivity,
-            }
-        }
+        Ok(data) => ActionOutcome::Ok {
+            data,
+            state_bindable: descriptor.state_bindable,
+            sensitivity: descriptor.sensitivity,
+        },
         Err(failure) => failure,
     }
 }
@@ -1140,5 +1141,40 @@ mod tests {
             None,
         );
         assert_eq!(outcome_code(&outcome), "blocked:descriptor_tampered");
+    }
+
+    #[test]
+    fn once_grant_cannot_be_replayed_at_gateway() {
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        let ctx = app_ctx(APP);
+        let d = crate::application_kernel::registered_actions::descriptor::find_action("local_data.write").unwrap();
+        let _g = crate::application_kernel::registered_actions::grants::mint_grant(
+            &mut db,
+            &ctx,
+            d,
+            crate::application_kernel::registered_actions::grants::GrantScope::ApplicationAction,
+            crate::application_kernel::registered_actions::grants::GrantDuration::Once,
+            None,
+            "user",
+        ).unwrap();
+
+        let out1 = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &json!({ "modelId": "note", "data": { "title": "first" } }),
+            None,
+        );
+        assert!(out1.is_ok(), "out1 failed: {}", outcome_code(&out1));
+
+        let out2 = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &json!({ "modelId": "note", "data": { "title": "second" } }),
+            None,
+        );
+        assert!(!out2.is_ok(), "out2 should be blocked, got: {:?}", out2);
     }
 }

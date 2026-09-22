@@ -53,6 +53,30 @@ describe("generated surface containment", () => {
     expect(field).not.toMatch(/min-width:\s*160px/);
   });
 
+  it("wraps the wallpaper category tabs instead of widening the settings panel", () => {
+    // Root cause of the settings horizontal scrollbar: a 10-tab flex row with
+    // no wrap/shrink guards inside .settings-panel (overflow: auto).
+    const tabs = rule(".wallpaper-category-tabs");
+    expect(tabs).toMatch(/display:\s*flex/);
+    expect(tabs).toMatch(/flex-wrap:\s*wrap/);
+    expect(tabs).toMatch(/min-width:\s*0/);
+    expect(tabs).toMatch(/max-width:\s*100%/);
+
+    const tab = rule(".wallpaper-category-tab");
+    expect(tab).toMatch(/min-width:\s*0/);
+    expect(tab).toMatch(/max-width:\s*100%/);
+  });
+
+  it("lets wallpaper tuning and hero rows wrap on narrow settings widths", () => {
+    const tuning = rule(".wallpaper-tuning-panel");
+    expect(tuning).toMatch(/flex-wrap:\s*wrap/);
+    expect(tuning).toMatch(/min-width:\s*0/);
+    expect(tuning).toMatch(/max-width:\s*100%/);
+
+    const hero = rule(".wallpaper-hero-overlay");
+    expect(hero).toMatch(/flex-wrap:\s*wrap/);
+  });
+
   it("scales generated images to the surface instead of clipping their intrinsic width", () => {
     const image = rule(".tr-image img");
     expect(image).toMatch(/display:\s*block/);

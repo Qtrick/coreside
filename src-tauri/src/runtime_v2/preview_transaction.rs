@@ -674,21 +674,50 @@ fn accept_and_paint(
     operation: AppOperation,
     seed: &mut impl FnMut(&str) -> Option<PreviewSurfaceModel>,
 ) -> Vec<PreviewOpEvent> {
-    let id = operation.id.clone();
+    let original_id = operation.id.clone();
 
     // P0 security: reject internal/reserved operations at the preview trust boundary.
     // This prevents model-originated privileged operations from reaching either
     // speculative preview or durable apply via progressive or legacy streaming paths.
-    if let Err(err) = super::operations::validate_model_operations(std::slice::from_ref(&operation))
-    {
-        preview.reject(id.clone(), err.clone());
-        return vec![PreviewOpEvent {
-            operation_id: id,
-            status: "rejected".into(),
-            reason: Some(err),
-            paint: None,
-        }];
-    }
+    // Preview the normalized operation that passed validation, not the pre-image,
+    // so preview state matches what reconciliation and the scheduler will see.
+    let operation = match super::operations::normalize_and_validate_model_operations(
+        std::slice::from_ref(&operation),
+    ) {
+        Ok(mut normalized) => {
+            let Some(op) = normalized.pop() else {
+                let err = "model operation rejected: empty normalization result".to_string();
+                preview.reject(original_id.clone(), err.clone());
+                return vec![PreviewOpEvent {
+                    operation_id: original_id,
+                    status: "rejected".into(),
+                    reason: Some(err),
+                    paint: None,
+                }];
+            };
+            if !normalized.is_empty() {
+                let err = "model operation rejected: unexpected multi-operation expansion".to_string();
+                preview.reject(original_id.clone(), err.clone());
+                return vec![PreviewOpEvent {
+                    operation_id: original_id,
+                    status: "rejected".into(),
+                    reason: Some(err),
+                    paint: None,
+                }];
+            }
+            op
+        }
+        Err(err) => {
+            preview.reject(original_id.clone(), err.clone());
+            return vec![PreviewOpEvent {
+                operation_id: original_id,
+                status: "rejected".into(),
+                reason: Some(err),
+                paint: None,
+            }];
+        }
+    };
+    let id = operation.id.clone();
 
     // If this operation has dependencies, check if any are not yet painted
     let has_unpainted_deps = operation.depends_on.as_ref().map_or(false, |deps| {

@@ -181,22 +181,51 @@ pub fn create_conversation(
 pub fn delete_conversation(db: &mut Database, id: &str) -> DbResult<()> {
     // Wrap the full deletion lifecycle in a single transaction so a failure
     // mid-way never leaves half-deleted state (FTS orphans, draft orphans,
-    // missing conversation row, etc.).
+    // missing conversation row, etc.). Every statement is fail-closed: a
+    // privacy/durability-sensitive deletion must not report success while a
+    // searchable or runnable copy may remain.
     db.with_transaction(|conn| {
         // Fail closed: never leave orphan FTS rows that could leak deleted chat text.
         conn.execute(
             "DELETE FROM message_fts WHERE conversation_id = ?1",
             [id],
         )?;
-        // Surfaces SET NULL conversation_id — clean drafts while the join still works.
+        // Surface-keyed continuity rows have no FK — clean them while the
+        // conversation→surface join still resolves.
+        for table in [
+            "component_preservation",
+            "surface_continuity",
+            "manual_edit_provenance",
+        ] {
+            conn.execute(
+                &format!(
+                    "DELETE FROM {table} WHERE surface_id IN (
+                        SELECT id FROM surfaces WHERE conversation_id = ?1
+                     )"
+                ),
+                [id],
+            )?;
+        }
+        // Surfaces SET NULL conversation_id — clean drafts, then delete the
+        // conversation-owned surfaces themselves. surface_versions and
+        // surface_state cascade from surfaces; workspace-owned surfaces
+        // (conversation_id IS NULL) are left untouched.
         conn.execute(
             "DELETE FROM surface_drafts WHERE surface_id IN (
                 SELECT id FROM surfaces WHERE conversation_id = ?1
              )",
             [id],
         )?;
+        conn.execute(
+            "DELETE FROM surfaces WHERE conversation_id = ?1",
+            [id],
+        )?;
         // Clean conversation-owned tables without FK constraints (orphan rows).
         // These tables reference conversation_id but have no ON DELETE CASCADE.
+        // (runtime_action_grants / runtime_approvals carry no conversation_id —
+        // they are application/session-scoped; only runtime_audit_events is
+        // conversation-scoped. application_route_state and provider_conformance
+        // are application/provider-scoped and intentionally survive.)
         for table in [
             "turn_journal",
             "conversation_event_log",
@@ -209,12 +238,19 @@ pub fn delete_conversation(db: &mut Database, id: &str) -> DbResult<()> {
             "patch_scheduler_items",
             "runtime_audit_events",
             "developer_diagnostics",
+            "app_transactions",
+            "search_sessions",
+            "exa_usage_ledger",
+            "operation_provenance",
         ] {
-            let _ = conn.execute(
+            conn.execute(
                 &format!("DELETE FROM {table} WHERE conversation_id = ?1"),
                 [id],
-            );
+            )?;
         }
+        // search_results cascades from search_sessions; app_operations cascades
+        // from app_transactions; messages/branches/snapshots/queue/timeline/
+        // checkpoints/proposals/summaries cascade from conversations.
         let n = conn.execute("DELETE FROM conversations WHERE id = ?1", [id])?;
         if n == 0 {
             return Err(DbError::NotFound(format!("conversation {id}")));
@@ -277,8 +313,59 @@ fn title_from_content(content: &str) -> String {
 
 pub fn clear_conversations(db: &mut Database) -> DbResult<u64> {
     db.with_transaction(|conn| {
-        // message_fts has no FK to conversations — must clear explicitly.
+        // Tables without FK cascades must be cleared explicitly. FK-cascaded
+        // children (messages, branches, snapshots, queue, timeline,
+        // checkpoints, proposals, summaries, surface versions/state,
+        // search_results, app_operations) follow their parents automatically.
+        // Application/provider-scoped tables (application_route_state,
+        // provider_conformance, runtime_action_grants, runtime_approvals)
+        // intentionally survive a chat wipe.
         conn.execute("DELETE FROM message_fts", [])?;
+        conn.execute(
+            "DELETE FROM component_preservation WHERE surface_id IN (
+                SELECT id FROM surfaces WHERE conversation_id IS NOT NULL
+             )",
+            [],
+        )?;
+        conn.execute(
+            "DELETE FROM surface_continuity WHERE surface_id IN (
+                SELECT id FROM surfaces WHERE conversation_id IS NOT NULL
+             )",
+            [],
+        )?;
+        conn.execute(
+            "DELETE FROM manual_edit_provenance WHERE surface_id IN (
+                SELECT id FROM surfaces WHERE conversation_id IS NOT NULL
+             )",
+            [],
+        )?;
+        conn.execute(
+            "DELETE FROM surface_drafts WHERE surface_id IN (
+                SELECT id FROM surfaces WHERE conversation_id IS NOT NULL
+             )",
+            [],
+        )?;
+        // Conversation-owned surfaces only; workspace-owned (NULL) survive.
+        conn.execute("DELETE FROM surfaces WHERE conversation_id IS NOT NULL", [])?;
+        for table in [
+            "turn_journal",
+            "conversation_event_log",
+            "conversation_event_sequences",
+            "commit_event_outbox",
+            "apply_idempotency_outcomes",
+            "chat_attachments",
+            "action_events",
+            "context_ledger_entries",
+            "patch_scheduler_items",
+            "runtime_audit_events",
+            "developer_diagnostics",
+            "app_transactions",
+            "search_sessions",
+            "exa_usage_ledger",
+            "operation_provenance",
+        ] {
+            conn.execute(&format!("DELETE FROM {table}"), [])?;
+        }
         conn.execute("DELETE FROM messages", [])?;
         let n = conn.execute("DELETE FROM conversations", [])?;
         Ok(n as u64)
@@ -420,14 +507,27 @@ pub fn update_message_metadata(
 /// Delete `message_id` and every later message in the same conversation (by created_at, then id).
 pub fn delete_messages_from(db: &mut Database, message_id: &str) -> DbResult<u64> {
     let msg = get_message(db, message_id)?;
-    let n = db.conn().execute(
-        "DELETE FROM messages
-         WHERE conversation_id = ?1
-           AND (created_at > ?2 OR (created_at = ?2 AND id >= ?3))",
-        params![msg.conversation_id, msg.created_at, msg.id],
-    )?;
+    let n: u64 = db.with_transaction(|conn| {
+        // Fail closed: remove the searchable FTS copy in the same transaction
+        // so edit-and-resend never leaves searchable ghost text.
+        conn.execute(
+            "DELETE FROM message_fts WHERE message_id IN (
+                SELECT id FROM messages
+                WHERE conversation_id = ?1
+                  AND (created_at > ?2 OR (created_at = ?2 AND id >= ?3))
+             )",
+            params![msg.conversation_id, msg.created_at, msg.id],
+        )?;
+        let n = conn.execute(
+            "DELETE FROM messages
+             WHERE conversation_id = ?1
+               AND (created_at > ?2 OR (created_at = ?2 AND id >= ?3))",
+            params![msg.conversation_id, msg.created_at, msg.id],
+        )?;
+        Ok(n as u64)
+    })?;
     touch_conversation(db, &msg.conversation_id)?;
-    Ok(n as u64)
+    Ok(n)
 }
 
 // ── Tools ───────────────────────────────────────────────────────────────────

@@ -414,8 +414,20 @@ fn validate_operations_inner(
 /// Internal and reserved operations must only come from host subsystems.
 /// Automatically converts `tool_change` ops to valid v2 operations before validation.
 pub fn validate_model_operations(operations: &[AppOperation]) -> Result<(), String> {
+    normalize_and_validate_model_operations(operations).map(|_| ())
+}
+
+/// Normalize legacy `tool_change` operations to canonical v2, then validate.
+///
+/// Production paths MUST use the returned vector for preview, reconciliation,
+/// and scheduling. Validating a temporary copy while applying the original
+/// violates the validate-what-you-apply invariant.
+pub fn normalize_and_validate_model_operations(
+    operations: &[AppOperation],
+) -> Result<Vec<AppOperation>, String> {
     let normalized = normalize_operations_for_validation(operations);
-    validate_operations_inner(&normalized, true)
+    validate_operations_inner(&normalized, true)?;
+    Ok(normalized)
 }
 
 /// Validate a list of application operations (trusted boundary).
@@ -493,10 +505,126 @@ pub fn normalize_operations_for_validation(operations: &[AppOperation]) -> Vec<A
         if let Some(converted) = try_convert_tool_change_op(op) {
             result.extend(converted);
         } else {
-            result.push(op.clone());
+            let mut op = op.clone();
+            normalize_operation_payload(&mut op);
+            result.push(op);
         }
     }
     result
+}
+
+/// Normalize an individual component JSON object:
+/// 1. Migrates legacy props.actions / props.action into top-level component.actions
+///    if the top-level actions is not already defined, and removes them from props.
+/// 2. Migrates legacy props.valueKey into top-level component.valueKey if missing.
+/// 3. Recursively processes children.
+fn normalize_component_value(component: &mut Value) {
+    let Some(comp_obj) = component.as_object_mut() else {
+        return;
+    };
+
+    let mut actions_to_insert = None;
+    let mut value_key_to_insert = None;
+
+    if let Some(props_val) = comp_obj.get_mut("props") {
+        if let Some(props) = props_val.as_object_mut() {
+            if let Some(actions) = props.remove("actions") {
+                if actions.is_array() {
+                    actions_to_insert = Some(actions);
+                }
+            } else if let Some(action) = props.remove("action") {
+                if action.is_array() {
+                    actions_to_insert = Some(action);
+                } else if action.is_object() {
+                    actions_to_insert = Some(Value::Array(vec![action]));
+                }
+            }
+            if let Some(vk) = props.get("valueKey").cloned() {
+                value_key_to_insert = Some(vk);
+            }
+        }
+    }
+
+    if let Some(actions) = actions_to_insert {
+        let has_actions = comp_obj
+            .get("actions")
+            .map(|v| !v.is_null())
+            .unwrap_or(false);
+        if !has_actions {
+            comp_obj.insert("actions".into(), actions);
+        }
+    }
+
+    if let Some(vk) = value_key_to_insert {
+        if !comp_obj.contains_key("valueKey") {
+            comp_obj.insert("valueKey".into(), vk);
+        }
+    }
+
+    if let Some(children) = comp_obj.get_mut("children").and_then(|c| c.as_array_mut()) {
+        for child in children {
+            normalize_component_value(child);
+        }
+    }
+}
+
+/// Repair model-serialized `components` inside a tool/surface definition.
+/// Models sometimes emit `components` as a JSON-encoded string (or a
+/// single-string array) instead of an array of component objects, which
+/// otherwise fails closed at apply time with `expected struct ToolComponent`.
+/// Parse it once here so every downstream validator sees the canonical shape;
+/// unparseable values are left untouched for validation to reject clearly.
+fn normalize_definition_components(definition: &mut Value) {
+    if let Some(components) = definition.get_mut("components") {
+        let parsed: Option<Value> = match components {
+            Value::String(s) => serde_json::from_str(s).ok(),
+            Value::Array(arr) if arr.len() == 1 => arr
+                .first()
+                .and_then(|v| v.as_str())
+                .and_then(|s| serde_json::from_str(s).ok()),
+            _ => None,
+        };
+        if matches!(parsed, Some(Value::Array(_))) {
+            *components = parsed.expect("array checked");
+        }
+        if let Some(comps) = components.as_array_mut() {
+            for comp in comps {
+                normalize_component_value(comp);
+            }
+        }
+    }
+    if let Some(sections) = definition
+        .get_mut("sections")
+        .and_then(|v| v.as_array_mut())
+    {
+        for section in sections {
+            normalize_definition_components(section);
+        }
+    }
+}
+
+/// Apply definition-shape normalization to definition-bearing operations.
+/// Single choke point: preview, durable extraction, and the final gate all
+/// flow through `normalize_operations_for_validation`.
+fn normalize_operation_payload(op: &mut AppOperation) {
+    if matches!(
+        op.op_type.as_str(),
+        "surface.create"
+            | "tool.full_replace"
+            | "chat.inline_surface_create"
+            | "chat.inline_surface_update"
+    ) {
+        for key in ["tool", "definition"] {
+            if let Some(def) = op.payload.get_mut(key) {
+                normalize_definition_components(def);
+            }
+        }
+        normalize_definition_components(&mut op.payload);
+    } else if matches!(op.op_type.as_str(), "component.insert" | "component.replace") {
+        if let Some(comp) = op.payload.get_mut("component") {
+            normalize_component_value(comp);
+        }
+    }
 }
 
 /// Adapt a v1 tool_change into a v2 operation list.
@@ -1156,6 +1284,82 @@ mod tests {
     }
 
     #[test]
+    fn normalize_and_validate_returns_canonical_operations() {
+        let ops = vec![AppOperation {
+            id: "op-tc".into(),
+            op_type: "tool_change".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({
+                "toolChange": {
+                    "action": "create",
+                    "tool": {
+                        "id": "my-tool",
+                        "name": "My Tool",
+                        "description": "",
+                        "layout": {"type": "single-column"},
+                        "components": []
+                    },
+                    "changeSummary": "created"
+                }
+            }),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        // The returned vector — not the input — is what preview, reconciliation,
+        // and the scheduler must consume (validate-what-you-apply invariant).
+        let normalized = normalize_and_validate_model_operations(&ops).unwrap();
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0].op_type, "surface.create");
+        assert_ne!(normalized[0].op_type, "tool_change");
+    }
+
+    #[test]
+    fn stringified_components_are_parsed_to_canonical_array() {
+        // Live-model failure 2026-09-22: surface.create arrived with components
+        // as a single JSON-encoded string and failed closed at apply time with
+        // `expected struct ToolComponent`. Normalization must repair the shape
+        // so validators see the canonical array.
+        let stringified = r#"[{"id":"t","type":"text","props":{"text":"hi"}}]"#;
+        let ops = vec![AppOperation {
+            id: "operation-1".into(),
+            op_type: "surface.create".into(),
+            target: OperationTarget {
+                surface_id: Some("surf-tasks".into()),
+                tool_id: Some("tool-tasks".into()),
+                ..Default::default()
+            },
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({
+                "tool": {
+                    "id": "tool-tasks",
+                    "name": "Tasks",
+                    "description": "",
+                    "layout": {"type": "single-column"},
+                    "components": stringified
+                }
+            }),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let normalized = normalize_operations_for_validation(&ops);
+        assert_eq!(normalized.len(), 1);
+        let components = normalized[0].payload["tool"]["components"]
+            .as_array()
+            .expect("components must be a canonical array after normalization");
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0]["id"], "t");
+    }
+
+    #[test]
     fn mixed_operations_with_tool_change_are_normalized() {
         let ops = vec![
             AppOperation {
@@ -1206,5 +1410,77 @@ mod tests {
         assert_eq!(normalized.len(), 2);
         assert_eq!(normalized[0].op_type, "surface.create");
         assert_eq!(normalized[1].op_type, "state.set");
+    }
+
+    #[test]
+    fn legacy_action_props_in_component_are_normalized_to_top_level_actions() {
+        let ops = vec![AppOperation {
+            id: "op-create".into(),
+            op_type: "surface.create".into(),
+            target: OperationTarget {
+                surface_id: Some("surf-tasks".into()),
+                tool_id: Some("tool-tasks".into()),
+                ..Default::default()
+            },
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({
+                "tool": {
+                    "id": "tool-tasks",
+                    "name": "Tasks",
+                    "description": "",
+                    "layout": {"type": "single-column"},
+                    "components": [
+                        {
+                            "id": "btn-add",
+                            "type": "button",
+                            "props": {
+                                "label": "Add Task",
+                                "actions": [
+                                    {"type": "setValue", "target": "taskTitle", "value": "New"}
+                                ],
+                                "valueKey": "boundState"
+                            }
+                        }
+                    ]
+                }
+            }),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+
+        let normalized = normalize_and_validate_model_operations(&ops)
+            .expect("should normalize and pass validation");
+        assert_eq!(normalized.len(), 1);
+        let comp = &normalized[0].payload["tool"]["components"][0];
+        assert_eq!(comp["id"], "btn-add");
+        assert_eq!(comp["valueKey"], "boundState");
+        assert!(comp["props"].get("actions").is_none());
+        assert!(comp["props"].get("action").is_none());
+        let actions = comp["actions"].as_array().expect("actions must be top-level");
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0]["type"], "setValue");
+    }
+
+    #[test]
+    fn live_task_manager_proposal_payload_normalizes_and_validates() {
+        let raw_json = r#"[{"id":"operation-1","type":"surface.create","target":{},"payload":{"components":[{"id":"header","props":{"text":"Task Manager"},"type":"heading"},{"id":"task-filter","props":{"label":"Search Tasks","valueKey":"searchQuery"},"type":"textInput"},{"id":"task-priority","props":{"label":"Filter by Priority","options":[{"label":"All","value":""},{"label":"High","value":"high"},{"label":"Medium","value":"medium"},{"label":"Low","value":"low"}],"valueKey":"priorityFilter"},"type":"select"},{"id":"task-status","props":{"label":"Filter by Status","options":[{"label":"All","value":""},{"label":"Completed","value":"completed"},{"label":"Pending","value":"pending"}],"valueKey":"statusFilter"},"type":"select"},{"id":"task-list","props":{"columns":[{"accessor":"title","header":"Task"},{"accessor":"priority","header":"Priority"},{"accessor":"status","header":"Status"},{"accessor":"actions","header":"Actions"}],"dataKey":"tasks","rowsKey":"tasks"},"type":"dataTable"},{"id":"add-task-container","props":{"actions":[{"target":"newTaskTitle","type":"setValue","value":""},{"target":"newTaskPriority","type":"setValue","value":"medium"},{"target":"newTaskStatus","type":"setValue","value":"pending"}],"label":"Add New Task"},"type":"container"},{"id":"newTaskTitle","props":{"label":"Task Title","valueKey":"newTaskTitle"},"type":"textInput"},{"id":"newTaskPriority","props":{"label":"Priority","options":[{"label":"High","value":"high"},{"label":"Medium","value":"medium"},{"label":"Low","value":"low"}],"valueKey":"newTaskPriority"},"type":"select"},{"id":"newTaskStatus","props":{"label":"Status","options":[{"label":"Pending","value":"pending"},{"label":"Completed","value":"completed"}],"valueKey":"newTaskStatus"},"type":"select"},{"id":"add-task-button","props":{"actions":[{"item":{"priority":"newTaskPriority","status":"newTaskStatus","title":"newTaskTitle"},"target":"tasks","type":"appendItem"},{"target":"newTaskTitle","type":"setValue","value":""},{"target":"newTaskPriority","type":"setValue","value":"medium"},{"target":"newTaskStatus","type":"setValue","value":"pending"}],"label":"Add Task"},"type":"button"},{"id":"delete-task-button","props":{"actions":[{"id":"selectedTaskId","target":"tasks","type":"removeItem"}],"label":"Delete Task"},"type":"button"},{"id":"edit-task-button","props":{"actions":[{"id":"selectedTaskId","patch":{"priority":"newTaskPriority","status":"newTaskStatus","title":"newTaskTitle"},"target":"tasks","type":"updateItem"}],"label":"Edit Task"},"type":"button"}],"description":"A tool for managing tasks with persistent storage, priority, status, and various functionalities.","id":"task-manager","layout":{"columns":2,"density":"compact","type":"dashboard"},"name":"Task Manager"}}]"#;
+
+        let ops: Vec<AppOperation> = serde_json::from_str(raw_json).expect("valid op json");
+        let normalized = normalize_and_validate_model_operations(&ops)
+            .expect("must normalize and validate live task manager proposal without conflicts");
+
+        assert_eq!(normalized.len(), 1);
+        let comps = normalized[0].payload["components"].as_array().expect("components array");
+        let add_container = comps.iter().find(|c| c["id"] == "add-task-container").expect("found container");
+        assert!(add_container["props"].get("actions").is_none());
+        assert!(add_container["actions"].is_array());
+
+        let add_btn = comps.iter().find(|c| c["id"] == "add-task-button").expect("found add btn");
+        assert!(add_btn["props"].get("actions").is_none());
+        assert!(add_btn["actions"].is_array());
     }
 }

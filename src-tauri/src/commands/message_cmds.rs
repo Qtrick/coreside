@@ -836,14 +836,21 @@ fn release_staged_attachments_from_queue_prompt(state: &AppState, prompt: &serde
     crate::commands::attachment_cmds::release_staged_attachment_ids_best_effort(state, &ids);
 }
 
-fn delete_orphaned_user_message(db: &mut crate::db::Database, message_id: &str) {
-    let _ = db.conn().execute(
-        "DELETE FROM message_fts WHERE message_id = ?1",
-        [message_id],
-    );
-    let _ = db
-        .conn()
-        .execute("DELETE FROM messages WHERE id = ?1", [message_id]);
+/// Remove an orphaned user message plus its searchable FTS copy, atomically.
+/// Fail-closed: callers run on an already-failing path, so failures are
+/// logged loudly rather than silently leaking searchable ghost text.
+fn delete_orphaned_user_message(
+    db: &mut crate::db::Database,
+    message_id: &str,
+) -> Result<(), crate::db::DbError> {
+    db.with_transaction(|conn| {
+        conn.execute(
+            "DELETE FROM message_fts WHERE message_id = ?1",
+            [message_id],
+        )?;
+        conn.execute("DELETE FROM messages WHERE id = ?1", [message_id])?;
+        Ok(())
+    })
 }
 
 fn schedule_queued_turn_drain(app: &AppHandle, conversation_id: &str) {
@@ -1430,7 +1437,15 @@ async fn send_message_inner(
                 &user_message.id,
                 &new_claim_ids,
             );
-            delete_orphaned_user_message(&mut db, &user_message.id);
+            if let Err(cleanup_err) =
+                delete_orphaned_user_message(&mut db, &user_message.id)
+            {
+                tracing::warn!(
+                    message_id = %user_message.id,
+                    error = %cleanup_err,
+                    "orphaned user message cleanup failed — searchable copy may remain"
+                );
+            }
             return Err(err);
         }
 
@@ -1772,7 +1787,15 @@ async fn send_message_inner(
             &user_message.id,
             &attachment_ids,
         );
-        delete_orphaned_user_message(&mut db, &user_message.id);
+        if let Err(cleanup_err) =
+            delete_orphaned_user_message(&mut db, &user_message.id)
+        {
+            tracing::warn!(
+                message_id = %user_message.id,
+                error = %cleanup_err,
+                "orphaned user message cleanup failed — searchable copy may remain"
+            );
+        }
         drop(db);
         let message = sanitize_error(&e.to_string(), api_key_ref);
         emit_turn(
@@ -1927,7 +1950,12 @@ async fn send_message_inner(
                         &mut text_seq,
                         &text,
                     );
-                    if progressive_ops_enabled {
+                    // Provider SSE text deltas are NOT the Coreside NDJSON operation
+                    // protocol. Only feed chunks that actually carry progressive
+                    // frames; buffered structured-JSON deltas (e.g. Gemini
+                    // responseMimeType application/json partial text) must never
+                    // enter the frame parser.
+                    if progressive_ops_enabled && text.contains(crate::runtime_v2::PROGRESSIVE_OPS_V) {
                         emit_progressive_op_previews(
                             &app_for_stream,
                             state,
@@ -2228,7 +2256,9 @@ async fn send_message_inner(
                             &mut text_seq,
                             &text,
                         );
-                        if progressive_ops_enabled {
+                        // Same NDJSON-only gating as the initial attempt: provider
+                        // text deltas are not operation frames.
+                        if progressive_ops_enabled && text.contains(crate::runtime_v2::PROGRESSIVE_OPS_V) {
                             emit_progressive_op_previews(
                                 &app_for_stream,
                                 state,
@@ -2439,6 +2469,12 @@ async fn send_message_inner(
             "autoMode": resolved.auto_mode,
             "attempts": resolved.attempts,
             "streamedLive": resolved.streamed_live,
+            "responseSchemaVersion": parsed.payload.schema_version,
+            "responseType": serde_json::to_value(&parsed.payload.response_type).unwrap_or(serde_json::Value::Null),
+            "progressiveOpsEnabled": progressive_ops_enabled,
+            "progressiveStarted": progressive_parser.started(),
+            "progressiveHalted": progressive_parser.is_halted(),
+            "operationCount": parsed.payload.operations.as_ref().map(|o| o.len()).unwrap_or(0),
         });
         if let Some(extra) = &parsed.payload.diagnostics {
             d["providerDiagnostics"] = extra.clone();
@@ -2504,7 +2540,11 @@ async fn send_message_inner(
 
     // Runtime V2: apply multi-surface operations when present
     let mut v2_apply: Option<serde_json::Value> = None;
-    if parsed.payload.schema_version == "2" {
+    let has_v2_schema = parsed.payload.schema_version == "2";
+    let has_operations = parsed.payload.operations.as_ref().map_or(false, |o| !o.is_empty());
+    let has_tool_change = parsed.payload.tool_change.is_some();
+
+    if has_v2_schema || has_operations || has_tool_change {
         // Finish progressive stream first — incomplete/missing terminal commits nothing.
         if progressive_ops_enabled {
             for ev in crate::runtime_v2::finish_progressive_ingest(
@@ -2527,53 +2567,49 @@ async fn send_message_inner(
         }
 
         let mut operations_from_payload: Option<Vec<crate::runtime_v2::AppOperation>> = None;
-        if parsed
-            .payload
-            .operations
-            .as_ref()
-            .map(|o| !o.is_empty())
-            .unwrap_or(false)
-        {
-            if let Ok(ops) = parsed.payload.normalized_operations() {
-                if !ops.is_empty() {
-                    operations_from_payload = Some(ops);
-                }
+        if let Ok(ops) = parsed.payload.normalized_operations() {
+            if !ops.is_empty() {
+                operations_from_payload = Some(ops);
             }
         }
 
         if progressive_ops_enabled {
             match progressive_parser.durable_operations() {
                 Some(durable) => {
-                    let durable = durable.to_vec();
                     // P0 defense-in-depth: reject internal/reserved ops at the
                     // progressive→kernel boundary, even though preview already
                     // validated each op individually.  Catches any parser-level
                     // inconsistency that could have slipped through.
-                    if let Err(err) =
-                        crate::runtime_v2::validate_model_operations(&durable)
-                    {
-                        tracing::warn!(
-                            conversation_id = %conversation_id,
-                            error = %err,
-                            "progressive durable operations failed model allowlist — committing zero ops"
-                        );
-                        preview_txn.mark_interrupted();
-                        operations_from_payload = Some(Vec::new());
-                    } else if let Some(final_ops) = operations_from_payload.as_ref() {
-                        if let Err(err) =
-                            crate::runtime_v2::reconcile_final_operations(&durable, final_ops)
-                        {
+                    // Use the normalized operations that passed validation for
+                    // reconciliation and scheduling — never the pre-image.
+                    match crate::runtime_v2::normalize_and_validate_model_operations(durable) {
+                        Err(err) => {
                             tracing::warn!(
                                 conversation_id = %conversation_id,
                                 error = %err,
-                                "progressive final payload diverged from preview — committing zero ops"
+                                "progressive durable operations failed model allowlist — committing zero ops"
                             );
                             preview_txn.mark_interrupted();
                             operations_from_payload = Some(Vec::new());
                         }
-                        // Prefer final_ops when reconciliation succeeded (already set).
-                    } else if !durable.is_empty() {
-                        operations_from_payload = Some(durable);
+                        Ok(durable) => {
+                            if let Some(final_ops) = operations_from_payload.as_ref() {
+                                if let Err(err) =
+                                    crate::runtime_v2::reconcile_final_operations(&durable, final_ops)
+                                {
+                                    tracing::warn!(
+                                        conversation_id = %conversation_id,
+                                        error = %err,
+                                        "progressive final payload diverged from preview — committing zero ops"
+                                    );
+                                    preview_txn.mark_interrupted();
+                                    operations_from_payload = Some(Vec::new());
+                                }
+                                // Prefer final_ops when reconciliation succeeded (already set).
+                            } else if !durable.is_empty() {
+                                operations_from_payload = Some(durable);
+                            }
+                        }
                     }
                 }
                 None if progressive_parser.started() || progressive_parser.is_halted() => {
@@ -2642,13 +2678,23 @@ async fn send_message_inner(
         if let Some(operations) = operations_from_payload {
             if !operations.is_empty() {
                 // P0 final gate: reject internal/reserved ops that should never reach the kernel.
-                if let Err(err) = crate::runtime_v2::validate_model_operations(&operations) {
-                    tracing::warn!(
-                        conversation_id = %conversation_id,
-                        error = %err,
-                        "operations failed model allowlist at final gate — dropping"
-                    );
-                    preview_txn.mark_interrupted();
+                // Schedule the normalized operations that passed validation — never the pre-image.
+                let operations = match crate::runtime_v2::normalize_and_validate_model_operations(
+                    &operations,
+                ) {
+                    Ok(ops) => ops,
+                    Err(err) => {
+                        tracing::warn!(
+                            conversation_id = %conversation_id,
+                            error = %err,
+                            "operations failed model allowlist at final gate — dropping"
+                        );
+                        preview_txn.mark_interrupted();
+                        Vec::new()
+                    }
+                };
+                if operations.is_empty() {
+                    // Dropped at the final gate; fall through without scheduling.
                 } else if !state
                     .quiescence
                     .allows(crate::quiescence::QuiescedSubsystem::PatchScheduler)
@@ -2844,7 +2890,7 @@ async fn send_message_inner(
         "settingsChange": settings_change,
         "settingsChangeStatus": if settings_change.is_some() { "pending" } else { "none" },
         "toolChangeStatus": if tool_change.is_some() { "pending" } else { "none" },
-        "pending": tool_change.is_some() || settings_change.is_some(),
+        "pending": tool_change.is_some() || settings_change.is_some() || v2_apply.as_ref().and_then(|v| v.get("proposalId")).is_some(),
         "recovered": parsed.recovered,
         "diagnostics": diagnostics,
         "actionEvents": action_events,

@@ -5,6 +5,7 @@ import {
   buildCanvasPresetProposal,
   buildStaticColorProposal,
   CURATED_WALLPAPER_PRESETS,
+  DEFAULT_WORKSPACE_WALLPAPER_JSON,
   type WallpaperPresetDefinition,
   parseWallpaperJson,
   schemaWallpaperToJson,
@@ -67,8 +68,17 @@ export function WallpaperSettings() {
   const [previewPreset, setPreviewPreset] = useState<WallpaperPresetDefinition | null>(null);
   const [previewOpacity, setPreviewOpacity] = useState<number>(0.85);
   const [previewSpeed, setPreviewSpeed] = useState<number>(1.0);
+  // Committed-wallpaper opacity draft: stays visible after Apply so the user
+  // can tune the active wallpaper without re-selecting it. Preview on change,
+  // commit on release (same pattern as interface transparency).
+  const [committedOpacityDraft, setCommittedOpacityDraft] = useState<number | null>(null);
 
   const transparencyCommitGenRef = useRef(0);
+
+  // Effective committed value: fresh profiles (null) render the built-in
+  // default; an explicitly cleared wallpaper ("") stays None.
+  const effectiveGlobalWallpaperJson =
+    globalWallpaperJson ?? DEFAULT_WORKSPACE_WALLPAPER_JSON;
 
   const committedSolid = useMemo(
     () => readCommittedSolid(globalWallpaperJson),
@@ -94,28 +104,73 @@ export function WallpaperSettings() {
   }, [globalWallpaperJson]);
 
   const activeId = activeCanvasPresetId({
-    globalWallpaperJson,
+    globalWallpaperJson: effectiveGlobalWallpaperJson,
     globalWallpaper: wallpaper,
   });
 
   const wallpaperActive = useMemo(() => {
-    if (globalWallpaperJson?.trim()) {
-      const parsed = parseWallpaperJson(globalWallpaperJson);
+    if (effectiveGlobalWallpaperJson.trim()) {
+      const parsed = parseWallpaperJson(effectiveGlobalWallpaperJson);
       if (parsed.format !== "none") return true;
     }
     return Boolean(wallpaper.kind && wallpaper.kind !== "none");
-  }, [globalWallpaperJson, wallpaper]);
+  }, [effectiveGlobalWallpaperJson, wallpaper]);
 
   // Match current active preset
   const activePreset = useMemo(() => {
     return CURATED_WALLPAPER_PRESETS.find((p) => {
       if (p.id === activeId) return true;
-      if (globalWallpaperJson && p.config.color) {
-        return globalWallpaperJson.includes(p.config.color);
+      if (effectiveGlobalWallpaperJson && p.config.color) {
+        return effectiveGlobalWallpaperJson.includes(p.config.color);
       }
       return false;
     });
-  }, [activeId, globalWallpaperJson]);
+  }, [activeId, effectiveGlobalWallpaperJson]);
+
+  // Canonical committed schema config, if the active wallpaper is a schema wallpaper.
+  const committedSchemaConfig = useMemo(() => {
+    if (!effectiveGlobalWallpaperJson.trim()) return null;
+    const parsed = parseWallpaperJson(effectiveGlobalWallpaperJson);
+    return parsed.format === "schema" ? parsed.config : null;
+  }, [effectiveGlobalWallpaperJson]);
+
+  useEffect(() => {
+    setCommittedOpacityDraft(null);
+  }, [globalWallpaperJson]);
+
+  const committedOpacity =
+    committedOpacityDraft ?? committedSchemaConfig?.opacity ?? null;
+
+  const handleCommittedOpacityPreview = (val: number) => {
+    setCommittedOpacityDraft(val);
+    if (!committedSchemaConfig) return;
+    previewWorkspaceWallpaper(
+      schemaWallpaperToJson({ ...committedSchemaConfig, opacity: val }),
+    );
+  };
+
+  const commitCommittedOpacity = async (val: number) => {
+    if (!committedSchemaConfig) return;
+    setCommittedOpacityDraft(null);
+    setBusy(true);
+    setError(null);
+    setTechDetail(null);
+    try {
+      await applyWorkspaceWallpaper(
+        schemaWallpaperToJson({ ...committedSchemaConfig, opacity: val }),
+      );
+    } catch (err) {
+      revertWorkspaceWallpaper();
+      const { message, technical } = consumerErrorMessage(
+        err,
+        "Coreside could not update the wallpaper opacity.",
+      );
+      setError(message);
+      setTechDetail(technical);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const activeTitle = useMemo(() => {
     if (previewPreset) {
@@ -481,7 +536,7 @@ export function WallpaperSettings() {
           </div>
           <div className="tuning-control-group">
             <div className="tuning-control">
-              <label htmlFor="wallpaper-opacity-slider">Opacity ({Math.round(previewOpacity * 100)}%)</label>
+              <label htmlFor="wallpaper-opacity-slider">Wallpaper opacity ({Math.round(previewOpacity * 100)}%)</label>
               <input
                 id="wallpaper-opacity-slider"
                 type="range"
@@ -507,6 +562,36 @@ export function WallpaperSettings() {
                 />
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Active-wallpaper opacity: always available after Apply. */}
+      {!previewPreset && committedSchemaConfig && committedOpacity != null && (
+        <div className="wallpaper-tuning-panel">
+          <div className="tuning-header">
+            <Sliders size={14} aria-hidden />
+            <strong>Active Wallpaper</strong>
+          </div>
+          <div className="tuning-control-group">
+            <div className="tuning-control">
+              <label htmlFor="wallpaper-active-opacity-slider">
+                Wallpaper opacity ({Math.round(committedOpacity * 100)}%)
+              </label>
+              <input
+                id="wallpaper-active-opacity-slider"
+                type="range"
+                min={0.1}
+                max={1.0}
+                step={0.05}
+                value={committedOpacity}
+                disabled={busy}
+                onChange={(e) => handleCommittedOpacityPreview(parseFloat(e.target.value))}
+                onPointerUp={(e) => void commitCommittedOpacity(parseFloat(e.currentTarget.value))}
+                onKeyUp={(e) => void commitCommittedOpacity(parseFloat(e.currentTarget.value))}
+                onBlur={(e) => void commitCommittedOpacity(parseFloat(e.currentTarget.value))}
+              />
+            </div>
           </div>
         </div>
       )}

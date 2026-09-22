@@ -319,14 +319,22 @@ fn grant_matches(
 }
 
 /// A once-grant is spent as soon as it authorizes a call.
+/// Atomically transitions status from 'active' to 'consumed' (CAS).
+/// Fails if the grant was already consumed, expired, or revoked.
 pub fn consume_once_grant(db: &mut Database, grant: &RuntimeGrant) -> DbResult<()> {
     if grant.duration != GrantDuration::Once.as_str() {
         return Ok(());
     }
-    db.conn().execute(
-        "UPDATE runtime_action_grants SET status = 'consumed', revoked_at = ?2 WHERE id = ?1",
+    let count = db.conn().execute(
+        "UPDATE runtime_action_grants SET status = 'consumed', revoked_at = ?2 WHERE id = ?1 AND status = 'active'",
         params![grant.id, now_rfc3339()],
     )?;
+    if count == 0 {
+        return Err(DbError::Invalid(format!(
+            "Once-grant {} was already consumed or inactive",
+            grant.id
+        )));
+    }
     Ok(())
 }
 
@@ -545,5 +553,6 @@ mod tests {
         assert!(match_grant(&db, &c, d, "hash-a").unwrap().is_some());
         consume_once_grant(&mut db, &g).unwrap();
         assert!(match_grant(&db, &c, d, "hash-a").unwrap().is_none());
+        assert!(consume_once_grant(&mut db, &g).is_err());
     }
 }

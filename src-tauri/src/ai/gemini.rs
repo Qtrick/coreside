@@ -137,6 +137,17 @@ impl GeminiProvider {
                     },
                     "required": ["action", "changeSummary"]
                 },
+                "operations": {
+                    "type": "array",
+                    "description": "Canonical Runtime V2 operations (preferred for app changes). Each item is an operation object with id, type, target, and payload.",
+                    "items": { "type": "object" }
+                },
+                "assistantMessages": {
+                    "type": "array",
+                    "items": { "type": "object" }
+                },
+                "turnId": { "type": "string" },
+                "silent": { "type": "boolean" },
                 "settingsChange": {
                     "type": "object",
                     "properties": {
