@@ -392,20 +392,23 @@ pub fn run() {
                         _ => {}
                     }
                 }
-                if let Some(state) = app.try_state::<AppState>() {
-                    match commands::reconcile_and_sweep_attachments(&state) {
-                        Ok(report) if report.expired > 0 || report.promoted_orphans > 0 || report.missing_durable > 0 => {
-                            tracing::info!(
-                                expired = report.expired,
-                                promoted = report.promoted_orphans,
-                                missing = report.missing_durable,
-                                "attachment sweep completed"
-                            );
+                let app_handle_for_sweep = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Some(state) = app_handle_for_sweep.try_state::<AppState>() {
+                        match commands::reconcile_and_sweep_attachments(&state) {
+                            Ok(report) if report.expired > 0 || report.promoted_orphans > 0 || report.missing_durable > 0 => {
+                                tracing::info!(
+                                    expired = report.expired,
+                                    promoted = report.promoted_orphans,
+                                    missing = report.missing_durable,
+                                    "attachment sweep completed"
+                                );
+                            }
+                            Err(err) => tracing::warn!(error = %err.message, "attachment sweep failed"),
+                            _ => {}
                         }
-                        Err(err) => tracing::warn!(error = %err.message, "attachment sweep failed"),
-                        _ => {}
                     }
-                }
+                });
 
                 let mut skip_ordinary_services = false;
                 if let Ok(paths) = app_paths::AppPaths::resolve() {

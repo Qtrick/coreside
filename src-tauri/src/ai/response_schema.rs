@@ -441,10 +441,53 @@ pub fn validate_layout(layout: &Value) -> Result<(), String> {
     Ok(())
 }
 
+impl ToolComponent {
+    /// Recursively strips legacy actions/onClick/valueKey from `props` and moves them
+    /// to authoritative fields.
+    pub fn normalize_legacy_actions(&mut self) {
+        if let Some(props) = self.props.as_mut().and_then(|p| p.as_object_mut()) {
+            let mut extracted: Vec<ActionDefinition> = Vec::new();
+            if let Some(actions_val) = props.remove("actions") {
+                if let Ok(acts) = serde_json::from_value::<Vec<ActionDefinition>>(actions_val.clone()) {
+                    extracted.extend(acts);
+                } else if let Ok(act) = serde_json::from_value::<ActionDefinition>(actions_val) {
+                    extracted.push(act);
+                }
+            }
+            if let Some(action_val) = props.remove("action") {
+                if let Ok(acts) = serde_json::from_value::<Vec<ActionDefinition>>(action_val.clone()) {
+                    extracted.extend(acts);
+                } else if let Ok(act) = serde_json::from_value::<ActionDefinition>(action_val) {
+                    extracted.push(act);
+                }
+            }
+            props.remove("onClick");
+            props.remove("on_click");
+            if self.value_key.is_none() {
+                if let Some(vk) = props.remove("valueKey").and_then(|v| v.as_str().map(|s| s.to_string())) {
+                    self.value_key = Some(vk);
+                }
+            }
+            if !extracted.is_empty() {
+                let current = self.actions.get_or_insert_with(Vec::new);
+                current.extend(extracted);
+            }
+        }
+        if let Some(children) = self.children.as_mut() {
+            for child in children {
+                child.normalize_legacy_actions();
+            }
+        }
+    }
+}
+
 impl ToolDefinition {
-    /// Normalize `layout` to `{ "type": "..." }` for frontend IPC.
+    /// Normalize `layout` to `{ "type": "..." }` and canonicalize component actions.
     pub fn normalize_for_frontend(&mut self) {
         self.layout = normalize_layout(&self.layout);
+        for comp in &mut self.components {
+            comp.normalize_legacy_actions();
+        }
     }
 }
 

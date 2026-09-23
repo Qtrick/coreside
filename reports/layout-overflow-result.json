@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-22T17:38:00.717Z",
+  "generatedAt": "2026-09-23T15:22:41.257Z",
   "mode": "static-css-scan",
   "note": "Static scan + contract checklist. Full DOM probe requires desktop runtime.",
   "viewportContract": "docs/APPLICATION_VIEWPORT_CONTRACT.md",

@@ -201,11 +201,13 @@ fn assert_ops_not_protected(operations: &[AppOperation]) -> Result<(), KernelErr
 pub fn apply_change(
     db: &mut Database,
     bus: Option<&mut crate::runtime_v2::EventBus>,
-    req: ChangeRequest,
+    mut req: ChangeRequest,
 ) -> Result<ChangeResult, KernelError> {
     if let Some(proposal_id) = req.proposal_id.as_deref() {
         return decide_proposal(db, bus, proposal_id, req.approval_granted);
     }
+
+    req.operations = crate::runtime_v2::normalize_operations_for_validation(&req.operations);
 
     validate_operations(&req.operations).map_err(KernelError::Validation)?;
     validate_dependency_refs(&req.operations).map_err(KernelError::Validation)?;
@@ -787,7 +789,7 @@ pub fn decide_proposal(
     }
 
     // 4. Apply frozen operations
-    let ops = proposal.exact_operations;
+    let ops = crate::runtime_v2::normalize_operations_for_validation(&proposal.exact_operations);
     let mut deferred = Vec::new();
     let txn_res = create_transaction(
         db,

@@ -1351,7 +1351,8 @@ body > .window-overlay-root > *,
 }
 
 .settings-panel {
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   min-height: 0;

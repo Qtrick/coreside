@@ -899,8 +899,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const wallpaper = wallpaperFromSettings(settings);
       const interfaceTransparency =
         typeof settings.interfaceTransparency === "number"
-          ? Math.min(60, Math.max(0, Math.round(settings.interfaceTransparency)))
-          : 20;
+          ? Math.min(100, Math.max(0, Math.round(settings.interfaceTransparency)))
+          : 35;
       committedInterfaceTransparency = interfaceTransparency;
       interfaceTransparencyCommittedGen = interfaceTransparencyCommitGen;
       syncCommittedWallpaperFromSettings({
@@ -1287,12 +1287,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   previewInterfaceTransparency: (value) => {
-    const next = Math.min(60, Math.max(0, Math.round(value)));
+    const next = Math.min(100, Math.max(0, Math.round(value)));
     set({ interfaceTransparency: next });
   },
 
   commitInterfaceTransparency: async (value) => {
-    const next = Math.min(60, Math.max(0, Math.round(value)));
+    const next = Math.min(100, Math.max(0, Math.round(value)));
     // Coalesce pointerup+blur / duplicate preset clicks onto the same value.
     if (next === committedInterfaceTransparency) {
       set({ interfaceTransparency: next });
@@ -1312,7 +1312,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         const saved =
           typeof settings.interfaceTransparency === "number"
             ? Math.min(
-                60,
+                100,
                 Math.max(0, Math.round(settings.interfaceTransparency)),
               )
             : next;
@@ -1843,7 +1843,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   deleteConversation: async (id) => {
     // Guard against double deletion (rapid clicks) racing the same IPC.
     if (get().deletingConversationIds.includes(id)) return;
+    const prevConversations = get().conversations;
+    const remainingConversations = prevConversations.filter((c) => c.id !== id);
     set({
+      conversations: remainingConversations,
       deletingConversationIds: [...get().deletingConversationIds, id],
     });
     // Cancel in-flight provider work before deleting so the post-provider
@@ -1858,6 +1861,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } catch (error) {
       console.error("Failed to delete conversation:", error);
       set({
+        conversations: prevConversations,
         deletingConversationIds: get().deletingConversationIds.filter(
           (c) => c !== id,
         ),

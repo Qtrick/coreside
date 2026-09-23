@@ -383,9 +383,9 @@ pub fn normalize_setting_kv(key: &str, value: &str) -> Result<String, String> {
             let n: f64 = value
                 .trim()
                 .parse()
-                .map_err(|_| "interfaceTransparency must be a number 0–60".to_string())?;
-            if !(0.0..=60.0).contains(&n) {
-                return Err("interfaceTransparency must be between 0 and 60".into());
+                .map_err(|_| "interfaceTransparency must be a number 0–100".to_string())?;
+            if !(0.0..=100.0).contains(&n) {
+                return Err("interfaceTransparency must be between 0 and 100".into());
             }
             Ok((n.round() as i32).to_string())
         }

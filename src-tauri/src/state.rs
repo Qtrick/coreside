@@ -64,6 +64,8 @@ pub struct AppState {
     /// Profile readiness. When not Ready, `db` holds a recovery shell database.
     pub bootstrap: Mutex<BootstrapStatus>,
     pub active_requests: Mutex<HashMap<String, CancellationToken>>,
+    /// Deletion tombstones to prevent late-arriving provider turns from resurrecting deleted conversations.
+    pub deleted_conversations: Mutex<HashSet<String>>,
     /// Conversations with an in-flight queue drain task (prevents concurrent drainers).
     pub queue_drain_inflight: Mutex<HashSet<String>>,
     /// Conversation-scoped queue UI Channels (no process-wide queue bus).
@@ -93,6 +95,7 @@ impl AppState {
             db: Arc::new(Mutex::new(db)),
             bootstrap: Mutex::new(bootstrap),
             active_requests: Mutex::new(HashMap::new()),
+            deleted_conversations: Mutex::new(HashSet::new()),
             queue_drain_inflight: Mutex::new(HashSet::new()),
             queue_subscribers: Mutex::new(HashMap::new()),
             sync_subscribers: Mutex::new(HashMap::new()),

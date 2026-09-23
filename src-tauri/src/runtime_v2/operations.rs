@@ -503,7 +503,10 @@ pub fn normalize_operations_for_validation(operations: &[AppOperation]) -> Vec<A
     let mut result = Vec::with_capacity(operations.len());
     for op in operations {
         if let Some(converted) = try_convert_tool_change_op(op) {
-            result.extend(converted);
+            for mut conv_op in converted {
+                normalize_operation_payload(&mut conv_op);
+                result.push(conv_op);
+            }
         } else {
             let mut op = op.clone();
             normalize_operation_payload(&mut op);
@@ -514,44 +517,61 @@ pub fn normalize_operations_for_validation(operations: &[AppOperation]) -> Vec<A
 }
 
 /// Normalize an individual component JSON object:
-/// 1. Migrates legacy props.actions / props.action into top-level component.actions
-///    if the top-level actions is not already defined, and removes them from props.
-/// 2. Migrates legacy props.valueKey into top-level component.valueKey if missing.
-/// 3. Recursively processes children.
+/// 1. Unwraps stringified props if present.
+/// 2. Migrates legacy props.actions / props.action / props.onClick / props.on_click
+///    into top-level component.actions, and strips them unconditionally from props.
+/// 3. Migrates legacy props.valueKey into top-level component.valueKey if missing,
+///    and strips valueKey from props.
+/// 4. Recursively processes children (unwrapping stringified children if present).
 fn normalize_component_value(component: &mut Value) {
     let Some(comp_obj) = component.as_object_mut() else {
         return;
     };
 
-    let mut actions_to_insert = None;
+    // 1. Unwrap stringified props if model emitted JSON string
+    if let Some(props_str) = comp_obj.get("props").and_then(|v| v.as_str()) {
+        if let Ok(parsed) = serde_json::from_str::<Value>(props_str) {
+            comp_obj.insert("props".into(), parsed);
+        }
+    }
+
+    let mut extracted_actions = Vec::new();
     let mut value_key_to_insert = None;
 
     if let Some(props_val) = comp_obj.get_mut("props") {
         if let Some(props) = props_val.as_object_mut() {
+            // Unconditionally remove actions/action/onClick/on_click from props
             if let Some(actions) = props.remove("actions") {
-                if actions.is_array() {
-                    actions_to_insert = Some(actions);
-                }
-            } else if let Some(action) = props.remove("action") {
-                if action.is_array() {
-                    actions_to_insert = Some(action);
-                } else if action.is_object() {
-                    actions_to_insert = Some(Value::Array(vec![action]));
+                if let Some(arr) = actions.as_array() {
+                    extracted_actions.extend(arr.clone());
+                } else if actions.is_object() {
+                    extracted_actions.push(actions);
                 }
             }
-            if let Some(vk) = props.get("valueKey").cloned() {
+            if let Some(action) = props.remove("action") {
+                if let Some(arr) = action.as_array() {
+                    extracted_actions.extend(arr.clone());
+                } else if action.is_object() {
+                    extracted_actions.push(action);
+                }
+            }
+            let _ = props.remove("onClick");
+            let _ = props.remove("on_click");
+
+            if let Some(vk) = props.remove("valueKey") {
                 value_key_to_insert = Some(vk);
             }
         }
     }
 
-    if let Some(actions) = actions_to_insert {
+    if !extracted_actions.is_empty() {
         let has_actions = comp_obj
             .get("actions")
-            .map(|v| !v.is_null())
+            .and_then(|v| v.as_array())
+            .map(|a| !a.is_empty())
             .unwrap_or(false);
         if !has_actions {
-            comp_obj.insert("actions".into(), actions);
+            comp_obj.insert("actions".into(), Value::Array(extracted_actions));
         }
     }
 
@@ -561,6 +581,12 @@ fn normalize_component_value(component: &mut Value) {
         }
     }
 
+    // 4. Unwrap stringified children if present, and normalize recursively
+    if let Some(children_str) = comp_obj.get("children").and_then(|v| v.as_str()) {
+        if let Ok(parsed) = serde_json::from_str::<Value>(children_str) {
+            comp_obj.insert("children".into(), parsed);
+        }
+    }
     if let Some(children) = comp_obj.get_mut("children").and_then(|c| c.as_array_mut()) {
         for child in children {
             normalize_component_value(child);
@@ -745,7 +771,7 @@ fn normalize_definition_components(definition: &mut Value) {
 /// Apply definition-shape normalization to definition-bearing operations.
 /// Single choke point: preview, durable extraction, and the final gate all
 /// flow through `normalize_operations_for_validation`.
-fn normalize_operation_payload(op: &mut AppOperation) {
+pub fn normalize_operation_payload(op: &mut AppOperation) {
     if matches!(
         op.op_type.as_str(),
         "surface.create"
@@ -788,7 +814,7 @@ pub fn tool_change_to_operations(tc: &ToolChangePayload) -> Vec<AppOperation> {
     } else {
         &tool.id
     };
-    vec![AppOperation {
+    let mut op = AppOperation {
         id: format!("op-v1-{}", tool.id),
         op_type: op_type.into(),
         target: OperationTarget {
@@ -811,7 +837,9 @@ pub fn tool_change_to_operations(tc: &ToolChangePayload) -> Vec<AppOperation> {
         requires_approval: Some(true),
         destructive: Some(matches!(tc.action.as_str(), "replace")),
         audience: Some(Audience::CurrentUser),
-    }]
+    };
+    normalize_operation_payload(&mut op);
+    vec![op]
 }
 
 pub fn surface_definition_from_tool(tool: &ToolDefinition) -> Value {

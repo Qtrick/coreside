@@ -12,10 +12,11 @@ export const INTERFACE_TRANSPARENCY_PRESETS = [
   { id: "solid", label: "Solid", value: 0 },
   { id: "balanced", label: "Balanced", value: 35 },
   { id: "immersive", label: "Immersive", value: 70 },
+  { id: "maximum", label: "Maximum", value: 100 },
 ] as const;
 
 export type InterfaceTransparencyTokens = {
-  /** User preference 0–60. */
+  /** User preference 0–100. */
   preference: number;
   /** Effective panel transparency after readability clamp. */
   effective: number;
@@ -76,11 +77,11 @@ export function computeInterfaceTransparencyTokens(
   const sidebarAlpha =
     panelAlpha >= 1 ? 1 : clamp01(panelAlpha - 0.03);
   // Cards: lower min so max transparency reveals wallpaper through content areas.
-  const cardAlpha = clamp01(Math.max(0.35, panelAlpha + 0.06));
+  const cardAlpha = clamp01(Math.max(0.30, panelAlpha + 0.06));
   // Controls: remain readable but visibly translucent at high transparency.
-  const controlAlpha = clamp01(Math.max(0.55, panelAlpha + 0.18));
+  const controlAlpha = clamp01(Math.max(0.45, panelAlpha + 0.12));
   // Headers: subtle scrim, not opaque.
-  const headerAlpha = clamp01(Math.max(0.45, panelAlpha + 0.08));
+  const headerAlpha = clamp01(Math.max(0.20, panelAlpha + 0.05));
   // Modals: keep stronger surface for transient high-information UI.
   const modalAlpha = clamp01(Math.max(0.75, panelAlpha + 0.28));
   const scrimAlpha = clamp01(boost / 100 + (effective > 40 ? 0.08 : 0));

@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { api } from "@/lib/tauri";
+import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
+import type { ToolDefinition, ToolState } from "@/types/tool";
 
 /**
  * Risk-based change proposal card in the chat stream.
@@ -29,6 +31,7 @@ export function ChangeProposalCard({
   const discardPending = useAppStore((s) => s.discardPendingKernelProposal);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewState, setPreviewState] = useState<ToolState>({});
   const [proposalData, setProposalData] = useState<{
     summary: string;
     impactSummary: string;
@@ -68,6 +71,27 @@ export function ChangeProposalCard({
   const risk = proposalData?.risk ?? initialRisk;
   const operations = proposalData?.operations ?? initialOperations;
   const proposalError = proposalData?.error ?? error;
+
+  const previewTool = useMemo<ToolDefinition | null>(() => {
+    for (const op of (operations as Array<Record<string, unknown>>)) {
+      if (!op || typeof op !== "object") continue;
+      const payload = op.payload as Record<string, unknown> | undefined;
+      if (!payload) continue;
+      if (payload.tool && typeof payload.tool === "object") {
+        return payload.tool as ToolDefinition;
+      }
+      if (Array.isArray(payload.components)) {
+        return {
+          id: (payload.id as string) || "preview-tool",
+          name: (payload.name as string) || summary || "Preview Tool",
+          description: (payload.description as string) || "",
+          layout: (payload.layout as Record<string, unknown>) || { type: "single-column" },
+          components: payload.components,
+        } as unknown as ToolDefinition;
+      }
+    }
+    return null;
+  }, [operations, summary]);
 
   if (currentStatus === "applied" || currentStatus === "discarded" || currentStatus === "rejected") {
     return (
@@ -175,10 +199,26 @@ export function ChangeProposalCard({
           This proposal has no operations to apply.
         </p>
       ) : null}
-      {error ? (
-        <p role="alert" className="muted">
-          {error}
-        </p>
+      {previewTool ? (
+        <div
+          className="proposal-tool-visual-preview"
+          style={{
+            marginTop: "0.75rem",
+            padding: "0.75rem",
+            borderRadius: "var(--radius-md)",
+            border: "1px dashed var(--border)",
+            background: "var(--core-card-overlay)",
+            maxHeight: "320px",
+            overflowY: "auto",
+          }}
+        >
+          <ToolRenderer
+            tool={previewTool}
+            state={previewState}
+            mode="preview"
+            onStateChange={(nextState) => setPreviewState(nextState)}
+          />
+        </div>
       ) : null}
       <div className="button-row" style={{ marginTop: "0.75rem" }}>
         <button

@@ -1179,6 +1179,9 @@ async fn send_message_inner(
     on_event: Option<tauri::ipc::Channel<AgentTurnEvent>>,
 ) -> Result<SendMessageResult, CommandError> {
     state.require_profile()?;
+    if state.deleted_conversations.lock().contains(&conversation_id) {
+        return Err(CommandError::new("not_found", "Conversation has been deleted"));
+    }
     let mut content = content.trim().to_string();
     let attachments = attachments.unwrap_or_default();
     if content.is_empty() && attachments.is_empty() && structured_user_input.is_none() {
@@ -2040,6 +2043,11 @@ async fn send_message_inner(
             return Err(CommandError::sanitized(e.code(), e, api_key_ref));
         }
     };
+
+    if state.deleted_conversations.lock().contains(&conversation_id) {
+        state.take_request(&request_key);
+        return Err(CommandError::new("not_found", "Conversation has been deleted"));
+    }
 
     record_action(
         &app,
@@ -2907,6 +2915,11 @@ async fn send_message_inner(
         && !search_meta.search_results.as_object().unwrap().is_empty()
     {
         metadata["searchResults"] = search_meta.search_results.clone();
+    }
+
+    if state.deleted_conversations.lock().contains(&conversation_id) {
+        tracing::info!(conversation_id = %conversation_id, "conversation deleted during turn, aborting message persistence");
+        return Err(CommandError::new("not_found", "Conversation has been deleted"));
     }
 
     let assistant_message = {

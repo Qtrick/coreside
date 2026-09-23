@@ -38,7 +38,10 @@ pub fn delete_conversation(
     conversation_id: String,
 ) -> Result<(), CommandError> {
     state.require_profile()?;
-    // Quiesce in-flight provider work first: active_requests is keyed by
+    // Tombstone the conversation to prevent late-arriving provider turns
+    // from resurrecting rows or emitting events after deletion.
+    state.deleted_conversations.lock().insert(conversation_id.clone());
+    // Quiesce in-flight provider work: active_requests is keyed by
     // conversation, and the post-provider commit path can otherwise resurrect
     // messages, ledger rows, and action events after the rows are deleted.
     state.cancel_request(&conversation_id);
@@ -71,6 +74,12 @@ pub fn delete_messages_from(
 #[tauri::command]
 pub fn clear_conversations(state: State<'_, AppState>) -> Result<u64, CommandError> {
     state.require_profile()?;
+    let active_keys: Vec<String> = state.active_requests.lock().keys().cloned().collect();
+    for key in &active_keys {
+        state.deleted_conversations.lock().insert(key.clone());
+        state.cancel_request(key);
+        state.take_request(key);
+    }
     let mut db = state.db.lock();
     Ok(db::clear_conversations(&mut db)?)
 }

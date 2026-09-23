@@ -1528,7 +1528,7 @@ export async function mockInvoke<T>(
         const n = typeof value === "number" ? value : Number(value);
         if (Number.isFinite(n)) {
           mockDb.settings.interfaceTransparency = Math.min(
-            60,
+            100,
             Math.max(0, Math.round(n)),
           );
         }
@@ -1636,14 +1636,14 @@ export async function mockInvoke<T>(
         input.interfaceTransparency !== null
       ) {
         const n = Number(input.interfaceTransparency);
-        if (!Number.isFinite(n) || n < 0 || n > 60) {
+        if (!Number.isFinite(n) || n < 0 || n > 100) {
           throw new TauriCommandError(
-            "interfaceTransparency must be between 0 and 60",
+            "interfaceTransparency must be between 0 and 100",
             "invalid",
           );
         }
         mockDb.settings.interfaceTransparency = Math.min(
-          60,
+          100,
           Math.max(0, Math.round(n)),
         );
       }

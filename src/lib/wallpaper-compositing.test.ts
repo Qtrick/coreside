@@ -16,7 +16,7 @@ import {
 
 describe("wallpaper compositing proof", () => {
   it("panel and card alphas decrease monotonically across presets", () => {
-    const levels = [0, 20, 40, 60].map((v) =>
+    const levels = [0, 35, 70, 100].map((v) =>
       computeInterfaceTransparencyTokens(v, { wallpaperActive: true }),
     );
     for (let i = 1; i < levels.length; i++) {
@@ -25,8 +25,8 @@ describe("wallpaper compositing proof", () => {
       expect(levels[i]!.sidebarAlpha).toBeLessThan(levels[i - 1]!.sidebarAlpha);
     }
     // At max transparency, panels must be clearly translucent.
-    expect(levels[3]!.panelAlpha).toBeLessThan(0.55);
-    expect(levels[3]!.cardAlpha).toBeLessThanOrEqual(0.82);
+    expect(levels[3]!.panelAlpha).toBeLessThan(0.15);
+    expect(levels[3]!.cardAlpha).toBeLessThanOrEqual(0.40);
   });
 
   it("writes nested overlay CSS variables, not only panel overlays", () => {

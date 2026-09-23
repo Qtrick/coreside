@@ -476,7 +476,7 @@ impl ProgressiveOpsParser {
                 // reconciliation, and the scheduler never see the raw legacy type.
                 // ponytail: single-op expansion only; multi-op expansion is rejected
                 // to keep frameId↔operation mapping 1:1 (upgrade path: buffered groups).
-                let op = match super::operations::try_convert_tool_change_op(&op) {
+                let mut op = match super::operations::try_convert_tool_change_op(&op) {
                     Some(mut converted) => {
                         if converted.len() != 1 {
                             return self.fatal(
@@ -494,6 +494,7 @@ impl ProgressiveOpsParser {
                         op
                     }
                 };
+                super::operations::normalize_operation_payload(&mut op);
                 if !self.seen_operation_ids.insert(op.id.clone()) {
                     return self.fatal(format!("duplicate or mutated operation id: {}", op.id));
                 }

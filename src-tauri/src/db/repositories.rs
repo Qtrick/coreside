@@ -443,6 +443,15 @@ pub fn insert_message(
     content: &str,
     metadata: Option<&serde_json::Value>,
 ) -> DbResult<Message> {
+    let exists: bool = db.conn().query_row(
+        "SELECT 1 FROM conversations WHERE id = ?1",
+        [conversation_id],
+        |_| Ok(true),
+    ).unwrap_or(false);
+    if !exists {
+        return Err(DbError::NotFound(format!("conversation {conversation_id} not found")));
+    }
+
     let id = format!("msg-{}", Uuid::new_v4());
     let now = now_rfc3339();
     let meta_str = metadata.map(|m| m.to_string());

@@ -744,11 +744,14 @@ fn apply_one(
             Ok(Some(s))
         }
         "surface.create" | "tool.full_replace" => {
+            let mut normalized_op = op.clone();
+            super::operations::normalize_operation_payload(&mut normalized_op);
             let tool: ToolDefinition = serde_json::from_value(
-                op.payload
+                normalized_op
+                    .payload
                     .get("tool")
                     .cloned()
-                    .unwrap_or_else(|| op.payload.clone()),
+                    .unwrap_or_else(|| normalized_op.payload.clone()),
             )
             .map_err(|e| e.to_string())?;
             crate::security::assert_not_protected(&tool.id)?;

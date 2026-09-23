@@ -68,11 +68,6 @@ export function WallpaperSettings() {
   const [previewPreset, setPreviewPreset] = useState<WallpaperPresetDefinition | null>(null);
   const [previewOpacity, setPreviewOpacity] = useState<number>(0.85);
   const [previewSpeed, setPreviewSpeed] = useState<number>(1.0);
-  // Committed-wallpaper opacity draft: stays visible after Apply so the user
-  // can tune the active wallpaper without re-selecting it. Preview on change,
-  // commit on release (same pattern as interface transparency).
-  const [committedOpacityDraft, setCommittedOpacityDraft] = useState<number | null>(null);
-
   const transparencyCommitGenRef = useRef(0);
 
   // Effective committed value: fresh profiles (null) render the built-in
@@ -127,51 +122,6 @@ export function WallpaperSettings() {
     });
   }, [activeId, effectiveGlobalWallpaperJson]);
 
-  // Canonical committed schema config, if the active wallpaper is a schema wallpaper.
-  const committedSchemaConfig = useMemo(() => {
-    if (!effectiveGlobalWallpaperJson.trim()) return null;
-    const parsed = parseWallpaperJson(effectiveGlobalWallpaperJson);
-    return parsed.format === "schema" ? parsed.config : null;
-  }, [effectiveGlobalWallpaperJson]);
-
-  useEffect(() => {
-    setCommittedOpacityDraft(null);
-  }, [globalWallpaperJson]);
-
-  const committedOpacity =
-    committedOpacityDraft ?? committedSchemaConfig?.opacity ?? null;
-
-  const handleCommittedOpacityPreview = (val: number) => {
-    setCommittedOpacityDraft(val);
-    if (!committedSchemaConfig) return;
-    previewWorkspaceWallpaper(
-      schemaWallpaperToJson({ ...committedSchemaConfig, opacity: val }),
-    );
-  };
-
-  const commitCommittedOpacity = async (val: number) => {
-    if (!committedSchemaConfig) return;
-    setCommittedOpacityDraft(null);
-    setBusy(true);
-    setError(null);
-    setTechDetail(null);
-    try {
-      await applyWorkspaceWallpaper(
-        schemaWallpaperToJson({ ...committedSchemaConfig, opacity: val }),
-      );
-    } catch (err) {
-      revertWorkspaceWallpaper();
-      const { message, technical } = consumerErrorMessage(
-        err,
-        "Coreside could not update the wallpaper opacity.",
-      );
-      setError(message);
-      setTechDetail(technical);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const activeTitle = useMemo(() => {
     if (previewPreset) {
       return `${previewPreset.name} (Previewing)`;
@@ -219,20 +169,6 @@ export function WallpaperSettings() {
     const json = schemaWallpaperToJson(preset.config);
     previewWorkspaceWallpaper(json);
   };
-
-  const handleOpacityChange = (val: number) => {
-    setPreviewOpacity(val);
-    if (!previewPreset) return;
-    const updatedConfig: SchemaWallpaperConfig = {
-      ...previewPreset.config,
-      opacity: val,
-      extra: previewPreset.config.extra
-        ? { ...previewPreset.config.extra, speed: previewSpeed }
-        : undefined,
-    };
-    previewWorkspaceWallpaper(schemaWallpaperToJson(updatedConfig));
-  };
-
   const handleSpeedChange = (val: number) => {
     setPreviewSpeed(val);
     if (!previewPreset) return;
@@ -531,69 +467,75 @@ export function WallpaperSettings() {
         </div>
       </div>
 
-      {/* Fine-Tuning Slider if Previewing */}
-      {previewPreset && (
-        <div className="wallpaper-tuning-panel">
-          <div className="tuning-header">
-            <Sliders size={14} aria-hidden />
-            <strong>Adjust Preset Intensity & Motion</strong>
-          </div>
-          <div className="tuning-control-group">
-            <div className="tuning-control">
-              <label htmlFor="wallpaper-opacity-slider">Wallpaper opacity ({Math.round(previewOpacity * 100)}%)</label>
-              <input
-                id="wallpaper-opacity-slider"
-                type="range"
-                min={0.1}
-                max={1.0}
-                step={0.05}
-                value={previewOpacity}
-                onChange={(e) => handleOpacityChange(parseFloat(e.target.value))}
-              />
-            </div>
-            {(previewPreset.config.type === "canvas-preset" ||
-              previewPreset.config.type === "floating-particles") && (
-              <div className="tuning-control">
-                <label htmlFor="wallpaper-speed-slider">Speed ({previewSpeed.toFixed(1)}x)</label>
-                <input
-                  id="wallpaper-speed-slider"
-                  type="range"
-                  min={0.2}
-                  max={2.0}
-                  step={0.1}
-                  value={previewSpeed}
-                  onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
-                />
-              </div>
-            )}
-          </div>
+      {/* Wallpaper transparency control: ALWAYS visible. */}
+      <div className="wallpaper-tuning-panel" aria-label="Wallpaper transparency controls">
+        <div className="tuning-header">
+          <Sliders size={14} aria-hidden />
+          <strong>Wallpaper transparency ({interfaceTransparency}%)</strong>
         </div>
-      )}
+        <div className="tuning-control-group" style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap", minWidth: 0, maxWidth: "100%" }}>
+          <div className="tuning-control" style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", minWidth: 0 }}>
+            <label htmlFor="wallpaper-transparency-slider" className="sr-only">
+              Wallpaper transparency ({interfaceTransparency}%)
+            </label>
+            <input
+              id="wallpaper-transparency-slider"
+              type="range"
+              min={INTERFACE_TRANSPARENCY_MIN}
+              max={INTERFACE_TRANSPARENCY_MAX}
+              step={INTERFACE_TRANSPARENCY_STEP}
+              value={interfaceTransparency}
+              disabled={busy}
+              aria-label="Wallpaper transparency"
+              aria-valuemin={INTERFACE_TRANSPARENCY_MIN}
+              aria-valuemax={INTERFACE_TRANSPARENCY_MAX}
+              aria-valuenow={interfaceTransparency}
+              aria-valuetext={`${interfaceTransparency} percent transparency`}
+              onChange={(e) => previewInterfaceTransparency(Number(e.target.value))}
+              onPointerUp={(e) => void commitTransparency(Number(e.currentTarget.value))}
+              onKeyUp={(e) => void commitTransparency(Number(e.currentTarget.value))}
+              onBlur={(e) => void commitTransparency(Number(e.currentTarget.value))}
+            />
+          </div>
+          <div className="transparency-presets" role="group" aria-label="Transparency presets" style={{ display: "flex", gap: "var(--space-1)", flexWrap: "wrap" }}>
+            {INTERFACE_TRANSPARENCY_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className="btn btn-secondary btn-sm"
+                aria-pressed={interfaceTransparency === preset.value}
+                disabled={busy}
+                onClick={() => void commitTransparency(preset.value)}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          {!wallpaperActive && (
+            <span className="muted" style={{ fontSize: "0.75rem" }}>
+              (Applies when a wallpaper is active)
+            </span>
+          )}
+        </div>
+      </div>
 
-      {/* Active-wallpaper opacity: always available after Apply. */}
-      {!previewPreset && committedSchemaConfig && committedOpacity != null && (
-        <div className="wallpaper-tuning-panel">
+      {previewPreset && (previewPreset.config.type === "canvas-preset" || previewPreset.config.type === "floating-particles") && (
+        <div className="wallpaper-tuning-panel" style={{ marginTop: "-0.5rem" }}>
           <div className="tuning-header">
             <Sliders size={14} aria-hidden />
-            <strong>Active Wallpaper</strong>
+            <strong>Motion Speed</strong>
           </div>
           <div className="tuning-control-group">
             <div className="tuning-control">
-              <label htmlFor="wallpaper-active-opacity-slider">
-                Wallpaper opacity ({Math.round(committedOpacity * 100)}%)
-              </label>
+              <label htmlFor="wallpaper-speed-slider">Speed ({previewSpeed.toFixed(1)}x)</label>
               <input
-                id="wallpaper-active-opacity-slider"
+                id="wallpaper-speed-slider"
                 type="range"
-                min={0.1}
-                max={1.0}
-                step={0.05}
-                value={committedOpacity}
-                disabled={busy}
-                onChange={(e) => handleCommittedOpacityPreview(parseFloat(e.target.value))}
-                onPointerUp={(e) => void commitCommittedOpacity(parseFloat(e.currentTarget.value))}
-                onKeyUp={(e) => void commitCommittedOpacity(parseFloat(e.currentTarget.value))}
-                onBlur={(e) => void commitCommittedOpacity(parseFloat(e.currentTarget.value))}
+                min={0.2}
+                max={2.0}
+                step={0.1}
+                value={previewSpeed}
+                onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
               />
             </div>
           </div>
@@ -791,61 +733,7 @@ export function WallpaperSettings() {
         </div>
       ) : null}
 
-      {/* Interface Transparency Slider */}
-      <div className="interface-transparency-control" aria-labelledby="interface-transparency-heading">
-        <h4 className="settings-subheading" id="interface-transparency-heading">
-          Interface Transparency
-        </h4>
-        <p>
-          Controls how much of the background shows through Coreside’s panels.
-          Readability protection automatically ensures text remains legible.
-          {!wallpaperActive ? " (Has no visual effect while None is active.)" : null}
-        </p>
-        <label>
-          <span className="sr-only">Interface transparency percent</span>
-          <input
-            type="range"
-            min={INTERFACE_TRANSPARENCY_MIN}
-            max={INTERFACE_TRANSPARENCY_MAX}
-            step={INTERFACE_TRANSPARENCY_STEP}
-            value={interfaceTransparency}
-            aria-valuemin={INTERFACE_TRANSPARENCY_MIN}
-            aria-valuemax={INTERFACE_TRANSPARENCY_MAX}
-            aria-valuenow={interfaceTransparency}
-            aria-valuetext={`${interfaceTransparency} percent`}
-            disabled={busy}
-            onChange={(e) => previewInterfaceTransparency(Number(e.target.value))}
-            onPointerUp={(e) => void commitTransparency(Number(e.currentTarget.value))}
-            onKeyUp={(e) => void commitTransparency(Number(e.currentTarget.value))}
-            onBlur={(e) => void commitTransparency(Number(e.currentTarget.value))}
-          />
-        </label>
-        <div className="button-row">
-          <output aria-live="polite">{interfaceTransparency}%</output>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled={busy || interfaceTransparency === 35}
-            onClick={() => void commitTransparency(35)}
-          >
-            Reset
-          </button>
-        </div>
-        <div className="transparency-presets" role="group" aria-label="Transparency presets">
-          {INTERFACE_TRANSPARENCY_PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              className="btn btn-secondary btn-sm"
-              aria-pressed={interfaceTransparency === preset.value}
-              disabled={busy}
-              onClick={() => void commitTransparency(preset.value)}
-            >
-              {preset.label}
-            </button>
-          ))}
-        </div>
-      </div>
+
 
       {error ? (
         <p className="form-error" role="alert">

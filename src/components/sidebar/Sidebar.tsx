@@ -419,6 +419,7 @@ export function Sidebar() {
             }
           }}
           onDelete={() => {
+            chatMenu.close();
             if (window.confirm(`Delete "${menuChat.title}"?`)) {
               deleteConversation(menuChat.id).catch((err) => {
                 console.error("Failed to delete conversation:", err);
