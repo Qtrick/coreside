@@ -242,6 +242,8 @@ pub fn delete_conversation(db: &mut Database, id: &str) -> DbResult<()> {
             "search_sessions",
             "exa_usage_ledger",
             "operation_provenance",
+            "crawl_jobs",
+            "application_manifests",
         ] {
             conn.execute(
                 &format!("DELETE FROM {table} WHERE conversation_id = ?1"),

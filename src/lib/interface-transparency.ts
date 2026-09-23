@@ -4,14 +4,14 @@
  */
 
 export const INTERFACE_TRANSPARENCY_MIN = 0;
-export const INTERFACE_TRANSPARENCY_MAX = 60;
-export const INTERFACE_TRANSPARENCY_DEFAULT = 20;
+export const INTERFACE_TRANSPARENCY_MAX = 100;
+export const INTERFACE_TRANSPARENCY_DEFAULT = 35;
 export const INTERFACE_TRANSPARENCY_STEP = 1;
 
 export const INTERFACE_TRANSPARENCY_PRESETS = [
   { id: "solid", label: "Solid", value: 0 },
-  { id: "balanced", label: "Balanced", value: 20 },
-  { id: "immersive", label: "Immersive", value: 40 },
+  { id: "balanced", label: "Balanced", value: 35 },
+  { id: "immersive", label: "Immersive", value: 70 },
 ] as const;
 
 export type InterfaceTransparencyTokens = {
@@ -67,11 +67,12 @@ export function computeInterfaceTransparencyTokens(
   }
 
   const effective = Math.max(0, pref - boost);
-  // Perceptual curve: compress low values so 20-60% shows increasingly
-  // visible transparency steps rather than feeling mostly opaque until 50%.
+  // Perceptual curve: compress low values so early transparency shows visible
+  // steps rather than feeling mostly opaque until 50%. The quadratic segment
+  // (t < 0.5) provides smoother ramp-up; linear above keeps high values predictable.
   const t = effective / 100;
   const perceptual = t < 0.5 ? t * t * 2 : t;
-  const panelAlpha = clamp01(1 - perceptual * 1.05);
+  const panelAlpha = clamp01(1 - perceptual * 0.95);
   const sidebarAlpha =
     panelAlpha >= 1 ? 1 : clamp01(panelAlpha - 0.03);
   // Cards: lower min so max transparency reveals wallpaper through content areas.

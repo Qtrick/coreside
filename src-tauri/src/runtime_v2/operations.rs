@@ -568,31 +568,170 @@ fn normalize_component_value(component: &mut Value) {
     }
 }
 
+/// Attempt to recursively unwrap a stringified JSON value.
+/// Returns the unwrapped value if the input is a string that parses to JSON,
+/// capping recursion at `max_depth` to prevent infinite loops.
+fn unwrap_json_string(val: &Value, max_depth: usize) -> Option<Value> {
+    if max_depth == 0 {
+        return None;
+    }
+    match val {
+        Value::String(s) => {
+            let parsed: Value = serde_json::from_str(s).ok()?;
+            unwrap_json_string(&parsed, max_depth - 1)
+        }
+        other => Some(other.clone()),
+    }
+}
+
+/// Extract a canonical `Vec<Value>` array of components from a `Value` that
+/// might be a string, a stringified array, a stringified wrapper object, or
+/// a nested definition/payload wrapper. Returns `None` when no fix is needed.
+fn extract_components_array(val: &Value) -> Option<Value> {
+    const MAX_DEPTH: usize = 4;
+
+    // Fast path: already a canonical array with no stringified elements.
+    if let Value::Array(arr) = val {
+        if !arr.iter().any(|item| matches!(item, Value::String(_))) {
+            return None;
+        }
+        // Special case: single-element array where the element is a stringified
+        // array (e.g. components: ["[{...}]"]). Parse the string and return the
+        // inner array directly, not wrapped in another array.
+        if arr.len() == 1 {
+            if let Value::String(s) = &arr[0] {
+                if let Ok(parsed) = serde_json::from_str::<Value>(s) {
+                    if parsed.is_array() {
+                        return Some(parsed);
+                    }
+                    // Parsed to an object — might be a wrapper; recurse
+                    return resolve_extracted_components(&parsed, MAX_DEPTH - 1);
+                }
+            }
+        }
+    }
+
+    // Slow path: unwrap strings, then resolve.
+    let unwrapped = unwrap_json_string(val, MAX_DEPTH)?;
+    resolve_extracted_components(&unwrapped, MAX_DEPTH)
+}
+
+/// Resolve an already-unwrapped value into a canonical components array.
+fn resolve_extracted_components(val: &Value, depth: usize) -> Option<Value> {
+    if depth == 0 {
+        return None;
+    }
+    match val {
+        Value::Array(arr) => {
+            let needs_fix = arr.iter().any(|item| matches!(item, Value::String(_)));
+            if needs_fix {
+                let fixed: Vec<Value> = arr
+                    .iter()
+                    .map(|item| {
+                        if let Value::String(s) = item {
+                            serde_json::from_str::<Value>(s).unwrap_or_else(|_| item.clone())
+                        } else {
+                            item.clone()
+                        }
+                    })
+                    .collect();
+                Some(Value::Array(fixed))
+            } else {
+                Some(val.clone())
+            }
+        }
+        Value::Object(obj) => {
+            // Wrapper pattern: {"components": [...]} or {"definition": {...}}
+            if let Some(inner) = obj.get("components") {
+                if inner.is_array() {
+                    return Some(inner.clone());
+                }
+                // components is itself stringified — recurse
+                return resolve_extracted_components(inner, depth - 1);
+            }
+            if let Some(def_val) = obj.get("definition") {
+                // Mutate a clone so the normalized definition replaces the original.
+                let mut wrapper = val.clone();
+                if let Some(wrap_obj) = wrapper.as_object_mut() {
+                    if let Some(inner_def) = wrap_obj.get_mut("definition") {
+                        normalize_definition_components(inner_def);
+                        // After normalization, the inner definition should have a
+                        // "components" array. Promote it to the wrapper level.
+                        if let Some(comps) = inner_def.get("components").cloned() {
+                            wrap_obj.insert("components".into(), comps);
+                        }
+                    }
+                }
+                return wrapper
+                    .get("components")
+                    .filter(|v| v.is_array())
+                    .cloned();
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 /// Repair model-serialized `components` inside a tool/surface definition.
 /// Models sometimes emit `components` as a JSON-encoded string (or a
 /// single-string array) instead of an array of component objects, which
 /// otherwise fails closed at apply time with `expected struct ToolComponent`.
 /// Parse it once here so every downstream validator sees the canonical shape;
 /// unparseable values are left untouched for validation to reject clearly.
+///
+/// Handles all known model serialization variants:
+/// - Direct array: `[{"id":"x","type":"text"}]`
+/// - Stringified array: `"[{\"id\":\"x\"}]"`  
+/// - Stringified wrapper object: `"{\"components\":[{\"id\":\"x\"}]}"`
+/// - Nested definition: `"{\"definition\":{\"components\":[...]}}"`
+/// - Payload wrapper: `"{\"payload\":{\"definition\":{\"components\":[...]}}}"`
 fn normalize_definition_components(definition: &mut Value) {
-    if let Some(components) = definition.get_mut("components") {
-        let parsed: Option<Value> = match components {
-            Value::String(s) => serde_json::from_str(s).ok(),
-            Value::Array(arr) if arr.len() == 1 => arr
-                .first()
-                .and_then(|v| v.as_str())
-                .and_then(|s| serde_json::from_str(s).ok()),
-            _ => None,
-        };
-        if matches!(parsed, Some(Value::Array(_))) {
-            *components = parsed.expect("array checked");
-        }
-        if let Some(comps) = components.as_array_mut() {
-            for comp in comps {
-                normalize_component_value(comp);
+    if let Some(components) = definition.get("components") {
+        if let Some(fixed) = extract_components_array(components) {
+            if let Some(obj) = definition.as_object_mut() {
+                obj.insert("components".into(), fixed);
             }
         }
     }
+
+    // Normalize each component (migrate legacy props.actions → top-level actions, etc.)
+    if let Some(comps) = definition
+        .get_mut("components")
+        .and_then(|v| v.as_array_mut())
+    {
+        for comp in comps {
+            normalize_component_value(comp);
+        }
+    }
+
+    // Also unwrap the definition itself if it's a stringified object containing
+    // a "components" key at the top level.
+    if let Some(def_val) = definition.get("definition") {
+        if def_val.is_string() {
+            if let Some(unwrapped) = unwrap_json_string(def_val, 4) {
+                if let Value::Object(obj) = unwrapped {
+                    *definition = Value::Object(obj);
+                    normalize_definition_components(definition);
+                    return;
+                }
+            }
+        }
+    }
+
+    // Unwrap "payload" → "definition" → "components" nesting.
+    if let Some(payload_val) = definition.get("payload") {
+        if payload_val.is_string() {
+            if let Some(unwrapped) = unwrap_json_string(payload_val, 4) {
+                if let Value::Object(obj) = unwrapped {
+                    *definition = Value::Object(obj);
+                    normalize_definition_components(definition);
+                    return;
+                }
+            }
+        }
+    }
+
     if let Some(sections) = definition
         .get_mut("sections")
         .and_then(|v| v.as_array_mut())
@@ -1483,4 +1622,283 @@ mod tests {
         assert!(add_btn["props"].get("actions").is_none());
         assert!(add_btn["actions"].is_array());
     }
+
+    // Regression tests: stringified component variants (P0 live-model failures).
+
+    #[test]
+    fn double_stringified_components_in_tool_definition() {
+        // Exact failure from screenshot: components is a stringified wrapper object
+        // containing a "components" key: "{\"components\":[{\"id\":...}]}"
+        let inner_components = json!([
+            {"id": "header", "type": "heading", "props": {"text": "Task Manager"}},
+            {"id": "task-list", "type": "dataTable", "props": {"columns": []}}
+        ]);
+        let wrapper_string = json!({
+            "components": inner_components
+        })
+        .to_string();
+
+        let ops = vec![AppOperation {
+            id: "operation-1".into(),
+            op_type: "surface.create".into(),
+            target: OperationTarget {
+                surface_id: Some("surf-tasks".into()),
+                tool_id: Some("tool-tasks".into()),
+                ..Default::default()
+            },
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({
+                "tool": {
+                    "id": "tool-tasks",
+                    "name": "Task Manager",
+                    "description": "",
+                    "layout": {"type": "single-column"},
+                    "components": wrapper_string
+                }
+            }),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+
+        let normalized = normalize_operations_for_validation(&ops);
+        assert_eq!(normalized.len(), 1);
+        let components = normalized[0].payload["tool"]["components"]
+            .as_array()
+            .expect("components must be a canonical array after normalization");
+        assert_eq!(components.len(), 2);
+        assert_eq!(components[0]["id"], "header");
+        assert_eq!(components[1]["id"], "task-list");
+    }
+
+    #[test]
+    fn deeply_nested_stringified_components_via_definition() {
+        // components is a stringified object with a nested definition wrapper
+        let inner = json!({
+            "definition": {
+                "components": [
+                    {"id": "c1", "type": "text", "props": {"text": "hello"}}
+                ]
+            }
+        })
+        .to_string();
+
+        let ops = vec![AppOperation {
+            id: "op-nested".into(),
+            op_type: "surface.create".into(),
+            target: OperationTarget {
+                surface_id: Some("surf-nested".into()),
+                ..Default::default()
+            },
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({
+                "tool": {
+                    "id": "tool-nested",
+                    "name": "Nested",
+                    "description": "",
+                    "layout": {"type": "single-column"},
+                    "components": inner
+                }
+            }),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+
+        let normalized = normalize_operations_for_validation(&ops);
+        assert_eq!(normalized.len(), 1);
+        let components = normalized[0].payload["tool"]["components"]
+            .as_array()
+            .expect("components must be resolved");
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0]["id"], "c1");
+    }
+
+    #[test]
+    fn mixed_canonical_and_stringified_operations() {
+        // One op has canonical components, the other has stringified
+        let stringified_tool = json!({
+            "id": "tool-b",
+            "name": "Tool B",
+            "description": "",
+            "layout": {"type": "single-column"},
+            "components": r#"[{"id":"x","type":"text","props":{"text":"hi"}}]"#
+        });
+
+        let ops = vec![
+            AppOperation {
+                id: "op-canonical".into(),
+                op_type: "surface.create".into(),
+                target: OperationTarget {
+                    surface_id: Some("surf-a".into()),
+                    tool_id: Some("tool-a".into()),
+                    ..Default::default()
+                },
+                base_revision: None,
+                transaction_group: None,
+                idempotency_key: None,
+                depends_on: None,
+                payload: json!({
+                    "tool": {
+                        "id": "tool-a",
+                        "name": "Tool A",
+                        "description": "",
+                        "layout": {"type": "single-column"},
+                        "components": [
+                            {"id": "h", "type": "heading", "props": {"text": "A"}}
+                        ]
+                    }
+                }),
+                requires_approval: None,
+                destructive: None,
+                audience: None,
+            },
+            AppOperation {
+                id: "op-stringified".into(),
+                op_type: "surface.create".into(),
+                target: OperationTarget {
+                    surface_id: Some("surf-b".into()),
+                    tool_id: Some("tool-b".into()),
+                    ..Default::default()
+                },
+                base_revision: None,
+                transaction_group: None,
+                idempotency_key: None,
+                depends_on: None,
+                payload: json!({
+                    "tool": stringified_tool
+                }),
+                requires_approval: None,
+                destructive: None,
+                audience: None,
+            },
+        ];
+
+        let normalized = normalize_operations_for_validation(&ops);
+        assert_eq!(normalized.len(), 2);
+        // Both should have resolved components
+        let comps_a = normalized[0].payload["tool"]["components"]
+            .as_array()
+            .expect("tool-a components");
+        assert_eq!(comps_a.len(), 1);
+        let comps_b = normalized[1].payload["tool"]["components"]
+            .as_array()
+            .expect("tool-b components");
+        assert_eq!(comps_b.len(), 1);
+        assert_eq!(comps_b[0]["id"], "x");
+    }
+
+    #[test]
+    fn malformed_json_string_components_left_for_validation() {
+        // If the string is not valid JSON at all, leave it untouched
+        let ops = vec![AppOperation {
+            id: "op-bad".into(),
+            op_type: "surface.create".into(),
+            target: OperationTarget {
+                surface_id: Some("surf-bad".into()),
+                tool_id: Some("tool-bad".into()),
+                ..Default::default()
+            },
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({
+                "tool": {
+                    "id": "tool-bad",
+                    "name": "Bad",
+                    "description": "",
+                    "layout": {"type": "single-column"},
+                    "components": "not-valid-json{{{{"
+                }
+            }),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+
+        // Should not panic — leaves the string as-is for validation to reject
+        let _ = normalize_operations_for_validation(&ops);
+    }
+
+    #[test]
+    fn operation_level_components_stringified() {
+        // Components at the operation payload level (not nested in "tool")
+        let stringified = json!([
+            {"id": "hdr", "type": "heading", "props": {"text": "Title"}}
+        ])
+        .to_string();
+
+        let ops = vec![AppOperation {
+            id: "op-level".into(),
+            op_type: "surface.create".into(),
+            target: OperationTarget {
+                surface_id: Some("surf-level".into()),
+                ..Default::default()
+            },
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({
+                "components": stringified
+            }),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+
+        let normalized = normalize_operations_for_validation(&ops);
+        assert_eq!(normalized.len(), 1);
+        let comps = normalized[0].payload["components"]
+            .as_array()
+            .expect("components should be resolved at payload level");
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0]["id"], "hdr");
+    }
+
+    #[test]
+    fn single_element_array_with_stringified_components() {
+        // components: ["[{\"id\":\"x\"}]"] — array of one string
+        let inner = r#"[{"id":"x","type":"text","props":{"text":"hi"}}]"#;
+        let ops = vec![AppOperation {
+            id: "op-arr-str".into(),
+            op_type: "surface.create".into(),
+            target: OperationTarget {
+                surface_id: Some("surf-arr".into()),
+                tool_id: Some("tool-arr".into()),
+                ..Default::default()
+            },
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({
+                "tool": {
+                    "id": "tool-arr",
+                    "name": "Arr",
+                    "description": "",
+                    "layout": {"type": "single-column"},
+                    "components": [inner]
+                }
+            }),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+
+        let normalized = normalize_operations_for_validation(&ops);
+        let comps = normalized[0].payload["tool"]["components"]
+            .as_array()
+            .expect("single-element string array should be unwrapped");
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0]["id"], "x");
+    }
+
 }

@@ -84,6 +84,28 @@ pub fn parse_agent_response(raw: &str) -> Result<ParsedAgentResponse, String> {
                             parse_warnings: warnings,
                         });
                     }
+
+                    // Operations exist but validation failed (e.g. stringified components).
+                    // Do not surface raw schema assertion as primary UX. Attempt recovery:
+                    // - Keep the operations for downstream retry/normalization
+                    // - Synthesize a visible assistant message so the turn is not empty
+                    // - Mark as recovered so callers know this is a degraded path
+                    let has_operations = payload
+                        .operations
+                        .as_ref()
+                        .map(|o| !o.is_empty())
+                        .unwrap_or(false);
+                    if has_operations && payload.assistant_message.trim().is_empty() {
+                        warnings.push(format!("Recovered operations with empty message: {verr}"));
+                        payload.assistant_message =
+                            "Processing your request...".to_string();
+                        return Ok(ParsedAgentResponse {
+                            payload,
+                            recovered: true,
+                            parse_warnings: warnings,
+                        });
+                    }
+
                     Err(verr)
                 }
             }

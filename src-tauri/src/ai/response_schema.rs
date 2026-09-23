@@ -720,9 +720,42 @@ impl AgentResponsePayload {
             .unwrap_or(false);
 
         if has_ops || has_tool_change {
-            let ops = self.normalized_operations()?;
-            if !ops.is_empty() {
-                crate::runtime_v2::validate_model_operations(&ops)?;
+            // Try normalized operations first. If normalization fails (e.g.
+            // stringified components), fall back to raw ops for validation
+            // so callers get a meaningful error rather than a schema panic.
+            match self.normalized_operations() {
+                Ok(ops) => {
+                    if !ops.is_empty() {
+                        crate::runtime_v2::validate_model_operations(&ops)?;
+                    }
+                }
+                Err(norm_err) => {
+                    // Normalization failed — still try to validate the raw
+                    // operations so the error message is about the actual
+                    // malformed content, not about normalization internals.
+                    if has_ops {
+                        let raw_ops: Vec<crate::runtime_v2::AppOperation> = self
+                            .operations
+                            .as_ref()
+                            .unwrap_or(&vec![])
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(idx, val)| {
+                                let normalized = normalize_raw_operation(val, idx);
+                                serde_json::from_value(normalized).ok()
+                            })
+                            .collect();
+                        if !raw_ops.is_empty() {
+                            if let Err(val_err) =
+                                crate::runtime_v2::validate_model_operations(&raw_ops)
+                            {
+                                return Err(val_err);
+                            }
+                        }
+                    }
+                    // If we can't recover, surface the normalization error
+                    return Err(norm_err);
+                }
             }
         }
 

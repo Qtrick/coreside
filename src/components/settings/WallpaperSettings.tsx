@@ -419,7 +419,11 @@ export function WallpaperSettings() {
         <div
           className="wallpaper-mini-shell"
           aria-hidden
-          style={{ opacity: Math.max(0.85, 1 - interfaceTransparency * 0.4) }}
+          style={{ opacity: (() => {
+            const t = Math.max(0, interfaceTransparency) / 100;
+            const perceptual = t < 0.5 ? t * t * 2 : t;
+            return Math.max(0.25, 1 - perceptual * 0.95);
+          })() }}
         >
           {/* Mini Window Chrome */}
           <div className="mini-shell-titlebar">
@@ -821,8 +825,8 @@ export function WallpaperSettings() {
           <button
             type="button"
             className="btn btn-ghost"
-            disabled={busy || interfaceTransparency === 20}
-            onClick={() => void commitTransparency(20)}
+            disabled={busy || interfaceTransparency === 35}
+            onClick={() => void commitTransparency(35)}
           >
             Reset
           </button>

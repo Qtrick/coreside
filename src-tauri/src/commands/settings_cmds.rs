@@ -99,7 +99,7 @@ pub struct AppSettings {
     pub wallpaper: WallpaperConfig,
     /// Schema wallpaper JSON for media / gradient backgrounds (validated).
     pub wallpaper_json: Option<String>,
-    /// Interface transparency percent (0–60). Default 20.
+    /// Interface transparency percent (0–100). Default 35.
     pub interface_transparency: u8,
     /// Adaptive window sizing: `smart` | `ask` | `off`.
     pub adaptive_window_sizing: String,

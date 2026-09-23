@@ -57,22 +57,22 @@
   --core-border: var(--border);
   --core-accent: var(--accent-primary);
   /* Interface transparency defaults (overridden by JS from user preference). */
-  --interface-transparency: 20;
-  --interface-transparency-effective: 20;
-  --core-panel-alpha: 0.83;
-  --core-sidebar-alpha: 0.79;
-  --core-card-alpha: 0.92;
-  --core-control-alpha: 0.94;
-  --core-header-alpha: 0.9;
-  --core-modal-alpha: 0.96;
+  --interface-transparency: 35;
+  --interface-transparency-effective: 35;
+  --core-panel-alpha: 0.767;
+  --core-sidebar-alpha: 0.737;
+  --core-card-alpha: 0.827;
+  --core-control-alpha: 0.947;
+  --core-header-alpha: 0.847;
+  --core-modal-alpha: 1.0;
   --core-readable-scrim-alpha: 0;
-  --core-content-overlay: color-mix(in srgb, var(--surface) 83%, transparent);
-  --core-sidebar-overlay: color-mix(in srgb, var(--surface) 79%, transparent);
-  --core-card-overlay: color-mix(in srgb, var(--surface) 92%, transparent);
-  --core-muted-overlay: color-mix(in srgb, var(--surface-muted) 92%, transparent);
-  --core-control-overlay: color-mix(in srgb, var(--surface) 94%, transparent);
-  --core-header-overlay: color-mix(in srgb, var(--surface) 90%, transparent);
-  --core-modal-overlay: color-mix(in srgb, var(--surface) 96%, transparent);
+  --core-content-overlay: color-mix(in srgb, var(--surface) 77%, transparent);
+  --core-sidebar-overlay: color-mix(in srgb, var(--surface) 74%, transparent);
+  --core-card-overlay: color-mix(in srgb, var(--surface) 83%, transparent);
+  --core-muted-overlay: color-mix(in srgb, var(--surface-muted) 83%, transparent);
+  --core-control-overlay: color-mix(in srgb, var(--surface) 95%, transparent);
+  --core-header-overlay: color-mix(in srgb, var(--surface) 85%, transparent);
+  --core-modal-overlay: color-mix(in srgb, var(--surface) 100%, transparent);
 }
 
 html[data-theme="dark"] {
