@@ -144,6 +144,64 @@ pub fn execute_registered_action(
     outcome
 }
 
+fn normalize_action_input<'a>(action_name: &str, input: &'a Value) -> std::borrow::Cow<'a, Value> {
+    if !input.is_object() {
+        return std::borrow::Cow::Borrowed(input);
+    }
+    match action_name {
+        "local_data.query" => {
+            if input.get("modelId").is_none() && input.get("model").is_some() {
+                let mut cloned = input.clone();
+                if let Some(m) = cloned.get("model").cloned() {
+                    cloned["modelId"] = m;
+                }
+                std::borrow::Cow::Owned(cloned)
+            } else {
+                std::borrow::Cow::Borrowed(input)
+            }
+        }
+        "local_data.write" => {
+            let mut modified = false;
+            let mut cloned = input.clone();
+            if cloned.get("modelId").is_none() && cloned.get("model").is_some() {
+                if let Some(m) = cloned.get("model").cloned() {
+                    cloned["modelId"] = m;
+                    modified = true;
+                }
+            }
+            if cloned.get("data").is_none() && cloned.get("record").is_some() {
+                if let Some(r) = cloned.get("record").cloned() {
+                    cloned["data"] = r;
+                    modified = true;
+                }
+            }
+            if cloned.get("recordId").is_none() && cloned.get("id").is_some() {
+                if let Some(i) = cloned.get("id").cloned() {
+                    cloned["recordId"] = i;
+                    modified = true;
+                }
+            }
+            if modified {
+                std::borrow::Cow::Owned(cloned)
+            } else {
+                std::borrow::Cow::Borrowed(input)
+            }
+        }
+        "local_data.delete" => {
+            if input.get("recordId").is_none() && input.get("id").is_some() {
+                let mut cloned = input.clone();
+                if let Some(i) = cloned.get("id").cloned() {
+                    cloned["recordId"] = i;
+                }
+                std::borrow::Cow::Owned(cloned)
+            } else {
+                std::borrow::Cow::Borrowed(input)
+            }
+        }
+        _ => std::borrow::Cow::Borrowed(input),
+    }
+}
+
 fn run(
     db: &mut Database,
     ctx: &ActionRunContext,
@@ -164,7 +222,9 @@ fn run(
         );
     }
 
-    // 2. Bounded input, schema, and nesting.
+    // 2. Bounded input, schema, and nesting (with compatibility normalization for local_data aliases).
+    let normalized_input = normalize_action_input(&descriptor.name, input);
+    let input = normalized_input.as_ref();
     if let Some(trip) = breakers::check_input_size(input) {
         return ActionOutcome::blocked(trip.code(), trip.reason());
     }

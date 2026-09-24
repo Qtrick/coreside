@@ -57,23 +57,40 @@ Strict placement rule (enforced by validation — violations reject the whole pr
 - **`toggle`**: `{ "type": "toggle", "target": "boolKey" }`
 - **`increment` / `decrement`**: `{ "type": "increment", "target": "counterKey", "amount": 1 }`
 - **`reset`**: `{ "type": "reset", "target": "stateKey", "value": ... }`
-- **`appendItem`**: `{ "type": "appendItem", "target": "itemsKey", "item": { "id": "...", "title": "..." } }`
-- **`removeItem`**: `{ "type": "removeItem", "target": "itemsKey", "id": "itemId" }`
-- **`updateItem`**: `{ "type": "updateItem", "target": "itemsKey", "id": "itemId", "patch": { "status": "done" } }`
+- **`appendItem`**: `{ "type": "appendItem", "target": "itemsKey", "item": { ... }, "itemFromState": { "title": "inputKey" } }`
+- **`removeItem`**: `{ "type": "removeItem", "target": "itemsKey", "id": "itemId", "idFromState": "selectedIdKey" }`
+- **`updateItem`**: `{ "type": "updateItem", "target": "itemsKey", "idFromState": "selectedIdKey", "patchFromState": { "status": "editStatusKey" } }`
 - **`selectTab`**: `{ "type": "selectTab", "target": "tabsId", "tabId": "tab-overview" }`
 - **`submitToAgent`**: `{ "type": "submitToAgent", "eventName": "taskCreated", "includeFields": ["title", "priority"] }` (requires explicit, non-empty `includeFields`)
 - **`invokeRegisteredAction`**: Deterministic sequential action execution with kernel capabilities:
-  - Query: `{ "type": "invokeRegisteredAction", "actionName": "local_data.query", "input": { "model": "tasks", "filter": {}, "limit": 50 }, "resultKey": "tasksResult" }`
-  - Write: `{ "type": "invokeRegisteredAction", "actionName": "local_data.write", "input": { "model": "tasks", "record": { "title": "New item" } } }`
-  - Delete: `{ "type": "invokeRegisteredAction", "actionName": "local_data.delete", "input": { "model": "tasks", "id": "123" } }`
+  - Query: `{ "type": "invokeRegisteredAction", "actionName": "local_data.query", "input": { "modelId": "tasks", "limit": 100 }, "resultKey": "tasksResult" }`
+  - Create Record: `{ "type": "invokeRegisteredAction", "actionName": "local_data.write", "input": { "modelId": "tasks", "data": {} }, "inputFromState": { "data.title": "newTaskTitle", "data.priority": "newTaskPriority", "data.status": "newTaskStatus" } }`
+  - Update Record: `{ "type": "invokeRegisteredAction", "actionName": "local_data.write", "input": { "modelId": "tasks", "data": {} }, "inputFromState": { "recordId": "selectedTaskId", "data.title": "editTaskTitle", "data.priority": "editTaskPriority", "data.status": "editTaskStatus" } }`
+  - Delete Record: `{ "type": "invokeRegisteredAction", "actionName": "local_data.delete", "input": {}, "inputFromState": { "recordId": "selectedTaskId" } }`
   - Media: `{ "type": "invokeRegisteredAction", "actionName": "media.read", "input": { "assetId": "asset-1" }, "resultKey": "mediaData" }`
   - Link: `{ "type": "invokeRegisteredAction", "actionName": "external_link.open", "input": { "url": "https://example.com" } }`
+
+## Declarative Data Hydration (`dataSource`)
+A tool definition can declare a top-level `dataSource` (or `dataSources` array) for safe, automatic mount-time query hydration:
+```json
+"dataSource": {
+  "actionName": "local_data.query",
+  "input": { "modelId": "tasks" },
+  "resultKey": "tasksResult",
+  "refreshOn": ["tasksVersion"]
+}
+```
+Only read-only query actions are permitted in `dataSource`. Writes and destructive operations are rejected at mount time.
 
 ## Explicit State & Data Binding Rules
 1. **Component IDs are NOT state keys.** A component's `id` is for DOM identity and partial tree patching only.
 2. **Inputs must declare `valueKey`**: e.g. `{ "id": "in-title", "type": "textInput", "props": { "label": "Title", "valueKey": "taskTitle" } }`. Unbound inputs remain local ephemeral UI state.
 3. **Display elements**: `stat` displays static `props.value` unless `props.valueKey` is set to read from state.
-4. **Data Tables**: `dataTable` binds via `rowsKey` or `dataKey` (e.g. `rowsKey: "tasksResult"`). It automatically unwraps `{ records, count }` returned by `local_data.query`. It supports row selection via `props.selectionKey: "selectedTaskId"`.
+4. **Data Tables**: `dataTable` binds via `rowsKey` or `dataKey` (e.g. `rowsKey: "tasksResult"`). It automatically unwraps `{ records, count }` returned by `local_data.query`.
+   - Columns: use `id` (or `key`/`accessor`) and `label` (or `header`).
+   - Row selection: declare `props.selectionKey: "selectedTaskId"`.
+   - Search: declare `props.searchKey: "searchQuery"` or use the built-in toolbar search.
+   - External filters: declare `props.filtersFromState: { "priority": "filterPriority", "status": "filterStatus" }`.
 5. **Real Charts**: `chartLine`, `chartArea`, `chartBar`, `chartPie`, `chartDonut`, and `chartScatter` render distinct SVG visualizations bound to `dataKey` or `valueKey`.
 
 ## State-First Architecture Thinking
@@ -86,12 +103,17 @@ Before generating components, determine the state and action contract:
 
 ## Canonical Application Patterns
 
-### Pattern 1: Study / Task Planner (Dashboard Archetype)
-- `layout`: `{ "type": "dashboard", "columns": 2, "density": "compact" }`
-- `header`: Title heading + filter segmented buttons (`setValue: filter = "all" | "active" | "done"`).
-- `stats`: 3 compact stat cards (`Total Tasks`, `Completed`, `Streak/Score`) bound to state or props.
-- `main`: `checklist` or `dataTable` bound to `itemsKey: "tasks"` with status toggle actions.
-- `sidebar`: Quick-add container with `textInput` (`valueKey: "newTaskTitle"`), `select` (`valueKey: "priority"`), and `button` (`actions: [appendItem, setValue reset]`).
+### Pattern 1: Canonical Persistent Task Manager (Dashboard Archetype)
+- `layout`: `{ "type": "dashboard", "columns": 2, "density": "normal" }`
+- `dataSource`: `{ "actionName": "local_data.query", "input": { "modelId": "tasks" }, "resultKey": "tasksResult", "refreshOn": ["tasksVersion"] }`
+- `header`: Title heading + search input (`valueKey: "searchQuery"`) + priority filter select (`valueKey: "filterPriority"`) + status filter select (`valueKey: "filterStatus"`).
+- `main`: `dataTable` with `rowsKey: "tasksResult"`, `selectionKey: "selectedTaskId"`, `searchKey: "searchQuery"`, `filtersFromState: { "priority": "filterPriority", "status": "filterStatus" }`, columns: `[{ "id": "title", "label": "Task" }, { "id": "priority", "label": "Priority" }, { "id": "status", "label": "Status" }]`.
+- `sidebar`:
+  - Quick-add card: `textInput` (`valueKey: "newTaskTitle"`), `select` (`valueKey: "newTaskPriority"`, options: `["High", "Medium", "Low"]`), `select` (`valueKey: "newTaskStatus"`, options: `["To Do", "In Progress", "Done"]`), and create button with actions:
+    1. `invokeRegisteredAction: "local_data.write"` with `inputFromState: { "data.title": "newTaskTitle", "data.priority": "newTaskPriority", "data.status": "newTaskStatus" }`
+    2. `invokeRegisteredAction: "local_data.query"` with `resultKey: "tasksResult"` (or `increment: tasksVersion`)
+    3. `setValue: newTaskTitle = ""`
+  - Edit/Delete card: `textInput` (`valueKey: "editTaskTitle"`), `select` (`valueKey: "editTaskPriority"`), `select` (`valueKey: "editTaskStatus"`), save button (`local_data.write` with `recordId: "selectedTaskId"`, query refresh) and delete button (`local_data.delete` with `recordId: "selectedTaskId"`, query refresh).
 
 ### Pattern 2: CRUD Expense / Inventory Tracker (Split/Dashboard Archetype)
 - `layout`: `{ "type": "split", "splitRatio": "1:2" }`

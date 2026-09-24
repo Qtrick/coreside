@@ -66,21 +66,24 @@ if (build.error) fail(`cargo spawn failed: ${build.error.message}`);
 if (build.status !== 0) process.exit(build.status ?? 1);
 if (!existsSync(DEBUG_BINARY)) fail(`missing debug binary: ${DEBUG_BINARY}`);
 
-const verify = spawnSync(
-  process.execPath,
-  [join(ROOT, "scripts/verify-adaptive-icon.mjs")],
-  { cwd: ROOT, encoding: "utf8", shell: false },
-);
-if (verify.status !== 0) {
-  process.stderr.write(verify.stdout || "");
-  process.stderr.write(verify.stderr || "");
-  fail("adaptive icon freshness check failed");
+if (process.env.CORESIDE_DEV_PREFLIGHT_DONE !== "1") {
+  const verify = spawnSync(
+    process.execPath,
+    [join(ROOT, "scripts/verify-adaptive-icon.mjs")],
+    { cwd: ROOT, encoding: "utf8", shell: false },
+  );
+  if (verify.status !== 0) {
+    process.stderr.write(verify.stdout || "");
+    process.stderr.write(verify.stderr || "");
+    fail("adaptive icon freshness check failed");
+  }
 }
 
 try {
-  ensureDevAppBundle();
-  installDebugBinaryIntoDevApp();
-  adHocSignDevApp();
+  const bundle = ensureDevAppBundle();
+  const installResult = installDebugBinaryIntoDevApp();
+  const needsSign = installResult.copied || Boolean(bundle?.resourcesChanged);
+  adHocSignDevApp({ force: needsSign });
 } catch (err) {
   fail(err instanceof Error ? err.message : String(err));
 }

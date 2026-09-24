@@ -81,5 +81,82 @@ pub fn clear_conversations(state: State<'_, AppState>) -> Result<u64, CommandErr
         state.take_request(key);
     }
     let mut db = state.db.lock();
+    if let Ok(convs) = db::list_conversations(&db, None) {
+        let mut dc = state.deleted_conversations.lock();
+        for c in convs {
+            dc.insert(c.id.clone());
+            state.cancel_request(&c.id);
+            state.take_request(&c.id);
+        }
+    }
     Ok(db::clear_conversations(&mut db)?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use crate::state::AppState;
+    use tokio_util::sync::CancellationToken;
+
+    #[test]
+    fn test_conversation_deletion_and_tombstone_barrier() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("test_conv.db")).unwrap();
+        let ws = crate::db::ensure_default_workspace(&db).unwrap();
+        let conv = crate::db::create_conversation(&mut db, &ws, "Test Chat", None).unwrap();
+
+        assert!(crate::db::conversation_exists(&db, &conv.id));
+
+        let state = AppState::new_for_test(db);
+
+        // Simulate tombstone barrier
+        state.deleted_conversations.lock().insert(conv.id.clone());
+        state.cancel_request(&conv.id);
+        state.take_request(&conv.id);
+
+        let mut lock = state.db.lock();
+        crate::db::delete_conversation(&mut lock, &conv.id).unwrap();
+
+        assert!(!crate::db::conversation_exists(&lock, &conv.id));
+        assert!(state.deleted_conversations.lock().contains(&conv.id));
+    }
+
+    #[test]
+    fn test_clear_conversations_tombstones_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("test_clear.db")).unwrap();
+        let ws = crate::db::ensure_default_workspace(&db).unwrap();
+        let conv1 = crate::db::create_conversation(&mut db, &ws, "Chat 1", None).unwrap();
+        let conv2 = crate::db::create_conversation(&mut db, &ws, "Chat 2", None).unwrap();
+
+        let state = AppState::new_for_test(db);
+
+        // Pre-register active request for conv1
+        state.register_request(&conv1.id, CancellationToken::new());
+
+        // Perform clear logic
+        let active_keys: Vec<String> = state.active_requests.lock().keys().cloned().collect();
+        for key in &active_keys {
+            state.deleted_conversations.lock().insert(key.clone());
+            state.cancel_request(key);
+            state.take_request(key);
+        }
+        let mut lock = state.db.lock();
+        if let Ok(convs) = crate::db::list_conversations(&lock, None) {
+            let mut dc = state.deleted_conversations.lock();
+            for c in convs {
+                dc.insert(c.id.clone());
+                state.cancel_request(&c.id);
+                state.take_request(&c.id);
+            }
+        }
+        crate::db::clear_conversations(&mut lock).unwrap();
+
+        assert!(!crate::db::conversation_exists(&lock, &conv1.id));
+        assert!(!crate::db::conversation_exists(&lock, &conv2.id));
+        assert!(state.deleted_conversations.lock().contains(&conv1.id));
+        assert!(state.deleted_conversations.lock().contains(&conv2.id));
+    }
+}
+

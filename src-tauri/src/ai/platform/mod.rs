@@ -19,5 +19,5 @@ pub use endpoint_policy::{
 };
 pub use types::{
     AuthMode, CapabilityConfidence, CapabilityFlag, CapabilityProfile, ConnectionHealth,
-    EndpointClass, ModelDiscoveryStrategy, ProtocolFamily,
+    EndpointClass, ModelDiscoveryStrategy, ProtocolFamily, ResponseMode, negotiate_response_mode,
 };

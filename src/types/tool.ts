@@ -97,20 +97,26 @@ export const ActionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("appendItem"),
     target: z.string().min(1),
-    item: z.unknown(),
+    item: z.unknown().optional(),
+    itemFromState: z.record(z.string()).optional(),
   }),
   z.object({
     type: z.literal("removeItem"),
     target: z.string().min(1),
     index: z.number().int().nonnegative().optional(),
     id: z.string().optional(),
+    idFromState: z.string().optional(),
+    indexFromState: z.string().optional(),
   }),
   z.object({
     type: z.literal("updateItem"),
     target: z.string().min(1),
     index: z.number().int().nonnegative().optional(),
     id: z.string().optional(),
-    patch: z.record(z.unknown()),
+    idFromState: z.string().optional(),
+    indexFromState: z.string().optional(),
+    patch: z.record(z.unknown()).optional(),
+    patchFromState: z.record(z.string()).optional(),
   }),
   z.object({
     type: z.literal("selectTab"),
@@ -208,12 +214,24 @@ export const ToolLayoutSchema = z
 
 export type ToolLayout = z.infer<typeof ToolLayoutSchema>;
 
+export const DataSourceSchema = z.object({
+  actionName: z.string().min(1),
+  input: z.record(z.unknown()).optional(),
+  inputFromState: z.record(z.string()).optional(),
+  resultKey: z.string().min(1),
+  refreshOn: z.array(z.string()).optional(),
+});
+
+export type DataSource = z.infer<typeof DataSourceSchema>;
+
 export const ToolDefinitionSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   description: z.string().default(""),
   layout: ToolLayoutSchema,
   components: z.array(ToolComponentSchema).default([]),
+  dataSource: DataSourceSchema.optional(),
+  dataSources: z.array(DataSourceSchema).optional(),
   version: z.number().int().positive().optional(),
 });
 

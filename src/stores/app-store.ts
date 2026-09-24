@@ -796,7 +796,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   appearance: { ...DEFAULT_APPEARANCE },
   wallpaper: { ...DEFAULT_WALLPAPER },
   globalWallpaperJson: null,
-  interfaceTransparency: 20,
+  interfaceTransparency: 35,
   adaptiveWindowSizing: "smart",
   chatToolSplitRatio: 0.5,
   layoutMode: "wide",

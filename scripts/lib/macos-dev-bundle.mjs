@@ -189,6 +189,13 @@ export function installDebugBinaryIntoDevApp() {
     throw new Error(`missing debug binary: ${DEBUG_BINARY}`);
   }
   mkdirSync(dirname(DEV_EXECUTABLE), { recursive: true });
+  if (existsSync(DEV_EXECUTABLE)) {
+    const srcStat = statSync(DEBUG_BINARY);
+    const destStat = statSync(DEV_EXECUTABLE);
+    if (srcStat.size === destStat.size && srcStat.mtimeMs <= destStat.mtimeMs) {
+      return { path: DEV_EXECUTABLE, copied: false };
+    }
+  }
   const tmp = `${DEV_EXECUTABLE}.tmp-${process.pid}`;
   assertUnderRoot(tmp, "dev executable temp");
   try {
@@ -200,13 +207,22 @@ export function installDebugBinaryIntoDevApp() {
     // After a successful rename, `tmp` is already gone; force keeps failures clean.
     rmSync(tmp, { force: true });
   }
-  return DEV_EXECUTABLE;
+  return { path: DEV_EXECUTABLE, copied: true };
 }
 
-export function adHocSignDevApp() {
+export function adHocSignDevApp({ force = false } = {}) {
   assertNotReleaseApp(DEV_APP);
   if (process.platform !== "darwin") {
     return { status: "not_applicable" };
+  }
+  if (!force) {
+    const verify = spawnSync("codesign", ["-v", DEV_APP], {
+      encoding: "utf8",
+      shell: false,
+    });
+    if (verify.status === 0) {
+      return { status: "cached" };
+    }
   }
   const r = spawnSync(
     "codesign",

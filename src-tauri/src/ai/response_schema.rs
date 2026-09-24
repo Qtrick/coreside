@@ -81,7 +81,14 @@ pub enum ActionDefinition {
     },
     AppendItem {
         target: String,
+        #[serde(default, skip_serializing_if = "Value::is_null")]
         item: Value,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "itemFromState"
+        )]
+        item_from_state: Option<HashMap<String, String>>,
     },
     RemoveItem {
         target: String,
@@ -89,6 +96,18 @@ pub enum ActionDefinition {
         index: Option<i64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<String>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "idFromState"
+        )]
+        id_from_state: Option<String>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "indexFromState"
+        )]
+        index_from_state: Option<String>,
     },
     UpdateItem {
         target: String,
@@ -96,7 +115,26 @@ pub enum ActionDefinition {
         index: Option<i64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<String>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "idFromState"
+        )]
+        id_from_state: Option<String>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "indexFromState"
+        )]
+        index_from_state: Option<String>,
+        #[serde(default, skip_serializing_if = "Value::is_null")]
         patch: Value,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "patchFromState"
+        )]
+        patch_from_state: Option<HashMap<String, String>>,
     },
     SelectTab {
         target: String,
@@ -160,20 +198,32 @@ impl ActionDefinition {
                     validate_action_payload_size(v)?;
                 }
             }
-            Self::AppendItem { target, item } => {
+            Self::AppendItem {
+                target,
+                item,
+                item_from_state,
+            } => {
                 validate_action_target(target)?;
-                validate_action_payload_size(item)?;
-            }
-            Self::RemoveItem { target, id, .. } => {
-                validate_action_target(target)?;
-                if let Some(id_str) = id {
-                    if id_str.len() > MAX_ACTION_TARGET_LEN {
-                        return Err("Item ID too long");
+                if !item.is_null() {
+                    validate_action_payload_size(item)?;
+                }
+                if let Some(map) = item_from_state {
+                    if map.len() > 64 {
+                        return Err("Too many itemFromState mappings");
+                    }
+                    for (k, v) in map {
+                        if k.len() > MAX_ACTION_TARGET_LEN || v.len() > MAX_ACTION_TARGET_LEN {
+                            return Err("itemFromState key or source name too long");
+                        }
                     }
                 }
             }
-            Self::UpdateItem {
-                target, id, patch, ..
+            Self::RemoveItem {
+                target,
+                id,
+                id_from_state,
+                index_from_state,
+                ..
             } => {
                 validate_action_target(target)?;
                 if let Some(id_str) = id {
@@ -181,7 +231,55 @@ impl ActionDefinition {
                         return Err("Item ID too long");
                     }
                 }
-                validate_action_payload_size(patch)?;
+                if let Some(s) = id_from_state {
+                    if s.len() > MAX_ACTION_TARGET_LEN {
+                        return Err("idFromState name too long");
+                    }
+                }
+                if let Some(s) = index_from_state {
+                    if s.len() > MAX_ACTION_TARGET_LEN {
+                        return Err("indexFromState name too long");
+                    }
+                }
+            }
+            Self::UpdateItem {
+                target,
+                id,
+                patch,
+                id_from_state,
+                index_from_state,
+                patch_from_state,
+                ..
+            } => {
+                validate_action_target(target)?;
+                if let Some(id_str) = id {
+                    if id_str.len() > MAX_ACTION_TARGET_LEN {
+                        return Err("Item ID too long");
+                    }
+                }
+                if let Some(s) = id_from_state {
+                    if s.len() > MAX_ACTION_TARGET_LEN {
+                        return Err("idFromState name too long");
+                    }
+                }
+                if let Some(s) = index_from_state {
+                    if s.len() > MAX_ACTION_TARGET_LEN {
+                        return Err("indexFromState name too long");
+                    }
+                }
+                if !patch.is_null() {
+                    validate_action_payload_size(patch)?;
+                }
+                if let Some(map) = patch_from_state {
+                    if map.len() > 64 {
+                        return Err("Too many patchFromState mappings");
+                    }
+                    for (k, v) in map {
+                        if k.len() > MAX_ACTION_TARGET_LEN || v.len() > MAX_ACTION_TARGET_LEN {
+                            return Err("patchFromState key or source name too long");
+                        }
+                    }
+                }
             }
             Self::SelectTab { target, tab_id } => {
                 validate_action_target(target)?;
@@ -947,17 +1045,23 @@ mod tests {
             ActionDefinition::AppendItem {
                 target: "items".into(),
                 item: json!({ "title": "Buy milk" }),
+                item_from_state: None,
             },
             ActionDefinition::RemoveItem {
                 target: "items".into(),
                 index: Some(2),
                 id: Some("item-123".into()),
+                id_from_state: None,
+                index_from_state: None,
             },
             ActionDefinition::UpdateItem {
                 target: "items".into(),
                 index: None,
                 id: Some("item-123".into()),
+                id_from_state: None,
+                index_from_state: None,
                 patch: json!({ "done": true }),
+                patch_from_state: None,
             },
             ActionDefinition::SelectTab {
                 target: "activeTab".into(),

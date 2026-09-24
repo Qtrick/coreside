@@ -646,9 +646,9 @@ pub fn agent_pack_catalog_markdown() -> String {
         - `invokeRegisteredAction`: `{ \"type\": \"invokeRegisteredAction\", \"actionName\": \"local_data.query\", \"input\": { ... }, \"resultKey\": \"targetStateKey\" }`".into());
 
     lines.push("\n## Registered Kernel Actions\n\
-        - `local_data.query`: `{ \"model\": string, \"filter\"?: object, \"orderBy\"?: string, \"limit\"?: number }` -> returns `{ \"records\": [...], \"count\": number }`\n\
-        - `local_data.write`: `{ \"model\": string, \"record\": object }` -> returns `{ \"id\": string }`\n\
-        - `local_data.delete`: `{ \"model\": string, \"id\": string }` -> returns `{ \"deleted\": boolean }`\n\
+        - `local_data.query`: `{ \"modelId\": string, \"limit\"?: number }` -> returns `{ \"records\": [...], \"count\": number }`\n\
+        - `local_data.write`: `{ \"modelId\": string, \"data\": object, \"recordId\"?: string, \"baseVersion\"?: number }` -> returns `{ \"recordId\": string, \"created\": boolean }`\n\
+        - `local_data.delete`: `{ \"recordId\": string }` -> returns `{ \"recordId\": string, \"deleted\": boolean }`\n\
         - `media.read`: `{ \"assetId\": string }` -> returns `{ \"assetUrl\": string, \"mimeType\": string }`\n\
         - `external_link.open`: `{ \"url\": string }`\n\
         - `web_search.request`: `{ \"query\": string }`".into());

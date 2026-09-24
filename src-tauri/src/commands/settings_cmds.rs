@@ -255,7 +255,7 @@ fn settings_from_map(map: &std::collections::HashMap<String, String>) -> AppSett
             .or_else(|| map.get("interface_transparency"))
             .and_then(|s| s.trim().parse::<u8>().ok())
             .map(|n| n.min(100))
-            .unwrap_or(20),
+            .unwrap_or(35),
         adaptive_window_sizing: map
             .get("adaptiveWindowSizing")
             .or_else(|| map.get("adaptive_window_sizing"))

@@ -39,7 +39,8 @@ function asBoolean(value: unknown, fallback = false): boolean {
  * and maintain local ephemeral React state.
  */
 export function stateKeyFor(component: ToolComponent, ...propKeys: string[]): string | null {
-  if (component.valueKey && typeof component.valueKey === "string" && component.valueKey.trim()) {
+  const allowValueKey = propKeys.length === 0 || propKeys.includes("valueKey");
+  if (allowValueKey && component.valueKey && typeof component.valueKey === "string" && component.valueKey.trim()) {
     return component.valueKey.trim();
   }
   for (const propKey of propKeys) {
@@ -1690,9 +1691,10 @@ export function AudioPlayerNode({ component }: ToolNodeProps) {
 }
 
 export function DataTableNode({ component }: ToolNodeProps) {
-  const { getValue, setValue } = useToolRuntime();
+  const { getValue, setValue, runActions } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey", "dataKey", "rowsKey");
   const selectionKey = stateKeyFor(component, "selectionKey");
+  const searchKey = stateKeyFor(component, "searchKey");
   const selectedId = selectionKey ? asString(getValue(selectionKey)) : null;
 
   const stateRows = key ? getValue(key) : undefined;
@@ -1712,10 +1714,11 @@ export function DataTableNode({ component }: ToolNodeProps) {
 
   const columns = useMemo(() => {
     if (Array.isArray(component.props?.columns) && component.props.columns.length > 0) {
-      return (component.props.columns as Array<{ id?: string; key?: string; label?: string } | string>).map((c) => {
+      return (component.props.columns as Array<Record<string, unknown> | string>).map((c) => {
         if (typeof c === "string") return { id: c, label: c };
-        const id = c.id ?? c.key ?? "";
-        return { id, label: c.label ?? id };
+        const id = asString(c.id ?? c.key ?? c.accessor, "");
+        const label = asString(c.label ?? c.header, id ? id.charAt(0).toUpperCase() + id.slice(1) : "");
+        return { id, label };
       });
     }
     if (rows.length > 0 && rows[0] && typeof rows[0] === "object") {
@@ -1734,17 +1737,54 @@ export function DataTableNode({ component }: ToolNodeProps) {
   const [sortDir, setSortDir] = useState<"asc" | "desc" | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
+  const externalSearch = searchKey ? asString(getValue(searchKey)).trim().toLowerCase() : "";
+  const filtersFromState = (component.props?.filtersFromState ?? component.props?.filters) as
+    | Record<string, string>
+    | undefined;
+
   // Filter
   const filteredRows = useMemo(() => {
+    let result = rows;
+
+    // Apply external filtersFromState (e.g. { priority: "filterPriority", status: "filterStatus" })
+    if (filtersFromState && typeof filtersFromState === "object") {
+      for (const [colField, stateVar] of Object.entries(filtersFromState)) {
+        if (typeof stateVar === "string" && stateVar) {
+          const rawFilterVal = getValue(stateVar);
+          if (rawFilterVal != null && rawFilterVal !== "" && rawFilterVal !== "all" && rawFilterVal !== "All") {
+            const expected = String(rawFilterVal).toLowerCase();
+            result = result.filter((row) => {
+              const actual = row[colField];
+              return actual != null && String(actual).toLowerCase() === expected;
+            });
+          }
+        }
+      }
+    }
+
+    // Apply external searchKey query if present
+    if (externalSearch) {
+      result = result.filter((row) =>
+        columns.some((col) => {
+          const val = row[col.id];
+          return val != null && String(val).toLowerCase().includes(externalSearch);
+        })
+      );
+    }
+
+    // Apply internal toolbar search input
     const q = filterText.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((row) =>
-      columns.some((col) => {
-        const val = row[col.id];
-        return val != null && String(val).toLowerCase().includes(q);
-      })
-    );
-  }, [rows, columns, filterText]);
+    if (q) {
+      result = result.filter((row) =>
+        columns.some((col) => {
+          const val = row[col.id];
+          return val != null && String(val).toLowerCase().includes(q);
+        })
+      );
+    }
+
+    return result;
+  }, [rows, columns, filterText, externalSearch, filtersFromState, getValue]);
 
   // Sort
   const sortedRows = useMemo(() => {
@@ -1788,9 +1828,13 @@ export function DataTableNode({ component }: ToolNodeProps) {
   };
 
   const handleRowClick = (row: Record<string, unknown>, i: number) => {
-    if (!selectionKey) return;
-    const id = asString(row._id ?? row.id ?? i);
-    setValue(selectionKey, id);
+    if (selectionKey) {
+      const id = asString(row._id ?? row.id ?? i);
+      setValue(selectionKey, id);
+    }
+    if (Array.isArray(component.actions) && component.actions.length > 0) {
+      runActions(component.actions, component.id);
+    }
   };
 
   const title = asString(component.props?.title, "Data table");

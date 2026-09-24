@@ -87,6 +87,7 @@ const extraArgs = process.argv.slice(2);
 
 if (process.platform === "darwin") {
   preflightMacos();
+  process.env.CORESIDE_DEV_PREFLIGHT_DONE = "1";
   console.log("dev: macOS packaged adaptive hot development");
   console.log(`dev: runner=${RUNNER}`);
   run(process.execPath, [tauriJs, "dev", "--runner", RUNNER, ...extraArgs]);

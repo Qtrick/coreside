@@ -341,7 +341,7 @@ pub fn branch_from_message(
                 };
 
                 let def = serde_json::from_str::<Value>(&def_json_str)
-                    .unwrap_or_else(|_| surface.definition.clone());
+                    .map_err(|e| crate::db::DbError::Corrupted(format!("invalid historical surface definition: {e}")))?;
                 let created = super::surfaces::create_inline_surface(
                     db,
                     &new_conv.id,
@@ -365,7 +365,7 @@ pub fn branch_from_message(
                     }
                 }
 
-                let _ = super::surfaces::save_surface_state(db, &created.id, &historical_state);
+                super::surfaces::save_surface_state(db, &created.id, &historical_state)?;
                 cloned_surfaces.push(created);
             }
         }

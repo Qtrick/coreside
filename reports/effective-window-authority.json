@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-22T17:37:43.387Z",
-  "commit": "55e0845007ae1488a785f73601b0d1497cca9a3f",
+  "generatedAt": "2026-09-23T17:54:45.641Z",
+  "commit": "6b93630b100bd6ce6030eb94105f27f98e23f794",
   "dirty": true,
   "sourceFingerprint": "ede8cbddd112f44aa5ea403dbbc41a055e860414b624a3182a19a27bca77c679",
   "packageLockHash": "2b427ad1e95a93b212ca4763ebba64a778c976c59421514246b4b3c68300468d",

@@ -580,7 +580,7 @@ fn emit_progressive_op_previews(
         |surface_id| {
             let db = state.db.lock();
             let surface = get_surface(&db, surface_id).ok()?;
-            let state_json = get_surface_state(&db, surface_id).unwrap_or_else(|_| json!({}));
+            let state_json = get_surface_state(&db, surface_id).ok()?;
             Some(PreviewSurfaceModel {
                 surface_id: surface.id.clone(),
                 tool_id: surface.tool_id.clone(),
@@ -915,11 +915,18 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
             );
             return;
         }
-        if state.active_requests.lock().contains_key(&conversation_id) {
+        if state.active_requests.lock().contains_key(&conversation_id)
+            || state.deleted_conversations.lock().contains(&conversation_id)
+        {
             return;
         }
         let item = {
             let mut db = state.db.lock();
+            if state.deleted_conversations.lock().contains(&conversation_id)
+                || !db::conversation_exists(&db, &conversation_id)
+            {
+                return;
+            }
             match crate::runtime_v2::activate_next(&mut db, &conversation_id) {
                 Ok(item) => item,
                 Err(e) => {
@@ -931,6 +938,9 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
         let Some(item) = item else {
             return;
         };
+        if state.deleted_conversations.lock().contains(&conversation_id) {
+            return;
+        }
         crate::commands::emit_queue_changed(
             state,
             crate::commands::QueueChangeKind::ItemActivated,
@@ -1228,6 +1238,11 @@ async fn send_message_inner(
         let attachment_ids: Vec<String> = attachments.iter().map(|a| a.id.clone()).collect();
         crate::commands::attachment_cmds::assert_staged_attachments_ready(state, &attachment_ids)?;
         let mut db = state.db.lock();
+        if state.deleted_conversations.lock().contains(&conversation_id)
+            || !db::conversation_exists(&db, &conversation_id)
+        {
+            return Err(CommandError::new("not_found", "Conversation has been deleted"));
+        }
         let item = crate::runtime_v2::enqueue(
             &mut db,
             &conversation_id,
@@ -1333,6 +1348,11 @@ async fn send_message_inner(
         crate::commands::attachment_cmds::assert_staged_attachments_ready(state, &attachment_ids)?;
 
         let mut db = state.db.lock();
+        if state.deleted_conversations.lock().contains(&conversation_id)
+            || !db::conversation_exists(&db, &conversation_id)
+        {
+            return Err(CommandError::new("not_found", "Conversation has been deleted"));
+        }
         let conv = db::get_conversation(&db, &conversation_id)?;
         let project_id = conv.project_id.clone();
 
@@ -1884,7 +1904,15 @@ async fn send_message_inner(
             },
         );
     }
-    let progressive_ops_enabled = provider_supports_progressive_ops(&access.credentials.provider);
+    let descriptor = crate::ai::platform::descriptor_by_id(&access.credentials.provider);
+    let response_mode = crate::ai::platform::negotiate_response_mode(
+        &access.credentials.provider,
+        &model_preference,
+        descriptor.as_ref().map(|d| d.protocol_family),
+        descriptor.as_ref().map(|d| &d.capability_profile),
+    );
+    let progressive_ops_enabled =
+        response_mode == crate::ai::platform::ResponseMode::ProgressiveNdjson;
     // Progressive coreside.ops.v1 parser — preview only until valid terminal.
     // Do not bind turnId/attemptId until the runtime advertises them to the
     // provider. Expecting an unpublished id rejects honest streams that omit
@@ -1954,11 +1982,11 @@ async fn send_message_inner(
                         &text,
                     );
                     // Provider SSE text deltas are NOT the Coreside NDJSON operation
-                    // protocol. Only feed chunks that actually carry progressive
-                    // frames; buffered structured-JSON deltas (e.g. Gemini
-                    // responseMimeType application/json partial text) must never
+                    // protocol. Only feed chunks when ProgressiveNdjson is negotiated
+                    // and carries operation frames; structured-JSON streaming deltas
+                    // (e.g. Gemini responseMimeType application/json) must never
                     // enter the frame parser.
-                    if progressive_ops_enabled && text.contains(crate::runtime_v2::PROGRESSIVE_OPS_V) {
+                    if progressive_ops_enabled && (text.contains(crate::runtime_v2::PROGRESSIVE_OPS_V) || text.trim_start().starts_with('{')) {
                         emit_progressive_op_previews(
                             &app_for_stream,
                             state,
@@ -2265,8 +2293,8 @@ async fn send_message_inner(
                             &text,
                         );
                         // Same NDJSON-only gating as the initial attempt: provider
-                        // text deltas are not operation frames.
-                        if progressive_ops_enabled && text.contains(crate::runtime_v2::PROGRESSIVE_OPS_V) {
+                        // text deltas are not operation frames unless ProgressiveNdjson is negotiated.
+                        if progressive_ops_enabled && (text.contains(crate::runtime_v2::PROGRESSIVE_OPS_V) || text.trim_start().starts_with('{')) {
                             emit_progressive_op_previews(
                                 &app_for_stream,
                                 state,
@@ -2478,6 +2506,10 @@ async fn send_message_inner(
             "attempts": resolved.attempts,
             "streamedLive": resolved.streamed_live,
             "responseSchemaVersion": parsed.payload.schema_version,
+            "schemaVersion": parsed.payload.schema_version,
+            "capabilityVersion": crate::runtime_v2::PROGRESSIVE_OPS_V,
+            "responseMode": response_mode.as_str(),
+            "retryFallbackCount": resolved.attempts.saturating_sub(1),
             "responseType": serde_json::to_value(&parsed.payload.response_type).unwrap_or(serde_json::Value::Null),
             "progressiveOpsEnabled": progressive_ops_enabled,
             "progressiveStarted": progressive_parser.started(),
@@ -2715,24 +2747,34 @@ async fn send_message_inner(
                     let silent = parsed.payload.silent.unwrap_or(false);
                     let schedule_result = {
                         let mut db = state.db.lock();
-                        let mut bus = state.event_bus.lock();
-                        let mut bus_opt = Some(&mut *bus);
-                        crate::runtime_v2::patch_scheduler::schedule_and_apply(
-                        &mut db,
-                        &mut bus_opt,
-                        crate::runtime_v2::patch_scheduler::ScheduleRequest {
-                            conversation_id: Some(conversation_id.clone()),
-                            turn_id: parsed.payload.turn_id.clone(),
-                            surface_id: None,
-                            priority: crate::runtime_v2::patch_scheduler::PatchPriority::ApprovedPersistentChange,
-                            operations,
-                            source_type: "agent".into(),
-                            from_agent: true,
-                            model: Some(resolved.model_used.clone()),
-                            provider: Some(resolved.response.provider_id.clone()),
-                        },
-                        false,
-                    )
+                        if state.deleted_conversations.lock().contains(&conversation_id)
+                            || !db::conversation_exists(&db, &conversation_id)
+                        {
+                            tracing::info!(
+                                conversation_id = %conversation_id,
+                                "conversation deleted during turn, aborting patch schedule"
+                            );
+                            Err(crate::db::DbError::NotFound("conversation deleted".into()))
+                        } else {
+                            let mut bus = state.event_bus.lock();
+                            let mut bus_opt = Some(&mut *bus);
+                            crate::runtime_v2::patch_scheduler::schedule_and_apply(
+                                &mut db,
+                                &mut bus_opt,
+                                crate::runtime_v2::patch_scheduler::ScheduleRequest {
+                                    conversation_id: Some(conversation_id.clone()),
+                                    turn_id: parsed.payload.turn_id.clone(),
+                                    surface_id: None,
+                                    priority: crate::runtime_v2::patch_scheduler::PatchPriority::ApprovedPersistentChange,
+                                    operations,
+                                    source_type: "agent".into(),
+                                    from_agent: true,
+                                    model: Some(resolved.model_used.clone()),
+                                    provider: Some(resolved.response.provider_id.clone()),
+                                },
+                                false,
+                            )
+                        }
                     };
                     match schedule_result {
                         Ok(scheduled) => {
@@ -2928,6 +2970,15 @@ async fn send_message_inner(
             .execute_batch("BEGIN IMMEDIATE")
             .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
         let commit = (|| -> Result<crate::db::Message, CommandError> {
+            if state.deleted_conversations.lock().contains(&conversation_id)
+                || !db::conversation_exists(&db, &conversation_id)
+            {
+                tracing::info!(
+                    conversation_id = %conversation_id,
+                    "conversation deleted during turn, aborting assistant commit under write lock"
+                );
+                return Err(CommandError::new("not_found", "Conversation has been deleted"));
+            }
             if let Some(events) = action_log.as_ref() {
                 for (i, event) in events.iter().enumerate() {
                     let label = event

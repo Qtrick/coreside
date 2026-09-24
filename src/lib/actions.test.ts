@@ -836,3 +836,150 @@ describe("adversarial security tests", () => {
   });
 });
 
+describe("State-to-Object & CRUD mapping", () => {
+  it("safely constructs nested object inputs from state via dotted paths", async () => {
+    const { applyAction } = await import("@/lib/actions");
+    const onInvokeRegisteredAction = vi.fn().mockResolvedValue({ status: "ok" });
+
+    const action: ActionDefinition = {
+      type: "invokeRegisteredAction",
+      actionName: "local_data.write",
+      input: { modelId: "tasks", data: {} },
+      inputFromState: {
+        "recordId": "selectedTaskId",
+        "data.title": "editTaskTitle",
+        "data.priority": "editTaskPriority",
+        "data.status": "editTaskStatus",
+      },
+    };
+
+    const result = applyAction(action, {
+      state: {
+        selectedTaskId: "task-99",
+        editTaskTitle: "Ship Coreside",
+        editTaskPriority: "P0",
+        editTaskStatus: "In Progress",
+      },
+      toolId: "tool-1",
+      allowedTargets: new Set([
+        "selectedTaskId",
+        "editTaskTitle",
+        "editTaskPriority",
+        "editTaskStatus",
+      ]),
+      onInvokeRegisteredAction,
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(onInvokeRegisteredAction).toHaveBeenCalledWith({
+      toolId: "tool-1",
+      actionName: "local_data.write",
+      input: {
+        modelId: "tasks",
+        recordId: "task-99",
+        data: {
+          title: "Ship Coreside",
+          priority: "P0",
+          status: "In Progress",
+        },
+      },
+      componentId: undefined,
+      resultKey: undefined,
+    });
+  });
+
+  it("rejects prototype pollution and dangerous path segments in setDottedPath", async () => {
+    const { setDottedPath } = await import("@/lib/actions");
+    const target: Record<string, unknown> = {};
+
+    expect(setDottedPath(target, "__proto__.polluted", true)).toBe(false);
+    expect(setDottedPath(target, "constructor.prototype.polluted", true)).toBe(false);
+    expect(setDottedPath(target, "prototype.polluted", true)).toBe(false);
+    expect(setDottedPath(target, "a.b.c.d.e", "too deep")).toBe(false);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("supports appendItem with itemFromState", async () => {
+    const { applyAction } = await import("@/lib/actions");
+    const action: ActionDefinition = {
+      type: "appendItem",
+      target: "tasks",
+      item: { id: "task-1" },
+      itemFromState: {
+        title: "newTaskTitle",
+        priority: "newTaskPriority",
+      },
+    };
+
+    const result = applyAction(action, {
+      state: {
+        tasks: [],
+        newTaskTitle: "Verify all release gates",
+        newTaskPriority: "High",
+      },
+      toolId: "tool-1",
+      allowedTargets: new Set(["tasks", "newTaskTitle", "newTaskPriority"]),
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(result.state.tasks).toEqual([
+      { id: "task-1", title: "Verify all release gates", priority: "High" },
+    ]);
+  });
+
+  it("supports updateItem with idFromState and patchFromState", async () => {
+    const { applyAction } = await import("@/lib/actions");
+    const action: ActionDefinition = {
+      type: "updateItem",
+      target: "tasks",
+      idFromState: "selectedId",
+      patchFromState: {
+        status: "newStatus",
+      },
+    };
+
+    const result = applyAction(action, {
+      state: {
+        tasks: [
+          { id: "t1", title: "Task 1", status: "todo" },
+          { id: "t2", title: "Task 2", status: "todo" },
+        ],
+        selectedId: "t2",
+        newStatus: "done",
+      },
+      toolId: "tool-1",
+      allowedTargets: new Set(["tasks", "selectedId", "newStatus"]),
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(result.state.tasks).toEqual([
+      { id: "t1", title: "Task 1", status: "todo" },
+      { id: "t2", title: "Task 2", status: "done" },
+    ]);
+  });
+
+  it("supports removeItem with idFromState", async () => {
+    const { applyAction } = await import("@/lib/actions");
+    const action: ActionDefinition = {
+      type: "removeItem",
+      target: "tasks",
+      idFromState: "selectedId",
+    };
+
+    const result = applyAction(action, {
+      state: {
+        tasks: [
+          { id: "t1", title: "Task 1" },
+          { id: "t2", title: "Task 2" },
+        ],
+        selectedId: "t1",
+      },
+      toolId: "tool-1",
+      allowedTargets: new Set(["tasks", "selectedId"]),
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(result.state.tasks).toEqual([{ id: "t2", title: "Task 2" }]);
+  });
+});
+

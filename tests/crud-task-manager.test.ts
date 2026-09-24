@@ -211,4 +211,149 @@ describe("CRUD Task Manager Acceptance & Authority Suite", () => {
     expect(result.errors[0]).toContain("outside the current tool scope");
     expect(result.state.userRole).toBe("viewer");
   });
+
+  it("safely maps nested dotted paths in inputFromState without prototype pollution", async () => {
+    const bindings = collectDeclaredBindings(tool.components);
+    const state = {
+      selectedTaskId: "TSK-42",
+      newTaskTitle: "Deep nested task",
+      newTaskPriority: "Urgent",
+    };
+
+    const mockInvoke = vi.fn().mockResolvedValue({
+      status: "ok",
+      data: { success: true },
+      stateBindable: true,
+    });
+
+    const updateAction: ActionDefinition = {
+      type: "invokeRegisteredAction",
+      actionName: "local_data.write",
+      input: {
+        modelId: "tasks",
+        data: {},
+      },
+      inputFromState: {
+        recordId: "selectedTaskId",
+        "data.title": "newTaskTitle",
+        "data.priority": "newTaskPriority",
+      },
+      resultKey: "lastTask",
+    };
+
+    const result = await applyActionsAsync([updateAction], {
+      state,
+      toolId: tool.id,
+      bindings,
+      onInvokeRegisteredAction: mockInvoke,
+    });
+
+    expect(result.errors).toHaveLength(0);
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+    expect(mockInvoke.mock.calls[0][0].input).toEqual({
+      modelId: "tasks",
+      recordId: "TSK-42",
+      data: {
+        title: "Deep nested task",
+        priority: "Urgent",
+      },
+    });
+  });
+
+  it("rejects prototype pollution attempts in inputFromState dotted paths", async () => {
+    const bindings = collectDeclaredBindings(tool.components);
+    const state = {
+      newTaskTitle: "Evil payload",
+    };
+
+    const mockInvoke = vi.fn();
+    const maliciousAction: ActionDefinition = {
+      type: "invokeRegisteredAction",
+      actionName: "local_data.write",
+      input: { modelId: "tasks" },
+      inputFromState: {
+        "__proto__.polluted": "newTaskTitle",
+      },
+    };
+
+    const result = await applyActionsAsync([maliciousAction], {
+      state,
+      toolId: tool.id,
+      bindings,
+      onInvokeRegisteredAction: mockInvoke,
+    });
+
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toContain("Dangerous path segment");
+    expect(mockInvoke).not.toHaveBeenCalled();
+    expect((Object.prototype as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("handles state-based CRUD items (itemFromState, idFromState, patchFromState)", async () => {
+    const bindings = collectDeclaredBindings(tool.components);
+    const state = {
+      selectedTaskId: "TSK-1",
+      newTaskTitle: "State-based item",
+      tasks: [{ id: "TSK-1", title: "Old task" }],
+    };
+
+    // Test appendItem with itemFromState
+    const appendAction: ActionDefinition = {
+      type: "appendItem",
+      target: "tasks",
+      itemFromState: {
+        title: "newTaskTitle",
+      },
+    };
+
+    const appendResult = await applyActionsAsync([appendAction], {
+      state,
+      toolId: tool.id,
+      bindings,
+    });
+
+    expect(appendResult.errors).toHaveLength(0);
+    expect(appendResult.state.tasks).toHaveLength(2);
+    expect((appendResult.state.tasks as Array<Record<string, unknown>>)[1]).toMatchObject({
+      title: "State-based item",
+    });
+
+    // Test updateItem with idFromState and patchFromState
+    const updateAction: ActionDefinition = {
+      type: "updateItem",
+      target: "tasks",
+      idFromState: "selectedTaskId",
+      patchFromState: {
+        title: "newTaskTitle",
+      },
+    };
+
+    const updateResult = await applyActionsAsync([updateAction], {
+      state: appendResult.state,
+      toolId: tool.id,
+      bindings,
+    });
+
+    expect(updateResult.errors).toHaveLength(0);
+    expect((updateResult.state.tasks as Array<Record<string, unknown>>)[0]).toMatchObject({
+      id: "TSK-1",
+      title: "State-based item",
+    });
+
+    // Test removeItem with idFromState
+    const removeAction: ActionDefinition = {
+      type: "removeItem",
+      target: "tasks",
+      idFromState: "selectedTaskId",
+    };
+
+    const removeResult = await applyActionsAsync([removeAction], {
+      state: updateResult.state,
+      toolId: tool.id,
+      bindings,
+    });
+
+    expect(removeResult.errors).toHaveLength(0);
+    expect(removeResult.state.tasks).toHaveLength(1);
+  });
 });

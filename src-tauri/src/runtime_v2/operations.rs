@@ -675,7 +675,7 @@ fn resolve_extracted_components(val: &Value, depth: usize) -> Option<Value> {
                 // components is itself stringified — recurse
                 return resolve_extracted_components(inner, depth - 1);
             }
-            if let Some(def_val) = obj.get("definition") {
+            if let Some(_def_val) = obj.get("definition") {
                 // Mutate a clone so the normalized definition replaces the original.
                 let mut wrapper = val.clone();
                 if let Some(wrap_obj) = wrapper.as_object_mut() {

@@ -108,10 +108,15 @@ fn local_data_write(db: &mut Database, ctx: &ActionRunContext, input: &Value) ->
     let model_id = model_id_field(input)?.to_string();
     let data = input
         .get("data")
+        .or_else(|| input.get("record"))
         .cloned()
         .filter(|v| v.is_object())
         .ok_or_else(|| ActionError::invalid("data must be an object"))?;
-    match input.get("recordId").and_then(|v| v.as_str()) {
+    let record_id_opt = input
+        .get("recordId")
+        .or_else(|| input.get("id"))
+        .and_then(|v| v.as_str());
+    match record_id_opt {
         Some(record_id) => {
             let base = input.get("baseVersion").and_then(|v| v.as_i64());
             super::super::data::update_record(db, app, record_id, data, base)?;
@@ -126,7 +131,12 @@ fn local_data_write(db: &mut Database, ctx: &ActionRunContext, input: &Value) ->
 
 fn local_data_delete(db: &mut Database, ctx: &ActionRunContext, input: &Value) -> HandlerResult {
     let app = application_id(ctx)?;
-    let record_id = str_field(input, "recordId")?;
+    let record_id = input
+        .get("recordId")
+        .or_else(|| input.get("id"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| ActionError::invalid("recordId is required"))?;
     super::super::data::delete_record(db, app, record_id)?;
     Ok(json!({ "recordId": record_id, "deleted": true }))
 }

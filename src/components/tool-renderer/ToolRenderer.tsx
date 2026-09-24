@@ -1,6 +1,7 @@
 import {
   Component,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -8,10 +9,10 @@ import {
   type ReactNode,
 } from "react";
 import { AlertTriangle, X } from "lucide-react";
-import { applyActionsAsync, collectDeclaredBindings } from "@/lib/actions";
+import { applyActionsAsync, collectDeclaredBindings, setDottedPath } from "@/lib/actions";
 import { api } from "@/lib/tauri";
 import type { ActionOutcome } from "@/types/application-kernel";
-import type { ActionDefinition, ToolComponent, ToolDefinition, ToolState } from "@/types/tool";
+import type { ActionDefinition, DataSource, ToolComponent, ToolDefinition, ToolState } from "@/types/tool";
 import { ToolRuntimeProvider } from "./context";
 import { resolveComponent } from "./registry";
 import { ToolLayoutContainer } from "./ToolLayoutContainer";
@@ -211,6 +212,97 @@ export function ToolRenderer({
   // from overwriting concurrent user input.
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  const dataSources = useMemo(() => {
+    const list: DataSource[] = [];
+    if (tool.dataSource) list.push(tool.dataSource);
+    if (Array.isArray(tool.dataSources)) list.push(...tool.dataSources);
+    const scanComps = (comps?: ToolComponent[]) => {
+      if (!comps) return;
+      for (const comp of comps) {
+        if (comp.props?.dataSource && typeof comp.props.dataSource === "object") {
+          const ds = comp.props.dataSource as DataSource;
+          if (ds.actionName && ds.resultKey) list.push(ds);
+        }
+        if (comp.children) scanComps(comp.children);
+      }
+    };
+    scanComps(tool.components);
+    return list;
+  }, [tool.dataSource, tool.dataSources, tool.components]);
+
+  const hydrationRef = useRef<Record<string, { lastRun: number; depSignature: string }>>({});
+
+  useEffect(() => {
+    if (isPreviewMode || isCustomizingMode) return;
+    if (dataSources.length === 0) return;
+
+    for (const ds of dataSources) {
+      if (!ds.actionName || (!ds.actionName.endsWith(".query") && ds.actionName !== "local_data.query")) {
+        console.warn(`[ToolRenderer] Rejected non-read-only dataSource action: ${ds.actionName}`);
+        continue;
+      }
+      if (!ds.resultKey) continue;
+
+      const depValues = (ds.refreshOn ?? []).map((k) => String(stateRef.current[k]));
+      const depSignature = depValues.join("::");
+
+      const existing = hydrationRef.current[ds.resultKey];
+      const now = Date.now();
+      if (existing) {
+        if (existing.depSignature === depSignature && now - existing.lastRun < 500) {
+          continue;
+        }
+        if (existing.depSignature === depSignature) {
+          continue;
+        }
+      }
+
+      hydrationRef.current[ds.resultKey] = { lastRun: now, depSignature };
+
+      const input: Record<string, unknown> = { ...(ds.input ?? {}) };
+      if (ds.inputFromState) {
+        for (const [key, stateKey] of Object.entries(ds.inputFromState)) {
+          if (stateRef.current[stateKey] !== undefined) {
+            setDottedPath(input, key, stateRef.current[stateKey]);
+          }
+        }
+      }
+
+      void api
+        .kernelInvokeRegisteredAction({
+          actionName: ds.actionName,
+          input,
+          applicationId: applicationId ?? tool.id,
+          surfaceId: surfaceId ?? tool.id,
+          componentId: null,
+          conversationId: conversationId ?? null,
+          projectId: projectId ?? null,
+        })
+        .then((outcome) => {
+          if (outcome && outcome.status === "ok" && outcome.data !== undefined) {
+            const currentVal = stateRef.current[ds.resultKey];
+            if (JSON.stringify(currentVal) !== JSON.stringify(outcome.data)) {
+              onStateChange({ ...stateRef.current, [ds.resultKey]: outcome.data });
+            }
+          }
+        })
+        .catch((err) => {
+          console.error(`[ToolRenderer] dataSource hydration failed for ${ds.resultKey}:`, err);
+        });
+    }
+  }, [
+    dataSources,
+    isPreviewMode,
+    isCustomizingMode,
+    applicationId,
+    surfaceId,
+    conversationId,
+    projectId,
+    tool.id,
+    onStateChange,
+    state,
+  ]);
 
   // Interaction failures are shown in the surface itself: a button that cannot
   // do anything must say so rather than only logging to the console.

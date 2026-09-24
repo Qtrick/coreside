@@ -251,6 +251,64 @@ pub enum ModelDiscoveryStrategy {
     ManualModelId,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseMode {
+    BufferedJson,
+    StructuredJsonStream,
+    ProgressiveNdjson,
+    PlainText,
+}
+
+impl ResponseMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::BufferedJson => "buffered_json",
+            Self::StructuredJsonStream => "structured_json_stream",
+            Self::ProgressiveNdjson => "progressive_ndjson",
+            Self::PlainText => "plain_text",
+        }
+    }
+}
+
+pub fn negotiate_response_mode(
+    provider_id: &str,
+    _model: &str,
+    protocol: Option<ProtocolFamily>,
+    profile: Option<&CapabilityProfile>,
+) -> ResponseMode {
+    let p_lower = provider_id.to_lowercase();
+    // Gemini GenerateContent uses structured output streaming (JSON deltas)
+    if p_lower == "gemini" || protocol == Some(ProtocolFamily::GeminiGenerateContent) {
+        return ResponseMode::StructuredJsonStream;
+    }
+    // Mock / deterministic offline test provider supports progressive NDJSON
+    if p_lower == "mock" || protocol == Some(ProtocolFamily::MockDeterministic) {
+        return ResponseMode::ProgressiveNdjson;
+    }
+    if let Some(p) = profile {
+        if p.supports(CapabilityFlag::ProgressiveCoresideOperations)
+            && p.supports(CapabilityFlag::TextStreaming)
+        {
+            return ResponseMode::ProgressiveNdjson;
+        }
+        if p.supports(CapabilityFlag::StructuredJson) {
+            if p.supports(CapabilityFlag::TextStreaming) {
+                return ResponseMode::StructuredJsonStream;
+            } else {
+                return ResponseMode::BufferedJson;
+            }
+        }
+    }
+    if matches!(
+        protocol,
+        Some(ProtocolFamily::OpenAiResponses | ProtocolFamily::OpenAiChatCompletions)
+    ) {
+        return ResponseMode::StructuredJsonStream;
+    }
+    ResponseMode::PlainText
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

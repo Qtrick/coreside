@@ -94,6 +94,22 @@ export function collectDeclaredBindings(
         into.readable.add(selKey);
         into.writable.add(selKey);
       }
+      if (props.filters && typeof props.filters === "object") {
+        for (const sk of Object.values(props.filters as Record<string, unknown>)) {
+          if (typeof sk === "string" && sk.trim()) into.readable.add(sk.trim());
+        }
+      }
+      if (props.filtersFromState && typeof props.filtersFromState === "object") {
+        for (const sk of Object.values(props.filtersFromState as Record<string, unknown>)) {
+          if (typeof sk === "string" && sk.trim()) into.readable.add(sk.trim());
+        }
+      }
+      if (typeof props.searchKey === "string" && props.searchKey.trim()) {
+        into.readable.add(props.searchKey.trim());
+      }
+      if (typeof props.filterKey === "string" && props.filterKey.trim()) {
+        into.readable.add(props.filterKey.trim());
+      }
     }
 
     // 5. Chart components
@@ -108,9 +124,12 @@ export function collectDeclaredBindings(
       }
     }
 
-    // 6. Registered actions: resultKey is an output target, NOT a read authorization
+    // 6. Registered actions & interactive actions
     if (component.actions) {
       for (const action of component.actions) {
+        if ("target" in action && typeof action.target === "string" && action.target.trim()) {
+          into.writable.add(action.target.trim());
+        }
         if (
           "resultKey" in action &&
           typeof action.resultKey === "string" &&
@@ -203,6 +222,54 @@ export type ActionEngineResult = {
   pendingTasks: Promise<void>[];
   pendingApproval?: boolean;
 };
+
+const DANGEROUS_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+const SEGMENT_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+const MAX_PATH_DEPTH = 4;
+const MAX_PATH_LENGTH = 64;
+
+/**
+ * Safely sets a value at a dotted path within a JSON target object.
+ * Rejects prototype pollution, dangerous segments, non-identifier syntax, and excessive depth.
+ */
+export function setDottedPath(
+  target: Record<string, unknown>,
+  path: string,
+  value: unknown,
+): boolean {
+  if (!path || typeof path !== "string" || path.length > MAX_PATH_LENGTH) {
+    return false;
+  }
+  const segments = path.split(".");
+  if (segments.length === 0 || segments.length > MAX_PATH_DEPTH) {
+    return false;
+  }
+  for (const seg of segments) {
+    if (!seg || DANGEROUS_SEGMENTS.has(seg) || !SEGMENT_PATTERN.test(seg)) {
+      return false;
+    }
+  }
+
+  let current: Record<string, unknown> = target;
+  for (let i = 0; i < segments.length - 1; i++) {
+    const seg = segments[i];
+    const existing = current[seg];
+    if (existing == null) {
+      const nextObj: Record<string, unknown> = {};
+      current[seg] = nextObj;
+      current = nextObj;
+    } else if (typeof existing === "object" && !Array.isArray(existing)) {
+      current = existing as Record<string, unknown>;
+    } else {
+      // Collision: cannot traverse through a primitive or array
+      return false;
+    }
+  }
+
+  const leaf = segments[segments.length - 1];
+  current[leaf] = value;
+  return true;
+}
 
 function cloneState(state: ToolState): ToolState {
   return structuredClone(state);
@@ -334,8 +401,27 @@ export function applyAction(
     case "appendItem": {
       if (!ensureWritable(action.target)) break;
       {
+        let itemToAppend = action.item;
+        if (action.itemFromState) {
+          const constructed: Record<string, unknown> =
+            itemToAppend && typeof itemToAppend === "object" && !Array.isArray(itemToAppend)
+              ? { ...(itemToAppend as Record<string, unknown>) }
+              : {};
+          let unauthorized = false;
+          for (const [key, stateKey] of Object.entries(action.itemFromState)) {
+            if (!ensureReadable(stateKey)) {
+              unauthorized = true;
+              break;
+            }
+            if (!setDottedPath(constructed, key, state[stateKey])) {
+              constructed[key] = state[stateKey];
+            }
+          }
+          if (unauthorized) break;
+          itemToAppend = constructed;
+        }
         const items = asArray(state[action.target]);
-        items.push(action.item);
+        items.push(itemToAppend);
         state[action.target] = items;
         changedKeys.push(action.target);
       }
@@ -344,8 +430,19 @@ export function applyAction(
     case "removeItem": {
       if (!ensureWritable(action.target)) break;
       {
+        let id = action.id;
+        if (action.idFromState) {
+          if (!ensureReadable(action.idFromState)) break;
+          id = state[action.idFromState] != null ? String(state[action.idFromState]) : undefined;
+        }
+        let index = action.index;
+        if (action.indexFromState) {
+          if (!ensureReadable(action.indexFromState)) break;
+          const val = Number(state[action.indexFromState]);
+          index = Number.isInteger(val) ? val : undefined;
+        }
         const items = asArray(state[action.target]);
-        const idx = findItemIndex(items, action.index, action.id);
+        const idx = findItemIndex(items, index, id);
         if (idx >= 0 && idx < items.length) {
           items.splice(idx, 1);
           state[action.target] = items;
@@ -357,12 +454,42 @@ export function applyAction(
     case "updateItem": {
       if (!ensureWritable(action.target)) break;
       {
+        let id = action.id;
+        if (action.idFromState) {
+          if (!ensureReadable(action.idFromState)) break;
+          id = state[action.idFromState] != null ? String(state[action.idFromState]) : undefined;
+        }
+        let index = action.index;
+        if (action.indexFromState) {
+          if (!ensureReadable(action.indexFromState)) break;
+          const val = Number(state[action.indexFromState]);
+          index = Number.isInteger(val) ? val : undefined;
+        }
+        let patch = action.patch;
+        if (action.patchFromState) {
+          const constructed: Record<string, unknown> =
+            patch && typeof patch === "object" && !Array.isArray(patch)
+              ? { ...(patch as Record<string, unknown>) }
+              : {};
+          let unauthorized = false;
+          for (const [key, stateKey] of Object.entries(action.patchFromState)) {
+            if (!ensureReadable(stateKey)) {
+              unauthorized = true;
+              break;
+            }
+            if (!setDottedPath(constructed, key, state[stateKey])) {
+              constructed[key] = state[stateKey];
+            }
+          }
+          if (unauthorized) break;
+          patch = constructed;
+        }
         const items = asArray(state[action.target]);
-        const idx = findItemIndex(items, action.index, action.id);
+        const idx = findItemIndex(items, index, id);
         if (idx >= 0 && idx < items.length) {
           const current = items[idx];
-          if (current && typeof current === "object" && typeof action.patch === "object") {
-            items[idx] = { ...current, ...action.patch };
+          if (current && typeof current === "object" && typeof patch === "object") {
+            items[idx] = { ...current, ...patch };
             state[action.target] = items;
             changedKeys.push(action.target);
           }
@@ -417,13 +544,18 @@ export function applyAction(
           errors.push(`Invalid registered action name: "${action.actionName ?? ""}"`);
           break;
         }
-        const input: Record<string, unknown> = { ...(action.input ?? {}) };
+        const input: Record<string, unknown> = structuredClone(action.input ?? {});
         let hasUnauthorized = false;
         for (const [key, stateKey] of Object.entries(action.inputFromState ?? {})) {
           if (!ensureReadable(stateKey)) {
             hasUnauthorized = true;
+            break;
           } else {
-            input[key] = state[stateKey];
+            if (!setDottedPath(input, key, state[stateKey])) {
+              errors.push(`Dangerous path segment or invalid format in inputFromState key "${key}"`);
+              hasUnauthorized = true;
+              break;
+            }
           }
         }
         if (hasUnauthorized) {
@@ -542,13 +674,18 @@ export async function applyActionsAsync(
         break;
       }
       let hasUnauthorized = false;
-      const input: Record<string, unknown> = { ...(action.input ?? {}) };
+      const input: Record<string, unknown> = structuredClone(action.input ?? {});
       for (const [key, stateKey] of Object.entries(action.inputFromState ?? {})) {
         if (!checkTargetReadable(stateKey, options)) {
           errors.push(`Field "${stateKey}" is outside the current tool scope`);
           hasUnauthorized = true;
+          break;
         } else {
-          input[key] = state[stateKey];
+          if (!setDottedPath(input, key, state[stateKey])) {
+            errors.push(`Dangerous path segment or invalid format in inputFromState key "${key}"`);
+            hasUnauthorized = true;
+            break;
+          }
         }
       }
       if (hasUnauthorized) break;

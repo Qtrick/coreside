@@ -50,8 +50,10 @@ describe("Journey 13 — wallpaper targeted update", () => {
       { timeout: 10_000, timeoutMsg: "Matrix preset not selected" },
     );
 
-    const slider = await $('input[type="range"][aria-valuemax="60"]');
+    const slider = await $('#wallpaper-transparency-slider');
     await slider.waitForExist({ timeout: 5_000 });
+    const maxVal = await slider.getAttribute("aria-valuemax");
+    expect(maxVal).toBe("100");
     await slider.click();
     await browser.execute((el) => {
       const input = el as HTMLInputElement;
@@ -65,6 +67,20 @@ describe("Journey 13 — wallpaper targeted update", () => {
       async () => (await slider.getAttribute("aria-valuenow")) === "40",
       { timeout: 8_000, timeoutMsg: "transparency did not commit to 40" },
     );
+
+    const compositingVars = await browser.execute(() => {
+      const style = getComputedStyle(document.documentElement);
+      return {
+        transparency: style.getPropertyValue("--interface-transparency").trim(),
+        panelAlpha: style.getPropertyValue("--core-panel-alpha").trim(),
+        sidebarAlpha: style.getPropertyValue("--core-sidebar-alpha").trim(),
+        contentOverlay: style.getPropertyValue("--core-content-overlay").trim(),
+      };
+    });
+    expect(compositingVars.transparency).toBe("40");
+    expect(Number(compositingVars.panelAlpha)).toBeLessThan(1.0);
+    expect(Number(compositingVars.panelAlpha)).toBeGreaterThan(0.0);
+    expect(compositingVars.contentOverlay).toContain("color-mix");
 
     const live = await $(".live-wallpaper");
     await live.waitForExist({ timeout: 10_000 });
@@ -224,6 +240,8 @@ describe("Journey 13 — wallpaper targeted update", () => {
       assertions: {
         matrixSelected: "passed",
         transparencyCommitted40: "passed",
+        transparencyScale0To100: "passed",
+        compositingVariablesUpdated: "passed",
         liveWallpaperPresent: "passed",
         canvasPresent: "passed",
         desktopPixelSampling: "passed",

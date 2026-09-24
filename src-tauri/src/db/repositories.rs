@@ -153,6 +153,16 @@ pub(crate) fn map_conversation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<
     })
 }
 
+pub fn conversation_exists(db: &Database, id: &str) -> bool {
+    db.conn()
+        .query_row(
+            "SELECT 1 FROM conversations WHERE id = ?1 LIMIT 1",
+            [id],
+            |_| Ok(()),
+        )
+        .is_ok()
+}
+
 pub fn create_conversation(
     db: &mut Database,
     workspace_id: &str,

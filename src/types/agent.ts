@@ -348,8 +348,8 @@ export const AppSettingsSchema = z.object({
   textSecondaryDark: z.string().optional().default("#a6afa3"),
   wallpaper: WallpaperConfigSchema.default(DEFAULT_WALLPAPER),
   wallpaperJson: z.string().optional().nullable(),
-  /** Added Settings → Wallpapers: how much wallpaper shows through panels (0–60). */
-  interfaceTransparency: z.number().min(0).max(60).optional().default(20),
+  /** Added Settings → Wallpapers: how much wallpaper shows through panels (0–100). */
+  interfaceTransparency: z.number().min(0).max(100).optional().default(35),
   /** Base Setting — Smart | ask | off native window expansion. */
   adaptiveWindowSizing: z
     .enum(["smart", "ask", "off"])
