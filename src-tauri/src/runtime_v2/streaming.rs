@@ -505,6 +505,8 @@ fn truncate(s: &str, n: usize) -> String {
         return s.to_string();
     }
     // Never slice mid–code-point: `&s[..n]` panics on multibyte UTF-8.
+    // `char_indices` yields start positions; `<= n` ensures the slice ends
+    // before any character that would push past the byte budget.
     let end = s
         .char_indices()
         .map(|(i, _)| i)

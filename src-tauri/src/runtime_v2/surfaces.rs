@@ -381,6 +381,11 @@ pub fn restore_surface(db: &mut Database, surface_id: &str) -> DbResult<SurfaceR
 ///
 /// Does **not** delete application manifests or shared application data.
 /// Linked tools are kept unless [`DeleteSurfaceOptions::delete_linked_tool`] is set.
+///
+/// # Safety
+/// All deletions must be wrapped in a single transaction by the caller.
+/// The primary callers (`apply_transaction_deferred`, undo path) already
+/// provide this via SAVEPOINT.
 pub fn delete_surface(
     db: &mut Database,
     surface_id: &str,

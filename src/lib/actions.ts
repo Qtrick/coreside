@@ -414,6 +414,15 @@ export function applyAction(
               break;
             }
             if (!setDottedPath(constructed, key, state[stateKey])) {
+              // Reject flat keys that failed setDottedPath (depth, length,
+              // or format limits). The key may be a dangerous segment that
+              // setDottedPath already blocked — a flat assign would bypass
+              // prototype-pollution guards.
+              if (!key || DANGEROUS_SEGMENTS.has(key) || !SEGMENT_PATTERN.test(key)) {
+                errors.push(`Dangerous or invalid key "${key}" in itemFromState`);
+                unauthorized = true;
+                break;
+              }
               constructed[key] = state[stateKey];
             }
           }
@@ -478,6 +487,15 @@ export function applyAction(
               break;
             }
             if (!setDottedPath(constructed, key, state[stateKey])) {
+              // Reject flat keys that failed setDottedPath (depth, length,
+              // or format limits). The key may be a dangerous segment that
+              // setDottedPath already blocked — a flat assign would bypass
+              // prototype-pollution guards.
+              if (!key || DANGEROUS_SEGMENTS.has(key) || !SEGMENT_PATTERN.test(key)) {
+                errors.push(`Dangerous or invalid key "${key}" in patchFromState`);
+                unauthorized = true;
+                break;
+              }
               constructed[key] = state[stateKey];
             }
           }

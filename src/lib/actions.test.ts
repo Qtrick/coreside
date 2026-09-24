@@ -899,6 +899,78 @@ describe("State-to-Object & CRUD mapping", () => {
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 
+  it("blocks prototype pollution via appendItem itemFromState fallback", async () => {
+    const { applyAction } = await import("@/lib/actions");
+    const originalConstructor = Object.prototype.constructor;
+
+    const action: ActionDefinition = {
+      type: "appendItem",
+      target: "items",
+      itemFromState: {
+        constructor: "secretValue",
+      },
+    };
+
+    const result = applyAction(action, {
+      state: { items: [], secretValue: "sensitive" },
+      toolId: "tool-1",
+      allowedTargets: new Set(["items", "secretValue"]),
+    });
+
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.some((e) => e.includes("Dangerous or invalid key"))).toBe(true);
+    // Ensure Object.prototype.constructor was NOT overwritten
+    expect(Object.prototype.constructor).toBe(originalConstructor);
+  });
+
+  it("blocks prototype pollution via updateItem patchFromState fallback", async () => {
+    const { applyAction } = await import("@/lib/actions");
+    const originalProto = ({} as Record<string, unknown>).__proto__;
+
+    const action: ActionDefinition = {
+      type: "updateItem",
+      target: "items",
+      id: "item-1",
+      patchFromState: {
+        constructor: "evilValue",
+      },
+    };
+
+    const result = applyAction(action, {
+      state: {
+        items: [{ id: "item-1", name: "test" }],
+        evilValue: "injected",
+      },
+      toolId: "tool-1",
+      allowedTargets: new Set(["items", "evilValue"]),
+    });
+
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.some((e) => e.includes("Dangerous or invalid key"))).toBe(true);
+    expect(({} as Record<string, unknown>).__proto__).toBe(originalProto);
+  });
+
+  it("blocks invalid segment syntax in itemFromState fallback", async () => {
+    const { applyAction } = await import("@/lib/actions");
+
+    const action: ActionDefinition = {
+      type: "appendItem",
+      target: "items",
+      itemFromState: {
+        "invalid key with spaces": "someValue",
+      },
+    };
+
+    const result = applyAction(action, {
+      state: { items: [], someValue: "data" },
+      toolId: "tool-1",
+      allowedTargets: new Set(["items", "someValue"]),
+    });
+
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.some((e) => e.includes("Dangerous or invalid key"))).toBe(true);
+  });
+
   it("supports appendItem with itemFromState", async () => {
     const { applyAction } = await import("@/lib/actions");
     const action: ActionDefinition = {
