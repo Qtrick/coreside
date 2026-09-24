@@ -916,13 +916,19 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
             return;
         }
         if state.active_requests.lock().contains_key(&conversation_id)
-            || state.deleted_conversations.lock().contains(&conversation_id)
+            || state
+                .deleted_conversations
+                .lock()
+                .contains(&conversation_id)
         {
             return;
         }
         let item = {
             let mut db = state.db.lock();
-            if state.deleted_conversations.lock().contains(&conversation_id)
+            if state
+                .deleted_conversations
+                .lock()
+                .contains(&conversation_id)
                 || !db::conversation_exists(&db, &conversation_id)
             {
                 return;
@@ -938,7 +944,11 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
         let Some(item) = item else {
             return;
         };
-        if state.deleted_conversations.lock().contains(&conversation_id) {
+        if state
+            .deleted_conversations
+            .lock()
+            .contains(&conversation_id)
+        {
             return;
         }
         crate::commands::emit_queue_changed(
@@ -1189,8 +1199,15 @@ async fn send_message_inner(
     on_event: Option<tauri::ipc::Channel<AgentTurnEvent>>,
 ) -> Result<SendMessageResult, CommandError> {
     state.require_profile()?;
-    if state.deleted_conversations.lock().contains(&conversation_id) {
-        return Err(CommandError::new("not_found", "Conversation has been deleted"));
+    if state
+        .deleted_conversations
+        .lock()
+        .contains(&conversation_id)
+    {
+        return Err(CommandError::new(
+            "not_found",
+            "Conversation has been deleted",
+        ));
     }
     let mut content = content.trim().to_string();
     let attachments = attachments.unwrap_or_default();
@@ -1238,10 +1255,16 @@ async fn send_message_inner(
         let attachment_ids: Vec<String> = attachments.iter().map(|a| a.id.clone()).collect();
         crate::commands::attachment_cmds::assert_staged_attachments_ready(state, &attachment_ids)?;
         let mut db = state.db.lock();
-        if state.deleted_conversations.lock().contains(&conversation_id)
+        if state
+            .deleted_conversations
+            .lock()
+            .contains(&conversation_id)
             || !db::conversation_exists(&db, &conversation_id)
         {
-            return Err(CommandError::new("not_found", "Conversation has been deleted"));
+            return Err(CommandError::new(
+                "not_found",
+                "Conversation has been deleted",
+            ));
         }
         let item = crate::runtime_v2::enqueue(
             &mut db,
@@ -1348,10 +1371,16 @@ async fn send_message_inner(
         crate::commands::attachment_cmds::assert_staged_attachments_ready(state, &attachment_ids)?;
 
         let mut db = state.db.lock();
-        if state.deleted_conversations.lock().contains(&conversation_id)
+        if state
+            .deleted_conversations
+            .lock()
+            .contains(&conversation_id)
             || !db::conversation_exists(&db, &conversation_id)
         {
-            return Err(CommandError::new("not_found", "Conversation has been deleted"));
+            return Err(CommandError::new(
+                "not_found",
+                "Conversation has been deleted",
+            ));
         }
         let conv = db::get_conversation(&db, &conversation_id)?;
         let project_id = conv.project_id.clone();
@@ -1460,9 +1489,7 @@ async fn send_message_inner(
                 &user_message.id,
                 &new_claim_ids,
             );
-            if let Err(cleanup_err) =
-                delete_orphaned_user_message(&mut db, &user_message.id)
-            {
+            if let Err(cleanup_err) = delete_orphaned_user_message(&mut db, &user_message.id) {
                 tracing::warn!(
                     message_id = %user_message.id,
                     error = %cleanup_err,
@@ -1810,9 +1837,7 @@ async fn send_message_inner(
             &user_message.id,
             &attachment_ids,
         );
-        if let Err(cleanup_err) =
-            delete_orphaned_user_message(&mut db, &user_message.id)
-        {
+        if let Err(cleanup_err) = delete_orphaned_user_message(&mut db, &user_message.id) {
             tracing::warn!(
                 message_id = %user_message.id,
                 error = %cleanup_err,
@@ -1986,7 +2011,10 @@ async fn send_message_inner(
                     // and carries operation frames; structured-JSON streaming deltas
                     // (e.g. Gemini responseMimeType application/json) must never
                     // enter the frame parser.
-                    if progressive_ops_enabled && (text.contains(crate::runtime_v2::PROGRESSIVE_OPS_V) || text.trim_start().starts_with('{')) {
+                    if progressive_ops_enabled
+                        && (text.contains(crate::runtime_v2::PROGRESSIVE_OPS_V)
+                            || text.trim_start().starts_with('{'))
+                    {
                         emit_progressive_op_previews(
                             &app_for_stream,
                             state,
@@ -2072,9 +2100,16 @@ async fn send_message_inner(
         }
     };
 
-    if state.deleted_conversations.lock().contains(&conversation_id) {
+    if state
+        .deleted_conversations
+        .lock()
+        .contains(&conversation_id)
+    {
         state.take_request(&request_key);
-        return Err(CommandError::new("not_found", "Conversation has been deleted"));
+        return Err(CommandError::new(
+            "not_found",
+            "Conversation has been deleted",
+        ));
     }
 
     record_action(
@@ -2294,7 +2329,10 @@ async fn send_message_inner(
                         );
                         // Same NDJSON-only gating as the initial attempt: provider
                         // text deltas are not operation frames unless ProgressiveNdjson is negotiated.
-                        if progressive_ops_enabled && (text.contains(crate::runtime_v2::PROGRESSIVE_OPS_V) || text.trim_start().starts_with('{')) {
+                        if progressive_ops_enabled
+                            && (text.contains(crate::runtime_v2::PROGRESSIVE_OPS_V)
+                                || text.trim_start().starts_with('{'))
+                        {
                             emit_progressive_op_previews(
                                 &app_for_stream,
                                 state,
@@ -2581,7 +2619,11 @@ async fn send_message_inner(
     // Runtime V2: apply multi-surface operations when present
     let mut v2_apply: Option<serde_json::Value> = None;
     let has_v2_schema = parsed.payload.schema_version == "2";
-    let has_operations = parsed.payload.operations.as_ref().map_or(false, |o| !o.is_empty());
+    let has_operations = parsed
+        .payload
+        .operations
+        .as_ref()
+        .map_or(false, |o| !o.is_empty());
     let has_tool_change = parsed.payload.tool_change.is_some();
 
     if has_v2_schema || has_operations || has_tool_change {
@@ -2634,9 +2676,9 @@ async fn send_message_inner(
                         }
                         Ok(durable) => {
                             if let Some(final_ops) = operations_from_payload.as_ref() {
-                                if let Err(err) =
-                                    crate::runtime_v2::reconcile_final_operations(&durable, final_ops)
-                                {
+                                if let Err(err) = crate::runtime_v2::reconcile_final_operations(
+                                    &durable, final_ops,
+                                ) {
                                     tracing::warn!(
                                         conversation_id = %conversation_id,
                                         error = %err,
@@ -2719,20 +2761,19 @@ async fn send_message_inner(
             if !operations.is_empty() {
                 // P0 final gate: reject internal/reserved ops that should never reach the kernel.
                 // Schedule the normalized operations that passed validation — never the pre-image.
-                let operations = match crate::runtime_v2::normalize_and_validate_model_operations(
-                    &operations,
-                ) {
-                    Ok(ops) => ops,
-                    Err(err) => {
-                        tracing::warn!(
-                            conversation_id = %conversation_id,
-                            error = %err,
-                            "operations failed model allowlist at final gate — dropping"
-                        );
-                        preview_txn.mark_interrupted();
-                        Vec::new()
-                    }
-                };
+                let operations =
+                    match crate::runtime_v2::normalize_and_validate_model_operations(&operations) {
+                        Ok(ops) => ops,
+                        Err(err) => {
+                            tracing::warn!(
+                                conversation_id = %conversation_id,
+                                error = %err,
+                                "operations failed model allowlist at final gate — dropping"
+                            );
+                            preview_txn.mark_interrupted();
+                            Vec::new()
+                        }
+                    };
                 if operations.is_empty() {
                     // Dropped at the final gate; fall through without scheduling.
                 } else if !state
@@ -2747,7 +2788,10 @@ async fn send_message_inner(
                     let silent = parsed.payload.silent.unwrap_or(false);
                     let schedule_result = {
                         let mut db = state.db.lock();
-                        if state.deleted_conversations.lock().contains(&conversation_id)
+                        if state
+                            .deleted_conversations
+                            .lock()
+                            .contains(&conversation_id)
                             || !db::conversation_exists(&db, &conversation_id)
                         {
                             tracing::info!(
@@ -2959,9 +3003,16 @@ async fn send_message_inner(
         metadata["searchResults"] = search_meta.search_results.clone();
     }
 
-    if state.deleted_conversations.lock().contains(&conversation_id) {
+    if state
+        .deleted_conversations
+        .lock()
+        .contains(&conversation_id)
+    {
         tracing::info!(conversation_id = %conversation_id, "conversation deleted during turn, aborting message persistence");
-        return Err(CommandError::new("not_found", "Conversation has been deleted"));
+        return Err(CommandError::new(
+            "not_found",
+            "Conversation has been deleted",
+        ));
     }
 
     let assistant_message = {
@@ -2970,14 +3021,20 @@ async fn send_message_inner(
             .execute_batch("BEGIN IMMEDIATE")
             .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
         let commit = (|| -> Result<crate::db::Message, CommandError> {
-            if state.deleted_conversations.lock().contains(&conversation_id)
+            if state
+                .deleted_conversations
+                .lock()
+                .contains(&conversation_id)
                 || !db::conversation_exists(&db, &conversation_id)
             {
                 tracing::info!(
                     conversation_id = %conversation_id,
                     "conversation deleted during turn, aborting assistant commit under write lock"
                 );
-                return Err(CommandError::new("not_found", "Conversation has been deleted"));
+                return Err(CommandError::new(
+                    "not_found",
+                    "Conversation has been deleted",
+                ));
             }
             if let Some(events) = action_log.as_ref() {
                 for (i, event) in events.iter().enumerate() {

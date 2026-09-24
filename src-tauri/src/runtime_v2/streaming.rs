@@ -16,9 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::limits::{MAX_DEFINITION_JSON_BYTES, MAX_OPERATIONS_PER_TURN, MAX_PATCH_QUEUE_BYTES};
-use super::operations::{
-    normalize_and_validate_model_operations, AgentResponseV2, AppOperation,
-};
+use super::operations::{normalize_and_validate_model_operations, AgentResponseV2, AppOperation};
 
 /// Max bytes for one NDJSON frame (aligned with surface definition ceiling).
 pub const MAX_FRAME_BYTES: usize = MAX_DEFINITION_JSON_BYTES;
@@ -401,15 +399,13 @@ impl NdjsonFrameParser {
         if let Ok(op) = serde_json::from_value::<AppOperation>(value.clone()) {
             // P0 security: enforce model allowlist — legacy path must not bypass it.
             // Record the normalized operation that passed validation, not the pre-image.
-            let normalized =
-                normalize_and_validate_model_operations(std::slice::from_ref(&op)).map_err(
-                    |e| {
-                        stream_err(
-                            StreamParseErrorKind::Unrecognized,
-                            format!("model operation rejected: {e}"),
-                        )
-                    },
-                )?;
+            let normalized = normalize_and_validate_model_operations(std::slice::from_ref(&op))
+                .map_err(|e| {
+                    stream_err(
+                        StreamParseErrorKind::Unrecognized,
+                        format!("model operation rejected: {e}"),
+                    )
+                })?;
             let Some(op) = normalized.into_iter().next() else {
                 return Err(stream_err(
                     StreamParseErrorKind::Unrecognized,
@@ -856,7 +852,10 @@ mod tests {
             + "\n";
         let events = p.push_legacy_compat(&bad_batch);
         assert_eq!(events.len(), 1);
-        assert!(events[0].is_err(), "batch with internal op must be rejected");
+        assert!(
+            events[0].is_err(),
+            "batch with internal op must be rejected"
+        );
         // Neither operation must be recorded (atomic rejection).
         assert!(
             p.completed_operations().is_empty(),
@@ -883,7 +882,10 @@ mod tests {
             + "\n";
         let events = p.push_legacy_compat(&bad_batch);
         assert_eq!(events.len(), 1);
-        assert!(events[0].is_err(), "batch with reserved op must be rejected");
+        assert!(
+            events[0].is_err(),
+            "batch with reserved op must be rejected"
+        );
         assert!(p.completed_operations().is_empty());
     }
 
@@ -905,4 +907,3 @@ mod tests {
         assert_eq!(p.completed_operations().len(), 1);
     }
 }
-

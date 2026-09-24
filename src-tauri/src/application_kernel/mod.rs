@@ -216,9 +216,8 @@ pub fn apply_change(
     // Recovery Mode: block agent UI mutations while surfaces are disabled.
     // Fail-closed: if recovery state cannot be read, block agent mutations
     // rather than silently allowing them through.
-    let rec = recovery::get_recovery_state(db).map_err(|e| {
-        KernelError::Validation(format!("unable to read recovery state: {e}"))
-    })?;
+    let rec = recovery::get_recovery_state(db)
+        .map_err(|e| KernelError::Validation(format!("unable to read recovery state: {e}")))?;
     if (rec.recovery_mode || rec.disable_user_surfaces) && req.source_type == "agent" {
         let touches_ui = req.operations.iter().any(|op| {
             let t = op.op_type.as_str();
@@ -257,9 +256,15 @@ pub fn apply_change(
         let mut base_revisions = HashMap::new();
         let mut newly_created_surfaces = std::collections::HashSet::new();
         for op in &req.operations {
-            if matches!(op.op_type.as_str(), "surface.create" | "chat.inline_surface_create") {
+            if matches!(
+                op.op_type.as_str(),
+                "surface.create" | "chat.inline_surface_create"
+            ) {
                 if let Some(sid) = op.target.surface_id.clone().or_else(|| {
-                    op.target.tool_id.as_deref().map(crate::runtime_v2::surfaces::surface_id_for_tool)
+                    op.target
+                        .tool_id
+                        .as_deref()
+                        .map(crate::runtime_v2::surfaces::surface_id_for_tool)
                 }) {
                     newly_created_surfaces.insert(sid);
                 }
@@ -267,11 +272,13 @@ pub fn apply_change(
                     newly_created_surfaces.insert(sid.to_string());
                 }
                 if let Some(tid) = op.payload.get("toolId").and_then(|v| v.as_str()) {
-                    newly_created_surfaces.insert(crate::runtime_v2::surfaces::surface_id_for_tool(tid));
+                    newly_created_surfaces
+                        .insert(crate::runtime_v2::surfaces::surface_id_for_tool(tid));
                 }
                 if let Some(tool) = op.payload.get("tool").and_then(|t| t.as_object()) {
                     if let Some(tid) = tool.get("id").and_then(|id| id.as_str()) {
-                        newly_created_surfaces.insert(crate::runtime_v2::surfaces::surface_id_for_tool(tid));
+                        newly_created_surfaces
+                            .insert(crate::runtime_v2::surfaces::surface_id_for_tool(tid));
                     }
                 }
             }
@@ -279,7 +286,10 @@ pub fn apply_change(
 
         for op in &req.operations {
             let sid_opt = op.target.surface_id.clone().or_else(|| {
-                op.target.tool_id.as_deref().map(crate::runtime_v2::surfaces::surface_id_for_tool)
+                op.target
+                    .tool_id
+                    .as_deref()
+                    .map(crate::runtime_v2::surfaces::surface_id_for_tool)
             });
             if let Some(sid) = sid_opt {
                 if newly_created_surfaces.contains(&sid) {
@@ -287,16 +297,19 @@ pub fn apply_change(
                     continue;
                 }
                 if !base_revisions.contains_key(&sid) {
-                    let rev: i64 = db.conn().query_row(
-                        "SELECT current_revision FROM surfaces WHERE id = ?",
-                        rusqlite::params![sid],
-                        |r| r.get(0),
-                    ).map_err(|e| match e {
-                        rusqlite::Error::QueryReturnedNoRows => {
-                            KernelError::Validation(format!("Target surface {sid} not found"))
-                        }
-                        other => KernelError::Db(crate::db::DbError::Sqlite(other)),
-                    })?;
+                    let rev: i64 = db
+                        .conn()
+                        .query_row(
+                            "SELECT current_revision FROM surfaces WHERE id = ?",
+                            rusqlite::params![sid],
+                            |r| r.get(0),
+                        )
+                        .map_err(|e| match e {
+                            rusqlite::Error::QueryReturnedNoRows => {
+                                KernelError::Validation(format!("Target surface {sid} not found"))
+                            }
+                            other => KernelError::Db(crate::db::DbError::Sqlite(other)),
+                        })?;
                     base_revisions.insert(sid, rev);
                 }
             }
@@ -315,29 +328,31 @@ pub fn apply_change(
         let ops_json = serde_json::to_string(&req.operations).unwrap_or_else(|_| "[]".into());
         let base_revs_json = serde_json::to_string(&base_revisions).unwrap_or_else(|_| "{}".into());
 
-        db.conn().execute(
-            "INSERT INTO kernel_change_proposals (
+        db.conn()
+            .execute(
+                "INSERT INTO kernel_change_proposals (
                 id, conversation_id, turn_id, summary, risk, impact_summary,
                 exact_operations_json, exact_operations_hash, base_revisions_json, source_type,
                 model, provider, status, created_at, expires_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
-            rusqlite::params![
-                proposal_id,
-                req.conversation_id,
-                req.turn_id,
-                req.summary,
-                risk,
-                impact,
-                ops_json,
-                operations_hash,
-                base_revs_json,
-                req.source_type,
-                req.model,
-                req.provider,
-                now,
-                expires_at,
-            ],
-        ).map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
+                rusqlite::params![
+                    proposal_id,
+                    req.conversation_id,
+                    req.turn_id,
+                    req.summary,
+                    risk,
+                    impact,
+                    ops_json,
+                    operations_hash,
+                    base_revs_json,
+                    req.source_type,
+                    req.model,
+                    req.provider,
+                    now,
+                    expires_at,
+                ],
+            )
+            .map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
 
         return Ok(ChangeResult {
             apply: None,
@@ -607,7 +622,10 @@ fn parse_proposal_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<KernelChangePro
     })
 }
 
-pub fn get_proposal(db: &Database, proposal_id: &str) -> Result<KernelChangeProposalRecord, KernelError> {
+pub fn get_proposal(
+    db: &Database,
+    proposal_id: &str,
+) -> Result<KernelChangeProposalRecord, KernelError> {
     db.conn()
         .query_row(
             "SELECT id, conversation_id, turn_id, summary, risk, impact_summary, \
@@ -634,14 +652,18 @@ pub fn list_pending_proposals(
                           exact_operations_json, exact_operations_hash, base_revisions_json, \
                           source_type, model, provider, status, error, created_at, expires_at, \
                           decided_at, applied_at, transaction_id \
-                   FROM kernel_change_proposals WHERE status = 'pending'".to_string();
+                   FROM kernel_change_proposals WHERE status = 'pending'"
+        .to_string();
     if conversation_id.is_some() {
         sql.push_str(" AND conversation_id = ? ORDER BY created_at DESC");
     } else {
         sql.push_str(" ORDER BY created_at DESC");
     }
 
-    let mut stmt = db.conn().prepare(&sql).map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
+    let mut stmt = db
+        .conn()
+        .prepare(&sql)
+        .map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
     let rows = if let Some(cid) = conversation_id {
         stmt.query_map(rusqlite::params![cid], parse_proposal_row)
     } else {
@@ -691,7 +713,9 @@ pub fn decide_proposal(
             rusqlite::params![now.to_rfc3339(), proposal_id],
         ).map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
         if updated == 0 {
-            return Err(KernelError::Validation("Proposal was already claimed or decided concurrently".into()));
+            return Err(KernelError::Validation(
+                "Proposal was already claimed or decided concurrently".into(),
+            ));
         }
         return Ok(ChangeResult {
             apply: None,
@@ -726,7 +750,9 @@ pub fn decide_proposal(
         if let Err(e) = db.conn().execute_batch("ROLLBACK") {
             tracing::error!(error = %e, "ROLLBACK failed after proposal already claimed");
         }
-        return Err(KernelError::Validation("Proposal was already claimed or decided concurrently".into()));
+        return Err(KernelError::Validation(
+            "Proposal was already claimed or decided concurrently".into(),
+        ));
     }
 
     // 2. Check base revisions against surfaces using `current_revision` column!
@@ -753,7 +779,8 @@ pub fn decide_proposal(
                 if *expected_rev == 0 {
                     // Valid: this surface is newly created by this proposal and does not exist in DB yet.
                 } else {
-                    let stale_msg = format!("Proposal is stale: target surface {sid} no longer exists");
+                    let stale_msg =
+                        format!("Proposal is stale: target surface {sid} no longer exists");
                     let _ = db.conn().execute(
                         "UPDATE kernel_change_proposals SET status = 'stale', error = ? WHERE id = ?",
                         rusqlite::params![stale_msg, proposal_id],
@@ -785,7 +812,9 @@ pub fn decide_proposal(
             rusqlite::params![proposal_id],
         );
         let _ = db.conn().execute_batch("COMMIT");
-        return Err(KernelError::Validation("Proposal operations hash mismatch (tampered payload)".into()));
+        return Err(KernelError::Validation(
+            "Proposal operations hash mismatch (tampered payload)".into(),
+        ));
     }
 
     // 4. Apply frozen operations
@@ -1348,7 +1377,9 @@ mod tests {
         )
         .unwrap();
 
-        let proposal_id = change_res.proposal_id.expect("expected proposal for strong change");
+        let proposal_id = change_res
+            .proposal_id
+            .expect("expected proposal for strong change");
         let proposal = get_proposal(&db, &proposal_id).unwrap();
         assert_eq!(proposal.status, "pending");
 
@@ -1473,7 +1504,8 @@ mod tests {
     #[test]
     fn test_live_task_manager_proposal_approval_and_application() {
         let mut db = test_db();
-        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Task Manager Conv", None).unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Task Manager Conv", None).unwrap();
 
         let raw_json = r#"[{"id":"operation-1","type":"surface.create","target":{},"payload":{"components":[{"id":"header","props":{"text":"Task Manager"},"type":"heading"},{"id":"task-filter","props":{"label":"Search Tasks","valueKey":"searchQuery"},"type":"textInput"},{"id":"task-priority","props":{"label":"Filter by Priority","options":[{"label":"All","value":""},{"label":"High","value":"high"},{"label":"Medium","value":"medium"},{"label":"Low","value":"low"}],"valueKey":"priorityFilter"},"type":"select"},{"id":"task-status","props":{"label":"Filter by Status","options":[{"label":"All","value":""},{"label":"Completed","value":"completed"},{"label":"Pending","value":"pending"}],"valueKey":"statusFilter"},"type":"select"},{"id":"task-list","props":{"columns":[{"accessor":"title","header":"Task"},{"accessor":"priority","header":"Priority"},{"accessor":"status","header":"Status"},{"accessor":"actions","header":"Actions"}],"dataKey":"tasks","rowsKey":"tasks"},"type":"dataTable"},{"id":"add-task-container","props":{"actions":[{"target":"newTaskTitle","type":"setValue","value":""},{"target":"newTaskPriority","type":"setValue","value":"medium"},{"target":"newTaskStatus","type":"setValue","value":"pending"}],"label":"Add New Task"},"type":"container"},{"id":"newTaskTitle","props":{"label":"Task Title","valueKey":"newTaskTitle"},"type":"textInput"},{"id":"newTaskPriority","props":{"label":"Priority","options":[{"label":"High","value":"high"},{"label":"Medium","value":"medium"},{"label":"Low","value":"low"}],"valueKey":"newTaskPriority"},"type":"select"},{"id":"newTaskStatus","props":{"label":"Status","options":[{"label":"Pending","value":"pending"},{"label":"Completed","value":"completed"}],"valueKey":"newTaskStatus"},"type":"select"},{"id":"add-task-button","props":{"actions":[{"item":{"priority":"newTaskPriority","status":"newTaskStatus","title":"newTaskTitle"},"target":"tasks","type":"appendItem"},{"target":"newTaskTitle","type":"setValue","value":""},{"target":"newTaskPriority","type":"setValue","value":"medium"},{"target":"newTaskStatus","type":"setValue","value":"pending"}],"label":"Add Task"},"type":"button"},{"id":"delete-task-button","props":{"actions":[{"id":"selectedTaskId","target":"tasks","type":"removeItem"}],"label":"Delete Task"},"type":"button"},{"id":"edit-task-button","props":{"actions":[{"id":"selectedTaskId","patch":{"priority":"newTaskPriority","status":"newTaskStatus","title":"newTaskTitle"},"target":"tasks","type":"updateItem"}],"label":"Edit Task"},"type":"button"}],"description":"A tool for managing tasks with persistent storage, priority, status, and various functionalities.","id":"task-manager","layout":{"columns":2,"density":"compact","type":"dashboard"},"name":"Task Manager"}}]"#;
 
@@ -1495,11 +1527,17 @@ mod tests {
         )
         .expect("apply_change must succeed and create proposal");
 
-        let proposal_id = change_res.proposal_id.expect("must produce proposal for agent surface creation");
+        let proposal_id = change_res
+            .proposal_id
+            .expect("must produce proposal for agent surface creation");
         let apply_res = decide_proposal(&mut db, None, &proposal_id, true)
             .expect("decide_proposal approve must succeed without conflicts");
 
-        assert!(apply_res.is_committed(), "proposal application must be committed, conflicts: {:?}", apply_res.conflicts);
+        assert!(
+            apply_res.is_committed(),
+            "proposal application must be committed, conflicts: {:?}",
+            apply_res.conflicts
+        );
         assert!(apply_res.conflicts.is_empty(), "conflicts must be empty");
 
         let prop = get_proposal(&db, &proposal_id).unwrap();

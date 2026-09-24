@@ -97,8 +97,7 @@ pub fn parse_agent_response(raw: &str) -> Result<ParsedAgentResponse, String> {
                         .unwrap_or(false);
                     if has_operations && payload.assistant_message.trim().is_empty() {
                         warnings.push(format!("Recovered operations with empty message: {verr}"));
-                        payload.assistant_message =
-                            "Processing your request...".to_string();
+                        payload.assistant_message = "Processing your request...".to_string();
                         return Ok(ParsedAgentResponse {
                             payload,
                             recovered: true,

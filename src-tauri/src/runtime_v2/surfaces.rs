@@ -74,7 +74,9 @@ pub fn upsert_surface_from_tool(
 
     let mut doc = super::software_document::SoftwareDocument::from_tool_definition(&def);
     if let Some((_, _, _, existing_definition_json)) = existing.as_ref() {
-        if let Ok(existing_doc) = super::software_document::SoftwareDocument::from_value(&serde_json::from_str(existing_definition_json)?) {
+        if let Ok(existing_doc) = super::software_document::SoftwareDocument::from_value(
+            &serde_json::from_str(existing_definition_json)?,
+        ) {
             // Preserve trusted contracts, capability packs, design tokens, and custom section metadata from existing_doc
             doc.state_contracts = existing_doc.state_contracts.clone();
             doc.action_contracts = existing_doc.action_contracts.clone();
@@ -115,9 +117,7 @@ pub fn upsert_surface_from_tool(
                 normalize_capability_packs(&persisted).map_err(DbError::Invalid)?
             }
         }
-        None => {
-            required_packs_for_definition(&persisted_def_value).map_err(DbError::Invalid)?
-        }
+        None => required_packs_for_definition(&persisted_def_value).map_err(DbError::Invalid)?,
     };
     validate_definition_components_for_packs(&persisted_def_value, &packs)
         .map_err(DbError::Invalid)?;
@@ -180,14 +180,15 @@ pub fn create_inline_surface(
             obj.insert("name".into(), json!(name));
         }
     }
-    let mut doc = if definition.get("sections").is_some() || definition.get("schemaVersion").is_some() {
-        super::software_document::SoftwareDocument::from_value(definition)
-            .map_err(|e| DbError::Invalid(format!("malformed software document: {e}")))?
-    } else {
-        let tool_def: ToolDefinition = serde_json::from_value(def_obj)
-            .map_err(|e| DbError::Invalid(format!("malformed surface definition: {e}")))?;
-        super::software_document::SoftwareDocument::from_tool_definition(&tool_def)
-    };
+    let mut doc =
+        if definition.get("sections").is_some() || definition.get("schemaVersion").is_some() {
+            super::software_document::SoftwareDocument::from_value(definition)
+                .map_err(|e| DbError::Invalid(format!("malformed software document: {e}")))?
+        } else {
+            let tool_def: ToolDefinition = serde_json::from_value(def_obj)
+                .map_err(|e| DbError::Invalid(format!("malformed surface definition: {e}")))?;
+            super::software_document::SoftwareDocument::from_tool_definition(&tool_def)
+        };
     doc.sync_components();
     if doc.title.is_empty() && !name.is_empty() {
         doc.title = name.to_string();
@@ -274,11 +275,20 @@ pub fn get_surface(db: &Database, id: &str) -> DbResult<SurfaceRecord> {
                 let def_json: String = row.get(11)?;
                 let packs_json: String = row.get(15)?;
                 let definition: Value = serde_json::from_str(&def_json).map_err(|e| {
-                    rusqlite::Error::FromSqlConversionFailure(11, rusqlite::types::Type::Text, Box::new(e))
+                    rusqlite::Error::FromSqlConversionFailure(
+                        11,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
                 })?;
-                let capability_packs: Vec<String> = serde_json::from_str(&packs_json).map_err(|e| {
-                    rusqlite::Error::FromSqlConversionFailure(15, rusqlite::types::Type::Text, Box::new(e))
-                })?;
+                let capability_packs: Vec<String> =
+                    serde_json::from_str(&packs_json).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            15,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })?;
                 Ok(SurfaceRecord {
                     id: row.get(0)?,
                     instance_id: row.get(1)?,
@@ -481,24 +491,26 @@ pub fn update_surface_definition(
             if let Ok(doc) = super::software_document::SoftwareDocument::from_value(definition) {
                 doc.to_tool_definition()
             } else {
-                serde_json::from_value::<ToolDefinition>(definition.clone())
-                    .unwrap_or_else(|_| ToolDefinition {
+                serde_json::from_value::<ToolDefinition>(definition.clone()).unwrap_or_else(|_| {
+                    ToolDefinition {
                         id: tool_id.clone(),
                         name: current.name.clone(),
                         description: String::new(),
                         layout: serde_json::json!({ "type": "single-column" }),
                         components: Vec::new(),
-                    })
+                    }
+                })
             }
         } else {
-            serde_json::from_value::<ToolDefinition>(definition.clone())
-                .unwrap_or_else(|_| ToolDefinition {
+            serde_json::from_value::<ToolDefinition>(definition.clone()).unwrap_or_else(|_| {
+                ToolDefinition {
                     id: tool_id.clone(),
                     name: current.name.clone(),
                     description: String::new(),
                     layout: serde_json::json!({ "type": "single-column" }),
                     components: Vec::new(),
-                })
+                }
+            })
         };
         let layout = layout_type_string(&tool.layout);
         let tool_def_json = serde_json::to_string(&tool)?;
@@ -584,7 +596,11 @@ pub fn get_surface_state_with_revision(db: &Database, surface_id: &str) -> DbRes
             let s: String = row.get(0)?;
             let rev: i64 = row.get(1)?;
             let val = serde_json::from_str(&s).map_err(|e| {
-                rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
             })?;
             Ok((val, rev))
         },
@@ -628,7 +644,9 @@ pub fn save_surface_state_occ(
     expected_revision: i64,
 ) -> DbResult<i64> {
     if !state.is_object() {
-        return Err(DbError::Invalid("surface state must be a JSON object".into()));
+        return Err(DbError::Invalid(
+            "surface state must be a JSON object".into(),
+        ));
     }
     let _: String = db
         .conn()
@@ -693,7 +711,9 @@ pub fn save_surface_state_user_cas(
     patch_or_state: &Value,
 ) -> DbResult<(Value, i64)> {
     if !patch_or_state.is_object() {
-        return Err(DbError::Invalid("surface state must be a JSON object".into()));
+        return Err(DbError::Invalid(
+            "surface state must be a JSON object".into(),
+        ));
     }
     let surface = get_surface(db, surface_id)?;
     let (mut current_state, current_rev) = get_surface_state_with_revision(db, surface_id)?;

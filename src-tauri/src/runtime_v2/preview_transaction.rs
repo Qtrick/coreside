@@ -348,14 +348,17 @@ impl PreviewTransaction {
             return Err("inline surface update missing definition".into());
         }
 
-        let is_structured = model.definition.get("sections").is_some() || op.op_type.starts_with("surface.");
+        let is_structured =
+            model.definition.get("sections").is_some() || op.op_type.starts_with("surface.");
         if is_structured {
             let mut doc = if model.definition.get("sections").is_some() {
                 super::software_document::SoftwareDocument::from_value(&model.definition)
                     .map_err(|e| format!("invalid software document in preview: {e}"))?
             } else {
-                let tool_def: crate::ai::ToolDefinition = serde_json::from_value(model.definition.clone())
-                    .map_err(|e| format!("cannot convert definition to software document: {e}"))?;
+                let tool_def: crate::ai::ToolDefinition =
+                    serde_json::from_value(model.definition.clone()).map_err(|e| {
+                        format!("cannot convert definition to software document: {e}")
+                    })?;
                 super::software_document::SoftwareDocument::from_tool_definition(&tool_def)
             };
 
@@ -696,7 +699,8 @@ fn accept_and_paint(
                 }];
             };
             if !normalized.is_empty() {
-                let err = "model operation rejected: unexpected multi-operation expansion".to_string();
+                let err =
+                    "model operation rejected: unexpected multi-operation expansion".to_string();
                 preview.reject(original_id.clone(), err.clone());
                 return vec![PreviewOpEvent {
                     operation_id: original_id,

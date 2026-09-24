@@ -57,6 +57,7 @@ import type {
 } from "@/types/project";
 import type { SurfaceDraftConflict } from "@/types/runtime-v2";
 import { parseWallpaperJson } from "@/types/wallpaper";
+import { surfaceIdForTool } from "@/lib/surface-ops";
 import {
   applyTextDelta,
   createTurnLiveState,
@@ -257,7 +258,7 @@ type AppStore = {
 
   refreshTools: () => Promise<void>;
   selectTool: (id: string | null) => Promise<void>;
-  closeToolCanvas: () => void;
+  closeToolCanvas: () => Promise<void>;
   openToolWindow: () => Promise<void>;
   undoTool: () => Promise<void>;
   updateToolState: (state: ToolState, persist?: boolean) => Promise<void>;
@@ -1927,7 +1928,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
   selectTool: async (id) => {
     const prevToolId = get().activeToolId;
     if (prevToolId && prevToolId !== id) {
-      void persistenceScheduler.flush(prevToolId, (toolId, s) => api.saveToolState(toolId, s));
+      await persistenceScheduler.flush(prevToolId, async (toolId, s) => {
+        await api.saveToolState(toolId, s);
+        const sid = surfaceIdForTool(toolId);
+        await api.saveSurfaceState(sid, s).catch(() => undefined);
+      });
     }
     if (!id) {
       set({ activeToolId: null, activeTool: null, toolState: {} });
@@ -1941,24 +1946,34 @@ export const useAppStore = create<AppStore>((set, get) => ({
       view: { kind: "chat", conversationId: conversationId ?? null },
       activeToolId: id,
     });
-    const [tool, state] = await Promise.all([
+    const sid = surfaceIdForTool(id);
+    const [tool, state, surfaceStateWithRev] = await Promise.all([
       api.getTool(id),
       api.getToolState(id),
+      api.getSurfaceStateWithRevision(sid).catch(() => null),
     ]);
     // Selecting another tool, or closing the canvas, wins over a late load.
     if (get().activeToolId !== id) return;
-    persistenceScheduler.initToolState(id, state ?? {});
+    const mergedState: ToolState = {
+      ...(state ?? {}),
+      ...(surfaceStateWithRev?.state ?? {}),
+    };
+    persistenceScheduler.initToolState(id, mergedState);
     set({
       activeTool: tool,
-      toolState: state ?? {},
+      toolState: mergedState,
     });
     void get().maybeExpandForTool(id);
   },
 
-  closeToolCanvas: () => {
+  closeToolCanvas: async () => {
     const prevToolId = get().activeToolId;
     if (prevToolId) {
-      void persistenceScheduler.flush(prevToolId, (toolId, s) => api.saveToolState(toolId, s));
+      await persistenceScheduler.flush(prevToolId, async (toolId, s) => {
+        await api.saveToolState(toolId, s);
+        const sid = surfaceIdForTool(toolId);
+        await api.saveSurfaceState(sid, s).catch(() => undefined);
+      });
     }
     const conversationId = get().activeConversationId;
     if (conversationId) {
@@ -1992,7 +2007,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       await persistenceScheduler.schedule(
         id,
         state,
-        (toolId, s) => api.saveToolState(toolId, s),
+        async (toolId, s) => {
+          await api.saveToolState(toolId, s);
+          const sid = surfaceIdForTool(toolId);
+          await api.saveSurfaceState(sid, s).catch(() => undefined);
+        },
         {
           onRollback: (restored) => {
             if (get().activeToolId === id) {
@@ -2007,7 +2026,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
   flushToolState: async (toolId?: string) => {
     const id = toolId ?? get().activeToolId;
     if (id) {
-      await persistenceScheduler.flush(id, (tid, s) => api.saveToolState(tid, s));
+      await persistenceScheduler.flush(id, async (tid, s) => {
+        await api.saveToolState(tid, s);
+        const sid = surfaceIdForTool(tid);
+        await api.saveSurfaceState(sid, s).catch(() => undefined);
+      });
     }
   },
 

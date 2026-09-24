@@ -193,6 +193,8 @@ export const config: Options.Testrunner = {
     "wallpaper-targeted": ["./specs/13-wallpaper-targeted-update.spec.ts"],
     "first-run-welcome": ["./specs/15-first-run-welcome.spec.ts"],
     "core-tutorial": ["./specs/16-core-tutorial.spec.ts"],
+    "local-ai-privacy": ["./specs/17-local-ai-privacy.spec.ts"],
+    "hosted-free-chat": ["./specs/18-hosted-free-chat.spec.ts"],
     main: [
       "./specs/01-clean-startup.spec.ts",
       "./specs/03-settings.spec.ts",

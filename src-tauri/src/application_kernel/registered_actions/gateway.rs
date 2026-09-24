@@ -268,7 +268,9 @@ fn run(
     // 3b. Component scope enforcement: if this action belongs to a different
     //     component within the application, block before generic undeclared checks.
     if let Some(record) = manifest.as_ref() {
-        if let Some(blocked) = enforce_action_contract_component_scope(record, ctx, &descriptor.name) {
+        if let Some(blocked) =
+            enforce_action_contract_component_scope(record, ctx, &descriptor.name)
+        {
             return blocked;
         }
     }
@@ -292,7 +294,11 @@ fn run(
     // 3c. Descriptor hash tamper verification:
     // If the manifest specifies an expected descriptor hash for this action, verify it.
     if let Some(record) = manifest.as_ref() {
-        if let Some(expected_hash) = record.manifest.action_descriptor_hashes.get(&descriptor.name) {
+        if let Some(expected_hash) = record
+            .manifest
+            .action_descriptor_hashes
+            .get(&descriptor.name)
+        {
             let actual_hash = descriptor.descriptor_hash();
             if actual_hash != *expected_hash {
                 return ActionOutcome::blocked(
@@ -398,7 +404,10 @@ fn run(
     match in_savepoint(db, |db| {
         if let Some(grant) = used_grant.as_ref() {
             grants::consume_once_grant(db, grant).map_err(|err| {
-                ActionOutcome::blocked("grant_burn_failed", format!("Failed to burn one-time grant: {err}"))
+                ActionOutcome::blocked(
+                    "grant_burn_failed",
+                    format!("Failed to burn one-time grant: {err}"),
+                )
             })?;
         }
         let data = handlers::dispatch(db, ctx, descriptor, input)
@@ -527,12 +536,16 @@ fn enforce_action_contract_component_scope(
     // For Runtime V2 applications that populate component_action_access:
     // if the action is listed under ANY other component but NOT under the caller's
     // component, it means the contract belongs to a different component.
-    let other_components_allow = record.manifest.component_action_access
+    let other_components_allow = record
+        .manifest
+        .component_action_access
         .iter()
         .filter(|(comp_id, _)| *comp_id != caller_component)
         .any(|(_, allowed_actions)| allowed_actions.iter().any(|a| a == action));
 
-    let caller_component_allows = record.manifest.component_action_access
+    let caller_component_allows = record
+        .manifest
+        .component_action_access
         .get(caller_component)
         .map(|allowed| allowed.iter().any(|a| a == action))
         .unwrap_or(true); // If no per-component restriction, do not block.
@@ -548,7 +561,6 @@ fn enforce_action_contract_component_scope(
 
     None
 }
-
 
 /// Trusted entry for the automation executor: presence is always `away`.
 /// No IPC command can reach this path.
@@ -1208,7 +1220,10 @@ mod tests {
         let (mut db, _dir) = test_db();
         seed(&mut db);
         let ctx = app_ctx(APP);
-        let d = crate::application_kernel::registered_actions::descriptor::find_action("local_data.write").unwrap();
+        let d = crate::application_kernel::registered_actions::descriptor::find_action(
+            "local_data.write",
+        )
+        .unwrap();
         let _g = crate::application_kernel::registered_actions::grants::mint_grant(
             &mut db,
             &ctx,
@@ -1217,7 +1232,8 @@ mod tests {
             crate::application_kernel::registered_actions::grants::GrantDuration::Once,
             None,
             "user",
-        ).unwrap();
+        )
+        .unwrap();
 
         let out1 = execute_registered_action(
             &mut db,

@@ -526,4 +526,71 @@ mod tests {
         let secret = input_preview(&json!({ "key": "AIzaSyA1234567890abcdefghijklmno" }));
         assert!(!secret.contains("AIzaSyA1234567890abcdefghijklmno"));
     }
+
+    #[test]
+    fn concurrent_consume_race_only_allows_single_winner() {
+        let (mut db, dir) = test_db();
+        let db_path = dir.path().join("registered-actions.db");
+        let d = find_action("local_data.write").unwrap();
+        let a = create_pending(&mut db, &ctx(), d, &json!({"modelId": "m"}), None).unwrap();
+        decide(&mut db, &a.id, true, None, "user").unwrap();
+
+        let approval_id = a.id.clone();
+        let call_hash = a.call_hash.clone();
+        let num_threads = 8;
+        let mut handles = Vec::new();
+
+        for _ in 0..num_threads {
+            let path = db_path.clone();
+            let aid = approval_id.clone();
+            let chash = call_hash.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut thread_db = Database::open_path(&path).expect("open db in thread");
+                consume(&mut thread_db, &aid, &chash).unwrap_or(false)
+            }));
+        }
+
+        let mut winners = 0;
+        for handle in handles {
+            if handle.join().expect("thread join") {
+                winners += 1;
+            }
+        }
+
+        assert_eq!(winners, 1, "Exactly one thread must win the consume race");
+        assert_eq!(get_approval(&db, &approval_id).unwrap().status, "consumed");
+    }
+
+    #[test]
+    fn concurrent_decide_race_only_allows_single_winner() {
+        let (mut db, dir) = test_db();
+        let db_path = dir.path().join("registered-actions.db");
+        let d = find_action("local_data.write").unwrap();
+        let a = create_pending(&mut db, &ctx(), d, &json!({"modelId": "m"}), None).unwrap();
+
+        let approval_id = a.id.clone();
+        let num_threads = 8;
+        let mut handles = Vec::new();
+
+        for i in 0..num_threads {
+            let path = db_path.clone();
+            let aid = approval_id.clone();
+            let approve = i % 2 == 0;
+            handles.push(std::thread::spawn(move || {
+                let mut thread_db = Database::open_path(&path).expect("open db in thread");
+                decide(&mut thread_db, &aid, approve, None, "user").is_ok()
+            }));
+        }
+
+        let mut successes = 0;
+        for handle in handles {
+            if handle.join().expect("thread join") {
+                successes += 1;
+            }
+        }
+
+        assert_eq!(successes, 1, "Exactly one thread must successfully decide");
+        let final_status = get_approval(&db, &approval_id).unwrap().status;
+        assert!(final_status == "approved" || final_status == "denied");
+    }
 }

@@ -238,7 +238,8 @@ pub fn branch_from_message(
             format!("{branch_name} (branch)")
         };
         let project_id = conversation_project_id(db, source_conversation_id);
-        let new_conv = crate::db::create_conversation(db, workspace_id, &title, project_id.as_deref())?;
+        let new_conv =
+            crate::db::create_conversation(db, workspace_id, &title, project_id.as_deref())?;
 
         for m in kept {
             crate::db::insert_message(db, &new_conv.id, &m.role, &m.content, m.metadata.as_ref())?;
@@ -302,7 +303,9 @@ pub fn branch_from_message(
             // Fallback for legacy messages prior to migration 027
             let next_msg_created_at = messages.get(cut + 1).map(|m| m.created_at.clone());
 
-            let subsequent_prev_snapshots: Vec<String> = if let Some(ref cutoff) = next_msg_created_at {
+            let subsequent_prev_snapshots: Vec<String> = if let Some(ref cutoff) =
+                next_msg_created_at
+            {
                 let mut stmt = db.conn().prepare(
                     "SELECT previous_snapshot_json FROM app_transactions
                      WHERE conversation_id = ?1 AND created_at >= ?2 AND status = 'applied' AND previous_snapshot_json IS NOT NULL
@@ -317,31 +320,39 @@ pub fn branch_from_message(
             };
 
             for surface in list_inline_surfaces(db, source_conversation_id)? {
-                let historical_row: Option<(i64, String)> = if let Some(ref cutoff) = next_msg_created_at {
-                    db.conn().query_row(
-                        "SELECT revision, definition_json FROM surface_versions
+                let historical_row: Option<(i64, String)> =
+                    if let Some(ref cutoff) = next_msg_created_at {
+                        db.conn()
+                            .query_row(
+                                "SELECT revision, definition_json FROM surface_versions
                          WHERE surface_id = ?1 AND created_at < ?2
                          ORDER BY revision DESC LIMIT 1",
-                        params![surface.id, cutoff],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    ).optional()?
-                } else {
-                    db.conn().query_row(
-                        "SELECT revision, definition_json FROM surface_versions
+                                params![surface.id, cutoff],
+                                |row| Ok((row.get(0)?, row.get(1)?)),
+                            )
+                            .optional()?
+                    } else {
+                        db.conn()
+                            .query_row(
+                                "SELECT revision, definition_json FROM surface_versions
                          WHERE surface_id = ?1
                          ORDER BY revision DESC LIMIT 1",
-                        params![surface.id],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    ).optional()?
-                };
+                                params![surface.id],
+                                |row| Ok((row.get(0)?, row.get(1)?)),
+                            )
+                            .optional()?
+                    };
 
                 let (_rev, def_json_str) = match historical_row {
                     Some(row) => row,
                     None => continue,
                 };
 
-                let def = serde_json::from_str::<Value>(&def_json_str)
-                    .map_err(|e| crate::db::DbError::Corrupted(format!("invalid historical surface definition: {e}")))?;
+                let def = serde_json::from_str::<Value>(&def_json_str).map_err(|e| {
+                    crate::db::DbError::Corrupted(format!(
+                        "invalid historical surface definition: {e}"
+                    ))
+                })?;
                 let created = super::surfaces::create_inline_surface(
                     db,
                     &new_conv.id,
@@ -377,7 +388,8 @@ pub fn branch_from_message(
             "sourceMessageId": source_message_id,
             "checkpointId": chk_id_opt,
             "exact": chk_id_opt.is_some(),
-        }).to_string();
+        })
+        .to_string();
 
         db.conn().execute(
             "INSERT INTO chat_branches (
@@ -541,8 +553,9 @@ pub fn get_snapshot(db: &Database, id: &str) -> DbResult<SnapshotRecord> {
             other => DbError::Sqlite(other),
         })?;
 
-    let payload: Value = serde_json::from_str(&payload_json)
-        .map_err(|e| DbError::Invalid(format!("corrupt snapshot JSON in snapshot {id_val}: {e}")))?;
+    let payload: Value = serde_json::from_str(&payload_json).map_err(|e| {
+        DbError::Invalid(format!("corrupt snapshot JSON in snapshot {id_val}: {e}"))
+    })?;
 
     Ok(SnapshotRecord {
         id: id_val,
@@ -949,11 +962,7 @@ mod tests {
         let mut def_a2 = def_a1.clone();
         def_a2["components"][0]["props"]["text"] = json!("v2");
         super::super::surfaces::update_surface_definition(
-            &mut db,
-            &surf_a.id,
-            &def_a2,
-            "Rev 2",
-            None,
+            &mut db, &surf_a.id, &def_a2, "Rev 2", None,
         )
         .unwrap();
 
@@ -1006,7 +1015,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(branch2_surfs.len(), 2);
-        let surf_a_in_b2 = branch2_surfs.iter().find(|s| s.name == "Surface A").unwrap();
+        let surf_a_in_b2 = branch2_surfs
+            .iter()
+            .find(|s| s.name == "Surface A")
+            .unwrap();
         let text_in_b2 = surf_a_in_b2
             .definition
             .pointer("/components/0/props/text")
@@ -1027,9 +1039,16 @@ mod tests {
             "layout": "stack",
             "components": [{"id": "t1", "type": "text", "props": {"text": "v1"}}]
         });
-        let surf_a =
-            super::super::surfaces::create_inline_surface(&mut db, &conv.id, None, None, "Surface A", &def1, &[])
-                .unwrap();
+        let surf_a = super::super::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Surface A",
+            &def1,
+            &[],
+        )
+        .unwrap();
 
         super::super::surfaces::save_surface_state(&mut db, &surf_a.id, &json!({ "counter": 42 }))
             .unwrap();
@@ -1048,8 +1067,14 @@ mod tests {
             "layout": "stack",
             "components": [{"id": "t1", "type": "text", "props": {"text": "v2"}}]
         });
-        super::super::surfaces::update_surface_definition(&mut db, &surf_a.id, &def2, "bump to v2", Some(1))
-            .unwrap();
+        super::super::surfaces::update_surface_definition(
+            &mut db,
+            &surf_a.id,
+            &def2,
+            "bump to v2",
+            Some(1),
+        )
+        .unwrap();
         super::super::surfaces::save_surface_state(&mut db, &surf_a.id, &json!({ "counter": 999 }))
             .unwrap();
 
@@ -1060,8 +1085,16 @@ mod tests {
             "layout": "stack",
             "components": [{"id": "t2", "type": "text", "props": {"text": "later"}}]
         });
-        let _surf_b = super::super::surfaces::create_inline_surface(&mut db, &conv.id, None, None, "Surface B", &def_b, &[])
-            .unwrap();
+        let _surf_b = super::super::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Surface B",
+            &def_b,
+            &[],
+        )
+        .unwrap();
 
         // Branch from m2 (which has the checkpoint)
         let (_branch, branch_surfs) = branch_from_message(
@@ -1085,8 +1118,12 @@ mod tests {
         assert_eq!(text_in_branch, Some("v1"));
 
         // State must be counter: 42 from checkpoint (NOT 999)
-        let branch_state = super::super::surfaces::get_surface_state(&db, &branch_surfs[0].id).unwrap();
-        assert_eq!(branch_state.get("counter").and_then(|v| v.as_i64()), Some(42));
+        let branch_state =
+            super::super::surfaces::get_surface_state(&db, &branch_surfs[0].id).unwrap();
+        assert_eq!(
+            branch_state.get("counter").and_then(|v| v.as_i64()),
+            Some(42)
+        );
 
         // Corrupt checkpoint fail-closed test
         db.conn()

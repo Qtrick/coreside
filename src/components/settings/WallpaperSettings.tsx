@@ -341,8 +341,8 @@ export function WallpaperSettings() {
   }, [previewPreset, activePreset, solidActive, committedSolid.color]);
 
   return (
-    <section className="settings-subsection wallpaper-settings" aria-labelledby="wallpaper-heading">
-      <h4 className="settings-subheading" id="wallpaper-heading">
+    <section className="settings-subsection wallpaper-settings" aria-labelledby="wallpapers-heading">
+      <h4 className="settings-subheading" id="wallpapers-heading">
         Personalization & Wallpaper
       </h4>
       <p>
@@ -600,7 +600,7 @@ export function WallpaperSettings() {
                 <button
                   key={preset.id}
                   type="button"
-                  className={`wallpaper-card-item${isCurrent ? " is-active" : ""}`}
+                  className={`wallpaper-card-item wallpaper-preset-card${isCurrent ? " is-active" : ""}`}
                   aria-pressed={isCurrent}
                   disabled={busy}
                   onClick={() => handleSelectPreset(preset)}

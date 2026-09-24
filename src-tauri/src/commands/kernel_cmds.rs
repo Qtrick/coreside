@@ -86,7 +86,8 @@ pub fn kernel_list_pending_proposals(
 ) -> Result<Vec<crate::application_kernel::KernelChangeProposalRecord>, CommandError> {
     state.require_profile()?;
     let db = state.db.lock();
-    crate::application_kernel::list_pending_proposals(&db, conversation_id.as_deref()).map_err(map_kernel)
+    crate::application_kernel::list_pending_proposals(&db, conversation_id.as_deref())
+        .map_err(map_kernel)
 }
 
 #[tauri::command]
@@ -100,7 +101,8 @@ pub fn kernel_decide_proposal(
     require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
     let mut bus = state.event_bus.lock();
-    crate::application_kernel::decide_proposal(&mut db, Some(&mut bus), &proposal_id, approve).map_err(map_kernel)
+    crate::application_kernel::decide_proposal(&mut db, Some(&mut bus), &proposal_id, approve)
+        .map_err(map_kernel)
 }
 
 #[tauri::command]
@@ -127,7 +129,10 @@ pub fn kernel_apply_change(
     // IPC from the UI is always user-initiated; never allow agent self-approval.
     request.source_type = "user".into();
     if request.operations.is_empty() {
-        return Err(CommandError::new("invalid", "operations or proposalId required"));
+        return Err(CommandError::new(
+            "invalid",
+            "operations or proposalId required",
+        ));
     }
     let mut db = state.db.lock();
     let mut bus = state.event_bus.lock();
@@ -591,7 +596,11 @@ pub fn kernel_invoke_registered_action(
                 request.project_id = Some(pid.clone());
             }
             if let Some(ref conv_id) = request.conversation_id {
-                if surface.conversation_id.as_deref().is_some_and(|c| c != conv_id) {
+                if surface
+                    .conversation_id
+                    .as_deref()
+                    .is_some_and(|c| c != conv_id)
+                {
                     return Err(CommandError::new(
                         "forbidden",
                         "Cross-conversation surface action invocation rejected",

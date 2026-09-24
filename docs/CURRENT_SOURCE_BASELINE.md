@@ -1,7 +1,7 @@
 # Current Source Baseline (RC3.12)
 
 **Product:** Coreside  
-**Access date:** 2026-09-20
+**Access date:** 2026-09-24
 **Phase:** RC3.12 source intake / development audit<br>
 **Public beta:** **NOT READY**  
 **Hosted AI:** **NOT READY**
@@ -12,9 +12,9 @@
 | --- | --- |
 | Path | `/Users/qunyingfan/Coreside` |
 | Branch | `main` |
-| Commit | `ebad035b4636371c6d617c64086d85326f4e967b` |
+| Commit | `0232a391414f9ae2c01bf7e5aa88c02f25d3c5c6` |
 | Dirty | Yes (development evidence only) |
-| Source fingerprint | `ede8cbddd112f44aa5ea403dbbc41a055e860414b624a3182a19a27bca77c679` |
+| Source fingerprint | `26f762277e77e9f483cfc958ccafc4efe1d070d610eccc4df14468567bc59fc8` |
 
 ## Uploaded archive
 
@@ -32,7 +32,7 @@
 
 | File | SHA-256 |
 | --- | --- |
-| `package-lock.json` | `f99da7c99dc5e2db93567632e2c36d36796c4b3ea8cf6a575a3f337bb6b9d641` |
+| `package-lock.json` | `2b427ad1e95a93b212ca4763ebba64a778c976c59421514246b4b3c68300468d` |
 | `src-tauri/Cargo.lock` | `b64ad87161713f19b77675d96b38081e050c78ec6b8e3d6b3e00f26b49bfbd67` |
 
 ## Tool versions

@@ -64,7 +64,11 @@ pub fn get_item(db: &Database, id: &str) -> DbResult<QueueItem> {
                     priority: row.get(2)?,
                     status: row.get(3)?,
                     prompt: serde_json::from_str(&prompt_json).map_err(|e| {
-                        rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(e))
+                        rusqlite::Error::FromSqlConversionFailure(
+                            4,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
                     })?,
                     created_at: row.get(5)?,
                     started_at: row.get(6)?,
@@ -195,9 +199,9 @@ pub fn remove_queued(db: &mut Database, id: &str) -> DbResult<()> {
 /// - otherwise: mark failed after interruption
 pub fn recover_stale_active(db: &mut Database) -> DbResult<u64> {
     let now = now_rfc3339();
-    let mut stmt = db.conn().prepare(
-        "SELECT id, conversation_id FROM agent_request_queue WHERE status = 'active'",
-    )?;
+    let mut stmt = db
+        .conn()
+        .prepare("SELECT id, conversation_id FROM agent_request_queue WHERE status = 'active'")?;
     let active_items: Vec<(String, String)> = stmt
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<Result<Vec<_>, _>>()?;

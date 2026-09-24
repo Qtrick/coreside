@@ -31,6 +31,8 @@ pub mod schema;
 
 #[cfg(test)]
 pub mod testing;
+#[cfg(test)]
+pub mod vendo_invariants;
 
 // Public surface of the runtime; some entries are used only by tests or by
 // callers added in later phases.

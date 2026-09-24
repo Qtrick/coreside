@@ -124,6 +124,71 @@ impl MockAiProvider {
             .to_string();
         }
 
+        if lower.contains("task manager") || lower.contains("task-manager") {
+            return json!({
+                "schemaVersion": SCHEMA_VERSION,
+                "assistantMessage": "I generated a Task Manager application with a dashboard layout, task data table, priority/status filtering, and full create/update/delete capabilities.",
+                "responseType": "tool_change",
+                "toolChange": {
+                    "action": "create",
+                    "targetToolId": null,
+                    "changeSummary": "Create Task Manager with data table and state CRUD",
+                    "tool": {
+                        "id": "tool-task-manager",
+                        "name": "Task Manager",
+                        "description": "Manage tasks with priority, status, and local data persistence.",
+                        "layout": { "type": "dashboard", "columns": 2, "density": "normal" },
+                        "components": [
+                            { "id": "tm-heading", "type": "heading", "props": { "text": "Task Manager", "level": 1 } },
+                            { "id": "tm-search", "type": "textInput", "props": { "label": "Search Tasks", "placeholder": "Search..." }, "valueKey": "searchQuery" },
+                            { "id": "tm-priority-filter", "type": "select", "props": { "label": "Priority Filter", "options": [{ "label": "All", "value": "" }, { "label": "High", "value": "high" }, { "label": "Medium", "value": "medium" }, { "label": "Low", "value": "low" }] }, "valueKey": "priorityFilter" },
+                            { "id": "tm-status-filter", "type": "select", "props": { "label": "Status Filter", "options": [{ "label": "All", "value": "" }, { "label": "To Do", "value": "todo" }, { "label": "In Progress", "value": "in_progress" }, { "label": "Done", "value": "done" }] }, "valueKey": "statusFilter" },
+                            { "id": "tm-list", "type": "dataTable", "props": { "columns": [{ "id": "title", "accessor": "title", "header": "Task" }, { "id": "priority", "accessor": "priority", "header": "Priority" }, { "id": "status", "accessor": "status", "header": "Status" }], "rowsKey": "tasks", "dataKey": "tasks", "selectionKey": "selectedTaskId", "searchKey": "searchQuery", "filtersFromState": { "priority": "priorityFilter", "status": "statusFilter" } } },
+                            { "id": "tm-new-title", "type": "textInput", "props": { "label": "New Task Title", "placeholder": "Task name..." }, "valueKey": "newTaskTitle" },
+                            { "id": "tm-new-priority", "type": "select", "props": { "label": "Task Priority", "options": [{ "label": "High", "value": "high" }, { "label": "Medium", "value": "medium" }, { "label": "Low", "value": "low" }] }, "valueKey": "newTaskPriority" },
+                            { "id": "tm-new-status", "type": "select", "props": { "label": "Task Status", "options": [{ "label": "To Do", "value": "todo" }, { "label": "In Progress", "value": "in_progress" }, { "label": "Done", "value": "done" }] }, "valueKey": "newTaskStatus" },
+                            { "id": "tm-add-btn", "type": "button", "props": { "label": "Add Task" }, "actions": [{ "type": "appendItem", "target": "tasks", "itemFromState": { "title": "newTaskTitle", "priority": "newTaskPriority", "status": "newTaskStatus" } }, { "type": "setValue", "target": "newTaskTitle", "value": "" }] },
+                            { "id": "tm-delete-btn", "type": "button", "props": { "label": "Delete Task" }, "actions": [{ "type": "removeItem", "target": "tasks", "idFromState": "selectedTaskId" }] },
+                            { "id": "tm-done-btn", "type": "button", "props": { "label": "Mark Done" }, "actions": [{ "type": "updateItem", "target": "tasks", "idFromState": "selectedTaskId", "patch": { "status": "done" } }] }
+                        ]
+                    }
+                },
+                "diagnostics": { "fixture": "task_manager" }
+            })
+            .to_string();
+        }
+
+        if lower.contains("expense") || lower.contains("budget") || lower.contains("spending") {
+            return json!({
+                "schemaVersion": SCHEMA_VERSION,
+                "assistantMessage": "I created an Expense Tracker with category management, statistics, and a persistent data table.",
+                "responseType": "tool_change",
+                "toolChange": {
+                    "action": "create",
+                    "targetToolId": null,
+                    "changeSummary": "Create Expense Tracker with stats and category logging",
+                    "tool": {
+                        "id": "tool-expense-tracker",
+                        "name": "Expense Tracker",
+                        "description": "Log and monitor expenses by category.",
+                        "layout": { "type": "split", "splitRatio": "1:2" },
+                        "components": [
+                            { "id": "exp-heading", "type": "heading", "props": { "text": "Expense Tracker", "level": 1 } },
+                            { "id": "exp-stat", "type": "stat", "props": { "label": "Total Logged ($)", "valueKey": "totalExpenses" } },
+                            { "id": "exp-amount", "type": "textInput", "props": { "label": "Amount ($)", "placeholder": "25.00" }, "valueKey": "newAmount" },
+                            { "id": "exp-category", "type": "select", "props": { "label": "Category", "options": [{ "label": "Food", "value": "food" }, { "label": "Travel", "value": "travel" }, { "label": "Supplies", "value": "supplies" }, { "label": "Services", "value": "services" }] }, "valueKey": "newCategory" },
+                            { "id": "exp-note", "type": "textInput", "props": { "label": "Description", "placeholder": "Lunch, taxi, etc." }, "valueKey": "newNote" },
+                            { "id": "exp-add-btn", "type": "button", "props": { "label": "Record Expense" }, "actions": [{ "type": "appendItem", "target": "expenses", "itemFromState": { "amount": "newAmount", "category": "newCategory", "note": "newNote" } }, { "type": "increment", "target": "totalExpenses", "amount": 25.0 }, { "type": "setValue", "target": "newAmount", "value": "" }, { "type": "setValue", "target": "newNote", "value": "" }] },
+                            { "id": "exp-table", "type": "dataTable", "props": { "columns": [{ "id": "amount", "accessor": "amount", "header": "Amount" }, { "id": "category", "accessor": "category", "header": "Category" }, { "id": "note", "accessor": "note", "header": "Description" }], "rowsKey": "expenses", "dataKey": "expenses", "selectionKey": "selectedExpenseId" } },
+                            { "id": "exp-delete-btn", "type": "button", "props": { "label": "Delete Expense" }, "actions": [{ "type": "removeItem", "target": "expenses", "idFromState": "selectedExpenseId" }] }
+                        ]
+                    }
+                },
+                "diagnostics": { "fixture": "expense_tracker" }
+            })
+            .to_string();
+        }
+
         if lower.contains("todo") || lower.contains("checklist") || lower.contains("task") {
             return json!({
                 "schemaVersion": SCHEMA_VERSION,
@@ -488,12 +553,17 @@ impl MockAiProvider {
 
         // Hold after the paint-capable op so desktop E2E can observe Preview
         // and (Journey 20) click Cancel before durable complete.
+        let hold_ms = if std::env::var("CORESIDE_E2E").is_ok() {
+            4500
+        } else {
+            200
+        };
         tokio::select! {
             _ = request.cancel.cancelled() => {
                 let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
                 return Err(AiError::Cancelled);
             }
-            _ = tokio::time::sleep(std::time::Duration::from_millis(2000)) => {}
+            _ = tokio::time::sleep(std::time::Duration::from_millis(hold_ms)) => {}
         }
 
         let _ = tx
@@ -625,7 +695,7 @@ impl MockAiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::response_schema::ResponseType;
+    use crate::ai::response_schema::{ActionDefinition, ResponseType};
     use crate::ai::{parse_agent_response, AgentMessage};
 
     #[tokio::test]
@@ -960,5 +1030,74 @@ mod tests {
             .as_array()
             .unwrap();
         assert_eq!(questions.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn task_manager_fixture_generates_valid_crud_tool() {
+        let provider = MockAiProvider::new();
+        let response = provider
+            .chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Please build me a Task Manager app",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            })
+            .await
+            .unwrap();
+        let parsed = parse_agent_response(&response.raw_text).unwrap();
+        let tc = parsed.payload.tool_change.as_ref().unwrap();
+        let tool = tc.tool.as_ref().unwrap();
+        assert_eq!(tool.id, "tool-task-manager");
+        assert_eq!(tool.name, "Task Manager");
+        // Verify dataTable component exists with rowsKey and filtering
+        let table = tool
+            .components
+            .iter()
+            .find(|c| c.component_type == "dataTable")
+            .expect("dataTable component");
+        assert_eq!(table.props.as_ref().unwrap()["rowsKey"], "tasks");
+        // Verify add button has appendItem action
+        let add_btn = tool
+            .components
+            .iter()
+            .find(|c| c.id == "tm-add-btn")
+            .expect("tm-add-btn");
+        let actions = add_btn.actions.as_ref().unwrap();
+        assert!(actions.iter().any(
+            |a| matches!(a, ActionDefinition::AppendItem { target, .. } if target == "tasks")
+        ));
+    }
+
+    #[tokio::test]
+    async fn expense_tracker_fixture_generates_valid_tool() {
+        let provider = MockAiProvider::new();
+        let response = provider
+            .chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Create an expense tracker for daily budget",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            })
+            .await
+            .unwrap();
+        let parsed = parse_agent_response(&response.raw_text).unwrap();
+        let tc = parsed.payload.tool_change.as_ref().unwrap();
+        let tool = tc.tool.as_ref().unwrap();
+        assert_eq!(tool.id, "tool-expense-tracker");
+        assert_eq!(tool.name, "Expense Tracker");
+        let mut tool = tool.clone();
+        tool.normalize_for_frontend();
+        let stat = tool
+            .components
+            .iter()
+            .find(|c| c.component_type == "stat")
+            .expect("stat component");
+        assert_eq!(stat.value_key.as_deref(), Some("totalExpenses"));
     }
 }

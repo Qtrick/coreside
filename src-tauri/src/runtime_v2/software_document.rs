@@ -277,12 +277,18 @@ impl SoftwareDocument {
             let tool: ToolDefinition = serde_json::from_value(val.clone())
                 .map_err(|e| format!("failed to parse ToolDefinition: {e}"))?;
             let mut doc = Self::from_tool_definition(&tool);
-            if let Some(sc) = val.get("stateContracts").or_else(|| val.get("state_contracts")) {
+            if let Some(sc) = val
+                .get("stateContracts")
+                .or_else(|| val.get("state_contracts"))
+            {
                 let contracts: Vec<StateContract> = serde_json::from_value(sc.clone())
                     .map_err(|e| format!("invalid state contracts: {e}"))?;
                 doc.state_contracts = contracts;
             }
-            if let Some(ac) = val.get("actionContracts").or_else(|| val.get("action_contracts")) {
+            if let Some(ac) = val
+                .get("actionContracts")
+                .or_else(|| val.get("action_contracts"))
+            {
                 let contracts: Vec<ActionContract> = serde_json::from_value(ac.clone())
                     .map_err(|e| format!("invalid action contracts: {e}"))?;
                 doc.action_contracts = contracts;
@@ -496,9 +502,10 @@ impl SoftwareDocument {
 
         // Check if there is multi-section or structured hierarchy
         let has_rich_structure = self.sections.len() > 1
-            || self.sections.iter().any(|s| {
-                s.parent_region_id.is_some() || s.role.is_some() || s.layout.is_some()
-            });
+            || self
+                .sections
+                .iter()
+                .any(|s| s.parent_region_id.is_some() || s.role.is_some() || s.layout.is_some());
 
         if !has_rich_structure {
             let mut all_components = Vec::new();
@@ -740,8 +747,8 @@ impl SoftwareDocument {
                 .position(|c| c.id == component_id)
                 .map(|pos| (sec.id.clone(), pos))
         });
-        let (source_region_id, source_pos) = source_info
-            .ok_or_else(|| format!("component '{component_id}' not found"))?;
+        let (source_region_id, source_pos) =
+            source_info.ok_or_else(|| format!("component '{component_id}' not found"))?;
 
         // 4. Compute adjusted target index for same-region moves.
         // Removing the source shifts indices at or after source_pos down by 1.
@@ -762,8 +769,7 @@ impl SoftwareDocument {
                 break;
             }
         }
-        let mut comp =
-            extracted.ok_or_else(|| format!("component '{component_id}' not found"))?;
+        let mut comp = extracted.ok_or_else(|| format!("component '{component_id}' not found"))?;
 
         // 6. Update component's section prop if present.
         if let Some(Value::Object(ref mut map)) = comp.props {
@@ -938,7 +944,11 @@ impl SoftwareDocument {
     }
 
     /// Replace a component in-place at arbitrary tree depth.
-    pub fn replace_component(&mut self, id: &str, new_comp: ToolComponent) -> Result<ToolComponent, String> {
+    pub fn replace_component(
+        &mut self,
+        id: &str,
+        new_comp: ToolComponent,
+    ) -> Result<ToolComponent, String> {
         for sec in &mut self.sections {
             if let Some(old) = replace_in_tree(&mut sec.components, id, new_comp.clone()) {
                 return Ok(old);
@@ -977,7 +987,11 @@ impl SoftwareDocument {
     }
 
     /// Update children of a component at arbitrary tree depth.
-    pub fn update_component_children(&mut self, id: &str, children: Vec<ToolComponent>) -> Result<(), String> {
+    pub fn update_component_children(
+        &mut self,
+        id: &str,
+        children: Vec<ToolComponent>,
+    ) -> Result<(), String> {
         let comp = self
             .find_component_mut(id)
             .ok_or_else(|| format!("component '{id}' not found"))?;
@@ -999,7 +1013,11 @@ impl SoftwareDocument {
     }
 
     /// Update actions of a component at arbitrary tree depth.
-    pub fn update_component_actions(&mut self, id: &str, actions: Vec<ActionDefinition>) -> Result<(), String> {
+    pub fn update_component_actions(
+        &mut self,
+        id: &str,
+        actions: Vec<ActionDefinition>,
+    ) -> Result<(), String> {
         let comp = self
             .find_component_mut(id)
             .ok_or_else(|| format!("component '{id}' not found"))?;
@@ -1012,7 +1030,8 @@ impl SoftwareDocument {
         if let Some(contract) = self.state_contracts.iter_mut().find(|sc| sc.key == key) {
             contract.scope = scope;
         } else {
-            self.state_contracts.push(StateContract::new(key, Value::Null, scope));
+            self.state_contracts
+                .push(StateContract::new(key, Value::Null, scope));
         }
         Ok(())
     }
@@ -1069,10 +1088,7 @@ impl SoftwareDocument {
         }
         if let Some(ref pid) = section.parent_region_id {
             if *pid == section.id {
-                return Err(format!(
-                    "section '{}' cannot be its own parent",
-                    section.id
-                ));
+                return Err(format!("section '{}' cannot be its own parent", section.id));
             }
             if !self.sections.iter().any(|s| &s.id == pid) {
                 return Err(format!(
@@ -1279,7 +1295,10 @@ impl SoftwareDocument {
     }
 
     /// Apply any AppOperation directly to this canonical SoftwareDocument.
-    pub fn apply_operation(&mut self, op: &crate::runtime_v2::operations::AppOperation) -> Result<(), String> {
+    pub fn apply_operation(
+        &mut self,
+        op: &crate::runtime_v2::operations::AppOperation,
+    ) -> Result<(), String> {
         match op.op_type.as_str() {
             "surface.add_section" => {
                 let section: DocumentSection = serde_json::from_value(
@@ -1338,19 +1357,32 @@ impl SoftwareDocument {
                 )
                 .map_err(|e| format!("invalid component payload: {e}"))?;
                 let sec_id = op.payload.get("sectionId").and_then(|v| v.as_str());
-                let pid = op.target.parent_id.as_deref()
+                let pid = op
+                    .target
+                    .parent_id
+                    .as_deref()
                     .or_else(|| op.payload.get("parentId").and_then(|v| v.as_str()));
-                let index = op.payload.get("index").and_then(|v| v.as_u64()).map(|i| i as usize);
+                let index = op
+                    .payload
+                    .get("index")
+                    .and_then(|v| v.as_u64())
+                    .map(|i| i as usize);
                 self.insert_component(sec_id, pid, index, comp)?;
             }
             "component.remove" => {
-                let cid = op.target.component_id.as_deref()
+                let cid = op
+                    .target
+                    .component_id
+                    .as_deref()
                     .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
                     .ok_or_else(|| "componentId required".to_string())?;
                 self.remove_component(cid)?;
             }
             "component.replace" => {
-                let cid = op.target.component_id.as_deref()
+                let cid = op
+                    .target
+                    .component_id
+                    .as_deref()
                     .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
                     .ok_or_else(|| "componentId required".to_string())?;
                 let comp: ToolComponent = serde_json::from_value(
@@ -1363,23 +1395,36 @@ impl SoftwareDocument {
                 self.replace_component(cid, comp)?;
             }
             "component.move" => {
-                let cid = op.target.component_id.as_deref()
+                let cid = op
+                    .target
+                    .component_id
+                    .as_deref()
                     .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
                     .ok_or_else(|| "componentId required".to_string())?;
                 let sec_id = op.payload.get("toSectionId").and_then(|v| v.as_str());
                 let pid = op.payload.get("toParentId").and_then(|v| v.as_str());
-                let index = op.payload.get("index").and_then(|v| v.as_u64()).map(|i| i as usize);
+                let index = op
+                    .payload
+                    .get("index")
+                    .and_then(|v| v.as_u64())
+                    .map(|i| i as usize);
                 self.move_component_tree(cid, sec_id, pid, index)?;
             }
             "component.update_props" => {
-                let cid = op.target.component_id.as_deref()
+                let cid = op
+                    .target
+                    .component_id
+                    .as_deref()
                     .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
                     .ok_or_else(|| "componentId required".to_string())?;
                 let props = op.payload.get("props").unwrap_or(&op.payload);
                 self.update_component_props(cid, props)?;
             }
             "component.update_children" => {
-                let cid = op.target.component_id.as_deref()
+                let cid = op
+                    .target
+                    .component_id
+                    .as_deref()
                     .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
                     .ok_or_else(|| "componentId required".to_string())?;
                 let children: Vec<ToolComponent> = serde_json::from_value(
@@ -1392,14 +1437,24 @@ impl SoftwareDocument {
                 self.update_component_children(cid, children)?;
             }
             "component.update_visibility" => {
-                let cid = op.target.component_id.as_deref()
+                let cid = op
+                    .target
+                    .component_id
+                    .as_deref()
                     .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
                     .ok_or_else(|| "componentId required".to_string())?;
-                let visible = op.payload.get("visible").and_then(|v| v.as_bool()).unwrap_or(true);
+                let visible = op
+                    .payload
+                    .get("visible")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
                 self.update_component_visibility(cid, visible)?;
             }
             "component.update_actions" => {
-                let cid = op.target.component_id.as_deref()
+                let cid = op
+                    .target
+                    .component_id
+                    .as_deref()
                     .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
                     .ok_or_else(|| "componentId required".to_string())?;
                 let actions: Vec<ActionDefinition> = serde_json::from_value(
@@ -1412,31 +1467,49 @@ impl SoftwareDocument {
                 self.update_component_actions(cid, actions)?;
             }
             "component.bind_state" => {
-                let cid = op.target.component_id.as_deref()
+                let cid = op
+                    .target
+                    .component_id
+                    .as_deref()
                     .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
                     .ok_or_else(|| "componentId required".to_string())?;
-                let key = op.payload.get("key").and_then(|v| v.as_str())
+                let key = op
+                    .payload
+                    .get("key")
+                    .and_then(|v| v.as_str())
                     .or_else(|| op.payload.get("valueKey").and_then(|v| v.as_str()))
                     .ok_or_else(|| "key or valueKey required".to_string())?;
                 let initial_val = op.payload.get("initialValue").cloned();
                 self.bind_state(cid, key, initial_val)?;
             }
             "component.bind_action" => {
-                let cid = op.target.component_id.as_deref()
+                let cid = op
+                    .target
+                    .component_id
+                    .as_deref()
                     .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
                     .ok_or_else(|| "componentId required".to_string())?;
                 let action: ActionDefinition = serde_json::from_value(
-                    op.payload.get("action").cloned().unwrap_or_else(|| op.payload.clone()),
+                    op.payload
+                        .get("action")
+                        .cloned()
+                        .unwrap_or_else(|| op.payload.clone()),
                 )
                 .map_err(|e| format!("invalid action payload: {e}"))?;
                 self.bind_action(cid, action)?;
             }
             "component.set_style_token" => {
-                let target_id = op.target.component_id.as_deref()
+                let target_id = op
+                    .target
+                    .component_id
+                    .as_deref()
                     .or_else(|| op.payload.get("targetId").and_then(|v| v.as_str()))
                     .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
                     .ok_or_else(|| "targetId or componentId required".to_string())?;
-                let token = op.payload.get("token").and_then(|v| v.as_str())
+                let token = op
+                    .payload
+                    .get("token")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| "token required".to_string())?;
                 let val = op.payload.get("value").cloned().unwrap_or(Value::Null);
                 self.set_style_token(target_id, token, val)?;
@@ -1518,9 +1591,17 @@ fn remove_from_tree(nodes: &mut Vec<ToolComponent>, id: &str) -> Option<ToolComp
     None
 }
 
-fn replace_in_tree(nodes: &mut [ToolComponent], id: &str, new_comp: ToolComponent) -> Option<ToolComponent> {
+fn replace_in_tree(
+    nodes: &mut [ToolComponent],
+    id: &str,
+    new_comp: ToolComponent,
+) -> Option<ToolComponent> {
     let mut to_replace = Some(new_comp);
-    fn inner(nodes: &mut [ToolComponent], id: &str, new_comp: &mut Option<ToolComponent>) -> Option<ToolComponent> {
+    fn inner(
+        nodes: &mut [ToolComponent],
+        id: &str,
+        new_comp: &mut Option<ToolComponent>,
+    ) -> Option<ToolComponent> {
         for n in nodes.iter_mut() {
             if n.id == id {
                 if let Some(replacement) = new_comp.take() {
@@ -1639,7 +1720,11 @@ pub fn admit_software_document_with_state(
         // authority, which is an escalation attack.
         if let Some(existing_doc) = existing {
             for sc in &candidate.state_contracts {
-                if let Some(existing_sc) = existing_doc.state_contracts.iter().find(|s| s.key == sc.key) {
+                if let Some(existing_sc) = existing_doc
+                    .state_contracts
+                    .iter()
+                    .find(|s| s.key == sc.key)
+                {
                     // Cannot escalate from model to user origin
                     if existing_sc.origin == "model" && sc.origin == "user" {
                         return Err(format!(
@@ -1666,7 +1751,12 @@ pub fn admit_software_document_with_state(
                 let existed_in_contracts = existing
                     .map(|e| e.state_contracts.iter().any(|c| &c.key == state_key))
                     .unwrap_or(false);
-                if !existed_in_contracts && candidate.state_contracts.iter().any(|c| &c.key == state_key) {
+                if !existed_in_contracts
+                    && candidate
+                        .state_contracts
+                        .iter()
+                        .any(|c| &c.key == state_key)
+                {
                     return Err(format!(
                         "cannot create state contract for existing opaque state key '{state_key}'"
                     ));
@@ -1677,7 +1767,11 @@ pub fn admit_software_document_with_state(
         // Rule B: Existing trusted contract preservation and anti-broadening.
         if let Some(existing_doc) = existing {
             for sc in &candidate.state_contracts {
-                if let Some(existing_sc) = existing_doc.state_contracts.iter().find(|s| s.key == sc.key) {
+                if let Some(existing_sc) = existing_doc
+                    .state_contracts
+                    .iter()
+                    .find(|s| s.key == sc.key)
+                {
                     if (existing_sc.read_policy == "restricted"
                         || existing_sc.sensitivity.as_deref() == Some("sensitive"))
                         && sc.read_policy != "restricted"
@@ -1716,7 +1810,12 @@ pub fn admit_software_document_with_state(
                 let is_protected = existing_sc.read_policy == "restricted"
                     || existing_sc.sensitivity.as_deref() == Some("sensitive")
                     || existing_sc.write_policy == "readonly";
-                if is_protected && !candidate.state_contracts.iter().any(|c| c.key == existing_sc.key) {
+                if is_protected
+                    && !candidate
+                        .state_contracts
+                        .iter()
+                        .any(|c| c.key == existing_sc.key)
+                {
                     return Err(format!(
                         "replacement cannot omit protected state contract '{}'",
                         existing_sc.key
@@ -1761,7 +1860,8 @@ pub fn admit_software_document_with_state(
                             ac.action_id
                         )
                     })?;
-                if sc.read_policy == "restricted" || sc.sensitivity.as_deref() == Some("sensitive") {
+                if sc.read_policy == "restricted" || sc.sensitivity.as_deref() == Some("sensitive")
+                {
                     return Err(format!(
                         "action '{}' cannot bind sensitive/restricted state key '{skey}' to input",
                         ac.action_id
@@ -1774,7 +1874,11 @@ pub fn admit_software_document_with_state(
     // 5. Component state and action binding verification
     for sec in &candidate.sections {
         for comp in &sec.components {
-            validate_component_bindings(comp, &candidate.state_contracts, &candidate.action_contracts)?;
+            validate_component_bindings(
+                comp,
+                &candidate.state_contracts,
+                &candidate.action_contracts,
+            )?;
         }
     }
 
@@ -1825,7 +1929,9 @@ fn validate_component_bindings(
                             comp.id
                         )
                     })?;
-                    if sc.read_policy == "restricted" || sc.sensitivity.as_deref() == Some("sensitive") {
+                    if sc.read_policy == "restricted"
+                        || sc.sensitivity.as_deref() == Some("sensitive")
+                    {
                         return Err(format!(
                             "component '{}' prop '{binding_prop}' binds to restricted/sensitive state key '{vk}'",
                             comp.id
@@ -1965,7 +2071,9 @@ fn repair_component(
         for binding_prop in &["valueKey", "rowsKey", "dataKey", "selectionKey"] {
             if let Some(Value::String(ref vkey)) = map.get(*binding_prop).cloned() {
                 if !vkey.is_empty() {
-                    let is_unauthorized = if let Some(existing_contract) = contracts.iter().find(|sc| &sc.key == vkey) {
+                    let is_unauthorized = if let Some(existing_contract) =
+                        contracts.iter().find(|sc| &sc.key == vkey)
+                    {
                         existing_contract.read_policy == "restricted"
                             || existing_contract.sensitivity.as_deref() == Some("sensitive")
                     } else {
@@ -1997,7 +2105,9 @@ fn repair_component(
                     notes.push(RepairNote {
                         kind: "stripped_unauthorized_state_binding".into(),
                         target_id: comp.id.clone(),
-                        detail: format!("Stripped unauthorized access to restricted state key '{vkey}'"),
+                        detail: format!(
+                            "Stripped unauthorized access to restricted state key '{vkey}'"
+                        ),
                     });
                 }
             } else {
@@ -2049,7 +2159,9 @@ mod tests {
         // Self-repair strips undeclared state binding without inventing authority
         let notes = doc.validate_and_repair();
         assert!(!notes.is_empty());
-        assert!(notes.iter().any(|n| n.kind == "stripped_unauthorized_state_binding"));
+        assert!(notes
+            .iter()
+            .any(|n| n.kind == "stripped_unauthorized_state_binding"));
         assert_eq!(doc.sections[0].components[0].value_key, None);
 
         // When a trusted state contract is explicitly declared:
@@ -2060,8 +2172,16 @@ mod tests {
         ));
         doc.sections[0].components[0].value_key = Some("selectedPaper".into());
         let notes2 = doc.validate_and_repair();
-        assert!(notes2.is_empty() || !notes2.iter().any(|n| n.kind == "stripped_unauthorized_state_binding"));
-        assert_eq!(doc.sections[0].components[0].value_key, Some("selectedPaper".into()));
+        assert!(
+            notes2.is_empty()
+                || !notes2
+                    .iter()
+                    .any(|n| n.kind == "stripped_unauthorized_state_binding")
+        );
+        assert_eq!(
+            doc.sections[0].components[0].value_key,
+            Some("selectedPaper".into())
+        );
 
         // Admission succeeds with trusted contract
         assert!(admit_software_document(None, &doc, &[]).is_ok());
@@ -2091,10 +2211,14 @@ mod tests {
         // Undeclared state binding -> rejected by admission
         let packs = vec!["coreside.core".to_string()];
         let err = admit_software_document(None, &doc, &packs).unwrap_err();
-        assert!(err.contains("undeclared state contract key 'secretKey'"), "Actual err was: {err}");
+        assert!(
+            err.contains("undeclared state contract key 'secretKey'"),
+            "Actual err was: {err}"
+        );
 
         // Declare contract as restricted/sensitive -> rejected by admission
-        let mut restricted_contract = StateContract::new("secretKey", Value::Null, StateScope::Persistent);
+        let mut restricted_contract =
+            StateContract::new("secretKey", Value::Null, StateScope::Persistent);
         restricted_contract.read_policy = "restricted".into();
         doc.state_contracts.push(restricted_contract);
 
@@ -2145,7 +2269,10 @@ mod tests {
         assert_eq!(round_trip.sections[0].id, "header");
         assert_eq!(round_trip.sections[0].role.as_deref(), Some("navigation"));
         assert_eq!(round_trip.sections[1].id, "sub-sidebar");
-        assert_eq!(round_trip.sections[1].parent_region_id.as_deref(), Some("header"));
+        assert_eq!(
+            round_trip.sections[1].parent_region_id.as_deref(),
+            Some("header")
+        );
         assert_eq!(round_trip.sections[1].components[0].id, "nav-link");
     }
 
@@ -2926,4 +3053,3 @@ mod tests {
         assert!(doc.find_region("grandchild").is_none());
     }
 }
-

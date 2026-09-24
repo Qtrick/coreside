@@ -688,10 +688,7 @@ fn resolve_extracted_components(val: &Value, depth: usize) -> Option<Value> {
                         }
                     }
                 }
-                return wrapper
-                    .get("components")
-                    .filter(|v| v.is_array())
-                    .cloned();
+                return wrapper.get("components").filter(|v| v.is_array()).cloned();
             }
             None
         }
@@ -785,7 +782,10 @@ pub fn normalize_operation_payload(op: &mut AppOperation) {
             }
         }
         normalize_definition_components(&mut op.payload);
-    } else if matches!(op.op_type.as_str(), "component.insert" | "component.replace") {
+    } else if matches!(
+        op.op_type.as_str(),
+        "component.insert" | "component.replace"
+    ) {
         if let Some(comp) = op.payload.get_mut("component") {
             normalize_component_value(comp);
         }
@@ -1045,7 +1045,9 @@ mod tests {
         }];
         let err = validate_model_operations(&ops).unwrap_err();
         assert!(
-            err.contains("unknown operation") || err.contains("internal operation") || err.contains("reserved operation"),
+            err.contains("unknown operation")
+                || err.contains("internal operation")
+                || err.contains("reserved operation"),
             "{err}"
         );
     }
@@ -1332,7 +1334,9 @@ mod tests {
         ];
         let err = validate_model_operations(&ops).unwrap_err();
         assert!(
-            err.contains("unknown operation") || err.contains("internal operation") || err.contains("reserved operation"),
+            err.contains("unknown operation")
+                || err.contains("internal operation")
+                || err.contains("reserved operation"),
             "{err}"
         );
     }
@@ -1423,7 +1427,10 @@ mod tests {
             audience: None,
         }];
         let result = validate_model_operations(&ops);
-        assert!(result.is_ok(), "tool_change should be normalized: {result:?}");
+        assert!(
+            result.is_ok(),
+            "tool_change should be normalized: {result:?}"
+        );
         let normalized = normalize_operations_for_validation(&ops);
         assert_eq!(normalized.len(), 1);
         assert_eq!(normalized[0].op_type, "surface.create");
@@ -1445,9 +1452,15 @@ mod tests {
             audience: None,
         }];
         let result = validate_model_operations(&ops);
-        assert!(result.is_err(), "malformed tool_change should fail validation");
+        assert!(
+            result.is_err(),
+            "malformed tool_change should fail validation"
+        );
         let err = result.unwrap_err();
-        assert!(err.contains("tool_change"), "error should mention tool_change: {err}");
+        assert!(
+            err.contains("tool_change"),
+            "error should mention tool_change: {err}"
+        );
     }
 
     #[test]
@@ -1627,7 +1640,9 @@ mod tests {
         assert_eq!(comp["valueKey"], "boundState");
         assert!(comp["props"].get("actions").is_none());
         assert!(comp["props"].get("action").is_none());
-        let actions = comp["actions"].as_array().expect("actions must be top-level");
+        let actions = comp["actions"]
+            .as_array()
+            .expect("actions must be top-level");
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0]["type"], "setValue");
     }
@@ -1641,12 +1656,20 @@ mod tests {
             .expect("must normalize and validate live task manager proposal without conflicts");
 
         assert_eq!(normalized.len(), 1);
-        let comps = normalized[0].payload["components"].as_array().expect("components array");
-        let add_container = comps.iter().find(|c| c["id"] == "add-task-container").expect("found container");
+        let comps = normalized[0].payload["components"]
+            .as_array()
+            .expect("components array");
+        let add_container = comps
+            .iter()
+            .find(|c| c["id"] == "add-task-container")
+            .expect("found container");
         assert!(add_container["props"].get("actions").is_none());
         assert!(add_container["actions"].is_array());
 
-        let add_btn = comps.iter().find(|c| c["id"] == "add-task-button").expect("found add btn");
+        let add_btn = comps
+            .iter()
+            .find(|c| c["id"] == "add-task-button")
+            .expect("found add btn");
         assert!(add_btn["props"].get("actions").is_none());
         assert!(add_btn["actions"].is_array());
     }
@@ -1928,5 +1951,4 @@ mod tests {
         assert_eq!(comps.len(), 1);
         assert_eq!(comps[0]["id"], "x");
     }
-
 }

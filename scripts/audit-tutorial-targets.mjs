@@ -96,14 +96,9 @@ function collectDomTargets(files) {
       const block = bm[1];
       const before = text.slice(0, bm.index);
       const line = before.split(/\r?\n/).length;
-      // Prefer ternary consequent: ? "tour-id"
-      const consequent = block.match(/\?\s*["']([^"']+)["']/);
-      if (consequent) {
-        pushHit(consequent[1], rel, line);
-        continue;
+      for (const lit of block.matchAll(/["']([^"']+)["']/g)) {
+        pushHit(lit[1], rel, line);
       }
-      const lit = block.match(/["']([^"']+)["']/);
-      if (lit) pushHit(lit[1], rel, line);
     }
   }
   return hits;

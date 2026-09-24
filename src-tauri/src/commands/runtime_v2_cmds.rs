@@ -235,7 +235,6 @@ pub fn get_surface_state_with_revision_cmd(
     }))
 }
 
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveDraftArgs {
@@ -407,11 +406,7 @@ pub fn get_route_state_cmd(
     state.require_profile()?;
     let effective_window = window.label();
     let db = state.db.lock();
-    Ok(get_route_state(
-        &db,
-        &application_id,
-        effective_window,
-    )?)
+    Ok(get_route_state(&db, &application_id, effective_window)?)
 }
 
 /// Set route state — SECURITY: caller-provided history and historyIndex are REJECTED.
@@ -511,7 +506,11 @@ pub fn ensure_initial_route_cmd(
     state.require_profile()?;
     let effective_window = window.label();
     let mut db = state.db.lock();
-    Ok(ensure_initial_route(&mut db, &application_id, effective_window)?)
+    Ok(ensure_initial_route(
+        &mut db,
+        &application_id,
+        effective_window,
+    )?)
 }
 
 #[tauri::command]

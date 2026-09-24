@@ -354,8 +354,9 @@ mod tests {
         let conv =
             crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "Gone", None)
                 .unwrap();
-        let msg = crate::db::insert_message(&mut db, &conv.id, "user", "secret-searchable-text", None)
-            .unwrap();
+        let msg =
+            crate::db::insert_message(&mut db, &conv.id, "user", "secret-searchable-text", None)
+                .unwrap();
         let surface = crate::runtime_v2::surfaces::create_inline_surface(
             &mut db,
             &conv.id,

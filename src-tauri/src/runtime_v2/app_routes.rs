@@ -106,7 +106,8 @@ pub fn navigate_route(
     }
 
     // 2. Validate route membership against manifest if manifest exists
-    if let Ok(manifest_rec) = crate::application_kernel::manifest::get_manifest(db, application_id) {
+    if let Ok(manifest_rec) = crate::application_kernel::manifest::get_manifest(db, application_id)
+    {
         if !manifest_rec.manifest.routes.is_empty() {
             let matching_route = manifest_rec
                 .manifest

@@ -212,7 +212,13 @@ pub fn resolve_access_presentation(
 fn is_local_provider(provider: &str) -> bool {
     matches!(
         provider.to_ascii_lowercase().as_str(),
-        "ollama" | "lmstudio" | "local" | "openai-compatible-local"
+        "ollama"
+            | "lmstudio"
+            | "vllm"
+            | "llama_cpp"
+            | "llama.cpp"
+            | "local"
+            | "openai-compatible-local"
     )
 }
 
@@ -288,5 +294,17 @@ mod tests {
         let p = resolve_access_presentation("connection", "ollama", true, true, false, true);
         assert_eq!(p.access_mode, AiAccessMode::UserLocal);
         assert_ne!(p.access_mode, AiAccessMode::CoresideHosted);
+    }
+
+    #[test]
+    fn local_providers_vllm_and_llama_cpp_resolve_user_local() {
+        let vllm = resolve_access_presentation("connection", "vllm", false, false, false, false);
+        assert_eq!(vllm.access_mode, AiAccessMode::UserLocal);
+        assert_eq!(vllm.consumer_display_name, "Local AI");
+
+        let llama =
+            resolve_access_presentation("connection", "llama_cpp", false, false, false, false);
+        assert_eq!(llama.access_mode, AiAccessMode::UserLocal);
+        assert_eq!(llama.consumer_display_name, "Local AI");
     }
 }

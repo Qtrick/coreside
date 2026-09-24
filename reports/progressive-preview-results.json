@@ -3,13 +3,13 @@
   "journey": 19,
   "name": "progressive-surface-preview",
   "evidenceLevel": "Desktop Verified",
-  "startedAt": "2026-08-10T23:35:11.997Z",
-  "endedAt": "2026-08-10T23:35:14.479Z",
-  "generatedAt": "2026-08-10T23:35:14.479Z",
-  "commit": "1bd2a3e8376afdf847cec55ae90fe9e219eee605",
+  "startedAt": "2026-09-24T17:54:38.372Z",
+  "endedAt": "2026-09-24T17:54:43.100Z",
+  "generatedAt": "2026-09-24T17:54:43.100Z",
+  "commit": "0232a391414f9ae2c01bf7e5aa88c02f25d3c5c6",
   "dirty": true,
-  "sourceFingerprint": "c0da070e975788ca2881dd74f503eb98ef9a0d32a6d9246a35dc63e51d4d81dd",
-  "binaryHash": "623a522e345d5c2a3fe72232318d1a1910ac2f0e4bf68072a5f50fc48ee85534",
+  "sourceFingerprint": "ede8cbddd112f44aa5ea403dbbc41a055e860414b624a3182a19a27bca77c679",
+  "binaryHash": "c97cb81a1c0130cdf62b2a0a3e0b96475f2dea8eb08747fb727dc9815f7ddfc8",
   "e2eSpec": "e2e/specs/19-progressive-surface-preview.spec.ts",
   "providerFixture": "mock progressive surface preview",
   "assertions": [
@@ -20,10 +20,10 @@
     "final note value remains progressive preview note"
   ],
   "metrics": {
-    "turnStartToFirstBadgeMs": 28,
-    "turnStartToFirstPaintMs": 57,
-    "turnStartToCompletionMs": 2088,
-    "totalWallMs": 2516,
+    "turnStartToFirstBadgeMs": 17,
+    "turnStartToFirstPaintMs": 30,
+    "turnStartToCompletionMs": 4544,
+    "totalWallMs": 4762,
     "note": "Timing is observational (not a CI gate). SQLite write absence during speculation is Unit Verified separately — do not elevate that claim from this Desktop run."
   },
   "intentionallyRejected": [

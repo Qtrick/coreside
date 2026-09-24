@@ -210,7 +210,7 @@ export const ToolLayoutSchema = z
     collapseAt: z.enum(["mobile", "tablet", "never"]).optional(),
   })
   .passthrough()
-  .optional();
+  .nullish();
 
 export type ToolLayout = z.infer<typeof ToolLayoutSchema>;
 

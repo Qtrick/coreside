@@ -61,6 +61,51 @@ describe("tool-schema", () => {
     expect(validateAction({ type: "nope" })).toBeNull();
   });
 
+  it("accepts a SoftwareDocument representation with sections and title", () => {
+    const result = validateToolDefinition({
+      id: "tool-e2e-notes",
+      title: "E2E Notes",
+      description: "Seeded personal tool",
+      version: 1,
+      layout: null,
+      sections: [
+        {
+          id: "main",
+          components: [
+            {
+              id: "e2e-note-input",
+              type: "textInput",
+              valueKey: "note",
+              props: { label: "Note", placeholder: "Type a note" },
+            },
+          ],
+        },
+      ],
+      stateContracts: [],
+      actionContracts: [],
+      capabilityPacks: ["coreside.core"],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.id).toBe("tool-e2e-notes");
+      expect(result.data.name).toBe("E2E Notes");
+      expect(result.data.components).toHaveLength(1);
+      expect(result.data.components[0].id).toBe("e2e-note-input");
+    }
+  });
+
+  it("accepts a tool definition with null layout by falling back to default", () => {
+    const result = validateToolDefinition({
+      id: "simple-tool",
+      name: "Simple Tool",
+      layout: null,
+      components: [],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
   it("knows supported component types", () => {
     expect(isSupportedComponentType("quiz")).toBe(true);
     expect(isSupportedComponentType("iframe")).toBe(false);

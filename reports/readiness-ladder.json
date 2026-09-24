@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-19T21:21:16.938Z",
-  "commit": "972d8b6763f3b262f52c54132b1a75b5316a5f22",
+  "generatedAt": "2026-09-24T18:09:29.619Z",
+  "commit": "0232a391414f9ae2c01bf7e5aa88c02f25d3c5c6",
   "dirty": true,
-  "sourceFingerprint": "ba425b39cbd67aaf2ef2d9e1b1364662c3b061055a68ac6faf06bbef8daad33f",
-  "packageLockHash": "f99da7c99dc5e2db93567632e2c36d36796c4b3ea8cf6a575a3f337bb6b9d641",
+  "sourceFingerprint": "26f762277e77e9f483cfc958ccafc4efe1d070d610eccc4df14468567bc59fc8",
+  "packageLockHash": "2b427ad1e95a93b212ca4763ebba64a778c976c59421514246b4b3c68300468d",
   "cargoLockHash": "b64ad87161713f19b77675d96b38081e050c78ec6b8e3d6b3e00f26b49bfbd67",
   "platform": "darwin",
   "architecture": "arm64",
@@ -37,7 +37,7 @@
       "id": "true-streaming",
       "name": "True streaming (chat_stream / TextDelta)",
       "state": "Integrated – Not Verified",
-      "notes": "True streaming desktop claim withheld. (prior evidence d1918e1) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Journey 12 passed in e2e-results but fingerprint stale — re-run e2e to claim Desktop Verified. (prior fingerprint ede8cbddd112…) Re-run on current source fingerprint to claim Desktop Verified.",
       "evidence": [
         "reports/true-streaming-results.json"
       ]
@@ -46,7 +46,7 @@
       "id": "channel-scoped-streaming",
       "name": "Channel-scoped turn streaming",
       "state": "Integrated – Not Verified",
-      "notes": "Channel-scoped streaming desktop claim withheld. (prior evidence d1918e1) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Journey 14 passed in e2e-results but fingerprint stale — re-run e2e to claim Desktop Verified. (prior fingerprint ede8cbddd112…) Re-run on current source fingerprint to claim Desktop Verified.",
       "evidence": [
         "reports/scoped-streaming-results.json",
         "reports/stream-eavesdropping-results.json"
@@ -56,7 +56,7 @@
       "id": "wallpaper-atomic-settings",
       "name": "Wallpaper atomic appearance writes",
       "state": "Integrated – Not Verified",
-      "notes": "Wallpaper atomic settings desktop claim withheld. (prior evidence d1918e1) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Journey 13 passed in e2e-results but fingerprint stale — re-run e2e to claim Desktop Verified. (prior fingerprint ede8cbddd112…) Re-run on current source fingerprint to claim Desktop Verified.",
       "evidence": [
         "reports/wallpaper-settings-results.json",
         "reports/wallpaper-visual-results.json"
@@ -128,7 +128,7 @@
       "id": "e2e-1-14",
       "name": "Desktop E2E Journeys 1–14",
       "state": "Integrated – Not Verified",
-      "notes": "e2e-results.json is on d1918e1, not HEAD — re-run e2e to claim Desktop Verified.",
+      "notes": "Orchestrator finished on this HEAD but Journey 7 is passed_partial — not a full Desktop Verified suite pass.",
       "evidence": [
         "reports/e2e-results.json",
         "reports/true-streaming-results.json",
@@ -141,7 +141,7 @@
       "id": "e2e-12-13",
       "name": "Desktop E2E Journey 12 / 13",
       "state": "Integrated – Not Verified",
-      "notes": "Journey 12/13 evidence not on HEAD. (prior evidence d1918e1) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Journeys 12/13 passed in e2e-results but fingerprint stale — re-run e2e to claim Desktop Verified. (prior fingerprint ede8cbddd112…) Re-run on current source fingerprint to claim Desktop Verified.",
       "evidence": [
         "reports/true-streaming-results.json",
         "reports/wallpaper-visual-results.json"
@@ -151,7 +151,7 @@
       "id": "e2e-14-eavesdrop",
       "name": "Tool-window stream eavesdropping denial",
       "state": "Integrated – Not Verified",
-      "notes": "Journey 14 eavesdrop desktop claim withheld. (prior evidence d1918e1) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Journey 14 passed in e2e-results but fingerprint stale — re-run e2e to claim Desktop Verified. (prior fingerprint ede8cbddd112…) Re-run on current source fingerprint to claim Desktop Verified.",
       "evidence": [
         "reports/stream-eavesdropping-results.json"
       ]
@@ -160,7 +160,7 @@
       "id": "command-authority-j11",
       "name": "Tool-window raw-invoke ACL denial (Journey 11)",
       "state": "Integrated – Not Verified",
-      "notes": "Journey 11 command-authority desktop claim withheld. (prior evidence 2b50227) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Journey 11 command-authority desktop claim withheld. (prior fingerprint ede8cbddd112…) Re-run on current source fingerprint to claim Desktop Verified.",
       "evidence": [
         "reports/command-authority-results.json"
       ]

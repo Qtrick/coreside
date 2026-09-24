@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-15T02:29:09.133Z",
-  "commit": "b491c6ab77ad9edd11f5e2aa4435f43d81449e8d",
+  "generatedAt": "2026-09-24T17:55:57.344Z",
+  "commit": "0232a391414f9ae2c01bf7e5aa88c02f25d3c5c6",
   "dirty": true,
-  "fingerprint": "630c063e81b6f29208fdc04de54114efcf08838daea722cc2e7ce9f17db42279",
+  "fingerprint": "f368dcfc2f3106eb4cae32df0836360737d0925e09015a0bea261a9df30172ad",
   "command": "audit:tutorial-targets",
   "declaredTargets": [
     "ai-connections-nav",
@@ -15,26 +15,35 @@
     "sidebar-projects"
   ],
   "presentInSource": [
+    "ai-access",
+    "ai-connections-nav",
     "app-panel",
     "chat-composer",
     "chat-composer-send",
+    "help-learning",
     "help-learning-nav",
     "sidebar-projects"
   ],
-  "missingInDom": [
-    "ai-connections-nav"
+  "missingInDom": [],
+  "undeclaredInTutorials": [
+    "ai-access",
+    "help-learning"
   ],
-  "undeclaredInTutorials": [],
   "occurrences": [
     {
       "id": "chat-composer",
       "file": "src/components/chat/Composer.tsx",
-      "line": 324
+      "line": 337
     },
     {
       "id": "chat-composer-send",
       "file": "src/components/chat/Composer.tsx",
-      "line": 451
+      "line": 464
+    },
+    {
+      "id": "help-learning",
+      "file": "src/components/settings/SettingsPanel.tsx",
+      "line": 429
     },
     {
       "id": "help-learning-nav",
@@ -42,19 +51,29 @@
       "line": 429
     },
     {
+      "id": "ai-access",
+      "file": "src/components/settings/SettingsPanel.tsx",
+      "line": 429
+    },
+    {
+      "id": "ai-connections-nav",
+      "file": "src/components/settings/SettingsPanel.tsx",
+      "line": 429
+    },
+    {
       "id": "sidebar-projects",
       "file": "src/components/sidebar/Sidebar.tsx",
-      "line": 206
+      "line": 207
     },
     {
       "id": "app-panel",
       "file": "src/components/tool-canvas/ToolCanvas.tsx",
-      "line": 279
+      "line": 392
     },
     {
       "id": "app-panel",
       "file": "src/components/tool-canvas/ToolCanvas.tsx",
-      "line": 311
+      "line": 424
     }
   ]
 }

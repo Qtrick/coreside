@@ -7,6 +7,10 @@ import {
   type ToolComponent,
   type ToolDefinition,
 } from "@/types/tool";
+import {
+  SoftwareDocumentSchema,
+  toToolDefinition,
+} from "@/lib/software-document";
 
 const SAFE_ID = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 
@@ -23,7 +27,24 @@ export function validateToolDefinition(input: unknown): {
   error: string;
   issues: string[];
 } {
-  const parsed = ToolDefinitionSchema.safeParse(input);
+  let target = input;
+  if (target && typeof target === "object" && !Array.isArray(target)) {
+    const raw = target as Record<string, unknown>;
+    if (Array.isArray(raw.sections) || ("title" in raw && !("name" in raw))) {
+      const docParsed = SoftwareDocumentSchema.safeParse(raw);
+      if (docParsed.success) {
+        target = toToolDefinition(docParsed.data);
+      } else if ("title" in raw && !("name" in raw)) {
+        target = {
+          ...raw,
+          name: raw.title,
+          layout: raw.layout ?? { type: "single-column" },
+        };
+      }
+    }
+  }
+
+  const parsed = ToolDefinitionSchema.safeParse(target);
   if (!parsed.success) {
     return {
       success: false,

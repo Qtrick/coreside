@@ -236,16 +236,27 @@ pub fn sync_software_document_contracts(
 ) {
     for contract in &doc.action_contracts {
         if let Some(ref comp_id) = contract.component_id {
-            let list = manifest.component_action_access.entry(comp_id.clone()).or_default();
+            let list = manifest
+                .component_action_access
+                .entry(comp_id.clone())
+                .or_default();
             if !list.contains(&contract.action_name) {
                 list.push(contract.action_name.clone());
             }
         }
         if let Some(ref hash) = contract.descriptor_hash {
-            manifest.action_descriptor_hashes.insert(contract.action_name.clone(), hash.clone());
+            manifest
+                .action_descriptor_hashes
+                .insert(contract.action_name.clone(), hash.clone());
         }
-        if !manifest.application_action_access.is_empty() && !manifest.application_action_access.contains(&contract.action_name) {
-            manifest.application_action_access.push(contract.action_name.clone());
+        if !manifest.application_action_access.is_empty()
+            && !manifest
+                .application_action_access
+                .contains(&contract.action_name)
+        {
+            manifest
+                .application_action_access
+                .push(contract.action_name.clone());
         }
     }
 }
@@ -382,13 +393,12 @@ pub fn get_manifest(db: &Database, application_id: &str) -> DbResult<ManifestRec
     let raw = raw.ok_or_else(|| DbError::NotFound(format!("application {application_id}")))?;
 
     // Fail closed: malformed manifest JSON is a hard error, not a fallback.
-    let manifest: ApplicationManifest =
-        serde_json::from_str(&raw.manifest_json).map_err(|e| {
-            DbError::Corrupted(format!(
-                "manifest JSON for application '{}' is malformed: {}",
-                application_id, e
-            ))
-        })?;
+    let manifest: ApplicationManifest = serde_json::from_str(&raw.manifest_json).map_err(|e| {
+        DbError::Corrupted(format!(
+            "manifest JSON for application '{}' is malformed: {}",
+            application_id, e
+        ))
+    })?;
 
     Ok(ManifestRecord {
         id: raw.id,
@@ -775,17 +785,15 @@ mod tests {
     fn sync_software_document_contracts_propagates_contracts() {
         let mut m = sample();
         let mut doc = crate::runtime_v2::SoftwareDocument::new("doc-1", "Test Doc");
-        doc.action_contracts = vec![
-            crate::runtime_v2::ActionContract {
-                action_id: "act-1".into(),
-                action_name: "local_data.query".into(),
-                component_id: Some("comp-table".into()),
-                descriptor_hash: Some("sha256:abc1234".into()),
-                description: None,
-                result_key: None,
-                input_from_state: None,
-            },
-        ];
+        doc.action_contracts = vec![crate::runtime_v2::ActionContract {
+            action_id: "act-1".into(),
+            action_name: "local_data.query".into(),
+            component_id: Some("comp-table".into()),
+            descriptor_hash: Some("sha256:abc1234".into()),
+            description: None,
+            result_key: None,
+            input_from_state: None,
+        }];
 
         sync_software_document_contracts(&mut m, &doc);
 

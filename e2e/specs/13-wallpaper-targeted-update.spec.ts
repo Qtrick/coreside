@@ -36,7 +36,9 @@ describe("Journey 13 — wallpaper targeted update", () => {
       timeout: 15_000,
       timeoutMsg: "wallpapers-heading not found in Appearance",
     });
-    await wallpapersHeading.scrollIntoView();
+    await browser.execute((el) => {
+      (el as HTMLElement).scrollIntoView?.({ block: "center" });
+    }, wallpapersHeading);
 
     // Matrix canvas mounts after this — WebKit must expose the automation probe first.
     await ensureWebDriverPaintProbe();

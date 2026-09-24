@@ -546,14 +546,18 @@ impl ToolComponent {
         if let Some(props) = self.props.as_mut().and_then(|p| p.as_object_mut()) {
             let mut extracted: Vec<ActionDefinition> = Vec::new();
             if let Some(actions_val) = props.remove("actions") {
-                if let Ok(acts) = serde_json::from_value::<Vec<ActionDefinition>>(actions_val.clone()) {
+                if let Ok(acts) =
+                    serde_json::from_value::<Vec<ActionDefinition>>(actions_val.clone())
+                {
                     extracted.extend(acts);
                 } else if let Ok(act) = serde_json::from_value::<ActionDefinition>(actions_val) {
                     extracted.push(act);
                 }
             }
             if let Some(action_val) = props.remove("action") {
-                if let Ok(acts) = serde_json::from_value::<Vec<ActionDefinition>>(action_val.clone()) {
+                if let Ok(acts) =
+                    serde_json::from_value::<Vec<ActionDefinition>>(action_val.clone())
+                {
                     extracted.extend(acts);
                 } else if let Ok(act) = serde_json::from_value::<ActionDefinition>(action_val) {
                     extracted.push(act);
@@ -562,7 +566,10 @@ impl ToolComponent {
             props.remove("onClick");
             props.remove("on_click");
             if self.value_key.is_none() {
-                if let Some(vk) = props.remove("valueKey").and_then(|v| v.as_str().map(|s| s.to_string())) {
+                if let Some(vk) = props
+                    .remove("valueKey")
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                {
                     self.value_key = Some(vk);
                 }
             }
@@ -805,7 +812,8 @@ impl AgentResponsePayload {
     }
 
     pub fn normalized_operations(&self) -> Result<Vec<crate::runtime_v2::AppOperation>, String> {
-        let mut ops: Vec<crate::runtime_v2::AppOperation> = if let Some(ops_raw) = &self.operations {
+        let mut ops: Vec<crate::runtime_v2::AppOperation> = if let Some(ops_raw) = &self.operations
+        {
             ops_raw
                 .iter()
                 .enumerate()

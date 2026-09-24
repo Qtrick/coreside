@@ -103,19 +103,39 @@ const SURFACES = [
   },
 ];
 
-const SETTINGS_CATEGORIES = [
-  "general",
-  "appearance",
-  "ai-access",
-  "agent",
-  "search",
-  "privacy",
-  "data",
-  "accessibility",
-  "advanced",
-  "about",
-  "added",
-];
+function loadSettingsCategories() {
+  const tsPath = path.join(root, "src/lib/settings-categories.ts");
+  if (fs.existsSync(tsPath)) {
+    const text = fs.readFileSync(tsPath, "utf8");
+    const block = text.match(
+      /SETTINGS_CATEGORIES:\s*readonly\s*SettingsCategory\[\]\s*=\s*\[([\s\S]*?)\]\s*as\s*const/,
+    );
+    if (block) {
+      const matches = [...block[1].matchAll(/id:\s*["']([^"']+)["']/g)].map(
+        (m) => m[1],
+      );
+      if (matches.length > 0) {
+        return matches;
+      }
+    }
+  }
+  return [
+    "general",
+    "appearance",
+    "ai-access",
+    "agent",
+    "search",
+    "privacy",
+    "data",
+    "accessibility",
+    "advanced",
+    "help-learning",
+    "about",
+    "added",
+  ];
+}
+
+const SETTINGS_CATEGORIES = loadSettingsCategories();
 
 const ladder = readJson("reports/readiness-ladder.json");
 const ladderById = new Map(

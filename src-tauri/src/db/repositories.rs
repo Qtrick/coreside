@@ -196,10 +196,7 @@ pub fn delete_conversation(db: &mut Database, id: &str) -> DbResult<()> {
     // searchable or runnable copy may remain.
     db.with_transaction(|conn| {
         // Fail closed: never leave orphan FTS rows that could leak deleted chat text.
-        conn.execute(
-            "DELETE FROM message_fts WHERE conversation_id = ?1",
-            [id],
-        )?;
+        conn.execute("DELETE FROM message_fts WHERE conversation_id = ?1", [id])?;
         // Surface-keyed continuity rows have no FK — clean them while the
         // conversation→surface join still resolves.
         for table in [
@@ -226,10 +223,7 @@ pub fn delete_conversation(db: &mut Database, id: &str) -> DbResult<()> {
              )",
             [id],
         )?;
-        conn.execute(
-            "DELETE FROM surfaces WHERE conversation_id = ?1",
-            [id],
-        )?;
+        conn.execute("DELETE FROM surfaces WHERE conversation_id = ?1", [id])?;
         // Clean conversation-owned tables without FK constraints (orphan rows).
         // These tables reference conversation_id but have no ON DELETE CASCADE.
         // (runtime_action_grants / runtime_approvals carry no conversation_id —
@@ -453,13 +447,18 @@ pub fn insert_message(
     content: &str,
     metadata: Option<&serde_json::Value>,
 ) -> DbResult<Message> {
-    let exists: bool = db.conn().query_row(
-        "SELECT 1 FROM conversations WHERE id = ?1",
-        [conversation_id],
-        |_| Ok(true),
-    ).unwrap_or(false);
+    let exists: bool = db
+        .conn()
+        .query_row(
+            "SELECT 1 FROM conversations WHERE id = ?1",
+            [conversation_id],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
     if !exists {
-        return Err(DbError::NotFound(format!("conversation {conversation_id} not found")));
+        return Err(DbError::NotFound(format!(
+            "conversation {conversation_id} not found"
+        )));
     }
 
     let id = format!("msg-{}", Uuid::new_v4());

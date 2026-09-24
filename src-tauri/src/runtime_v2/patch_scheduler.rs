@@ -252,10 +252,11 @@ pub fn schedule_patches(db: &mut Database, req: &ScheduleRequest) -> DbResult<Ve
     // This prevents sibling operations in the same batch from mutually superseding each other.
     let preview_batch_id = if req.priority == PatchPriority::ActiveTurnPreview {
         let batch_id = format!("preview-batch-{}", Uuid::new_v4());
-        let surface_id = req
-            .surface_id
-            .as_deref()
-            .or_else(|| req.operations.first().and_then(|o| o.target.surface_id.as_deref()));
+        let surface_id = req.surface_id.as_deref().or_else(|| {
+            req.operations
+                .first()
+                .and_then(|o| o.target.surface_id.as_deref())
+        });
         let _ = supersede_preview_items(db, surface_id, &batch_id)?;
         Some(batch_id)
     } else {
@@ -644,7 +645,9 @@ pub fn flush_scheduler(
     while let Some(failed_id) = fail_queue.pop_front() {
         if let Some(deps) = dependents.get(&failed_id) {
             for dep_id in deps {
-                if !missing_dep_patches.contains(dep_id) && failed_dep_patches.insert(dep_id.clone()) {
+                if !missing_dep_patches.contains(dep_id)
+                    && failed_dep_patches.insert(dep_id.clone())
+                {
                     fail_queue.push_back(dep_id.clone());
                 }
             }
@@ -674,7 +677,9 @@ pub fn flush_scheduler(
     // Ready queue with deterministic sorting: (sequence_number, id)
     let mut ready: Vec<String> = in_degree
         .iter()
-        .filter(|(id, d)| **d == 0 && !missing_dep_patches.contains(*id) && !failed_dep_patches.contains(*id))
+        .filter(|(id, d)| {
+            **d == 0 && !missing_dep_patches.contains(*id) && !failed_dep_patches.contains(*id)
+        })
         .map(|(id, _)| id.clone())
         .collect();
 
@@ -695,7 +700,10 @@ pub fn flush_scheduler(
             for dep_id in deps {
                 if let Some(deg) = in_degree.get_mut(dep_id) {
                     *deg -= 1;
-                    if *deg == 0 && !missing_dep_patches.contains(dep_id) && !failed_dep_patches.contains(dep_id) {
+                    if *deg == 0
+                        && !missing_dep_patches.contains(dep_id)
+                        && !failed_dep_patches.contains(dep_id)
+                    {
                         newly_ready.push(dep_id.clone());
                     }
                 }

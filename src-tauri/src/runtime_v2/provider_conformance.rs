@@ -86,6 +86,63 @@ fn static_profile(provider_id: &str) -> (ProviderProfile, Value) {
                 "supportsApplicationChanges": true,
             }),
         ),
+        "kimi" => (
+            ProviderProfile::NativeStreamingOperations,
+            json!({
+                "profiles": [
+                    "native_streaming_operations",
+                    "tool_call_operations",
+                    "json_schema_response"
+                ],
+                "supportsApplicationChanges": true,
+            }),
+        ),
+        "mistral" => (
+            ProviderProfile::NativeStreamingOperations,
+            json!({
+                "profiles": [
+                    "native_streaming_operations",
+                    "tool_call_operations",
+                    "json_schema_response"
+                ],
+                "supportsApplicationChanges": true,
+            }),
+        ),
+        "ollama" => (
+            ProviderProfile::TextProtocolFallback,
+            json!({
+                "profiles": ["text_protocol_fallback", "tool_call_operations"],
+                "supportsApplicationChanges": true,
+            }),
+        ),
+        "lmstudio" => (
+            ProviderProfile::TextProtocolFallback,
+            json!({
+                "profiles": ["text_protocol_fallback", "tool_call_operations"],
+                "supportsApplicationChanges": true,
+            }),
+        ),
+        "vllm" => (
+            ProviderProfile::TextProtocolFallback,
+            json!({
+                "profiles": ["text_protocol_fallback", "tool_call_operations"],
+                "supportsApplicationChanges": true,
+            }),
+        ),
+        "llama_cpp" | "llama.cpp" => (
+            ProviderProfile::TextProtocolFallback,
+            json!({
+                "profiles": ["text_protocol_fallback", "tool_call_operations"],
+                "supportsApplicationChanges": true,
+            }),
+        ),
+        "compatible" => (
+            ProviderProfile::UnsupportedForApplicationChanges,
+            json!({
+                "profiles": ["text_protocol_fallback"],
+                "supportsApplicationChanges": false,
+            }),
+        ),
         "mock" => (
             ProviderProfile::NativeStreamingOperations,
             json!({
@@ -104,7 +161,20 @@ fn static_profile(provider_id: &str) -> (ProviderProfile, Value) {
 }
 
 pub fn seed_provider_profiles(db: &mut Database) -> DbResult<()> {
-    for provider in ["gemini", "openai", "anthropic", "openrouter", "mock"] {
+    for provider in [
+        "gemini",
+        "openai",
+        "anthropic",
+        "openrouter",
+        "kimi",
+        "mistral",
+        "ollama",
+        "lmstudio",
+        "vllm",
+        "llama_cpp",
+        "compatible",
+        "mock",
+    ] {
         let _ = get_provider_profile(db, provider, "*");
     }
     Ok(())
@@ -244,7 +314,39 @@ mod tests {
         assert_eq!(anthropic, ProviderProfile::BufferedStructuredResponse);
         let openrouter = select_application_profile(&mut db, "openrouter", "*").unwrap();
         assert_eq!(openrouter, ProviderProfile::TextProtocolFallback);
+        let kimi = select_application_profile(&mut db, "kimi", "*").unwrap();
+        assert_eq!(kimi, ProviderProfile::NativeStreamingOperations);
+        let mistral = select_application_profile(&mut db, "mistral", "*").unwrap();
+        assert_eq!(mistral, ProviderProfile::NativeStreamingOperations);
+        let ollama = select_application_profile(&mut db, "ollama", "*").unwrap();
+        assert_eq!(ollama, ProviderProfile::TextProtocolFallback);
+        let lmstudio = select_application_profile(&mut db, "lmstudio", "*").unwrap();
+        assert_eq!(lmstudio, ProviderProfile::TextProtocolFallback);
+        let vllm = select_application_profile(&mut db, "vllm", "*").unwrap();
+        assert_eq!(vllm, ProviderProfile::TextProtocolFallback);
+        let llama_cpp = select_application_profile(&mut db, "llama_cpp", "*").unwrap();
+        assert_eq!(llama_cpp, ProviderProfile::TextProtocolFallback);
+        let compatible = select_application_profile(&mut db, "compatible", "*").unwrap();
+        assert_eq!(
+            compatible,
+            ProviderProfile::UnsupportedForApplicationChanges
+        );
+        let mock = select_application_profile(&mut db, "mock", "*").unwrap();
+        assert_eq!(mock, ProviderProfile::NativeStreamingOperations);
         let unknown = select_application_profile(&mut db, "unknown", "*").unwrap();
         assert_eq!(unknown, ProviderProfile::UnsupportedForApplicationChanges);
+    }
+
+    #[test]
+    fn seed_provider_profiles_persists_records() {
+        let mut db = test_db();
+        seed_provider_profiles(&mut db).unwrap();
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM provider_conformance", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(count >= 12, "Must seed all 12 provider families");
     }
 }

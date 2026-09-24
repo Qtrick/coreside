@@ -40,7 +40,10 @@ pub fn delete_conversation(
     state.require_profile()?;
     // Tombstone the conversation to prevent late-arriving provider turns
     // from resurrecting rows or emitting events after deletion.
-    state.deleted_conversations.lock().insert(conversation_id.clone());
+    state
+        .deleted_conversations
+        .lock()
+        .insert(conversation_id.clone());
     // Quiesce in-flight provider work: active_requests is keyed by
     // conversation, and the post-provider commit path can otherwise resurrect
     // messages, ledger rows, and action events after the rows are deleted.
@@ -159,4 +162,3 @@ mod tests {
         assert!(state.deleted_conversations.lock().contains(&conv2.id));
     }
 }
-

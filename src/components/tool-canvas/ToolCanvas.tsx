@@ -202,9 +202,8 @@ export function ToolCanvas() {
     (state: Record<string, unknown>) => {
       if (canonicalSurface && activeTool) {
         setCanonicalState(state);
-      } else {
-        void updateToolState(state, true);
       }
+      void updateToolState(state, true);
     },
     [canonicalSurface, activeTool, updateToolState],
   );
@@ -218,6 +217,8 @@ export function ToolCanvas() {
           // Pass stateRevision (not definition revision) as the OCC guard.
           const newStateRev = await api.saveSurfaceState(sid, state, stateRevision);
           setStateRevision(newStateRev);
+          await api.saveToolState(activeTool.id, state).catch(() => undefined);
+          useAppStore.setState({ toolState: state });
         } catch (err) {
           // On conflict, reload fresh state + revision atomically.
           const [freshSurf, freshWithRev] = await Promise.all([
@@ -228,6 +229,7 @@ export function ToolCanvas() {
           if (freshWithRev) {
             setCanonicalState(freshWithRev.state);
             setStateRevision(freshWithRev.stateRevision);
+            useAppStore.setState({ toolState: freshWithRev.state });
           }
           throw err;
         }
@@ -370,7 +372,9 @@ export function ToolCanvas() {
   const renderTool = previewOverlay?.tool ?? canonicalDef ?? activeTool;
   const renderState =
     previewOverlay?.state ??
-    (canonicalSurface && canonicalState ? canonicalState : toolState);
+    (canonicalSurface && canonicalState && Object.keys(canonicalState).length > 0
+      ? { ...toolState, ...canonicalState }
+      : toolState);
   const isPreviewPaint = Boolean(previewOverlay);
 
   const surfacesById = useMemo(() => {

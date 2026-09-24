@@ -18,6 +18,6 @@ pub use endpoint_policy::{
     validate_and_build_credential_client, EndpointPolicyError, EndpointValidation,
 };
 pub use types::{
-    AuthMode, CapabilityConfidence, CapabilityFlag, CapabilityProfile, ConnectionHealth,
-    EndpointClass, ModelDiscoveryStrategy, ProtocolFamily, ResponseMode, negotiate_response_mode,
+    negotiate_response_mode, AuthMode, CapabilityConfidence, CapabilityFlag, CapabilityProfile,
+    ConnectionHealth, EndpointClass, ModelDiscoveryStrategy, ProtocolFamily, ResponseMode,
 };

@@ -177,9 +177,9 @@ pub fn get_model(
 }
 
 pub fn list_models(db: &Database, application_id: &str) -> DbResult<Vec<DataModelDefinition>> {
-    let mut stmt = db.conn().prepare(
-        "SELECT definition_json FROM generated_data_models WHERE application_id = ?1",
-    )?;
+    let mut stmt = db
+        .conn()
+        .prepare("SELECT definition_json FROM generated_data_models WHERE application_id = ?1")?;
     let rows = stmt.query_map([application_id], |r| {
         let json_str: String = r.get(0)?;
         serde_json::from_str(&json_str).map_err(|e| {

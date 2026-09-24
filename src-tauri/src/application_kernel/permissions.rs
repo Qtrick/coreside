@@ -163,8 +163,9 @@ pub fn list_permissions(db: &Database, application_id: &str) -> DbResult<Vec<Per
     )?;
     let rows = stmt.query_map([application_id], |row| {
         let scope_s: String = row.get(3)?;
-        let scope = serde_json::from_str(&scope_s)
-            .map_err(|e| rusqlite::Error::InvalidParameterName(format!("corrupted permission scope: {e}")))?;
+        let scope = serde_json::from_str(&scope_s).map_err(|e| {
+            rusqlite::Error::InvalidParameterName(format!("corrupted permission scope: {e}"))
+        })?;
         Ok(PermissionGrant {
             id: row.get(0)?,
             application_id: row.get(1)?,

@@ -58,6 +58,24 @@ pub fn seed_application(db: &mut Database, application_id: &str, actions: &[&str
         )
         .expect("permission");
     }
+    if actions.iter().any(|a| a.starts_with("local_data.")) {
+        let _ = crate::application_kernel::data::upsert_model(
+            db,
+            application_id,
+            crate::application_kernel::data::DataModelDefinition {
+                model_id: "note".into(),
+                display_name: "Note".into(),
+                schema_version: 1,
+                fields: vec![crate::application_kernel::data::DataField {
+                    field_id: "title".into(),
+                    field_type: "text".into(),
+                    required: false,
+                    default: None,
+                    enum_values: None,
+                }],
+            },
+        );
+    }
 }
 
 fn permissions_for(actions: &[&str]) -> Vec<String> {

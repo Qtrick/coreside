@@ -1,19 +1,29 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-08-04T22:02:31.043Z",
-  "commit": "2b502278ede0d0db57fe16f77ef1e282a92fd0d1",
+  "generatedAt": "2026-09-24T17:54:27.478Z",
+  "commit": "0232a391414f9ae2c01bf7e5aa88c02f25d3c5c6",
   "dirty": true,
-  "sourceFingerprint": "3c3fa498fa75b2aade48f3d127a45066df532598526258c60051d6c0cb5252dd",
+  "sourceFingerprint": "ede8cbddd112f44aa5ea403dbbc41a055e860414b624a3182a19a27bca77c679",
   "platform": "darwin",
   "architecture": "arm64",
   "command": "e2e:journey-13-wallpaper-targeted",
   "result": "passed",
   "evidenceLevel": "Desktop Verified",
+  "suiteScope": "journey-13-isolated",
+  "doNotClaim": [
+    "Desktop Verified for journeys 1–16 suite",
+    "Full npm run e2e suite pass",
+    "Packaged Verified",
+    "Human Accepted"
+  ],
+  "webDriverPaintProbe": true,
   "e2eSpec": "e2e/specs/13-wallpaper-targeted-update.spec.ts",
   "assertions": {
     "matrixSelected": "passed",
     "transparencyCommitted40": "passed",
+    "transparencyScale0To100": "passed",
+    "compositingVariablesUpdated": "passed",
     "liveWallpaperPresent": "passed",
     "canvasPresent": "passed",
     "desktopPixelSampling": "passed",
@@ -23,89 +33,80 @@
   },
   "transparency": {
     "ariaValueNow": "40",
-    "panelAlpha": 0.58
+    "panelAlpha": 0.696
   },
   "canvas": {
     "width": 2240,
     "height": 1344,
     "sampleCount": 156,
-    "uniqueColors": 4,
-    "lumSpan": 37.727999999999994,
+    "uniqueColors": 2,
+    "lumSpan": 67.8748,
     "samples": [
       {
         "a": 255,
-        "b": 32,
-        "g": 47,
-        "lum": 42.727999999999994,
-        "r": 32,
-        "x": 1306,
-        "y": 228
+        "b": 55,
+        "g": 78,
+        "lum": 71.8748,
+        "r": 57,
+        "x": 4,
+        "y": 1236
       },
       {
         "a": 255,
-        "b": 14,
-        "g": 32,
-        "lum": 25.810599999999997,
-        "r": 9,
-        "x": 562,
-        "y": 1012
-      },
-      {
-        "a": 255,
-        "b": 5,
-        "g": 5,
-        "lum": 4.999999999999999,
-        "r": 5,
+        "b": 4,
+        "g": 4,
+        "lum": 4,
+        "r": 4,
         "x": 4,
         "y": 4
       },
       {
         "a": 255,
-        "b": 5,
-        "g": 5,
-        "lum": 4.999999999999999,
-        "r": 5,
+        "b": 4,
+        "g": 4,
+        "lum": 4,
+        "r": 4,
         "x": 190,
         "y": 4
       },
       {
         "a": 255,
-        "b": 5,
-        "g": 5,
-        "lum": 4.999999999999999,
-        "r": 5,
+        "b": 4,
+        "g": 4,
+        "lum": 4,
+        "r": 4,
         "x": 376,
         "y": 4
       },
       {
         "a": 255,
-        "b": 5,
-        "g": 5,
-        "lum": 4.999999999999999,
-        "r": 5,
+        "b": 4,
+        "g": 4,
+        "lum": 4,
+        "r": 4,
         "x": 562,
         "y": 4
       },
       {
         "a": 255,
-        "b": 5,
-        "g": 5,
-        "lum": 4.999999999999999,
-        "r": 5,
+        "b": 4,
+        "g": 4,
+        "lum": 4,
+        "r": 4,
         "x": 748,
         "y": 4
       },
       {
         "a": 255,
-        "b": 5,
-        "g": 5,
-        "lum": 4.999999999999999,
-        "r": 5,
+        "b": 4,
+        "g": 4,
+        "lum": 4,
+        "r": 4,
         "x": 934,
         "y": 4
       }
     ]
   },
-  "screenshotHash": "ff451e5acdbe9e75b0f1ef9030c63cc00acaa7145b54f7124fe5ea2015935e59",
+  "screenshotHash": "11507f641ea43b168084c27067996ce5c05892a6bf4cc0b773df32a4a74e8398",
   "publicBeta": "Not ready"
 }

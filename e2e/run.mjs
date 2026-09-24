@@ -102,14 +102,12 @@ const JOURNEYS = [
     name: "local-ai-privacy",
     suite: "local-ai-privacy",
     coverage: "full",
-    note: "Spec present; not executed — requires Local AI desktop profile",
   },
   {
     id: 18,
     name: "hosted-free-chat",
     suite: "hosted-free-chat",
     coverage: "full",
-    note: "Spec present; not executed — requires hosted Supabase + Coreside AI session",
   },
 ];
 
@@ -212,6 +210,8 @@ function runSuite(suite, { seed, env: envOverrides } = {}) {
     AI_PROVIDER: process.env.AI_PROVIDER || "mock",
     CORESIDE_E2E_COMMIT: (commit.stdout || "").trim(),
     CORESIDE_E2E_DIRTY: (porcelain.stdout || "").trim().length > 0 ? "1" : "0",
+    NO_PROXY: "127.0.0.1,localhost",
+    no_proxy: "127.0.0.1,localhost",
     ...envOverrides,
   };
   // Explicitly unset vs empty-string: a polluted parent shell must not leak seed.
@@ -271,6 +271,12 @@ runSuite("existing-eavesdrop", { seed: "existing" });
 // Progressive surface preview needs seeded E2E Notes tool + mock paint fixture.
 runSuite("progressive-surface-preview", { seed: "existing" });
 runSuite("progressive-preview-cancel", { seed: "existing" });
+
+// Seeded local AI privacy disclosure profile.
+runSuite("local-ai-privacy", { seed: "local" });
+
+// Hosted AI gate verification (offline unauthenticated gate + optional hosted session).
+runSuite("hosted-free-chat");
 
 // Onboarding journeys need CORESIDE_E2E but must not disable welcome/tutorial.
 // Explicit empty seed prevents a polluted parent shell from leaking existing fixture data.

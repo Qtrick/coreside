@@ -34,10 +34,52 @@ pub fn maybe_seed(db: &mut Database) {
                 tracing::error!(error = %err, "e2e seed failed");
             }
         }
+        "local" => {
+            if let Err(err) = seed_local_profile(db) {
+                tracing::error!(error = %err, "e2e local seed failed");
+            }
+        }
         other => {
             tracing::warn!(profile = other, "unknown CORESIDE_E2E_SEED value; ignoring");
         }
     }
+}
+
+fn seed_local_profile(db: &mut Database) -> db::DbResult<()> {
+    let now = db::now_rfc3339();
+    // Ensure only one active connection (idx_provider_connections_one_active)
+    db.conn().execute(
+        "UPDATE provider_connections SET is_active = 0 WHERE is_active = 1",
+        [],
+    )?;
+    db.conn().execute(
+        "INSERT INTO provider_connections (
+            id, provider, label, base_url, model_default, keyring_account, is_active, last_status, last_tested_at, created_at, updated_at
+        ) VALUES (
+            'conn-e2e-local', 'ollama', 'Local Ollama', 'http://127.0.0.1:11434', 'llama3', 'coreside-e2e-local', 1, 'ready', ?1, ?1, ?1
+        ) ON CONFLICT(id) DO UPDATE SET is_active = 1, last_status = 'ready'",
+        rusqlite::params![now],
+    )?;
+
+    let count: i64 = db.conn().query_row(
+        "SELECT COUNT(*) FROM conversations WHERE workspace_id = ?1",
+        [DEFAULT_WORKSPACE_ID],
+        |r| r.get(0),
+    )?;
+    if count == 0 {
+        db.conn().execute(
+            "INSERT INTO conversations (id, workspace_id, title, project_id, pinned, archived, created_at, updated_at)
+             VALUES ('conv-e2e-local', ?1, 'Local AI Chat', NULL, 0, 0, ?2, ?2)",
+            rusqlite::params![DEFAULT_WORKSPACE_ID, now],
+        )?;
+        db.conn().execute(
+            "INSERT INTO messages (id, conversation_id, role, content)
+             VALUES ('msg-e2e-local-1', 'conv-e2e-local', 'user', 'Hello local AI')",
+            [],
+        )?;
+    }
+    tracing::info!("e2e local profile seeded");
+    Ok(())
 }
 
 fn seed_existing_profile(db: &mut Database) -> db::DbResult<()> {

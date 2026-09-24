@@ -175,8 +175,9 @@ const GRANT_COLS: &str = "id, subject, application_id, action_name, descriptor_h
 
 fn map_grant(row: &rusqlite::Row<'_>) -> rusqlite::Result<RuntimeGrant> {
     let scope_s: String = row.get(6)?;
-    let scope = serde_json::from_str(&scope_s)
-        .map_err(|e| rusqlite::Error::InvalidParameterName(format!("corrupted grant scope: {e}")))?;
+    let scope = serde_json::from_str(&scope_s).map_err(|e| {
+        rusqlite::Error::InvalidParameterName(format!("corrupted grant scope: {e}"))
+    })?;
     Ok(RuntimeGrant {
         id: row.get(0)?,
         subject: row.get(1)?,

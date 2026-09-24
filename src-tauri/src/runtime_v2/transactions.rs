@@ -198,8 +198,9 @@ pub fn apply_transaction_deferred(
                 initial_revisions
                     .entry(sid.clone())
                     .or_insert(s.current_revision);
-                let (current_state, state_rev) = super::surfaces::get_surface_state_with_revision(db, sid)
-                    .map_err(DbError::from)?;
+                let (current_state, state_rev) =
+                    super::surfaces::get_surface_state_with_revision(db, sid)
+                        .map_err(DbError::from)?;
                 previous.as_object_mut().unwrap().insert(
                     sid.clone(),
                     json!({
@@ -242,10 +243,10 @@ pub fn apply_transaction_deferred(
     }
 
     if !created_surfaces_list.is_empty() {
-        previous.as_object_mut().unwrap().insert(
-            "created_surfaces".into(),
-            json!(created_surfaces_list),
-        );
+        previous
+            .as_object_mut()
+            .unwrap()
+            .insert("created_surfaces".into(), json!(created_surfaces_list));
     }
 
     if failed {
@@ -464,8 +465,9 @@ fn apply_one(
                 .unwrap_or_else(|| op.payload.clone());
             validate_definition_components(&definition)?;
             let packs: Vec<String> = match op.payload.get("capabilityPacks") {
-                Some(v) => serde_json::from_value(v.clone())
-                    .map_err(|e| format!("invalid capabilityPacks in inline_surface_create: {e}"))?,
+                Some(v) => serde_json::from_value(v.clone()).map_err(|e| {
+                    format!("invalid capabilityPacks in inline_surface_create: {e}")
+                })?,
                 None => Vec::new(),
             };
             let s = create_inline_surface(
@@ -500,27 +502,43 @@ fn apply_one(
                 effective_base_revision(op, surface.current_revision, initial_revisions, sid);
 
             let (mut doc, original_doc) = if surface.definition.get("sections").is_some() {
-                let orig = super::software_document::SoftwareDocument::from_value(&surface.definition)
-                    .map_err(|e| format!("failed to load SoftwareDocument for surface '{sid}': {e}"))?;
+                let orig =
+                    super::software_document::SoftwareDocument::from_value(&surface.definition)
+                        .map_err(|e| {
+                            format!("failed to load SoftwareDocument for surface '{sid}': {e}")
+                        })?;
                 (orig.clone(), Some(orig))
             } else {
                 let tool_def: ToolDefinition = serde_json::from_value(surface.definition.clone())
-                    .map_err(|e| format!("failed to parse flat ToolDefinition for surface '{sid}': {e}"))?;
-                let orig = super::software_document::SoftwareDocument::from_tool_definition(&tool_def);
+                    .map_err(|e| {
+                    format!("failed to parse flat ToolDefinition for surface '{sid}': {e}")
+                })?;
+                let orig =
+                    super::software_document::SoftwareDocument::from_tool_definition(&tool_def);
                 (orig.clone(), Some(orig))
             };
 
             let (current_state, _) = super::surfaces::get_surface_state_with_revision(db, sid)
                 .map_err(|e| format!("failed to load surface state for surface '{sid}': {e}"))?;
 
-            if op.op_type == "chat.inline_surface_update" && op.payload.get("definition").is_some() {
+            if op.op_type == "chat.inline_surface_update" && op.payload.get("definition").is_some()
+            {
                 let incoming_raw = op.payload.get("definition").unwrap();
                 let candidate_doc = if incoming_raw.get("sections").is_some() {
-                    super::software_document::SoftwareDocument::from_value(incoming_raw)
-                        .map_err(|e| format!("invalid candidate software document on inline_surface_update: {e}"))?
+                    super::software_document::SoftwareDocument::from_value(incoming_raw).map_err(
+                        |e| {
+                            format!(
+                                "invalid candidate software document on inline_surface_update: {e}"
+                            )
+                        },
+                    )?
                 } else {
                     let tool_def: ToolDefinition = serde_json::from_value(incoming_raw.clone())
-                        .map_err(|e| format!("invalid candidate tool definition on inline_surface_update: {e}"))?;
+                        .map_err(|e| {
+                            format!(
+                                "invalid candidate tool definition on inline_surface_update: {e}"
+                            )
+                        })?;
                     super::software_document::SoftwareDocument::from_tool_definition(&tool_def)
                 };
                 super::software_document::admit_software_document_with_state(
@@ -574,15 +592,11 @@ fn apply_one(
             // (has `sections` key) and deserializes directly, preserving state_contracts,
             // action_contracts, design_tokens, capability_packs, and section hierarchy.
             // Falls back to from_tool_definition() only for legacy ToolDefinition-format definitions.
-            let mut doc = super::software_document::SoftwareDocument::from_value(
-                &surface.definition,
-            )
-            .map_err(|e| {
-                format!(
-                    "failed to load SoftwareDocument for surface '{}': {e}",
-                    sid
-                )
-            })?;
+            let mut doc =
+                super::software_document::SoftwareDocument::from_value(&surface.definition)
+                    .map_err(|e| {
+                        format!("failed to load SoftwareDocument for surface '{}': {e}", sid)
+                    })?;
 
             match op.op_type.as_str() {
                 "surface.add_section" => {
@@ -716,8 +730,9 @@ fn apply_one(
             // SECURITY: Fail-closed — if the existing surface definition cannot be parsed
             // as a SoftwareDocument, this is a hard failure for canonical surfaces.
             // For legacy surfaces, the admission check will handle the None case explicitly.
-            let original_doc = super::software_document::SoftwareDocument::from_value(&surface.definition)
-                .map_err(|e| format!("existing surface definition is malformed: {e}"))?;
+            let original_doc =
+                super::software_document::SoftwareDocument::from_value(&surface.definition)
+                    .map_err(|e| format!("existing surface definition is malformed: {e}"))?;
             let _notes = doc.validate_and_repair();
             let (current_state, _) = super::surfaces::get_surface_state_with_revision(db, sid)
                 .map_err(|e| format!("failed to load surface state for surface '{sid}': {e}"))?;
@@ -919,21 +934,32 @@ fn apply_one(
             // Enforce state contracts on every touched key if contracts are declared
             if !doc.state_contracts.is_empty() {
                 for k in &touched_keys {
-                    let sc = doc.state_contracts.iter().find(|s| &s.key == k).ok_or_else(|| {
-                        format!("state key '{k}' has no declared state contract on surface '{sid}'")
-                    })?;
+                    let sc = doc
+                        .state_contracts
+                        .iter()
+                        .find(|s| &s.key == k)
+                        .ok_or_else(|| {
+                            format!(
+                                "state key '{k}' has no declared state contract on surface '{sid}'"
+                            )
+                        })?;
                     if sc.write_policy == "readonly" {
-                        return Err(format!("cannot write to readonly state key '{k}' on surface '{sid}'"));
+                        return Err(format!(
+                            "cannot write to readonly state key '{k}' on surface '{sid}'"
+                        ));
                     }
-                    if sc.read_policy == "restricted" || sc.sensitivity.as_deref() == Some("sensitive") {
+                    if sc.read_policy == "restricted"
+                        || sc.sensitivity.as_deref() == Some("sensitive")
+                    {
                         return Err(format!("cannot write to restricted/sensitive state key '{k}' on surface '{sid}'"));
                     }
                 }
             }
 
             // Load current state fail-closed with revision
-            let (mut current, current_rev) = super::surfaces::get_surface_state_with_revision(db, sid)
-                .map_err(|e| e.to_string())?;
+            let (mut current, current_rev) =
+                super::surfaces::get_surface_state_with_revision(db, sid)
+                    .map_err(|e| e.to_string())?;
 
             if !current.is_object() {
                 current = json!({});
@@ -1193,9 +1219,12 @@ pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<App
             [transaction_id],
             |r| r.get::<_, Option<String>>(0),
         )
-        .optional()?.flatten();
+        .optional()?
+        .flatten();
     let prev = prev_json.ok_or_else(|| {
-        DbError::Invalid(format!("transaction '{transaction_id}' has no previous snapshot to undo to"))
+        DbError::Invalid(format!(
+            "transaction '{transaction_id}' has no previous snapshot to undo to"
+        ))
     })?;
 
     let map = match serde_json::from_str::<Value>(&prev) {
@@ -1221,14 +1250,22 @@ pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<App
         }
     }
 
-    db.conn().execute_batch("SAVEPOINT undo_sp").map_err(DbError::Sqlite)?;
+    db.conn()
+        .execute_batch("SAVEPOINT undo_sp")
+        .map_err(DbError::Sqlite)?;
 
     let res = (|| -> DbResult<()> {
         // 1. Delete surfaces created by this transaction
         if let Some(created) = map.get("created_surfaces").and_then(|v| v.as_array()) {
             for cid_val in created {
                 if let Some(cid) = cid_val.as_str() {
-                    let _ = delete_surface(db, cid, DeleteSurfaceOptions { delete_linked_tool: true });
+                    let _ = delete_surface(
+                        db,
+                        cid,
+                        DeleteSurfaceOptions {
+                            delete_linked_tool: true,
+                        },
+                    );
                 }
             }
         }
@@ -1255,7 +1292,9 @@ pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<App
 
     match res {
         Ok(()) => {
-            db.conn().execute_batch("RELEASE SAVEPOINT undo_sp").map_err(DbError::Sqlite)?;
+            db.conn()
+                .execute_batch("RELEASE SAVEPOINT undo_sp")
+                .map_err(DbError::Sqlite)?;
             get_transaction(db, transaction_id)
         }
         Err(e) => {
@@ -1504,7 +1543,8 @@ mod tests {
 
         let updated_surface = get_surface(&db, &surface.id).unwrap();
         assert_eq!(updated_surface.current_revision, initial_rev + 2);
-        let doc = crate::runtime_v2::SoftwareDocument::from_value(&updated_surface.definition).unwrap();
+        let doc =
+            crate::runtime_v2::SoftwareDocument::from_value(&updated_surface.definition).unwrap();
         assert_eq!(doc.sections[0].components.len(), 3);
         assert_eq!(doc.sections[0].components[1].id, "c1");
         assert_eq!(doc.sections[0].components[2].id, "c2");
@@ -1582,10 +1622,19 @@ mod tests {
         // Live surface revision unchanged!
         let current_surf = get_surface(&db, &surface.id).unwrap();
         assert_eq!(current_surf.current_revision, initial_rev);
-        let comps = if let Ok(doc) = crate::runtime_v2::SoftwareDocument::from_value(&current_surf.definition) {
+        let comps = if let Ok(doc) =
+            crate::runtime_v2::SoftwareDocument::from_value(&current_surf.definition)
+        {
             doc.to_tool_definition().components
         } else {
-            serde_json::from_value(current_surf.definition.get("components").cloned().unwrap_or(json!([]))).unwrap_or_default()
+            serde_json::from_value(
+                current_surf
+                    .definition
+                    .get("components")
+                    .cloned()
+                    .unwrap_or(json!([])),
+            )
+            .unwrap_or_default()
         };
         assert_eq!(comps.len(), 1); // "c-fp" not inserted into live surface
 
@@ -1729,7 +1778,8 @@ mod tests {
         // Verify surface_a is completely unmodified
         let surf_after = get_surface(&db, &surface_a.id).unwrap();
         assert_eq!(surf_after.current_revision, surface_a.current_revision);
-        let doc_after = crate::runtime_v2::SoftwareDocument::from_value(&surf_after.definition).unwrap();
+        let doc_after =
+            crate::runtime_v2::SoftwareDocument::from_value(&surf_after.definition).unwrap();
         assert_eq!(doc_after.sections[0].components.len(), 1);
         assert_eq!(doc_after.sections[0].components[0].id, "c0");
     }
@@ -1749,8 +1799,8 @@ mod tests {
         };
 
         let mut db = test_db();
-        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "DocIntegrity", None)
-            .unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "DocIntegrity", None).unwrap();
 
         // Build a rich SoftwareDocument with state_contracts, action_contracts,
         // design_tokens, capability_packs.
@@ -1882,7 +1932,9 @@ mod tests {
             "document description must survive semantic edit"
         );
         assert!(
-            loaded_doc.capability_packs.contains(&"coreside.charts".to_string()),
+            loaded_doc
+                .capability_packs
+                .contains(&"coreside.charts".to_string()),
             "capability_packs must survive: got {:?}",
             loaded_doc.capability_packs
         );
