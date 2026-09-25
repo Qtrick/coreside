@@ -2,10 +2,10 @@
   "schemaVersion": 2,
   "product": "Coreside",
   "accessDate": "2026-08-07",
-  "generatedAt": "2026-09-24T17:55:43.082Z",
-  "commit": "0232a391414f9ae2c01bf7e5aa88c02f25d3c5c6",
+  "generatedAt": "2026-09-25T16:59:41.976Z",
+  "commit": "e9c961923b52420646657888c44872ff90e6e69a",
   "dirty": true,
-  "sourceFingerprint": "f368dcfc2f3106eb4cae32df0836360737d0925e09015a0bea261a9df30172ad",
+  "sourceFingerprint": "f3e0434743a2e416c527f15b45b46a0e045b3906f96bd1c5465eb6081e760377",
   "command": "audit:partial-update",
   "exitStatus": 0,
   "publicBeta": "Not ready",
@@ -132,7 +132,7 @@
           "path": "reports/true-streaming-results.json",
           "ok": false,
           "fresh": false,
-          "commitFresh": true
+          "commitFresh": false
         }
       ],
       "gapPriority": null,
@@ -257,7 +257,7 @@
           "path": "reports/progressive-preview-results.json",
           "ok": false,
           "fresh": false,
-          "commitFresh": true
+          "commitFresh": false
         }
       ],
       "gapPriority": "P0",

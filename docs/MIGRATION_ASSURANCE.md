@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 28 forward migrations (001–028; includes `028_deep_runtime_v2_hardening.sql`)
+**Count:** 30 forward migrations (001–030; includes `030_patch_scheduler_target_readiness.sql`)
 
 ## Inventory
 
@@ -36,6 +36,8 @@
 | 026 | `026_kernel_change_proposals.sql` | Kernel change proposals: frozen operations, CAS status, approval lifecycle |
 | 027 | `027_secure_runtime_proposals_and_state.sql` | Secure runtime: state contract origin, proposal operations hash, state revision OCC |
 | 028 | `028_deep_runtime_v2_hardening.sql` | Deep Runtime V2 hardening: conversation event sequences, outbox idempotency, turn journal CAS |
+| 029 | `029_queue_turn_binding.sql` | Queue item turn binding: explicit turn_id relationship and crash recovery isolation |
+| 030 | `030_patch_scheduler_target_readiness.sql` | Target readiness: deferred patch scheduling, target dependency promotion, TTL timeout |
 
 ## What is verified
 

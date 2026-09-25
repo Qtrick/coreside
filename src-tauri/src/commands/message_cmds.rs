@@ -387,14 +387,48 @@ fn sync_conversation_id(event: &AgentTurnEvent) -> Option<&str> {
     }
 }
 
+fn turn_event_conversation_id(event: &AgentTurnEvent) -> Option<&str> {
+    let cid = match event {
+        AgentTurnEvent::Action {
+            conversation_id, ..
+        } => conversation_id.as_str(),
+        AgentTurnEvent::Text {
+            conversation_id, ..
+        } => conversation_id.as_str(),
+        AgentTurnEvent::Error {
+            conversation_id, ..
+        } => conversation_id.as_str(),
+        AgentTurnEvent::Operation {
+            conversation_id, ..
+        } => conversation_id.as_str(),
+        AgentTurnEvent::PreviewSurface {
+            conversation_id, ..
+        } => conversation_id.as_str(),
+        AgentTurnEvent::Sync {
+            conversation_id: Some(id),
+            ..
+        }
+        | AgentTurnEvent::Conflict {
+            conversation_id: Some(id),
+            ..
+        } => id.as_str(),
+        _ => return None,
+    };
+    if cid.trim().is_empty() {
+        None
+    } else {
+        Some(cid)
+    }
+}
+
 /// Deliver a turn event with Channel-scoped privacy for private kinds.
 ///
 /// - Text / Action / Error / Operation / PreviewSurface: send on Channel when
 ///   present. **Never** put these on the process-wide `agent-turn` bus (tool
 ///   windows with `core:event:default` must not see another conversation's
-///   private payloads). When Channel is None (queue drain): skip Text; drop
-///   Action / Error / Operation / PreviewSurface rather than global-leak
-///   (queue-drain progress UI is a follow-up).
+///   private payloads). When Channel is None (queue drain): skip Text; persist
+///   Action / Error / Operation / PreviewSurface to conversation_event_log so
+///   clients can reconnect / catch-up without leaking on the global bus.
 /// - Sync / Conflict: prefer `subscribe_conversation_sync` fan-out; if that
 ///   delivers to any live Channel, **do not** also send on the invoke Channel
 ///   (avoids double reload/conflict apply on main). Fall back to invoke
@@ -419,10 +453,33 @@ fn emit_turn(
             if let Some(ch) = on_event {
                 let _ = ch.send(event);
             } else {
-                // Queue-drain / no Channel: drop rather than leak on the global bus.
-                tracing::debug!(
-                    "skipping private turn event without Channel subscriber (queue drain)"
-                );
+                // Queue-drain / no direct Channel: persist to conversation_event_log
+                // so clients can catch-up or reconnect without leaking across conversations.
+                if let Some(cid) = turn_event_conversation_id(&event) {
+                    if let Some(state) = app.try_state::<crate::state::AppState>() {
+                        let mut db = state.db.lock();
+                        let (event_type, turn_id) = match &event {
+                            AgentTurnEvent::Action { .. } => ("action", None),
+                            AgentTurnEvent::Error { .. } => ("error", None),
+                            AgentTurnEvent::Operation { .. } => ("operation", None),
+                            AgentTurnEvent::PreviewSurface { turn_id, .. } => {
+                                ("preview_surface", Some(turn_id.as_str()))
+                            }
+                            _ => ("turn_event", None),
+                        };
+                        let payload =
+                            serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
+                        if let Err(e) = crate::runtime_v2::append_conversation_event(
+                            &mut db, cid, turn_id, None, event_type, &payload,
+                        ) {
+                            tracing::warn!(
+                                error = %e,
+                                conversation_id = %cid,
+                                "failed to append queue drain event to conversation_event_log"
+                            );
+                        }
+                    }
+                }
             }
         }
         AgentTurnEvent::Sync { .. } | AgentTurnEvent::Conflict { .. } => {
@@ -1102,6 +1159,7 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
             structured_user_input,
             false,
             None,
+            Some(item.id.clone()),
         )
         .await;
 
@@ -1181,6 +1239,7 @@ pub async fn send_message(
         structured_user_input,
         true,
         Some(on_event),
+        None,
     )
     .await
 }
@@ -1197,6 +1256,7 @@ async fn send_message_inner(
     structured_user_input: Option<StructuredUserInputSubmission>,
     schedule_drain: bool,
     on_event: Option<tauri::ipc::Channel<AgentTurnEvent>>,
+    active_queue_item_id: Option<String>,
 ) -> Result<SendMessageResult, CommandError> {
     state.require_profile()?;
     if state
@@ -1916,6 +1976,12 @@ async fn send_message_inner(
         }
     };
     if has_turn_record {
+        if let Some(ref qid) = active_queue_item_id {
+            let mut db_mut = state.db.lock();
+            if let Err(e) = crate::runtime_v2::bind_queue_item_turn(&mut db_mut, qid, &turn_id) {
+                tracing::warn!(error = %e, queue_item = %qid, turn_id = %turn_id, "failed to bind turn_id to queue item");
+            }
+        }
         let db = state.db.lock();
         let _ = crate::runtime_v2::transition_turn(
             &db,

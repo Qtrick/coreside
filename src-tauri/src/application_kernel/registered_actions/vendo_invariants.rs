@@ -15,6 +15,9 @@
 //! - Invariant K: Output size enforcement (output_too_large fail-closed)
 //! - Invariant L: Transactional audit logging for every decision, grant, and execution
 
+use std::sync::{Arc, Mutex};
+use std::thread;
+
 use serde_json::json;
 
 use super::approvals::{self, decide, get_approval, RememberChoice};
@@ -65,8 +68,7 @@ fn invariant_a_single_choke_point_enforces_recovery_and_permissions() {
     assert_eq!(outcome_code(&unperm), "blocked:policy_blocked");
 
     // Recovery mode blocks all execution through gateway
-    crate::application_kernel::recovery::set_recovery_mode(&mut db, true)
-        .unwrap();
+    crate::application_kernel::recovery::set_recovery_mode(&mut db, true).unwrap();
     let blocked_recovery = execute_registered_action(
         &mut db,
         &ctx,
@@ -438,29 +440,249 @@ fn invariant_k_output_size_enforcement() {
 
 // INVARIANT L: Transactional audit logging
 #[test]
-fn invariant_l_transactional_audit_logging() {
+fn invariant_l_transactional_audit_logging_success_both_durable() {
     let (mut db, _dir) = test_db();
-    seed_application(&mut db, APP_A, &["local_data.query"]);
+    seed_application(&mut db, APP_A, &["local_data.write"]);
 
     let ctx = app_ctx(APP_A);
-    execute_registered_action(
+    let d = find_action("local_data.write").unwrap();
+    let _g = mint_grant(
         &mut db,
         &ctx,
-        "local_data.query",
-        &json!({ "modelId": "note" }),
+        d,
+        GrantScope::ApplicationAction,
+        GrantDuration::Session,
         None,
-    );
+        "user",
+    )
+    .unwrap();
+
+    let input = json!({ "modelId": "note", "data": { "title": "Audit-Verified Note" } });
+    let res = execute_registered_action(&mut db, &ctx, "local_data.write", &input, None);
+    assert!(res.is_ok(), "Write execution must succeed");
+
+    // Both mutation and audit record must be durable
+    let data_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM generated_data_records WHERE application_id = ?1 AND model_id = 'note'",
+            [APP_A],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(data_count, 1, "Data mutation must be committed");
 
     let audit_count: i64 = db
         .conn()
         .query_row(
-            "SELECT COUNT(*) FROM runtime_audit_events WHERE application_id = ?1 AND action_name = ?2",
-            rusqlite::params![APP_A, "local_data.query"],
+            "SELECT COUNT(*) FROM runtime_audit_events WHERE application_id = ?1 AND action_name = 'local_data.write' AND outcome = 'ok'",
+            [APP_A],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(audit_count, 1, "Successful audit record must be committed");
+}
+
+#[test]
+fn invariant_l_action_failure_rolls_back_mutation_but_records_failure_audit() {
+    let (mut db, _dir) = test_db();
+    seed_application(&mut db, APP_A, &["local_data.write"]);
+
+    let ctx = app_ctx(APP_A);
+    let d = find_action("local_data.write").unwrap();
+    let _g = mint_grant(
+        &mut db,
+        &ctx,
+        d,
+        GrantScope::ApplicationAction,
+        GrantDuration::Session,
+        None,
+        "user",
+    )
+    .unwrap();
+
+    // Non-existent model causes handler dispatch to error
+    let input = json!({ "modelId": "non_existent_model", "data": { "title": "bad" } });
+    let res = execute_registered_action(&mut db, &ctx, "local_data.write", &input, None);
+    assert!(!res.is_ok(), "Action with bad model must fail");
+
+    // Verify zero data records committed
+    let data_count: i64 = db
+        .conn()
+        .query_row("SELECT COUNT(*) FROM generated_data_records", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(data_count, 0, "Failed mutation must roll back completely");
+
+    // Failure audit must be durably recorded!
+    let audit_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM runtime_audit_events WHERE application_id = ?1 AND outcome IN ('error', 'blocked')",
+            [APP_A],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(audit_count, 1, "Failure audit must remain durably recorded");
+}
+
+#[test]
+fn invariant_l_audit_failure_forces_entire_mutation_rollback() {
+    let (mut db, _dir) = test_db();
+    seed_application(&mut db, APP_A, &["local_data.write"]);
+
+    let ctx = app_ctx(APP_A);
+    let d = find_action("local_data.write").unwrap();
+    let _g = mint_grant(
+        &mut db,
+        &ctx,
+        d,
+        GrantScope::ApplicationAction,
+        GrantDuration::Session,
+        None,
+        "user",
+    )
+    .unwrap();
+
+    // Force audit inserts to fail via a SQLite trigger
+    db.conn()
+        .execute_batch(
+            "CREATE TRIGGER force_audit_fail BEFORE INSERT ON runtime_audit_events
+         BEGIN
+             SELECT RAISE(ABORT, 'Simulated audit table I/O failure');
+         END;",
+        )
+        .unwrap();
+
+    let input = json!({ "modelId": "note", "data": { "title": "Ghost Note" } });
+    let res = execute_registered_action(&mut db, &ctx, "local_data.write", &input, None);
+
+    // Gateway must report audit_storage_error
+    assert_eq!(
+        outcome_code(&res),
+        "error:audit_storage_error",
+        "Audit failure must return audit_storage_error"
+    );
+
+    // CRITICAL: The data mutation MUST NOT remain committed!
+    let data_count: i64 = db
+        .conn()
+        .query_row("SELECT COUNT(*) FROM generated_data_records", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        data_count, 0,
+        "When audit insert fails, action mutation MUST be rolled back atomically"
+    );
+}
+
+#[test]
+fn invariant_l_approval_consumption_rolls_back_if_audit_fails() {
+    let (mut db, _dir) = test_db();
+    seed_application(&mut db, APP_A, &["local_data.write"]);
+
+    let ctx = app_ctx(APP_A);
+    let d = find_action("local_data.write").unwrap();
+    let input = json!({ "modelId": "note", "data": { "title": "Approval Test" } });
+    let pending = approvals::create_pending(&mut db, &ctx, d, &input, None).unwrap();
+    decide(&mut db, &pending.id, true, None, "user").unwrap();
+
+    // Trigger to simulate audit failure
+    db.conn()
+        .execute_batch(
+            "CREATE TRIGGER force_audit_fail_approval BEFORE INSERT ON runtime_audit_events
+         BEGIN
+             SELECT RAISE(ABORT, 'Simulated audit table failure on approval');
+         END;",
+        )
+        .unwrap();
+
+    let res =
+        execute_registered_action(&mut db, &ctx, "local_data.write", &input, Some(&pending.id));
+    assert_eq!(outcome_code(&res), "error:audit_storage_error");
+
+    // CRITICAL: Because audit logging failed, the approval status was rolled back and is not committed as consumed!
+    let app = get_approval(&db, &pending.id).unwrap();
+    assert_eq!(
+        app.status, "approved",
+        "Approval status must roll back to approved (not consumed) if audit fails"
+    );
+
+    let data_count: i64 = db
+        .conn()
+        .query_row("SELECT COUNT(*) FROM generated_data_records", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(data_count, 0, "No mutation committed if audit fails");
+}
+
+#[test]
+fn invariant_c_approval_concurrent_multi_thread_race_only_allows_single_winner() {
+    let (mut db, _dir) = test_db();
+    seed_application(&mut db, APP_A, &["local_data.write"]);
+
+    let ctx = app_ctx(APP_A);
+    let d = find_action("local_data.write").unwrap();
+    let input = json!({ "modelId": "note", "data": { "title": "Concurrent CAS Test" } });
+    let pending = approvals::create_pending(&mut db, &ctx, d, &input, None).unwrap();
+    decide(&mut db, &pending.id, true, None, "user").unwrap();
+
+    let db_arc = Arc::new(Mutex::new(db));
+    let approval_id = pending.id.clone();
+    let mut handles = Vec::new();
+
+    // Spawn 8 concurrent threads all attempting to consume the same approval simultaneously
+    for _ in 0..8 {
+        let db_clone = Arc::clone(&db_arc);
+        let id_clone = approval_id.clone();
+        let ctx_clone = ctx.clone();
+        let input_clone = input.clone();
+        handles.push(thread::spawn(move || {
+            let mut db_guard = db_clone.lock().unwrap();
+            execute_registered_action(
+                &mut db_guard,
+                &ctx_clone,
+                "local_data.write",
+                &input_clone,
+                Some(&id_clone),
+            )
+        }));
+    }
+
+    let mut ok_count = 0;
+    let mut blocked_count = 0;
+    for handle in handles {
+        let outcome = handle.join().unwrap();
+        if outcome.is_ok() {
+            ok_count += 1;
+        } else if outcome_code(&outcome) == "blocked:approval_invalid" {
+            blocked_count += 1;
+        }
+    }
+
+    assert_eq!(
+        ok_count, 1,
+        "Exactly one thread must win the approval CAS race"
+    );
+    assert_eq!(
+        blocked_count, 7,
+        "All losing threads must be blocked with approval_invalid"
+    );
+
+    let final_db = db_arc.lock().unwrap();
+    let record_count: i64 = final_db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM generated_data_records WHERE application_id = ?1",
+            [APP_A],
             |r| r.get(0),
         )
         .unwrap();
     assert_eq!(
-        audit_count, 1,
-        "Every registered action execution must write an audit record"
+        record_count, 1,
+        "Exactly one mutation must be committed — no duplicate execution"
     );
 }

@@ -1,7 +1,7 @@
 # Current Source Baseline (RC3.12)
 
 **Product:** Coreside  
-**Access date:** 2026-09-24
+**Access date:** 2026-09-25
 **Phase:** RC3.12 source intake / development audit<br>
 **Public beta:** **NOT READY**  
 **Hosted AI:** **NOT READY**
@@ -12,9 +12,9 @@
 | --- | --- |
 | Path | `/Users/qunyingfan/Coreside` |
 | Branch | `main` |
-| Commit | `0232a391414f9ae2c01bf7e5aa88c02f25d3c5c6` |
+| Commit | `e9c961923b52420646657888c44872ff90e6e69a` |
 | Dirty | Yes (development evidence only) |
-| Source fingerprint | `26f762277e77e9f483cfc958ccafc4efe1d070d610eccc4df14468567bc59fc8` |
+| Source fingerprint | `f3e0434743a2e416c527f15b45b46a0e045b3906f96bd1c5465eb6081e760377` |
 
 ## Uploaded archive
 
@@ -50,11 +50,11 @@
 | Metric | Active |
 | --- | --- |
 | `src` files | 205 |
-| Rust `.rs` | 201 |
-| Migrations | 28 |
+| Rust `.rs` | 202 |
+| Migrations | 30 |
 | E2E specs | 20 |
 | Tauri commands | 233 |
-| Fingerprint files | 747 |
+| Fingerprint files | 750 |
 
 ## Archive vs active
 

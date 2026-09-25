@@ -72,10 +72,10 @@ pub use packs::{
 pub use patch::{apply_component_op, check_revision, PatchConflict};
 #[allow(unused_imports)]
 pub use patch_scheduler::{
-    detect_dependency_cycle, flush_scheduler, get_scheduled_patch, preview_rate_limit_hz,
-    record_manual_edit_provenance, schedule_and_apply, schedule_patches, topological_order,
-    validate_agent_priority, PatchPriority, ScheduleAndApplyResult, ScheduleRequest,
-    ScheduledPatch,
+    detect_dependency_cycle, evaluate_target_readiness, flush_scheduler, get_scheduled_patch,
+    preview_rate_limit_hz, promote_deferred_patches, record_manual_edit_provenance,
+    schedule_and_apply, schedule_patches, topological_order, validate_agent_priority,
+    PatchPriority, ScheduleAndApplyResult, ScheduleRequest, ScheduledPatch, TargetReadiness,
 };
 #[allow(unused_imports)]
 pub use preservation::{
@@ -101,8 +101,9 @@ pub use provider_conformance::{
 };
 #[allow(unused_imports)]
 pub use queue::{
-    activate_next, cancel as cancel_queue_item, complete as complete_queue_item, enqueue, get_item,
-    list_queue, recover_stale_active, remove_queued, requeue as requeue_queue_item, QueueItem,
+    activate_next, bind_turn, bind_turn as bind_queue_item_turn, cancel as cancel_queue_item,
+    complete as complete_queue_item, enqueue, get_item, list_queue, recover_stale_active,
+    remove_queued, requeue as requeue_queue_item, QueueItem,
 };
 #[allow(unused_imports)]
 pub use streaming::{NdjsonFrameParser, StreamEvent, StreamParseError, StreamParseErrorKind};
@@ -119,10 +120,10 @@ pub use transactions::{
 };
 #[allow(unused_imports)]
 pub use turn_journal::{
-    begin_retry_attempt, compact_turn_journal, create_turn, get_conversation_events, get_turn,
-    get_turn_by_idempotency, list_conversation_recoverable_turns, list_recoverable_turns,
-    mark_interrupted_in_flight, transition_turn, ConversationEventRecord, TurnJournalRecord,
-    TurnPatch, TurnState,
+    append_conversation_event, begin_retry_attempt, compact_turn_journal, create_turn,
+    get_conversation_events, get_turn, get_turn_by_idempotency,
+    list_conversation_recoverable_turns, list_recoverable_turns, mark_interrupted_in_flight,
+    transition_turn, ConversationEventRecord, TurnJournalRecord, TurnPatch, TurnState,
 };
 pub use turn_timeline::{
     list_turn_timeline_events, try_append_turn_timeline_event, TurnTimelineEvent,

@@ -503,7 +503,7 @@ mod tests {
             .iter()
             .map(|(n, _)| *n)
             .collect::<Vec<_>>();
-        assert_eq!(names.len(), 28);
+        assert_eq!(names.len(), 30);
         for (i, name) in names.iter().enumerate() {
             let expected = format!("{:03}_", i + 1);
             assert!(
@@ -511,8 +511,8 @@ mod tests {
                 "migration {i} should start with {expected}, got {name}"
             );
         }
-        assert_eq!(names[27], LATEST_MIGRATION);
-        assert_eq!(LATEST_MIGRATION, "028_deep_runtime_v2_hardening");
+        assert_eq!(names[29], LATEST_MIGRATION);
+        assert_eq!(LATEST_MIGRATION, "030_patch_scheduler_target_readiness");
     }
 
     #[test]

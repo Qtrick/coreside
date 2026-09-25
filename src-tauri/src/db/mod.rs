@@ -138,10 +138,18 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         "028_deep_runtime_v2_hardening",
         include_str!("../../migrations/028_deep_runtime_v2_hardening.sql"),
     ),
+    (
+        "029_queue_turn_binding",
+        include_str!("../../migrations/029_queue_turn_binding.sql"),
+    ),
+    (
+        "030_patch_scheduler_target_readiness",
+        include_str!("../../migrations/030_patch_scheduler_target_readiness.sql"),
+    ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "028_deep_runtime_v2_hardening";
+pub const LATEST_MIGRATION: &str = "030_patch_scheduler_target_readiness";
 
 #[derive(Debug, Error)]
 pub enum DbError {

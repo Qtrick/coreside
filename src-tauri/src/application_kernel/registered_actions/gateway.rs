@@ -108,7 +108,19 @@ pub fn execute_registered_action(
     }
 
     let (descriptor, outcome) = match find_action(action_name) {
-        Some(d) => (Some(d), run(db, ctx, d, input, approval_id, &mut trail)),
+        Some(d) => {
+            if let Err(e) = db
+                .conn()
+                .execute_batch("SAVEPOINT registered_action_envelope")
+            {
+                return ActionOutcome::error(
+                    "storage_error",
+                    format!("Failed to open action transaction savepoint: {e}"),
+                );
+            }
+            let res = run(db, ctx, d, input, approval_id, &mut trail);
+            (Some(d), res)
+        }
         None => (
             None,
             ActionOutcome::error("unknown_action", "That action is not available."),
@@ -125,7 +137,7 @@ pub fn execute_registered_action(
         trail.source = Some("approval_pending");
     }
     let preview = input_preview(input);
-    let _ = audit::append_event(
+    let audit_res = audit::append_event(
         db,
         ctx,
         AuditInput {
@@ -141,6 +153,46 @@ pub fn execute_registered_action(
             duration_ms: Some(started.elapsed().as_millis() as i64),
         },
     );
+
+    if descriptor.is_some() {
+        match audit_res {
+            Ok(()) => {
+                if let Err(rel_err) = db
+                    .conn()
+                    .execute_batch("RELEASE SAVEPOINT registered_action_envelope")
+                {
+                    let _ = db.conn().execute_batch(
+                        "ROLLBACK TO SAVEPOINT registered_action_envelope; RELEASE SAVEPOINT registered_action_envelope",
+                    );
+                    return ActionOutcome::error(
+                        "storage_integrity_error",
+                        format!(
+                            "Failed to release registered_action_envelope savepoint: {rel_err}"
+                        ),
+                    );
+                }
+            }
+            Err(audit_err) => {
+                if let Err(rb_err) = db.conn().execute_batch(
+                    "ROLLBACK TO SAVEPOINT registered_action_envelope; RELEASE SAVEPOINT registered_action_envelope",
+                ) {
+                    return ActionOutcome::error(
+                        "storage_integrity_error",
+                        format!(
+                            "Critical failure: audit logging failed ({audit_err}) and rollback failed ({rb_err})."
+                        ),
+                    );
+                }
+                return ActionOutcome::error(
+                    "audit_storage_error",
+                    format!(
+                        "Transactional audit logging failed; mutation rolled back: {audit_err}"
+                    ),
+                );
+            }
+        }
+    }
+
     outcome
 }
 
@@ -432,27 +484,40 @@ fn in_savepoint<T>(
     db: &mut Database,
     body: impl FnOnce(&mut Database) -> Result<T, ActionOutcome>,
 ) -> Result<T, ActionOutcome> {
-    if db
+    if let Err(e) = db
         .conn()
-        .execute_batch("SAVEPOINT registered_action")
-        .is_err()
+        .execute_batch("SAVEPOINT registered_action_mutation")
     {
         return Err(ActionOutcome::error(
             "storage_error",
-            "Local storage is unavailable.",
+            format!("Local storage savepoint unavailable: {e}"),
         ));
     }
     match body(db) {
         Ok(value) => {
-            let _ = db
+            if let Err(e) = db
                 .conn()
-                .execute_batch("RELEASE SAVEPOINT registered_action");
+                .execute_batch("RELEASE SAVEPOINT registered_action_mutation")
+            {
+                let _ = db.conn().execute_batch(
+                    "ROLLBACK TO SAVEPOINT registered_action_mutation; RELEASE SAVEPOINT registered_action_mutation",
+                );
+                return Err(ActionOutcome::error(
+                    "storage_integrity_error",
+                    format!("Failed to release mutation savepoint: {e}"),
+                ));
+            }
             Ok(value)
         }
         Err(failure) => {
-            let _ = db.conn().execute_batch(
-                "ROLLBACK TO SAVEPOINT registered_action; RELEASE SAVEPOINT registered_action",
-            );
+            if let Err(e) = db.conn().execute_batch(
+                "ROLLBACK TO SAVEPOINT registered_action_mutation; RELEASE SAVEPOINT registered_action_mutation",
+            ) {
+                return Err(ActionOutcome::error(
+                    "storage_integrity_error",
+                    format!("Critical failure: failed to rollback mutation savepoint: {e}"),
+                ));
+            }
             Err(failure)
         }
     }

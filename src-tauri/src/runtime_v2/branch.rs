@@ -1053,7 +1053,7 @@ mod tests {
         super::super::surfaces::save_surface_state(&mut db, &surf_a.id, &json!({ "counter": 42 }))
             .unwrap();
 
-        let m1 = crate::db::insert_message(&mut db, &conv.id, "user", "start", None).unwrap();
+        let _m1 = crate::db::insert_message(&mut db, &conv.id, "user", "start", None).unwrap();
         let m2 = crate::db::insert_message(&mut db, &conv.id, "assistant", "done", None).unwrap();
 
         // Create turn checkpoint at message m2

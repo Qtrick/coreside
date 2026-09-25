@@ -416,8 +416,19 @@ export function ConversationHistory({
     }
   }, [open, tab, developerMode]);
 
+  const [selectedMessageId, setSelectedMessageId] = useState<string>("");
+
+  useEffect(() => {
+    if (messages.length > 0 && !selectedMessageId) {
+      setSelectedMessageId(messages[messages.length - 1].id);
+    }
+  }, [messages, selectedMessageId]);
+
   const createBranch = async () => {
-    const sourceMessageId = messages[messages.length - 1]?.id;
+    const sourceMessageId =
+      selectedMessageId && messages.some((m) => m.id === selectedMessageId)
+        ? selectedMessageId
+        : messages[messages.length - 1]?.id;
     if (!sourceMessageId) {
       setError("Add a message before creating a branch.");
       return;
@@ -588,6 +599,25 @@ export function ConversationHistory({
                 {tab === "branches" ? (
                   <section aria-label="Branches">
                     <div className="conversation-history-create">
+                      {messages.length > 0 ? (
+                        <label className="conversation-history-field">
+                          <span className="muted">Branch point</span>
+                          <select
+                            value={selectedMessageId}
+                            onChange={(e) => setSelectedMessageId(e.target.value)}
+                            disabled={busy}
+                            aria-label="Branch point message"
+                            className="conversation-history-select"
+                          >
+                            {messages.map((m, idx) => (
+                              <option key={m.id} value={m.id}>
+                                #{idx + 1} {m.role === "user" ? "User" : "Assistant"}:{" "}
+                                {m.content.slice(0, 36).replace(/\n/g, " ")}...
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
                       <label className="conversation-history-field">
                         <span className="muted">Branch name</span>
                         <input
@@ -601,8 +631,8 @@ export function ConversationHistory({
                       <button
                         type="button"
                         className="btn btn-primary btn-compact"
-                        disabled={busy}
-                        aria-label="Create branch from latest message"
+                        disabled={busy || messages.length === 0}
+                        aria-label="Create branch from selected message"
                         onClick={() => void createBranch()}
                       >
                         Create branch

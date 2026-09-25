@@ -1422,11 +1422,11 @@ function main() {
 
   const md = `# Partial Update Current-Source Audit
 
-**Product:** Coreside  
-**Access date:** ${ACCESS_DATE}  
-**Generated:** ${matrix.generatedAt}  
-**Commit:** \`${commit}\`  
-**Dirty:** ${dirty ? "yes" : "no"}  
+**Product:** Coreside<br/>
+**Access date:** ${ACCESS_DATE}<br/>
+**Generated:** ${matrix.generatedAt}<br/>
+**Commit:** \`${commit}\`<br/>
+**Dirty:** ${dirty ? "yes" : "no"}<br/>
 **Public beta:** **NOT READY**
 
 ## Archive

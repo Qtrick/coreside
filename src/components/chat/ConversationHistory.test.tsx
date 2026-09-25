@@ -25,11 +25,16 @@ vi.mock("@/lib/tauri", () => ({
   },
 }));
 
+const mockMessages = [
+  { id: "msg-1", role: "user", content: "first question", createdAt: "2026-08-01T10:00:00Z" },
+  { id: "msg-2", role: "assistant", content: "second response", createdAt: "2026-08-01T10:01:00Z" },
+];
+
 vi.mock("@/stores/app-store", () => ({
   useAppStore: (
     selector: (s: {
       developerMode: boolean;
-      messages: { id: string }[];
+      messages: { id: string; role?: string; content?: string; createdAt?: string }[];
       conversations: { id: string; projectId: string | null }[];
       refreshConversations: () => Promise<void>;
       navigateToChat: (id: string) => Promise<void>;
@@ -37,7 +42,7 @@ vi.mock("@/stores/app-store", () => ({
   ) =>
     selector({
       developerMode: true,
-      messages: [{ id: "msg-1" }],
+      messages: mockMessages,
       conversations: [{ id: "conv-1", projectId: null }],
       refreshConversations: vi.fn(async () => undefined),
       navigateToChat: vi.fn(async () => undefined),
@@ -392,6 +397,47 @@ describe("ConversationHistory", () => {
     // Close diff panel
     fireEvent.click(screen.getByRole("button", { name: "Close branch comparison" }));
     expect(screen.queryByText("Branch Comparison")).not.toBeInTheDocument();
+  });
+
+  it("creates branch from selected historical message point", async () => {
+    vi.mocked(api.listBranches).mockResolvedValue([]);
+    vi.mocked(api.branchConversation).mockResolvedValue({
+      id: "branch-new",
+      branchName: "Historical Exploration",
+      sourceConversationId: "conv-1",
+      newConversationId: "conv-branched",
+      createdAt: "2026-08-03T12:30:00Z",
+    });
+
+    render(<ConversationHistory conversationId="conv-1" />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open conversation history" }),
+    );
+
+    // Default select should show branch point selector
+    const select = await screen.findByLabelText("Branch point message");
+    expect(select).toBeInTheDocument();
+
+    // Select the first historical message (msg-1) instead of the latest (msg-2)
+    fireEvent.change(select, { target: { value: "msg-1" } });
+
+    // Enter custom branch name
+    const input = screen.getByLabelText("Branch name");
+    fireEvent.change(input, { target: { value: "Historical Exploration" } });
+
+    // Click create branch
+    const createBtn = screen.getByRole("button", {
+      name: "Create branch from selected message",
+    });
+    fireEvent.click(createBtn);
+
+    await waitFor(() => {
+      expect(api.branchConversation).toHaveBeenCalledWith({
+        sourceConversationId: "conv-1",
+        sourceMessageId: "msg-1",
+        branchName: "Historical Exploration",
+      });
+    });
   });
 });
 
