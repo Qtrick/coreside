@@ -264,6 +264,10 @@ pub fn apply_transaction_deferred(
             "UPDATE app_transactions SET status = 'failed', previous_snapshot_json = ?1 WHERE id = ?2",
             params![previous.to_string(), transaction_id],
         )?;
+        db.conn().execute(
+            "UPDATE app_operations SET apply_status = 'failed' WHERE transaction_id = ?1",
+            [transaction_id],
+        )?;
         return Ok(ApplyResult {
             transaction: get_transaction(db, transaction_id)?,
             surfaces,
@@ -282,6 +286,11 @@ pub fn apply_transaction_deferred(
             result.to_string(),
             transaction_id
         ],
+    )?;
+    // Authoritatively mark all operations in this committed transaction as applied
+    db.conn().execute(
+        "UPDATE app_operations SET apply_status = 'applied', validation_status = 'valid' WHERE transaction_id = ?1",
+        [transaction_id],
     )?;
     db.conn()
         .execute_batch("RELEASE SAVEPOINT runtime_v2_apply")
@@ -874,6 +883,7 @@ fn apply_one(
                         .clone()
                         .or_else(|| op.target.project_id.clone()),
                     component_id: None,
+                    application_id: None,
                 },
                 target: Default::default(),
                 payload: json!({ "surfaceId": sid }),
@@ -1098,12 +1108,20 @@ fn apply_one(
                     .map_err(|e| format!("invalid target in subscription.create: {e}"))?,
                 None => Default::default(),
             };
+            let handler: Option<super::events::EventHandler> = match op.payload.get("handler") {
+                Some(v) if !v.is_null() => Some(
+                    serde_json::from_value(v.clone())
+                        .map_err(|e| format!("invalid handler in subscription.create: {e}"))?,
+                ),
+                _ => None,
+            };
             let sub = super::events::Subscription {
                 id: sub_id.clone(),
                 owner_surface_id: owner.into(),
                 event_types: event_types.clone(),
                 source_filter: source_filter.clone(),
                 target: target.clone(),
+                handler: handler.clone(),
                 enabled: true,
             };
             deferred.push(super::outbox::DeferredBusEffect::AddSubscription(sub));
@@ -1111,14 +1129,15 @@ fn apply_one(
                 .execute(
                     "INSERT OR REPLACE INTO surface_subscriptions (
                         id, owner_surface_id, source_filter_json, target_json,
-                        event_types_json, enabled, created_at, updated_at
-                     ) VALUES (?1,?2,?3,?4,?5,1,datetime('now'),datetime('now'))",
+                        event_types_json, handler_json, enabled, created_at, updated_at
+                     ) VALUES (?1,?2,?3,?4,?5,?6,1,datetime('now'),datetime('now'))",
                     params![
                         sub_id,
                         owner,
                         serde_json::to_string(&source_filter).unwrap_or_else(|_| "{}".into()),
                         serde_json::to_string(&target).unwrap_or_else(|_| "{}".into()),
-                        serde_json::to_string(&event_types).unwrap_or_else(|_| "[]".into())
+                        serde_json::to_string(&event_types).unwrap_or_else(|_| "[]".into()),
+                        serde_json::to_string(&handler).unwrap_or_else(|_| "null".into())
                     ],
                 )
                 .map_err(|e| e.to_string())?;
@@ -1162,6 +1181,30 @@ fn apply_one(
                 .and_then(|v| v.as_str())
                 .unwrap_or("custom")
                 .to_string();
+            let target_ref: super::events::EventRef = match op.payload.get("target") {
+                Some(v) => serde_json::from_value(v.clone())
+                    .map_err(|e| format!("invalid target in event.dispatch: {e}"))?,
+                None => super::events::EventRef {
+                    surface_id: op.target.surface_id.clone(),
+                    tool_id: op.target.tool_id.clone(),
+                    conversation_id: op.target.conversation_id.clone(),
+                    project_id: op.target.project_id.clone(),
+                    component_id: op.target.component_id.clone(),
+                    application_id: op.target.application_id.clone(),
+                },
+            };
+            let source_ref: super::events::EventRef = match op.payload.get("source") {
+                Some(v) => serde_json::from_value(v.clone())
+                    .map_err(|e| format!("invalid source in event.dispatch: {e}"))?,
+                None => super::events::EventRef {
+                    surface_id: op.target.surface_id.clone(),
+                    tool_id: op.target.tool_id.clone(),
+                    conversation_id: op.target.conversation_id.clone(),
+                    project_id: op.target.project_id.clone(),
+                    component_id: op.target.component_id.clone(),
+                    application_id: op.target.application_id.clone(),
+                },
+            };
             let ev = super::events::SurfaceEvent {
                 id: format!("evt-{}", Uuid::new_v4()),
                 event_type: event_type.clone(),
@@ -1171,14 +1214,8 @@ fn apply_one(
                     .and_then(|v| v.as_str())
                     .unwrap_or("surface")
                     .into(),
-                source: super::events::EventRef {
-                    surface_id: op.target.surface_id.clone(),
-                    tool_id: op.target.tool_id.clone(),
-                    conversation_id: op.target.conversation_id.clone(),
-                    project_id: op.target.project_id.clone(),
-                    component_id: op.target.component_id.clone(),
-                },
-                target: Default::default(),
+                source: source_ref,
+                target: target_ref,
                 payload: op.payload.get("payload").cloned().unwrap_or(json!({})),
                 idempotency_key: op.idempotency_key.clone(),
             };
@@ -1188,10 +1225,11 @@ fn apply_one(
                     "INSERT INTO surface_events (
                         id, source_json, target_json, scope, event_type, payload_json,
                         idempotency_key, status, created_at, processed_at
-                     ) VALUES (?1,?2,'{}',?3,?4,?5,?6,'pending',datetime('now'),NULL)",
+                     ) VALUES (?1,?2,?3,?4,?5,?6,?7,'pending',datetime('now'),NULL)",
                     params![
                         ev.id,
                         serde_json::to_string(&ev.source).unwrap_or_else(|_| "{}".into()),
+                        serde_json::to_string(&ev.target).unwrap_or_else(|_| "{}".into()),
                         ev.scope,
                         ev.event_type,
                         ev.payload.to_string(),
@@ -1259,13 +1297,13 @@ pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<App
         if let Some(created) = map.get("created_surfaces").and_then(|v| v.as_array()) {
             for cid_val in created {
                 if let Some(cid) = cid_val.as_str() {
-                    let _ = delete_surface(
+                    delete_surface(
                         db,
                         cid,
                         DeleteSurfaceOptions {
                             delete_linked_tool: true,
                         },
-                    );
+                    )?;
                 }
             }
         }
@@ -1298,8 +1336,13 @@ pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<App
             get_transaction(db, transaction_id)
         }
         Err(e) => {
-            let _ = db.conn().execute_batch("ROLLBACK TO SAVEPOINT undo_sp");
-            let _ = db.conn().execute_batch("RELEASE SAVEPOINT undo_sp");
+            let rb_res = db
+                .conn()
+                .execute_batch("ROLLBACK TO SAVEPOINT undo_sp; RELEASE SAVEPOINT undo_sp");
+            if let Err(rb_err) = rb_res {
+                tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during undo_transaction");
+                return Err(DbError::Sqlite(rb_err));
+            }
             Err(e)
         }
     }

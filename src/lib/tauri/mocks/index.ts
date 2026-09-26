@@ -2767,6 +2767,17 @@ export async function mockInvoke<T>(
     case "cleanup_tutorial_sample":
       return 0 as T;
 
+    case "runtime_v2_reconstruct_replay_state":
+      return {
+        conversationId: String(args?.conversationId ?? ""),
+        targetTurnId: args?.targetTurnId ? String(args.targetTurnId) : null,
+        targetTransactionId: args?.targetTransactionId ? String(args.targetTransactionId) : null,
+        surfaces: [],
+        transactionCount: 0,
+        operationCount: 0,
+        readOnlyBanner: "Viewing historical turn state. Interactions are disabled.",
+      } as T;
+
     default:
       throw new TauriCommandError(`Unknown command: ${command}`);
   }

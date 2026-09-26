@@ -314,7 +314,7 @@ pub fn branch_from_message(
                 let rows = stmt.query_map(params![source_conversation_id, cutoff], |row| {
                     row.get::<_, String>(0)
                 })?;
-                rows.filter_map(|r| r.ok()).collect()
+                rows.collect::<Result<Vec<_>, _>>()?
             } else {
                 Vec::new()
             };

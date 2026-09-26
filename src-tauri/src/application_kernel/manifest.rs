@@ -425,8 +425,7 @@ pub fn list_manifests(db: &Database) -> DbResult<Vec<ManifestRecord>> {
         .prepare("SELECT application_id FROM application_manifests ORDER BY updated_at DESC")?;
     let ids: Vec<String> = stmt
         .query_map([], |row| row.get(0))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     let mut out = Vec::new();
     for id in ids {
         out.push(get_manifest(db, &id)?);

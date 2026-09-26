@@ -56,6 +56,12 @@ pub enum SyncScopedEvent {
         message: String,
         conflicts: Vec<String>,
     },
+    #[serde(rename_all = "camelCase")]
+    SurfaceEvent {
+        conversation_id: Option<String>,
+        surface_id: String,
+        event: crate::runtime_v2::events::SurfaceEvent,
+    },
 }
 
 pub struct AppState {
@@ -86,10 +92,14 @@ impl AppState {
         Self::new_with_bootstrap(config, db, BootstrapStatus::Ready)
     }
 
-    pub fn new_with_bootstrap(config: AppConfig, db: Database, bootstrap: BootstrapStatus) -> Self {
+    pub fn new_with_bootstrap(
+        config: AppConfig,
+        mut db: Database,
+        bootstrap: BootstrapStatus,
+    ) -> Self {
         let mut event_bus = EventBus::load_from_db(&db);
         // Drain post-commit effects left pending after a crash between COMMIT and flush.
-        let _ = crate::runtime_v2::outbox::flush_pending_outbox(&db, Some(&mut event_bus));
+        let _ = crate::runtime_v2::outbox::flush_pending_outbox(&mut db, Some(&mut event_bus));
         Self {
             config: Mutex::new(config),
             db: Arc::new(Mutex::new(db)),
@@ -287,9 +297,9 @@ impl AppState {
     }
 
     /// Replace the active database after a successful retry or restore.
-    pub fn replace_profile_database(&self, db: Database) {
+    pub fn replace_profile_database(&self, mut db: Database) {
         let mut event_bus = EventBus::load_from_db(&db);
-        let _ = crate::runtime_v2::outbox::flush_pending_outbox(&db, Some(&mut event_bus));
+        let _ = crate::runtime_v2::outbox::flush_pending_outbox(&mut db, Some(&mut event_bus));
         *self.event_bus.lock() = event_bus;
         *self.db.lock() = db;
         *self.bootstrap.lock() = BootstrapStatus::Ready;

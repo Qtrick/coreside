@@ -416,29 +416,62 @@ pub fn import_package(
         pkg.manifest.application_id = format!("app-{}", Uuid::new_v4());
         pkg.manifest.instance_id = format!("instance-{}", Uuid::new_v4());
     }
+    // Pre-validate all data models upfront before touching database
+    let mut parsed_models = Vec::new();
+    for (idx, model) in pkg.data_models.iter().enumerate() {
+        let def = serde_json::from_value::<super::data::DataModelDefinition>(model.clone())
+            .map_err(|e| {
+                KernelError::Validation(format!("invalid data model at index {idx}: {e}"))
+            })?;
+        parsed_models.push(def);
+    }
+
+    db.conn()
+        .execute_batch("SAVEPOINT import_pkg")
+        .map_err(|e| KernelError::Db(DbError::Sqlite(e)))?;
+
     // Importing declares intent; it never grants authority. Permissions and
     // remembered action grants stay with the user, who grants them afterwards.
-    upsert_manifest(db, pkg.manifest.clone()).map_err(KernelError::Db)?;
-    for model in &pkg.data_models {
-        if let Ok(def) = serde_json::from_value::<super::data::DataModelDefinition>(model.clone()) {
-            let _ = super::data::upsert_model(db, &pkg.manifest.application_id, def);
+    let res = (|| -> Result<(), KernelError> {
+        upsert_manifest(db, pkg.manifest.clone()).map_err(KernelError::Db)?;
+        for def in parsed_models {
+            super::data::upsert_model(db, &pkg.manifest.application_id, def)
+                .map_err(KernelError::Db)?;
+        }
+        db.conn()
+            .execute(
+                "INSERT INTO application_packages (
+                    id, application_id, package_version, direction, status, filename, trust_state, created_at
+                 ) VALUES (?1,?2,?3,'import','installed',NULL,?4,?5)",
+                params![
+                    format!("pkg-{}", Uuid::new_v4()),
+                    pkg.manifest.application_id,
+                    pkg.package_version,
+                    pkg.trust_state,
+                    now_rfc3339()
+                ],
+            )
+            .map_err(|e| KernelError::Db(DbError::Sqlite(e)))?;
+        Ok(())
+    })();
+
+    match res {
+        Ok(()) => {
+            db.conn()
+                .execute_batch("RELEASE SAVEPOINT import_pkg")
+                .map_err(|e| KernelError::Db(DbError::Sqlite(e)))?;
+            Ok(pkg.manifest)
+        }
+        Err(e) => {
+            let rb = db
+                .conn()
+                .execute_batch("ROLLBACK TO SAVEPOINT import_pkg; RELEASE SAVEPOINT import_pkg");
+            if let Err(rb_err) = rb {
+                tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during import_package");
+            }
+            Err(e)
         }
     }
-    db.conn()
-        .execute(
-            "INSERT INTO application_packages (
-                id, application_id, package_version, direction, status, filename, trust_state, created_at
-             ) VALUES (?1,?2,?3,'import','installed',NULL,?4,?5)",
-            params![
-                format!("pkg-{}", Uuid::new_v4()),
-                pkg.manifest.application_id,
-                pkg.package_version,
-                pkg.trust_state,
-                now_rfc3339()
-            ],
-        )
-        .map_err(|e| KernelError::Db(DbError::Sqlite(e)))?;
-    Ok(pkg.manifest)
 }
 
 #[cfg(test)]

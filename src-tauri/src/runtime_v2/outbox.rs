@@ -109,7 +109,7 @@ pub fn apply_deferred_effect(
 /// Deliver pending outbox rows after a successful commit. Restart-safe and idempotent.
 ///
 /// Requires a live EventBus — never mark rows delivered without applying them.
-pub fn flush_pending_outbox(db: &Database, bus: Option<&mut EventBus>) -> DbResult<usize> {
+pub fn flush_pending_outbox(db: &mut Database, bus: Option<&mut EventBus>) -> DbResult<usize> {
     let Some(bus) = bus else {
         // ponytail: without a bus, leave rows pending for a later flush (startup / retry)
         return Ok(0);
@@ -139,25 +139,49 @@ pub fn flush_pending_outbox(db: &Database, bus: Option<&mut EventBus>) -> DbResu
                 continue;
             }
         };
-        match apply_deferred_effect(bus, &effect) {
-            Ok(()) => {
-                let updated = db.conn().execute(
-                    "UPDATE commit_event_outbox SET status = 'delivered', delivered_at = ?1,
-                     delivery_attempts = delivery_attempts + 1 WHERE id = ?2 AND status = 'pending'",
-                    params![now, id],
-                )?;
-                if updated > 0 {
-                    delivered += 1;
+        match &effect {
+            DeferredBusEffect::Dispatch(ev) => match bus.dispatch(ev, 0) {
+                Ok(matched) => {
+                    for sub_id in matched {
+                        let _ =
+                            super::events::execute_durable_event_delivery(db, bus, ev, &sub_id, 0);
+                    }
+                    let updated = db.conn().execute(
+                            "UPDATE commit_event_outbox SET status = 'delivered', delivered_at = ?1,
+                             delivery_attempts = delivery_attempts + 1 WHERE id = ?2 AND status = 'pending'",
+                            params![now, id],
+                        )?;
+                    if updated > 0 {
+                        delivered += 1;
+                    }
                 }
-            }
-            Err(e) => {
-                db.conn().execute(
-                    "UPDATE commit_event_outbox SET last_error = ?1,
-                     delivery_attempts = delivery_attempts + 1 WHERE id = ?2 AND status = 'pending'",
-                    params![e.to_string(), id],
-                )?;
-                // Do not mark delivered — row stays pending for retry.
-            }
+                Err(e) => {
+                    db.conn().execute(
+                            "UPDATE commit_event_outbox SET last_error = ?1,
+                             delivery_attempts = delivery_attempts + 1 WHERE id = ?2 AND status = 'pending'",
+                            params![e.to_string(), id],
+                        )?;
+                }
+            },
+            other => match apply_deferred_effect(bus, other) {
+                Ok(()) => {
+                    let updated = db.conn().execute(
+                            "UPDATE commit_event_outbox SET status = 'delivered', delivered_at = ?1,
+                             delivery_attempts = delivery_attempts + 1 WHERE id = ?2 AND status = 'pending'",
+                            params![now, id],
+                        )?;
+                    if updated > 0 {
+                        delivered += 1;
+                    }
+                }
+                Err(e) => {
+                    db.conn().execute(
+                            "UPDATE commit_event_outbox SET last_error = ?1,
+                             delivery_attempts = delivery_attempts + 1 WHERE id = ?2 AND status = 'pending'",
+                            params![e.to_string(), id],
+                        )?;
+                }
+            },
         }
     }
     Ok(delivered)
@@ -289,7 +313,7 @@ mod tests {
     #[test]
     fn outbox_survives_until_flush() {
         let dir = tempdir().unwrap();
-        let db = crate::db::Database::open_path(&dir.path().join("o.db")).unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("o.db")).unwrap();
         let effect = DeferredBusEffect::Dispatch(SurfaceEvent {
             id: "evt-1".into(),
             event_type: "test".into(),
@@ -301,7 +325,7 @@ mod tests {
         });
         enqueue_outbox(&db, Some("txn-1"), None, None, None, 0, &effect).unwrap();
         // Without a bus, rows must stay pending (never mark delivered blindly).
-        assert_eq!(flush_pending_outbox(&db, None).unwrap(), 0);
+        assert_eq!(flush_pending_outbox(&mut db, None).unwrap(), 0);
         let pending: i64 = db
             .conn()
             .query_row(
@@ -312,9 +336,9 @@ mod tests {
             .unwrap();
         assert_eq!(pending, 1);
         let mut bus = EventBus::new();
-        let n = flush_pending_outbox(&db, Some(&mut bus)).unwrap();
+        let n = flush_pending_outbox(&mut db, Some(&mut bus)).unwrap();
         assert_eq!(n, 1);
-        let n2 = flush_pending_outbox(&db, Some(&mut bus)).unwrap();
+        let n2 = flush_pending_outbox(&mut db, Some(&mut bus)).unwrap();
         assert_eq!(n2, 0);
     }
 

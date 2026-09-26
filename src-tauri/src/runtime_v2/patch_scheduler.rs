@@ -296,6 +296,13 @@ pub fn schedule_patches(db: &mut Database, req: &ScheduleRequest) -> DbResult<Ve
     }
     validate_operations(&req.operations).map_err(DbError::Invalid)?;
 
+    if let Some(cycle) = detect_dependency_cycle(&req.operations) {
+        return Err(DbError::Invalid(format!(
+            "dependency cycle: {}",
+            cycle.join(" -> ")
+        )));
+    }
+
     let payload_bytes: usize = serde_json::to_string(&req.operations)
         .map(|s| s.len())
         .unwrap_or(0);
@@ -308,21 +315,11 @@ pub fn schedule_patches(db: &mut Database, req: &ScheduleRequest) -> DbResult<Ve
         |r| r.get(0),
     )?;
 
-    // P0.4: supersede old previews ONCE for the entire batch before any insertion.
-    // This prevents sibling operations in the same batch from mutually superseding each other.
-    let preview_batch_id = if req.priority == PatchPriority::ActiveTurnPreview {
-        let batch_id = format!("preview-batch-{}", Uuid::new_v4());
-        let surface_id = req.surface_id.as_deref().or_else(|| {
-            req.operations
-                .first()
-                .and_then(|o| o.target.surface_id.as_deref())
-        });
-        let _ = supersede_preview_items(db, surface_id, &batch_id)?;
-        Some(batch_id)
-    } else {
-        None
-    };
-    let _ = preview_batch_id; // recorded in supersession; not currently persisted per-op    // First pass: generate patch IDs and build operation_id -> patch_id mapping for the batch
+    // Atomic batch scheduling: savepoint covers preview supersession AND row insertions.
+    // If scheduling fails for any reason (constraint, validation, target rejection),
+    // old preview states are restored rather than remaining permanently superseded.
+    db.conn().execute_batch("SAVEPOINT sched_batch")?;
+
     let mut op_to_patch: HashMap<String, String> = HashMap::new();
     let mut batch_plan: Vec<(String, &AppOperation)> = Vec::new();
     for op in &req.operations {
@@ -332,12 +329,20 @@ pub fn schedule_patches(db: &mut Database, req: &ScheduleRequest) -> DbResult<Ve
     }
 
     let now = now_rfc3339();
-
-    // Atomic batch insertion
-    db.conn().execute_batch("SAVEPOINT sched_batch")?;
     let mut scheduled = Vec::new();
 
     let insert_result = (|| -> DbResult<Vec<ScheduledPatch>> {
+        // P0.4: supersede old previews ONCE for the entire batch INSIDE the savepoint.
+        if req.priority == PatchPriority::ActiveTurnPreview {
+            let batch_id = format!("preview-batch-{}", Uuid::new_v4());
+            let surface_id = req.surface_id.as_deref().or_else(|| {
+                req.operations
+                    .first()
+                    .and_then(|o| o.target.surface_id.as_deref())
+            });
+            let _ = supersede_preview_items(db, surface_id, &batch_id)?;
+        }
+
         for (i, (id, op)) in batch_plan.iter().enumerate() {
             let mut resolved_deps = Vec::new();
             if let Some(deps) = &op.depends_on {
@@ -423,7 +428,12 @@ pub fn schedule_patches(db: &mut Database, req: &ScheduleRequest) -> DbResult<Ve
             Ok(res)
         }
         Err(e) => {
-            let _ = db.conn().execute_batch("ROLLBACK TO sched_batch");
+            let rb = db
+                .conn()
+                .execute_batch("ROLLBACK TO sched_batch; RELEASE sched_batch");
+            if let Err(rb_err) = rb {
+                tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during schedule_patches");
+            }
             Err(e)
         }
     }
@@ -601,16 +611,17 @@ pub fn topological_order(ops: &[AppOperation]) -> Result<Vec<usize>, String> {
 /// instead of executing duplicate mutations.
 pub fn recover_scheduler(db: &mut Database) -> DbResult<u64> {
     let now = now_rfc3339();
-    let mut stmt = db.conn().prepare(
-        "SELECT id, operation_id, turn_id FROM patch_scheduler_items WHERE status = 'queued'",
-    )?;
-    let queued_items: Vec<(String, String, Option<String>)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+    let mut stmt = db
+        .conn()
+        .prepare("SELECT id, operation_id FROM patch_scheduler_items WHERE status = 'queued'")?;
+    let queued_items: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut reconciled = 0u64;
-    for (patch_id, op_id, turn_id) in queued_items {
-        // 1. Check if app_operations already applied this operation_id
+    for (patch_id, op_id) in queued_items {
+        // Authoritative operation-level check: Did this exact operation apply and commit?
+        // Never infer operation commit from a turn-level transaction when a turn can have multiple operations.
         let committed_txn: Option<String> = db
             .conn()
             .query_row(
@@ -620,27 +631,32 @@ pub fn recover_scheduler(db: &mut Database) -> DbResult<u64> {
             )
             .optional()?;
 
-        let txn_id = if committed_txn.is_some() {
-            committed_txn
-        } else if let Some(ref tid) = turn_id {
-            // 2. Check if transaction for this turn_id committed
-            db.conn()
-                .query_row(
-                    "SELECT id FROM app_transactions WHERE turn_id = ?1 AND status = 'applied' LIMIT 1",
-                    [tid],
-                    |r| r.get(0),
-                )
-                .optional()?
-        } else {
-            None
-        };
-
-        if let Some(t_id) = txn_id {
+        if let Some(t_id) = committed_txn {
             db.conn().execute(
                 "UPDATE patch_scheduler_items SET status = 'applied', applied_at = ?1, transaction_id = ?2 WHERE id = ?3",
                 params![now, t_id, patch_id],
             )?;
             reconciled += 1;
+        } else {
+            // Check if the turn already committed without this operation
+            let turn_committed: bool = db
+                .conn()
+                .query_row(
+                    "SELECT 1 FROM patch_scheduler_items p
+                     JOIN app_transactions t ON t.turn_id = p.turn_id AND t.status = 'applied'
+                     WHERE p.id = ?1 LIMIT 1",
+                    [&patch_id],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+            if turn_committed {
+                db.conn().execute(
+                    "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
+                     error_category = 'crash_recovered' WHERE id = ?2",
+                    params![now, patch_id],
+                )?;
+                reconciled += 1;
+            }
         }
     }
     Ok(reconciled)
@@ -1056,8 +1072,9 @@ pub fn schedule_and_apply(
         Vec::new()
     };
 
-    let scheduled = schedule_patches(db, &req)?;
+    // Validate dependency order & references BEFORE scheduling any patches durably
     let order = topological_order(&req.operations).map_err(DbError::Invalid)?;
+    let scheduled = schedule_patches(db, &req)?;
 
     // Filter operations whose patch status is 'queued' (ready to apply now).
     // Deferred operations remain in 'deferred_target_pending' until target surface is ready.
@@ -1580,5 +1597,182 @@ mod tests {
             )
             .unwrap();
         assert_eq!(err_cat, "conversation_deleted");
+    }
+
+    #[test]
+    fn scheduler_recovery_operation_level_authority_not_turn_guessing() {
+        let mut db = test_db();
+        let turn_id = "turn-auth-1";
+
+        // Insert a turn transaction that succeeded
+        db.conn()
+            .execute(
+                "INSERT INTO app_transactions (id, turn_id, status, operations_json, created_at)
+                 VALUES ('txn-turn-1', ?1, 'applied', '[]', datetime('now'))",
+                [turn_id],
+            )
+            .unwrap();
+
+        // Operation 1 was applied in txn-turn-1
+        db.conn()
+            .execute(
+                "INSERT INTO app_operations (id, transaction_id, sequence, op_type, target_json, payload_json, validation_status, apply_status, created_at)
+                 VALUES ('op-applied-1', 'txn-turn-1', 0, 'state.set', '{}', '{}', 'valid', 'applied', datetime('now'))",
+                [],
+            )
+            .unwrap();
+
+        // Operation 2 was NOT applied (status is still 'pending')
+        db.conn()
+            .execute(
+                "INSERT INTO app_operations (id, transaction_id, sequence, op_type, target_json, payload_json, validation_status, apply_status, created_at)
+                 VALUES ('op-pending-2', 'txn-turn-1', 1, 'state.set', '{}', '{}', 'valid', 'pending', datetime('now'))",
+                [],
+            )
+            .unwrap();
+
+        // Scheduler items in 'queued' state before crash
+        db.conn()
+            .execute(
+                "INSERT INTO patch_scheduler_items (id, operation_id, priority, status, turn_id, payload_json)
+                 VALUES ('p-1', 'op-applied-1', 'approved_persistent_change', 'queued', ?1, '{}')",
+                [turn_id],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO patch_scheduler_items (id, operation_id, priority, status, turn_id, payload_json)
+                 VALUES ('p-2', 'op-pending-2', 'approved_persistent_change', 'queued', ?1, '{}')",
+                [turn_id],
+            )
+            .unwrap();
+
+        // Run recovery
+        let recovered = recover_scheduler(&mut db).unwrap();
+        assert_eq!(recovered, 2);
+
+        // p-1 must be applied because its EXACT operation ID was marked applied
+        let p1 = get_scheduled_patch(&db, "p-1").unwrap();
+        assert_eq!(p1.status, "applied");
+        assert_eq!(p1.transaction_id.as_deref(), Some("txn-turn-1"));
+
+        // p-2 must be failed because its exact operation ID was never applied,
+        // and recovery must NOT infer it was applied just because turn_id had an applied txn!
+        let p2 = get_scheduled_patch(&db, "p-2").unwrap();
+        assert_eq!(p2.status, "failed");
+        let err_cat: String = db
+            .conn()
+            .query_row(
+                "SELECT error_category FROM patch_scheduler_items WHERE id = 'p-2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(err_cat, "crash_recovered");
+    }
+
+    #[test]
+    fn schedule_patches_preview_supersession_is_atomic() {
+        let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "Test", None)
+                .unwrap();
+
+        // 1. Create an initial preview patch
+        let initial_op = simple_op("op-initial-preview", vec![]);
+        let req1 = ScheduleRequest {
+            conversation_id: Some(conv.id.clone()),
+            turn_id: Some("turn-prev-1".into()),
+            surface_id: None,
+            operations: vec![initial_op],
+            priority: PatchPriority::ActiveTurnPreview,
+            source_type: "system".into(),
+            from_agent: false,
+            model: None,
+            provider: None,
+        };
+        let res1 = schedule_patches(&mut db, &req1).unwrap();
+        let initial_patch_id = &res1[0].id;
+        assert_eq!(res1[0].status, "queued");
+
+        // 2. Schedule a second batch that contains a cycle (fails validation)
+        let op_bad_a = simple_op("op-bad-a", vec!["op-bad-b".into()]);
+        let op_bad_b = simple_op("op-bad-b", vec!["op-bad-a".into()]);
+        let req2 = ScheduleRequest {
+            conversation_id: Some(conv.id.clone()),
+            turn_id: Some("turn-prev-2".into()),
+            surface_id: None,
+            operations: vec![op_bad_a, op_bad_b],
+            priority: PatchPriority::ActiveTurnPreview,
+            source_type: "system".into(),
+            from_agent: false,
+            model: None,
+            provider: None,
+        };
+
+        // This must fail
+        assert!(schedule_patches(&mut db, &req2).is_err());
+
+        // Invariant: The initial preview MUST NOT be marked superseded!
+        let initial_patch = get_scheduled_patch(&db, initial_patch_id).unwrap();
+        assert_eq!(
+            initial_patch.status, "queued",
+            "failed new schedule must not leave prior preview superseded"
+        );
+        let superseded_by: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT superseded_by FROM patch_scheduler_items WHERE id = ?1",
+                [initial_patch_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            superseded_by.is_none(),
+            "superseded_by must be rolled back on failure"
+        );
+    }
+
+    #[test]
+    fn schedule_and_apply_dependency_validation_before_queueing() {
+        let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "Test", None)
+                .unwrap();
+
+        // Batch where op2 depends on missing-op
+        let op1 = simple_op("op-valid", vec![]);
+        let op2 = simple_op("op-invalid", vec!["missing-op".into()]);
+        let req = ScheduleRequest {
+            conversation_id: Some(conv.id.clone()),
+            turn_id: Some("turn-dep-check".into()),
+            surface_id: None,
+            operations: vec![op1, op2],
+            priority: PatchPriority::ApprovedPersistentChange,
+            source_type: "user".into(),
+            from_agent: false,
+            model: None,
+            provider: None,
+        };
+
+        // Must fail with topological order error
+        let err = schedule_and_apply(&mut db, &mut None, req, true).unwrap_err();
+        assert!(
+            format!("{err:?}").contains("depends_on") || format!("{err}").contains("depends_on")
+        );
+
+        // No rows may have been inserted into patch_scheduler_items!
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM patch_scheduler_items WHERE turn_id = 'turn-dep-check'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "no scheduler items may be queued when dependencies are invalid"
+        );
     }
 }

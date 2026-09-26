@@ -1069,6 +1069,24 @@ pub fn runtime_v2_limits() -> Result<Value, CommandError> {
     }))
 }
 
+#[tauri::command]
+pub fn runtime_v2_reconstruct_replay_state(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    target_turn_id: Option<String>,
+    target_transaction_id: Option<String>,
+) -> Result<crate::runtime_v2::replay::ReplayStateSnapshot, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    crate::runtime_v2::replay::reconstruct_replay_state(
+        &db,
+        &conversation_id,
+        target_turn_id.as_deref(),
+        target_transaction_id.as_deref(),
+    )
+    .map_err(|e| CommandError::new("db", e.to_string()))
+}
+
 #[cfg(test)]
 mod queue_event_tests {
     use super::{emit_queue_changed, QueueChangeKind, QueueChangedEvent};

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Search, Trash2, X } from "lucide-react";
 import { CoresideLogo } from "@/components/branding/CoresideLogo";
 import { AgentBehaviorSettings } from "@/components/settings/AgentBehaviorSettings";
@@ -295,10 +295,35 @@ export function SettingsPanel() {
     setConfirmClearTools(false);
   };
 
-  const clearSearch = () => {
+  const closeSettings = useCallback(() => {
+    const id = useAppStore.getState().activeConversationId;
+    if (id) void navigateToChat(id);
+    else
+      useAppStore.setState({
+        view: { kind: "chat", conversationId: null },
+      });
+  }, [navigateToChat]);
+
+  const clearSearch = useCallback(() => {
     setSearchQuery("");
     searchInputRef.current?.focus();
-  };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (searchActive && document.activeElement === searchInputRef.current) {
+          e.preventDefault();
+          clearSearch();
+          return;
+        }
+        e.preventDefault();
+        closeSettings();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [closeSettings, searchActive, clearSearch]);
 
   return (
     <section className="settings-panel" aria-label="Settings">
@@ -313,14 +338,7 @@ export function SettingsPanel() {
         <button
           type="button"
           className="btn btn-secondary"
-          onClick={() => {
-            const id = useAppStore.getState().activeConversationId;
-            if (id) void navigateToChat(id);
-            else
-              useAppStore.setState({
-                view: { kind: "chat", conversationId: null },
-              });
-          }}
+          onClick={closeSettings}
         >
           Back to chat
         </button>

@@ -50,6 +50,126 @@ impl Default for ProgressiveOpsExpect {
     }
 }
 
+/// Detected streaming protocol kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetectedStreamingProtocol {
+    Undetermined,
+    PlainText,
+    StructuredJson,
+    CoresideOpsNdjson,
+}
+
+/// Bounded detector that distinguishes plain text, structured JSON, and coreside.ops.v1 NDJSON.
+/// Eliminates false positives from arbitrary leading `{` characters and prevents unbounded buffering.
+#[derive(Debug, Clone)]
+pub struct ProgressiveProtocolDetector {
+    buffer: String,
+    detected: DetectedStreamingProtocol,
+    max_probe_bytes: usize,
+}
+
+impl Default for ProgressiveProtocolDetector {
+    fn default() -> Self {
+        Self::new(2048)
+    }
+}
+
+impl ProgressiveProtocolDetector {
+    pub fn new(max_probe_bytes: usize) -> Self {
+        Self {
+            buffer: String::new(),
+            detected: DetectedStreamingProtocol::Undetermined,
+            max_probe_bytes,
+        }
+    }
+
+    pub fn detected(&self) -> DetectedStreamingProtocol {
+        self.detected
+    }
+
+    pub fn is_coreside_ndjson(&self) -> bool {
+        self.detected == DetectedStreamingProtocol::CoresideOpsNdjson
+    }
+
+    pub fn feed(&mut self, chunk: &str) -> DetectedStreamingProtocol {
+        if self.detected != DetectedStreamingProtocol::Undetermined {
+            return self.detected;
+        }
+
+        // Fast-path: chunk explicitly contains the protocol version
+        if chunk.contains(PROGRESSIVE_OPS_V) {
+            self.detected = DetectedStreamingProtocol::CoresideOpsNdjson;
+            return self.detected;
+        }
+
+        if self.buffer.len() < self.max_probe_bytes {
+            let remain = self.max_probe_bytes - self.buffer.len();
+            let to_add = if chunk.len() > remain {
+                let mut end = remain;
+                while end > 0 && !chunk.is_char_boundary(end) {
+                    end -= 1;
+                }
+                &chunk[..end]
+            } else {
+                chunk
+            };
+            self.buffer.push_str(to_add);
+        }
+
+        let trimmed = self.buffer.trim_start();
+        if trimmed.is_empty() {
+            return DetectedStreamingProtocol::Undetermined;
+        }
+
+        // If it doesn't start with '{', it's plain text/markdown
+        if !trimmed.starts_with('{') {
+            self.detected = DetectedStreamingProtocol::PlainText;
+            return self.detected;
+        }
+
+        // Starts with '{': check if it contains the protocol tag
+        if trimmed.contains(PROGRESSIVE_OPS_V) {
+            self.detected = DetectedStreamingProtocol::CoresideOpsNdjson;
+            return self.detected;
+        }
+
+        // If there is a newline, inspect the first line
+        if let Some(pos) = trimmed.find('\n') {
+            let first_line = trimmed[..pos].trim();
+            if first_line.contains(PROGRESSIVE_OPS_V) {
+                self.detected = DetectedStreamingProtocol::CoresideOpsNdjson;
+                return self.detected;
+            }
+            // In coreside.ops.v1 NDJSON, every frame must be a single line containing
+            // the protocol version. If the first line finished with a newline and does
+            // not contain the protocol version, it is multi-line structured JSON.
+            self.detected = DetectedStreamingProtocol::StructuredJson;
+            return self.detected;
+        }
+
+        // If the entire trimmed buffer parses as valid JSON without newline, inspect it
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            if v.get("v").and_then(|x| x.as_str()) == Some(PROGRESSIVE_OPS_V) {
+                self.detected = DetectedStreamingProtocol::CoresideOpsNdjson;
+            } else {
+                self.detected = DetectedStreamingProtocol::StructuredJson;
+            }
+            return self.detected;
+        }
+
+        // Buffer full without protocol match -> treat as structured JSON
+        if self.buffer.len() >= self.max_probe_bytes {
+            if trimmed.starts_with('{') {
+                self.detected = DetectedStreamingProtocol::StructuredJson;
+            } else {
+                self.detected = DetectedStreamingProtocol::PlainText;
+            }
+        }
+
+        self.detected
+    }
+}
+
 /// Provider-facing NDJSON frame (`coreside.ops.v1`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -1161,5 +1281,48 @@ mod tests {
         let ev = p.push(&start_line("g1"));
         assert!(ev[0].is_err());
         assert!(p.durable_operations().is_none());
+    }
+
+    #[test]
+    fn detector_identifies_coreside_ndjson() {
+        let mut d = ProgressiveProtocolDetector::default();
+        assert_eq!(d.detected(), DetectedStreamingProtocol::Undetermined);
+
+        let res = d.feed("{\"v\": \"coreside.ops.v1\", \"type\": \"start\", \"groupId\": \"g1\", \"schemaVersion\": \"2\"}\n");
+        assert_eq!(res, DetectedStreamingProtocol::CoresideOpsNdjson);
+        assert!(d.is_coreside_ndjson());
+    }
+
+    #[test]
+    fn detector_identifies_plain_text() {
+        let mut d = ProgressiveProtocolDetector::default();
+        let res = d.feed("I will help you create a task manager app!");
+        assert_eq!(res, DetectedStreamingProtocol::PlainText);
+        assert!(!d.is_coreside_ndjson());
+    }
+
+    #[test]
+    fn detector_identifies_structured_json_not_ndjson() {
+        let mut d = ProgressiveProtocolDetector::default();
+        // A structured JSON document response (e.g. Gemini responseMimeType: application/json)
+        let res = d.feed("{\n  \"components\": [{\"id\": \"root\"}],\n  \"state\": {}\n}");
+        assert_eq!(res, DetectedStreamingProtocol::StructuredJson);
+        assert!(!d.is_coreside_ndjson());
+    }
+
+    #[test]
+    fn detector_handles_split_chunks_gracefully() {
+        let mut d = ProgressiveProtocolDetector::default();
+        // Chunk 1 has part of leading JSON
+        assert_eq!(
+            d.feed("{\"v\": \"core"),
+            DetectedStreamingProtocol::Undetermined
+        );
+        // Chunk 2 completes the protocol tag
+        assert_eq!(
+            d.feed("side.ops.v1\""),
+            DetectedStreamingProtocol::CoresideOpsNdjson
+        );
+        assert!(d.is_coreside_ndjson());
     }
 }

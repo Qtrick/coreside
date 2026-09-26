@@ -17,6 +17,7 @@ pub mod preview_transaction;
 pub mod progressive_ops;
 pub mod provider_conformance;
 pub mod queue;
+pub mod replay;
 pub mod software_document;
 pub mod streaming;
 pub mod surfaces;
@@ -91,8 +92,9 @@ pub use preview_transaction::{
 };
 #[allow(unused_imports)]
 pub use progressive_ops::{
-    reconcile_final_operations, ProgressiveOpsExpect, ProgressiveOpsFrame, ProgressiveOpsParser,
-    ProgressiveTerminal, PROGRESSIVE_OPS_V, PROGRESSIVE_SCHEMA_VERSION,
+    reconcile_final_operations, DetectedStreamingProtocol, ProgressiveOpsExpect,
+    ProgressiveOpsFrame, ProgressiveOpsParser, ProgressiveProtocolDetector, ProgressiveTerminal,
+    PROGRESSIVE_OPS_V, PROGRESSIVE_SCHEMA_VERSION,
 };
 #[allow(unused_imports)]
 pub use provider_conformance::{
@@ -105,6 +107,8 @@ pub use queue::{
     complete as complete_queue_item, enqueue, get_item, list_queue, recover_stale_active,
     remove_queued, requeue as requeue_queue_item, QueueItem,
 };
+#[allow(unused_imports)]
+pub use replay::{reconstruct_replay_state, ReplayStateSnapshot, ReplayedSurface};
 #[allow(unused_imports)]
 pub use streaming::{NdjsonFrameParser, StreamEvent, StreamParseError, StreamParseErrorKind};
 #[allow(unused_imports)]

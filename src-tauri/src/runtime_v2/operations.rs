@@ -77,7 +77,7 @@ pub struct OperationTarget {
     pub model_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AppOperation {
     pub id: String,
@@ -170,6 +170,10 @@ pub const SUPPORTED_MODEL_OPERATIONS: &[&str] = &[
     "component.bind_state",
     "component.bind_action",
     "component.set_style_token",
+    "event.dispatch",
+    "subscription.create",
+    "subscription.update",
+    "subscription.delete",
 ];
 
 /// Internal operations used by host subsystems and commands (not directly model-facing).
@@ -205,10 +209,6 @@ pub const RESERVED_OPERATIONS: &[&str] = &[
     "layout.resize_panel",
     "layout.remove_panel",
     "layout.set_visibility",
-    "event.dispatch",
-    "subscription.create",
-    "subscription.update",
-    "subscription.delete",
     "chat.branch_create",
     "automation.create",
     "automation.update",
@@ -388,6 +388,39 @@ fn validate_operations_inner(
                     {
                         return Err(format!(
                             "operation '{}' of type 'chat.inline_surface_create' requires a 'definition' or 'tool' object payload",
+                            op.id
+                        ));
+                    }
+                }
+                "subscription.create" => {
+                    if op.target.surface_id.is_none()
+                        && op
+                            .payload
+                            .get("ownerSurfaceId")
+                            .and_then(|v| v.as_str())
+                            .is_none()
+                    {
+                        return Err(format!(
+                            "operation '{}' of type 'subscription.create' requires surfaceId target or ownerSurfaceId payload",
+                            op.id
+                        ));
+                    }
+                }
+                "subscription.update" | "subscription.delete" => {
+                    if op.payload.get("id").and_then(|v| v.as_str()).is_none() {
+                        return Err(format!(
+                            "operation '{}' of type '{}' requires subscription 'id' in payload",
+                            op.id, op.op_type
+                        ));
+                    }
+                }
+                "event.dispatch" => {
+                    if op.target.surface_id.is_none()
+                        && op.payload.get("surfaceId").is_none()
+                        && op.payload.get("target").is_none()
+                    {
+                        return Err(format!(
+                            "operation '{}' of type 'event.dispatch' requires target surfaceId or payload",
                             op.id
                         ));
                     }

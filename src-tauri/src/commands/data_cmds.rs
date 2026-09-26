@@ -645,9 +645,9 @@ pub fn restore_profile_backup(
         crate::maintenance::MaintenanceStage::Rehydrating,
     );
     {
-        let db = state.db.lock();
+        let mut db = state.db.lock();
         let mut bus = crate::runtime_v2::EventBus::load_from_db(&db);
-        let _ = crate::runtime_v2::outbox::flush_pending_outbox(&db, Some(&mut bus));
+        let _ = crate::runtime_v2::outbox::flush_pending_outbox(&mut db, Some(&mut bus));
         *state.event_bus.lock() = bus;
     }
     *state.bootstrap.lock() = crate::db::BootstrapStatus::Ready;

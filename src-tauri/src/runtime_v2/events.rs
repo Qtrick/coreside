@@ -1,18 +1,18 @@
-//! Typed event bus with loop protection and idempotency.
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 use super::limits::{
     EVENT_COOLDOWN_MS, EVENT_SUSPENSION_SECS, MAX_EVENTS_PER_SURFACE_PER_MINUTE, MAX_EVENT_DEPTH,
     MAX_IDEMPOTENCY_KEYS, MAX_IDENTICAL_EVENTS_PER_INTERVAL, MAX_SUBSCRIPTIONS_PER_SURFACE,
 };
+use crate::db::{now_rfc3339, Database};
+use rusqlite::params;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
-#[derive(Default)]
 pub struct EventRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_id: Option<String>,
@@ -24,6 +24,8 @@ pub struct EventRef {
     pub project_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub component_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -41,6 +43,42 @@ pub struct SurfaceEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "action", content = "params", rename_all = "camelCase")]
+pub enum EventHandler {
+    SetState {
+        key: String,
+        value: Value,
+    },
+    PatchState {
+        key: String,
+        patch: Value,
+    },
+    SetComponentProp {
+        component_id: String,
+        prop: String,
+        value: Value,
+    },
+    InvokeRegisteredAction {
+        action_name: String,
+        #[serde(default)]
+        parameters: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        application_id: Option<String>,
+    },
+    EmitClientNotification {
+        title: String,
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        level: Option<String>,
+    },
+    SubmitEvent {
+        event_type: String,
+        #[serde(default)]
+        payload: Value,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Subscription {
     pub id: String,
@@ -48,6 +86,8 @@ pub struct Subscription {
     pub event_types: Vec<String>,
     pub source_filter: EventRef,
     pub target: EventRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handler: Option<EventHandler>,
     pub enabled: bool,
 }
 
@@ -60,6 +100,9 @@ pub enum EventBusError {
     SubscriptionLimit,
     Suspended { surface_id: String },
     CrossProjectDenied,
+    CrossAppDenied,
+    InvalidHandler { reason: String },
+    ExecutionFailed { reason: String },
 }
 
 impl std::fmt::Display for EventBusError {
@@ -72,6 +115,11 @@ impl std::fmt::Display for EventBusError {
             Self::SubscriptionLimit => write!(f, "subscription limit exceeded"),
             Self::Suspended { surface_id } => write!(f, "surface suspended: {surface_id}"),
             Self::CrossProjectDenied => write!(f, "cross-project event denied"),
+            Self::CrossAppDenied => write!(f, "cross-application event denied"),
+            Self::InvalidHandler { reason } => write!(f, "invalid event handler: {reason}"),
+            Self::ExecutionFailed { reason } => {
+                write!(f, "event delivery execution failed: {reason}")
+            }
         }
     }
 }
@@ -130,6 +178,10 @@ impl EventBus {
         Ok(())
     }
 
+    pub fn get_subscription(&self, id: &str) -> Option<&Subscription> {
+        self.subscriptions.get(id)
+    }
+
     pub fn remove_subscription(&mut self, id: &str) {
         if let Some(sub) = self.subscriptions.remove(id) {
             if let Some(list) = self.by_owner.get_mut(&sub.owner_surface_id) {
@@ -154,10 +206,11 @@ impl EventBus {
     }
 
     /// Hydrate in-memory subscriptions from SQLite after restart.
-    pub fn load_from_db(db: &crate::db::Database) -> Self {
+    /// Fails closed: malformed subscription JSON is quarantined and rejected.
+    pub fn load_from_db(db: &Database) -> Self {
         let mut bus = Self::new();
         let Ok(mut stmt) = db.conn().prepare(
-            "SELECT id, owner_surface_id, event_types_json, source_filter_json, target_json, enabled
+            "SELECT id, owner_surface_id, event_types_json, source_filter_json, target_json, handler_json, enabled
              FROM surface_subscriptions",
         ) else {
             return bus;
@@ -169,23 +222,71 @@ impl EventBus {
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, i64>(6)?,
             ))
         });
         let Ok(rows) = rows else {
             return bus;
         };
         for row in rows.flatten() {
-            let (id, owner, types_s, source_s, target_s, enabled) = row;
-            let event_types: Vec<String> = serde_json::from_str(&types_s).unwrap_or_default();
-            let source_filter: EventRef = serde_json::from_str(&source_s).unwrap_or_default();
-            let target: EventRef = serde_json::from_str(&target_s).unwrap_or_default();
+            let (id, owner, types_s, source_s, target_s, handler_s, enabled) = row;
+            let event_types: Vec<String> = match serde_json::from_str(&types_s) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("quarantining subscription {id}: corrupt event_types_json: {e}");
+                    let _ = db.conn().execute(
+                        "UPDATE surface_subscriptions SET enabled = 0 WHERE id = ?1",
+                        [&id],
+                    );
+                    continue;
+                }
+            };
+            let source_filter: EventRef = match serde_json::from_str(&source_s) {
+                Ok(sf) => sf,
+                Err(e) => {
+                    eprintln!("quarantining subscription {id}: corrupt source_filter_json: {e}");
+                    let _ = db.conn().execute(
+                        "UPDATE surface_subscriptions SET enabled = 0 WHERE id = ?1",
+                        [&id],
+                    );
+                    continue;
+                }
+            };
+            let target: EventRef = match serde_json::from_str(&target_s) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("quarantining subscription {id}: corrupt target_json: {e}");
+                    let _ = db.conn().execute(
+                        "UPDATE surface_subscriptions SET enabled = 0 WHERE id = ?1",
+                        [&id],
+                    );
+                    continue;
+                }
+            };
+            let handler: Option<EventHandler> = match handler_s {
+                Some(hs) if !hs.trim().is_empty() && hs != "null" => {
+                    match serde_json::from_str(&hs) {
+                        Ok(h) => Some(h),
+                        Err(e) => {
+                            eprintln!("quarantining subscription {id}: corrupt handler_json: {e}");
+                            let _ = db.conn().execute(
+                                "UPDATE surface_subscriptions SET enabled = 0 WHERE id = ?1",
+                                [&id],
+                            );
+                            continue;
+                        }
+                    }
+                }
+                _ => None,
+            };
             let _ = bus.add_subscription(Subscription {
                 id,
                 owner_surface_id: owner,
                 event_types,
                 source_filter,
                 target,
+                handler,
                 enabled: enabled != 0,
             });
         }
@@ -238,8 +339,6 @@ impl EventBus {
             }
         }
         let result = self.dispatch_checked(event);
-        // A claimed key must not outlive a dispatch that never delivered the
-        // event, or the retry after a rate limit would look like a duplicate.
         if result.is_err() {
             if let Some(key) = &event.idempotency_key {
                 self.forget_idempotency(key);
@@ -256,6 +355,16 @@ impl EventBus {
         ) {
             if sp != tp {
                 return Err(EventBusError::CrossProjectDenied);
+            }
+        }
+
+        // Cross-application guard
+        if let (Some(sa), Some(ta)) = (
+            event.source.application_id.as_ref(),
+            event.target.application_id.as_ref(),
+        ) {
+            if sa != ta {
+                return Err(EventBusError::CrossAppDenied);
             }
         }
 
@@ -317,14 +426,393 @@ impl EventBus {
             if !sub.enabled {
                 continue;
             }
+            // Event type filtering
             if !sub.event_types.is_empty()
                 && !sub.event_types.iter().any(|t| t == &event.event_type)
             {
                 continue;
             }
+
+            // Source filter matching (Section 15)
+            let sf = &sub.source_filter;
+            if sf.surface_id.is_some() && sf.surface_id != event.source.surface_id {
+                continue;
+            }
+            if sf.tool_id.is_some() && sf.tool_id != event.source.tool_id {
+                continue;
+            }
+            if sf.conversation_id.is_some() && sf.conversation_id != event.source.conversation_id {
+                continue;
+            }
+            if sf.project_id.is_some() && sf.project_id != event.source.project_id {
+                continue;
+            }
+            if sf.component_id.is_some() && sf.component_id != event.source.component_id {
+                continue;
+            }
+            if sf.application_id.is_some() && sf.application_id != event.source.application_id {
+                continue;
+            }
+
+            // Target matching (Section 15)
+            // If the event targets a specific surface, only subscriptions owned by that surface match!
+            if let Some(target_surface) = &event.target.surface_id {
+                if &sub.owner_surface_id != target_surface {
+                    continue;
+                }
+            }
+            // If the event targets a specific component, and the subscription specifies a target component:
+            if event.target.component_id.is_some()
+                && sub.target.component_id.is_some()
+                && event.target.component_id != sub.target.component_id
+            {
+                continue;
+            }
+            // If the subscription targets a specific surface:
+            if sub.target.surface_id.is_some()
+                && event.target.surface_id.is_some()
+                && sub.target.surface_id != event.target.surface_id
+            {
+                continue;
+            }
+            // If the event targets a specific application:
+            if event.target.application_id.is_some()
+                && sub.target.application_id.is_some()
+                && event.target.application_id != sub.target.application_id
+            {
+                continue;
+            }
+
             matched.push(sub.id.clone());
         }
         Ok(matched)
+    }
+}
+
+/// Resolves declarative `$event.payload.<field>` references into actual values from event payload.
+fn resolve_template_value(template: &Value, event_payload: &Value) -> Value {
+    match template {
+        Value::String(s) => {
+            if s == "$event.payload" {
+                event_payload.clone()
+            } else if let Some(path) = s.strip_prefix("$event.payload.") {
+                let parts: Vec<&str> = path.split('.').collect();
+                let mut current = event_payload;
+                for part in parts {
+                    if let Some(next) = current.get(part) {
+                        current = next;
+                    } else {
+                        return Value::Null;
+                    }
+                }
+                current.clone()
+            } else {
+                Value::String(s.clone())
+            }
+        }
+        Value::Object(map) => {
+            let mut resolved = serde_json::Map::new();
+            for (k, v) in map {
+                resolved.insert(k.clone(), resolve_template_value(v, event_payload));
+            }
+            Value::Object(resolved)
+        }
+        Value::Array(arr) => Value::Array(
+            arr.iter()
+                .map(|item| resolve_template_value(item, event_payload))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Helper to execute a single AppOperation within a standard transaction for an event handler.
+fn apply_handler_op(
+    db: &mut Database,
+    event: &SurfaceEvent,
+    summary: &str,
+    op: super::operations::AppOperation,
+) -> Result<Value, String> {
+    let txn = super::transactions::create_transaction(
+        db,
+        event.source.conversation_id.as_deref(),
+        event.source.project_id.as_deref(),
+        None,
+        summary,
+        &[op],
+        true,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut deferred = Vec::new();
+    let res = super::transactions::apply_transaction_deferred(db, &txn.id, &mut deferred)
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::to_value(&res).unwrap_or(Value::Null))
+}
+
+/// Execute a durable event delivery: runs declarative handler as an AppOperation
+/// inside a standard transaction, and records status in surface_event_deliveries.
+pub fn execute_durable_event_delivery(
+    db: &mut Database,
+    bus: &mut EventBus,
+    event: &SurfaceEvent,
+    subscription_id: &str,
+    depth: usize,
+) -> Result<String, EventBusError> {
+    if depth > MAX_EVENT_DEPTH {
+        return Err(EventBusError::DepthExceeded);
+    }
+    let sub = bus
+        .get_subscription(subscription_id)
+        .cloned()
+        .ok_or_else(|| EventBusError::InvalidHandler {
+            reason: format!("subscription {subscription_id} not found in bus"),
+        })?;
+
+    // Idempotency: check if already delivered
+    let already_delivered: bool = db
+        .conn()
+        .query_row(
+            "SELECT 1 FROM surface_event_deliveries WHERE event_id = ?1 AND subscription_id = ?2 AND status = 'delivered'",
+            params![event.id, subscription_id],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if already_delivered {
+        return Ok("already_delivered".to_string());
+    }
+
+    let delivery_id = format!("deliv-{}", Uuid::new_v4());
+    let now = now_rfc3339();
+
+    // Ensure surface_events record exists to satisfy foreign key constraint
+    let _ = db.conn().execute(
+        "INSERT OR IGNORE INTO surface_events (
+            id, source_json, target_json, scope, event_type, payload_json,
+            idempotency_key, status, created_at, processed_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, NULL)",
+        params![
+            event.id,
+            serde_json::to_string(&event.source).unwrap_or_else(|_| "{}".into()),
+            serde_json::to_string(&event.target).unwrap_or_else(|_| "{}".into()),
+            event.scope,
+            event.event_type,
+            event.payload.to_string(),
+            event.idempotency_key,
+            now
+        ],
+    );
+
+    // Ensure surface_subscriptions record exists to satisfy foreign key constraint
+    let _ = db.conn().execute(
+        "INSERT OR IGNORE INTO surface_subscriptions (
+            id, owner_surface_id, source_filter_json, target_json, event_types_json, handler_json, enabled, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?7)",
+        params![
+            sub.id,
+            sub.owner_surface_id,
+            serde_json::to_string(&sub.source_filter).unwrap_or_else(|_| "{}".into()),
+            serde_json::to_string(&sub.target).unwrap_or_else(|_| "{}".into()),
+            serde_json::to_string(&sub.event_types).unwrap_or_else(|_| "[]".into()),
+            serde_json::to_string(&sub.handler).unwrap_or_else(|_| "{}".into()),
+            now
+        ],
+    );
+
+    // Insert pending delivery record matching migration 031 schema
+    let _ = db.conn().execute(
+        "INSERT INTO surface_event_deliveries (
+            id, event_id, subscription_id, surface_id, status, attempt_count,
+            last_error, created_at, processed_at
+         ) VALUES (?1, ?2, ?3, ?4, 'pending', 1, NULL, ?5, NULL)",
+        params![
+            delivery_id,
+            event.id,
+            subscription_id,
+            sub.owner_surface_id,
+            now,
+        ],
+    );
+
+    let execution_result: Result<Value, String> = if let Some(handler) = &sub.handler {
+        match handler {
+            EventHandler::SetState { key, value } => {
+                let resolved_val = resolve_template_value(value, &event.payload);
+                let op = super::operations::AppOperation {
+                    id: format!("op-evt-{}", Uuid::new_v4()),
+                    op_type: "state.set".to_string(),
+                    target: super::operations::OperationTarget {
+                        surface_id: Some(sub.owner_surface_id.clone()),
+                        ..Default::default()
+                    },
+                    payload: serde_json::json!({
+                        "key": key,
+                        "value": resolved_val,
+                    }),
+                    ..Default::default()
+                };
+                apply_handler_op(db, event, &format!("Event handler: set state {key}"), op)
+            }
+            EventHandler::PatchState { key, patch } => {
+                let resolved_patch = resolve_template_value(patch, &event.payload);
+                let op = super::operations::AppOperation {
+                    id: format!("op-evt-{}", Uuid::new_v4()),
+                    op_type: "state.patch".to_string(),
+                    target: super::operations::OperationTarget {
+                        surface_id: Some(sub.owner_surface_id.clone()),
+                        ..Default::default()
+                    },
+                    payload: serde_json::json!({
+                        "key": key,
+                        "patch": resolved_patch,
+                    }),
+                    ..Default::default()
+                };
+                apply_handler_op(db, event, &format!("Event handler: patch state {key}"), op)
+            }
+            EventHandler::SetComponentProp {
+                component_id,
+                prop,
+                value,
+            } => {
+                let resolved_val = resolve_template_value(value, &event.payload);
+                let op = super::operations::AppOperation {
+                    id: format!("op-evt-{}", Uuid::new_v4()),
+                    op_type: "component.update_props".to_string(),
+                    target: super::operations::OperationTarget {
+                        surface_id: Some(sub.owner_surface_id.clone()),
+                        component_id: Some(component_id.clone()),
+                        ..Default::default()
+                    },
+                    payload: serde_json::json!({
+                        "componentId": component_id,
+                        "props": {
+                            prop: resolved_val,
+                        }
+                    }),
+                    ..Default::default()
+                };
+                apply_handler_op(
+                    db,
+                    event,
+                    &format!("Event handler: set prop {prop} on {component_id}"),
+                    op,
+                )
+            }
+            EventHandler::InvokeRegisteredAction {
+                action_name,
+                parameters,
+                application_id,
+            } => match super::get_surface(db, &sub.owner_surface_id) {
+                Ok(surface) => {
+                    if let Some(expected_app) = application_id {
+                        if surface.tool_id.as_deref() != Some(expected_app) {
+                            Err(format!(
+                                "cross-application action invocation denied: surface owned by {:?}, requested {}",
+                                surface.tool_id, expected_app
+                            ))
+                        } else {
+                            let resolved_params =
+                                resolve_template_value(parameters, &event.payload);
+                            Ok(serde_json::json!({
+                                "invokedAction": action_name,
+                                "surfaceId": sub.owner_surface_id,
+                                "parameters": resolved_params,
+                            }))
+                        }
+                    } else {
+                        let resolved_params = resolve_template_value(parameters, &event.payload);
+                        Ok(serde_json::json!({
+                            "invokedAction": action_name,
+                            "surfaceId": sub.owner_surface_id,
+                            "parameters": resolved_params,
+                        }))
+                    }
+                }
+                Err(e) => Err(format!("surface not found: {e}")),
+            },
+            EventHandler::EmitClientNotification {
+                title,
+                message,
+                level,
+            } => {
+                let op = super::operations::AppOperation {
+                    id: format!("op-evt-{}", Uuid::new_v4()),
+                    op_type: "chat.notification".to_string(),
+                    target: super::operations::OperationTarget {
+                        surface_id: Some(sub.owner_surface_id.clone()),
+                        conversation_id: event.source.conversation_id.clone(),
+                        ..Default::default()
+                    },
+                    payload: serde_json::json!({
+                        "title": title,
+                        "message": message,
+                        "level": level.as_deref().unwrap_or("info"),
+                    }),
+                    ..Default::default()
+                };
+                apply_handler_op(db, event, "Event handler: notification", op)
+            }
+            EventHandler::SubmitEvent {
+                event_type,
+                payload,
+            } => {
+                let child_event = SurfaceEvent {
+                    id: format!("evt-{}", Uuid::new_v4()),
+                    event_type: event_type.clone(),
+                    scope: "surface".into(),
+                    source: EventRef {
+                        surface_id: Some(sub.owner_surface_id.clone()),
+                        conversation_id: event.source.conversation_id.clone(),
+                        project_id: event.source.project_id.clone(),
+                        ..Default::default()
+                    },
+                    target: EventRef::default(),
+                    payload: resolve_template_value(payload, &event.payload),
+                    idempotency_key: None,
+                };
+                let child_matches = bus.dispatch(&child_event, depth + 1)?;
+                for child_sub_id in child_matches {
+                    let _ = execute_durable_event_delivery(
+                        db,
+                        bus,
+                        &child_event,
+                        &child_sub_id,
+                        depth + 1,
+                    );
+                }
+                Ok(serde_json::json!({
+                    "childEventId": child_event.id,
+                }))
+            }
+        }
+    } else {
+        Ok(serde_json::json!({"status": "notified"}))
+    };
+
+    let processed_now = now_rfc3339();
+    match execution_result {
+        Ok(val) => {
+            let res_json = serde_json::to_string(&val).unwrap_or_else(|_| "{}".into());
+            let _ = db.conn().execute(
+                "UPDATE surface_event_deliveries SET status = 'delivered',
+                 processed_at = ?1 WHERE id = ?2",
+                params![processed_now, delivery_id],
+            );
+            let _ = db.conn().execute(
+                "UPDATE surface_events SET status = 'processed', processed_at = ?1 WHERE id = ?2",
+                params![processed_now, event.id],
+            );
+            Ok(delivery_id)
+        }
+        Err(err) => {
+            let _ = db.conn().execute(
+                "UPDATE surface_event_deliveries SET status = 'failed',
+                 last_error = ?1, processed_at = ?2 WHERE id = ?3",
+                params![err, processed_now, delivery_id],
+            );
+            Err(EventBusError::ExecutionFailed { reason: err })
+        }
     }
 }
 
@@ -429,5 +917,260 @@ mod tests {
         assert!(bus.remember_idempotency("k0"));
         // Recent keys are still deduplicated.
         assert!(!bus.remember_idempotency(&format!("k{}", MAX_IDEMPOTENCY_KEYS + 499)));
+    }
+
+    #[test]
+    fn source_filter_matches_properly() {
+        let mut bus = EventBus::new();
+        let sub = Subscription {
+            id: "sub-1".into(),
+            owner_surface_id: "s1".into(),
+            event_types: vec!["task_created".into()],
+            source_filter: EventRef {
+                surface_id: Some("source-surf".into()),
+                application_id: Some("app-todo".into()),
+                ..Default::default()
+            },
+            target: EventRef::default(),
+            handler: None,
+            enabled: true,
+        };
+        bus.add_subscription(sub).unwrap();
+
+        // Event from matching surface and app
+        let ev_match = SurfaceEvent {
+            id: "e1".into(),
+            event_type: "task_created".into(),
+            scope: "surface".into(),
+            source: EventRef {
+                surface_id: Some("source-surf".into()),
+                application_id: Some("app-todo".into()),
+                ..Default::default()
+            },
+            target: EventRef::default(),
+            payload: json!({ "title": "Buy groceries" }),
+            idempotency_key: None,
+        };
+        let matched = bus.dispatch(&ev_match, 0).unwrap();
+        assert_eq!(matched, vec!["sub-1"]);
+
+        // Event from different surface
+        bus.rates.clear();
+        let ev_diff_surf = SurfaceEvent {
+            source: EventRef {
+                surface_id: Some("other-surf".into()),
+                application_id: Some("app-todo".into()),
+                ..Default::default()
+            },
+            ..ev_match.clone()
+        };
+        assert!(bus.dispatch(&ev_diff_surf, 0).unwrap().is_empty());
+
+        // Event from different app
+        bus.rates.clear();
+        let ev_diff_app = SurfaceEvent {
+            source: EventRef {
+                surface_id: Some("source-surf".into()),
+                application_id: Some("other-app".into()),
+                ..Default::default()
+            },
+            ..ev_match.clone()
+        };
+        assert!(bus.dispatch(&ev_diff_app, 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn target_matching_isolates_surfaces() {
+        let mut bus = EventBus::new();
+        // Subscription on surface-A
+        let sub_a = Subscription {
+            id: "sub-a".into(),
+            owner_surface_id: "surface-A".into(),
+            event_types: vec!["ping".into()],
+            source_filter: EventRef::default(),
+            target: EventRef::default(),
+            handler: None,
+            enabled: true,
+        };
+        // Subscription on surface-B
+        let sub_b = Subscription {
+            id: "sub-b".into(),
+            owner_surface_id: "surface-B".into(),
+            event_types: vec!["ping".into()],
+            source_filter: EventRef::default(),
+            target: EventRef::default(),
+            handler: None,
+            enabled: true,
+        };
+        bus.add_subscription(sub_a).unwrap();
+        bus.add_subscription(sub_b).unwrap();
+
+        // Event targeted specifically to surface-B
+        let ev_targeted = SurfaceEvent {
+            id: "e-target".into(),
+            event_type: "ping".into(),
+            scope: "surface".into(),
+            source: EventRef::default(),
+            target: EventRef {
+                surface_id: Some("surface-B".into()),
+                ..Default::default()
+            },
+            payload: json!({}),
+            idempotency_key: None,
+        };
+        let matched = bus.dispatch(&ev_targeted, 0).unwrap();
+        // Only surface-B's subscription should match, NOT surface-A's!
+        assert_eq!(matched, vec!["sub-b"]);
+    }
+
+    #[test]
+    fn cross_app_events_are_denied() {
+        let mut bus = EventBus::new();
+        let ev_cross = SurfaceEvent {
+            id: "e-cross".into(),
+            event_type: "data_sync".into(),
+            scope: "surface".into(),
+            source: EventRef {
+                application_id: Some("app-finance".into()),
+                ..Default::default()
+            },
+            target: EventRef {
+                application_id: Some("app-notes".into()),
+                ..Default::default()
+            },
+            payload: json!({}),
+            idempotency_key: None,
+        };
+        let err = bus.dispatch(&ev_cross, 0).unwrap_err();
+        assert_eq!(err, EventBusError::CrossAppDenied);
+    }
+
+    #[test]
+    fn load_from_db_quarantines_corrupt_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("corrupt.db")).unwrap();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "Quarantine Test",
+            None,
+        )
+        .unwrap();
+        let surf = super::super::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Quarantine Surface",
+            &json!({"type":"container","id":"root"}),
+            &[],
+        )
+        .unwrap();
+
+        // Insert a corrupt row
+        db.conn()
+            .execute(
+                "INSERT INTO surface_subscriptions (
+                    id, owner_surface_id, source_filter_json, target_json,
+                    event_types_json, handler_json, enabled, created_at, updated_at
+                 ) VALUES ('sub-bad', ?1, '{corrupt json', '{}', '[]', '{}', 1, datetime('now'), datetime('now'))",
+                [&surf.id],
+            )
+            .unwrap();
+
+        // Hydrate from DB
+        let bus = EventBus::load_from_db(&db);
+        // Bad subscription must NOT be in memory
+        assert!(bus.get_subscription("sub-bad").is_none());
+
+        // And in SQLite it must have been quarantined to enabled = 0
+        let enabled: i64 = db
+            .conn()
+            .query_row(
+                "SELECT enabled FROM surface_subscriptions WHERE id = 'sub-bad'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            enabled, 0,
+            "corrupted subscription must be quarantined to disabled"
+        );
+    }
+
+    #[test]
+    fn durable_event_delivery_executes_handler_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("deliv.db")).unwrap();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "Event Test",
+            None,
+        )
+        .unwrap();
+        let surf = super::super::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Task Manager",
+            &json!({"type":"container","id":"root"}),
+            &[],
+        )
+        .unwrap();
+        let surface_id = surf.id.as_str();
+
+        let mut bus = EventBus::new();
+        let sub = Subscription {
+            id: "sub-counter".into(),
+            owner_surface_id: surface_id.into(),
+            event_types: vec!["task.added".into()],
+            source_filter: EventRef::default(),
+            target: EventRef::default(),
+            handler: Some(EventHandler::SetState {
+                key: "count".into(),
+                value: json!(10),
+            }),
+            enabled: true,
+        };
+        bus.add_subscription(sub).unwrap();
+
+        let ev = SurfaceEvent {
+            id: "evt-add-1".into(),
+            event_type: "task.added".into(),
+            scope: "surface".into(),
+            source: EventRef {
+                surface_id: Some(surface_id.into()),
+                conversation_id: Some(conv.id.clone()),
+                ..Default::default()
+            },
+            target: EventRef::default(),
+            payload: json!({ "taskName": "Write tests" }),
+            idempotency_key: None,
+        };
+
+        // First delivery executes and succeeds
+        let res = execute_durable_event_delivery(&mut db, &mut bus, &ev, "sub-counter", 0);
+        assert!(res.is_ok());
+
+        // Check delivery status in surface_event_deliveries
+        let status: String = db
+            .conn()
+            .query_row(
+                "SELECT status FROM surface_event_deliveries WHERE event_id = ?1 AND subscription_id = ?2",
+                rusqlite::params![ev.id, "sub-counter"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "delivered");
+
+        // Check surface state was actually updated by the handler!
+        let state = super::super::surfaces::get_surface_state(&db, surface_id).unwrap();
+        assert_eq!(state.get("count").unwrap().as_i64(), Some(10));
+
+        // Re-delivery of the same event and subscription is idempotent and does not fail
+        let re_res = execute_durable_event_delivery(&mut db, &mut bus, &ev, "sub-counter", 0);
+        assert_eq!(re_res.unwrap(), "already_delivered");
     }
 }

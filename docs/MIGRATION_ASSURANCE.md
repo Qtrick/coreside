@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 30 forward migrations (001–030; includes `030_patch_scheduler_target_readiness.sql`)
+**Count:** 31 forward migrations (001–031; includes `031_surface_event_deliveries.sql`)
 
 ## Inventory
 
@@ -38,6 +38,7 @@
 | 028 | `028_deep_runtime_v2_hardening.sql` | Deep Runtime V2 hardening: conversation event sequences, outbox idempotency, turn journal CAS |
 | 029 | `029_queue_turn_binding.sql` | Queue item turn binding: explicit turn_id relationship and crash recovery isolation |
 | 030 | `030_patch_scheduler_target_readiness.sql` | Target readiness: deferred patch scheduling, target dependency promotion, TTL timeout |
+| 031 | `031_surface_event_deliveries.sql` | Surface event deliveries: durable delivery lifecycle, attempt counts, declarative handler schema |
 
 ## What is verified
 

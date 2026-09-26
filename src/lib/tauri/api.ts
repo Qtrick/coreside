@@ -950,6 +950,16 @@ export const api = {
       payload,
     }),
   runtimeV2Limits: () => invoke<Record<string, unknown>>("runtime_v2_limits"),
+  runtimeV2ReconstructReplayState: (
+    conversationId: string,
+    targetTurnId?: string | null,
+    targetTransactionId?: string | null,
+  ) =>
+    invoke<Record<string, unknown>>("runtime_v2_reconstruct_replay_state", {
+      conversationId,
+      targetTurnId: targetTurnId ?? null,
+      targetTransactionId: targetTransactionId ?? null,
+    }),
 
   // Application Kernel
   kernelCapabilityCatalog: () => invoke<Record<string, unknown>>("kernel_capability_catalog"),

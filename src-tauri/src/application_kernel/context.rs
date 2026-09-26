@@ -70,7 +70,7 @@ pub fn recent_transactions_summary(
             "createdAt": row.get::<_, String>(3)?,
         }))
     })?;
-    let items: Vec<Value> = rows.filter_map(|r| r.ok()).collect();
+    let items: Vec<Value> = rows.collect::<Result<Vec<_>, _>>()?;
     Ok(json!({
         "applicationId": application_id,
         "recent": items,

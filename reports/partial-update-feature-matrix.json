@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "product": "Coreside",
   "accessDate": "2026-08-07",
-  "generatedAt": "2026-09-25T16:59:41.976Z",
-  "commit": "e9c961923b52420646657888c44872ff90e6e69a",
+  "generatedAt": "2026-09-26T15:39:28.428Z",
+  "commit": "bc2110803d2a829bc8bd48525a935b50307f5402",
   "dirty": true,
   "sourceFingerprint": "f3e0434743a2e416c527f15b45b46a0e045b3906f96bd1c5465eb6081e760377",
   "command": "audit:partial-update",
@@ -39,9 +39,9 @@
     "Absent": 0,
     "Scaffolded": 0,
     "Implemented": 0,
-    "Unit Verified": 13,
+    "Unit Verified": 11,
     "Integrated – Not Verified": 0,
-    "Desktop Verified": 0,
+    "Desktop Verified": 2,
     "Packaged Verified": 0,
     "Cross-Platform Verified": 0,
     "Human Accepted": 0,
@@ -49,11 +49,11 @@
     "Deferred": 2
   },
   "highestValueGap": {
-    "id": "PU-PROGRESSIVE-PREVIEW",
-    "name": "Progressive generated-surface preview",
+    "id": "PU-PARSE",
+    "name": "NDJSON / UpdateStreamParser incremental parse",
     "status": "Unit Verified",
-    "userValue": 10,
-    "rationale": "Progressive trusted surface paint is Unit Verified with SQLite cancel/incomplete rollback evidence (PreviewTransaction + overlay + ToolCanvas) but lacks desktop/packaged progressive-surface journeys — Journey 12 covers text streaming only."
+    "userValue": 9,
+    "rationale": "Highest user-value secure feature still below Desktop/Packaged Verified."
   },
   "methodology": [
     "Content probes on Partial Update and Coreside trees (mustMatch/anyMatch).",
@@ -69,18 +69,16 @@
       "name": "Provider streaming (live deltas)",
       "category": "streaming",
       "userValue": 10,
-      "status": "Unit Verified",
+      "status": "Desktop Verified",
       "partialUpdatePresent": true,
       "coreside": {
         "implOk": true,
         "wiredOk": true,
         "unitOk": true,
-        "desktopOk": false,
+        "desktopOk": true,
         "packagedOk": false
       },
-      "notes": [
-        "Historical desktop evidence in true-streaming-results.json not applied (fingerprint/commit mismatch)."
-      ],
+      "notes": [],
       "evidence": [
         {
           "side": "partialUpdate",
@@ -128,11 +126,14 @@
           "level": "Unit Verified"
         },
         {
+          "side": "e2e-results",
+          "ok": true
+        },
+        {
           "side": "desktopReport",
           "path": "reports/true-streaming-results.json",
-          "ok": false,
-          "fresh": false,
-          "commitFresh": false
+          "ok": true,
+          "fresh": true
         }
       ],
       "gapPriority": null,
@@ -196,17 +197,16 @@
       "name": "Progressive generated-surface preview",
       "category": "generative",
       "userValue": 10,
-      "status": "Unit Verified",
+      "status": "Desktop Verified",
       "partialUpdatePresent": true,
       "coreside": {
         "implOk": true,
         "wiredOk": true,
         "unitOk": true,
-        "desktopOk": false,
+        "desktopOk": true,
         "packagedOk": false
       },
       "notes": [
-        "Historical desktop evidence in progressive-preview-results.json not applied (fingerprint/commit mismatch).",
         "Secure progressive paint exists (PreviewTransaction + overlay + ToolCanvas badge); SQLite cancel/incomplete rollback is unit-integrated; Journey 19 (progressive-surface-preview) is the Desktop Verified path — remains Unit Verified until progressive-preview-results.json is fresh."
       ],
       "evidence": [
@@ -253,11 +253,14 @@
           "ok": true
         },
         {
+          "side": "e2e-results",
+          "ok": true
+        },
+        {
           "side": "desktopReport",
           "path": "reports/progressive-preview-results.json",
-          "ok": false,
-          "fresh": false,
-          "commitFresh": false
+          "ok": true,
+          "fresh": true
         }
       ],
       "gapPriority": "P0",

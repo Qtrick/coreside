@@ -315,6 +315,7 @@ pub fn run() {
             commands::list_diagnostics_cmd,
             commands::list_turn_timeline_cmd,
             commands::runtime_v2_limits,
+            commands::runtime_v2_reconstruct_replay_state,
             commands::kernel_capability_catalog,
             commands::kernel_apply_change,
             commands::kernel_get_proposal,

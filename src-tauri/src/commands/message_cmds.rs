@@ -2016,6 +2016,7 @@ async fn send_message_inner(
             schema_version: crate::runtime_v2::PROGRESSIVE_SCHEMA_VERSION.into(),
             capability_version: None,
         });
+    let mut protocol_detector = crate::runtime_v2::ProgressiveProtocolDetector::default();
     let mut preview_txn = crate::runtime_v2::PreviewTransaction::new(turn_id.clone(), None);
     let resolved = chat_with_auto(
         &access,
@@ -2074,13 +2075,11 @@ async fn send_message_inner(
                     );
                     // Provider SSE text deltas are NOT the Coreside NDJSON operation
                     // protocol. Only feed chunks when ProgressiveNdjson is negotiated
-                    // and carries operation frames; structured-JSON streaming deltas
-                    // (e.g. Gemini responseMimeType application/json) must never
-                    // enter the frame parser.
-                    if progressive_ops_enabled
-                        && (text.contains(crate::runtime_v2::PROGRESSIVE_OPS_V)
-                            || text.trim_start().starts_with('{'))
-                    {
+                    // and ProgressiveProtocolDetector authoritatively verifies coreside.ops.v1;
+                    // structured-JSON streaming deltas (e.g. Gemini responseMimeType application/json)
+                    // or ordinary conversational text must never enter the frame parser.
+                    protocol_detector.feed(&text);
+                    if progressive_ops_enabled && protocol_detector.is_coreside_ndjson() {
                         emit_progressive_op_previews(
                             &app_for_stream,
                             state,

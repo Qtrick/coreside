@@ -923,11 +923,14 @@ pub fn decide_proposal(
         approval_granted: true,
     };
     if let Err(e) = record_provenance(db, &txn.id, &change_req, "applied", Some("passed"), None) {
-        tracing::warn!(
-            transaction_id = %txn.id,
-            error = %e,
-            "provenance recording failed after proposal apply — audit trail gap"
+        if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
+            tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during proposal provenance recording");
+        }
+        let _ = db.conn().execute(
+            "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
+            rusqlite::params![format!("provenance failed: {e}"), proposal_id],
         );
+        return Err(KernelError::Db(e));
     }
 
     let verification = testing::verify_after_change(db, &ops).ok();
