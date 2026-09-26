@@ -3146,6 +3146,25 @@ async fn send_message_inner(
             ) {
                 tracing::warn!(error = %e, "failed to create turn checkpoint");
             }
+            // Bind inline surfaces created this turn to the assistant message when unset,
+            // so InlineSurfacesForMessage can render them under the correct bubble.
+            // Executing this inside the BEGIN IMMEDIATE write transaction ensures atomic
+            // binding with the assistant message insertion and honors the deletion barrier.
+            if let Some(apply) = &v2_apply {
+                if let Some(surfaces) = apply.get("surfaces").and_then(|v| v.as_array()) {
+                    for surface in surfaces {
+                        if let Some(surface_id) = surface.get("id").and_then(|v| v.as_str()) {
+                            if let Err(e) = db.conn().execute(
+                                "UPDATE surfaces SET message_id = ?1
+                                 WHERE id = ?2 AND conversation_id = ?3 AND message_id IS NULL",
+                                rusqlite::params![assistant.id, surface_id, conversation_id],
+                            ) {
+                                tracing::warn!(error = %e, surface_id = %surface_id, "failed to bind surface to message");
+                            }
+                        }
+                    }
+                }
+            }
             Ok(assistant)
         })();
         match commit {
@@ -3192,25 +3211,6 @@ async fn send_message_inner(
     }
 
     note_timeline(state, &conversation_id, &turn_id, "completion", json!({}));
-
-    // Bind inline surfaces created this turn to the assistant message when unset,
-    // so InlineSurfacesForMessage can render them under the correct bubble.
-    if let Some(apply) = &v2_apply {
-        if let Some(surfaces) = apply.get("surfaces").and_then(|v| v.as_array()) {
-            let db = state.db.lock();
-            for surface in surfaces {
-                if let Some(surface_id) = surface.get("id").and_then(|v| v.as_str()) {
-                    if let Err(e) = db.conn().execute(
-                        "UPDATE surfaces SET message_id = ?1
-                         WHERE id = ?2 AND conversation_id = ?3 AND message_id IS NULL",
-                        rusqlite::params![assistant_message.id, surface_id, conversation_id],
-                    ) {
-                        tracing::warn!(error = %e, surface_id = %surface_id, "failed to bind surface to message");
-                    }
-                }
-            }
-        }
-    }
 
     Ok(SendMessageResult {
         message_id: assistant_message.id,

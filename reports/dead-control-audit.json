@@ -1,19 +1,12 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-26T15:39:01.509Z",
-  "commit": "bc2110803d2a829bc8bd48525a935b50307f5402",
+  "generatedAt": "2026-09-26T18:28:22.063Z",
+  "commit": "4c4c9bfbcdf02aebc4940fa5510cbd9d631e9758",
   "dirty": true,
   "command": "audit:dead-controls",
   "evidenceLevel": "Scaffolded",
   "note": "Heuristic dead-control hints only — false positives expected.",
-  "matchCount": 1,
-  "matches": [
-    {
-      "file": "src/components/sidebar/Sidebar.tsx",
-      "line": 426,
-      "hint": "alert_call",
-      "snippet": "alert(\"Failed to delete chat. Please try again.\"); });"
-    }
-  ]
+  "matchCount": 0,
+  "matches": []
 }

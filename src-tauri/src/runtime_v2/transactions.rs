@@ -53,6 +53,13 @@ pub fn create_transaction(
     silent: bool,
 ) -> DbResult<AppTransactionRecord> {
     validate_operations(operations).map_err(DbError::Invalid)?;
+    if let Some(cid) = conversation_id {
+        if !crate::db::conversation_exists(db, cid) {
+            return Err(DbError::NotFound(format!(
+                "conversation {cid} not found or deleted"
+            )));
+        }
+    }
     let id = format!("txn-{}", Uuid::new_v4());
     let now = now_rfc3339();
     let ops_json = serde_json::to_string(operations)?;
@@ -2104,6 +2111,30 @@ mod tests {
             1,
             "action_contracts must still be intact after add_section"
         );
+    }
+
+    #[test]
+    fn create_transaction_rejects_deleted_or_nonexistent_conversation() {
+        let mut db = test_db();
+        let cid = "deleted-conv-id";
+        let res = create_transaction(&mut db, Some(cid), None, None, "test_turn", &[], false);
+        match res {
+            Err(DbError::NotFound(msg)) => {
+                assert!(msg.contains("conversation deleted-conv-id"));
+            }
+            other => panic!("expected DbError::NotFound, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn create_transaction_after_conversation_deletion_is_blocked() {
+        let mut db = test_db();
+        let conv = crate::db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Test Chat", None)
+            .unwrap();
+        crate::db::delete_conversation(&mut db, &conv.id).unwrap();
+
+        let res = create_transaction(&mut db, Some(&conv.id), None, None, "late_turn", &[], false);
+        assert!(matches!(res, Err(DbError::NotFound(_))));
     }
 }
 

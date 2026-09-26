@@ -379,7 +379,8 @@ export function ToolRenderer({
       }
     },
     [
-      isCustomizing,
+      isCustomizingMode,
+      isPreviewMode,
       declaredBindings,
       applicationId,
       conversationId,

@@ -128,6 +128,7 @@ pub enum TargetReadiness {
 pub fn evaluate_target_readiness(db: &Database, op: &AppOperation) -> TargetReadiness {
     // Surface creations establish a new surface and are ready immediately.
     if op.op_type == "surface.create"
+        || op.op_type == "chat.inline_surface_create"
         || op.op_type == "application.create"
         || op.op_type == "tool.create"
     {
@@ -301,6 +302,14 @@ pub fn schedule_patches(db: &mut Database, req: &ScheduleRequest) -> DbResult<Ve
             "dependency cycle: {}",
             cycle.join(" -> ")
         )));
+    }
+
+    if let Some(ref cid) = req.conversation_id {
+        if !crate::db::conversation_exists(db, cid) {
+            return Err(DbError::NotFound(format!(
+                "conversation {cid} not found or deleted"
+            )));
+        }
     }
 
     let payload_bytes: usize = serde_json::to_string(&req.operations)
@@ -1295,13 +1304,16 @@ mod tests {
     #[test]
     fn transitive_dependency_failure_propagation() {
         let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "Test", None)
+                .unwrap();
         let ops = vec![
             simple_op("op_a", vec!["op_nonexistent".into()]),
             simple_op("op_b", vec!["op_a".into()]),
             simple_op("op_c", vec!["op_b".into()]),
         ];
         let req = ScheduleRequest {
-            conversation_id: Some("conv-sched-1".into()),
+            conversation_id: Some(conv.id.clone()),
             turn_id: Some("turn-1".into()),
             surface_id: None,
             priority: PatchPriority::ApprovedPersistentChange,
@@ -1319,7 +1331,7 @@ mod tests {
         let patch_c_id = &scheduled[2].id;
 
         // Flush the scheduler
-        let _ = flush_scheduler(&mut db, &mut None, Some("conv-sched-1"), "user", true).unwrap();
+        let _ = flush_scheduler(&mut db, &mut None, Some(&conv.id), "user", true).unwrap();
 
         // Check statuses and error_categories
         let patch_a = get_scheduled_patch(&db, patch_a_id).unwrap();

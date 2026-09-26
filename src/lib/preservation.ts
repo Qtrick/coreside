@@ -68,9 +68,25 @@ export function restoreFocusSnapshot(
     if (byId) target = byId;
   }
   if (!target && snapshot.componentId) {
-    target = root.querySelector<HTMLElement>(
-      `[data-component-id="${CSS.escape(snapshot.componentId)}"] input, [data-component-id="${CSS.escape(snapshot.componentId)}"] textarea, [data-component-id="${CSS.escape(snapshot.componentId)}"] button, [data-component-id="${CSS.escape(snapshot.componentId)}"] select`,
+    const compEl = root.querySelector<HTMLElement>(
+      `[data-component-id="${CSS.escape(snapshot.componentId)}"]`,
     );
+    if (compEl) {
+      if (
+        compEl instanceof HTMLInputElement ||
+        compEl instanceof HTMLTextAreaElement ||
+        compEl instanceof HTMLButtonElement ||
+        compEl instanceof HTMLSelectElement ||
+        compEl.tabIndex >= 0 ||
+        compEl.isContentEditable
+      ) {
+        target = compEl;
+      } else {
+        target = compEl.querySelector<HTMLElement>(
+          "input, textarea, button, select, [tabindex]:not([tabindex='-1']), [contenteditable='true']",
+        );
+      }
+    }
   }
   if (!target) return;
   target.focus({ preventScroll: true });

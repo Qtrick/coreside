@@ -214,6 +214,11 @@ pub fn create_inline_surface(
     if def_json.len() > MAX_DEFINITION_JSON_BYTES {
         return Err(DbError::Invalid("surface definition too large".into()));
     }
+    if !crate::db::conversation_exists(db, conversation_id) {
+        return Err(DbError::NotFound(format!(
+            "conversation {conversation_id} not found"
+        )));
+    }
     let count: i64 = db.conn().query_row(
         "SELECT COUNT(*) FROM surfaces WHERE conversation_id = ?1 AND archived = 0",
         [conversation_id],
@@ -1099,5 +1104,45 @@ mod tests {
             .unwrap()
             .capability_packs
             .is_empty());
+    }
+
+    #[test]
+    fn create_inline_surface_rejects_deleted_or_nonexistent_conversation() {
+        let mut db = test_db();
+        let cid = "deleted-conv-id";
+        let res = create_inline_surface(
+            &mut db,
+            cid,
+            None,
+            None,
+            "Failed Inline",
+            &minimal_def("Failed Inline"),
+            &[],
+        );
+        match res {
+            Err(DbError::NotFound(msg)) => {
+                assert!(msg.contains("conversation deleted-conv-id"));
+            }
+            other => panic!("expected DbError::NotFound, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn create_inline_surface_after_conversation_deletion_is_blocked() {
+        let mut db = test_db();
+        let conv = crate::db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Test Chat", None)
+            .unwrap();
+        crate::db::delete_conversation(&mut db, &conv.id).unwrap();
+
+        let res = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Late Inline Surface",
+            &minimal_def("Late Inline"),
+            &[],
+        );
+        assert!(matches!(res, Err(DbError::NotFound(_))));
     }
 }

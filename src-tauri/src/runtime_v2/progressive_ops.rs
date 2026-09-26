@@ -96,12 +96,6 @@ impl ProgressiveProtocolDetector {
             return self.detected;
         }
 
-        // Fast-path: chunk explicitly contains the protocol version
-        if chunk.contains(PROGRESSIVE_OPS_V) {
-            self.detected = DetectedStreamingProtocol::CoresideOpsNdjson;
-            return self.detected;
-        }
-
         if self.buffer.len() < self.max_probe_bytes {
             let remain = self.max_probe_bytes - self.buffer.len();
             let to_add = if chunk.len() > remain {
@@ -127,16 +121,29 @@ impl ProgressiveProtocolDetector {
             return self.detected;
         }
 
-        // Starts with '{': check if it contains the protocol tag
-        if trimmed.contains(PROGRESSIVE_OPS_V) {
-            self.detected = DetectedStreamingProtocol::CoresideOpsNdjson;
+        // Gemini/OpenAI structured output contains top-level assistantMessage, toolChange, or settingsChange.
+        // Even if the text inside assistantMessage mentions "coreside.ops.v1", it is structured JSON, not NDJSON.
+        if trimmed.contains("\"assistantMessage\"")
+            || trimmed.contains("\"toolChange\"")
+            || trimmed.contains("\"settingsChange\"")
+        {
+            self.detected = DetectedStreamingProtocol::StructuredJson;
             return self.detected;
         }
 
         // If there is a newline, inspect the first line
         if let Some(pos) = trimmed.find('\n') {
             let first_line = trimmed[..pos].trim();
-            if first_line.contains(PROGRESSIVE_OPS_V) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(first_line) {
+                if v.get("v").and_then(|x| x.as_str()) == Some(PROGRESSIVE_OPS_V) {
+                    self.detected = DetectedStreamingProtocol::CoresideOpsNdjson;
+                    return self.detected;
+                }
+            } else if (first_line.contains("\"v\": \"coreside.ops.v1\"")
+                || first_line.contains("\"v\":\"coreside.ops.v1\"")
+                || first_line.contains("\"v\" : \"coreside.ops.v1\""))
+                && !first_line.contains("\"assistantMessage\"")
+            {
                 self.detected = DetectedStreamingProtocol::CoresideOpsNdjson;
                 return self.detected;
             }
@@ -144,6 +151,16 @@ impl ProgressiveProtocolDetector {
             // the protocol version. If the first line finished with a newline and does
             // not contain the protocol version, it is multi-line structured JSON.
             self.detected = DetectedStreamingProtocol::StructuredJson;
+            return self.detected;
+        }
+
+        // Check if the buffered prefix has the explicit protocol version field
+        if (trimmed.contains("\"v\": \"coreside.ops.v1\"")
+            || trimmed.contains("\"v\":\"coreside.ops.v1\"")
+            || trimmed.contains("\"v\" : \"coreside.ops.v1\""))
+            && !trimmed.contains("\"assistantMessage\"")
+        {
+            self.detected = DetectedStreamingProtocol::CoresideOpsNdjson;
             return self.detected;
         }
 
@@ -1324,5 +1341,23 @@ mod tests {
             DetectedStreamingProtocol::CoresideOpsNdjson
         );
         assert!(d.is_coreside_ndjson());
+    }
+
+    #[test]
+    fn detector_does_not_misclassify_structured_json_mentioning_protocol() {
+        let mut d = ProgressiveProtocolDetector::default();
+        let payload = r#"{"assistantMessage": "We can upgrade to coreside.ops.v1 protocol later.", "toolChange": null}"#;
+        let res = d.feed(payload);
+        assert_eq!(res, DetectedStreamingProtocol::StructuredJson);
+        assert!(!d.is_coreside_ndjson());
+    }
+
+    #[test]
+    fn detector_does_not_misclassify_plain_text_mentioning_protocol() {
+        let mut d = ProgressiveProtocolDetector::default();
+        let payload = "Here is the explanation: the format uses coreside.ops.v1 under the hood.";
+        let res = d.feed(payload);
+        assert_eq!(res, DetectedStreamingProtocol::PlainText);
+        assert!(!d.is_coreside_ndjson());
     }
 }

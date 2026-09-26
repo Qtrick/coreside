@@ -38,7 +38,7 @@ function asBoolean(value: unknown, fallback = false): boolean {
  * P0 Security: Never falls back to component.id. Unbound components return null
  * and maintain local ephemeral React state.
  */
-export function stateKeyFor(component: ToolComponent, ...propKeys: string[]): string | null {
+function stateKeyFor(component: ToolComponent, ...propKeys: string[]): string | null {
   const allowValueKey = propKeys.length === 0 || propKeys.includes("valueKey");
   if (allowValueKey && component.valueKey && typeof component.valueKey === "string" && component.valueKey.trim()) {
     return component.valueKey.trim();

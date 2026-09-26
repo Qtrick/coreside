@@ -165,14 +165,16 @@ export function ToolCanvas() {
     [manifestRecord, recovery],
   );
 
+  const activeToolId = activeTool?.id;
+
   useEffect(() => {
-    if (!activeTool) {
+    if (!activeToolId) {
       setCanonicalSurface(null);
       setCanonicalState(null);
       setStateRevision(0);
       return;
     }
-    const sid = surfaceIdForTool(activeTool.id);
+    const sid = surfaceIdForTool(activeToolId);
     let cancelled = false;
     // Use getSurfaceStateWithRevision to atomically fetch state + stateRevision.
     // Previously we called getSurface() + getSurfaceState() and used surf.currentRevision
@@ -196,7 +198,7 @@ export function ToolCanvas() {
     return () => {
       cancelled = true;
     };
-  }, [activeTool?.id]);
+  }, [activeToolId]);
 
   const onStateChange = useCallback(
     (state: Record<string, unknown>) => {
@@ -259,7 +261,7 @@ export function ToolCanvas() {
       cancelAnimationFrame(frame);
       ro.disconnect();
     };
-  }, [activeTool?.id]);
+  }, [activeToolId]);
 
   useEffect(() => {
     if (!activeTool) {

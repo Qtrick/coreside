@@ -213,6 +213,14 @@ pub fn apply_change(
     validate_dependency_refs(&req.operations).map_err(KernelError::Validation)?;
     assert_ops_not_protected(&req.operations)?;
 
+    if let Some(ref cid) = req.conversation_id {
+        if !crate::db::conversation_exists(db, cid) {
+            return Err(KernelError::Validation(format!(
+                "conversation {cid} not found or deleted"
+            )));
+        }
+    }
+
     // Recovery Mode: block agent UI mutations while surfaces are disabled.
     // Fail-closed: if recovery state cannot be read, block agent mutations
     // rather than silently allowing them through.
@@ -425,6 +433,13 @@ pub fn apply_change(
 
     let mut deferred = Vec::new();
     let inner = (|| -> Result<ChangeResult, KernelError> {
+        if let Some(ref cid) = req.conversation_id {
+            if !crate::db::conversation_exists(db, cid) {
+                return Err(KernelError::Validation(format!(
+                    "conversation {cid} not found or deleted"
+                )));
+            }
+        }
         let txn = create_transaction(
             db,
             req.conversation_id.as_deref(),
@@ -1549,5 +1564,33 @@ mod tests {
         let sid = crate::runtime_v2::surfaces::surface_id_for_tool("task-manager");
         let surface = crate::runtime_v2::surfaces::get_surface(&db, &sid).unwrap();
         assert_eq!(surface.name, "Task Manager");
+    }
+
+    #[test]
+    fn apply_change_rejects_deleted_conversation_under_immediate_transaction() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Delete Barrier Test", None)
+            .unwrap();
+        crate::db::delete_conversation(&mut db, &conv.id).unwrap();
+
+        let req = ChangeRequest {
+            conversation_id: Some(conv.id.clone()),
+            turn_id: Some("turn-late-1".into()),
+            summary: "Late change".into(),
+            operations: vec![op("surface.delete")],
+            source_type: "user".into(),
+            ..Default::default()
+        };
+
+        let res = apply_change(&mut db, None, req);
+        match res {
+            Err(KernelError::Validation(msg)) => {
+                assert!(msg.contains("conversation") && msg.contains("not found"));
+            }
+            other => panic!(
+                "expected KernelError::Validation for deleted conversation, got {:?}",
+                other
+            ),
+        }
     }
 }
