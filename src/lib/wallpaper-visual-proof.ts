@@ -47,9 +47,9 @@ export function sampleWallpaperThroughPanel(preference: number): WallpaperSample
   };
 }
 
-/** Prove 0→20→40→60 increases wallpaper contribution and shifts color toward wallpaper. */
+/** Prove 0→10→25→40→50→70→85→100 increases wallpaper contribution and shifts color toward wallpaper. */
 export function assertMonotonicWallpaperVisibility(
-  levels: number[] = [0, 20, 40, 60],
+  levels: number[] = [0, 10, 25, 40, 50, 70, 85, 100],
 ): WallpaperSample[] {
   const samples = levels.map(sampleWallpaperThroughPanel);
   for (let i = 1; i < samples.length; i++) {

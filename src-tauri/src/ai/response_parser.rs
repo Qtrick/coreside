@@ -403,6 +403,7 @@ mod tests {
                     description: String::new(),
                     layout: serde_json::json!({ "type": "single-column" }),
                     components: vec![],
+                    ..Default::default()
                 }),
                 change_summary: "brand".into(),
             }),
@@ -452,6 +453,7 @@ mod tests {
                     description: String::new(),
                     layout: serde_json::json!({ "type": "single-column" }),
                     components: vec![],
+                    ..Default::default()
                 }),
                 change_summary: "u".into(),
             }),

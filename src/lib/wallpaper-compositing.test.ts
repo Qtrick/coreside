@@ -61,10 +61,10 @@ describe("wallpaper compositing proof", () => {
 
   it("proves monotonic wallpaper pixel contribution through panels (visual model)", () => {
     const samples = assertMonotonicWallpaperVisibility();
+    expect(samples.length).toBe(8);
     expect(samples[0]!.wallpaperContribution).toBe(0);
-    expect(samples[3]!.wallpaperContribution).toBeGreaterThan(
-      samples[2]!.wallpaperContribution,
-    );
+    expect(samples[samples.length - 1]!.preference).toBe(100);
+    expect(samples[samples.length - 1]!.wallpaperContribution).toBeGreaterThanOrEqual(0.9);
     expect(sampleWallpaperThroughPanel(0).blended).toEqual({
       r: 245,
       g: 245,

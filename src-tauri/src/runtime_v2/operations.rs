@@ -969,6 +969,7 @@ mod tests {
                 description: "".into(),
                 layout: json!({"type":"single-column"}),
                 components: vec![],
+                ..Default::default()
             }),
             change_summary: "create".into(),
         };
@@ -988,6 +989,7 @@ mod tests {
                 description: "".into(),
                 layout: json!({"type":"single-column"}),
                 components: vec![],
+                ..Default::default()
             }),
             change_summary: "replace".into(),
         };

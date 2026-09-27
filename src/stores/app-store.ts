@@ -276,6 +276,10 @@ type AppStore = {
       eventName?: string | null;
       applicationId?: string | null;
       surfaceId?: string | null;
+      surfaceRevision?: number | null;
+      stateRevision?: number | null;
+      componentId?: string | null;
+      idempotencyKey?: string | null;
       fields: Record<string, unknown>;
     } | null,
   ) => Promise<boolean>;

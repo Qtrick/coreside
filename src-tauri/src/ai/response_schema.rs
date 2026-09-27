@@ -409,6 +409,32 @@ pub struct ToolDefinition {
     pub layout: Value,
     #[serde(default)]
     pub components: Vec<ToolComponent>,
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        alias = "state_contracts"
+    )]
+    pub state_contracts: Vec<crate::runtime_v2::software_document::StateContract>,
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        alias = "action_contracts"
+    )]
+    pub action_contracts: Vec<crate::runtime_v2::software_document::ActionContract>,
+}
+
+impl Default for ToolDefinition {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            description: String::new(),
+            layout: default_layout(),
+            components: Vec::new(),
+            state_contracts: Vec::new(),
+            action_contracts: Vec::new(),
+        }
+    }
 }
 
 fn default_layout() -> Value {

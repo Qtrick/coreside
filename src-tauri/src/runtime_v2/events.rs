@@ -547,6 +547,12 @@ fn apply_handler_op(
     let mut deferred = Vec::new();
     let res = super::transactions::apply_transaction_deferred(db, &txn.id, &mut deferred)
         .map_err(|e| e.to_string())?;
+    if res.transaction.status != "applied" || !res.conflicts.is_empty() {
+        return Err(format!(
+            "handler transaction '{}' was not applied (status='{}', conflicts={:?})",
+            txn.id, res.transaction.status, res.conflicts
+        ));
+    }
     Ok(serde_json::to_value(&res).unwrap_or(Value::Null))
 }
 
@@ -703,34 +709,117 @@ pub fn execute_durable_event_delivery(
                 action_name,
                 parameters,
                 application_id,
-            } => match super::get_surface(db, &sub.owner_surface_id) {
-                Ok(surface) => {
-                    if let Some(expected_app) = application_id {
-                        if surface.tool_id.as_deref() != Some(expected_app) {
-                            Err(format!(
+            } => {
+                match super::get_surface(db, &sub.owner_surface_id) {
+                    Ok(surface) => {
+                        if let Some(expected_app) = application_id {
+                            if surface.tool_id.as_deref() != Some(expected_app) {
+                                Err(format!(
                                 "cross-application action invocation denied: surface owned by {:?}, requested {}",
                                 surface.tool_id, expected_app
                             ))
+                            } else {
+                                let resolved_params =
+                                    resolve_template_value(parameters, &event.payload);
+                                let ctx = crate::application_kernel::registered_actions::ActionRunContext {
+                                actor: "event_handler".into(),
+                                venue: crate::application_kernel::registered_actions::Venue::Application,
+                                presence: crate::application_kernel::registered_actions::Presence::Present,
+                                application_id: surface.tool_id.clone().or(application_id.clone()),
+                                project_id: surface.project_id.clone(),
+                                conversation_id: surface.conversation_id.clone(),
+                                session_id: crate::application_kernel::registered_actions::context::session_id().to_string(),
+                                run_id: format!("run-{}", Uuid::new_v4()),
+                                trigger: Some(format!("event:{}", event.event_type)),
+                                surface_id: Some(sub.owner_surface_id.clone()),
+                                component_id: None,
+                                depth: depth as u32,
+                            };
+                                let outcome = crate::application_kernel::registered_actions::execute_registered_action(
+                                db,
+                                &ctx,
+                                action_name,
+                                &resolved_params,
+                                None,
+                            );
+                                match outcome {
+                                crate::application_kernel::registered_actions::ActionOutcome::Ok { data, .. } => {
+                                    Ok(serde_json::json!({
+                                        "status": "success",
+                                        "action": action_name,
+                                        "surfaceId": sub.owner_surface_id,
+                                        "output": data,
+                                    }))
+                                }
+                                crate::application_kernel::registered_actions::ActionOutcome::PendingApproval { approval_id, .. } => {
+                                    Ok(serde_json::json!({
+                                        "status": "pending_approval",
+                                        "approvalId": approval_id,
+                                        "action": action_name,
+                                        "surfaceId": sub.owner_surface_id,
+                                    }))
+                                }
+                                crate::application_kernel::registered_actions::ActionOutcome::Error { message, code } => {
+                                    Err(format!("action '{action_name}' failed with {code}: {message}"))
+                                }
+                                crate::application_kernel::registered_actions::ActionOutcome::Blocked { reason, .. } => {
+                                    Err(format!("action '{action_name}' was blocked: {reason}"))
+                                }
+                            }
+                            }
                         } else {
                             let resolved_params =
                                 resolve_template_value(parameters, &event.payload);
-                            Ok(serde_json::json!({
-                                "invokedAction": action_name,
-                                "surfaceId": sub.owner_surface_id,
-                                "parameters": resolved_params,
-                            }))
+                            let ctx = crate::application_kernel::registered_actions::ActionRunContext {
+                            actor: "event_handler".into(),
+                            venue: crate::application_kernel::registered_actions::Venue::Application,
+                            presence: crate::application_kernel::registered_actions::Presence::Present,
+                            application_id: surface.tool_id.clone(),
+                            project_id: surface.project_id.clone(),
+                            conversation_id: surface.conversation_id.clone(),
+                            session_id: crate::application_kernel::registered_actions::context::session_id().to_string(),
+                            run_id: format!("run-{}", Uuid::new_v4()),
+                            trigger: Some(format!("event:{}", event.event_type)),
+                            surface_id: Some(sub.owner_surface_id.clone()),
+                            component_id: None,
+                            depth: depth as u32,
+                        };
+                            let outcome = crate::application_kernel::registered_actions::execute_registered_action(
+                            db,
+                            &ctx,
+                            action_name,
+                            &resolved_params,
+                            None,
+                        );
+                            match outcome {
+                            crate::application_kernel::registered_actions::ActionOutcome::Ok { data, .. } => {
+                                Ok(serde_json::json!({
+                                    "status": "success",
+                                    "action": action_name,
+                                    "surfaceId": sub.owner_surface_id,
+                                    "output": data,
+                                }))
+                            }
+                            crate::application_kernel::registered_actions::ActionOutcome::PendingApproval { approval_id, .. } => {
+                                Ok(serde_json::json!({
+                                    "status": "pending_approval",
+                                    "approvalId": approval_id,
+                                    "action": action_name,
+                                    "surfaceId": sub.owner_surface_id,
+                                }))
+                            }
+                            crate::application_kernel::registered_actions::ActionOutcome::Error { message, code } => {
+                                Err(format!("action '{action_name}' failed with {code}: {message}"))
+                            }
+                            crate::application_kernel::registered_actions::ActionOutcome::Blocked { reason, .. } => {
+                                Err(format!("action '{action_name}' was blocked: {reason}"))
+                            }
                         }
-                    } else {
-                        let resolved_params = resolve_template_value(parameters, &event.payload);
-                        Ok(serde_json::json!({
-                            "invokedAction": action_name,
-                            "surfaceId": sub.owner_surface_id,
-                            "parameters": resolved_params,
-                        }))
+                        }
                     }
+                    Err(e) => Err(format!("surface not found: {e}")),
                 }
-                Err(e) => Err(format!("surface not found: {e}")),
-            },
+            }
             EventHandler::EmitClientNotification {
                 title,
                 message,
@@ -1152,7 +1241,7 @@ mod tests {
 
         // First delivery executes and succeeds
         let res = execute_durable_event_delivery(&mut db, &mut bus, &ev, "sub-counter", 0);
-        assert!(res.is_ok());
+        assert!(res.is_ok(), "res was: {:?}", res);
 
         // Check delivery status in surface_event_deliveries
         let status: String = db

@@ -234,10 +234,11 @@ impl PreviewTransaction {
                 model.preview_revision = model.preview_revision.saturating_add(1);
                 Ok(Some(self.make_paint(sid)?))
             }
-            "surface.create" | "tool.full_replace" => {
+            "surface.create" | "tool.full_replace" | "chat.inline_surface_create" => {
                 let mut tool = op
                     .payload
-                    .get("tool")
+                    .get("definition")
+                    .or_else(|| op.payload.get("tool"))
                     .cloned()
                     .unwrap_or_else(|| op.payload.clone());
                 let proposed_tool_id = tool
@@ -245,7 +246,7 @@ impl PreviewTransaction {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
                     .or_else(|| op.target.tool_id.clone())
-                    .ok_or_else(|| "tool id required for surface create/replace".to_string())?;
+                    .unwrap_or_else(|| format!("tool-{}", op.id));
                 // Full replaces are persisted under targetToolId. Use that ID
                 // for the speculative surface too, otherwise preview may derive
                 // a fresh pack set while durable apply enforces the old surface.
@@ -264,6 +265,12 @@ impl PreviewTransaction {
                     .target
                     .surface_id
                     .clone()
+                    .or_else(|| {
+                        op.payload
+                            .get("surfaceId")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string)
+                    })
                     .unwrap_or_else(|| super::surfaces::surface_id_for_tool(&tool_id));
                 if !self.surfaces.contains_key(&surface_id) {
                     if let Some(model) = seed(&surface_id) {

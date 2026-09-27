@@ -180,15 +180,8 @@ pub fn create_inline_surface(
             obj.insert("name".into(), json!(name));
         }
     }
-    let mut doc =
-        if definition.get("sections").is_some() || definition.get("schemaVersion").is_some() {
-            super::software_document::SoftwareDocument::from_value(definition)
-                .map_err(|e| DbError::Invalid(format!("malformed software document: {e}")))?
-        } else {
-            let tool_def: ToolDefinition = serde_json::from_value(def_obj)
-                .map_err(|e| DbError::Invalid(format!("malformed surface definition: {e}")))?;
-            super::software_document::SoftwareDocument::from_tool_definition(&tool_def)
-        };
+    let mut doc = super::software_document::SoftwareDocument::from_value(&def_obj)
+        .map_err(|e| DbError::Invalid(format!("malformed software document: {e}")))?;
     doc.sync_components();
     if doc.title.is_empty() && !name.is_empty() {
         doc.title = name.to_string();
@@ -547,6 +540,7 @@ pub fn update_surface_definition(
                         description: String::new(),
                         layout: serde_json::json!({ "type": "single-column" }),
                         components: Vec::new(),
+                        ..Default::default()
                     }
                 })
             }
@@ -558,6 +552,7 @@ pub fn update_surface_definition(
                     description: String::new(),
                     layout: serde_json::json!({ "type": "single-column" }),
                     components: Vec::new(),
+                    ..Default::default()
                 }
             })
         };
@@ -939,6 +934,7 @@ mod tests {
                 children: None,
                 ..Default::default()
             }],
+            ..Default::default()
         };
         let applied =
             apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "test")
@@ -1105,6 +1101,7 @@ mod tests {
                 children: None,
                 ..Default::default()
             }],
+            ..Default::default()
         };
         let applied = apply_tool_change(
             &mut db,

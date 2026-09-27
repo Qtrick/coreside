@@ -922,12 +922,14 @@ fn apply_one(
             let surface = get_surface(db, sid).map_err(|e| e.to_string())?;
 
             // Load contracts if surface has SoftwareDocument definition
-            let doc = super::software_document::SoftwareDocument::from_value(&surface.definition)
-                .map_err(|e| format!("invalid software document on surface '{sid}': {e}"))?;
+            let mut doc =
+                super::software_document::SoftwareDocument::from_value(&surface.definition)
+                    .map_err(|e| format!("invalid software document on surface '{sid}': {e}"))?;
 
             let incoming = op
                 .payload
                 .get("state")
+                .or_else(|| op.payload.get("values"))
                 .cloned()
                 .unwrap_or_else(|| op.payload.clone());
 
@@ -948,29 +950,66 @@ fn apply_one(
                 vec![]
             };
 
-            // Enforce state contracts on every touched key if contracts are declared
-            if !doc.state_contracts.is_empty() {
-                for k in &touched_keys {
-                    let sc = doc
-                        .state_contracts
-                        .iter()
-                        .find(|s| &s.key == k)
-                        .ok_or_else(|| {
-                            format!(
-                                "state key '{k}' has no declared state contract on surface '{sid}'"
-                            )
-                        })?;
-                    if sc.write_policy == "readonly" {
-                        return Err(format!(
-                            "cannot write to readonly state key '{k}' on surface '{sid}'"
-                        ));
-                    }
-                    if sc.read_policy == "restricted"
-                        || sc.sensitivity.as_deref() == Some("sensitive")
-                    {
-                        return Err(format!("cannot write to restricted/sensitive state key '{k}' on surface '{sid}'"));
-                    }
+            // Enforce state contracts on every touched key. If no contracts are declared,
+            // infer safe model contracts from component bindings so that newly generated surfaces
+            // or legacy surfaces always enforce contract discipline without an empty-contract bypass.
+            if doc.state_contracts.is_empty() {
+                doc.infer_missing_contracts_if_empty();
+            }
+
+            let has_explicit_contracts = surface
+                .definition
+                .as_object()
+                .map(|o| {
+                    o.contains_key("stateContracts")
+                        && !o
+                            .get("stateContracts")
+                            .and_then(|v| v.as_array())
+                            .map(|a| a.is_empty())
+                            .unwrap_or(false)
+                })
+                .unwrap_or(false);
+
+            for k in &touched_keys {
+                let target_val = if key_mode.is_some() {
+                    op.payload.get("value").unwrap_or(&Value::Null)
+                } else if let Some(obj) = incoming.as_object() {
+                    obj.get(k).unwrap_or(&Value::Null)
+                } else {
+                    &Value::Null
+                };
+
+                let synthesized;
+                let sc = if let Some(found) = doc.state_contracts.iter().find(|s| &s.key == k) {
+                    found
+                } else if !has_explicit_contracts {
+                    // Legacy compatibility path: infer safe default contract so legacy tools don't break,
+                    // but newly generated Runtime V2 surfaces with explicit contracts are strictly enforced.
+                    synthesized = super::software_document::StateContract::new_with_origin(
+                        k.clone(),
+                        Value::Null,
+                        super::software_document::StateScope::Persistent,
+                        "legacy",
+                    );
+                    &synthesized
+                } else {
+                    return Err(format!(
+                        "state key '{k}' has no declared state contract on surface '{sid}'"
+                    ));
+                };
+
+                if sc.write_policy == "readonly" {
+                    return Err(format!(
+                        "cannot write to readonly state key '{k}' on surface '{sid}'"
+                    ));
                 }
+                if sc.read_policy == "restricted" || sc.sensitivity.as_deref() == Some("sensitive")
+                {
+                    return Err(format!(
+                        "cannot write to restricted/sensitive state key '{k}' on surface '{sid}'"
+                    ));
+                }
+                validate_state_value_type(k, target_val, &sc.type_name)?;
             }
 
             // Load current state fail-closed with revision
@@ -1093,7 +1132,27 @@ fn apply_one(
                 .target
                 .surface_id
                 .as_deref()
-                .ok_or_else(|| "surfaceId required for subscription".to_string())?;
+                .or_else(|| op.payload.get("ownerSurfaceId").and_then(|v| v.as_str()))
+                .unwrap_or("");
+            if owner.is_empty() {
+                return Err("surfaceId required for subscription".to_string());
+            }
+            // Authorize subscription ownership against conversation/project
+            let surf = super::surfaces::get_surface(db, owner).map_err(|e| e.to_string())?;
+            if let Some(txn_conv) = txn.conversation_id.as_deref() {
+                if surf.conversation_id.as_deref() != Some(txn_conv) {
+                    return Err(format!(
+                        "subscription surface '{owner}' does not belong to conversation '{txn_conv}'"
+                    ));
+                }
+            }
+            if let Some(txn_proj) = txn.project_id.as_deref() {
+                if surf.project_id.as_deref() != Some(txn_proj) {
+                    return Err(format!(
+                        "subscription surface '{owner}' does not belong to project '{txn_proj}'"
+                    ));
+                }
+            }
             let sub_id = op
                 .payload
                 .get("id")
@@ -1156,6 +1215,30 @@ fn apply_one(
                 .get("id")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "subscription id required".to_string())?;
+            let owner_surf_id: String = db
+                .conn()
+                .query_row(
+                    "SELECT owner_surface_id FROM surface_subscriptions WHERE id = ?1",
+                    [sid],
+                    |r| r.get(0),
+                )
+                .map_err(|_| format!("subscription '{sid}' not found"))?;
+            let surf =
+                super::surfaces::get_surface(db, &owner_surf_id).map_err(|e| e.to_string())?;
+            if let Some(txn_conv) = txn.conversation_id.as_deref() {
+                if surf.conversation_id.as_deref() != Some(txn_conv) {
+                    return Err(format!(
+                        "subscription '{sid}' does not belong to conversation '{txn_conv}'"
+                    ));
+                }
+            }
+            if let Some(txn_proj) = txn.project_id.as_deref() {
+                if surf.project_id.as_deref() != Some(txn_proj) {
+                    return Err(format!(
+                        "subscription '{sid}' does not belong to project '{txn_proj}'"
+                    ));
+                }
+            }
             if op.op_type == "subscription.delete" {
                 db.conn()
                     .execute("DELETE FROM surface_subscriptions WHERE id = ?1", [sid])
@@ -1200,17 +1283,29 @@ fn apply_one(
                     application_id: op.target.application_id.clone(),
                 },
             };
-            let source_ref: super::events::EventRef = match op.payload.get("source") {
-                Some(v) => serde_json::from_value(v.clone())
-                    .map_err(|e| format!("invalid source in event.dispatch: {e}"))?,
-                None => super::events::EventRef {
-                    surface_id: op.target.surface_id.clone(),
-                    tool_id: op.target.tool_id.clone(),
-                    conversation_id: op.target.conversation_id.clone(),
-                    project_id: op.target.project_id.clone(),
-                    component_id: op.target.component_id.clone(),
-                    application_id: op.target.application_id.clone(),
+            // Authoritative event origin: derive from authoritative surface record and transaction context.
+            // Do NOT accept untrusted spoofed source from op.payload.
+            let src_surface_id = op.target.surface_id.as_deref().unwrap_or("");
+            let (auth_tool_id, auth_conv_id, auth_proj_id) = if !src_surface_id.is_empty() {
+                if let Ok(s) = super::surfaces::get_surface(db, src_surface_id) {
+                    (s.tool_id, s.conversation_id, s.project_id)
+                } else {
+                    (None, txn.conversation_id.clone(), txn.project_id.clone())
+                }
+            } else {
+                (None, txn.conversation_id.clone(), txn.project_id.clone())
+            };
+            let source_ref = super::events::EventRef {
+                surface_id: if src_surface_id.is_empty() {
+                    None
+                } else {
+                    Some(src_surface_id.to_string())
                 },
+                tool_id: auth_tool_id.clone(),
+                conversation_id: auth_conv_id,
+                project_id: auth_proj_id,
+                component_id: op.target.component_id.clone(),
+                application_id: auth_tool_id,
             };
             let ev = super::events::SurfaceEvent {
                 id: format!("evt-{}", Uuid::new_v4()),
@@ -1372,6 +1467,55 @@ pub fn list_transactions(
     ids.into_iter().map(|id| get_transaction(db, &id)).collect()
 }
 
+/// Compute the effective base revision for sequential operations within a transaction.
+/// When multiple ops target the same surface with the same base_revision, the first op
+/// advances the revision and subsequent ops see the updated revision.
+fn effective_base_revision(
+    op: &AppOperation,
+    surface_revision: i64,
+    initial_revisions: &std::collections::HashMap<String, i64>,
+    surface_id: &str,
+) -> Option<i64> {
+    let init_rev = initial_revisions.get(surface_id).copied();
+    match (op.base_revision, init_rev) {
+        (Some(base), Some(init)) if base == init => Some(surface_revision),
+        (Some(base), _) if base == surface_revision => Some(surface_revision),
+        (Some(base), _) => Some(base),
+        (None, _) => None,
+    }
+}
+
+fn prop_preservation_key(comp: &ToolComponent) -> Option<&str> {
+    comp.props
+        .as_ref()
+        .and_then(|p| {
+            p.get("preservationKey")
+                .or_else(|| p.get("preservation_key"))
+        })
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+}
+
+fn validate_state_value_type(key: &str, value: &Value, type_name: &str) -> Result<(), String> {
+    if value.is_null() {
+        return Ok(());
+    }
+    let valid = match type_name.to_lowercase().as_str() {
+        "string" => value.is_string(),
+        "number" | "integer" | "float" => value.is_number(),
+        "boolean" | "bool" => value.is_boolean(),
+        "array" | "list" => value.is_array(),
+        "object" | "map" => value.is_object(),
+        _ => true,
+    };
+    if !valid {
+        return Err(format!(
+            "state value for key '{key}' does not match contract type '{type_name}'"
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1473,6 +1617,7 @@ mod tests {
                 children: None,
                 ..Default::default()
             }],
+            ..Default::default()
         };
         let saved = apply_tool_change(
             &mut db,
@@ -2136,33 +2281,169 @@ mod tests {
         let res = create_transaction(&mut db, Some(&conv.id), None, None, "late_turn", &[], false);
         assert!(matches!(res, Err(DbError::NotFound(_))));
     }
-}
 
-/// Compute the effective base revision for sequential operations within a transaction.
-/// When multiple ops target the same surface with the same base_revision, the first op
-/// advances the revision and subsequent ops see the updated revision.
-fn effective_base_revision(
-    op: &AppOperation,
-    surface_revision: i64,
-    initial_revisions: &std::collections::HashMap<String, i64>,
-    surface_id: &str,
-) -> Option<i64> {
-    let init_rev = initial_revisions.get(surface_id).copied();
-    match (op.base_revision, init_rev) {
-        (Some(base), Some(init)) if base == init => Some(surface_revision),
-        (Some(base), _) if base == surface_revision => Some(surface_revision),
-        (Some(base), _) => Some(base),
-        (None, _) => None,
+    #[test]
+    fn state_set_enforces_type_contracts_and_rejects_undeclared_keys() {
+        let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Contract Chat", None)
+                .unwrap();
+
+        let doc = json!({
+            "schemaVersion": "coreside.document/v2",
+            "documentId": "doc-game-1",
+            "title": "Game App",
+            "stateContracts": [
+                {
+                    "key": "score",
+                    "type": "number",
+                    "initial": 0,
+                    "writePolicy": "model",
+                    "readPolicy": "all"
+                },
+                {
+                    "key": "player_name",
+                    "type": "string",
+                    "initial": "Player 1",
+                    "writePolicy": "model",
+                    "readPolicy": "all"
+                }
+            ],
+            "sections": [
+                {
+                    "id": "main",
+                    "components": []
+                }
+            ]
+        });
+
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Game Surface",
+            &doc,
+            &["coreside.core".to_string()],
+        )
+        .unwrap();
+
+        // 1. Valid state.set matching contract types succeeds
+        let valid_txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "valid_state_set",
+            &[op(
+                "state.set",
+                Some(&surface.id),
+                json!({ "values": { "score": 100, "player_name": "Alice" } }),
+            )],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &valid_txn.id).unwrap();
+        assert_eq!(res.transaction.status, "applied");
+
+        // 2. Invalid type (score as string instead of number) is rejected
+        let invalid_type_txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "invalid_type_set",
+            &[op(
+                "state.set",
+                Some(&surface.id),
+                json!({ "values": { "score": "not_a_number" } }),
+            )],
+            false,
+        )
+        .unwrap();
+        let err_res = apply_transaction(&mut db, &invalid_type_txn.id).unwrap();
+        assert_eq!(err_res.transaction.status, "failed");
+        assert!(
+            err_res
+                .conflicts
+                .iter()
+                .any(|c| c.contains("does not match contract type")),
+            "expected contract type conflict, got {:?}",
+            err_res.conflicts
+        );
+
+        // 3. Undeclared key is rejected because explicit contracts exist
+        let undeclared_txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "undeclared_key_set",
+            &[op(
+                "state.set",
+                Some(&surface.id),
+                json!({ "values": { "undeclared_secret": 999 } }),
+            )],
+            false,
+        )
+        .unwrap();
+        let undeclared_res = apply_transaction(&mut db, &undeclared_txn.id).unwrap();
+        assert_eq!(undeclared_res.transaction.status, "failed");
+        assert!(
+            undeclared_res
+                .conflicts
+                .iter()
+                .any(|c| c.contains("has no declared state contract")),
+            "expected undeclared state key conflict, got {:?}",
+            undeclared_res.conflicts
+        );
     }
-}
 
-fn prop_preservation_key(comp: &ToolComponent) -> Option<&str> {
-    comp.props
-        .as_ref()
-        .and_then(|p| {
-            p.get("preservationKey")
-                .or_else(|| p.get("preservation_key"))
-        })
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
+    #[test]
+    fn subscription_mutation_rejects_cross_conversation_target() {
+        let mut db = test_db();
+        let conv_a =
+            crate::db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat A", None).unwrap();
+        let conv_b =
+            crate::db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat B", None).unwrap();
+
+        let def = json!({
+            "id": "surf-b",
+            "name": "Surface B",
+            "layout": "stack",
+            "components": []
+        });
+        let surface_b =
+            create_inline_surface(&mut db, &conv_b.id, None, None, "Surface B", &def, &[]).unwrap();
+
+        // Transaction under conv_a tries to create subscription on surface_b (conv_b)
+        let cross_txn = create_transaction(
+            &mut db,
+            Some(&conv_a.id),
+            None,
+            None,
+            "cross_subscription",
+            &[op(
+                "subscription.create",
+                Some(&surface_b.id),
+                json!({
+                    "subscriptionId": "sub-cross-1",
+                    "channel": "chat",
+                    "eventTypes": ["message"]
+                }),
+            )],
+            false,
+        )
+        .unwrap();
+
+        let res = apply_transaction(&mut db, &cross_txn.id).unwrap();
+        assert_eq!(res.transaction.status, "failed");
+        assert!(
+            res.conflicts
+                .iter()
+                .any(|c| c.contains("Forbidden") || c.contains("cross-chat violation")),
+            "cross-conversation subscription must fail with conflict, got {:?}",
+            res.conflicts
+        );
+    }
 }

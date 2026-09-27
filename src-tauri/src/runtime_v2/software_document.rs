@@ -95,7 +95,7 @@ fn default_origin() -> String {
 }
 
 fn default_type_name() -> String {
-    "string".to_string()
+    "any".to_string()
 }
 
 fn default_read_policy() -> String {
@@ -118,7 +118,7 @@ impl StateContract {
     ) -> Self {
         Self {
             key: key.into(),
-            type_name: "string".to_string(),
+            type_name: default_type_name(),
             initial_value,
             scope,
             description: None,
@@ -264,11 +264,127 @@ impl SoftwareDocument {
         self.components = self.flatten_components();
     }
 
+    /// Deterministically infer safe state contracts from component bindings and actions
+    /// if no state contracts were explicitly declared.
+    pub fn infer_missing_contracts_if_empty(&mut self) {
+        if !self.state_contracts.is_empty() {
+            return;
+        }
+        let mut keys_found: HashMap<String, (String, Value)> = HashMap::new();
+        fn collect_from_comp(c: &ToolComponent, map: &mut HashMap<String, (String, Value)>) {
+            let comp_type = c.component_type.as_str();
+            let (inferred_type, default_val) = match comp_type {
+                "checkbox" | "toggle" => ("boolean", json!(false)),
+                "slider" | "counter" | "number_input" => ("number", json!(0)),
+                "dataTable" | "table" | "list" => ("array", json!([])),
+                "canvas" | "canvas_scene" => ("object", json!({})),
+                _ => ("string", json!("")),
+            };
+            if let Some(ref vk) = c.value_key {
+                if !vk.is_empty() {
+                    map.entry(vk.clone())
+                        .or_insert_with(|| (inferred_type.to_string(), default_val.clone()));
+                }
+            }
+            if let Some(Value::Object(ref p)) = c.props {
+                for prop_name in &["valueKey", "selectionKey"] {
+                    if let Some(Value::String(ref s)) = p.get(*prop_name) {
+                        if !s.is_empty() {
+                            map.entry(s.clone()).or_insert_with(|| {
+                                (inferred_type.to_string(), default_val.clone())
+                            });
+                        }
+                    }
+                }
+                for prop_name in &["rowsKey", "dataKey"] {
+                    if let Some(Value::String(ref s)) = p.get(*prop_name) {
+                        if !s.is_empty() {
+                            map.entry(s.clone())
+                                .or_insert_with(|| ("array".to_string(), json!([])));
+                        }
+                    }
+                }
+            }
+            if let Some(ref children) = c.children {
+                for child in children {
+                    collect_from_comp(child, map);
+                }
+            }
+        }
+        for sec in &self.sections {
+            for comp in &sec.components {
+                collect_from_comp(comp, &mut keys_found);
+            }
+        }
+        for comp in &self.components {
+            collect_from_comp(comp, &mut keys_found);
+        }
+        for ac in &self.action_contracts {
+            if let Some(ref rk) = ac.result_key {
+                if !rk.is_empty() {
+                    keys_found
+                        .entry(rk.clone())
+                        .or_insert_with(|| ("object".to_string(), json!({})));
+                }
+            }
+            if let Some(ref inputs) = ac.input_from_state {
+                for (_p, skey) in inputs {
+                    if !skey.is_empty() {
+                        keys_found
+                            .entry(skey.clone())
+                            .or_insert_with(|| ("string".to_string(), json!("")));
+                    }
+                }
+            }
+        }
+
+        let mut inferred = Vec::new();
+        for (k, (t, init)) in keys_found {
+            inferred.push(StateContract {
+                key: k,
+                type_name: t,
+                initial_value: init,
+                scope: StateScope::Persistent,
+                description: Some("Inferred state contract".into()),
+                preservation_policy: Some("preserve".into()),
+                read_policy: "public".into(),
+                write_policy: "model".into(),
+                sensitivity: None,
+                origin: "legacy".into(),
+            });
+        }
+        inferred.sort_by(|a, b| a.key.cmp(&b.key));
+        self.state_contracts = inferred;
+    }
+
     /// Load or convert a JSON Value into a SoftwareDocument without losing contracts.
     pub fn from_value(val: &Value) -> Result<Self, String> {
         if val.get("sections").is_some() {
             let mut doc: Self = serde_json::from_value(val.clone())
                 .map_err(|e| format!("failed to deserialize SoftwareDocument: {e}"))?;
+            if doc.state_contracts.is_empty() {
+                if let Some(sc) = val
+                    .get("stateContracts")
+                    .or_else(|| val.get("state_contracts"))
+                {
+                    if let Ok(contracts) = serde_json::from_value(sc.clone()) {
+                        doc.state_contracts = contracts;
+                    }
+                }
+            }
+            if doc.action_contracts.is_empty() {
+                if let Some(ac) = val
+                    .get("actionContracts")
+                    .or_else(|| val.get("action_contracts"))
+                {
+                    if let Ok(contracts) = serde_json::from_value(ac.clone()) {
+                        doc.action_contracts = contracts;
+                    }
+                }
+            }
+            if doc.state_contracts.is_empty() {
+                doc.infer_missing_contracts_if_empty();
+            }
             if doc.components.is_empty() && !doc.sections.is_empty() {
                 doc.sync_components();
             }
@@ -293,6 +409,9 @@ impl SoftwareDocument {
                     .map_err(|e| format!("invalid action contracts: {e}"))?;
                 doc.action_contracts = contracts;
             }
+            if doc.state_contracts.is_empty() {
+                doc.infer_missing_contracts_if_empty();
+            }
             doc.sync_components();
             Ok(doc)
         }
@@ -307,6 +426,8 @@ impl SoftwareDocument {
         } else {
             Some(tool.description.clone())
         };
+        doc.state_contracts = tool.state_contracts.clone();
+        doc.action_contracts = tool.action_contracts.clone();
 
         // Check if components contain synthetic section containers
         let has_synthetic_sections = tool.components.iter().any(|c| {
@@ -425,6 +546,9 @@ impl SoftwareDocument {
             }
 
             doc.sync_components();
+            if doc.state_contracts.is_empty() {
+                doc.infer_missing_contracts_if_empty();
+            }
             return doc;
         }
 
@@ -483,6 +607,9 @@ impl SoftwareDocument {
         }
 
         doc.sync_components();
+        if doc.state_contracts.is_empty() {
+            doc.infer_missing_contracts_if_empty();
+        }
         doc
     }
 
@@ -529,6 +656,8 @@ impl SoftwareDocument {
                 description: self.description.clone().unwrap_or_default(),
                 layout,
                 components: all_components,
+                state_contracts: self.state_contracts.clone(),
+                action_contracts: self.action_contracts.clone(),
             };
         }
 
@@ -623,6 +752,8 @@ impl SoftwareDocument {
             description: self.description.clone().unwrap_or_default(),
             layout,
             components: root_components,
+            state_contracts: self.state_contracts.clone(),
+            action_contracts: self.action_contracts.clone(),
         }
     }
 

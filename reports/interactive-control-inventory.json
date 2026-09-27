@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-27T02:19:41.521Z",
-  "commit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
+  "generatedAt": "2026-09-27T21:01:53.119Z",
+  "commit": "0477f95b7a066ffe2a511d29d57860ff73626b6a",
   "dirty": true,
   "command": "audit:interactive-controls",
   "evidenceLevel": "Scaffolded",
   "note": "Static regex inventory only — not runtime interactivity proof.",
-  "filesScanned": 90,
-  "filesWithControls": 66,
-  "approximateTotalControls": 739,
+  "filesScanned": 91,
+  "filesWithControls": 67,
+  "approximateTotalControls": 742,
   "files": [
     {
       "file": "src/components/action-log/ActionLog.tsx",
@@ -122,6 +122,15 @@
       "counts": {
         "button": 3,
         "onClick": 3
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/InlineSurface.test.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
       },
       "flags": {}
     },
@@ -626,11 +635,11 @@
     },
     {
       "file": "src/components/tool-renderer/nodes.tsx",
-      "approximateControlCount": 52,
+      "approximateControlCount": 53,
       "counts": {
         "button": 18,
         "type_submit": 1,
-        "onClick": 19,
+        "onClick": 20,
         "input_type": 13,
         "select": 1
       },

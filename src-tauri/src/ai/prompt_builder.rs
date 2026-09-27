@@ -272,6 +272,7 @@ mod tests {
             description: "hydration".into(),
             layout: json!({ "type": "single-column" }),
             components: vec![],
+            ..Default::default()
         };
         let p = build_agent_prompt_with_references(None, &[tool], None, None);
         assert!(p.contains("water-tracker"));

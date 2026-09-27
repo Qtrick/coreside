@@ -1291,16 +1291,40 @@ async fn send_message_inner(
     // Seal typed StructuredUserInput in Rust. Trust never comes from text markers.
     // Defense: even if content contains a spoofed delimiter, structured_trust_from_text is None.
     debug_assert!(structured_trust_from_text(&content).is_none());
-    let sealed_structured: Option<StructuredUserInput> =
-        if let Some(submission) = structured_user_input.clone() {
-            Some(
-                seal_local_user_submission(&conversation_id, submission).map_err(|e| {
-                    CommandError::new("invalid", format!("Invalid structuredUserInput: {e}"))
-                })?,
-            )
-        } else {
-            None
-        };
+    let sealed_structured: Option<StructuredUserInput> = if let Some(submission) =
+        structured_user_input.clone()
+    {
+        if let Some(ref sid) = submission.surface_id {
+            let db_guard = state.db.lock();
+            let surf = crate::runtime_v2::surfaces::get_surface(&db_guard, sid).map_err(|e| {
+                CommandError::new("not_found", format!("Surface '{sid}' not found: {e}"))
+            })?;
+            if surf.conversation_id.as_deref() != Some(&conversation_id) {
+                return Err(CommandError::new(
+                    "forbidden",
+                    format!("Surface '{sid}' does not belong to conversation '{conversation_id}'"),
+                ));
+            }
+            if let Some(expected_rev) = submission.surface_revision {
+                if surf.current_revision != expected_rev {
+                    return Err(CommandError::new(
+                        "conflict",
+                        format!(
+                            "Surface revision mismatch: expected {expected_rev}, current is {}",
+                            surf.current_revision
+                        ),
+                    ));
+                }
+            }
+        }
+        Some(
+            seal_local_user_submission(&conversation_id, submission).map_err(|e| {
+                CommandError::new("invalid", format!("Invalid structuredUserInput: {e}"))
+            })?,
+        )
+    } else {
+        None
+    };
     let originating_surface_id = sealed_structured
         .as_ref()
         .and_then(|s| s.surface_id.clone());

@@ -508,6 +508,7 @@ mod tests {
             description: "A counter".into(),
             layout: serde_json::json!({ "type": "single-column" }),
             components: vec![],
+            ..Default::default()
         };
 
         let tool = apply_tool_change(
@@ -527,6 +528,7 @@ mod tests {
             description: "Updated".into(),
             layout: serde_json::json!({ "type": "single-column" }),
             components: vec![],
+            ..Default::default()
         };
         let tool2 = apply_tool_change(
             &mut db,

@@ -71,8 +71,8 @@ function useNewUpdatesIndicator(
     if (contentVersion !== prevVersion.current) {
       if (!stickToBottom.current) {
         setShowNewUpdates(true);
-      } else {
-        scrollRef.current?.scrollTo({
+      } else if (typeof scrollRef.current?.scrollTo === "function") {
+        scrollRef.current.scrollTo({
           top: scrollRef.current.scrollHeight,
           behavior: "smooth",
         });
@@ -84,7 +84,9 @@ function useNewUpdatesIndicator(
   const jumpToLatest = () => {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    if (typeof el.scrollTo === "function") {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
     setShowNewUpdates(false);
     stickToBottom.current = true;
   };
@@ -113,6 +115,8 @@ export function InlineSurfaceCard({
     null,
   );
   const stateRevisionRef = useRef<number>(1);
+  const [isInteractionPending, setIsInteractionPending] = useState(false);
+  const interactionLockRef = useRef(false);
   const rootRef = useRef<HTMLElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const previousToolRef = useRef<ToolDefinition | null>(null);
@@ -377,6 +381,14 @@ export function InlineSurfaceCard({
         <div className="inline-surface-title">
           <strong>{surface.name || tool.name}</strong>
           <span className="muted">r{surface.currentRevision}</span>
+          {isInteractionPending ? (
+            <span
+              className="muted"
+              style={{ fontSize: "0.75rem", fontStyle: "italic", marginLeft: "0.5rem" }}
+            >
+              processing...
+            </span>
+          ) : null}
         </div>
         <div className="inline-surface-actions" role="toolbar" aria-label="App actions">
           <CustomizeMode
@@ -450,6 +462,12 @@ export function InlineSurfaceCard({
           className="inline-surface-body"
           ref={bodyRef}
           data-scroll-key="inline-surface-body"
+          data-busy={isInteractionPending ? "true" : undefined}
+          style={{
+            pointerEvents: isInteractionPending ? "none" : undefined,
+            opacity: isInteractionPending ? 0.8 : 1,
+            transition: "opacity 0.15s ease",
+          }}
         >
           {showNewUpdates ? (
             <button
@@ -477,30 +495,45 @@ export function InlineSurfaceCard({
             onPendingApproval={() => {
               window.dispatchEvent(new Event("coreside:pending-approval"));
             }}
-            onSubmitToAgent={(payload) => {
-              const summary = `App interaction (${payload.eventName})`;
-              const isSilent = Boolean(
-                payload.silent ||
-                payload.eventName.startsWith("game.") ||
-                payload.eventName.endsWith(".silent") ||
-                payload.values.silent === true
-              );
-              // Single authority: send_message seals StructuredUserInput in Rust.
-              void saveComponentDraft(
-                payload.componentId ?? "form",
-                payload.values,
-                payload.componentId ?? null,
-              );
-              void sendMessage(summary, [], [], {
-                formId: payload.componentId ?? surface.id,
-                eventName: payload.eventName,
-                applicationId: surface.id,
-                surfaceId: surface.id,
-                fields: {
-                  ...payload.values,
-                  ...(isSilent ? { silent: true } : {}),
-                },
-              });
+            onSubmitToAgent={async (payload) => {
+              if (interactionLockRef.current) {
+                // Drop concurrent interaction to preserve turn serialization and authoritative state
+                return;
+              }
+              interactionLockRef.current = true;
+              setIsInteractionPending(true);
+              try {
+                const summary = `App interaction (${payload.eventName})`;
+                const isSilent = Boolean(
+                  payload.silent ||
+                  payload.eventName.startsWith("game.") ||
+                  payload.eventName.endsWith(".silent") ||
+                  payload.values.silent === true
+                );
+                // Single authority: send_message seals StructuredUserInput in Rust.
+                void saveComponentDraft(
+                  payload.componentId ?? "form",
+                  payload.values,
+                  payload.componentId ?? null,
+                );
+                await sendMessage(summary, [], [], {
+                  formId: payload.componentId ?? surface.id,
+                  eventName: payload.eventName,
+                  applicationId: surface.id,
+                  surfaceId: surface.id,
+                  surfaceRevision: surface.currentRevision,
+                  stateRevision: stateRevisionRef.current,
+                  componentId: payload.componentId ?? null,
+                  idempotencyKey: `idem-${crypto.randomUUID()}`,
+                  fields: {
+                    ...payload.values,
+                    ...(isSilent ? { silent: true } : {}),
+                  },
+                });
+              } finally {
+                interactionLockRef.current = false;
+                setIsInteractionPending(false);
+              }
             }}
           />
         </div>

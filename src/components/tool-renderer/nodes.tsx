@@ -1623,31 +1623,128 @@ export function MathBlockNode({ component }: ToolNodeProps) {
 }
 
 export function CanvasSceneNode({ component }: ToolNodeProps) {
+  const { getValue, setValue, runActions } = useToolRuntime();
+  const selectionKey = stateKeyFor(component, "selectionKey", "valueKey");
+  const selectedId = selectionKey ? asString(getValue(selectionKey)) : null;
+
   const objects = Array.isArray(component.props?.objects)
     ? (component.props?.objects as Array<Record<string, unknown>>).slice(0, 200)
     : [];
   const width = asBoundedSceneSize(component.props?.width, 320);
   const height = asBoundedSceneSize(component.props?.height, 240);
+
+  const handleObjectClick = (obj: Record<string, unknown>, objId: string) => {
+    if (selectionKey) {
+      setValue(selectionKey, objId);
+    }
+    const actions: ActionDefinition[] = [];
+    if (Array.isArray(obj.actions)) {
+      actions.push(...(obj.actions as ActionDefinition[]));
+    } else if (component.actions) {
+      actions.push(...component.actions);
+    }
+    const eventName = asString(obj.eventName);
+    if (eventName) {
+      actions.push({
+        type: "submitToAgent",
+        eventName,
+        values: {
+          objectId: objId,
+          ...(obj.eventPayload as Record<string, unknown> | undefined),
+        },
+      } as unknown as ActionDefinition);
+    }
+    if (actions.length > 0) {
+      void runActions(actions, component.id);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const keyBindings = component.props?.keyBindings as Record<string, string> | undefined;
+    if (keyBindings && keyBindings[e.key]) {
+      e.preventDefault();
+      void runActions(
+        [
+          {
+            type: "submitToAgent",
+            eventName: keyBindings[e.key]!,
+            values: { key: e.key },
+          } as unknown as ActionDefinition,
+        ],
+        component.id,
+      );
+    }
+  };
+
   return (
     <div
       className="tr-canvas-scene"
       data-component-id={component.id}
-      style={{ width, height, position: "relative", border: "1px solid var(--border)" }}
-      role="img"
-      aria-label={asString(component.props?.ariaLabel, "Canvas scene")}
+      tabIndex={component.props?.keyBindings ? 0 : undefined}
+      onKeyDown={component.props?.keyBindings ? handleKeyDown : undefined}
+      style={{
+        width,
+        height,
+        position: "relative",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius-md, 6px)",
+        overflow: "hidden",
+        backgroundColor: asString(component.props?.background, "var(--bg-canvas, transparent)"),
+      }}
+      role="region"
+      aria-label={asString(component.props?.ariaLabel, "Interactive canvas scene")}
     >
       {objects.map((obj, i) => {
+        const objId = asString(obj.id, `obj-${i}`);
         const type = asString(obj.type, "rect");
+        const isSelected = selectedId === objId;
+        const isInteractive = Boolean(obj.actions || obj.eventName || selectionKey);
         const style: CSSProperties = {
           position: "absolute",
           left: asNumber(obj.x),
           top: asNumber(obj.y),
           width: asNumber(obj.width, 40),
           height: asNumber(obj.height, 40),
-          background: asString(obj.fill, "var(--accent-primary)"),
-          borderRadius: type === "circle" ? "50%" : undefined,
+          background: isSelected
+            ? asString(obj.selectedFill, "var(--accent-active, #22c55e)")
+            : asString(obj.fill, "var(--accent-primary, #3b82f6)"),
+          borderRadius: type === "circle" ? "50%" : asNumber(obj.radius, 4),
+          border: isSelected ? "2px solid var(--accent-contrast, #ffffff)" : (obj.stroke ? `1px solid ${asString(obj.stroke)}` : undefined),
+          cursor: isInteractive ? "pointer" : "default",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: asString(obj.textColor, "var(--fg-primary, #ffffff)"),
+          fontSize: asNumber(obj.fontSize, 12),
+          fontWeight: 600,
+          userSelect: "none",
+          transition: "transform 0.1s ease, filter 0.1s ease",
+          boxShadow: isSelected ? "0 0 8px rgba(34, 197, 94, 0.5)" : undefined,
         };
-        return <div key={i} style={style} title={asString(obj.label)} />;
+        const text = asString(obj.text || obj.label);
+        return (
+          <div
+            key={objId}
+            style={style}
+            role={isInteractive ? "button" : undefined}
+            tabIndex={isInteractive ? 0 : undefined}
+            aria-label={asString(obj.ariaLabel, text || objId)}
+            aria-pressed={isInteractive && selectionKey ? isSelected : undefined}
+            onClick={isInteractive ? () => handleObjectClick(obj, objId) : undefined}
+            onKeyDown={
+              isInteractive
+                ? (e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleObjectClick(obj, objId);
+                    }
+                  }
+                : undefined
+            }
+          >
+            {text}
+          </div>
+        );
       })}
     </div>
   );

@@ -332,6 +332,7 @@ pub fn seed_tutorial_sample(db: &mut Database) -> DbResult<TutorialSampleSeed> {
             description: "Tutorial sample app — safe to delete.".into(),
             layout: serde_json::json!({ "type": "single-column" }),
             components: vec![],
+            ..Default::default()
         };
         super::apply_tool_change(
             db,

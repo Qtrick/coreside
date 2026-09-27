@@ -78,11 +78,17 @@ pub fn reconstruct_replay_state(
 
     let mut preview_txn = PreviewTransaction::new(target_turn_id.unwrap_or("replay-turn"), None);
 
-    // Initial base state per surface
+    // Initial base state per surface from historical version record
     for r in surfaces_rows {
-        let (sid, _name, def_str, cur_rev, packs_str) = r?;
-        let def: Value =
-            serde_json::from_str(&def_str).unwrap_or(json!({"type":"container","id":"root"}));
+        let (sid, _name, def_str, _cur_rev, packs_str) = r?;
+        let earliest_def_res: Result<String, _> = db.conn().query_row(
+            "SELECT definition_json FROM surface_versions WHERE surface_id = ?1 ORDER BY revision ASC LIMIT 1",
+            [&sid],
+            |row| row.get(0),
+        );
+        let historical_def_str = earliest_def_res.unwrap_or(def_str);
+        let def: Value = serde_json::from_str(&historical_def_str)
+            .unwrap_or(json!({"type":"container","id":"root"}));
         let packs: Vec<String> = serde_json::from_str(&packs_str).unwrap_or_default();
 
         let initial_model = PreviewSurfaceModel {
@@ -92,8 +98,8 @@ pub fn reconstruct_replay_state(
             capability_packs: packs,
             definition: def,
             state: json!({}),
-            base_revision: cur_rev,
-            preview_revision: 0,
+            base_revision: 1,
+            preview_revision: 1,
         };
         preview_txn.seed_surface(initial_model);
     }

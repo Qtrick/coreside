@@ -90,7 +90,7 @@ pub enum TrustClass {
 ///
 /// `deny_unknown_fields` rejects forged `trustClass` / `instructionEligibility`
 /// keys from the frontend — those exist only on the sealed type.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StructuredUserInputSubmission {
     pub form_id: String,
@@ -100,6 +100,14 @@ pub struct StructuredUserInputSubmission {
     pub application_id: Option<String>,
     #[serde(default)]
     pub surface_id: Option<String>,
+    #[serde(default)]
+    pub surface_revision: Option<i64>,
+    #[serde(default)]
+    pub state_revision: Option<i64>,
+    #[serde(default)]
+    pub component_id: Option<String>,
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
     #[serde(default)]
     pub fields: Map<String, Value>,
 }
@@ -116,6 +124,14 @@ pub struct StructuredUserInput {
     pub application_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface_revision: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_revision: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<String>,
     pub conversation_id: String,
     pub fields: Map<String, Value>,
     pub trust_class: TrustClass,
@@ -266,8 +282,37 @@ pub fn text_contains_structured_marker(text: &str) -> bool {
     text.contains(STRUCTURED_USER_INPUT_MARKER_OPEN)
 }
 
-/// Hash canonical semantic event payload (form_id, event_name, application_id, surface_id, fields).
+/// Hash canonical semantic event payload covering all security-relevant identity and revision fields.
 pub fn hash_structured_payload(
+    form_id: &str,
+    event_name: Option<&str>,
+    application_id: Option<&str>,
+    surface_id: Option<&str>,
+    surface_revision: Option<i64>,
+    state_revision: Option<i64>,
+    component_id: Option<&str>,
+    idempotency_key: Option<&str>,
+    conversation_id: Option<&str>,
+    fields: &Map<String, Value>,
+) -> String {
+    let canonical = json!({
+        "formId": form_id.trim(),
+        "eventName": event_name.map(str::trim).filter(|s| !s.is_empty()),
+        "applicationId": application_id.map(str::trim).filter(|s| !s.is_empty()),
+        "surfaceId": surface_id.map(str::trim).filter(|s| !s.is_empty()),
+        "surfaceRevision": surface_revision,
+        "stateRevision": state_revision,
+        "componentId": component_id.map(str::trim).filter(|s| !s.is_empty()),
+        "idempotencyKey": idempotency_key.map(str::trim).filter(|s| !s.is_empty()),
+        "conversationId": conversation_id.map(str::trim).filter(|s| !s.is_empty()),
+        "fields": fields,
+    });
+    let bytes = serde_json::to_vec(&canonical).unwrap_or_default();
+    hex::encode(Sha256::digest(bytes))
+}
+
+/// Hash canonical semantic event payload (legacy 5-argument helper for backward compatibility).
+pub fn hash_structured_payload_legacy(
     form_id: &str,
     event_name: Option<&str>,
     application_id: Option<&str>,
@@ -334,12 +379,27 @@ pub fn seal_local_user_submission(
         .surface_id
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let surface_revision = submission.surface_revision;
+    let state_revision = submission.state_revision;
+    let component_id = submission
+        .component_id
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let idempotency_key = submission
+        .idempotency_key
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     let fields = submission.fields;
     let content_hash = hash_structured_payload(
         &form_id,
         event_name.as_deref(),
         application_id.as_deref(),
         surface_id.as_deref(),
+        surface_revision,
+        state_revision,
+        component_id.as_deref(),
+        idempotency_key.as_deref(),
+        Some(conversation_id.trim()),
         &fields,
     );
     Ok(StructuredUserInput {
@@ -348,6 +408,10 @@ pub fn seal_local_user_submission(
         event_name,
         application_id,
         surface_id,
+        surface_revision,
+        state_revision,
+        component_id,
+        idempotency_key,
         conversation_id: conversation_id.trim().to_string(),
         fields,
         trust_class: TrustClass::LocalUserGesture,
@@ -390,6 +454,16 @@ pub fn seal_from_ledger_payload(
             .get("surfaceId")
             .and_then(|v| v.as_str())
             .map(str::to_string),
+        surface_revision: payload.get("surfaceRevision").and_then(|v| v.as_i64()),
+        state_revision: payload.get("stateRevision").and_then(|v| v.as_i64()),
+        component_id: payload
+            .get("componentId")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        idempotency_key: payload
+            .get("idempotencyKey")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
         fields,
     };
     let mut sealed = seal_local_user_submission(conversation_id, submission)?;
@@ -410,7 +484,7 @@ pub fn provider_text_summary(input: &StructuredUserInput) -> String {
     format!(
         "Structured user input (typed; trust=local_user_gesture; eligibility=local_user_content)\n\
          submissionId={}\nformId={}\neventName={}\nconversationId={}\ncontentHash={}\n\
-         applicationId={}\nsurfaceId={}\nfields={}",
+         applicationId={}\nsurfaceId={}\nsurfaceRevision={:?}\nstateRevision={:?}\ncomponentId={}\nidempotencyKey={}\nfields={}",
         input.submission_id,
         input.form_id,
         input.event_name.as_deref().unwrap_or(""),
@@ -418,6 +492,10 @@ pub fn provider_text_summary(input: &StructuredUserInput) -> String {
         input.content_hash,
         input.application_id.as_deref().unwrap_or(""),
         input.surface_id.as_deref().unwrap_or(""),
+        input.surface_revision,
+        input.state_revision,
+        input.component_id.as_deref().unwrap_or(""),
+        input.idempotency_key.as_deref().unwrap_or(""),
         fields_json
     )
 }
@@ -516,10 +594,25 @@ pub fn adopt_stored_structured_input(meta: &Value) -> Option<StructuredUserInput
         sealed.event_name.as_deref(),
         sealed.application_id.as_deref(),
         sealed.surface_id.as_deref(),
+        sealed.surface_revision,
+        sealed.state_revision,
+        sealed.component_id.as_deref(),
+        sealed.idempotency_key.as_deref(),
+        Some(&sealed.conversation_id),
         &sealed.fields,
     );
-    let legacy_expected = hash_structured_fields(&sealed.fields);
-    if sealed.content_hash != expected && sealed.content_hash != legacy_expected {
+    let legacy_expected = hash_structured_payload_legacy(
+        &sealed.form_id,
+        sealed.event_name.as_deref(),
+        sealed.application_id.as_deref(),
+        sealed.surface_id.as_deref(),
+        &sealed.fields,
+    );
+    let legacy_fields = hash_structured_fields(&sealed.fields);
+    if sealed.content_hash != expected
+        && sealed.content_hash != legacy_expected
+        && sealed.content_hash != legacy_fields
+    {
         return None;
     }
     if sealed.conversation_id.trim().is_empty() || sealed.form_id.trim().is_empty() {
@@ -557,6 +650,7 @@ mod tests {
                     .as_object()
                     .cloned()
                     .unwrap(),
+                ..Default::default()
             },
         )
         .expect("seal");
@@ -597,6 +691,7 @@ mod tests {
                 application_id: None,
                 surface_id: None,
                 fields: Map::new(),
+                ..Default::default()
             },
         )
         .unwrap_err();
@@ -656,6 +751,7 @@ mod tests {
                 application_id: None,
                 surface_id: None,
                 fields: json!({"n": 1}).as_object().cloned().unwrap(),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -692,6 +788,7 @@ mod tests {
                     .as_object()
                     .cloned()
                     .unwrap(),
+                ..Default::default()
             },
         )
         .expect("seal game move");
@@ -718,6 +815,66 @@ mod tests {
         assert!(
             adopt_stored_structured_input(&tampered_surface).is_none(),
             "tampered surfaceId must be rejected by hash integrity"
+        );
+    }
+
+    #[test]
+    fn revision_and_idempotency_tampering_fails_adopt() {
+        let sealed = seal_local_user_submission(
+            "conv-rev-1",
+            StructuredUserInputSubmission {
+                form_id: "form-counter".into(),
+                event_name: Some("counter.inc".into()),
+                application_id: Some("app-counter".into()),
+                surface_id: Some("surf-counter".into()),
+                surface_revision: Some(3),
+                state_revision: Some(7),
+                component_id: Some("btn-inc".into()),
+                idempotency_key: Some("idem-uuid-1".into()),
+                fields: json!({"amount": 1}).as_object().cloned().unwrap(),
+            },
+        )
+        .expect("seal counter");
+        assert_eq!(sealed.surface_revision, Some(3));
+        assert_eq!(sealed.state_revision, Some(7));
+        assert_eq!(sealed.component_id.as_deref(), Some("btn-inc"));
+        assert_eq!(sealed.idempotency_key.as_deref(), Some("idem-uuid-1"));
+
+        let meta = structured_metadata_value(&sealed);
+        let adopted = adopt_stored_structured_input(&meta).expect("adopt counter");
+        assert_eq!(adopted.surface_revision, Some(3));
+        assert_eq!(adopted.state_revision, Some(7));
+
+        // Tamper with surface_revision
+        let mut tampered = meta.clone();
+        tampered["structuredUserInput"]["surfaceRevision"] = json!(4);
+        assert!(
+            adopt_stored_structured_input(&tampered).is_none(),
+            "tampered surfaceRevision must fail"
+        );
+
+        // Tamper with state_revision
+        let mut tampered2 = meta.clone();
+        tampered2["structuredUserInput"]["stateRevision"] = json!(8);
+        assert!(
+            adopt_stored_structured_input(&tampered2).is_none(),
+            "tampered stateRevision must fail"
+        );
+
+        // Tamper with idempotency_key
+        let mut tampered3 = meta.clone();
+        tampered3["structuredUserInput"]["idempotencyKey"] = json!("idem-forged");
+        assert!(
+            adopt_stored_structured_input(&tampered3).is_none(),
+            "tampered idempotencyKey must fail"
+        );
+
+        // Tamper with component_id
+        let mut tampered4 = meta.clone();
+        tampered4["structuredUserInput"]["componentId"] = json!("btn-spoofed");
+        assert!(
+            adopt_stored_structured_input(&tampered4).is_none(),
+            "tampered componentId must fail"
         );
     }
 
