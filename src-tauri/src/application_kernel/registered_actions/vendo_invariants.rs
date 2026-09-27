@@ -108,13 +108,24 @@ fn invariant_c_approval_single_use_cas_consumption() {
     let (mut db, _dir) = test_db();
     seed_application(&mut db, APP_A, &["local_data.delete"]);
 
+    // The approved deletion targets a record that actually exists. Delete is
+    // fail-closed on missing records, so the fixture must be realistic for
+    // the first execution to succeed.
+    let record_id = crate::application_kernel::data::create_record(
+        &mut db,
+        APP_A,
+        "note",
+        json!({ "title": "cas-target" }),
+    )
+    .unwrap();
+
     let ctx = app_ctx(APP_A);
     let d = find_action("local_data.delete").unwrap();
     let pending = approvals::create_pending(
         &mut db,
         &ctx,
         d,
-        &json!({ "modelId": "note", "recordId": "r-cas" }),
+        &json!({ "modelId": "note", "recordId": record_id }),
         None,
     )
     .unwrap();
@@ -127,7 +138,7 @@ fn invariant_c_approval_single_use_cas_consumption() {
         &mut db,
         &ctx,
         "local_data.delete",
-        &json!({ "modelId": "note", "recordId": "r-cas" }),
+        &json!({ "modelId": "note", "recordId": record_id }),
         Some(&pending.id),
     );
     assert!(first.is_ok(), "first execution must succeed");
@@ -137,7 +148,7 @@ fn invariant_c_approval_single_use_cas_consumption() {
         &mut db,
         &ctx,
         "local_data.delete",
-        &json!({ "modelId": "note", "recordId": "r-cas" }),
+        &json!({ "modelId": "note", "recordId": record_id }),
         Some(&pending.id),
     );
     assert_eq!(outcome_code(&second), "blocked:approval_invalid");

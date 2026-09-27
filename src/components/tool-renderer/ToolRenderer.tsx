@@ -264,7 +264,11 @@ export function ToolRenderer({
       if (ds.inputFromState) {
         for (const [key, stateKey] of Object.entries(ds.inputFromState)) {
           if (stateRef.current[stateKey] !== undefined) {
-            setDottedPath(input, key, stateRef.current[stateKey]);
+            if (!setDottedPath(input, key, stateRef.current[stateKey])) {
+              console.warn(
+                `[ToolRenderer] Rejected unsafe dataSource inputFromState key: ${key}`,
+              );
+            }
           }
         }
       }

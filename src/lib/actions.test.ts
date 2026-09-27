@@ -1053,5 +1053,68 @@ describe("State-to-Object & CRUD mapping", () => {
     expect(result.errors).toEqual([]);
     expect(result.state.tasks).toEqual([{ id: "t2", title: "Task 2" }]);
   });
+
+  it("rejects oversized paths and array/primitive traversal in setDottedPath", async () => {
+    const { setDottedPath } = await import("@/lib/actions");
+    expect(setDottedPath({}, "a".repeat(65), "x")).toBe(false);
+    const withArray: Record<string, unknown> = { list: [1, 2, 3] };
+    expect(setDottedPath(withArray, "list.0", "x")).toBe(false);
+    const withPrimitive: Record<string, unknown> = { count: 5 };
+    expect(setDottedPath(withPrimitive, "count.nested", "x")).toBe(false);
+    expect(withArray.list).toEqual([1, 2, 3]);
+  });
+
+  it("blocks invokeRegisteredAction fail-closed for dangerous or oversized inputFromState paths", async () => {
+    const { applyAction } = await import("@/lib/actions");
+    for (const key of ["__proto__.polluted", "a".repeat(65)]) {
+      const onInvokeRegisteredAction = vi.fn();
+      const result = applyAction(
+        {
+          type: "invokeRegisteredAction",
+          actionName: "local_data.write",
+          input: {},
+          inputFromState: { [key]: "draft" },
+        },
+        {
+          state: { draft: "hello" },
+          toolId: "tool-1",
+          allowedTargets: new Set(["draft"]),
+          onInvokeRegisteredAction,
+        },
+      );
+      expect(onInvokeRegisteredAction).not.toHaveBeenCalled();
+      expect(result.errors.some((e) => e.includes("Dangerous path"))).toBe(true);
+    }
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("blocks ephemeral sensitivity outcome in async pipeline even when stateBindable is true", async () => {
+    const { applyActionsAsync } = await import("@/lib/actions");
+    const onInvokeRegisteredAction = vi.fn().mockResolvedValue({
+      status: "ok",
+      data: { temp: "do-not-persist" },
+      stateBindable: true,
+      sensitivity: "ephemeral",
+    });
+    const result = await applyActionsAsync(
+      [
+        {
+          type: "invokeRegisteredAction",
+          actionName: "local_data.query",
+          input: { modelId: "notes" },
+          resultKey: "queryResult",
+        },
+      ],
+      {
+        state: {},
+        toolId: "test-tool",
+        allowedTargets: new Set(["queryResult"]),
+        onInvokeRegisteredAction,
+      },
+    );
+    expect(onInvokeRegisteredAction).toHaveBeenCalled();
+    expect(result.errors.some((e) => e.includes("not state-bindable"))).toBe(true);
+    expect(result.state).toEqual({});
+  });
 });
 

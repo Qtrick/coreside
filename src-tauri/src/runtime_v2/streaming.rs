@@ -908,4 +908,39 @@ mod tests {
         assert!(events[0].is_ok(), "valid model op must be accepted");
         assert_eq!(p.completed_operations().len(), 1);
     }
+
+    #[test]
+    fn fragmented_byte_by_byte_reassembles_at_arbitrary_boundaries() {
+        // Arbitrary 1-byte splits must still buffer until the newline.
+        let mut p = NdjsonFrameParser::new();
+        let frame = r#"{"type":"turn.started","turn_id":"t1"}"#.to_string() + "\n";
+        let mut results = Vec::new();
+        for byte in frame.as_bytes() {
+            results.extend(p.push(std::str::from_utf8(&[*byte]).unwrap()));
+        }
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_ok());
+    }
+
+    #[test]
+    fn text_resembling_json_is_rejected_without_side_effects() {
+        let mut p = NdjsonFrameParser::new();
+        for line in ["just some prose\n", "text with { braces } but not json\n"] {
+            let events = p.push(line);
+            assert_eq!(events.len(), 1);
+            assert!(events[0].is_err(), "prose must not parse: {line}");
+        }
+        assert!(p.completed_operations().is_empty());
+        assert!(p.finish().is_empty());
+    }
+
+    #[test]
+    fn malformed_braced_frame_reports_malformed() {
+        let mut p = NdjsonFrameParser::new();
+        let events = p.push("{\"type\": \"turn.started\", \"turn_id\": }\n");
+        assert_eq!(events.len(), 1);
+        let err = events[0].as_ref().err().expect("must err");
+        assert!(err.contains("[malformed]"), "unexpected: {err}");
+        assert!(p.completed_operations().is_empty());
+    }
 }

@@ -121,6 +121,28 @@ impl ProgressiveProtocolDetector {
             return self.detected;
         }
 
+        // NDJSON positive match takes precedence: when the first line is a
+        // complete coreside.ops.v1 frame, later lines (op payloads) may legally
+        // contain "assistantMessage"/"toolChange"/"settingsChange" substrings
+        // (e.g. text content quoting response keys). Checking structured keys
+        // first would misclassify a batched start+op flush as StructuredJson
+        // and silently disable the progressive path.
+        if let Some(pos) = trimmed.find('\n') {
+            let first_line = trimmed[..pos].trim();
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(first_line) {
+                if v.get("v").and_then(|x| x.as_str()) == Some(PROGRESSIVE_OPS_V) {
+                    self.detected = DetectedStreamingProtocol::CoresideOpsNdjson;
+                    return self.detected;
+                }
+            } else if first_line.contains("\"v\": \"coreside.ops.v1\"")
+                || first_line.contains("\"v\":\"coreside.ops.v1\"")
+                || first_line.contains("\"v\" : \"coreside.ops.v1\"")
+            {
+                self.detected = DetectedStreamingProtocol::CoresideOpsNdjson;
+                return self.detected;
+            }
+        }
+
         // Gemini/OpenAI structured output contains top-level assistantMessage, toolChange, or settingsChange.
         // Even if the text inside assistantMessage mentions "coreside.ops.v1", it is structured JSON, not NDJSON.
         if trimmed.contains("\"assistantMessage\"")
@@ -131,25 +153,11 @@ impl ProgressiveProtocolDetector {
             return self.detected;
         }
 
-        // If there is a newline, inspect the first line
-        if let Some(pos) = trimmed.find('\n') {
-            let first_line = trimmed[..pos].trim();
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(first_line) {
-                if v.get("v").and_then(|x| x.as_str()) == Some(PROGRESSIVE_OPS_V) {
-                    self.detected = DetectedStreamingProtocol::CoresideOpsNdjson;
-                    return self.detected;
-                }
-            } else if (first_line.contains("\"v\": \"coreside.ops.v1\"")
-                || first_line.contains("\"v\":\"coreside.ops.v1\"")
-                || first_line.contains("\"v\" : \"coreside.ops.v1\""))
-                && !first_line.contains("\"assistantMessage\"")
-            {
-                self.detected = DetectedStreamingProtocol::CoresideOpsNdjson;
-                return self.detected;
-            }
-            // In coreside.ops.v1 NDJSON, every frame must be a single line containing
-            // the protocol version. If the first line finished with a newline and does
-            // not contain the protocol version, it is multi-line structured JSON.
+        // If there is a newline and the first line was not a coreside.ops.v1
+        // frame (checked above), it is multi-line structured JSON: in
+        // coreside.ops.v1 NDJSON every frame must be a single line containing
+        // the protocol version.
+        if trimmed.find('\n').is_some() {
             self.detected = DetectedStreamingProtocol::StructuredJson;
             return self.detected;
         }
@@ -1359,5 +1367,17 @@ mod tests {
         let res = d.feed(payload);
         assert_eq!(res, DetectedStreamingProtocol::PlainText);
         assert!(!d.is_coreside_ndjson());
+    }
+
+    #[test]
+    fn detector_prioritizes_ndjson_first_line_over_payload_key_mentions() {
+        let mut d = ProgressiveProtocolDetector::default();
+        // Batched start + op flush where the op payload text quotes response
+        // keys. The first line is a complete coreside.ops.v1 frame, so the
+        // stream is NDJSON despite later-line key mentions.
+        let payload = "{\"v\": \"coreside.ops.v1\", \"type\": \"start\", \"groupId\": \"g-1\", \"schemaVersion\": \"2\"}\n{\"v\": \"coreside.ops.v1\", \"type\": \"op\", \"frameId\": 1, \"op\": {\"id\": \"op-1\", \"opType\": \"component.insert\", \"payload\": {\"text\": \"assistantMessage toolChange settingsChange\"}}}";
+        let res = d.feed(payload);
+        assert_eq!(res, DetectedStreamingProtocol::CoresideOpsNdjson);
+        assert!(d.is_coreside_ndjson());
     }
 }

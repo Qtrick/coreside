@@ -1155,6 +1155,95 @@ mod tests {
             if data.get("count").and_then(|v| v.as_u64()) == Some(0)));
     }
 
+    #[test]
+    fn delete_missing_record_returns_not_found() {
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        // Deleting is destructive, so it always asks first. After approval the
+        // handler must fail closed instead of reporting success, so callers
+        // can distinguish a replay from a write.
+        let ctx = app_ctx(APP);
+        let input = json!({ "recordId": "rec-does-not-exist" });
+        let first = execute_registered_action(&mut db, &ctx, "local_data.delete", &input, None);
+        let approval_id = match &first {
+            ActionOutcome::PendingApproval { approval_id, .. } => approval_id.clone(),
+            other => panic!("expected approval, got {}", outcome_code(other)),
+        };
+        approvals::decide(&mut db, &approval_id, true, None, "user").unwrap();
+        let second = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.delete",
+            &input,
+            Some(&approval_id),
+        );
+        assert_eq!(outcome_code(&second), "error:not_found");
+    }
+
+    #[test]
+    fn update_missing_record_returns_not_found() {
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        let ctx = app_ctx(APP);
+        let input = json!({
+            "modelId": "note",
+            "recordId": "rec-does-not-exist",
+            "data": { "title": "ghost" },
+        });
+        let first = execute_registered_action(&mut db, &ctx, "local_data.write", &input, None);
+        let approval_id = match &first {
+            ActionOutcome::PendingApproval { approval_id, .. } => approval_id.clone(),
+            other => panic!("expected approval, got {}", outcome_code(other)),
+        };
+        approvals::decide(&mut db, &approval_id, true, None, "user").unwrap();
+        let second = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &input,
+            Some(&approval_id),
+        );
+        assert_eq!(outcome_code(&second), "error:not_found");
+    }
+
+    #[test]
+    fn chat_venue_cannot_touch_application_data() {
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        // No application binding: even though the Chat venue passes the
+        // gateway's declared/permission checks, the handler must fail closed
+        // rather than read or mutate another application's records.
+        let mut chat = app_ctx(APP);
+        chat.venue = Venue::Chat;
+        chat.application_id = None;
+        let query = execute_registered_action(
+            &mut db,
+            &chat,
+            "local_data.query",
+            &json!({ "modelId": "note" }),
+            None,
+        );
+        assert_eq!(outcome_code(&query), "error:invalid_context");
+        // Deletes always ask first; approving must still fail closed because
+        // there is no application to own the write.
+        let delete_input = json!({ "recordId": "rec-anything" });
+        let first =
+            execute_registered_action(&mut db, &chat, "local_data.delete", &delete_input, None);
+        let approval_id = match &first {
+            ActionOutcome::PendingApproval { approval_id, .. } => approval_id.clone(),
+            other => panic!("expected approval, got {}", outcome_code(other)),
+        };
+        approvals::decide(&mut db, &approval_id, true, None, "user").unwrap();
+        let second = execute_registered_action(
+            &mut db,
+            &chat,
+            "local_data.delete",
+            &delete_input,
+            Some(&approval_id),
+        );
+        assert_eq!(outcome_code(&second), "error:invalid_context");
+    }
+
     fn note_count(db: &Database) -> usize {
         crate::application_kernel::data::query_records(db, APP, "note", 500)
             .unwrap()

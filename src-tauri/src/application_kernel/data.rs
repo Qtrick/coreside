@@ -233,12 +233,20 @@ pub fn update_record(
     base_version: Option<i64>,
 ) -> DbResult<()> {
     assert_can_write_data(db, application_id)?;
-    let (model_id, version): (String, i64) = db.conn().query_row(
-        "SELECT model_id, record_version FROM generated_data_records
+    let (model_id, version): (String, i64) = db
+        .conn()
+        .query_row(
+            "SELECT model_id, record_version FROM generated_data_records
          WHERE id = ?1 AND application_id = ?2",
-        params![record_id, application_id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
+            params![record_id, application_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                DbError::NotFound(format!("record {record_id}"))
+            }
+            other => DbError::Sqlite(other),
+        })?;
     if let Some(base) = base_version {
         if base != version {
             return Err(DbError::Invalid(format!(
@@ -258,10 +266,13 @@ pub fn update_record(
 
 pub fn delete_record(db: &mut Database, application_id: &str, record_id: &str) -> DbResult<()> {
     assert_can_write_data(db, application_id)?;
-    db.conn().execute(
+    let removed = db.conn().execute(
         "DELETE FROM generated_data_records WHERE id = ?1 AND application_id = ?2",
         params![record_id, application_id],
     )?;
+    if removed == 0 {
+        return Err(DbError::NotFound(format!("record {record_id}")));
+    }
     Ok(())
 }
 

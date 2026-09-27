@@ -280,11 +280,20 @@ fn recover_connection_after_failed_restore(
 /// Mid-swap (irreversible) failure: retain journal as RecoveryRequired, keep quiescence paused.
 #[tauri::command]
 pub fn restore_profile_backup(
+    window: tauri::WebviewWindow,
     app: AppHandle,
     state: State<'_, AppState>,
     path: String,
     confirm: bool,
 ) -> Result<RestoreApplied, CommandError> {
+    // Defense-in-depth: this quarantines and swaps the live database. Tool
+    // windows are already capability-denied; this also blocks non-main labels.
+    if crate::windows::caller_bound_tool_id(&window).is_some() || window.label() != "main" {
+        return Err(CommandError::new(
+            "forbidden",
+            "Only the main Coreside window can restore a backup.",
+        ));
+    }
     if !confirm {
         return Err(CommandError::new(
             "validation_failed",
