@@ -29,6 +29,7 @@
     "audit:evidence-manifest": "node scripts/audit-evidence-manifest.mjs",
     "audit:tauri-capabilities": "node scripts/audit-tauri-capabilities.mjs",
     "audit:interactive-controls": "node scripts/audit-interactive-controls.mjs",
+    "audit:tool-components": "node scripts/audit-tool-components.mjs",
     "audit:dead-controls": "node scripts/audit-interactive-controls.mjs --dead-only",
     "audit:consumer-language": "node scripts/audit-consumer-language.mjs",
     "audit:tutorial-targets": "node scripts/audit-tutorial-targets.mjs",

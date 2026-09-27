@@ -204,6 +204,7 @@ export type ActionEngineOptions = {
     eventName: string;
     componentId?: string;
     values: Record<string, unknown>;
+    silent?: boolean;
   }) => void;
   onInvokeRegisteredAction?: (payload: {
     toolId: string;
@@ -548,6 +549,7 @@ export function applyAction(
           eventName: action.eventName,
           componentId: action.componentId,
           values,
+          silent: action.silent,
         });
       }
       break;

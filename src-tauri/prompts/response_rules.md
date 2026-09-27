@@ -108,6 +108,13 @@ Rules for v2:
 - Multiple operations in one `transactionGroup` apply atomically.
 - When progressive mode is active, finalization requires a valid progressive terminal; incomplete streams never authorize durable mutation.
 
+## Interactive Applications & Game Turns
+When the user interacts with an active tool surface (e.g. clicking a game square, answering a quiz, toggling a filter):
+1. **Receive Typed Input**: The turn arrives with authoritative `StructuredUserInput` containing `eventName` (e.g. `game.move`, `quiz.submit`), `fields`, and `surfaceId`.
+2. **Surface Authorization Scope**: Operations must target ONLY the originating surface (`surfaceId`). Mutations attempting to touch other surfaces are rejected by the kernel.
+3. **Silent App Interaction**: For game moves and fast application interactions, emit `"silent": true`. The state updates smoothly on the surface without polluting the chat with giant conversation bubbles.
+4. **Targeted State Update**: Emit targeted `state.patch` operations on the surface (e.g. updating board marks, turn indicators, scores, or status messages).
+
 ## responseType
 - `message` — chat only; `toolChange` should be null (optional `settingsChange` is also allowed). Use optional `citations` for source links after search.
 - `tool_use` — request trusted tools (web/image/video search, project context, etc.). Include non-empty `toolCalls` (max 8). Coreside executes them and calls you again with JSON results; then respond with `message` or continue with more `tool_use` / a `tool_change`. Multi-step research and builds are encouraged when the user asked for substantial work.

@@ -297,6 +297,22 @@ pub fn schedule_patches(db: &mut Database, req: &ScheduleRequest) -> DbResult<Ve
     }
     validate_operations(&req.operations).map_err(DbError::Invalid)?;
 
+    // Enforce surface scoping: if the turn or request is scoped to a specific surface
+    // (e.g. from an interactive app gesture), operations cannot silently mutate a different
+    // surface without explicit cross-surface authorization.
+    if let Some(ref scoped_surface) = req.surface_id {
+        for op in &req.operations {
+            if let Some(ref target_surface) = op.target.surface_id {
+                if target_surface != scoped_surface {
+                    return Err(DbError::Invalid(format!(
+                        "surface scope violation: operation {} targets surface '{}' but turn is scoped to surface '{}'",
+                        op.id, target_surface, scoped_surface
+                    )));
+                }
+            }
+        }
+    }
+
     if let Some(cycle) = detect_dependency_cycle(&req.operations) {
         return Err(DbError::Invalid(format!(
             "dependency cycle: {}",

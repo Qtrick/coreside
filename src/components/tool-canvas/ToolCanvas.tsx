@@ -332,15 +332,26 @@ export function ToolCanvas() {
       eventName: string;
       componentId?: string;
       values: Record<string, unknown>;
+      silent?: boolean;
     }) => {
       const summary = `Tool form submitted (${payload.eventName})`;
+      const isSilent = Boolean(
+        payload.silent ||
+        payload.eventName.startsWith("game.") ||
+        payload.eventName.endsWith(".silent") ||
+        payload.values.silent === true
+      );
       // Single authority: send_message seals StructuredUserInput in Rust.
       // Do not also appendContextLedger here — that created a second ledger-* id
       // which was skipped on this turn then reinjected on the next ordinary turn.
       void sendMessage(summary, [], [], {
         formId: payload.toolId,
         applicationId: payload.toolId,
-        fields: payload.values,
+        eventName: payload.eventName,
+        fields: {
+          ...payload.values,
+          ...(isSilent ? { silent: true } : {}),
+        },
       });
     },
     [sendMessage],

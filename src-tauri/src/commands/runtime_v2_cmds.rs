@@ -257,6 +257,7 @@ pub fn get_draft_cmd(
 ) -> Result<Option<SurfaceDraft>, CommandError> {
     state.require_profile()?;
     let db = state.db.lock();
+    let _ = crate::runtime_v2::resolve_and_authorize_surface_scope(&db, &surface_id, None, None)?;
     Ok(get_draft(
         &db,
         &surface_id,
@@ -272,6 +273,8 @@ pub fn save_draft_cmd(
 ) -> Result<SurfaceDraft, CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
+    let _ =
+        crate::runtime_v2::resolve_and_authorize_surface_scope(&db, &args.surface_id, None, None)?;
     save_draft(
         &mut db,
         &args.surface_id,
@@ -303,6 +306,7 @@ pub fn delete_draft_cmd(
 ) -> Result<(), CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
+    let _ = crate::runtime_v2::resolve_and_authorize_surface_scope(&db, &surface_id, None, None)?;
     Ok(delete_draft(
         &mut db,
         &surface_id,
@@ -340,6 +344,23 @@ pub fn schedule_patches_cmd(
     let priority = PatchPriority::parse(&args.priority)
         .ok_or_else(|| CommandError::new("invalid", "unknown patch priority"))?;
 
+    // Derive authoritative surface and conversation scope from persisted database state
+    let (authorized_conversation_id, authorized_surface_id) = if let Some(ref sid) = args.surface_id
+    {
+        let surface = crate::runtime_v2::resolve_and_authorize_surface_scope(
+            &db,
+            sid,
+            args.conversation_id.as_deref(),
+            None,
+        )?;
+        (
+            surface.conversation_id.or(args.conversation_id),
+            Some(sid.clone()),
+        )
+    } else {
+        (args.conversation_id, None)
+    };
+
     // P0 security boundary: frontend IPC cannot forge agent authority or bypass approval gates.
     let trusted_source = if args.source_type == "direct_manipulation" {
         "direct_manipulation"
@@ -348,9 +369,9 @@ pub fn schedule_patches_cmd(
     };
 
     let req = ScheduleRequest {
-        conversation_id: args.conversation_id,
+        conversation_id: authorized_conversation_id,
         turn_id: args.turn_id,
-        surface_id: args.surface_id,
+        surface_id: authorized_surface_id,
         priority,
         operations: args.operations,
         source_type: trusted_source.into(),

@@ -10,6 +10,7 @@ use super::provider::{
     UsageMetadata,
 };
 use super::response_schema::SCHEMA_VERSION;
+use super::structured_user_input::AgentContentPart;
 
 pub struct MockAiProvider;
 
@@ -295,6 +296,338 @@ impl MockAiProvider {
         })
         .to_string()
     }
+
+    pub fn fixture_for_request(request: &AgentRequest) -> String {
+        let user_msg = request
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.role == crate::ai::AgentRole::User);
+        let user_text = user_msg.map(|m| m.content.as_str()).unwrap_or("");
+        let lower = user_text.to_lowercase();
+
+        // 1. Structured input turns (interactive games / app actions)
+        let structured = user_msg.and_then(|m| {
+            m.parts.iter().find_map(|p| match p {
+                AgentContentPart::StructuredUserInput(sui) => Some(sui),
+                _ => None,
+            })
+        });
+
+        let event_name = structured
+            .and_then(|s| s.event_name.as_deref())
+            .or_else(|| {
+                if lower.contains("game.reset") || lower.contains("eventname=game.reset") {
+                    Some("game.reset")
+                } else if lower.contains("game.move") || lower.contains("eventname=game.move") {
+                    Some("game.move")
+                } else {
+                    None
+                }
+            });
+
+        if let Some("game.reset") = event_name {
+            let surface_id = structured
+                .and_then(|s| s.surface_id.as_deref())
+                .unwrap_or("tool-tictactoe");
+            return json!({
+                "schemaVersion": "2",
+                "assistantMessage": "New game started! Your turn (X). Click any square to play.",
+                "responseType": "message",
+                "silent": true,
+                "operations": [
+                    {
+                        "id": "op-tictactoe-reset",
+                        "type": "state.patch",
+                        "target": { "surfaceId": surface_id },
+                        "payload": {
+                            "c0": "", "c1": "", "c2": "",
+                            "c3": "", "c4": "", "c5": "",
+                            "c6": "", "c7": "", "c8": "",
+                            "turn": "X",
+                            "status": "New game started! Your turn (X).",
+                            "winner": ""
+                        }
+                    }
+                ],
+                "diagnostics": { "fixture": "tictactoe_reset" }
+            })
+            .to_string();
+        }
+
+        if let Some("game.move") = event_name {
+            let surface_id = structured
+                .and_then(|s| s.surface_id.as_deref())
+                .unwrap_or("tool-tictactoe");
+
+            let mut board: Vec<String> = (0..9)
+                .map(|i| {
+                    structured
+                        .and_then(|s| s.fields.get(&format!("c{i}")))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
+                })
+                .collect();
+
+            let last_move = structured
+                .and_then(|s| s.fields.get("lastMove").or_else(|| s.fields.get("cell")))
+                .and_then(|v| {
+                    v.as_u64()
+                        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                })
+                .map(|v| v as usize);
+
+            if let Some(cell) = last_move {
+                if cell < 9 && board[cell].is_empty() {
+                    board[cell] = "X".to_string();
+                }
+            } else if let Some(empty_pos) = board.iter().position(|c| c.is_empty()) {
+                board[empty_pos] = "X".to_string();
+            }
+
+            let lines = [
+                [0, 1, 2],
+                [3, 4, 5],
+                [6, 7, 8],
+                [0, 3, 6],
+                [1, 4, 7],
+                [2, 5, 8],
+                [0, 4, 8],
+                [2, 4, 6],
+            ];
+            let check_win = |b: &[String], mark: &str| -> bool {
+                lines
+                    .iter()
+                    .any(|&[x, y, z]| b[x] == mark && b[y] == mark && b[z] == mark)
+            };
+
+            let (status, winner, next_turn) = if check_win(&board, "X") {
+                (
+                    "You win! Congratulations!".to_string(),
+                    "X".to_string(),
+                    "gameover".to_string(),
+                )
+            } else if board.iter().all(|c| !c.is_empty()) {
+                (
+                    "It's a draw! Click New Game to play again.".to_string(),
+                    "draw".to_string(),
+                    "gameover".to_string(),
+                )
+            } else {
+                let ai_cell = if board[4].is_empty() {
+                    4
+                } else {
+                    let candidates = [0, 2, 6, 8, 1, 3, 5, 7];
+                    candidates
+                        .into_iter()
+                        .find(|&idx| board[idx].is_empty())
+                        .unwrap_or(0)
+                };
+                board[ai_cell] = "O".to_string();
+
+                if check_win(&board, "O") {
+                    (
+                        "AI wins! Better luck next time.".to_string(),
+                        "O".to_string(),
+                        "gameover".to_string(),
+                    )
+                } else if board.iter().all(|c| !c.is_empty()) {
+                    (
+                        "It's a draw! Click New Game to play again.".to_string(),
+                        "draw".to_string(),
+                        "gameover".to_string(),
+                    )
+                } else {
+                    (
+                        format!("AI played square {}. Your turn (X)!", ai_cell + 1),
+                        "".to_string(),
+                        "X".to_string(),
+                    )
+                }
+            };
+
+            return json!({
+                "schemaVersion": "2",
+                "assistantMessage": status,
+                "responseType": "message",
+                "silent": true,
+                "operations": [
+                    {
+                        "id": "op-tictactoe-ai-move",
+                        "type": "state.patch",
+                        "target": { "surfaceId": surface_id },
+                        "payload": {
+                            "c0": board[0], "c1": board[1], "c2": board[2],
+                            "c3": board[3], "c4": board[4], "c5": board[5],
+                            "c6": board[6], "c7": board[7], "c8": board[8],
+                            "turn": next_turn,
+                            "status": status,
+                            "winner": winner
+                        }
+                    }
+                ],
+                "diagnostics": { "fixture": "tictactoe_move" }
+            })
+            .to_string();
+        }
+
+        // 2. Tic-Tac-Toe generation prompt
+        if lower.contains("tic-tac-toe") || lower.contains("tictactoe") {
+            return json!({
+                "schemaVersion": "2",
+                "assistantMessage": "I built a Tic-Tac-Toe game where you play against me! Click any square to make your move.",
+                "responseType": "message",
+                "operations": [
+                    {
+                        "id": "op-create-tictactoe",
+                        "type": "surface.create",
+                        "target": {},
+                        "payload": {
+                            "id": "tool-tictactoe",
+                            "name": "Tic-Tac-Toe vs AI",
+                            "description": "Play Tic-Tac-Toe directly inside your conversation against the AI",
+                            "layout": { "type": "single-column" },
+                            "components": [
+                                {
+                                    "id": "ttt-heading",
+                                    "type": "heading",
+                                    "props": { "text": "Tic-Tac-Toe vs AI", "level": 1 }
+                                },
+                                {
+                                    "id": "ttt-status",
+                                    "type": "badge",
+                                    "props": { "text": "Your turn (X). Click any square to play!", "valueKey": "status" }
+                                },
+                                {
+                                    "id": "ttt-row-0",
+                                    "type": "row",
+                                    "props": {},
+                                    "children": [
+                                        {
+                                            "id": "ttt-c0",
+                                            "type": "button",
+                                            "props": { "label": "·", "valueKey": "c0" },
+                                            "actions": [
+                                                { "type": "setValue", "target": "c0", "value": "X" },
+                                                { "type": "setValue", "target": "lastMove", "value": 0 },
+                                                { "type": "submitToAgent", "eventName": "game.move", "includeFields": ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "lastMove", "turn"] }
+                                            ]
+                                        },
+                                        {
+                                            "id": "ttt-c1",
+                                            "type": "button",
+                                            "props": { "label": "·", "valueKey": "c1" },
+                                            "actions": [
+                                                { "type": "setValue", "target": "c1", "value": "X" },
+                                                { "type": "setValue", "target": "lastMove", "value": 1 },
+                                                { "type": "submitToAgent", "eventName": "game.move", "includeFields": ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "lastMove", "turn"] }
+                                            ]
+                                        },
+                                        {
+                                            "id": "ttt-c2",
+                                            "type": "button",
+                                            "props": { "label": "·", "valueKey": "c2" },
+                                            "actions": [
+                                                { "type": "setValue", "target": "c2", "value": "X" },
+                                                { "type": "setValue", "target": "lastMove", "value": 2 },
+                                                { "type": "submitToAgent", "eventName": "game.move", "includeFields": ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "lastMove", "turn"] }
+                                            ]
+                                        }
+                                    ]
+                                },
+                                {
+                                    "id": "ttt-row-1",
+                                    "type": "row",
+                                    "props": {},
+                                    "children": [
+                                        {
+                                            "id": "ttt-c3",
+                                            "type": "button",
+                                            "props": { "label": "·", "valueKey": "c3" },
+                                            "actions": [
+                                                { "type": "setValue", "target": "c3", "value": "X" },
+                                                { "type": "setValue", "target": "lastMove", "value": 3 },
+                                                { "type": "submitToAgent", "eventName": "game.move", "includeFields": ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "lastMove", "turn"] }
+                                            ]
+                                        },
+                                        {
+                                            "id": "ttt-c4",
+                                            "type": "button",
+                                            "props": { "label": "·", "valueKey": "c4" },
+                                            "actions": [
+                                                { "type": "setValue", "target": "c4", "value": "X" },
+                                                { "type": "setValue", "target": "lastMove", "value": 4 },
+                                                { "type": "submitToAgent", "eventName": "game.move", "includeFields": ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "lastMove", "turn"] }
+                                            ]
+                                        },
+                                        {
+                                            "id": "ttt-c5",
+                                            "type": "button",
+                                            "props": { "label": "·", "valueKey": "c5" },
+                                            "actions": [
+                                                { "type": "setValue", "target": "c5", "value": "X" },
+                                                { "type": "setValue", "target": "lastMove", "value": 5 },
+                                                { "type": "submitToAgent", "eventName": "game.move", "includeFields": ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "lastMove", "turn"] }
+                                            ]
+                                        }
+                                    ]
+                                },
+                                {
+                                    "id": "ttt-row-2",
+                                    "type": "row",
+                                    "props": {},
+                                    "children": [
+                                        {
+                                            "id": "ttt-c6",
+                                            "type": "button",
+                                            "props": { "label": "·", "valueKey": "c6" },
+                                            "actions": [
+                                                { "type": "setValue", "target": "c6", "value": "X" },
+                                                { "type": "setValue", "target": "lastMove", "value": 6 },
+                                                { "type": "submitToAgent", "eventName": "game.move", "includeFields": ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "lastMove", "turn"] }
+                                            ]
+                                        },
+                                        {
+                                            "id": "ttt-c7",
+                                            "type": "button",
+                                            "props": { "label": "·", "valueKey": "c7" },
+                                            "actions": [
+                                                { "type": "setValue", "target": "c7", "value": "X" },
+                                                { "type": "setValue", "target": "lastMove", "value": 7 },
+                                                { "type": "submitToAgent", "eventName": "game.move", "includeFields": ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "lastMove", "turn"] }
+                                            ]
+                                        },
+                                        {
+                                            "id": "ttt-c8",
+                                            "type": "button",
+                                            "props": { "label": "·", "valueKey": "c8" },
+                                            "actions": [
+                                                { "type": "setValue", "target": "c8", "value": "X" },
+                                                { "type": "setValue", "target": "lastMove", "value": 8 },
+                                                { "type": "submitToAgent", "eventName": "game.move", "includeFields": ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "lastMove", "turn"] }
+                                            ]
+                                        }
+                                    ]
+                                },
+                                {
+                                    "id": "ttt-reset",
+                                    "type": "button",
+                                    "props": { "label": "New Game", "variant": "secondary" },
+                                    "actions": [
+                                        { "type": "submitToAgent", "eventName": "game.reset" }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "diagnostics": { "fixture": "tictactoe_create" }
+            }).to_string();
+        }
+
+        Self::fixture_for(user_text)
+    }
 }
 
 impl Default for MockAiProvider {
@@ -329,14 +662,6 @@ impl AiProvider for MockAiProvider {
             return Err(AiError::Cancelled);
         }
 
-        let user_text = request
-            .messages
-            .iter()
-            .rev()
-            .find(|m| m.role == crate::ai::AgentRole::User)
-            .map(|m| m.content.as_str())
-            .unwrap_or("");
-
         // Tiny yield so cancellation can race in tests.
         tokio::task::yield_now().await;
         if request.cancel.is_cancelled() {
@@ -344,7 +669,7 @@ impl AiProvider for MockAiProvider {
         }
 
         Ok(AgentResponse {
-            raw_text: Self::fixture_for(user_text),
+            raw_text: Self::fixture_for_request(&request),
             usage: UsageMetadata {
                 prompt_tokens: Some(10),
                 completion_tokens: Some(50),
@@ -1099,5 +1424,126 @@ mod tests {
             .find(|c| c.component_type == "stat")
             .expect("stat component");
         assert_eq!(stat.value_key.as_deref(), Some("totalExpenses"));
+    }
+
+    #[tokio::test]
+    async fn tictactoe_fixture_generates_valid_surface() {
+        use crate::ai::ToolDefinition;
+        let provider = MockAiProvider::new();
+        let response = provider
+            .chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Build me a Tic-Tac-Toe game where I play against you",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            })
+            .await
+            .unwrap();
+        let parsed = parse_agent_response(&response.raw_text).unwrap();
+        assert_eq!(parsed.payload.schema_version, "2");
+        let ops = parsed.payload.operations.as_ref().expect("operations");
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0]["type"], "surface.create");
+        let tool: ToolDefinition =
+            serde_json::from_value(ops[0]["payload"].clone()).expect("tool payload");
+        assert_eq!(tool.id, "tool-tictactoe");
+        assert_eq!(tool.name, "Tic-Tac-Toe vs AI");
+    }
+
+    #[tokio::test]
+    async fn tictactoe_move_and_reset_turn_returns_targeted_state_patch() {
+        use crate::ai::StructuredUserInput;
+        use std::collections::HashMap;
+        let provider = MockAiProvider::new();
+
+        // 1. Move turn with structured user input
+        let mut fields_map = serde_json::Map::new();
+        fields_map.insert("cell".to_string(), json!(4));
+        fields_map.insert("lastMove".to_string(), json!(4));
+        for i in 0..9 {
+            fields_map.insert(format!("c{i}"), json!(""));
+        }
+        let sui = StructuredUserInput {
+            submission_id: "sui-1".into(),
+            form_id: "ttt-c4".into(),
+            event_name: Some("game.move".into()),
+            application_id: Some("tool-tictactoe".into()),
+            surface_id: Some("tool-tictactoe".into()),
+            conversation_id: "conv-1".into(),
+            fields: fields_map,
+            content_hash: "hash".into(),
+            trust_class: crate::ai::structured_user_input::TrustClass::LocalUserGesture,
+            instruction_eligibility:
+                crate::ai::structured_user_input::InstructionEligibility::LocalUserContent,
+        };
+
+        let response = provider
+            .chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::with_parts(
+                    crate::ai::AgentRole::User,
+                    "App interaction (game.move)",
+                    vec![AgentContentPart::StructuredUserInput(sui)],
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            })
+            .await
+            .unwrap();
+
+        let parsed = parse_agent_response(&response.raw_text).unwrap();
+        assert_eq!(parsed.payload.schema_version, "2");
+        assert_eq!(parsed.payload.silent, Some(true));
+        let ops = parsed.payload.operations.as_ref().expect("operations");
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0]["type"], "state.patch");
+        assert_eq!(ops[0]["target"]["surfaceId"], "tool-tictactoe");
+        let state = &ops[0]["payload"];
+        assert_eq!(state["c4"], "X"); // User move
+        assert_eq!(state["c0"], "O"); // AI counter move
+        assert_eq!(state["turn"], "X"); // Next turn
+
+        // 2. Reset turn
+        let reset_sui = StructuredUserInput {
+            submission_id: "sui-2".into(),
+            form_id: "ttt-reset".into(),
+            event_name: Some("game.reset".into()),
+            application_id: Some("tool-tictactoe".into()),
+            surface_id: Some("tool-tictactoe".into()),
+            conversation_id: "conv-1".into(),
+            fields: serde_json::Map::new(),
+            content_hash: "hash2".into(),
+            trust_class: crate::ai::structured_user_input::TrustClass::LocalUserGesture,
+            instruction_eligibility:
+                crate::ai::structured_user_input::InstructionEligibility::LocalUserContent,
+        };
+
+        let reset_response = provider
+            .chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::with_parts(
+                    crate::ai::AgentRole::User,
+                    "App interaction (game.reset)",
+                    vec![AgentContentPart::StructuredUserInput(reset_sui)],
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            })
+            .await
+            .unwrap();
+
+        let reset_parsed = parse_agent_response(&reset_response.raw_text).unwrap();
+        let reset_ops = reset_parsed
+            .payload
+            .operations
+            .as_ref()
+            .expect("operations");
+        assert_eq!(reset_ops.len(), 1);
+        assert_eq!(reset_ops[0]["type"], "state.patch");
+        assert_eq!(reset_ops[0]["payload"]["c4"], "");
+        assert_eq!(reset_ops[0]["payload"]["turn"], "X");
     }
 }

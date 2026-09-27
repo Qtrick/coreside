@@ -693,14 +693,41 @@ pub fn kernel_decide_approval(
         } else {
             Venue::Chat
         };
+        let (conv_id, proj_id) = if let Some(ref sid) = result.approval.surface_id {
+            db.conn()
+                .query_row(
+                    "SELECT conversation_id, project_id FROM surfaces WHERE id = ?1",
+                    [sid],
+                    |r| {
+                        Ok((
+                            r.get::<_, Option<String>>(0)?,
+                            r.get::<_, Option<String>>(1)?,
+                        ))
+                    },
+                )
+                .unwrap_or((None, None))
+        } else if let Some(ref app_id) = result.approval.application_id {
+            let pid: Option<String> = db
+                .conn()
+                .query_row(
+                    "SELECT project_id FROM application_manifests WHERE id = ?1",
+                    [app_id],
+                    |r| r.get(0),
+                )
+                .ok();
+            (None, pid)
+        } else {
+            (None, None)
+        };
+
         let req = ClientActionRequest {
             action_name: result.approval.action_name.clone(),
             input,
             application_id: result.approval.application_id.clone(),
             surface_id: result.approval.surface_id.clone(),
             component_id: result.approval.component_id.clone(),
-            conversation_id: None,
-            project_id: None,
+            conversation_id: conv_id,
+            project_id: proj_id,
             approval_id: Some(approval_id),
         };
         let ctx = ActionRunContext::from_client(&req, venue);

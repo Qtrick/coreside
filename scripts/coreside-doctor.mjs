@@ -508,6 +508,31 @@ check(
   "Root tsconfig excludes e2e so @wdio types cannot leak into app tsc",
 );
 
+// --- macOS DMG installer configuration ---
+const tauriConfRaw = read("src-tauri/tauri.conf.json");
+let dmgConfigured = false;
+let dmgDetail = "bundle.macOS.dmg missing or invalid in src-tauri/tauri.conf.json";
+try {
+  const tauriConf = JSON.parse(tauriConfRaw);
+  const dmgConfig = tauriConf?.bundle?.macOS?.dmg;
+  const dmgBg = dmgConfig?.background
+    ? path.join(root, "src-tauri", dmgConfig.background)
+    : null;
+  dmgConfigured =
+    Boolean(dmgConfig) &&
+    typeof dmgConfig?.windowSize?.width === "number" &&
+    typeof dmgConfig?.windowSize?.height === "number" &&
+    typeof dmgConfig?.appPosition?.x === "number" &&
+    typeof dmgConfig?.applicationFolderPosition?.x === "number" &&
+    Boolean(dmgBg && exists(path.relative(root, dmgBg)));
+  if (dmgConfigured) {
+    dmgDetail = `custom DMG configured: window ${dmgConfig.windowSize.width}x${dmgConfig.windowSize.height}, background ${dmgConfig.background}`;
+  }
+} catch (e) {
+  dmgDetail = String(e?.message || e);
+}
+check("bundle.dmg_customized", dmgConfigured, dmgDetail);
+
 // --- Release evidence drift (do not fail solely because the tree is dirty) ---
 check(
   "evidence.script_present",

@@ -20,7 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const reportsDir = path.join(root, "reports");
 const artifactsDir = path.join(reportsDir, ".artifacts");
-const ACCESS_DATE = "2026-08-07";
+const ACCESS_DATE = process.env.AUDIT_DATE || new Date().toISOString().slice(0, 10);
 const commandName = "audit:partial-update";
 
 const PARTIAL_UPDATE_ARCHIVE =

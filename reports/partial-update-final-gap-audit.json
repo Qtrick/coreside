@@ -1,6 +1,6 @@
 {
   "product": "Coreside",
-  "auditedAt": "2026-07-18",
+  "auditedAt": "2026-09-27",
   "phase": "final_partial_update_gap_completion",
   "systems": [
     { "id": "keyed_preservation", "status": "complete_but_unverified" },

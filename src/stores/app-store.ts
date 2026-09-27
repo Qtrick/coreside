@@ -129,6 +129,9 @@ type AppStore = {
   editProjectId: string | null;
   addChatsDialogOpen: boolean;
   addChatsProjectId: string | null;
+  manageContextDialogOpen: boolean;
+  manageContextProjectId: string | null;
+  setManageContextDialogOpen: (projectId: string | null) => void;
   deleteProjectDialogOpen: boolean;
   deleteProjectId: string | null;
   renameConversationDialogOpen: boolean;
@@ -270,6 +273,7 @@ type AppStore = {
     attachments?: import("@/types/attachments").StagedAttachment[],
     structuredUserInput?: {
       formId: string;
+      eventName?: string | null;
       applicationId?: string | null;
       surfaceId?: string | null;
       fields: Record<string, unknown>;
@@ -820,6 +824,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   editProjectId: null,
   addChatsDialogOpen: false,
   addChatsProjectId: null,
+  manageContextDialogOpen: false,
+  manageContextProjectId: null,
   deleteProjectDialogOpen: false,
   deleteProjectId: null,
   renameConversationDialogOpen: false,
@@ -1412,6 +1418,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({
       addChatsDialogOpen: Boolean(projectId),
       addChatsProjectId: projectId,
+      projectActionError: null,
+    }),
+
+  setManageContextDialogOpen: (projectId) =>
+    set({
+      manageContextDialogOpen: Boolean(projectId),
+      manageContextProjectId: projectId,
       projectActionError: null,
     }),
 
@@ -2060,6 +2073,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
       trimmed ||
       (structuredUserInput ? "Form submitted" : "Shared attachments");
 
+    const isSilentInteraction = Boolean(
+      structuredUserInput?.eventName?.startsWith("game.") ||
+      structuredUserInput?.eventName?.endsWith(".silent") ||
+      structuredUserInput?.fields?.silent === true
+    );
+
     const optimistic: ChatMessage = {
       id: `local-${crypto.randomUUID()}`,
       conversationId,
@@ -2068,7 +2087,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       createdAt: new Date().toISOString(),
       status: "pending",
       metadata:
-        mentions.length > 0 || attachments.length > 0
+        mentions.length > 0 || attachments.length > 0 || structuredUserInput || isSilentInteraction
           ? {
               ...(mentions.length > 0
                 ? {
@@ -2091,6 +2110,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
                     })),
                   }
                 : {}),
+              ...(isSilentInteraction ? { silent: true } : {}),
             }
           : null,
     };

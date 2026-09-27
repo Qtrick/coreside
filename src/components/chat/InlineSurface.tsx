@@ -112,6 +112,7 @@ export function InlineSurfaceCard({
   const [kernelApplicationId, setKernelApplicationId] = useState<string | null>(
     null,
   );
+  const stateRevisionRef = useRef<number>(1);
   const rootRef = useRef<HTMLElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const previousToolRef = useRef<ToolDefinition | null>(null);
@@ -150,11 +151,15 @@ export function InlineSurfaceCard({
     let cancelled = false;
     void (async () => {
       try {
-        const [savedState, continuity] = await Promise.all([
-          api.getSurfaceState(surface.id),
+        const [{ state: savedState, stateRevision }, continuity] = await Promise.all([
+          api.getSurfaceStateWithRevision(surface.id).catch(async () => {
+            const fallback = await api.getSurfaceState(surface.id).catch(() => ({}));
+            return { state: fallback ?? {}, stateRevision: 1 };
+          }),
           api.getContinuity(surface.id).catch(() => null),
         ]);
         if (cancelled) return;
+        stateRevisionRef.current = stateRevision;
         setState(savedState ?? {});
         setHydrated(true);
         previousToolRef.current = asToolDefinition(latestSurfaceRef.current);
@@ -265,7 +270,10 @@ export function InlineSurfaceCard({
         `surface:${surface.id}`,
         next,
         async (_key, s) => {
-          await api.saveSurfaceState(surface.id, s);
+          const newRev = await api.saveSurfaceState(surface.id, s, stateRevisionRef.current);
+          if (typeof newRev === "number") {
+            stateRevisionRef.current = newRev;
+          }
         },
         {
           onRollback: (restored) => {
@@ -283,7 +291,10 @@ export function InlineSurfaceCard({
       await persistenceScheduler.flush(
         `surface:${surface.id}`,
         async (_key, s) => {
-          await api.saveSurfaceState(surface.id, s);
+          const newRev = await api.saveSurfaceState(surface.id, s, stateRevisionRef.current);
+          if (typeof newRev === "number") {
+            stateRevisionRef.current = newRev;
+          }
         },
       );
     },
@@ -295,7 +306,10 @@ export function InlineSurfaceCard({
       void persistenceScheduler.flush(
         `surface:${surface.id}`,
         async (_key, s) => {
-          await api.saveSurfaceState(surface.id, s);
+          const newRev = await api.saveSurfaceState(surface.id, s, stateRevisionRef.current);
+          if (typeof newRev === "number") {
+            stateRevisionRef.current = newRev;
+          }
         },
       );
     };
@@ -464,10 +478,14 @@ export function InlineSurfaceCard({
               window.dispatchEvent(new Event("coreside:pending-approval"));
             }}
             onSubmitToAgent={(payload) => {
-              const summary = `App form submitted (${payload.eventName})`;
+              const summary = `App interaction (${payload.eventName})`;
+              const isSilent = Boolean(
+                payload.silent ||
+                payload.eventName.startsWith("game.") ||
+                payload.eventName.endsWith(".silent") ||
+                payload.values.silent === true
+              );
               // Single authority: send_message seals StructuredUserInput in Rust.
-              // Do not also appendContextLedger — that created a second ledger-* id
-              // reinjected on the next ordinary turn.
               void saveComponentDraft(
                 payload.componentId ?? "form",
                 payload.values,
@@ -475,8 +493,13 @@ export function InlineSurfaceCard({
               );
               void sendMessage(summary, [], [], {
                 formId: payload.componentId ?? surface.id,
+                eventName: payload.eventName,
+                applicationId: surface.id,
                 surfaceId: surface.id,
-                fields: payload.values,
+                fields: {
+                  ...payload.values,
+                  ...(isSilent ? { silent: true } : {}),
+                },
               });
             }}
           />

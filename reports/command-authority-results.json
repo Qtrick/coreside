@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-26T23:45:37.617Z",
-  "commit": "b16ef824e20e3ba2b4da227b430bde3a53538bf3",
+  "generatedAt": "2026-09-27T02:29:54.199Z",
+  "commit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
   "dirty": true,
-  "sourceFingerprint": "f3e0434743a2e416c527f15b45b46a0e045b3906f96bd1c5465eb6081e760377",
+  "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
   "platform": "darwin",
   "architecture": "arm64",
   "exitStatus": "passed",

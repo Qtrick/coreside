@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-26T23:45:45.118Z",
-  "commit": "b16ef824e20e3ba2b4da227b430bde3a53538bf3",
+  "generatedAt": "2026-09-27T02:30:02.662Z",
+  "commit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
   "dirty": true,
-  "sourceFingerprint": "f3e0434743a2e416c527f15b45b46a0e045b3906f96bd1c5465eb6081e760377",
+  "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
   "platform": "darwin",
   "architecture": "arm64",
   "command": "e2e:journey-13-wallpaper-targeted",
@@ -39,35 +39,44 @@
     "width": 2240,
     "height": 1344,
     "sampleCount": 156,
-    "uniqueColors": 5,
-    "lumSpan": 83.6686,
+    "uniqueColors": 8,
+    "lumSpan": 71.30519999999999,
     "samples": [
       {
         "a": 255,
-        "b": 66,
-        "g": 96,
-        "lum": 87.6686,
-        "r": 67,
-        "x": 1678,
+        "b": 31,
+        "g": 46,
+        "lum": 41.728,
+        "r": 31,
+        "x": 1306,
         "y": 4
       },
       {
         "a": 255,
-        "b": 17,
-        "g": 22,
-        "lum": 20.575999999999997,
-        "r": 17,
-        "x": 376,
-        "y": 788
+        "b": 57,
+        "g": 82,
+        "lum": 75.30519999999999,
+        "r": 59,
+        "x": 1306,
+        "y": 116
       },
       {
         "a": 255,
-        "b": 31,
-        "g": 43,
-        "lum": 39.794999999999995,
-        "r": 32,
+        "b": 15,
+        "g": 23,
+        "lum": 20.2964,
+        "r": 13,
         "x": 4,
-        "y": 1124
+        "y": 676
+      },
+      {
+        "a": 255,
+        "b": 16,
+        "g": 31,
+        "lum": 25.0272,
+        "r": 8,
+        "x": 376,
+        "y": 1012
       },
       {
         "a": 255,
@@ -116,15 +125,15 @@
       },
       {
         "a": 255,
-        "b": 4,
-        "g": 4,
-        "lum": 4,
+        "b": 10,
+        "g": 18,
+        "lum": 14.446,
         "r": 4,
         "x": 934,
         "y": 4
       }
     ]
   },
-  "screenshotHash": "2694c3a6ce52025a587318cf80b0dac97b697f2f3153d250f9160e42c0742d4f",
+  "screenshotHash": "adf765108e1b67a4b1e7dd4a6cae0fbd62c3f3c1bcb5219032d6eef9a9745094",
   "publicBeta": "Not ready"
 }

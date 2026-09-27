@@ -280,6 +280,7 @@ export const api = {
     /** Typed form fields — Rust seals trust; never rely on text markers. */
     structuredUserInput?: {
       formId: string;
+      eventName?: string | null;
       applicationId?: string | null;
       surfaceId?: string | null;
       fields: Record<string, unknown>;

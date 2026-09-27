@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-25T16:59:13.659Z",
-  "commit": "e9c961923b52420646657888c44872ff90e6e69a",
+  "generatedAt": "2026-09-27T02:26:13.943Z",
+  "commit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
   "dirty": true,
-  "sourceFingerprint": "f3e0434743a2e416c527f15b45b46a0e045b3906f96bd1c5465eb6081e760377",
+  "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
   "packageLockHash": "2b427ad1e95a93b212ca4763ebba64a778c976c59421514246b4b3c68300468d",
   "cargoLockHash": "b64ad87161713f19b77675d96b38081e050c78ec6b8e3d6b3e00f26b49bfbd67",
   "platform": "darwin",
@@ -12,7 +12,7 @@
   "buildMode": "development",
   "exitStatus": 0,
   "evidenceLevel": "classified-not-desktop-verified",
-  "command": "audit:readiness-delta",
+  "command": "audit:readiness",
   "baseline": {
     "kind": "prior-coreside-archive",
     "label": "Coreside Chat AI(10).zip",

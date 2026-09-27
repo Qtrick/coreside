@@ -1301,6 +1301,9 @@ async fn send_message_inner(
         } else {
             None
         };
+    let originating_surface_id = sealed_structured
+        .as_ref()
+        .and_then(|s| s.surface_id.clone());
 
     // If a turn is already active for this chat, enqueue instead of overlapping.
     // Preserve attachment ids + mentions so the queued turn cannot silently drop them.
@@ -1465,6 +1468,19 @@ async fn send_message_inner(
                     for (k, v) in obj {
                         meta.insert(k.clone(), v.clone());
                     }
+                }
+                if sui
+                    .event_name
+                    .as_deref()
+                    .map(|n| n.starts_with("game.") || n.ends_with(".silent"))
+                    .unwrap_or(false)
+                    || sui
+                        .fields
+                        .get("silent")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                {
+                    meta.insert("silent".into(), json!(true));
                 }
             }
             if meta.is_empty() {
@@ -2873,7 +2889,7 @@ async fn send_message_inner(
                                 crate::runtime_v2::patch_scheduler::ScheduleRequest {
                                     conversation_id: Some(conversation_id.clone()),
                                     turn_id: parsed.payload.turn_id.clone(),
-                                    surface_id: None,
+                                    surface_id: originating_surface_id.clone(),
                                     priority: crate::runtime_v2::patch_scheduler::PatchPriority::ApprovedPersistentChange,
                                     operations,
                                     source_type: "agent".into(),

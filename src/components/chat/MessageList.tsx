@@ -270,9 +270,20 @@ function humanizeActionLabel(raw: string): string {
           New updates
         </button>
       ) : null}
-      {messages.map((message) => (
-        <MessageBubble key={message.id} message={message} />
-      ))}
+      {messages
+        .filter((message) => {
+          const isSilent = Boolean(
+            message.metadata &&
+              typeof message.metadata === "object" &&
+              (message.metadata as Record<string, unknown>).silent === true,
+          );
+          // Silent app interactions (e.g. game moves) remain persisted and auditable,
+          // but hide ordinary chat bubbles unless Action Log mode is always on.
+          return !isSilent || actionLogMode === "always";
+        })
+        .map((message) => (
+          <MessageBubble key={message.id} message={message} />
+        ))}
       {liveHere ? (
         <div className="message-bubble assistant agent-live" aria-label="Agent is responding">
           <div className="message-meta">

@@ -1,11 +1,11 @@
 {
   "schemaVersion": 2,
   "product": "Coreside",
-  "accessDate": "2026-08-07",
-  "generatedAt": "2026-09-26T18:38:38.472Z",
-  "commit": "4c4c9bfbcdf02aebc4940fa5510cbd9d631e9758",
+  "accessDate": "2026-09-27",
+  "generatedAt": "2026-09-27T02:26:14.108Z",
+  "commit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
   "dirty": true,
-  "sourceFingerprint": "f3e0434743a2e416c527f15b45b46a0e045b3906f96bd1c5465eb6081e760377",
+  "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
   "command": "audit:partial-update",
   "exitStatus": 0,
   "publicBeta": "Not ready",
@@ -136,7 +136,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": null
     },
@@ -187,7 +187,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": null
     },
@@ -261,7 +261,7 @@
         }
       ],
       "gapPriority": "P0",
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": null
     },
@@ -312,7 +312,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": null
     },
@@ -376,7 +376,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": null
     },
@@ -437,7 +437,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": null
     },
@@ -490,7 +490,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": null
     },
@@ -550,7 +550,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": null
     },
@@ -601,7 +601,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": null
     },
@@ -654,7 +654,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": null
     },
@@ -693,7 +693,7 @@
           ]
         }
       ],
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": "Arbitrary HTML in the protected webview is rejected; Coreside uses trusted declarative components.",
       "deferReason": null
     },
@@ -733,7 +733,7 @@
           ]
         }
       ],
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": "Model-generated script execution is rejected; registered actions only.",
       "deferReason": null
     },
@@ -771,7 +771,7 @@
           ]
         }
       ],
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": "CDN script/link injection rejected; bundled capability packs only.",
       "deferReason": null
     },
@@ -810,7 +810,7 @@
           ]
         }
       ],
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": "iframe form POST + clientSecret trust path rejected; typed StructuredUserInput is the secure equivalent.",
       "deferReason": null
     },
@@ -847,7 +847,7 @@
           "hits": []
         }
       ],
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": "Global/model CSS on protected chrome rejected; semantic tokens + capability styles only.",
       "deferReason": null
     },
@@ -878,7 +878,7 @@
           "misses": []
         }
       ],
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": "Public multiuser collaboration deferred; local-first consumer beta priority."
     },
@@ -909,7 +909,7 @@
           "misses": []
         }
       ],
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": "Hosted identity deferred relative to local BYOK consumer track."
     },
@@ -963,7 +963,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": null
     },
@@ -1014,7 +1014,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": null
     },
@@ -1073,7 +1073,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-08-07",
+      "accessDate": "2026-09-27",
       "rejectReason": null,
       "deferReason": null
     }

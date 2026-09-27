@@ -128,6 +128,7 @@ export const ActionSchema = z.discriminatedUnion("type", [
     eventName: z.string().min(1),
     includeFields: z.array(z.string()).optional(),
     componentId: z.string().optional(),
+    silent: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("invokeRegisteredAction"),
@@ -264,9 +265,13 @@ export type ToolState = Record<string, unknown>;
 export const ToolInteractionEventSchema = z.object({
   eventType: z.literal("tool_interaction"),
   toolId: z.string(),
+  applicationId: z.string().optional(),
+  surfaceId: z.string().optional(),
   componentId: z.string().optional(),
   eventName: z.string(),
   values: z.record(z.unknown()),
+  conversationId: z.string().optional(),
+  silent: z.boolean().optional(),
 });
 
 export type ToolInteractionEvent = z.infer<typeof ToolInteractionEventSchema>;

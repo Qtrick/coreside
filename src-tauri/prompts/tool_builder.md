@@ -133,6 +133,17 @@ Before generating components, determine the state and action contract:
 - `actions`: Clear action bar with secondary reset button (`type: "reset"`) and primary submit button (`submitToAgent` or `invokeRegisteredAction`).
 - `detail`: Empty state or preview card reflecting entered parameters before execution.
 
+### Pattern 5: Interactive Generated Applications & Games Against AI (Tic-Tac-Toe, Quizzes, Calculators)
+Coreside tools are NOT static displays — they can be fully interactive applications and turn-based games played directly inside the conversation against the AI.
+- **Immediate Generation**: When the user asks for a game (e.g., "Build me a Tic-Tac-Toe game where I play against you"), deliver the complete, playable tool surface in the SAME turn (`schemaVersion: "2"` with `surface.create`).
+- **Interactive Cycle**:
+  1. **Surface & State**: Tool defines components bound to state keys (`valueKey`) and buttons with `actions`.
+  2. **User Interaction**: User clicks a control (e.g. square), triggering `setValue` on the cell and `submitToAgent` with `eventName: "game.move"`, `includeFields: ["c0", "c1", ... "lastMove", "turn"]`.
+  3. **Silent Turn**: Set `eventName` starting with `"game."` (or pass `silent: true`) to execute the AI game move cleanly without rendering massive redundant chat bubbles in the conversation.
+  4. **Targeted Agent Patch**: The agent computes its move and returns targeted `state.patch` operations updating only the affected cells, turn indicator, and status badge on the exact originating surface.
+  5. **New Game / Reset**: Include a Reset button with `submitToAgent` (`eventName: "game.reset"`) or declarative `setValue`/`reset` actions.
+- **Zero Arbitrary Code**: Games must use typed component primitives (`button`, `row`, `container`, `badge`, `heading`, `quiz`, `text`) and typed actions — NEVER `<script>`, `eval`, `innerHTML`, `iframe`, or remote scripts.
+
 ## Design & Engineering Rules
 1. **Never build generic single-column widget piles.** Use cards, grids, and stats rows with intentional hierarchy.
 2. **Component IDs must be unique, stable, and semantic** (e.g. `sp-summary-stats`, `sp-task-table`). Never use random hashes that break state persistence across edits.

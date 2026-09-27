@@ -95,6 +95,8 @@ pub enum TrustClass {
 pub struct StructuredUserInputSubmission {
     pub form_id: String,
     #[serde(default)]
+    pub event_name: Option<String>,
+    #[serde(default)]
     pub application_id: Option<String>,
     #[serde(default)]
     pub surface_id: Option<String>,
@@ -108,6 +110,8 @@ pub struct StructuredUserInputSubmission {
 pub struct StructuredUserInput {
     pub submission_id: String,
     pub form_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub application_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -262,7 +266,26 @@ pub fn text_contains_structured_marker(text: &str) -> bool {
     text.contains(STRUCTURED_USER_INPUT_MARKER_OPEN)
 }
 
-/// Hash canonical field JSON for integrity / dedupe.
+/// Hash canonical semantic event payload (form_id, event_name, application_id, surface_id, fields).
+pub fn hash_structured_payload(
+    form_id: &str,
+    event_name: Option<&str>,
+    application_id: Option<&str>,
+    surface_id: Option<&str>,
+    fields: &Map<String, Value>,
+) -> String {
+    let canonical = json!({
+        "formId": form_id.trim(),
+        "eventName": event_name.map(str::trim).filter(|s| !s.is_empty()),
+        "applicationId": application_id.map(str::trim).filter(|s| !s.is_empty()),
+        "surfaceId": surface_id.map(str::trim).filter(|s| !s.is_empty()),
+        "fields": fields,
+    });
+    let bytes = serde_json::to_vec(&canonical).unwrap_or_default();
+    hex::encode(Sha256::digest(bytes))
+}
+
+/// Hash canonical field JSON for backward-compatibility integrity / dedupe.
 pub fn hash_structured_fields(fields: &Map<String, Value>) -> String {
     let canonical = Value::Object(fields.clone());
     let bytes = serde_json::to_vec(&canonical).unwrap_or_default();
@@ -299,19 +322,32 @@ pub fn seal_local_user_submission(
 ) -> Result<StructuredUserInput, String> {
     validate_submission(&submission)?;
     let form_id = submission.form_id.trim().to_string();
+    let event_name = submission
+        .event_name
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let application_id = submission
+        .application_id
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let surface_id = submission
+        .surface_id
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     let fields = submission.fields;
-    let content_hash = hash_structured_fields(&fields);
+    let content_hash = hash_structured_payload(
+        &form_id,
+        event_name.as_deref(),
+        application_id.as_deref(),
+        surface_id.as_deref(),
+        &fields,
+    );
     Ok(StructuredUserInput {
         submission_id: format!("sui-{}", Uuid::new_v4()),
         form_id,
-        application_id: submission
-            .application_id
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty()),
-        surface_id: submission
-            .surface_id
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty()),
+        event_name,
+        application_id,
+        surface_id,
         conversation_id: conversation_id.trim().to_string(),
         fields,
         trust_class: TrustClass::LocalUserGesture,
@@ -333,6 +369,10 @@ pub fn seal_from_ledger_payload(
         .and_then(|v| v.as_str())
         .unwrap_or(entry_id)
         .to_string();
+    let event_name = payload
+        .get("eventName")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     let fields = payload
         .get("values")
         .or_else(|| payload.get("fields"))
@@ -341,6 +381,7 @@ pub fn seal_from_ledger_payload(
         .unwrap_or_default();
     let submission = StructuredUserInputSubmission {
         form_id,
+        event_name,
         application_id: payload
             .get("applicationId")
             .and_then(|v| v.as_str())
@@ -368,10 +409,11 @@ pub fn provider_text_summary(input: &StructuredUserInput) -> String {
     let fields_json = serde_json::to_string(&input.fields).unwrap_or_else(|_| "{}".to_string());
     format!(
         "Structured user input (typed; trust=local_user_gesture; eligibility=local_user_content)\n\
-         submissionId={}\nformId={}\nconversationId={}\ncontentHash={}\n\
+         submissionId={}\nformId={}\neventName={}\nconversationId={}\ncontentHash={}\n\
          applicationId={}\nsurfaceId={}\nfields={}",
         input.submission_id,
         input.form_id,
+        input.event_name.as_deref().unwrap_or(""),
         input.conversation_id,
         input.content_hash,
         input.application_id.as_deref().unwrap_or(""),
@@ -469,8 +511,15 @@ pub fn adopt_stored_structured_input(meta: &Value) -> Option<StructuredUserInput
     // Authority: overwrite any deserialized trust / eligibility claims.
     sealed.trust_class = TrustClass::LocalUserGesture;
     sealed.instruction_eligibility = InstructionEligibility::LocalUserContent;
-    let expected = hash_structured_fields(&sealed.fields);
-    if sealed.content_hash != expected {
+    let expected = hash_structured_payload(
+        &sealed.form_id,
+        sealed.event_name.as_deref(),
+        sealed.application_id.as_deref(),
+        sealed.surface_id.as_deref(),
+        &sealed.fields,
+    );
+    let legacy_expected = hash_structured_fields(&sealed.fields);
+    if sealed.content_hash != expected && sealed.content_hash != legacy_expected {
         return None;
     }
     if sealed.conversation_id.trim().is_empty() || sealed.form_id.trim().is_empty() {
@@ -501,6 +550,7 @@ mod tests {
             "conv-1",
             StructuredUserInputSubmission {
                 form_id: "form-schedule".into(),
+                event_name: None,
                 application_id: Some("app-1".into()),
                 surface_id: Some("surf-1".into()),
                 fields: json!({"name": "Ada", "ok": true})
@@ -543,6 +593,7 @@ mod tests {
             "conv",
             StructuredUserInputSubmission {
                 form_id: "  ".into(),
+                event_name: None,
                 application_id: None,
                 surface_id: None,
                 fields: Map::new(),
@@ -601,6 +652,7 @@ mod tests {
             "conv-1",
             StructuredUserInputSubmission {
                 form_id: "form-1".into(),
+                event_name: None,
                 application_id: None,
                 surface_id: None,
                 fields: json!({"n": 1}).as_object().cloned().unwrap(),
@@ -625,6 +677,48 @@ mod tests {
         let mut bad = meta.clone();
         bad["structuredUserInput"]["fields"] = json!({"n": 999});
         assert!(adopt_stored_structured_input(&bad).is_none());
+    }
+
+    #[test]
+    fn event_name_is_sealed_and_tampered_event_name_fails_adopt() {
+        let sealed = seal_local_user_submission(
+            "conv-game-1",
+            StructuredUserInputSubmission {
+                form_id: "tictactoe-board".into(),
+                event_name: Some("game.move".into()),
+                application_id: Some("app-tictactoe".into()),
+                surface_id: Some("surf-tictactoe".into()),
+                fields: json!({"cell": 4, "player": "X"})
+                    .as_object()
+                    .cloned()
+                    .unwrap(),
+            },
+        )
+        .expect("seal game move");
+        assert_eq!(sealed.event_name.as_deref(), Some("game.move"));
+        let summary = provider_text_summary(&sealed);
+        assert!(summary.contains("eventName=game.move"));
+        assert!(summary.contains("surfaceId=surf-tictactoe"));
+
+        let meta = structured_metadata_value(&sealed);
+        let adopted = adopt_stored_structured_input(&meta).expect("adopt game move");
+        assert_eq!(adopted.event_name.as_deref(), Some("game.move"));
+
+        // Tampering with eventName must cause hash verification failure!
+        let mut tampered_event = meta.clone();
+        tampered_event["structuredUserInput"]["eventName"] = json!("admin.grant_all");
+        assert!(
+            adopt_stored_structured_input(&tampered_event).is_none(),
+            "tampered eventName must be rejected by hash integrity"
+        );
+
+        // Tampering with surfaceId must also cause hash verification failure!
+        let mut tampered_surface = meta.clone();
+        tampered_surface["structuredUserInput"]["surfaceId"] = json!("surf-other");
+        assert!(
+            adopt_stored_structured_input(&tampered_surface).is_none(),
+            "tampered surfaceId must be rejected by hash integrity"
+        );
     }
 
     #[test]

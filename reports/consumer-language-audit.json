@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-16T19:35:19.508Z",
-  "commit": "1839c1bd1f8baad098dc3fb2b60de7e52c09a863",
+  "generatedAt": "2026-09-27T02:19:41.674Z",
+  "commit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
   "dirty": true,
-  "fingerprint": "3639d324318ba0d83e8cb4047cc05bfd6ea5b4222be21b2f7ae859561c007d97",
+  "fingerprint": "504f93850d247e4b221cd58a6677057f6e071aca422f00590e3e624d0ab50bc0",
   "command": "audit:consumer-language",
-  "scannedFiles": 188,
-  "findingCount": 0,
+  "scannedFiles": 194,
+  "findingCount": 3,
   "terms": [
     {
       "term": "Tool Canvas",
@@ -38,5 +38,27 @@
       "proposedCanonical": "App / panel (avoid Surface as UI label)"
     }
   ],
-  "findings": []
+  "findings": [
+    {
+      "file": "src/lib/benchmarks/fixture-tools.ts",
+      "line": 794,
+      "term": "Gateway",
+      "proposedCanonical": "(internal — avoid in consumer UI)",
+      "excerpt": "{ id: \"item-1\", text: \"Complete Coreside Search Gateway audit\", checked: true },"
+    },
+    {
+      "file": "src/lib/benchmarks/fixture-tools.ts",
+      "line": 975,
+      "term": "Gateway",
+      "proposedCanonical": "(internal — avoid in consumer UI)",
+      "excerpt": "props: { label: \"Add Milestone\", placeholder: \"e.g. Supabase Gateway deploy\" },"
+    },
+    {
+      "file": "src/lib/benchmarks/fixture-tools.ts",
+      "line": 1004,
+      "term": "Gateway",
+      "proposedCanonical": "(internal — avoid in consumer UI)",
+      "excerpt": "{ time: \"2026-09-16 10:00\", event: \"Exa Gateway Integration\", owner: \"Backend\", status: \"Verified\" },"
+    }
+  ]
 }

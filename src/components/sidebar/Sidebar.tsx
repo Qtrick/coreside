@@ -55,6 +55,7 @@ export function Sidebar() {
     setCreateProjectDialogOpen,
     setEditProjectDialogOpen,
     setAddChatsDialogOpen,
+    setManageContextDialogOpen,
     setDeleteProjectDialogOpen,
     setRenameConversationDialogOpen,
     createChatInProject,
@@ -89,6 +90,7 @@ export function Sidebar() {
       setCreateProjectDialogOpen: s.setCreateProjectDialogOpen,
       setEditProjectDialogOpen: s.setEditProjectDialogOpen,
       setAddChatsDialogOpen: s.setAddChatsDialogOpen,
+      setManageContextDialogOpen: s.setManageContextDialogOpen,
       setDeleteProjectDialogOpen: s.setDeleteProjectDialogOpen,
       setRenameConversationDialogOpen: s.setRenameConversationDialogOpen,
       createChatInProject: s.createChatInProject,
@@ -441,7 +443,7 @@ export function Sidebar() {
           onAddChats={() => setAddChatsDialogOpen(menuProject.id)}
           onRename={() => setEditProjectDialogOpen(menuProject.id)}
           onEditInstructions={() => setEditProjectDialogOpen(menuProject.id)}
-          onManageContext={() => void navigateToProject(menuProject.id)}
+          onManageContext={() => setManageContextDialogOpen(menuProject.id)}
           onExport={() => {
             const path = window.prompt(
               "Save project export to path:",

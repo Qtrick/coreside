@@ -26,6 +26,7 @@ import {
 import { CreateProjectDialog } from "@/components/projects/CreateProjectDialog";
 import { EditProjectDialog } from "@/components/projects/EditProjectDialog";
 import { AddChatsToProjectDialog } from "@/components/projects/AddChatsToProjectDialog";
+import { ProjectContextDialog } from "@/components/projects/ProjectContextDialog";
 import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
 import { RenameConversationDialog } from "@/components/projects/RenameConversationDialog";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -89,6 +90,15 @@ export function AppShell() {
   const addChatsProjectId = useAppStore((s) => s.addChatsProjectId);
   const setAddChatsDialogOpen = useAppStore((s) => s.setAddChatsDialogOpen);
   const assignChats = useAppStore((s) => s.assignChats);
+
+  const manageContextDialogOpen = useAppStore((s) => s.manageContextDialogOpen);
+  const manageContextProjectId = useAppStore((s) => s.manageContextProjectId);
+  const setManageContextDialogOpen = useAppStore(
+    (s) => s.setManageContextDialogOpen,
+  );
+  const manageContextProject = projects.find(
+    (p) => p.id === manageContextProjectId,
+  );
 
   const deleteProjectDialogOpen = useAppStore((s) => s.deleteProjectDialogOpen);
   const deleteProjectId = useAppStore((s) => s.deleteProjectId);
@@ -280,9 +290,7 @@ export function AppShell() {
             onNewChat={() => void createChatInProject(activeProject.id)}
             onOpenChat={(id) => void navigateToChat(id)}
             onEditProject={() => setEditProjectDialogOpen(activeProject.id)}
-            onManageContext={() => {
-              /* Project context search arrives in a later phase — no browser alert. */
-            }}
+            onManageContext={() => setManageContextDialogOpen(activeProject.id)}
             onAddChats={() => setAddChatsDialogOpen(activeProject.id)}
           />
         ) : (
@@ -349,6 +357,17 @@ export function AppShell() {
             : Promise.resolve()
         }
       />
+      {manageContextProject && (
+        <ProjectContextDialog
+          open={manageContextDialogOpen}
+          project={manageContextProject}
+          onClose={() => setManageContextDialogOpen(null)}
+          onOpenChat={(chatId) => {
+            setManageContextDialogOpen(null);
+            void navigateToChat(chatId);
+          }}
+        />
+      )}
       <DeleteProjectDialog
         open={deleteProjectDialogOpen}
         projectName={deleteProjectTarget?.name ?? "Project"}

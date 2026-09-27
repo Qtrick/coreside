@@ -215,13 +215,20 @@ export function TextNode({ component }: ToolNodeProps) {
 }
 
 export function BadgeNode({ component }: ToolNodeProps) {
+  const { getValue } = useToolRuntime();
   const variant = asString(component.props?.variant, "default");
+  const stateKey = stateKeyFor(component, "valueKey", "stateKey");
+  const boundValue = stateKey ? getValue<string>(stateKey) : undefined;
+  const text =
+    boundValue !== undefined && boundValue !== null && String(boundValue) !== ""
+      ? String(boundValue)
+      : asString(component.props?.text, asString(component.props?.label));
   return (
     <span
       className={`tr-badge${variant === "accent" ? " accent" : ""}`}
       data-component-id={component.id}
     >
-      {asString(component.props?.text, asString(component.props?.label))}
+      {text}
     </span>
   );
 }
@@ -539,13 +546,19 @@ export function TableNode({ component }: ToolNodeProps) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, index) => (
-            <tr key={index}>
-              {normalized.map((col) => (
-                <td key={col.key}>{String(row[col.key] ?? "")}</td>
-              ))}
-            </tr>
-          ))}
+          {rows.map((row, index) => {
+            const rowKey =
+              row && (row.id !== undefined || row.key !== undefined)
+                ? String(row.id ?? row.key)
+                : `row-${index}`;
+            return (
+              <tr key={rowKey}>
+                {normalized.map((col, colIdx) => (
+                  <td key={col.key || `col-${colIdx}`}>{String(row[col.key] ?? "")}</td>
+                ))}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -687,7 +700,7 @@ function resolveButtonActions(component: ToolComponent): ActionDefinition[] {
 }
 
 export function ButtonNode({ component }: ToolNodeProps) {
-  const { runActions } = useToolRuntime();
+  const { runActions, getValue } = useToolRuntime();
   const variant = asString(component.props?.variant, "secondary");
   const className =
     variant === "primary"
@@ -695,6 +708,12 @@ export function ButtonNode({ component }: ToolNodeProps) {
       : variant === "danger"
         ? "btn btn-danger"
         : "btn btn-secondary";
+  const stateKey = stateKeyFor(component, "valueKey", "stateKey");
+  const boundValue = stateKey ? getValue<string>(stateKey) : undefined;
+  const label =
+    boundValue !== undefined && boundValue !== null && String(boundValue) !== ""
+      ? String(boundValue)
+      : asString(component.props?.label, "Button");
   return (
     <button
       type="button"
@@ -702,7 +721,7 @@ export function ButtonNode({ component }: ToolNodeProps) {
       data-component-id={component.id}
       onClick={() => runActions(resolveButtonActions(component), component.id)}
     >
-      {asString(component.props?.label, "Button")}
+      {label}
     </button>
   );
 }

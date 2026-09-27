@@ -114,8 +114,9 @@ pub use streaming::{NdjsonFrameParser, StreamEvent, StreamParseError, StreamPars
 #[allow(unused_imports)]
 pub use surfaces::{
     archive_surface, create_inline_surface, delete_surface, get_surface, get_surface_state,
-    list_inline_surfaces, promote_inline_to_tool, restore_surface, save_surface_state,
-    update_surface_definition, upsert_surface_from_tool, DeleteSurfaceOptions, SurfaceRecord,
+    list_inline_surfaces, promote_inline_to_tool, resolve_and_authorize_surface_scope,
+    restore_surface, save_surface_state, update_surface_definition, upsert_surface_from_tool,
+    DeleteSurfaceOptions, SurfaceRecord,
 };
 #[allow(unused_imports)]
 pub use transactions::{

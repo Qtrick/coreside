@@ -59,7 +59,32 @@ When modifying, tuning, restyling, or adding to an existing tool, prefer emittin
 }
 ```
 
-### Example 3: Full Tree Replacement (`tool_change`)
+### Example 3: Targeted Interactive Application / Game Turn (`state.patch`)
+When responding to a game move or interactive tool action (e.g. `eventName: "game.move"`):
+- Update only the affected game state keys (such as `c4: "O"`, `status`, `turn`) using `state.patch`.
+- Set `"silent": true` so the move does not clutter the chat transcript with massive bubbles.
+- Do NOT recreate the whole board or replace unrelated component subtrees.
+```json
+{
+  "schemaVersion": "2",
+  "responseType": "message",
+  "silent": true,
+  "assistantMessage": "AI played square 5. Your turn (X)!",
+  "operations": [
+    {
+      "type": "state.patch",
+      "surfaceId": "<active-surface-id>",
+      "payload": {
+        "c4": "O",
+        "turn": "X",
+        "status": "AI played square 5. Your turn (X)!"
+      }
+    }
+  ]
+}
+```
+
+### Example 4: Full Tree Replacement (`tool_change`)
 Use `tool_change` **only** when:
 1. The user explicitly requests a complete overhaul or redesign from scratch.
 2. The fundamental layout archetype changes (e.g. converting a stack into a multi-column dashboard).

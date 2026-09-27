@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-24T17:55:57.344Z",
-  "commit": "0232a391414f9ae2c01bf7e5aa88c02f25d3c5c6",
+  "generatedAt": "2026-09-27T02:19:41.822Z",
+  "commit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
   "dirty": true,
-  "fingerprint": "f368dcfc2f3106eb4cae32df0836360737d0925e09015a0bea261a9df30172ad",
+  "fingerprint": "504f93850d247e4b221cd58a6677057f6e071aca422f00590e3e624d0ab50bc0",
   "command": "audit:tutorial-targets",
   "declaredTargets": [
     "ai-connections-nav",
@@ -43,37 +43,37 @@
     {
       "id": "help-learning",
       "file": "src/components/settings/SettingsPanel.tsx",
-      "line": 429
+      "line": 447
     },
     {
       "id": "help-learning-nav",
       "file": "src/components/settings/SettingsPanel.tsx",
-      "line": 429
+      "line": 447
     },
     {
       "id": "ai-access",
       "file": "src/components/settings/SettingsPanel.tsx",
-      "line": 429
+      "line": 447
     },
     {
       "id": "ai-connections-nav",
       "file": "src/components/settings/SettingsPanel.tsx",
-      "line": 429
+      "line": 447
     },
     {
       "id": "sidebar-projects",
       "file": "src/components/sidebar/Sidebar.tsx",
-      "line": 207
+      "line": 209
     },
     {
       "id": "app-panel",
       "file": "src/components/tool-canvas/ToolCanvas.tsx",
-      "line": 392
+      "line": 405
     },
     {
       "id": "app-panel",
       "file": "src/components/tool-canvas/ToolCanvas.tsx",
-      "line": 424
+      "line": 437
     }
   ]
 }

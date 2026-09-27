@@ -31,6 +31,7 @@ type AppRouteShellProps = {
     eventName: string;
     componentId?: string;
     values: Record<string, unknown>;
+    silent?: boolean;
   }) => void;
   onPendingApproval?: (outcome: Extract<ActionOutcome, { status: "pendingApproval" }>) => void;
 };

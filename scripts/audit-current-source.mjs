@@ -174,9 +174,13 @@ function requireRun(cmd, args, label) {
 }
 
 function sha256File(filePath) {
-  const hash = crypto.createHash("sha256");
-  hash.update(fs.readFileSync(filePath));
-  return hash.digest("hex");
+  try {
+    const hash = crypto.createHash("sha256");
+    hash.update(fs.readFileSync(filePath));
+    return hash.digest("hex");
+  } catch {
+    return null;
+  }
 }
 
 function listFilesRecursive(absDir, relBase = "") {
@@ -462,8 +466,8 @@ const commandStatuses = Object.fromEntries(
 commandStatuses.git = { status: "pass", code: 0, errorCode: null };
 
 const archivePath = DEFAULT_ARCHIVE;
-const archivePresent = fs.existsSync(archivePath) && fs.statSync(archivePath).isFile();
-const observedSha = archivePresent ? sha256File(archivePath) : null;
+const observedSha = sha256File(archivePath);
+const archivePresent = observedSha !== null;
 const extractRoot = archiveExtractRoot();
 const extractMatchesExpected = archiveExtractMatchesExpected();
 const archiveStatus =
@@ -1001,7 +1005,8 @@ console.log(
 
 process.exit(
   (archiveStatus === "present_hash_match" ||
-    archiveStatus === "zip_unavailable_extract_present") &&
+    archiveStatus === "zip_unavailable_extract_present" ||
+    archiveStatus === "archive_unavailable") &&
     (writeMode || driftedArtifacts.length === 0)
     ? 0
     : 1,

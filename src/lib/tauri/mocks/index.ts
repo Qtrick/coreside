@@ -969,11 +969,17 @@ export async function mockInvoke<T>(
         args?.structuredUserInput && typeof args.structuredUserInput === "object"
           ? (args.structuredUserInput as {
               formId?: string;
+              eventName?: string | null;
               applicationId?: string | null;
               surfaceId?: string | null;
               fields?: Record<string, unknown>;
             })
           : null;
+      const isSilentInteraction = Boolean(
+        structuredUserInput?.eventName?.startsWith("game.") ||
+        structuredUserInput?.eventName?.endsWith(".silent") ||
+        structuredUserInput?.fields?.silent === true
+      );
       const messages = mockDb.messages.get(conversationId) ?? [];
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
@@ -1004,6 +1010,7 @@ export async function mockInvoke<T>(
                       structuredUserInput: {
                         submissionId: `mock-sui-${crypto.randomUUID()}`,
                         formId: String(structuredUserInput.formId ?? "form"),
+                        eventName: structuredUserInput.eventName ?? null,
                         applicationId: structuredUserInput.applicationId ?? null,
                         surfaceId: structuredUserInput.surfaceId ?? null,
                         conversationId,
@@ -1015,6 +1022,7 @@ export async function mockInvoke<T>(
                       structuredTrustSource: "typed_part",
                     }
                   : {}),
+                ...(isSilentInteraction ? { silent: true } : {}),
               }
             : null,
       };

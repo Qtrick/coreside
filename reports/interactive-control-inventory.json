@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-26T18:28:22.062Z",
-  "commit": "4c4c9bfbcdf02aebc4940fa5510cbd9d631e9758",
+  "generatedAt": "2026-09-27T02:19:41.521Z",
+  "commit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
   "dirty": true,
   "command": "audit:interactive-controls",
   "evidenceLevel": "Scaffolded",
   "note": "Static regex inventory only — not runtime interactivity proof.",
-  "filesScanned": 88,
-  "filesWithControls": 65,
-  "approximateTotalControls": 727,
+  "filesScanned": 90,
+  "filesWithControls": 66,
+  "approximateTotalControls": 739,
   "files": [
     {
       "file": "src/components/action-log/ActionLog.tsx",
@@ -368,6 +368,19 @@
         "select": 1
       },
       "flags": {}
+    },
+    {
+      "file": "src/components/projects/ProjectContextDialog.tsx",
+      "approximateControlCount": 12,
+      "counts": {
+        "button": 4,
+        "type_submit": 1,
+        "onClick": 6,
+        "input_type": 1
+      },
+      "flags": {
+        "placeholder": true
+      }
     },
     {
       "file": "src/components/projects/ProjectList.tsx",

@@ -322,6 +322,45 @@ pub fn get_surface(db: &Database, id: &str) -> DbResult<SurfaceRecord> {
         })
 }
 
+/// Authoritatively resolve a surface and verify that its persisted conversation_id
+/// and project_id match expected scopes.
+/// Fails closed if the surface does not exist, belongs to a different conversation/project,
+/// or its parent conversation was deleted.
+pub fn resolve_and_authorize_surface_scope(
+    db: &Database,
+    surface_id: &str,
+    expected_conversation_id: Option<&str>,
+    expected_project_id: Option<&str>,
+) -> DbResult<SurfaceRecord> {
+    let surface = get_surface(db, surface_id)?;
+    if let Some(expected_cid) = expected_conversation_id {
+        if let Some(ref actual_cid) = surface.conversation_id {
+            if actual_cid != expected_cid {
+                return Err(DbError::Invalid(format!(
+                    "surface scope mismatch: surface {surface_id} belongs to conversation {actual_cid}, not {expected_cid}"
+                )));
+            }
+        }
+    }
+    if let Some(expected_pid) = expected_project_id {
+        if let Some(ref actual_pid) = surface.project_id {
+            if actual_pid != expected_pid {
+                return Err(DbError::Invalid(format!(
+                    "surface scope mismatch: surface {surface_id} belongs to project {actual_pid}, not {expected_pid}"
+                )));
+            }
+        }
+    }
+    if let Some(ref cid) = surface.conversation_id {
+        if !crate::db::conversation_exists(db, cid) {
+            return Err(DbError::NotFound(format!(
+                "conversation {cid} has been deleted"
+            )));
+        }
+    }
+    Ok(surface)
+}
+
 /// List all active inline surfaces for a conversation.
 ///
 /// Do **not** apply `MAX_INLINE_SURFACES_VISIBLE` here — that ceiling is UI-only.

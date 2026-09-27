@@ -1,0 +1,183 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "generatedAt": "2026-09-27T02:26:14.266Z",
+  "commit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
+  "dirty": true,
+  "totalControls": 15,
+  "classes": {
+    "READ_ONLY": 0,
+    "NON_DESTRUCTIVE": 9,
+    "DATA_MUTATING": 4,
+    "DESTRUCTIVE": 2,
+    "SECURITY_SENSITIVE": 0,
+    "NATIVE_OS": 0
+  },
+  "controls": [
+    {
+      "control": "Sidebar Toggle",
+      "component": "AppShell",
+      "sourceFile": "src/components/layout/AppShell.tsx",
+      "view": "MainShell",
+      "interactionClass": "NON_DESTRUCTIVE",
+      "test": "e2e/specs/desktop-interaction-journeys.e2e.ts",
+      "testType": "E2E_DESKTOP",
+      "status": "PASS",
+      "evidence": "Proven by automated desktop test"
+    },
+    {
+      "control": "New Chat Button",
+      "component": "Sidebar",
+      "sourceFile": "src/components/sidebar/Sidebar.tsx",
+      "view": "Sidebar",
+      "interactionClass": "NON_DESTRUCTIVE",
+      "test": "e2e/specs/desktop-interaction-journeys.e2e.ts",
+      "testType": "E2E_DESKTOP",
+      "status": "PASS",
+      "evidence": "Proven by automated desktop test"
+    },
+    {
+      "control": "Project Context Manage Button",
+      "component": "ProjectPage",
+      "sourceFile": "src/components/projects/ProjectContextDialog.tsx",
+      "view": "ProjectPage",
+      "interactionClass": "NON_DESTRUCTIVE",
+      "test": "src/components/projects/ProjectContextDialog.test.tsx",
+      "testType": "UNIT",
+      "status": "PASS",
+      "evidence": "Proven by automated test"
+    },
+    {
+      "control": "Message Textarea",
+      "component": "ChatComposer",
+      "sourceFile": "src/components/chat/ChatComposer.tsx",
+      "view": "Chat",
+      "interactionClass": "NON_DESTRUCTIVE",
+      "test": "src/components/chat/ChatComposer.test.tsx",
+      "testType": "UNIT",
+      "status": "PASS",
+      "evidence": "Proven by automated test"
+    },
+    {
+      "control": "Send Message Button",
+      "component": "ChatComposer",
+      "sourceFile": "src/components/chat/ChatComposer.tsx",
+      "view": "Chat",
+      "interactionClass": "DATA_MUTATING",
+      "test": "src/components/chat/ChatComposer.test.tsx",
+      "testType": "UNIT",
+      "status": "PASS",
+      "evidence": "Proven by automated test"
+    },
+    {
+      "control": "Stop Generation Button",
+      "component": "ChatComposer",
+      "sourceFile": "src/components/chat/ChatComposer.tsx",
+      "view": "Chat",
+      "interactionClass": "NON_DESTRUCTIVE",
+      "test": "src/components/chat/ChatComposer.test.tsx",
+      "testType": "UNIT",
+      "status": "PASS",
+      "evidence": "Proven by automated test"
+    },
+    {
+      "control": "Tic-Tac-Toe Move Button (game.move)",
+      "component": "ButtonNode",
+      "sourceFile": "src/components/tool-renderer/nodes.tsx",
+      "view": "InlineSurface",
+      "interactionClass": "DATA_MUTATING",
+      "test": "tests/interactive-game.test.tsx",
+      "testType": "INTEGRATION",
+      "status": "PASS",
+      "evidence": "Proven by automated test & mock provider fixture"
+    },
+    {
+      "control": "Tic-Tac-Toe Reset Button (game.reset)",
+      "component": "ButtonNode",
+      "sourceFile": "src/components/tool-renderer/nodes.tsx",
+      "view": "InlineSurface",
+      "interactionClass": "DATA_MUTATING",
+      "test": "tests/interactive-game.test.tsx",
+      "testType": "INTEGRATION",
+      "status": "PASS",
+      "evidence": "Proven by automated test & mock provider fixture"
+    },
+    {
+      "control": "Form Text Input",
+      "component": "TextInputNode",
+      "sourceFile": "src/components/tool-renderer/nodes.tsx",
+      "view": "ToolRenderer",
+      "interactionClass": "NON_DESTRUCTIVE",
+      "test": "tests/component-gallery.test.tsx",
+      "testType": "INTEGRATION",
+      "status": "PASS",
+      "evidence": "Proven by automated test"
+    },
+    {
+      "control": "Form Submit Button",
+      "component": "SubmitButtonNode",
+      "sourceFile": "src/components/tool-renderer/nodes.tsx",
+      "view": "ToolRenderer",
+      "interactionClass": "DATA_MUTATING",
+      "test": "tests/component-gallery.test.tsx",
+      "testType": "INTEGRATION",
+      "status": "PASS",
+      "evidence": "Proven by automated test"
+    },
+    {
+      "control": "Theme Selector (System/Light/Dark)",
+      "component": "AppearanceSettings",
+      "sourceFile": "src/components/settings/AppearanceSettings.tsx",
+      "view": "SettingsModal",
+      "interactionClass": "NON_DESTRUCTIVE",
+      "test": "e2e/specs/desktop-interaction-journeys.e2e.ts",
+      "testType": "E2E_DESKTOP",
+      "status": "PASS",
+      "evidence": "Proven by automated desktop test"
+    },
+    {
+      "control": "Transparency Slider (0-100)",
+      "component": "AppearanceSettings",
+      "sourceFile": "src/components/settings/AppearanceSettings.tsx",
+      "view": "SettingsModal",
+      "interactionClass": "NON_DESTRUCTIVE",
+      "test": "src/components/settings/AppearanceSettings.test.tsx",
+      "testType": "UNIT",
+      "status": "PASS",
+      "evidence": "Proven by automated test"
+    },
+    {
+      "control": "Wallpaper Preset Selector",
+      "component": "AppearanceSettings",
+      "sourceFile": "src/components/settings/AppearanceSettings.tsx",
+      "view": "SettingsModal",
+      "interactionClass": "NON_DESTRUCTIVE",
+      "test": "src/components/settings/AppearanceSettings.test.tsx",
+      "testType": "UNIT",
+      "status": "PASS",
+      "evidence": "Proven by automated test"
+    },
+    {
+      "control": "Delete Conversation",
+      "component": "ConversationItem",
+      "sourceFile": "src/components/sidebar/ConversationItem.tsx",
+      "view": "Sidebar",
+      "interactionClass": "DESTRUCTIVE",
+      "test": "src/components/sidebar/ConversationItem.test.tsx",
+      "testType": "UNIT",
+      "status": "PASS",
+      "evidence": "Proven by automated test with confirmation dialog"
+    },
+    {
+      "control": "Clear Storage / Cache",
+      "component": "DataStorageSettings",
+      "sourceFile": "src/components/settings/DataStorageSettings.tsx",
+      "view": "SettingsModal",
+      "interactionClass": "DESTRUCTIVE",
+      "test": "src/components/settings/DataStorageSettings.test.tsx",
+      "testType": "UNIT",
+      "status": "PASS",
+      "evidence": "Proven by automated test with isolated DB fixture"
+    }
+  ]
+}
