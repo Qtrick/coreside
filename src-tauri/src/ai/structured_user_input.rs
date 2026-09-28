@@ -609,11 +609,24 @@ pub fn adopt_stored_structured_input(meta: &Value) -> Option<StructuredUserInput
         &sealed.fields,
     );
     let legacy_fields = hash_structured_fields(&sealed.fields);
-    if sealed.content_hash != expected
-        && sealed.content_hash != legacy_expected
-        && sealed.content_hash != legacy_fields
-    {
-        return None;
+    let has_modern_envelope = sealed.surface_revision.is_some()
+        || sealed.state_revision.is_some()
+        || sealed.component_id.is_some()
+        || sealed.idempotency_key.is_some();
+
+    if has_modern_envelope {
+        // Modern records MUST match the comprehensive modern hash. Downgrade to legacy hash is forbidden.
+        if sealed.content_hash != expected {
+            return None;
+        }
+    } else {
+        // Legacy records without any modern envelope metadata may validate against legacy hash variants.
+        if sealed.content_hash != expected
+            && sealed.content_hash != legacy_expected
+            && sealed.content_hash != legacy_fields
+        {
+            return None;
+        }
     }
     if sealed.conversation_id.trim().is_empty() || sealed.form_id.trim().is_empty() {
         return None;
@@ -875,6 +888,33 @@ mod tests {
         assert!(
             adopt_stored_structured_input(&tampered4).is_none(),
             "tampered componentId must fail"
+        );
+
+        // Security: Downgrade attack — replace modern content_hash with legacy hash while retaining modern envelope fields
+        let legacy_hash = hash_structured_payload_legacy(
+            &sealed.form_id,
+            sealed.event_name.as_deref(),
+            sealed.application_id.as_deref(),
+            sealed.surface_id.as_deref(),
+            &sealed.fields,
+        );
+        let mut downgrade_attack = meta.clone();
+        downgrade_attack["structuredUserInput"]["contentHash"] = json!(legacy_hash);
+        assert!(
+            adopt_stored_structured_input(&downgrade_attack).is_none(),
+            "legacy hash downgrade MUST fail when modern envelope fields are present"
+        );
+
+        // Legitimate legacy record without modern envelope fields can still validate against legacy hash
+        let mut pure_legacy = meta.clone();
+        pure_legacy["structuredUserInput"]["surfaceRevision"] = json!(null);
+        pure_legacy["structuredUserInput"]["stateRevision"] = json!(null);
+        pure_legacy["structuredUserInput"]["componentId"] = json!(null);
+        pure_legacy["structuredUserInput"]["idempotencyKey"] = json!(null);
+        pure_legacy["structuredUserInput"]["contentHash"] = json!(legacy_hash);
+        assert!(
+            adopt_stored_structured_input(&pure_legacy).is_some(),
+            "pure legacy record with legacy hash must be adopted for backward compatibility"
         );
     }
 

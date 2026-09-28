@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "product": "Coreside",
   "accessDate": "2026-09-27",
-  "generatedAt": "2026-09-27T21:01:56.078Z",
-  "commit": "0477f95b7a066ffe2a511d29d57860ff73626b6a",
+  "generatedAt": "2026-09-27T22:41:18.839Z",
+  "commit": "f02e69c0d634e93d27184f971834d1cbce249668",
   "dirty": true,
   "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
   "command": "audit:partial-update",
@@ -39,9 +39,9 @@
     "Absent": 0,
     "Scaffolded": 0,
     "Implemented": 0,
-    "Unit Verified": 11,
+    "Unit Verified": 13,
     "Integrated – Not Verified": 0,
-    "Desktop Verified": 2,
+    "Desktop Verified": 0,
     "Packaged Verified": 0,
     "Cross-Platform Verified": 0,
     "Human Accepted": 0,
@@ -49,11 +49,11 @@
     "Deferred": 2
   },
   "highestValueGap": {
-    "id": "PU-PARSE",
-    "name": "NDJSON / UpdateStreamParser incremental parse",
+    "id": "PU-PROGRESSIVE-PREVIEW",
+    "name": "Progressive generated-surface preview",
     "status": "Unit Verified",
-    "userValue": 9,
-    "rationale": "Highest user-value secure feature still below Desktop/Packaged Verified."
+    "userValue": 10,
+    "rationale": "Progressive trusted surface paint is Unit Verified with SQLite cancel/incomplete rollback evidence (PreviewTransaction + overlay + ToolCanvas) but lacks desktop/packaged progressive-surface journeys — Journey 12 covers text streaming only."
   },
   "methodology": [
     "Content probes on Partial Update and Coreside trees (mustMatch/anyMatch).",
@@ -69,13 +69,13 @@
       "name": "Provider streaming (live deltas)",
       "category": "streaming",
       "userValue": 10,
-      "status": "Desktop Verified",
+      "status": "Unit Verified",
       "partialUpdatePresent": true,
       "coreside": {
         "implOk": true,
         "wiredOk": true,
         "unitOk": true,
-        "desktopOk": true,
+        "desktopOk": false,
         "packagedOk": false
       },
       "notes": [
@@ -126,10 +126,6 @@
           "ok": true,
           "fresh": true,
           "level": "Unit Verified"
-        },
-        {
-          "side": "e2e-results",
-          "ok": true
         },
         {
           "side": "desktopReport",
@@ -200,13 +196,13 @@
       "name": "Progressive generated-surface preview",
       "category": "generative",
       "userValue": 10,
-      "status": "Desktop Verified",
+      "status": "Unit Verified",
       "partialUpdatePresent": true,
       "coreside": {
         "implOk": true,
         "wiredOk": true,
         "unitOk": true,
-        "desktopOk": true,
+        "desktopOk": false,
         "packagedOk": false
       },
       "notes": [
@@ -254,10 +250,6 @@
         {
           "side": "unitFile",
           "path": "src-tauri/src/ai/mock.rs",
-          "ok": true
-        },
-        {
-          "side": "e2e-results",
           "ok": true
         },
         {

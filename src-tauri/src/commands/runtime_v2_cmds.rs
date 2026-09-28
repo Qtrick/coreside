@@ -16,9 +16,10 @@ use crate::runtime_v2::{
     list_turn_timeline_events, navigate_route, promote_inline_to_tool, recover_stale_active,
     remove_queued, route_back, route_forward, save_continuity, save_draft, save_surface_state,
     schedule_and_apply, schedule_patches, set_route_state, store_diagnostics, surfaces,
-    suspend_surface, undo_transaction, update_surface_definition, AgentResponseV2, AppOperation,
-    AppTransactionRecord, ApplyResult, ChatBranchRecord, ContextLedgerEntry, ContinuitySnapshot,
-    ConversationEventRecord, NavigateResult, PatchPriority, ProviderConformanceRecord, QueueItem,
+    suspend_surface, undo_transaction, update_surface_definition, ActionOutcome, AgentResponseV2,
+    AppOperation, AppTransactionRecord, ApplyResult, ChatBranchRecord, ContextLedgerEntry,
+    ContinuitySnapshot, ConversationEventRecord, DeterministicRng, InteractiveAppDefinition,
+    LegalActionSummary, NavigateResult, PatchPriority, ProviderConformanceRecord, QueueItem,
     RouteState, ScheduleRequest, ScheduledPatch, SnapshotRecord, SurfaceDraft, SurfaceRecord,
     SuspensionState, TurnTimelineEvent,
 };
@@ -1106,6 +1107,92 @@ pub fn runtime_v2_reconstruct_replay_state(
         target_transaction_id.as_deref(),
     )
     .map_err(|e| CommandError::new("db", e.to_string()))
+}
+
+#[tauri::command]
+pub fn runtime_v2_validate_interactive_definition(
+    definition: InteractiveAppDefinition,
+) -> Result<Value, CommandError> {
+    definition
+        .validate()
+        .map_err(|e| CommandError::new("invalid_definition", e))?;
+    definition
+        .run_self_tests()
+        .map_err(|e| CommandError::new("self_test_failed", e))?;
+    Ok(serde_json::json!({
+        "valid": true,
+        "selfTestsPassed": true,
+        "actionsCount": definition.actions.len(),
+    }))
+}
+
+#[tauri::command]
+pub fn runtime_v2_get_interactive_fixture(
+    name: String,
+) -> Result<InteractiveAppDefinition, CommandError> {
+    match name.to_lowercase().as_str() {
+        "tic-tac-toe" | "tictactoe" => {
+            Ok(runtime_v2::rules_engine::fixtures::fixture_tic_tac_toe())
+        }
+        "connect-four" | "connectfour" => {
+            Ok(runtime_v2::rules_engine::fixtures::fixture_connect_four())
+        }
+        "checkers" => Ok(runtime_v2::rules_engine::fixtures::fixture_checkers()),
+        "chess" => Ok(runtime_v2::rules_engine::fixtures::fixture_chess()),
+        "2048" => Ok(runtime_v2::rules_engine::fixtures::fixture_2048()),
+        "minesweeper" => Ok(runtime_v2::rules_engine::fixtures::fixture_minesweeper()),
+        "sudoku" => Ok(runtime_v2::rules_engine::fixtures::fixture_sudoku()),
+        "card-deck" | "cards" => Ok(runtime_v2::rules_engine::fixtures::fixture_card_deck()),
+        "quiz" => Ok(runtime_v2::rules_engine::fixtures::fixture_quiz()),
+        "calculator" => Ok(runtime_v2::rules_engine::fixtures::fixture_calculator()),
+        "simulation" => Ok(runtime_v2::rules_engine::fixtures::fixture_simulation()),
+        "synthetic" | "custom" => {
+            Ok(runtime_v2::rules_engine::fixtures::fixture_custom_rule_game())
+        }
+        other => Err(CommandError::new(
+            "not_found",
+            format!("Interactive fixture '{other}' not found"),
+        )),
+    }
+}
+
+#[tauri::command]
+pub fn runtime_v2_is_legal_action(
+    definition: InteractiveAppDefinition,
+    state: Value,
+    action_id: String,
+    params: Option<Value>,
+    actor: String,
+) -> Result<bool, CommandError> {
+    let p = params.unwrap_or_else(|| serde_json::json!({}));
+    definition
+        .is_legal_action(&state, &action_id, &p, &actor)
+        .map_err(|e| CommandError::new("validation_error", e))
+}
+
+#[tauri::command]
+pub fn runtime_v2_execute_interactive_action(
+    definition: InteractiveAppDefinition,
+    mut state: Value,
+    action_id: String,
+    params: Option<Value>,
+    actor: String,
+    random_seed: Option<u64>,
+) -> Result<ActionOutcome, CommandError> {
+    let mut rng = DeterministicRng::new(random_seed.or(definition.random_seed).unwrap_or(42));
+    let p = params.unwrap_or_else(|| serde_json::json!({}));
+    definition
+        .execute_action(&mut state, &action_id, &p, &actor, &mut rng)
+        .map_err(|e| CommandError::new("illegal_action", e))
+}
+
+#[tauri::command]
+pub fn runtime_v2_get_legal_actions(
+    definition: InteractiveAppDefinition,
+    state: Value,
+    actor: String,
+) -> Result<Vec<LegalActionSummary>, CommandError> {
+    Ok(definition.get_legal_actions(&state, &actor))
 }
 
 #[cfg(test)]

@@ -327,11 +327,23 @@ export function ToolRenderer({
         }
         return action;
       });
+      let pendingSubmitToAgent: {
+        toolId: string;
+        eventName: string;
+        componentId?: string;
+        values: Record<string, unknown>;
+        silent?: boolean;
+      } | null = null;
+
       const result = await applyActionsAsync(normalized, {
         state: stateRef.current,
         toolId: tool.id,
         bindings: declaredBindings,
-        onSubmitToAgent: isPreviewMode ? undefined : onSubmitToAgent,
+        onSubmitToAgent: isPreviewMode
+          ? undefined
+          : (p) => {
+              pendingSubmitToAgent = p;
+            },
         onInvokeRegisteredAction: async (payload: {
           toolId: string;
           actionName: string;
@@ -365,22 +377,52 @@ export function ToolRenderer({
           return outcome;
         },
       });
+
       if (result.changedKeys.length > 0) {
         // Merge only modified keys into the latest live state to avoid stale-state overwrites
         const mergedState = { ...stateRef.current };
         for (const key of result.changedKeys) {
           mergedState[key] = result.state[key];
         }
+        stateRef.current = mergedState;
         if (onPersistState) {
-          void onPersistState(mergedState).catch(() => {
+          try {
+            await onPersistState(mergedState);
+          } catch {
             setActionError("That change could not be saved.");
-          });
+            return;
+          }
         } else {
           onStateChange(mergedState);
         }
       }
+
       if (result.errors.length > 0) {
         setActionError(result.errors[0]);
+        return;
+      }
+
+      // Order guarantee: local mutations are durably committed BEFORE the model request is enqueued
+      const toSubmit = pendingSubmitToAgent as {
+        toolId: string;
+        eventName: string;
+        componentId?: string;
+        values: Record<string, unknown>;
+        silent?: boolean;
+      } | null;
+      if (toSubmit && onSubmitToAgent) {
+        if (toSubmit.values) {
+          for (const key of Object.keys(toSubmit.values)) {
+            if (key in stateRef.current) {
+              toSubmit.values[key] = stateRef.current[key];
+            }
+          }
+        }
+        try {
+          await onSubmitToAgent(toSubmit);
+        } catch {
+          setActionError("Could not submit interaction to agent.");
+        }
       }
     },
     [
@@ -401,18 +443,23 @@ export function ToolRenderer({
 
   const setValue = useCallback(
     (key: string, value: unknown) => {
-      onStateChange({ ...stateRef.current, [key]: value });
+      const next = { ...stateRef.current, [key]: value };
+      stateRef.current = next;
+      onStateChange(next);
     },
     [onStateChange],
   );
 
   const setValueOptimistic = useCallback(
-    (key: string, value: unknown) => {
+    async (key: string, value: unknown) => {
       const next = { ...stateRef.current, [key]: value };
+      stateRef.current = next;
       if (onPersistState) {
-        void onPersistState(next).catch(() => {
+        try {
+          await onPersistState(next);
+        } catch {
           setActionError("That change could not be saved.");
-        });
+        }
       } else {
         onStateChange(next);
       }

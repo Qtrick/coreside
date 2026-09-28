@@ -9,7 +9,7 @@ use super::limits::{
     MAX_IDEMPOTENCY_KEYS, MAX_IDENTICAL_EVENTS_PER_INTERVAL, MAX_SUBSCRIPTIONS_PER_SURFACE,
 };
 use crate::db::{now_rfc3339, Database};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -229,7 +229,14 @@ impl EventBus {
         let Ok(rows) = rows else {
             return bus;
         };
-        for row in rows.flatten() {
+        for row_result in rows {
+            let row = match row_result {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("Database row read error in load_from_db: {e}");
+                    continue;
+                }
+            };
             let (id, owner, types_s, source_s, target_s, handler_s, enabled) = row;
             let event_types: Vec<String> = match serde_json::from_str(&types_s) {
                 Ok(t) => t,
@@ -583,6 +590,10 @@ pub fn execute_durable_event_delivery(
             params![event.id, subscription_id],
             |_| Ok(true),
         )
+        .optional()
+        .map_err(|e| EventBusError::ExecutionFailed {
+            reason: format!("Failed to query delivery status for event '{}': {e}", event.id),
+        })?
         .unwrap_or(false);
     if already_delivered {
         return Ok("already_delivered".to_string());
@@ -592,25 +603,32 @@ pub fn execute_durable_event_delivery(
     let now = now_rfc3339();
 
     // Ensure surface_events record exists to satisfy foreign key constraint
-    let _ = db.conn().execute(
-        "INSERT OR IGNORE INTO surface_events (
+    db.conn()
+        .execute(
+            "INSERT OR IGNORE INTO surface_events (
             id, source_json, target_json, scope, event_type, payload_json,
             idempotency_key, status, created_at, processed_at
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, NULL)",
-        params![
-            event.id,
-            serde_json::to_string(&event.source).unwrap_or_else(|_| "{}".into()),
-            serde_json::to_string(&event.target).unwrap_or_else(|_| "{}".into()),
-            event.scope,
-            event.event_type,
-            event.payload.to_string(),
-            event.idempotency_key,
-            now
-        ],
-    );
+            params![
+                event.id,
+                serde_json::to_string(&event.source).unwrap_or_else(|_| "{}".into()),
+                serde_json::to_string(&event.target).unwrap_or_else(|_| "{}".into()),
+                event.scope,
+                event.event_type,
+                event.payload.to_string(),
+                event.idempotency_key,
+                now
+            ],
+        )
+        .map_err(|e| EventBusError::ExecutionFailed {
+            reason: format!(
+                "Database error inserting surface_events '{}': {e}",
+                event.id
+            ),
+        })?;
 
     // Ensure surface_subscriptions record exists to satisfy foreign key constraint
-    let _ = db.conn().execute(
+    db.conn().execute(
         "INSERT OR IGNORE INTO surface_subscriptions (
             id, owner_surface_id, source_filter_json, target_json, event_types_json, handler_json, enabled, created_at, updated_at
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?7)",
@@ -623,22 +641,31 @@ pub fn execute_durable_event_delivery(
             serde_json::to_string(&sub.handler).unwrap_or_else(|_| "{}".into()),
             now
         ],
-    );
+    ).map_err(|e| EventBusError::ExecutionFailed {
+        reason: format!("Database error inserting surface_subscriptions '{}': {e}", sub.id),
+    })?;
 
     // Insert pending delivery record matching migration 031 schema
-    let _ = db.conn().execute(
-        "INSERT INTO surface_event_deliveries (
+    db.conn()
+        .execute(
+            "INSERT INTO surface_event_deliveries (
             id, event_id, subscription_id, surface_id, status, attempt_count,
             last_error, created_at, processed_at
          ) VALUES (?1, ?2, ?3, ?4, 'pending', 1, NULL, ?5, NULL)",
-        params![
-            delivery_id,
-            event.id,
-            subscription_id,
-            sub.owner_surface_id,
-            now,
-        ],
-    );
+            params![
+                delivery_id,
+                event.id,
+                subscription_id,
+                sub.owner_surface_id,
+                now,
+            ],
+        )
+        .map_err(|e| EventBusError::ExecutionFailed {
+            reason: format!(
+                "Database error inserting surface_event_deliveries '{}': {e}",
+                delivery_id
+            ),
+        })?;
 
     let execution_result: Result<Value, String> = if let Some(handler) = &sub.handler {
         match handler {
@@ -860,19 +887,33 @@ pub fn execute_durable_event_delivery(
                     payload: resolve_template_value(payload, &event.payload),
                     idempotency_key: None,
                 };
-                let child_matches = bus.dispatch(&child_event, depth + 1)?;
-                for child_sub_id in child_matches {
-                    let _ = execute_durable_event_delivery(
-                        db,
-                        bus,
-                        &child_event,
-                        &child_sub_id,
-                        depth + 1,
-                    );
+                match bus.dispatch(&child_event, depth + 1) {
+                    Ok(child_matches) => {
+                        let mut child_err = None;
+                        for child_sub_id in child_matches {
+                            if let Err(e) = execute_durable_event_delivery(
+                                db,
+                                bus,
+                                &child_event,
+                                &child_sub_id,
+                                depth + 1,
+                            ) {
+                                child_err = Some(format!(
+                                    "Child event delivery failed for child sub '{child_sub_id}': {e}"
+                                ));
+                                break;
+                            }
+                        }
+                        if let Some(err_msg) = child_err {
+                            Err(err_msg)
+                        } else {
+                            Ok(serde_json::json!({
+                                "childEventId": child_event.id,
+                            }))
+                        }
+                    }
+                    Err(e) => Err(format!("Child event dispatch failed: {e}")),
                 }
-                Ok(serde_json::json!({
-                    "childEventId": child_event.id,
-                }))
             }
         }
     } else {
@@ -881,25 +922,35 @@ pub fn execute_durable_event_delivery(
 
     let processed_now = now_rfc3339();
     match execution_result {
-        Ok(val) => {
-            let res_json = serde_json::to_string(&val).unwrap_or_else(|_| "{}".into());
-            let _ = db.conn().execute(
-                "UPDATE surface_event_deliveries SET status = 'delivered',
+        Ok(_val) => {
+            db.conn()
+                .execute(
+                    "UPDATE surface_event_deliveries SET status = 'delivered',
                  processed_at = ?1 WHERE id = ?2",
-                params![processed_now, delivery_id],
-            );
-            let _ = db.conn().execute(
+                    params![processed_now, delivery_id],
+                )
+                .map_err(|e| EventBusError::ExecutionFailed {
+                    reason: format!(
+                        "Database error updating delivery status for '{}': {e}",
+                        delivery_id
+                    ),
+                })?;
+            db.conn().execute(
                 "UPDATE surface_events SET status = 'processed', processed_at = ?1 WHERE id = ?2",
                 params![processed_now, event.id],
-            );
+            ).map_err(|e| EventBusError::ExecutionFailed {
+                reason: format!("Database error updating surface_event status for '{}': {e}", event.id),
+            })?;
             Ok(delivery_id)
         }
         Err(err) => {
-            let _ = db.conn().execute(
+            if let Err(e) = db.conn().execute(
                 "UPDATE surface_event_deliveries SET status = 'failed',
                  last_error = ?1, processed_at = ?2 WHERE id = ?3",
                 params![err, processed_now, delivery_id],
-            );
+            ) {
+                tracing::error!("Failed to record failed status for delivery '{delivery_id}': {e}");
+            }
             Err(EventBusError::ExecutionFailed { reason: err })
         }
     }
@@ -1261,5 +1312,107 @@ mod tests {
         // Re-delivery of the same event and subscription is idempotent and does not fail
         let re_res = execute_durable_event_delivery(&mut db, &mut bus, &ev, "sub-counter", 0);
         assert_eq!(re_res.unwrap(), "already_delivered");
+    }
+
+    #[test]
+    fn test_child_event_failure_fails_closed_and_does_not_mark_parent_delivered() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("evt_fail.db")).unwrap();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "Test Conv",
+            None,
+        )
+        .unwrap();
+        let surf = super::super::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Parent Surface",
+            &json!({"type":"container","id":"root"}),
+            &[],
+        )
+        .unwrap();
+
+        let mut bus = EventBus::new();
+        // Parent subscription emits a child event that will fail child delivery due to DepthExceeded
+        let parent_sub = Subscription {
+            id: "sub-parent".into(),
+            owner_surface_id: surf.id.clone(),
+            event_types: vec!["parent.trigger".into()],
+            source_filter: EventRef::default(),
+            target: EventRef::default(),
+            handler: Some(EventHandler::SubmitEvent {
+                event_type: "child.trigger".into(),
+                payload: json!({}),
+            }),
+            enabled: true,
+        };
+        bus.add_subscription(parent_sub).unwrap();
+
+        let child_sub = Subscription {
+            id: "sub-child".into(),
+            owner_surface_id: surf.id.clone(),
+            event_types: vec!["child.trigger".into()],
+            source_filter: EventRef::default(),
+            target: EventRef::default(),
+            handler: Some(EventHandler::SetState {
+                key: "child_ran".into(),
+                value: json!(true),
+            }),
+            enabled: true,
+        };
+        bus.add_subscription(child_sub).unwrap();
+
+        let parent_event = SurfaceEvent {
+            id: "evt-parent-fail".into(),
+            event_type: "parent.trigger".into(),
+            scope: "surface".into(),
+            source: EventRef {
+                surface_id: Some(surf.id.clone()),
+                conversation_id: Some(conv.id.clone()),
+                ..Default::default()
+            },
+            target: EventRef::default(),
+            payload: json!({}),
+            idempotency_key: None,
+        };
+
+        // Delivering at MAX_EVENT_DEPTH means child event dispatch will exceed MAX_EVENT_DEPTH
+        let res = execute_durable_event_delivery(
+            &mut db,
+            &mut bus,
+            &parent_event,
+            "sub-parent",
+            MAX_EVENT_DEPTH,
+        );
+        assert!(
+            res.is_err(),
+            "Delivery must fail when child event delivery fails"
+        );
+
+        // Verify parent delivery status is 'failed', NOT 'delivered'
+        let status: String = db
+            .conn()
+            .query_row(
+                "SELECT status FROM surface_event_deliveries WHERE event_id = ?1 AND subscription_id = ?2",
+                rusqlite::params![parent_event.id, "sub-parent"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "failed");
+
+        // Verify surface_events status is NOT 'processed'
+        let evt_status: String = db
+            .conn()
+            .query_row(
+                "SELECT status FROM surface_events WHERE id = ?1",
+                rusqlite::params![parent_event.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_ne!(evt_status, "processed");
     }
 }

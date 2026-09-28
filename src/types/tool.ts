@@ -129,6 +129,8 @@ export const ActionSchema = z.discriminatedUnion("type", [
     includeFields: z.array(z.string()).optional(),
     componentId: z.string().optional(),
     silent: z.boolean().optional(),
+    values: z.record(z.unknown()).optional(),
+    eventPayload: z.record(z.unknown()).optional(),
   }),
   z.object({
     type: z.literal("invokeRegisteredAction"),

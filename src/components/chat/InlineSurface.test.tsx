@@ -113,7 +113,9 @@ describe("InlineSurfaceCard", () => {
     // Click once: starts first interaction
     fireEvent.click(btn);
 
-    expect(mockSendMessage).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledTimes(1);
+    });
     expect(mockSendMessage).toHaveBeenCalledWith(
       "App interaction (game.move)",
       [],
@@ -149,6 +151,8 @@ describe("InlineSurfaceCard", () => {
 
     // Now a subsequent click should be accepted
     fireEvent.click(btn);
-    expect(mockSendMessage).toHaveBeenCalledTimes(2);
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledTimes(2);
+    });
   });
 });

@@ -136,23 +136,32 @@ Before generating components, determine the state and action contract:
 ### Pattern 5: Interactive Generated Applications & Games (Tic-Tac-Toe, Chess, Connect Four, 2048, Minesweeper, Quiz, Calculator, Data Table)
 Coreside tools are NOT static displays — they are fully interactive applications and turn-based games played directly inside the conversation against the AI or standalone.
 - **Immediate Generation**: When the user asks for an interactive app or game (e.g. "Build me a chess board and let me play against you", "Make a Connect Four game", "Build a calculator"), deliver the complete, playable tool surface in the SAME turn (`schemaVersion: "2"` with `surface.create`). Do NOT just describe how to build it or give rules text. Build the actual interactive surface.
-- **State Contracts Required**: Always declare explicit `stateContracts` for every mutable key:
+- **Authoritative Rules Architecture**: The trusted Rust runtime remains authoritative over application state, action legality, deterministic transitions, derived status, and seeded randomness. The model defines the declarative state schema and typed interactions; the runtime guarantees correctness.
+- **Strict State Contracts Required**: Always declare explicit `stateContracts` for every mutable key:
   ```json
   "stateContracts": [
-    { "key": "turn", "type": "string", "initialValue": "X", "writePolicy": "model" },
-    { "key": "status", "type": "string", "initialValue": "Your turn (X)", "writePolicy": "model" },
-    { "key": "score", "type": "number", "initialValue": 0, "writePolicy": "model" }
+    { "key": "turn", "type": "integer", "initialValue": 1, "writePolicy": "model" },
+    { "key": "status", "type": "string", "initialValue": "Your turn (white)", "writePolicy": "model" },
+    { "key": "inCheck", "type": "boolean", "initialValue": false, "writePolicy": "model" },
+    { "key": "selectedSquare", "type": "string", "initialValue": null, "nullable": true, "writePolicy": "user" }
   ]
   ```
-  Types must be `"string"`, `"number"`, `"boolean"`, `"array"`, or `"object"`. State writes without contracts or type mismatches are rejected by the trusted Rust runtime.
+  Supported types: `"string"`, `"integer"`, `"number"`, `"boolean"`, `"array"`, `"object"`.
+  - `"integer"` is strictly integral: non-integral numbers (1.5, 2.25, -3.7) are rejected.
+  - Unknown types fail closed and reject the surface.
+  - Set `"nullable": true` explicitly for nullable state keys; nulls for non-nullable contracts fail closed.
+- **Canonical `submitToAgent` Semantics**:
+  - `includeFields: ["c0", "turn"]` — exposes only declared, authorized state fields in the cryptographic envelope.
+  - `includeFields: []` — canonical declaration for pure user gestures, navigation, and reset actions (`game.reset`). Exposes zero state fields safely.
 - **Interactive Turn Cycle**:
-  1. **Surface & State**: Tool defines components bound to state keys (`valueKey`) and buttons with `actions`.
-  2. **User Interaction**: User clicks a control (e.g. board square), triggering `setValue` and `submitToAgent` with `eventName: "game.move"`, `includeFields: [...]`.
-  3. **Silent Interactions**: Set `eventName` starting with `"game."` (or pass `silent: true` in payload) so that rapid game moves update state without generating conversational chat bubbles.
-  4. **Targeted Agent Patch**: The agent evaluates the game rules, makes its move, and returns targeted `state.patch` operations updating only the affected cells, turn indicator, and status badge on the exact surface.
-  5. **Rules & Integrity**: Never cheat on game logic: follow standard rules for Chess (legal moves, check, checkmate), Checkers (diagonal moves, jumps), Connect Four (gravity drop, 4-in-a-row), Minesweeper (adjacent counts, flags), 2048 (slide merges, score), Sudoku (1-9 constraints), Calculators (accurate arithmetic).
-  6. **Controls & Feedback**: Always include visible turn indicators, win/loss/draw banners, accessible labels, and a clear Reset / New Game button (`eventName: "game.reset"`).
+  1. **Surface & State**: Tool defines components bound to state keys (`valueKey`) and buttons with typed `actions`.
+  2. **User Interaction**: User clicks a control (e.g. board square), triggering local deterministic transition, persisting state, and sealing the gesture with `submitToAgent`.
+  3. **Silent Interactions**: Set `eventName` starting with `"game."` (or `"silent": true` in payload) so that game moves update state smoothly without creating conversational chat bubbles.
+  4. **Targeted Agent Patch**: The agent evaluates legal moves, makes its choice, and returns targeted `state.patch` operations updating only the affected cells, turn indicator, and status badge on the exact surface.
+  5. **Rules & Integrity**: Never cheat on game logic: follow standard rules for Chess (legal moves, check, checkmate, castling, en passant), Checkers (diagonal moves, captures, kinging), Connect Four (gravity drop, 4-in-a-row), Minesweeper (adjacent counts, flags, loss on mine), 2048 (slide merges, score, no double merge), Sudoku (row/col/box 1-9 constraints), Calculators (accurate arithmetic).
+  6. **Controls & Feedback**: Always include visible turn indicators, win/loss/draw banners, accessible labels, and a clear Reset / New Game button (`eventName: "game.reset"`, `includeFields: []`).
   7. **Keyboard & Canvas**: For grid/spatial games (like 2048 or maze puzzles), use `canvasScene` with `keyBindings` (e.g. `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`) or directional button groups.
+  8. **Accessibility**: Every game must support keyboard interaction, visible focus, ARIA labels, and non-color-only state indication.
 - **Zero Arbitrary Code**: Games must use typed component primitives (`button`, `row`, `container`, `badge`, `heading`, `quiz`, `canvasScene`, `text`) and typed actions — NEVER `<script>`, `eval`, `innerHTML`, `iframe`, or remote scripts.
 
 ## Design & Engineering Rules

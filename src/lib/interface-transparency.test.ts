@@ -40,7 +40,7 @@ describe("interface transparency", () => {
     expect(max.panelAlpha).toBeLessThan(immersive.panelAlpha);
     expect(immersive.cardAlpha).toBeGreaterThan(immersive.panelAlpha);
     expect(immersive.controlAlpha).toBeGreaterThanOrEqual(immersive.cardAlpha);
-    expect(immersive.modalAlpha).toBeGreaterThanOrEqual(0.75);
+    expect(immersive.modalAlpha).toBeGreaterThanOrEqual(0.50);
     // Nested cards must also become more translucent as the slider rises.
     expect(max.cardAlpha).toBeLessThan(balanced.cardAlpha);
     // at 35% ordinary cards must not clamp to fully opaque.
@@ -55,8 +55,39 @@ describe("interface transparency", () => {
     expect(tokens.cardAlpha).toBeGreaterThan(tokens.panelAlpha);
     expect(tokens.controlAlpha).toBeGreaterThan(tokens.panelAlpha);
     expect(tokens.modalAlpha).toBeGreaterThan(tokens.cardAlpha);
-    expect(tokens.cardAlpha).toBeGreaterThanOrEqual(0.30);
-    expect(tokens.panelAlpha).toBeLessThanOrEqual(0.10);
+    // At 100% max transparency, cards drop to translucent glass (~0.08) rather than heavy 30% blocks
+    expect(tokens.cardAlpha).toBeGreaterThanOrEqual(0.08);
+    expect(tokens.cardAlpha).toBeLessThan(0.20);
+    expect(tokens.panelAlpha).toBeLessThanOrEqual(0.05);
+  });
+
+  it("produces strictly monotonic alphas across all 8 inspection levels (0, 10, 25, 40, 50, 70, 85, 100)", () => {
+    const levels = [0, 10, 25, 40, 50, 70, 85, 100];
+    const results = levels.map((lvl) =>
+      computeInterfaceTransparencyTokens(lvl, { wallpaperActive: true }),
+    );
+
+    for (let i = 1; i < results.length; i++) {
+      const prev = results[i - 1]!;
+      const cur = results[i]!;
+      expect(cur.panelAlpha).toBeLessThan(prev.panelAlpha);
+      expect(cur.cardAlpha).toBeLessThan(prev.cardAlpha);
+      expect(cur.controlAlpha).toBeLessThan(prev.controlAlpha);
+      expect(cur.sidebarAlpha).toBeLessThan(prev.sidebarAlpha);
+      expect(cur.headerAlpha).toBeLessThan(prev.headerAlpha);
+      expect(cur.modalAlpha).toBeLessThan(prev.modalAlpha);
+    }
+
+    // Level 0: fully opaque
+    expect(results[0]!.panelAlpha).toBe(1);
+    expect(results[0]!.cardAlpha).toBe(1);
+
+    // Level 100: maximum transparency (wallpaper show-through target)
+    const max = results[results.length - 1]!;
+    expect(max.panelAlpha).toBe(0.02);
+    expect(max.cardAlpha).toBe(0.08);
+    expect(max.controlAlpha).toBe(0.18);
+    expect(max.modalAlpha).toBe(0.45);
   });
 
   it("keeps Solid (0%) fully opaque including sidebar", () => {

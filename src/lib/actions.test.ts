@@ -340,7 +340,7 @@ describe("collectTargets security boundary", () => {
       "submitToAgent requires explicit includeFields declaration",
     );
 
-    // 2. Empty includeFields array:
+    // 2. Empty includeFields array: canonical submit without exposing state fields (e.g. reset/pure event)
     const resultEmpty = applyAction(
       {
         type: "submitToAgent",
@@ -354,10 +354,14 @@ describe("collectTargets security boundary", () => {
         onSubmitToAgent,
       },
     );
-    expect(onSubmitToAgent).not.toHaveBeenCalled();
-    expect(resultEmpty.errors).toContain(
-      "submitToAgent requires explicit includeFields declaration",
+    expect(onSubmitToAgent).toHaveBeenCalledTimes(1);
+    expect(onSubmitToAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "submit_empty",
+        values: {},
+      }),
     );
+    expect(resultEmpty.errors).toHaveLength(0);
   });
 
   it("proves component ID, arbitrary props.target, props.field, props.name do not authorize state access", async () => {
@@ -742,13 +746,12 @@ describe("adversarial security tests", () => {
     expect(result.state).toEqual({});
   });
 
-  it("submitToAgent rejects empty includeFields", () => {
+  it("submitToAgent rejects missing includeFields when no static payload provided", () => {
     const onSubmitToAgent = vi.fn();
-    applyAction(
+    const result = applyAction(
       {
         type: "submitToAgent",
         eventName: "test",
-        includeFields: [],
       },
       {
         state: { field: "value" },
@@ -759,6 +762,78 @@ describe("adversarial security tests", () => {
     );
 
     expect(onSubmitToAgent).not.toHaveBeenCalled();
+    expect(result.errors).toContain(
+      "submitToAgent requires explicit includeFields declaration",
+    );
+  });
+
+  it("submitToAgent accepts empty includeFields for pure event / reset without leaking state", () => {
+    const onSubmitToAgent = vi.fn();
+    const result = applyAction(
+      {
+        type: "submitToAgent",
+        eventName: "game.reset",
+        includeFields: [],
+      },
+      {
+        state: { field: "secret" },
+        toolId: "test-tool",
+        allowedTargets: new Set(["field"]),
+        onSubmitToAgent,
+      },
+    );
+
+    expect(onSubmitToAgent).toHaveBeenCalledTimes(1);
+    expect(onSubmitToAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "game.reset",
+        values: {},
+      }),
+    );
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it("submitToAgent accepts bounded sanitized static payload and rejects dangerous prototype keys", () => {
+    const onSubmitToAgent = vi.fn();
+    // Valid static payload:
+    const validResult = applyAction(
+      {
+        type: "submitToAgent",
+        eventName: "canvas.click",
+        includeFields: [],
+        values: { objectId: "obj-1", x: 10, y: 20 },
+      },
+      {
+        state: {},
+        toolId: "test-tool",
+        onSubmitToAgent,
+      },
+    );
+    expect(onSubmitToAgent).toHaveBeenCalledTimes(1);
+    expect(onSubmitToAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "canvas.click",
+        values: { objectId: "obj-1", x: 10, y: 20 },
+      }),
+    );
+    expect(validResult.errors).toHaveLength(0);
+
+    // Prototype injection attempt:
+    const maliciousPayload = JSON.parse('{"__proto__": {"polluted": true}, "normal": 1}');
+    const protoResult = applyAction(
+      {
+        type: "submitToAgent",
+        eventName: "canvas.click",
+        includeFields: [],
+        values: maliciousPayload,
+      },
+      {
+        state: {},
+        toolId: "test-tool",
+        onSubmitToAgent,
+      },
+    );
+    expect(protoResult.errors.some((e) => e.includes("Disallowed dangerous property"))).toBe(true);
   });
 
   it("component IDs do not authorize state access", () => {

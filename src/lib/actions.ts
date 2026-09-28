@@ -65,6 +65,18 @@ export function collectDeclaredBindings(
       }
     }
 
+    // 2b. CanvasScene: selectionKey or valueKey binds selected object
+    if (type === "canvasScene") {
+      const vk =
+        (typeof props.selectionKey === "string" ? props.selectionKey.trim() : "") ||
+        valueKey ||
+        (typeof props.valueKey === "string" ? props.valueKey.trim() : "");
+      if (vk) {
+        into.readable.add(vk);
+        into.writable.add(vk);
+      }
+    }
+
     // 3. Display / Metric controls: stat, progress
     if (type === "stat" || type === "progress") {
       const vk =
@@ -325,6 +337,48 @@ function checkTargetReadable(
   return false;
 }
 
+const MAX_INTERACTION_PAYLOAD_KEYS = 32;
+const MAX_INTERACTION_PAYLOAD_BYTES = 4096;
+
+export function sanitizeInteractionPayload(
+  payload: Record<string, unknown>,
+): { ok: true; data: Record<string, unknown> } | { ok: false; error: string } {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    return { ok: false, error: "Interaction payload must be a non-null object" };
+  }
+  const keys = Object.keys(payload);
+  if (keys.length > MAX_INTERACTION_PAYLOAD_KEYS) {
+    return {
+      ok: false,
+      error: `Interaction payload exceeds maximum key limit (${MAX_INTERACTION_PAYLOAD_KEYS})`,
+    };
+  }
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(payload);
+  } catch {
+    return { ok: false, error: "Interaction payload contains circular or non-serializable data" };
+  }
+  if (!serialized || serialized.length > MAX_INTERACTION_PAYLOAD_BYTES) {
+    return {
+      ok: false,
+      error: `Interaction payload exceeds ${MAX_INTERACTION_PAYLOAD_BYTES} bytes limit`,
+    };
+  }
+  const sanitized: Record<string, unknown> = {};
+  for (const k of keys) {
+    if (k === "__proto__" || k === "constructor" || k === "prototype") {
+      return { ok: false, error: `Disallowed dangerous property name in interaction payload: "${k}"` };
+    }
+    const val = payload[k];
+    if (typeof val === "function" || typeof val === "symbol") {
+      return { ok: false, error: `Non-serializable value type for key "${k}" in interaction payload` };
+    }
+    sanitized[k] = val;
+  }
+  return { ok: true, data: sanitized };
+}
+
 export function applyAction(
   action: ActionDefinition,
   options: ActionEngineOptions,
@@ -528,21 +582,38 @@ export function applyAction(
         break;
       }
       {
-        if (!action.includeFields || action.includeFields.length === 0) {
+        const hasExplicitFields = Array.isArray(action.includeFields);
+        const hasStaticPayload = Boolean(action.values || action.eventPayload);
+        if (!hasExplicitFields && !hasStaticPayload) {
           errors.push("submitToAgent requires explicit includeFields declaration");
           break;
         }
         const values: Record<string, unknown> = {};
         let hasUnauthorized = false;
-        for (const field of action.includeFields) {
-          if (!ensureReadable(field)) {
-            hasUnauthorized = true;
-          } else {
-            values[field] = state[field];
+        if (hasExplicitFields) {
+          for (const field of action.includeFields!) {
+            if (!ensureReadable(field)) {
+              hasUnauthorized = true;
+            } else {
+              values[field] = state[field];
+            }
           }
         }
         if (hasUnauthorized) {
           break;
+        }
+        const staticPayload = action.values ?? action.eventPayload;
+        if (staticPayload && typeof staticPayload === "object") {
+          const sanitized = sanitizeInteractionPayload(staticPayload);
+          if (!sanitized.ok) {
+            errors.push(sanitized.error);
+            break;
+          }
+          for (const [k, v] of Object.entries(sanitized.data)) {
+            if (!(k in values)) {
+              values[k] = v;
+            }
+          }
         }
         options.onSubmitToAgent({
           toolId: options.toolId,

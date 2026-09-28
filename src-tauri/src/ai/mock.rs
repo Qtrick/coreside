@@ -615,7 +615,7 @@ impl MockAiProvider {
                                     "type": "button",
                                     "props": { "label": "New Game", "variant": "secondary" },
                                     "actions": [
-                                        { "type": "submitToAgent", "eventName": "game.reset" }
+                                        { "type": "submitToAgent", "eventName": "game.reset", "includeFields": [] }
                                     ]
                                 }
                             ]
@@ -623,6 +623,243 @@ impl MockAiProvider {
                     }
                 ],
                 "diagnostics": { "fixture": "tictactoe_create" }
+            }).to_string();
+        }
+
+        if lower.contains("chess") {
+            return json!({
+                "schemaVersion": "2",
+                "assistantMessage": "I built an interactive Chess board for you! Standard rules apply with legal moves, turn tracking, and check detection.",
+                "responseType": "message",
+                "operations": [
+                    {
+                        "id": "op-create-chess",
+                        "type": "surface.create",
+                        "target": {},
+                        "payload": {
+                            "id": "tool-chess",
+                            "name": "Chess vs AI",
+                            "description": "Play Chess with authoritative rule validation",
+                            "layout": { "type": "dashboard", "columns": 2 },
+                            "stateContracts": [
+                                { "key": "currentPlayer", "type": "string", "initialValue": "white", "writePolicy": "model" },
+                                { "key": "turn", "type": "integer", "initialValue": 1, "writePolicy": "model" },
+                                { "key": "status", "type": "string", "initialValue": "Your turn (white)", "writePolicy": "model" },
+                                { "key": "inCheck", "type": "boolean", "initialValue": false, "writePolicy": "model" }
+                            ],
+                            "components": [
+                                { "id": "chess-heading", "type": "heading", "props": { "text": "Chess vs AI", "level": 1 } },
+                                { "id": "chess-status", "type": "badge", "props": { "text": "Your turn (White)", "valueKey": "status" } },
+                                { "id": "chess-board", "type": "container", "props": { "padding": "md" } },
+                                {
+                                    "id": "chess-reset",
+                                    "type": "button",
+                                    "props": { "label": "New Game", "variant": "secondary" },
+                                    "actions": [
+                                        { "type": "submitToAgent", "eventName": "game.reset", "includeFields": [] }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "diagnostics": { "fixture": "chess_create" }
+            }).to_string();
+        }
+
+        if lower.contains("connect-four")
+            || lower.contains("connect four")
+            || lower.contains("connectfour")
+        {
+            return json!({
+                "schemaVersion": "2",
+                "assistantMessage": "I created a Connect Four game! Choose a column to drop your chip.",
+                "responseType": "message",
+                "operations": [
+                    {
+                        "id": "op-create-connect-four",
+                        "type": "surface.create",
+                        "target": {},
+                        "payload": {
+                            "id": "tool-connect-four",
+                            "name": "Connect Four",
+                            "description": "Classic 4-in-a-row chip dropping game",
+                            "layout": { "type": "single-column" },
+                            "stateContracts": [
+                                { "key": "currentPlayer", "type": "string", "initialValue": "red", "writePolicy": "model" },
+                                { "key": "turn", "type": "integer", "initialValue": 1, "writePolicy": "model" },
+                                { "key": "status", "type": "string", "initialValue": "playing", "writePolicy": "model" }
+                            ],
+                            "components": [
+                                { "id": "c4-heading", "type": "heading", "props": { "text": "Connect Four", "level": 1 } },
+                                { "id": "c4-status", "type": "badge", "props": { "text": "Red's turn", "valueKey": "status" } },
+                                {
+                                    "id": "c4-reset",
+                                    "type": "button",
+                                    "props": { "label": "Restart", "variant": "secondary" },
+                                    "actions": [
+                                        { "type": "submitToAgent", "eventName": "game.reset", "includeFields": [] }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "diagnostics": { "fixture": "connect_four_create" }
+            }).to_string();
+        }
+
+        if lower.contains("2048") {
+            return json!({
+                "schemaVersion": "2",
+                "assistantMessage": "Here is 2048! Use directional controls or arrows to slide and merge matching numbers.",
+                "responseType": "message",
+                "operations": [
+                    {
+                        "id": "op-create-2048",
+                        "type": "surface.create",
+                        "target": {},
+                        "payload": {
+                            "id": "tool-2048",
+                            "name": "2048 Puzzle",
+                            "description": "Slide matching tiles to reach 2048",
+                            "layout": { "type": "single-column" },
+                            "stateContracts": [
+                                { "key": "score", "type": "integer", "initialValue": 0, "writePolicy": "model" },
+                                { "key": "moves", "type": "integer", "initialValue": 0, "writePolicy": "model" },
+                                { "key": "status", "type": "string", "initialValue": "playing", "writePolicy": "model" }
+                            ],
+                            "components": [
+                                { "id": "g2048-heading", "type": "heading", "props": { "text": "2048", "level": 1 } },
+                                { "id": "g2048-score", "type": "stat", "props": { "label": "Score", "valueKey": "score" } },
+                                {
+                                    "id": "g2048-reset",
+                                    "type": "button",
+                                    "props": { "label": "New Game", "variant": "secondary" },
+                                    "actions": [
+                                        { "type": "submitToAgent", "eventName": "game.reset", "includeFields": [] }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "diagnostics": { "fixture": "2048_create" }
+            }).to_string();
+        }
+
+        if lower.contains("minesweeper") {
+            return json!({
+                "schemaVersion": "2",
+                "assistantMessage": "I built Minesweeper! Click squares to reveal them and flag suspect mine locations.",
+                "responseType": "message",
+                "operations": [
+                    {
+                        "id": "op-create-minesweeper",
+                        "type": "surface.create",
+                        "target": {},
+                        "payload": {
+                            "id": "tool-minesweeper",
+                            "name": "Minesweeper",
+                            "description": "Clear the minefield without detonating any mines",
+                            "layout": { "type": "single-column" },
+                            "stateContracts": [
+                                { "key": "minesRemaining", "type": "integer", "initialValue": 10, "writePolicy": "model" },
+                                { "key": "status", "type": "string", "initialValue": "playing", "writePolicy": "model" }
+                            ],
+                            "components": [
+                                { "id": "ms-heading", "type": "heading", "props": { "text": "Minesweeper", "level": 1 } },
+                                { "id": "ms-stat", "type": "stat", "props": { "label": "Mines Left", "valueKey": "minesRemaining" } },
+                                {
+                                    "id": "ms-reset",
+                                    "type": "button",
+                                    "props": { "label": "Restart", "variant": "secondary" },
+                                    "actions": [
+                                        { "type": "submitToAgent", "eventName": "game.reset", "includeFields": [] }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "diagnostics": { "fixture": "minesweeper_create" }
+            }).to_string();
+        }
+
+        if lower.contains("calculator") {
+            return json!({
+                "schemaVersion": "2",
+                "assistantMessage": "Here is an interactive calculator with numeric keypad and arithmetic operations.",
+                "responseType": "message",
+                "operations": [
+                    {
+                        "id": "op-create-calculator",
+                        "type": "surface.create",
+                        "target": {},
+                        "payload": {
+                            "id": "tool-calculator",
+                            "name": "Calculator",
+                            "description": "Interactive arithmetic calculator",
+                            "layout": { "type": "single-column" },
+                            "stateContracts": [
+                                { "key": "display", "type": "string", "initialValue": "0", "writePolicy": "model" },
+                                { "key": "acc", "type": "number", "initialValue": 0.0, "writePolicy": "model" }
+                            ],
+                            "components": [
+                                { "id": "calc-heading", "type": "heading", "props": { "text": "Calculator", "level": 1 } },
+                                { "id": "calc-display", "type": "stat", "props": { "label": "Result", "valueKey": "display" } },
+                                {
+                                    "id": "calc-clear",
+                                    "type": "button",
+                                    "props": { "label": "Clear", "variant": "secondary" },
+                                    "actions": [
+                                        { "type": "setValue", "target": "display", "value": "0" },
+                                        { "type": "submitToAgent", "eventName": "calc.clear", "includeFields": [] }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "diagnostics": { "fixture": "calculator_create" }
+            }).to_string();
+        }
+
+        if lower.contains("sudoku") {
+            return json!({
+                "schemaVersion": "2",
+                "assistantMessage": "I generated a Sudoku puzzle! Fill in the 9x9 grid with numbers 1 through 9.",
+                "responseType": "message",
+                "operations": [
+                    {
+                        "id": "op-create-sudoku",
+                        "type": "surface.create",
+                        "target": {},
+                        "payload": {
+                            "id": "tool-sudoku",
+                            "name": "Sudoku",
+                            "description": "Standard 9x9 Sudoku logic puzzle",
+                            "layout": { "type": "single-column" },
+                            "stateContracts": [
+                                { "key": "remainingEmpty", "type": "integer", "initialValue": 45, "writePolicy": "model" },
+                                { "key": "status", "type": "string", "initialValue": "playing", "writePolicy": "model" }
+                            ],
+                            "components": [
+                                { "id": "sdk-heading", "type": "heading", "props": { "text": "Sudoku", "level": 1 } },
+                                { "id": "sdk-stat", "type": "stat", "props": { "label": "Empty Cells", "valueKey": "remainingEmpty" } },
+                                {
+                                    "id": "sdk-reset",
+                                    "type": "button",
+                                    "props": { "label": "Reset Clues", "variant": "secondary" },
+                                    "actions": [
+                                        { "type": "submitToAgent", "eventName": "game.reset", "includeFields": [] }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "diagnostics": { "fixture": "sudoku_create" }
             }).to_string();
         }
 
@@ -1553,5 +1790,41 @@ mod tests {
         assert_eq!(reset_ops[0]["type"], "state.patch");
         assert_eq!(reset_ops[0]["payload"]["c4"], "");
         assert_eq!(reset_ops[0]["payload"]["turn"], "X");
+    }
+
+    #[tokio::test]
+    async fn interactive_app_fixtures_generate_valid_surfaces() {
+        let provider = MockAiProvider::new();
+        let fixtures = [
+            ("Build me a chess game", "tool-chess"),
+            ("Build a Connect Four game", "tool-connect-four"),
+            ("Create 2048", "tool-2048"),
+            ("Make minesweeper", "tool-minesweeper"),
+            ("Build me a calculator", "tool-calculator"),
+            ("Build a sudoku puzzle", "tool-sudoku"),
+        ];
+
+        for (prompt, expected_id) in fixtures {
+            let resp = provider
+                .chat(AgentRequest {
+                    system_prompt: "test".into(),
+                    messages: vec![AgentMessage::text(crate::ai::AgentRole::User, prompt)],
+                    cancel: CancellationToken::new(),
+                    idempotency_key: None,
+                })
+                .await
+                .unwrap();
+
+            let parsed = parse_agent_response(&resp.raw_text).unwrap();
+            let ops = parsed.payload.operations.as_ref().expect("operations");
+            assert_eq!(
+                ops.len(),
+                1,
+                "Must generate exactly 1 surface create op for {prompt}"
+            );
+            assert_eq!(ops[0]["type"], "surface.create");
+            assert_eq!(ops[0]["payload"]["id"], expected_id);
+            assert!(ops[0]["payload"]["components"].as_array().unwrap().len() > 0);
+        }
     }
 }

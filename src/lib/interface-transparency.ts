@@ -41,8 +41,16 @@ export function clampInterfaceTransparency(value: unknown): number {
 
 /**
  * Compute semantic surface alphas from interface transparency %.
- * Higher transparency → lower alpha (more wallpaper shows through).
- * Cards/controls/modals keep stronger minimum surfaces for readability.
+ *
+ * SEMANTICS (Section 45):
+ * - 0% transparency = normal opaque interface (alphas = 1.0, no wallpaper shows through).
+ * - 100% transparency = maximum wallpaper show-through:
+ *   - main panels are substantially transparent (~0.02 alpha);
+ *   - cards drop to subtle glass translucency (~0.08 alpha) instead of heavy blocks;
+ *   - controls remain legible with sleek translucent backing (~0.18 alpha);
+ *   - headers maintain a subtle boundary scrim (~0.06 alpha);
+ *   - modals keep sufficient contrast (~0.45 alpha).
+ * - Distinct from wallpaper layer opacity (how bright the wallpaper image/canvas renders).
  */
 export function computeInterfaceTransparencyTokens(
   preference: number,
@@ -68,22 +76,35 @@ export function computeInterfaceTransparencyTokens(
   }
 
   const effective = Math.max(0, pref - boost);
+  if (effective === 0) {
+    return {
+      preference: pref,
+      effective: 0,
+      panelAlpha: 1,
+      sidebarAlpha: 1,
+      cardAlpha: 1,
+      controlAlpha: 1,
+      headerAlpha: 1,
+      modalAlpha: 1,
+      scrimAlpha: 0,
+    };
+  }
+
   // Perceptual curve: compress low values so early transparency shows visible
   // steps rather than feeling mostly opaque until 50%. The quadratic segment
   // (t < 0.5) provides smoother ramp-up; linear above keeps high values predictable.
   const t = effective / 100;
   const perceptual = t < 0.5 ? t * t * 2 : t;
-  const panelAlpha = clamp01(1 - perceptual * 0.95);
-  const sidebarAlpha =
-    panelAlpha >= 1 ? 1 : clamp01(panelAlpha - 0.03);
-  // Cards: lower min so max transparency reveals wallpaper through content areas.
-  const cardAlpha = clamp01(Math.max(0.30, panelAlpha + 0.06));
-  // Controls: remain readable but visibly translucent at high transparency.
-  const controlAlpha = clamp01(Math.max(0.45, panelAlpha + 0.12));
+  const panelAlpha = clamp01(1 - perceptual * 0.98);
+  const sidebarAlpha = clamp01(1 - perceptual * 0.99);
+  // Cards: lower min so max transparency reveals wallpaper cleanly through content areas.
+  const cardAlpha = clamp01(Math.max(0.08, 1 - perceptual * 0.92));
+  // Controls: remain readable and distinct, but visibly translucent at high transparency.
+  const controlAlpha = clamp01(Math.max(0.18, 1 - perceptual * 0.82));
   // Headers: subtle scrim, not opaque.
-  const headerAlpha = clamp01(Math.max(0.20, panelAlpha + 0.05));
+  const headerAlpha = clamp01(Math.max(0.06, 1 - perceptual * 0.94));
   // Modals: keep stronger surface for transient high-information UI.
-  const modalAlpha = clamp01(Math.max(0.75, panelAlpha + 0.28));
+  const modalAlpha = clamp01(Math.max(0.45, 1 - perceptual * 0.55));
   const scrimAlpha = clamp01(boost / 100 + (effective > 40 ? 0.08 : 0));
 
   return {
@@ -151,5 +172,5 @@ export function applyInterfaceTransparencyCssVars(
 }
 
 function clamp01(n: number): number {
-  return Math.min(1, Math.max(0, n));
+  return Math.round(Math.min(1, Math.max(0, n)) * 10000) / 10000;
 }

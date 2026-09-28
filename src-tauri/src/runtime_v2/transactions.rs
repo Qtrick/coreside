@@ -1009,7 +1009,12 @@ fn apply_one(
                         "cannot write to restricted/sensitive state key '{k}' on surface '{sid}'"
                     ));
                 }
-                validate_state_value_type(k, target_val, &sc.type_name)?;
+                super::software_document::validate_state_value_type(
+                    k,
+                    target_val,
+                    &sc.type_name,
+                    sc.is_effective_nullable(),
+                )?;
             }
 
             // Load current state fail-closed with revision
@@ -1494,26 +1499,6 @@ fn prop_preservation_key(comp: &ToolComponent) -> Option<&str> {
         })
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-}
-
-fn validate_state_value_type(key: &str, value: &Value, type_name: &str) -> Result<(), String> {
-    if value.is_null() {
-        return Ok(());
-    }
-    let valid = match type_name.to_lowercase().as_str() {
-        "string" => value.is_string(),
-        "number" | "integer" | "float" => value.is_number(),
-        "boolean" | "bool" => value.is_boolean(),
-        "array" | "list" => value.is_array(),
-        "object" | "map" => value.is_object(),
-        _ => true,
-    };
-    if !valid {
-        return Err(format!(
-            "state value for key '{key}' does not match contract type '{type_name}'"
-        ));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

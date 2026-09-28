@@ -21,6 +21,7 @@ import {
   INTERFACE_TRANSPARENCY_MIN,
   INTERFACE_TRANSPARENCY_PRESETS,
   INTERFACE_TRANSPARENCY_STEP,
+  computeInterfaceTransparencyTokens,
 } from "@/lib/interface-transparency";
 import { useAppStore } from "@/stores/app-store";
 
@@ -355,11 +356,9 @@ export function WallpaperSettings() {
         <div
           className="wallpaper-mini-shell"
           aria-hidden
-          style={{ opacity: (() => {
-            const t = Math.max(0, interfaceTransparency) / 100;
-            const perceptual = t < 0.5 ? t * t * 2 : t;
-            return Math.max(0.25, 1 - perceptual * 0.95);
-          })() }}
+          style={{
+            background: `color-mix(in srgb, var(--surface) ${Math.round(computeInterfaceTransparencyTokens(interfaceTransparency).panelAlpha * 100)}%, transparent)`,
+          }}
         >
           {/* Mini Window Chrome */}
           <div className="mini-shell-titlebar">

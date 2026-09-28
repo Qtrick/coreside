@@ -75,6 +75,8 @@ pub struct StateContract {
     #[serde(default)]
     pub initial_value: Value,
     #[serde(default)]
+    pub nullable: bool,
+    #[serde(default)]
     pub scope: StateScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -106,7 +108,64 @@ fn default_write_policy() -> String {
     "model".to_string()
 }
 
+/// Validate state value against contract type and nullability.
+/// Rejects non-integral floats for integer, rejects unknown types, and rejects null when nullable is false.
+pub fn validate_state_value_type(
+    key: &str,
+    value: &Value,
+    type_name: &str,
+    nullable: bool,
+) -> Result<(), String> {
+    if value.is_null() {
+        if nullable
+            || type_name.eq_ignore_ascii_case("any")
+            || type_name.eq_ignore_ascii_case("null")
+        {
+            return Ok(());
+        }
+        return Err(format!(
+            "state value for key '{key}' is null, but contract does not allow null (nullable is false)"
+        ));
+    }
+    let valid = match type_name.to_lowercase().as_str() {
+        "string" => value.is_string(),
+        "number" | "float" => value.is_number(),
+        "integer" | "int" => {
+            if value.as_i64().is_some() || value.as_u64().is_some() {
+                true
+            } else if let Some(f) = value.as_f64() {
+                f.is_finite() && f.fract() == 0.0
+            } else {
+                false
+            }
+        }
+        "boolean" | "bool" => value.is_boolean(),
+        "array" | "list" => value.is_array(),
+        "object" | "map" => value.is_object(),
+        "any" => true,
+        unknown => {
+            return Err(format!(
+                "unknown state contract type '{unknown}' for key '{key}'"
+            ));
+        }
+    };
+    if !valid {
+        return Err(format!(
+            "state value for key '{key}' does not match contract type '{type_name}'"
+        ));
+    }
+    Ok(())
+}
+
 impl StateContract {
+    /// True when state value may be null (either explicitly declared nullable,
+    /// defaulted to null on declaration for migration compatibility, or typed "any").
+    pub fn is_effective_nullable(&self) -> bool {
+        self.nullable
+            || self.initial_value.is_null()
+            || self.type_name.eq_ignore_ascii_case("any")
+            || self.type_name.eq_ignore_ascii_case("null")
+    }
     /// Create a new state contract with an explicit origin.
     /// Use `origin = "model"` for model-declared contracts, `"user"` for user-authorized,
     /// `"system"` for system-managed, `"legacy"` for pre-contract state.
@@ -120,6 +179,7 @@ impl StateContract {
             key: key.into(),
             type_name: default_type_name(),
             initial_value,
+            nullable: false,
             scope,
             description: None,
             preservation_policy: Some("preserve".into()),
@@ -154,6 +214,7 @@ impl Default for StateContract {
             key: String::new(),
             type_name: default_type_name(),
             initial_value: Value::Null,
+            nullable: false,
             scope: StateScope::Persistent,
             description: None,
             preservation_policy: None,
@@ -174,7 +235,7 @@ impl Default for StateContract {
 /// `descriptor_hash` is the SHA-256 hex of the canonical bundled ActionDescriptor JSON.
 /// If supplied, the gateway verifies it before execution so that descriptor tampering
 /// is detected at the boundary.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionContract {
     pub action_id: String,
@@ -340,10 +401,12 @@ impl SoftwareDocument {
 
         let mut inferred = Vec::new();
         for (k, (t, init)) in keys_found {
+            let is_null = init.is_null();
             inferred.push(StateContract {
                 key: k,
                 type_name: t,
                 initial_value: init,
+                nullable: is_null,
                 scope: StateScope::Persistent,
                 description: Some("Inferred state contract".into()),
                 preservation_policy: Some("preserve".into()),
@@ -1841,6 +1904,12 @@ pub fn admit_software_document_with_state(
                 ));
             }
         }
+        validate_state_value_type(
+            &sc.key,
+            &sc.initial_value,
+            &sc.type_name,
+            sc.is_effective_nullable(),
+        )?;
     }
 
     if !is_user_customizing {
@@ -1957,9 +2026,13 @@ pub fn admit_software_document_with_state(
     }
 
     // 4. Action contracts validation
+    let mut action_ids = HashSet::new();
     for ac in &candidate.action_contracts {
         if ac.action_id.trim().is_empty() {
             return Err("action contract id cannot be empty".into());
+        }
+        if !action_ids.insert(ac.action_id.clone()) {
+            return Err(format!("duplicate action contract id '{}'", ac.action_id));
         }
         if let Some(ref rk) = ac.result_key {
             let sc = candidate
@@ -2129,6 +2202,21 @@ fn validate_component_bindings(
                             {
                                 return Err(format!(
                                     "component '{}' action '{action_name}' binds restricted/sensitive state key '{skey}' to input",
+                                    comp.id
+                                ));
+                            }
+                        }
+                    }
+                }
+                crate::ai::ActionDefinition::SetValue { target, .. }
+                | crate::ai::ActionDefinition::AppendItem { target, .. }
+                | crate::ai::ActionDefinition::RemoveItem { target, .. }
+                | crate::ai::ActionDefinition::UpdateItem { target, .. } => {
+                    if !target.is_empty() && !contracts.is_empty() {
+                        if let Some(sc) = contracts.iter().find(|s| &s.key == target) {
+                            if sc.write_policy == "readonly" {
+                                return Err(format!(
+                                    "component '{}' action mutates readonly state key '{target}'",
                                     comp.id
                                 ));
                             }
@@ -3182,5 +3270,76 @@ mod tests {
         assert!(doc.find_region("sibling").is_some());
         assert!(doc.find_region("child").is_none());
         assert!(doc.find_region("grandchild").is_none());
+    }
+
+    #[test]
+    fn test_strict_state_contract_integer_rejects_floats() {
+        assert!(validate_state_value_type("score", &json!(42), "integer", false).is_ok());
+        assert!(validate_state_value_type("score", &json!(0), "integer", false).is_ok());
+        assert!(validate_state_value_type("score", &json!(-5), "integer", false).is_ok());
+        assert!(validate_state_value_type("score", &json!(10.0), "integer", false).is_ok());
+
+        assert!(validate_state_value_type("score", &json!(1.5), "integer", false).is_err());
+        assert!(validate_state_value_type("score", &json!(2.25), "integer", false).is_err());
+        assert!(validate_state_value_type("score", &json!(-3.7), "integer", false).is_err());
+    }
+
+    #[test]
+    fn test_strict_state_contract_unknown_type_fails() {
+        let err = validate_state_value_type("custom", &json!("abc"), "unknown_custom_type", false);
+        assert!(err.is_err());
+        assert!(err
+            .unwrap_err()
+            .contains("unknown state contract type 'unknown_custom_type'"));
+    }
+
+    #[test]
+    fn test_strict_state_contract_nullability() {
+        // Non-nullable string rejects null
+        assert!(validate_state_value_type("name", &json!(null), "string", false).is_err());
+        // Explicitly nullable string accepts null
+        assert!(validate_state_value_type("name", &json!(null), "string", true).is_ok());
+        // String accepts valid string
+        assert!(validate_state_value_type("name", &json!("alice"), "string", false).is_ok());
+        // Type "any" allows null
+        assert!(validate_state_value_type("anything", &json!(null), "any", false).is_ok());
+    }
+
+    #[test]
+    fn test_admit_rejects_duplicate_action_ids() {
+        let mut doc = SoftwareDocument::new("doc-actions", "Action Doc");
+        doc.action_contracts = vec![
+            ActionContract {
+                action_id: "act-1".into(),
+                action_name: "test.action".into(),
+                ..Default::default()
+            },
+            ActionContract {
+                action_id: "act-1".into(),
+                action_name: "test.action2".into(),
+                ..Default::default()
+            },
+        ];
+        let err = admit_software_document(None, &doc, &[]);
+        assert!(err.is_err());
+        assert!(err
+            .unwrap_err()
+            .contains("duplicate action contract id 'act-1'"));
+    }
+
+    #[test]
+    fn test_admit_rejects_invalid_initial_value_against_contract() {
+        let mut doc = SoftwareDocument::new("doc-init", "Init Doc");
+        doc.state_contracts = vec![StateContract {
+            key: "round".into(),
+            type_name: "integer".into(),
+            initial_value: json!(3.1415), // float for integer must fail
+            ..Default::default()
+        }];
+        let err = admit_software_document(None, &doc, &[]);
+        assert!(err.is_err());
+        assert!(err
+            .unwrap_err()
+            .contains("state value for key 'round' does not match contract type 'integer'"));
     }
 }

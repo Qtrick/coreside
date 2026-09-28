@@ -510,6 +510,17 @@ export function InlineSurfaceCard({
                   payload.eventName.endsWith(".silent") ||
                   payload.values.silent === true
                 );
+                // Order guarantee: flush any in-flight or scheduled state persistence to SQLite
+                // and obtain the fresh authoritative state revision before sealing the interaction envelope.
+                await persistenceScheduler.flush(
+                  `surface:${surface.id}`,
+                  async (_key, s) => {
+                    const newRev = await api.saveSurfaceState(surface.id, s, stateRevisionRef.current);
+                    if (typeof newRev === "number") {
+                      stateRevisionRef.current = newRev;
+                    }
+                  },
+                );
                 // Single authority: send_message seals StructuredUserInput in Rust.
                 void saveComponentDraft(
                   payload.componentId ?? "form",

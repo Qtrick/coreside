@@ -1244,6 +1244,21 @@ pub async fn send_message(
     .await
 }
 
+fn contains_component_id(val: &serde_json::Value, target_id: &str) -> bool {
+    match val {
+        serde_json::Value::Object(obj) => {
+            if let Some(serde_json::Value::String(id)) = obj.get("id") {
+                if id == target_id {
+                    return true;
+                }
+            }
+            obj.values().any(|v| contains_component_id(v, target_id))
+        }
+        serde_json::Value::Array(arr) => arr.iter().any(|v| contains_component_id(v, target_id)),
+        _ => false,
+    }
+}
+
 async fn send_message_inner(
     app: AppHandle,
     state: &AppState,
@@ -1294,6 +1309,14 @@ async fn send_message_inner(
     let sealed_structured: Option<StructuredUserInput> = if let Some(submission) =
         structured_user_input.clone()
     {
+        if submission.surface_id.is_none()
+            && (submission.surface_revision.is_some() || submission.state_revision.is_some())
+        {
+            return Err(CommandError::new(
+                "invalid",
+                "surfaceId is required when surfaceRevision or stateRevision is specified",
+            ));
+        }
         if let Some(ref sid) = submission.surface_id {
             let db_guard = state.db.lock();
             let surf = crate::runtime_v2::surfaces::get_surface(&db_guard, sid).map_err(|e| {
@@ -1305,6 +1328,30 @@ async fn send_message_inner(
                     format!("Surface '{sid}' does not belong to conversation '{conversation_id}'"),
                 ));
             }
+            if let Ok(conv) = db::get_conversation(&db_guard, &conversation_id) {
+                if let Some(ref surf_p_id) = surf.project_id {
+                    if conv.project_id.as_ref() != Some(surf_p_id) {
+                        return Err(CommandError::new(
+                            "forbidden",
+                            format!(
+                                "Surface project '{surf_p_id}' does not match conversation project '{:?}'",
+                                conv.project_id
+                            ),
+                        ));
+                    }
+                }
+            }
+            if let Some(ref app_id) = submission.application_id {
+                let matches_app = surf.id == *app_id
+                    || surf.tool_id.as_deref() == Some(app_id)
+                    || surf.instance_id == *app_id;
+                if !matches_app {
+                    return Err(CommandError::new(
+                        "invalid",
+                        format!("Application ID mismatch for surface '{sid}': expected '{app_id}'"),
+                    ));
+                }
+            }
             if let Some(expected_rev) = submission.surface_revision {
                 if surf.current_revision != expected_rev {
                     return Err(CommandError::new(
@@ -1312,6 +1359,55 @@ async fn send_message_inner(
                         format!(
                             "Surface revision mismatch: expected {expected_rev}, current is {}",
                             surf.current_revision
+                        ),
+                    ));
+                }
+            }
+            if let Some(expected_state_rev) = submission.state_revision {
+                let (_, current_state_rev) =
+                    crate::runtime_v2::surfaces::get_surface_state_with_revision(&db_guard, sid)
+                        .map_err(|e| {
+                            CommandError::new(
+                                "not_found",
+                                format!("Surface state '{sid}' not found: {e}"),
+                            )
+                        })?;
+                if current_state_rev != expected_state_rev {
+                    return Err(CommandError::new(
+                        "conflict",
+                        format!(
+                            "Surface state revision mismatch: expected {expected_state_rev}, current is {current_state_rev}"
+                        ),
+                    ));
+                }
+            }
+            if let Some(ref comp_id) = submission.component_id {
+                let found = contains_component_id(&surf.definition, comp_id)
+                    || surf.id == *comp_id
+                    || surf.tool_id.as_deref() == Some(comp_id);
+                if !found {
+                    return Err(CommandError::new(
+                        "invalid",
+                        format!("Component '{comp_id}' not found in surface '{sid}'"),
+                    ));
+                }
+            }
+        }
+        if let Some(ref idem) = submission.idempotency_key {
+            let key = format!("sui-{idem}");
+            let db_guard = state.db.lock();
+            if let Ok(existing) =
+                crate::runtime_v2::get_turn_by_idempotency(&db_guard, &conversation_id, &key)
+            {
+                if !matches!(
+                    existing.state,
+                    crate::runtime_v2::TurnState::Failed
+                        | crate::runtime_v2::TurnState::InterruptedRecoverable
+                ) {
+                    return Err(CommandError::new(
+                        "conflict",
+                        format!(
+                            "Structured user input with idempotency key '{idem}' has already been processed"
                         ),
                     ));
                 }
@@ -1971,7 +2067,15 @@ async fn send_message_inner(
     let mut live_text_accum = String::new();
     let mut last_preview = String::new();
     let mut text_seq: u64 = 0;
-    let turn_idem_key = format!("turn-{}", user_message.id);
+    let turn_idem_key = if let Some(ref sui) = sealed_structured {
+        if let Some(ref idem) = sui.idempotency_key {
+            format!("sui-{idem}")
+        } else {
+            format!("turn-{}", user_message.id)
+        }
+    } else {
+        format!("turn-{}", user_message.id)
+    };
     let (turn_id, attempt_id, has_turn_record) = {
         let db = state.db.lock();
         if let Ok(existing) =

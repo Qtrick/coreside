@@ -1,25 +1,53 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-27T02:33:39.947Z",
-  "generatedAtLocal": "Sat Sep 26 2026 22:33:39 GMT-0400 (Eastern Daylight Time)",
-  "timezone": "America/New_York",
-  "commit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
+  "generatedAt": "2026-09-27T22:41:09.719Z",
+  "commit": "f02e69c0d634e93d27184f971834d1cbce249668",
   "dirty": true,
-  "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
-  "packageLockHash": "2b427ad1e95a93b212ca4763ebba64a778c976c59421514246b4b3c68300468d",
-  "cargoLockHash": "b64ad87161713f19b77675d96b38081e050c78ec6b8e3d6b3e00f26b49bfbd67",
-  "platform": "darwin",
-  "architecture": "arm64",
-  "buildMode": "development",
-  "exitStatus": "not_run",
-  "evidenceLevel": "Absent",
-  "currentOrHistorical": "historical",
-  "historicalNote": "RC3.12 intake 8d455783 is current; P0.5 intake 220c246e, P0.4 intake a9327c01, and P0.3 intake 7e335f18 are historical. Desktop/Packaged gates require fresh evidence on the current fingerprint.",
-  "archiveExpectedSha256": "8d455783ca41492259b15f0ed2973c7db14513a8afe352005d5eff8a1eef3155",
   "command": "test:packaged-smoke",
-  "classification": "Packaged launch smoke",
-  "smokeKind": "not_run",
-  "scope": "not_run",
-  "checks": []
+  "launchedApp": false,
+  "status": "launch_failed",
+  "reason": "launch_failed",
+  "evidenceLevel": "Scaffolded",
+  "launch": {
+    "step": "open",
+    "status": 1,
+    "stderr": "_LSOpenURLsWithCompletionHandler() failed with error -54.\n"
+  },
+  "rootsPresent": [
+    "src-tauri/target/release/bundle",
+    "src-tauri/target/debug/bundle"
+  ],
+  "artifacts": [
+    "src-tauri/target/release/bundle/dmg/Coreside_0.1.0_aarch64.dmg",
+    "src-tauri/target/release/bundle/macos/Coreside.app",
+    "src-tauri/target/debug/bundle/macos/Coreside.app"
+  ],
+  "artifactHashes": [
+    {
+      "path": "src-tauri/target/release/bundle/dmg/Coreside_0.1.0_aarch64.dmg",
+      "sha256": "dcf42a0f488bd5b7069c0af0f2666a710264ef00c2ce728832f34b8f6ff50c6f",
+      "size": 13477862
+    },
+    {
+      "path": "src-tauri/target/release/bundle/macos/Coreside.app",
+      "kind": "directory_bundle",
+      "note": "Directory bundle (.app) — no single-file hash."
+    },
+    {
+      "path": "src-tauri/target/debug/bundle/macos/Coreside.app",
+      "kind": "directory_bundle",
+      "note": "Directory bundle (.app) — no single-file hash."
+    }
+  ],
+  "packageScanExitCode": 0,
+  "packagingResults": {
+    "status": "passed",
+    "rootsFound": 2,
+    "filesScanned": 20,
+    "findingsCount": 0
+  },
+  "sourceIndependence": null,
+  "note": "Bundle present but smoke launch failed.",
+  "publicBeta": "Not ready"
 }

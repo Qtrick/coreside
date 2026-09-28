@@ -1648,11 +1648,14 @@ export function CanvasSceneNode({ component }: ToolNodeProps) {
       actions.push({
         type: "submitToAgent",
         eventName,
+        includeFields: [],
         values: {
           objectId: objId,
-          ...(obj.eventPayload as Record<string, unknown> | undefined),
+          ...(obj.eventPayload && typeof obj.eventPayload === "object"
+            ? (obj.eventPayload as Record<string, unknown>)
+            : {}),
         },
-      } as unknown as ActionDefinition);
+      });
     }
     if (actions.length > 0) {
       void runActions(actions, component.id);
@@ -1668,8 +1671,9 @@ export function CanvasSceneNode({ component }: ToolNodeProps) {
           {
             type: "submitToAgent",
             eventName: keyBindings[e.key]!,
+            includeFields: [],
             values: { key: e.key },
-          } as unknown as ActionDefinition,
+          },
         ],
         component.id,
       );
