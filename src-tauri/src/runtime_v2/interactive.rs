@@ -496,6 +496,194 @@ pub fn ai_turn_context(db: &mut Database, surface_id: &str) -> DbResult<Value> {
     }))
 }
 
+/// Model-safe rejection of an AI interactive.action proposal.
+/// Never embeds hidden/restricted state values — only reason codes and public context.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiActionRejection {
+    pub attempt_id: String,
+    pub attempt_index: u32,
+    pub action_id: Option<String>,
+    pub reason_code: String,
+    pub safe_message: String,
+    pub fresh_context: Value,
+    pub budget_remaining: u32,
+}
+
+/// Fresh attempt identity for a bounded illegal-action repair round.
+pub fn new_ai_action_attempt_id(attempt_index: u32) -> String {
+    format!("ai-act-{}-{attempt_index}", Uuid::new_v4())
+}
+
+fn safe_reject(
+    attempt_index: u32,
+    action_id: Option<&str>,
+    reason_code: &str,
+    safe_message: &str,
+    fresh_context: Value,
+    budget_remaining: u32,
+) -> AiActionRejection {
+    AiActionRejection {
+        attempt_id: new_ai_action_attempt_id(attempt_index),
+        attempt_index,
+        action_id: action_id.map(str::to_string),
+        reason_code: reason_code.into(),
+        safe_message: safe_message.into(),
+        fresh_context,
+        budget_remaining,
+    }
+}
+
+/// Dry-validate one AI interactive.action against authoritative state without mutating.
+/// Errors are model-safe (no hidden values, no raw state dumps).
+pub fn probe_ai_action(
+    db: &mut Database,
+    surface_id: &str,
+    expected_state_revision: i64,
+    action_id: &str,
+    params: &Value,
+    attempt_index: u32,
+) -> Result<(), AiActionRejection> {
+    let budget = super::limits::MAX_REPAIR_ATTEMPTS as u32;
+    let budget_remaining = budget.saturating_sub(attempt_index.saturating_add(1));
+    let fresh = |db: &mut Database| {
+        ai_turn_context(db, surface_id).unwrap_or(json!({
+            "surfaceId": surface_id,
+            "authority": "rust",
+            "error": "context_unavailable",
+        }))
+    };
+
+    let loaded = match ensure_initialized(db, surface_id) {
+        Ok(l) => l,
+        Err(_) => {
+            return Err(safe_reject(
+                attempt_index,
+                Some(action_id),
+                "surface_unavailable",
+                "Interactive surface is unavailable for an AI action.",
+                fresh(db),
+                budget_remaining,
+            ));
+        }
+    };
+
+    if loaded.reinitialized || expected_state_revision != loaded.revision {
+        return Err(safe_reject(
+            attempt_index,
+            Some(action_id),
+            "stale_revision",
+            "stateRevision is stale; use the refreshed authoritative context.",
+            fresh(db),
+            budget_remaining,
+        ));
+    }
+
+    let cp = loaded
+        .owned
+        .get("currentPlayer")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if !loaded.def.ai_actors.contains(&cp) {
+        return Err(safe_reject(
+            attempt_index,
+            Some(action_id),
+            "not_ai_turn",
+            "It is not an AI actor's turn.",
+            fresh(db),
+            budget_remaining,
+        ));
+    }
+
+    match loaded
+        .def
+        .is_legal_action(&loaded.owned, action_id, params, &cp)
+    {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(safe_reject(
+            attempt_index,
+            Some(action_id),
+            "illegal",
+            "Proposed action is not legal in the current public state. Choose from legalActions with a fresh stateRevision.",
+            fresh(db),
+            budget_remaining,
+        )),
+        Err(_) => Err(safe_reject(
+            attempt_index,
+            Some(action_id),
+            "illegal",
+            "Proposed action failed validation. Choose from legalActions with valid params and a fresh stateRevision.",
+            fresh(db),
+            budget_remaining,
+        )),
+    }
+}
+
+/// Probe all interactive.action ops in a model batch. Non-interactive ops are ignored.
+/// Returns Ok when every interactive.action is legal (or none are present).
+pub fn probe_ai_operations(
+    db: &mut Database,
+    surface_id: &str,
+    ops: &[super::operations::AppOperation],
+    attempt_index: u32,
+) -> Result<(), AiActionRejection> {
+    let interactive_ops: Vec<_> = ops
+        .iter()
+        .filter(|o| o.op_type == "interactive.action")
+        .collect();
+    if interactive_ops.is_empty() {
+        return Ok(());
+    }
+    for op in interactive_ops {
+        let sid = op.target.surface_id.as_deref().unwrap_or(surface_id);
+        if sid != surface_id {
+            let budget = super::limits::MAX_REPAIR_ATTEMPTS as u32;
+            return Err(safe_reject(
+                attempt_index,
+                op.payload.get("actionId").and_then(Value::as_str),
+                "wrong_surface",
+                "interactive.action target surface does not match the AI turn surface.",
+                ai_turn_context(db, surface_id).unwrap_or(json!({ "authority": "rust" })),
+                budget.saturating_sub(attempt_index.saturating_add(1)),
+            ));
+        }
+        let action_id = op
+            .payload
+            .get("actionId")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if action_id.is_empty() {
+            let budget = super::limits::MAX_REPAIR_ATTEMPTS as u32;
+            return Err(safe_reject(
+                attempt_index,
+                None,
+                "missing_action",
+                "interactive.action requires actionId.",
+                ai_turn_context(db, surface_id).unwrap_or(json!({ "authority": "rust" })),
+                budget.saturating_sub(attempt_index.saturating_add(1)),
+            ));
+        }
+        let expected = op
+            .payload
+            .get("stateRevision")
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+        let params = op
+            .payload
+            .get("params")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        probe_ai_action(db, surface_id, expected, action_id, &params, attempt_index)?;
+    }
+    Ok(())
+}
+
+/// Whether the repair budget still allows another model attempt after `attempt_index` failures.
+pub fn ai_action_budget_allows_retry(attempt_index: u32) -> bool {
+    (attempt_index as usize) < super::limits::MAX_REPAIR_ATTEMPTS
+}
+
 fn validate_event_id(event_id: &str) -> DbResult<()> {
     let ok = !event_id.is_empty()
         && event_id.len() <= MAX_EVENT_ID_LEN

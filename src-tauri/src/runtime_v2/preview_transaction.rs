@@ -470,13 +470,18 @@ impl PreviewTransaction {
             .get(surface_id)
             .ok_or_else(|| format!("preview surface missing: {surface_id}"))?;
         self.paint_sequence = self.paint_sequence.saturating_add(1);
+        // Channel PreviewSurface is renderer-facing: always project at egress so
+        // surface.create / inline updates / state paints cannot leak restricted
+        // interactive initials, seeds, or hidden state even when the in-memory
+        // speculative model still holds authoritative values for apply fidelity.
+        use super::visibility::{project_definition_value, project_surface_state, Audience};
         Ok(PreviewPaintEvent {
             turn_id: self.turn_id.clone(),
             tool_id: model.tool_id.clone(),
             surface_id: model.surface_id.clone(),
             application_id: model.application_id.clone(),
-            definition_json: model.definition.clone(),
-            state_json: model.state.clone(),
+            definition_json: project_definition_value(&model.definition, Audience::Renderer),
+            state_json: project_surface_state(&model.definition, &model.state, Audience::Renderer),
             revision: model.preview_revision,
             sequence: self.paint_sequence,
         })
@@ -1671,14 +1676,135 @@ mod tests {
             .find(|c| c["key"] == "answers")
             .expect("answers contract");
         assert!(
-            answers["initialValue"].is_null()
-                || answers.get("valueRedacted") == Some(&json!(true)),
+            answers["initialValue"].is_null() || answers.get("valueRedacted") == Some(&json!(true)),
             "restricted initialValue must be redacted in preview definition: {answers}"
         );
         let encoded = format!("{}{}", seed.definition, seed.state);
         assert!(
             !encoded.contains("[1,0,0]") && !encoded.contains("[1, 0, 0]"),
             "preview seed serialization must not embed quiz answers: {encoded}"
+        );
+    }
+
+    #[test]
+    fn make_paint_projects_surface_create_interactive_secrets() {
+        let mut preview = PreviewTransaction::new("turn-create-leak", None);
+        let op: AppOperation = serde_json::from_value(json!({
+            "id": "op-create-quiz",
+            "type": "surface.create",
+            "target": { "surfaceId": "surf-new-quiz" },
+            "payload": {
+                "definition": {
+                    "id": "quiz-tool",
+                    "name": "Quiz",
+                    "layout": { "type": "single-column" },
+                    "components": [{
+                        "id": "c1",
+                        "type": "progress",
+                        "props": { "maximum": 5, "value": 1 }
+                    }],
+                    "stateContracts": [
+                        {
+                            "key": "answers",
+                            "type": "array",
+                            "initialValue": [1, 0, 0],
+                            "readPolicy": "restricted"
+                        }
+                    ],
+                    "interactive": {
+                        "id": "quiz",
+                        "kind": "quiz",
+                        "randomSeed": 42,
+                        "stateSchema": [
+                            {
+                                "key": "answers",
+                                "type": "array",
+                                "initialValue": [1, 0, 0],
+                                "readPolicy": "restricted"
+                            },
+                            { "key": "score", "type": "number", "initialValue": 0 }
+                        ],
+                        "actions": [],
+                        "actors": ["player"]
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        let paint = preview
+            .paint_op(&op, |_| None)
+            .expect("paint")
+            .expect("surface paint");
+
+        let encoded = format!("{}{}", paint.definition_json, paint.state_json);
+        assert!(
+            !encoded.contains("\"randomSeed\"") && !encoded.contains("[1, 0, 0]"),
+            "preview paint must redact interactive secrets: {encoded}"
+        );
+        let answers = paint.definition_json["interactive"]["stateSchema"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["key"] == "answers")
+            .unwrap();
+        assert!(
+            answers["initialValue"].is_null() || answers.get("valueRedacted") == Some(&json!(true))
+        );
+        // In-memory speculative model may retain authoritative values for apply fidelity.
+        assert_eq!(
+            preview.surfaces["surf-new-quiz"].definition["interactive"]["randomSeed"],
+            42
+        );
+    }
+
+    #[test]
+    fn make_paint_strips_restricted_keys_from_state_set() {
+        let mut preview = PreviewTransaction::new("turn-state-leak", None);
+        preview.seed_surface(PreviewSurfaceModel {
+            surface_id: "s-quiz".into(),
+            tool_id: Some("t-quiz".into()),
+            application_id: Some("t-quiz".into()),
+            capability_packs: vec!["core.ui".into()],
+            definition: json!({
+                "id": "quiz",
+                "interactive": {
+                    "id": "quiz",
+                    "kind": "quiz",
+                    "stateSchema": [
+                        {
+                            "key": "answers",
+                            "type": "array",
+                            "initialValue": [1, 0, 0],
+                            "readPolicy": "restricted"
+                        },
+                        { "key": "score", "type": "number", "initialValue": 0 }
+                    ],
+                    "actions": [],
+                    "actors": ["player"]
+                }
+            }),
+            state: json!({ "score": 0 }),
+            base_revision: 1,
+            preview_revision: 1,
+        });
+        let op: AppOperation = serde_json::from_value(json!({
+            "id": "op-set",
+            "type": "state.set",
+            "target": { "surfaceId": "s-quiz" },
+            "payload": { "answers": [9, 9, 9], "score": 3 }
+        }))
+        .unwrap();
+        let paint = preview
+            .paint_op(&op, |_| None)
+            .expect("paint")
+            .expect("state paint");
+        assert!(paint.state_json.get("answers").is_none());
+        assert_eq!(paint.state_json["score"], 3);
+        // Speculative model still holds the streamed values; egress must not.
+        assert_eq!(
+            preview.surfaces["s-quiz"].state["answers"],
+            json!([9, 9, 9])
         );
     }
 }

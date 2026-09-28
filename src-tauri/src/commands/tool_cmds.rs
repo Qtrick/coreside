@@ -220,7 +220,37 @@ pub fn get_tool_state(
     state.require_profile()?;
     windows::enforce_caller_tool_scope(&window, &tool_id)?;
     let db = state.db.lock();
-    Ok(db::get_tool_state(&db, &tool_id)?.unwrap_or_else(|| json!({})))
+    let raw = db::get_tool_state(&db, &tool_id)?.unwrap_or_else(|| json!({}));
+    // tool_state may mirror surface_state (including restricted interactive keys).
+    // Never return that raw blob to the renderer — project through the bound surface
+    // or tool definition contracts when available.
+    let sid = crate::runtime_v2::surfaces::surface_id_for_tool(&tool_id);
+    if let Ok(surface) = crate::runtime_v2::surfaces::get_surface(&db, &sid) {
+        return Ok(crate::runtime_v2::visibility::project_surface_state(
+            &surface.definition,
+            &raw,
+            crate::runtime_v2::visibility::Audience::Renderer,
+        ));
+    }
+    if let Ok(tool) = db::get_tool(&db, &tool_id) {
+        let mut wrapper = json!({
+            "stateContracts": tool.definition.state_contracts,
+        });
+        if let Some(interactive) = tool.definition.interactive {
+            if let Some(obj) = wrapper.as_object_mut() {
+                obj.insert("interactive".into(), interactive);
+            }
+        }
+        return Ok(crate::runtime_v2::visibility::project_surface_state(
+            &wrapper,
+            &raw,
+            crate::runtime_v2::visibility::Audience::Renderer,
+        ));
+    }
+    // No surface/tool contracts available — fail closed rather than returning
+    // an unprojected blob that may contain restricted interactive keys.
+    let _ = raw;
+    Ok(json!({}))
 }
 
 #[tauri::command]

@@ -628,9 +628,7 @@ fn emit_progressive_op_previews(
     preview_txn: &mut crate::runtime_v2::PreviewTransaction,
     delta: &str,
 ) {
-    use crate::runtime_v2::{
-        get_surface, get_surface_state, renderer_safe_preview_seed,
-    };
+    use crate::runtime_v2::{get_surface, get_surface_state, renderer_safe_preview_seed};
 
     let events = crate::runtime_v2::ingest_progressive_chunk_with_seed(
         parser,
@@ -2670,6 +2668,181 @@ async fn send_message_inner(
         parsed.payload.normalize_for_frontend();
     }
 
+    // Bounded illegal-action repair for interactive.ai_turn (Rust-owned).
+    // Probe before releasing the request slot so fresh context + re-prompt stay authoritative.
+    let interactive_ai_surface = sealed_structured
+        .as_ref()
+        .filter(|s| s.event_name.as_deref() == Some("interactive.ai_turn"))
+        .and_then(|s| s.surface_id.clone());
+    let mut interactive_repaired_ops: Option<Vec<crate::runtime_v2::AppOperation>> = None;
+    let mut interactive_repair_exhausted = false;
+    if let Some(ref sid) = interactive_ai_surface {
+        let mut candidate_ops = parsed.payload.normalized_operations().unwrap_or_default();
+        if candidate_ops
+            .iter()
+            .any(|o| o.op_type == "interactive.action")
+        {
+            let mut attempt_index = 0u32;
+            loop {
+                if cancel.is_cancelled() {
+                    interactive_repaired_ops = Some(Vec::new());
+                    interactive_repair_exhausted = true;
+                    break;
+                }
+                let probe = {
+                    let mut db = state.db.lock();
+                    crate::runtime_v2::interactive::probe_ai_operations(
+                        &mut db,
+                        sid,
+                        &candidate_ops,
+                        attempt_index,
+                    )
+                };
+                match probe {
+                    Ok(()) => {
+                        interactive_repaired_ops = Some(candidate_ops);
+                        break;
+                    }
+                    Err(rejection) => {
+                        record_action(
+                            &app,
+                            on_event.as_ref(),
+                            &conversation_id,
+                            &mut action_log,
+                            "Interactive AI action rejected; regenerating context",
+                            "interactive_action_rejected",
+                            api_key_ref,
+                        );
+                        note_timeline(
+                            state,
+                            &conversation_id,
+                            &turn_id,
+                            "operation_rejected",
+                            json!({
+                                "scope": "interactive.ai_action",
+                                "attemptId": rejection.attempt_id,
+                                "attemptIndex": rejection.attempt_index,
+                                "reasonCode": rejection.reason_code,
+                                "actionId": rejection.action_id,
+                                "budgetRemaining": rejection.budget_remaining,
+                            }),
+                        );
+                        attempt_index = attempt_index.saturating_add(1);
+                        if !crate::runtime_v2::interactive::ai_action_budget_allows_retry(
+                            attempt_index,
+                        ) || cancel.is_cancelled()
+                        {
+                            interactive_repaired_ops = Some(Vec::new());
+                            interactive_repair_exhausted = true;
+                            emit_turn(
+                                &app,
+                                on_event.as_ref(),
+                                AgentTurnEvent::Error {
+                                    conversation_id: conversation_id.clone(),
+                                    message: rejection.safe_message.clone(),
+                                },
+                            );
+                            break;
+                        }
+                        // Attempt identity lives on the rejection + timeline (turn stays active).
+                        // Do not call begin_retry_attempt here — that API is for failed turns only.
+                        chat_messages.push(AgentMessage::text(
+                            AgentRole::Assistant,
+                            "Previous interactive.action was rejected by Rust.",
+                        ));
+                        let repair_body = format!(
+                            "[interactive.ai_turn.repair]\nreasonCode: {}\n{}\nFresh authoritative context (JSON):\n{}",
+                            rejection.reason_code,
+                            rejection.safe_message,
+                            serde_json::to_string(&rejection.fresh_context)
+                                .unwrap_or_else(|_| "{\"authority\":\"rust\",\"error\":\"context_unavailable\"}".into())
+                        );
+                        chat_messages.push(AgentMessage::text(AgentRole::User, repair_body));
+                        let app_for_stream = app.clone();
+                        let conversation_for_stream = conversation_id.clone();
+                        let repair = chat_with_auto(
+                            &access,
+                            &model_preference,
+                            AgentRequest {
+                                system_prompt: system_prompt.clone(),
+                                messages: chat_messages.clone(),
+                                cancel: cancel.clone(),
+                                idempotency_key: Some(Uuid::new_v4().to_string()),
+                            },
+                            |_| {},
+                            |event| {
+                                use crate::ai::ProviderStreamEvent;
+                                if let ProviderStreamEvent::TextDelta { text } = event {
+                                    let _ = text;
+                                    let _ = &app_for_stream;
+                                    let _ = &conversation_for_stream;
+                                }
+                            },
+                        )
+                        .await;
+                        match repair {
+                            Ok(r) => {
+                                resolved = r;
+                                match parse_agent_response(&resolved.response.raw_text) {
+                                    Ok(reparsed) => {
+                                        parsed = reparsed;
+                                        parsed.payload.normalize_for_frontend();
+                                        candidate_ops = parsed
+                                            .payload
+                                            .normalized_operations()
+                                            .unwrap_or_default();
+                                        if !candidate_ops
+                                            .iter()
+                                            .any(|o| o.op_type == "interactive.action")
+                                        {
+                                            // Model gave up proposing an action — commit nothing.
+                                            interactive_repaired_ops = Some(Vec::new());
+                                            break;
+                                        }
+                                    }
+                                    Err(_) => {
+                                        interactive_repaired_ops = Some(Vec::new());
+                                        interactive_repair_exhausted = true;
+                                        emit_turn(
+                                            &app,
+                                            on_event.as_ref(),
+                                            AgentTurnEvent::Error {
+                                                conversation_id: conversation_id.clone(),
+                                                message: "Interactive AI repair response could not be parsed.".into(),
+                                            },
+                                        );
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(e) if matches!(e, crate::ai::AiError::Cancelled) => {
+                                interactive_repaired_ops = Some(Vec::new());
+                                interactive_repair_exhausted = true;
+                                break;
+                            }
+                            Err(_) => {
+                                interactive_repaired_ops = Some(Vec::new());
+                                interactive_repair_exhausted = true;
+                                emit_turn(
+                                    &app,
+                                    on_event.as_ref(),
+                                    AgentTurnEvent::Error {
+                                        conversation_id: conversation_id.clone(),
+                                        message: "Interactive AI repair failed.".into(),
+                                    },
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // `interactive_repair_exhausted` is recorded via Error events above when
+    // the turn must surface failure; empty ops still prevent illegal commits.
+    let _ = interactive_repair_exhausted;
+
     if has_turn_record {
         let db = state.db.lock();
         let _ = crate::runtime_v2::transition_turn(
@@ -2896,13 +3069,17 @@ async fn send_message_inner(
         }
 
         let mut operations_from_payload: Option<Vec<crate::runtime_v2::AppOperation>> = None;
-        if let Ok(ops) = parsed.payload.normalized_operations() {
+        let interactive_ops_locked = interactive_repaired_ops.is_some();
+        if let Some(repaired) = interactive_repaired_ops.take() {
+            // Interactive AI repair owned the final op set (may be empty after budget exhaust).
+            operations_from_payload = Some(repaired);
+        } else if let Ok(ops) = parsed.payload.normalized_operations() {
             if !ops.is_empty() {
                 operations_from_payload = Some(ops);
             }
         }
 
-        if progressive_ops_enabled {
+        if progressive_ops_enabled && !interactive_ops_locked {
             match progressive_parser.durable_operations() {
                 Some(durable) => {
                     // P0 defense-in-depth: reject internal/reserved ops at the
@@ -2957,10 +3134,11 @@ async fn send_message_inner(
                     // aggregate schema-v2 operations only (text/tool_change path).
                 }
             }
-        } else if operations_from_payload
-            .as_ref()
-            .map(|o| o.is_empty())
-            .unwrap_or(true)
+        } else if !interactive_ops_locked
+            && operations_from_payload
+                .as_ref()
+                .map(|o| o.is_empty())
+                .unwrap_or(true)
             && !preview_txn.interrupted
             && !preview_txn.committed
             && !preview_txn.is_empty()
@@ -2970,7 +3148,8 @@ async fn send_message_inner(
         }
 
         // Post-hoc legacy harvest is isolated from the authoritative progressive path.
-        if !progressive_ops_enabled
+        if !interactive_ops_locked
+            && !progressive_ops_enabled
             && operations_from_payload
                 .as_ref()
                 .map(|o| o.is_empty())

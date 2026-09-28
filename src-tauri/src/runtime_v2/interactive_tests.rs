@@ -4,9 +4,11 @@ use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
 use super::interactive::{
-    ai_turn_context, dispatch, get_view, history, reconstruct, replay_view, undo, InteractiveView,
-    Origin,
+    ai_action_budget_allows_retry, ai_turn_context, dispatch, get_view, history,
+    new_ai_action_attempt_id, probe_ai_action, probe_ai_operations, reconstruct, replay_view, undo,
+    AiActionRejection, InteractiveView, Origin,
 };
+use super::limits::MAX_REPAIR_ATTEMPTS;
 use super::operations::{AppOperation, OperationTarget};
 use super::rules_engine::{InteractiveAppDefinition, RNG_STATE_KEY};
 use super::rules_fixtures::get_fixture;
@@ -130,6 +132,58 @@ fn state_op(op_type: &str, sid: &str, payload: Value) -> AppOperation {
         payload,
         ..Default::default()
     }
+}
+
+fn interactive_action_op(sid: &str, action_id: &str, rev: i64, params: Value) -> AppOperation {
+    state_op(
+        "interactive.action",
+        sid,
+        json!({
+            "actionId": action_id,
+            "stateRevision": rev,
+            "params": params,
+        }),
+    )
+}
+
+fn with_ai_actors(mut interactive: Value, actors: &[&str]) -> Value {
+    interactive["aiActors"] = json!(actors);
+    // Probe gates on currentPlayer ∈ aiActors; fixtures without a turn key need one.
+    let has_cp = interactive["stateSchema"]
+        .as_array()
+        .map(|s| {
+            s.iter()
+                .any(|e| e.get("key").and_then(|k| k.as_str()) == Some("currentPlayer"))
+        })
+        .unwrap_or(false);
+    if !has_cp {
+        let actor = actors.first().copied().unwrap_or("user");
+        interactive["stateSchema"]
+            .as_array_mut()
+            .expect("stateSchema")
+            .push(json!({
+                "key": "currentPlayer",
+                "type": "string",
+                "initialValue": actor
+            }));
+    }
+    interactive
+}
+
+fn assert_quiz_rejection_hides_answers(rej: &AiActionRejection) {
+    assert!(rej.fresh_context["publicState"].get("answers").is_none());
+    let encoded = serde_json::to_string(rej).unwrap();
+    assert!(
+        !encoded.contains("[1,0,0]")
+            && !encoded.contains("[1, 0, 0]")
+            && !encoded.contains("\"answers\":[1"),
+        "rejection must not leak quiz answers: {encoded}"
+    );
+    assert!(
+        !rej.safe_message.contains("answers") && !rej.safe_message.contains("[1"),
+        "safe_message must not mention hidden answers: {}",
+        rej.safe_message
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -710,6 +764,92 @@ fn chess_game_with_castling_replays_exactly_at_every_step() {
 }
 
 #[test]
+fn chess_resign_and_claim_draw_dispatch_through_fixture() {
+    let mut e = env();
+    let sid = create(&mut e, fixture_json("chess"));
+    let _ = get_view(&mut e.db, &sid).unwrap();
+
+    let rev = raw_state(&e.db, &sid).1;
+    let claim = dispatch(
+        &mut e.db,
+        &sid,
+        rev,
+        "claim-early",
+        "claimDraw",
+        &json!({}),
+        Origin::User,
+    );
+    assert!(
+        claim.is_err(),
+        "claimDraw must fail when nothing is claimable: {claim:?}"
+    );
+    assert_eq!(raw_state(&e.db, &sid).1, rev);
+
+    let resigned = act(&mut e, &sid, "resign-1", "resign", json!({}));
+    assert_eq!(resigned.status, "resigned");
+    assert_eq!(resigned.state["winner"], "black");
+    assert_eq!(resigned.state["chess"]["status"], "resigned");
+    assert_eq!(resigned.state["chess"]["winner"], "black");
+    assert!(resigned
+        .legal_actions
+        .iter()
+        .any(|a| a.action_id == "reset"));
+    // Parameterless endgame actions are gated by the playing guard.
+    assert!(!resigned
+        .legal_actions
+        .iter()
+        .any(|a| a.action_id == "resign" || a.action_id == "claimDraw"));
+    let rev_after = resigned.state_revision;
+    assert!(dispatch(
+        &mut e.db,
+        &sid,
+        rev_after,
+        "resign-again",
+        "resign",
+        &json!({}),
+        Origin::User,
+    )
+    .is_err());
+}
+
+#[test]
+fn chess_claim_draw_succeeds_after_threefold_via_dispatch() {
+    let mut e = env();
+    let sid = create(&mut e, fixture_json("chess"));
+    let _ = get_view(&mut e.db, &sid).unwrap();
+
+    // Knight shuffle to threefold repetition (claimable, not automatic).
+    let moves = [
+        ("g1", "f3"),
+        ("g8", "f6"),
+        ("f3", "g1"),
+        ("f6", "g8"),
+        ("g1", "f3"),
+        ("g8", "f6"),
+        ("f3", "g1"),
+        ("f6", "g8"),
+    ];
+    for (i, (from, to)) in moves.iter().enumerate() {
+        act(
+            &mut e,
+            &sid,
+            &format!("tf-{i}"),
+            "move",
+            json!({"from": from, "to": to}),
+        );
+    }
+    let view = get_view(&mut e.db, &sid).unwrap();
+    assert_eq!(view.status, "playing");
+    assert_eq!(view.state["chess"]["claimableDraw"], "threefold");
+
+    let claimed = act(&mut e, &sid, "claim-tf", "claimDraw", json!({}));
+    assert_eq!(claimed.status, "draw_threefold");
+    assert_eq!(claimed.state["chess"]["status"], "draw_threefold");
+    assert!(claimed.state["chess"]["claimableDraw"].is_null());
+    assert!(claimed.legal_actions.iter().any(|a| a.action_id == "reset"));
+}
+
+#[test]
 fn random_card_game_replays_exactly_at_every_step() {
     let mut e = env();
     let def = get_fixture("card-deck").unwrap();
@@ -1061,6 +1201,158 @@ fn ai_actor_moves_only_on_its_turn_and_user_cannot_act_for_it() {
         Origin::Ai,
     );
     assert!(ai_again.is_err());
+}
+
+#[test]
+fn probe_ai_action_accepts_legal_move_on_ai_turn() {
+    let mut e = env();
+    let mut ttt = fixture_json("tic-tac-toe");
+    ttt["aiActors"] = json!(["O"]);
+    let sid = create(&mut e, ttt);
+    let _ = get_view(&mut e.db, &sid).unwrap();
+    let v1 = act(&mut e, &sid, "u-center", "move", json!({"index": 4}));
+    assert_eq!(v1.waiting_for.as_deref(), Some("O"));
+    let rev = v1.state_revision;
+    let rows = log_count(&e.db, &sid);
+
+    assert!(probe_ai_action(&mut e.db, &sid, rev, "move", &json!({"index": 0}), 0).is_ok());
+    assert_eq!(log_count(&e.db, &sid), rows, "probe must not mutate");
+    assert_eq!(raw_state(&e.db, &sid).1, rev);
+    // Confirm the probed move still applies afterward.
+    let v2 = dispatch(
+        &mut e.db,
+        &sid,
+        rev,
+        "ai-probe-ok",
+        "move",
+        &json!({"index": 0}),
+        Origin::Ai,
+    )
+    .unwrap();
+    assert_eq!(v2.state["board"][0], "O");
+}
+
+#[test]
+fn probe_ai_action_rejects_illegal_without_leaking_quiz_answers() {
+    let mut e = env();
+    let sid = create(&mut e, with_ai_actors(fixture_json("quiz"), &["user"]));
+    let _ = get_view(&mut e.db, &sid).unwrap();
+    // aiActors=["user"] so only Origin::Ai may answer; finish the quiz then probe.
+    for (i, choice) in [1, 0, 0].into_iter().enumerate() {
+        let rev = raw_state(&e.db, &sid).1;
+        dispatch(
+            &mut e.db,
+            &sid,
+            rev,
+            &format!("q-{i}"),
+            "answer",
+            &json!({"choice": choice}),
+            Origin::Ai,
+        )
+        .unwrap_or_else(|err| panic!("answer {choice} failed: {err}"));
+    }
+    let done = get_view(&mut e.db, &sid).unwrap();
+    assert_eq!(done.status, "completed");
+    let rev = done.state_revision;
+    let rows = log_count(&e.db, &sid);
+
+    let err = probe_ai_action(&mut e.db, &sid, rev, "answer", &json!({"choice": 0}), 1)
+        .expect_err("completed quiz answer must be illegal");
+    assert_eq!(err.reason_code, "illegal");
+    assert_eq!(err.attempt_index, 1);
+    assert_eq!(err.action_id.as_deref(), Some("answer"));
+    assert!(err.attempt_id.contains("-1"));
+    assert!(err.budget_remaining < MAX_REPAIR_ATTEMPTS as u32);
+    assert_quiz_rejection_hides_answers(&err);
+    assert_eq!(log_count(&e.db, &sid), rows);
+    assert_eq!(raw_state(&e.db, &sid).1, rev);
+}
+
+#[test]
+fn probe_ai_action_rejects_stale_revision() {
+    let mut e = env();
+    let mut ttt = fixture_json("tic-tac-toe");
+    ttt["aiActors"] = json!(["O"]);
+    let sid = create(&mut e, ttt);
+    let v0 = get_view(&mut e.db, &sid).unwrap();
+    let v1 = act(&mut e, &sid, "u-1", "move", json!({"index": 4}));
+    let stale = v0.state_revision;
+    assert_ne!(stale, v1.state_revision);
+
+    let err = probe_ai_action(&mut e.db, &sid, stale, "move", &json!({"index": 0}), 0)
+        .expect_err("stale revision must fail");
+    assert_eq!(err.reason_code, "stale_revision");
+    assert!(err.safe_message.to_lowercase().contains("stale"));
+    assert_eq!(err.fresh_context["stateRevision"], v1.state_revision);
+}
+
+#[test]
+fn probe_ai_operations_rejects_wrong_surface() {
+    let mut e = env();
+    let mut ttt = fixture_json("tic-tac-toe");
+    ttt["aiActors"] = json!(["O"]);
+    let sid = create(&mut e, ttt);
+    let _ = get_view(&mut e.db, &sid).unwrap();
+    let v1 = act(&mut e, &sid, "u-1", "move", json!({"index": 4}));
+    let mut wrong = interactive_action_op(
+        "other-surface",
+        "move",
+        v1.state_revision,
+        json!({"index": 0}),
+    );
+    wrong.target.surface_id = Some("other-surface".into());
+
+    let err = probe_ai_operations(&mut e.db, &sid, &[wrong], 0)
+        .expect_err("mismatched surface must fail");
+    assert_eq!(err.reason_code, "wrong_surface");
+    assert_eq!(err.action_id.as_deref(), Some("move"));
+    // Non-interactive ops are ignored; only the bad interactive.action fails the batch.
+    let ignored = state_op("state.patch", &sid, json!({"path": "/note", "value": "x"}));
+    let legal = interactive_action_op(&sid, "move", v1.state_revision, json!({"index": 0}));
+    assert!(probe_ai_operations(&mut e.db, &sid, &[ignored, legal], 0).is_ok());
+}
+
+#[test]
+fn ai_action_budget_allows_retry_until_max_repair_attempts() {
+    for i in 0..MAX_REPAIR_ATTEMPTS {
+        assert!(
+            ai_action_budget_allows_retry(i as u32),
+            "attempt {i} should still allow retry"
+        );
+    }
+    assert!(!ai_action_budget_allows_retry(MAX_REPAIR_ATTEMPTS as u32));
+    assert!(!ai_action_budget_allows_retry(
+        MAX_REPAIR_ATTEMPTS as u32 + 5
+    ));
+}
+
+#[test]
+fn new_ai_action_attempt_id_is_unique_and_indexed() {
+    let a = new_ai_action_attempt_id(2);
+    let b = new_ai_action_attempt_id(2);
+    assert!(a.starts_with("ai-act-") && a.ends_with("-2"), "{a}");
+    assert!(b.starts_with("ai-act-") && b.ends_with("-2"), "{b}");
+    assert_ne!(a, b);
+}
+
+#[test]
+fn probe_rejection_fresh_context_is_model_safe_for_quiz() {
+    let mut e = env();
+    let sid = create(&mut e, with_ai_actors(fixture_json("quiz"), &["user"]));
+    let _ = get_view(&mut e.db, &sid).unwrap();
+    let rev = raw_state(&e.db, &sid).1;
+
+    let err = probe_ai_action(&mut e.db, &sid, rev, "answer", &json!({"choice": 99}), 0)
+        .expect_err("out-of-range choice must be illegal");
+    assert_eq!(err.reason_code, "illegal");
+    assert_quiz_rejection_hides_answers(&err);
+    assert_eq!(err.fresh_context["authority"], "rust");
+    assert!(err.fresh_context["publicState"].get("answers").is_none());
+    assert!(err.fresh_context["modelDefinition"]["stateSchema"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["key"] == "answers" && c["valueRedacted"] == true));
 }
 
 #[test]

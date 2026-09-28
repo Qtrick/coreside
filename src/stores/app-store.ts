@@ -313,6 +313,8 @@ let agentTurnSyncAttached = false;
 /** Active conversation-scoped Sync Channel unlisten (main / tool window). */
 let conversationSyncUnlisten: (() => void) | null = null;
 let conversationSyncConversationId: string | null = null;
+/** Per-conversation catch-up cursor for conversation_event_log. */
+const conversationEventCursor = new Map<string, number>();
 
 type SyncListenerGet = () => {
   reloadActiveSurfaces: () => Promise<void>;
@@ -325,6 +327,50 @@ type SyncListenerSet = (partial: {
   appConflict?: AppConflict | null;
   previewSurfacesByKey?: Record<string, PreviewSurfaceOverlay>;
 }) => void;
+
+/**
+ * Apply durable conversation_event_log rows missed while the Channel was down.
+ * Reloads surfaces for transaction_applied events; advances the cursor always.
+ * Pages until exhausted so a long gap cannot stall the cursor mid-stream.
+ */
+async function catchUpConversationEvents(
+  conversationId: string,
+  get: SyncListenerGet,
+) {
+  let after = conversationEventCursor.get(conversationId) ?? 0;
+  try {
+    let needsReload = false;
+    const pageLimit = 200;
+    // Bound pages so a pathological log cannot hang the UI thread forever.
+    for (let page = 0; page < 20; page += 1) {
+      const events = await api.getConversationEvents({
+        conversationId,
+        afterSequence: after,
+        limit: pageLimit,
+      });
+      if (events.length === 0) break;
+      let maxSeq = after;
+      for (const ev of events) {
+        if (ev.sequence > maxSeq) maxSeq = ev.sequence;
+        // Durable apply marker written by the transaction kernel. Channel-only
+        // "sync" events are not persisted — live subscribe covers those.
+        if (ev.eventType === "surface.transaction_applied") {
+          needsReload = true;
+        }
+      }
+      if (maxSeq > after) {
+        conversationEventCursor.set(conversationId, maxSeq);
+        after = maxSeq;
+      }
+      if (events.length < pageLimit) break;
+    }
+    if (needsReload && get().activeConversationId === conversationId) {
+      await get().reloadActiveSurfaces();
+    }
+  } catch {
+    // Best-effort; live Channel remains authoritative while connected.
+  }
+}
 
 /** Shared Sync/Conflict apply path for scoped Channel + residual global bus. */
 function applySyncOrConflictEvent(
@@ -411,6 +457,8 @@ function ensureConversationSyncSubscription(
   conversationSyncUnlisten = null;
   conversationSyncConversationId = trimmed || null;
   if (!trimmed) return;
+  // Subscribe first, then catch up. Catch-up→subscribe leaves a gap where
+  // durable applies can land unseen; overlap only causes an extra reload.
   void api
     .subscribeConversationSync({
       conversationId: trimmed,
@@ -424,9 +472,11 @@ function ensureConversationSyncSubscription(
         return;
       }
       conversationSyncUnlisten = stop;
+      void catchUpConversationEvents(trimmed, get);
     })
     .catch(() => {
       // Best-effort; residual global listenAgentTurn remains.
+      void catchUpConversationEvents(trimmed, get);
     });
 }
 

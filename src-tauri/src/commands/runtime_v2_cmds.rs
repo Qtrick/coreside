@@ -134,6 +134,14 @@ pub struct CreateInlineSurfaceArgs {
     pub capability_packs: Option<Vec<String>>,
 }
 
+fn project_surface_for_renderer(mut surface: SurfaceRecord) -> SurfaceRecord {
+    surface.definition = crate::runtime_v2::visibility::project_definition_value(
+        &surface.definition,
+        crate::runtime_v2::visibility::Audience::Renderer,
+    );
+    surface
+}
+
 #[tauri::command]
 pub fn create_inline_surface_cmd(
     state: State<'_, AppState>,
@@ -142,7 +150,7 @@ pub fn create_inline_surface_cmd(
     state.require_profile()?;
     let mut db = state.db.lock();
     let packs = args.capability_packs.unwrap_or_default();
-    Ok(create_inline_surface(
+    let surface = create_inline_surface(
         &mut db,
         &args.conversation_id,
         args.message_id.as_deref(),
@@ -150,7 +158,8 @@ pub fn create_inline_surface_cmd(
         &args.name,
         &args.definition,
         &packs,
-    )?)
+    )?;
+    Ok(project_surface_for_renderer(surface))
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,13 +178,14 @@ pub fn update_surface_cmd(
 ) -> Result<SurfaceRecord, CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
-    Ok(update_surface_definition(
+    let surface = update_surface_definition(
         &mut db,
         &args.surface_id,
         &args.definition,
         args.change_summary.as_deref().unwrap_or("update"),
         args.base_revision,
-    )?)
+    )?;
+    Ok(project_surface_for_renderer(surface))
 }
 
 #[tauri::command]
@@ -185,11 +195,8 @@ pub fn promote_surface_cmd(
 ) -> Result<SurfaceRecord, CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
-    Ok(promote_inline_to_tool(
-        &mut db,
-        &surface_id,
-        "ws-personal-default",
-    )?)
+    let surface = promote_inline_to_tool(&mut db, &surface_id, "ws-personal-default")?;
+    Ok(project_surface_for_renderer(surface))
 }
 
 #[tauri::command]
@@ -823,13 +830,18 @@ pub fn branch_conversation_cmd(
 ) -> Result<(ChatBranchRecord, Vec<SurfaceRecord>), CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
-    Ok(branch_from_message(
+    let (branch, surfaces) = branch_from_message(
         &mut db,
         &args.source_conversation_id,
         &args.source_message_id,
         args.branch_name.as_deref().unwrap_or(""),
         "ws-personal-default",
-    )?)
+    )?;
+    let surfaces = surfaces
+        .into_iter()
+        .map(project_surface_for_renderer)
+        .collect();
+    Ok((branch, surfaces))
 }
 
 #[tauri::command]

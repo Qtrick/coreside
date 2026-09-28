@@ -648,6 +648,14 @@ pub enum RuleEffect {
         #[serde(default)]
         promotion: Option<RuleExpr>,
     },
+    /// Claim a FIDE optional draw (threefold / fifty-move) when claimable.
+    ChessClaimDraw {
+        key: String,
+    },
+    /// Resign for the side to move.
+    ChessResign {
+        key: String,
+    },
     /// Trusted 2048 capability: slide/merge the square grid at `key`, spawn a
     /// tile from the persisted RNG, and update `scoreKey` and `status`.
     Grid2048Slide {
@@ -1577,6 +1585,10 @@ fn check_effect_shape(
             }
             false
         }
+        RuleEffect::ChessClaimDraw { key } | RuleEffect::ChessResign { key } => {
+            validate_state_ref(key)?;
+            false
+        }
         RuleEffect::Grid2048Slide {
             key,
             direction,
@@ -2064,6 +2076,24 @@ fn apply_effect(
             state["status"] = next["status"].clone();
             state["winner"] = next["winner"].clone();
             state["currentPlayer"] = next["sideToMove"].clone();
+            state[key] = next;
+        }
+        RuleEffect::ChessClaimDraw { key } => {
+            let cur = state
+                .get(key)
+                .ok_or_else(|| format!("Chess state '{key}' missing"))?;
+            let next = chess::claim_draw(cur)?;
+            state["status"] = next["status"].clone();
+            state["winner"] = next["winner"].clone();
+            state[key] = next;
+        }
+        RuleEffect::ChessResign { key } => {
+            let cur = state
+                .get(key)
+                .ok_or_else(|| format!("Chess state '{key}' missing"))?;
+            let next = chess::resign(cur)?;
+            state["status"] = next["status"].clone();
+            state["winner"] = next["winner"].clone();
             state[key] = next;
         }
         RuleEffect::Grid2048Slide {

@@ -3,8 +3,9 @@
 //! The model may describe a chess application and propose moves, but only this
 //! module decides legality. Behavior follows FIDE rules as implemented by chess.js:
 //! legal move generation with king safety, castling (rights, through-check and
-//! in-check rejection), en passant, promotion, checkmate, stalemate, fifty-move
-//! rule, threefold repetition and insufficient material.
+//! in-check rejection), en passant, promotion, checkmate, stalemate, insufficient
+//! material, claimable threefold / fifty-move draws, automatic fivefold / 75-move
+//! draws, and resign.
 
 use serde_json::{json, Value};
 
@@ -745,7 +746,27 @@ fn parse_promotion(v: &Value) -> Result<Option<Kind>, String> {
     }
 }
 
+/// Claimable draw reason the side to move may assert (FIDE optional claims).
+/// Automatic draws (fivefold / 75-move) are handled in [`game_status`].
+pub fn claimable_draw(pos: &Position, history: &[String]) -> Option<&'static str> {
+    let key = pos.repetition_key();
+    let reps = history.iter().filter(|k| **k == key).count();
+    // Threefold is claimable; fivefold is automatic (see game_status).
+    if (3..5).contains(&reps) {
+        return Some("threefold");
+    }
+    // Fifty-move is claimable at halfmove >= 100; 75-move is automatic at >= 150.
+    if (100..150).contains(&pos.halfmove) {
+        return Some("fifty_move");
+    }
+    None
+}
+
 /// Outcome of the position for the side to move.
+///
+/// Automatic terminals: checkmate, stalemate, insufficient material, fivefold
+/// repetition, 75-move rule. Threefold / fifty-move remain claimable via
+/// [`claim_draw`] while status stays `playing`.
 pub fn game_status(pos: &Position, history: &[String]) -> (&'static str, Option<&'static str>) {
     let legal = pos.legal_moves();
     if legal.is_empty() {
@@ -754,15 +775,16 @@ pub fn game_status(pos: &Position, history: &[String]) -> (&'static str, Option<
         }
         return ("stalemate", None);
     }
-    if pos.halfmove >= 100 {
-        return ("draw_fifty_move", None);
-    }
     if pos.insufficient_material() {
         return ("draw_insufficient_material", None);
     }
+    // FIDE automatic draws
+    if pos.halfmove >= 150 {
+        return ("draw_seventy_five_move", None);
+    }
     let key = pos.repetition_key();
-    if history.iter().filter(|k| **k == key).count() >= 3 {
-        return ("draw_threefold", None);
+    if history.iter().filter(|k| **k == key).count() >= 5 {
+        return ("draw_fivefold", None);
     }
     ("playing", None)
 }
@@ -789,6 +811,11 @@ pub fn state_object(pos: &Position, history: Vec<String>, moves: Vec<String>) ->
     } else {
         Vec::new()
     };
+    let claimable = if status == "playing" {
+        claimable_draw(pos, &history)
+    } else {
+        None
+    };
     json!({
         "fen": pos.to_fen(),
         "board": board,
@@ -799,6 +826,8 @@ pub fn state_object(pos: &Position, history: Vec<String>, moves: Vec<String>) ->
         "positionHistory": history,
         "status": status,
         "winner": winner,
+        "claimableDraw": claimable,
+        "halfmoveClock": pos.halfmove,
     })
 }
 
@@ -820,6 +849,61 @@ fn string_list(obj: &Value, key: &str) -> Result<Vec<String>, String> {
         .collect()
 }
 
+/// Claim a draw when FIDE optional claim conditions hold (threefold / fifty-move).
+/// Automatic draws are already applied by [`game_status`]; this only covers claimable ones.
+pub fn claim_draw(chess: &Value) -> Result<Value, String> {
+    let fen = chess
+        .get("fen")
+        .and_then(Value::as_str)
+        .ok_or("chess state 'fen' missing")?;
+    let pos = Position::from_fen(fen)?;
+    let history = string_list(chess, "positionHistory")?;
+    let moves = string_list(chess, "moves")?;
+    let recorded = chess
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("playing");
+    if recorded != "playing" || game_status(&pos, &history).0 != "playing" {
+        return Err("Game is over".into());
+    }
+    let reason = claimable_draw(&pos, &history).ok_or("No claimable draw")?;
+    let status = match reason {
+        "threefold" => "draw_threefold",
+        "fifty_move" => "draw_fifty_move",
+        other => return Err(format!("Unknown claimable draw '{other}'")),
+    };
+    let mut obj = state_object(&pos, history, moves);
+    obj["status"] = json!(status);
+    obj["winner"] = Value::Null;
+    obj["claimableDraw"] = Value::Null;
+    obj["legalMoves"] = json!([]);
+    Ok(obj)
+}
+
+/// Resign for the side to move. Opponent wins.
+pub fn resign(chess: &Value) -> Result<Value, String> {
+    let fen = chess
+        .get("fen")
+        .and_then(Value::as_str)
+        .ok_or("chess state 'fen' missing")?;
+    let pos = Position::from_fen(fen)?;
+    let history = string_list(chess, "positionHistory")?;
+    let moves = string_list(chess, "moves")?;
+    let recorded = chess
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("playing");
+    if recorded != "playing" || game_status(&pos, &history).0 != "playing" {
+        return Err("Game is over".into());
+    }
+    let mut obj = state_object(&pos, history, moves);
+    obj["status"] = json!("resigned");
+    obj["winner"] = json!(pos.side.other().name());
+    obj["claimableDraw"] = Value::Null;
+    obj["legalMoves"] = json!([]);
+    Ok(obj)
+}
+
 /// Apply a move to the persisted chess object. Fails closed on corrupt state,
 /// illegal moves, or moves after the game has ended.
 pub fn apply_move(chess: &Value, from: &str, to: &str, promotion: &Value) -> Result<Value, String> {
@@ -830,7 +914,13 @@ pub fn apply_move(chess: &Value, from: &str, to: &str, promotion: &Value) -> Res
     let pos = Position::from_fen(fen)?;
     let mut history = string_list(chess, "positionHistory")?;
     let mut moves = string_list(chess, "moves")?;
-    if game_status(&pos, &history).0 != "playing" {
+    // Claimed draws / resign set status without changing the FIDE position
+    // outcome — honor the recorded terminal so moves cannot continue.
+    let recorded = chess
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("playing");
+    if recorded != "playing" || game_status(&pos, &history).0 != "playing" {
         return Err("Game is over".into());
     }
     if history.len() >= MAX_HISTORY {
@@ -1078,25 +1168,90 @@ mod tests {
     }
 
     #[test]
-    fn fifty_move_rule() {
+    fn fifty_move_rule_is_claimable_not_automatic() {
         let obj = from_fen("4k3/8/8/8/8/8/8/R3K3 w - - 99 60");
         let after = play_uci(obj, &["a1a2"]).unwrap();
-        assert_eq!(after["status"], "draw_fifty_move");
+        assert_eq!(after["status"], "playing");
+        assert_eq!(after["claimableDraw"], "fifty_move");
+        let claimed = claim_draw(&after).unwrap();
+        assert_eq!(claimed["status"], "draw_fifty_move");
+        assert!(claim_draw(&claimed).is_err());
         // A pawn move resets the clock.
         let reset = play_uci(from_fen("4k3/8/8/8/8/8/P7/4K3 w - - 99 60"), &["a2a3"]).unwrap();
         assert_eq!(reset["status"], "playing");
+        assert!(reset["claimableDraw"].is_null());
     }
 
     #[test]
-    fn threefold_repetition() {
+    fn seventy_five_move_is_automatic() {
+        let obj = from_fen("4k3/8/8/8/8/8/8/R3K3 w - - 149 80");
+        let after = play_uci(obj, &["a1a2"]).unwrap();
+        assert_eq!(after["status"], "draw_seventy_five_move");
+        assert!(after["claimableDraw"].is_null());
+    }
+
+    #[test]
+    fn threefold_repetition_is_claimable() {
         let obj = play_uci(
             from_fen(START_FEN),
             &["g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6", "f3g1"],
         )
         .unwrap();
         assert_eq!(obj["status"], "playing");
-        let drawn = play_uci(obj, &["f6g8"]).unwrap();
-        assert_eq!(drawn["status"], "draw_threefold");
+        let at_three = play_uci(obj, &["f6g8"]).unwrap();
+        assert_eq!(at_three["status"], "playing");
+        assert_eq!(at_three["claimableDraw"], "threefold");
+        let claimed = claim_draw(&at_three).unwrap();
+        assert_eq!(claimed["status"], "draw_threefold");
+    }
+
+    #[test]
+    fn fivefold_repetition_is_automatic() {
+        // Four full knight-shuffle cycles from the start position → fivefold.
+        let cycles = [
+            "g1f3", "g8f6", "f3g1", "f6g8", // 2
+            "g1f3", "g8f6", "f3g1", "f6g8", // 3 claimable
+            "g1f3", "g8f6", "f3g1", "f6g8", // 4
+            "g1f3", "g8f6", "f3g1", "f6g8", // 5 automatic
+        ];
+        let drawn = play_uci(from_fen(START_FEN), &cycles).unwrap();
+        assert_eq!(drawn["status"], "draw_fivefold");
+    }
+
+    #[test]
+    fn resign_awards_opponent() {
+        let start = from_fen(START_FEN);
+        let out = resign(&start).unwrap();
+        assert_eq!(out["status"], "resigned");
+        assert_eq!(out["winner"], "black");
+        assert!(resign(&out).is_err());
+        assert!(
+            apply_move(&out, "e2", "e4", &Value::Null).is_err(),
+            "moves must be rejected after resign"
+        );
+    }
+
+    #[test]
+    fn claim_draw_rejected_when_not_claimable() {
+        let start = from_fen(START_FEN);
+        assert!(claim_draw(&start).is_err());
+    }
+
+    #[test]
+    fn apply_move_rejected_after_claimed_threefold() {
+        let at_three = play_uci(
+            from_fen(START_FEN),
+            &[
+                "g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6", "f3g1", "f6g8",
+            ],
+        )
+        .unwrap();
+        let claimed = claim_draw(&at_three).unwrap();
+        assert_eq!(claimed["status"], "draw_threefold");
+        assert!(
+            apply_move(&claimed, "g1", "f3", &Value::Null).is_err(),
+            "moves must be rejected after claimed draw"
+        );
     }
 
     #[test]

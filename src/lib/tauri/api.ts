@@ -709,6 +709,28 @@ export const api = {
       componentId,
       windowId: windowId ?? null,
     }),
+  /** Catch-up cursor: events with sequence > afterSequence for one conversation. */
+  getConversationEvents: (args: {
+    conversationId: string;
+    afterSequence?: number | null;
+    limit?: number | null;
+  }) =>
+    invoke<
+      Array<{
+        id: string;
+        conversationId: string;
+        sequence: number;
+        turnId: string | null;
+        attemptId: string | null;
+        eventType: string;
+        payload: unknown;
+        createdAt: string;
+      }>
+    >("get_conversation_events_cmd", {
+      conversationId: args.conversationId,
+      afterSequence: args.afterSequence ?? null,
+      limit: args.limit ?? null,
+    }),
   saveDraft: (args: {
     surfaceId: string;
     componentId: string;

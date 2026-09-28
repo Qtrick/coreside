@@ -163,13 +163,30 @@ pub fn fixture_chess() -> InteractiveAppDefinition {
                 "guards": [playing("playing")],
                 "effects": [{ "effect": "chessMove", "key": "chess", "from": p("from"), "to": p("to"), "promotion": p("promotion") }]
             },
+            {
+                "id": "claimDraw",
+                "actor": "active_player",
+                "description": "Claim a draw when threefold repetition or the fifty-move rule applies",
+                "guards": [playing("playing")],
+                "effects": [{ "effect": "chessClaimDraw", "key": "chess" }]
+            },
+            {
+                "id": "resign",
+                "actor": "active_player",
+                "description": "Resign and award the win to the opponent",
+                "guards": [playing("playing")],
+                "effects": [{ "effect": "chessResign", "key": "chess" }]
+            },
             { "id": "reset", "description": "Start a new game", "effects": [{ "effect": "resetGame" }] }
         ],
         "testCases": [
             { "name": "e4", "actionId": "move", "params": { "from": "e2", "to": "e4" }, "expectedSuccess": true,
               "expectedStateSubset": { "currentPlayer": "black" }, "expectedStatus": "playing" },
             { "name": "illegal pawn triple push", "actionId": "move", "params": { "from": "e2", "to": "e5" }, "expectedSuccess": false },
-            { "name": "black cannot move first", "actor": "black", "actionId": "move", "params": { "from": "e7", "to": "e5" }, "expectedSuccess": false }
+            { "name": "black cannot move first", "actor": "black", "actionId": "move", "params": { "from": "e7", "to": "e5" }, "expectedSuccess": false },
+            { "name": "resign awards black", "actionId": "resign", "expectedSuccess": true, "expectedStatus": "resigned",
+              "expectedStateSubset": { "winner": "black" } },
+            { "name": "claim draw rejected at start", "actionId": "claimDraw", "expectedSuccess": false }
         ]
     }))
 }

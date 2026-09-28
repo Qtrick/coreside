@@ -7,6 +7,21 @@ const mockGetSurfaceStateWithRevision = vi.fn().mockResolvedValue({
   state: { count: 1 },
   stateRevision: 3,
 });
+const mockInteractiveView = vi.fn().mockResolvedValue({
+  surfaceId: "surface-main",
+  applicationId: "app-test",
+  stateRevision: 5,
+  state: { score: 9 },
+  actor: "player",
+  waitingFor: null,
+  status: "active",
+  winner: null,
+  message: null,
+  legalActions: [],
+  seq: 1,
+  duplicate: false,
+  reinitialized: false,
+});
 const mockSaveSurfaceState = vi.fn().mockResolvedValue(4);
 const mockGetRouteState = vi.fn().mockResolvedValue({
   id: "rs-1",
@@ -22,6 +37,7 @@ const mockGetRouteState = vi.fn().mockResolvedValue({
 vi.mock("@/lib/tauri", () => ({
   api: {
     getSurfaceStateWithRevision: (...args: unknown[]) => mockGetSurfaceStateWithRevision(...args),
+    interactiveView: (...args: unknown[]) => mockInteractiveView(...args),
     getSurfaceState: vi.fn().mockResolvedValue({}),
     saveSurfaceState: (...args: unknown[]) => mockSaveSurfaceState(...args),
     getRouteState: (...args: unknown[]) => mockGetRouteState(...args),
@@ -128,11 +144,23 @@ describe("AppRouteShell", () => {
     });
   });
 
-  it("interactive routes use parent state instead of seeding empty per-surface state", async () => {
-    mockGetSurfaceStateWithRevision.mockResolvedValue({
-      state: { score: 9 },
+  it("interactive routes hydrate via interactiveView and keep parent state authoritative", async () => {
+    mockInteractiveView.mockResolvedValue({
+      surfaceId: "surface-main",
+      applicationId: "app-test",
       stateRevision: 5,
+      state: { score: 9 },
+      actor: "player",
+      waitingFor: null,
+      status: "active",
+      winner: null,
+      message: null,
+      legalActions: [],
+      seq: 1,
+      duplicate: false,
+      reinitialized: false,
     });
+    const onStateChange = vi.fn();
     const parentState = { score: 3, lastResult: "correct" };
     render(
       <AppRouteShell
@@ -149,16 +177,20 @@ describe("AppRouteShell", () => {
           } as never,
         }}
         state={parentState}
-        onStateChange={vi.fn()}
+        onStateChange={onStateChange}
       />,
     );
 
     await waitFor(() => {
-      expect(mockGetSurfaceStateWithRevision).toHaveBeenCalledWith("surface-main");
+      expect(mockInteractiveView).toHaveBeenCalledWith("surface-main");
     });
-    // Parent public InteractiveView state must remain visible (empty {} must not win).
+    // Until onStateChange is applied by the parent, scoped state remains parent-provided.
     await waitFor(() => {
       expect(screen.getByTestId("scoped-state").textContent).toBe(JSON.stringify(parentState));
     });
+    await waitFor(() => {
+      expect(onStateChange).toHaveBeenCalledWith({ score: 9 });
+    });
+    expect(mockGetSurfaceStateWithRevision).not.toHaveBeenCalled();
   });
 });

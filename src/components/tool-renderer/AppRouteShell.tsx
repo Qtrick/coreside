@@ -237,16 +237,34 @@ export function AppRouteShell({
         delete next[routeSurfaceId];
         return next;
       });
+      // Hydrate via authoritative interactive view (renderer-projected), never raw state.
       void api
-        .getSurfaceStateWithRevision(routeSurfaceId)
-        .then((res) => {
-          if (cancelled || !res) return;
+        .interactiveView(routeSurfaceId)
+        .then((view) => {
+          if (cancelled || !view) return;
           setPerSurfaceRevision((prev) => ({
             ...prev,
-            [routeSurfaceId]: res.stateRevision,
+            [routeSurfaceId]: view.stateRevision,
           }));
+          if (view.state && typeof view.state === "object") {
+            onStateChange(view.state as ToolState);
+          }
         })
-        .catch(() => undefined);
+        .catch(() => {
+          // Revision-only fallback: getSurfaceStateWithRevision is already
+          // renderer-projected, but do not seed interactive parent state from it
+          // (shape differs from InteractiveView).
+          void api
+            .getSurfaceStateWithRevision(routeSurfaceId)
+            .then((res) => {
+              if (cancelled || !res) return;
+              setPerSurfaceRevision((prev) => ({
+                ...prev,
+                [routeSurfaceId]: res.stateRevision,
+              }));
+            })
+            .catch(() => undefined);
+        });
       return () => {
         cancelled = true;
       };
@@ -274,6 +292,9 @@ export function AppRouteShell({
     return () => {
       cancelled = true;
     };
+    // onStateChange intentionally omitted: parent often passes an unstable callback;
+    // including it would re-hydrate on every parent render. Route identity drives hydrate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
   }, [routeSurfaceId, isPreview, routes.length, routeIsInteractive]);
 
   const currentScopedState = useMemo(() => {
