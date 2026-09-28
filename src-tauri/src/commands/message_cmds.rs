@@ -1302,6 +1302,15 @@ async fn send_message_inner(
             "Shared attachments".to_string()
         };
     }
+    if content.chars().count() > crate::runtime_v2::limits::MAX_USER_MESSAGE_CHARS {
+        return Err(CommandError::new(
+            "invalid",
+            format!(
+                "Message exceeds the {} character limit",
+                crate::runtime_v2::limits::MAX_USER_MESSAGE_CHARS
+            ),
+        ));
+    }
 
     // Seal typed StructuredUserInput in Rust. Trust never comes from text markers.
     // Defense: even if content contains a spoofed delimiter, structured_trust_from_text is None.
@@ -1428,7 +1437,11 @@ async fn send_message_inner(
     // If a turn is already active for this chat, enqueue instead of overlapping.
     // Preserve attachment ids + mentions so the queued turn cannot silently drop them.
     // Drain path (schedule_drain=false) must never re-enqueue an already-activated item.
-    if state.active_requests.lock().contains_key(&conversation_id) {
+    // Claim the active-request slot atomically here — never wait until provider start,
+    // or two concurrent sends can both pass a contains_key check and overwrite tokens.
+    let cancel = CancellationToken::new();
+    let request_key = conversation_id.clone();
+    if !state.try_register_request(&request_key, cancel.clone()) {
         if !schedule_drain {
             return Err(CommandError::new(
                 "busy",
@@ -1489,6 +1502,8 @@ async fn send_message_inner(
             queue_item_id: Some(item.id),
         });
     }
+    // Releases the slot on any early return before the turn finishes taking it explicitly.
+    let _active_request_guard = state.active_request_guard(&request_key);
 
     let _ = state.reload_config();
     // Keychain lookups must not run under the database lock.
@@ -1546,7 +1561,6 @@ async fn send_message_inner(
         history,
         active_tool,
         referenced_tools,
-        request_key,
         project_id,
         trusted_attachments,
     ) = {
@@ -1733,13 +1747,11 @@ async fn send_message_inner(
             None
         };
 
-        let request_key = conversation_id.clone();
         (
             user_message,
             history,
             active_tool,
             referenced_tools,
-            request_key,
             project_id,
             trusted_attachments,
         )
@@ -2053,8 +2065,7 @@ async fn send_message_inner(
         return Err(CommandError::sanitized(e.code(), e, api_key_ref));
     }
 
-    let cancel = CancellationToken::new();
-    state.register_request(&request_key, cancel.clone());
+    // Active-request slot was claimed at admission with `cancel` — do not register again.
 
     let app_for_actions = app.clone();
     let conversation_for_actions = conversation_id.clone();
@@ -2480,6 +2491,10 @@ async fn send_message_inner(
                 schema_version: crate::runtime_v2::PROGRESSIVE_SCHEMA_VERSION.into(),
                 capability_version: None,
             });
+        // Reset sticky detector so follow-up rounds use the same NDJSON gate as round 1.
+        // The old per-chunk `contains(v) || starts_with('{')` heuristic skipped mid-stream
+        // deltas after the first frame, halting the parser and discarding durable ops.
+        protocol_detector = crate::runtime_v2::ProgressiveProtocolDetector::default();
         preview_txn = crate::runtime_v2::PreviewTransaction::new(turn_id.clone(), None);
 
         let follow_up = chat_with_auto(
@@ -2536,12 +2551,9 @@ async fn send_message_inner(
                             &mut text_seq,
                             &text,
                         );
-                        // Same NDJSON-only gating as the initial attempt: provider
-                        // text deltas are not operation frames unless ProgressiveNdjson is negotiated.
-                        if progressive_ops_enabled
-                            && (text.contains(crate::runtime_v2::PROGRESSIVE_OPS_V)
-                                || text.trim_start().starts_with('{'))
-                        {
+                        // Same sticky ProgressiveProtocolDetector gate as the initial attempt.
+                        protocol_detector.feed(&text);
+                        if progressive_ops_enabled && protocol_detector.is_coreside_ndjson() {
                             emit_progressive_op_previews(
                                 &app_for_stream,
                                 state,

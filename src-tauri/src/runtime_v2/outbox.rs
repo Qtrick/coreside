@@ -142,17 +142,35 @@ pub fn flush_pending_outbox(db: &mut Database, bus: Option<&mut EventBus>) -> Db
         match &effect {
             DeferredBusEffect::Dispatch(ev) => match bus.dispatch(ev, 0) {
                 Ok(matched) => {
-                    for sub_id in matched {
-                        let _ =
-                            super::events::execute_durable_event_delivery(db, bus, ev, &sub_id, 0);
+                    // All durable deliveries must succeed before marking delivered.
+                    // A failed handler leaves the row pending/failed for retry.
+                    let mut delivery_ok = true;
+                    let mut last_err = String::new();
+                    for sub_id in &matched {
+                        if let Err(e) = super::events::execute_durable_event_delivery(
+                            db, bus, ev, sub_id, 0,
+                        ) {
+                            delivery_ok = false;
+                            last_err = e.to_string();
+                            break;
+                        }
                     }
-                    let updated = db.conn().execute(
+                    if delivery_ok {
+                        let updated = db.conn().execute(
                             "UPDATE commit_event_outbox SET status = 'delivered', delivered_at = ?1,
-                             delivery_attempts = delivery_attempts + 1 WHERE id = ?2 AND status = 'pending'",
+                             delivery_attempts = delivery_attempts + 1, last_error = NULL
+                             WHERE id = ?2 AND status = 'pending'",
                             params![now, id],
                         )?;
-                    if updated > 0 {
-                        delivered += 1;
+                        if updated > 0 {
+                            delivered += 1;
+                        }
+                    } else {
+                        db.conn().execute(
+                            "UPDATE commit_event_outbox SET status = 'failed', last_error = ?1,
+                             delivery_attempts = delivery_attempts + 1 WHERE id = ?2 AND status = 'pending'",
+                            params![last_err, id],
+                        )?;
                     }
                 }
                 Err(e) => {
@@ -340,6 +358,137 @@ mod tests {
         assert_eq!(n, 1);
         let n2 = flush_pending_outbox(&mut db, Some(&mut bus)).unwrap();
         assert_eq!(n2, 0);
+    }
+
+    fn outbox_row(db: &Database, id: &str) -> (String, Option<String>, i64, Option<String>) {
+        db.conn()
+            .query_row(
+                "SELECT status, last_error, delivery_attempts, delivered_at FROM commit_event_outbox WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn failing_durable_handler_marks_outbox_row_failed_not_delivered() {
+        use crate::runtime_v2::events::EventHandler;
+        use crate::runtime_v2::surfaces::{create_inline_surface, get_surface_state_with_revision};
+
+        let dir = tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("o.db")).unwrap();
+        let conv = crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "Chat", None)
+            .unwrap();
+        let def = serde_json::json!({
+            "id": "ttt", "name": "TTT", "layout": "stack",
+            "components": [{ "id": "title", "type": "heading", "props": { "text": "TTT" } }],
+            "interactive": serde_json::to_value(
+                crate::runtime_v2::rules_fixtures::get_fixture("tic-tac-toe").unwrap()
+            ).unwrap()
+        });
+        let sid = create_inline_surface(&mut db, &conv.id, None, None, "TTT", &def, &[])
+            .unwrap()
+            .id;
+        crate::runtime_v2::interactive::get_view(&mut db, &sid).unwrap();
+
+        let sub = |id: &str, event_type: &str, handler: EventHandler| Subscription {
+            id: id.into(),
+            owner_surface_id: sid.clone(),
+            event_types: vec![event_type.into()],
+            source_filter: EventRef::default(),
+            target: EventRef::default(),
+            handler: Some(handler),
+            enabled: true,
+        };
+        let mut bus = EventBus::new();
+        // Engine-owned key: the handler transaction is rejected.
+        bus.add_subscription(sub(
+            "sub-break",
+            "break_board",
+            EventHandler::SetState {
+                key: "board".into(),
+                value: serde_json::json!(["X", "X", "X", "", "", "", "", "", ""]),
+            },
+        ))
+        .unwrap();
+        bus.add_subscription(sub(
+            "sub-note",
+            "set_note",
+            EventHandler::SetState {
+                key: "note".into(),
+                value: serde_json::json!("$event.payload.note"),
+            },
+        ))
+        .unwrap();
+        let event = |id: &str, event_type: &str, source: &str, payload: Value| {
+            DeferredBusEffect::Dispatch(SurfaceEvent {
+                id: id.into(),
+                event_type: event_type.into(),
+                scope: "surface".into(),
+                source: EventRef {
+                    surface_id: Some(source.into()),
+                    ..Default::default()
+                },
+                target: EventRef::default(),
+                payload,
+                idempotency_key: None,
+            })
+        };
+
+        let (state_before, rev_before) = get_surface_state_with_revision(&db, &sid).unwrap();
+        let failing = enqueue_outbox(
+            &db,
+            Some("txn-1"),
+            None,
+            None,
+            None,
+            0,
+            &event("evt-break", "break_board", "src-a", serde_json::json!({})),
+        )
+        .unwrap();
+        assert_eq!(flush_pending_outbox(&mut db, Some(&mut bus)).unwrap(), 0);
+
+        let (status, last_error, attempts, delivered_at) = outbox_row(&db, &failing);
+        assert_eq!(status, "failed");
+        assert!(last_error.as_deref().unwrap_or("").contains("owned"), "{last_error:?}");
+        assert_eq!(attempts, 1);
+        assert_eq!(delivered_at, None);
+        assert_eq!(
+            get_surface_state_with_revision(&db, &sid).unwrap(),
+            (state_before, rev_before),
+            "failed handler must not mutate state"
+        );
+        let delivery_status: String = db
+            .conn()
+            .query_row(
+                "SELECT status FROM surface_event_deliveries WHERE event_id = 'evt-break'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(delivery_status, "failed");
+
+        // Failed rows are terminal: later flushes neither retry nor re-count them.
+        assert_eq!(flush_pending_outbox(&mut db, Some(&mut bus)).unwrap(), 0);
+        assert_eq!(outbox_row(&db, &failing), ("failed".into(), last_error, 1, None));
+
+        // A healthy handler in the same bus is delivered and applied.
+        let healthy = enqueue_outbox(
+            &db,
+            Some("txn-2"),
+            None,
+            None,
+            None,
+            0,
+            &event("evt-note", "set_note", "src-b", serde_json::json!({ "note": "hi" })),
+        )
+        .unwrap();
+        assert_eq!(flush_pending_outbox(&mut db, Some(&mut bus)).unwrap(), 1);
+        let (status, last_error, attempts, delivered_at) = outbox_row(&db, &healthy);
+        assert_eq!((status.as_str(), last_error, attempts), ("delivered", None, 1));
+        assert!(delivered_at.is_some());
+        assert_eq!(get_surface_state_with_revision(&db, &sid).unwrap().0["note"], "hi");
+        assert_eq!(outbox_row(&db, &failing).0, "failed");
     }
 
     #[test]

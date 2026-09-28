@@ -177,6 +177,20 @@ pub enum ActionDefinition {
         #[serde(default, skip_serializing_if = "Option::is_none", rename = "resultKey")]
         result_key: Option<String>,
     },
+    /// Invoke an action of the surface's interactive rules definition. Rust
+    /// decides legality and returns the committed state.
+    DispatchInteractive {
+        #[serde(rename = "actionId")]
+        action_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        params: Option<Value>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "paramsFromState"
+        )]
+        params_from_state: Option<HashMap<String, String>>,
+    },
 }
 
 impl ActionDefinition {
@@ -295,11 +309,10 @@ impl ActionDefinition {
                 if event_name.trim().is_empty() || event_name.len() > MAX_ACTION_TARGET_LEN {
                     return Err("Invalid eventName in submitToAgent");
                 }
+                // Explicit includeFields is required. Empty array is intentional for
+                // pure gesture/event submissions (reset, click) that carry no state fields.
                 match include_fields {
                     None => return Err("submitToAgent requires explicit includeFields"),
-                    Some(fields) if fields.is_empty() => {
-                        return Err("submitToAgent requires non-empty includeFields");
-                    }
                     Some(fields) => {
                         if fields.len() > 64 {
                             return Err("Too many includeFields in submitToAgent");
@@ -348,6 +361,31 @@ impl ActionDefinition {
                 if let Some(rk) = result_key {
                     if rk.trim().is_empty() || rk.len() > MAX_ACTION_TARGET_LEN {
                         return Err("Invalid resultKey in invokeRegisteredAction");
+                    }
+                }
+            }
+            Self::DispatchInteractive {
+                action_id,
+                params,
+                params_from_state,
+            } => {
+                if action_id.trim().is_empty() || action_id.len() > MAX_ACTION_TARGET_LEN {
+                    return Err("Invalid actionId in dispatchInteractive");
+                }
+                if let Some(p) = params {
+                    if !p.is_object() {
+                        return Err("dispatchInteractive params must be an object");
+                    }
+                    validate_action_payload_size(p)?;
+                }
+                if let Some(map) = params_from_state {
+                    if map.len() > 16 {
+                        return Err("Too many paramsFromState mappings in dispatchInteractive");
+                    }
+                    for (k, v) in map {
+                        if k.len() > MAX_ACTION_TARGET_LEN || v.len() > MAX_ACTION_TARGET_LEN {
+                            return Err("paramsFromState key/value exceeds maximum length");
+                        }
                     }
                 }
             }
@@ -421,6 +459,9 @@ pub struct ToolDefinition {
         alias = "action_contracts"
     )]
     pub action_contracts: Vec<crate::runtime_v2::software_document::ActionContract>,
+    /// Optional rules-engine definition (see `runtime_v2::rules_engine`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interactive: Option<Value>,
 }
 
 impl Default for ToolDefinition {
@@ -433,6 +474,7 @@ impl Default for ToolDefinition {
             components: Vec::new(),
             state_contracts: Vec::new(),
             action_contracts: Vec::new(),
+            interactive: None,
         }
     }
 }

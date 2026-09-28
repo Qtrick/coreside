@@ -66,6 +66,13 @@ fn static_profile(provider_id: &str) -> (ProviderProfile, Value) {
                     "json_schema_response"
                 ],
                 "supportsApplicationChanges": true,
+                "structuredOutput": {
+                    "mode": "json_schema_when_model_supports",
+                    "strict": false,
+                    "fallback": "json_object",
+                    "localValidation": "authoritative",
+                    "note": "Uses response_format json_schema for gpt-4o/4.1/5/o-series; legacy models keep json_object. Nested free-form component trees prevent OpenAI strict:true."
+                },
             }),
         ),
         "anthropic" => (
@@ -82,8 +89,18 @@ fn static_profile(provider_id: &str) -> (ProviderProfile, Value) {
         "openrouter" => (
             ProviderProfile::TextProtocolFallback,
             json!({
-                "profiles": ["text_protocol_fallback", "tool_call_operations"],
+                "profiles": [
+                    "text_protocol_fallback",
+                    "tool_call_operations",
+                    "json_schema_response"
+                ],
                 "supportsApplicationChanges": true,
+                "structuredOutput": {
+                    "mode": "json_schema_when_model_supports",
+                    "strict": false,
+                    "localValidation": "authoritative",
+                    "note": "OpenRouter json_schema is capability-gated by model; nested free-form trees are not provider-strict."
+                },
             }),
         ),
         "kimi" => (

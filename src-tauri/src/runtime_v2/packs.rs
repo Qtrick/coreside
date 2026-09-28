@@ -645,8 +645,9 @@ pub fn agent_pack_catalog_markdown() -> String {
         - `removeItem`: `{ \"type\": \"removeItem\", \"target\": \"itemsKey\", \"id\": \"itemId\" }`\n\
         - `updateItem`: `{ \"type\": \"updateItem\", \"target\": \"itemsKey\", \"id\": \"itemId\", \"patch\": { ... } }`\n\
         - `selectTab`: `{ \"type\": \"selectTab\", \"target\": \"tabsId\", \"tabId\": \"tab-1\" }`\n\
-        - `submitToAgent`: `{ \"type\": \"submitToAgent\", \"eventName\": \"submitted\", \"includeFields\": [\"field1\", \"field2\"] }` (includeFields is required and non-empty)\n\
-        - `invokeRegisteredAction`: `{ \"type\": \"invokeRegisteredAction\", \"actionName\": \"local_data.query\", \"input\": { ... }, \"resultKey\": \"targetStateKey\" }`".into());
+        - `submitToAgent`: `{ \"type\": \"submitToAgent\", \"eventName\": \"submitted\", \"includeFields\": [\"field1\", \"field2\"] }` (includeFields is required; empty array allowed for pure gesture/event submissions)\n\
+        - `invokeRegisteredAction`: `{ \"type\": \"invokeRegisteredAction\", \"actionName\": \"local_data.query\", \"input\": { ... }, \"resultKey\": \"targetStateKey\" }`\n\
+        - `dispatchInteractive`: `{ \"type\": \"dispatchInteractive\", \"actionId\": \"move\", \"params\": { ... }, \"paramsFromState\": { \"from\": \"selectedFrom\" } }` (only on surfaces with an `interactive` rules definition; Rust decides legality)".into());
 
     lines.push("\n## Registered Kernel Actions\n\
         - `local_data.query`: `{ \"modelId\": string, \"limit\"?: number }` -> returns `{ \"records\": [...], \"count\": number }`\n\

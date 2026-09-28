@@ -225,8 +225,18 @@ export type ActionEngineOptions = {
     componentId?: string;
     resultKey?: string;
   }) => RegisteredActionOutcome | Promise<RegisteredActionOutcome>;
+  /** Rust rules-engine dispatch; resolves with the committed public state. */
+  onDispatchInteractive?: (payload: {
+    toolId: string;
+    actionId: string;
+    params: Record<string, unknown>;
+  }) => Promise<InteractiveDispatchOutcome>;
   depth?: number;
 };
+
+export type InteractiveDispatchOutcome =
+  | { ok: true; state: ToolState }
+  | { ok: false; error: string };
 
 export type ActionEngineResult = {
   state: ToolState;
@@ -234,6 +244,8 @@ export type ActionEngineResult = {
   changedKeys: string[];
   pendingTasks: Promise<void>[];
   pendingApproval?: boolean;
+  /** State already committed by Rust; hosts must not re-save it as a local edit. */
+  committedState?: ToolState;
 };
 
 const DANGEROUS_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
@@ -690,6 +702,10 @@ export function applyAction(
       }
       break;
     }
+    case "dispatchInteractive": {
+      errors.push("Interactive actions must run through the async action pipeline");
+      break;
+    }
     default: {
       const _exhaustive: never = action;
       errors.push(`Unsupported action: ${JSON.stringify(_exhaustive)}`);
@@ -747,12 +763,58 @@ export async function applyActionsAsync(
   const changedKeys: string[] = [];
   let depth = options.depth ?? 0;
   let pendingApproval = false;
+  let committedState: ToolState | undefined;
 
   for (const action of actions) {
     depth += 1;
     if (depth > MAX_ACTION_DEPTH) {
       errors.push("Action loop protection triggered — too many actions");
       break;
+    }
+
+    if (action.type === "dispatchInteractive") {
+      if (!options.onDispatchInteractive) {
+        errors.push("Interactive actions are not available here");
+        break;
+      }
+      const params: Record<string, unknown> = { ...(action.params ?? {}) };
+      let rejected = false;
+      for (const [key, stateKey] of Object.entries(action.paramsFromState ?? {})) {
+        if (DANGEROUS_SEGMENTS.has(key) || !SEGMENT_PATTERN.test(key)) {
+          errors.push(`Invalid parameter name "${key}"`);
+          rejected = true;
+          break;
+        }
+        if (!checkTargetReadable(stateKey, options) && !checkTargetWritable(stateKey, options)) {
+          errors.push(`Field "${stateKey}" is outside the current tool scope`);
+          rejected = true;
+          break;
+        }
+        params[key] = state[stateKey];
+      }
+      if (rejected) break;
+      const sanitized = sanitizeInteractionPayload(params);
+      if (!sanitized.ok) {
+        errors.push(sanitized.error);
+        break;
+      }
+      try {
+        const outcome = await options.onDispatchInteractive({
+          toolId: options.toolId,
+          actionId: action.actionId,
+          params: sanitized.data,
+        });
+        if (!outcome.ok) {
+          errors.push(outcome.error);
+          break;
+        }
+        state = { ...state, ...outcome.state };
+        committedState = { ...(committedState ?? {}), ...outcome.state };
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
+        break;
+      }
+      continue;
     }
 
     if (action.type === "invokeRegisteredAction") {
@@ -869,6 +931,7 @@ export async function applyActionsAsync(
     changedKeys: [...new Set(changedKeys)],
     pendingTasks: [],
     pendingApproval,
+    committedState,
   };
 }
 

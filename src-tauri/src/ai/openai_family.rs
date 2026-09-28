@@ -139,6 +139,150 @@ fn text_parts_for_openai_family(parts: &[AgentContentPart]) -> String {
     flatten_parts_for_provider(&filtered)
 }
 
+/// Whether this OpenAI-family model ID is known to accept `response_format: json_schema`.
+///
+/// Older Chat Completions models only support `json_object`. Unknown / compatible
+/// endpoints fall back to `json_object` and rely on local response validation.
+pub fn model_supports_json_schema_response_format(model: &str) -> bool {
+    let m = model.trim().to_ascii_lowercase();
+    if m.is_empty() {
+        return false;
+    }
+    // Strip OpenRouter vendor prefix (`openai/gpt-4o` → `gpt-4o`).
+    let bare = m.rsplit('/').next().unwrap_or(&m);
+    let supports = bare.starts_with("gpt-4o")
+        || bare.starts_with("gpt-4.1")
+        || bare.starts_with("gpt-4.5")
+        || bare.starts_with("gpt-5")
+        || bare.starts_with("o1")
+        || bare.starts_with("o3")
+        || bare.starts_with("o4")
+        || bare.contains("gpt-4o")
+        || bare.contains("gpt-4.1");
+    // Explicitly exclude legacy turbo / 3.5 / instruct which reject json_schema.
+    let legacy = bare.contains("gpt-3.5")
+        || bare.contains("gpt-4-turbo")
+        || bare.contains("gpt-4-0613")
+        || bare.contains("instruct");
+    supports && !legacy
+}
+
+/// Guidance schema for Coreside agent JSON. Nested free-form trees (components,
+/// operations payloads) cannot be fully closed under OpenAI `strict: true`, so
+/// this uses `strict: false` + local `response_parser` validation as the
+/// authority. Prefer this over bare `json_object`, which provides no schema.
+pub fn agent_response_json_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "schemaVersion": { "type": "string" },
+            "assistantMessage": { "type": "string" },
+            "responseType": {
+                "type": "string",
+                "enum": ["message", "tool_change", "tool_use", "settings_change", "noop"]
+            },
+            "toolCalls": {
+                "type": ["array", "null"],
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "capability": { "type": "string" },
+                        "arguments": { "type": "object" }
+                    },
+                    "required": ["capability"]
+                }
+            },
+            "citations": {
+                "type": ["array", "null"],
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "id": { "type": "string" },
+                        "title": { "type": "string" },
+                        "url": { "type": "string" },
+                        "displayDomain": { "type": "string" },
+                        "snippet": { "type": "string" }
+                    },
+                    "required": ["id", "title", "url"]
+                }
+            },
+            "toolChange": {
+                "type": ["object", "null"],
+                "additionalProperties": false,
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "update", "replace"]
+                    },
+                    "targetToolId": { "type": ["string", "null"] },
+                    "changeSummary": { "type": "string" },
+                    "tool": {
+                        "type": ["object", "null"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "id": { "type": "string" },
+                            "name": { "type": "string" },
+                            "description": { "type": ["string", "null"] },
+                            "layout": { "type": ["object", "null"] },
+                            "components": {
+                                "type": "array",
+                                "items": { "type": "object" }
+                            },
+                            "stateContracts": {
+                                "type": ["array", "null"],
+                                "items": { "type": "object" }
+                            },
+                            "interactive": {
+                                "type": ["object", "null"],
+                                "description": "Optional rules-engine definition. Rust validates and owns state."
+                            }
+                        },
+                        "required": ["id", "name", "components"]
+                    }
+                },
+                "required": ["action", "changeSummary"]
+            },
+            "operations": {
+                "type": ["array", "null"],
+                "description": "Canonical Runtime V2 operations.",
+                "items": { "type": "object" }
+            },
+            "assistantMessages": {
+                "type": ["array", "null"],
+                "items": { "type": "object" }
+            },
+            "turnId": { "type": ["string", "null"] },
+            "silent": { "type": ["boolean", "null"] },
+            "settingsChange": { "type": ["object", "null"] },
+            "diagnostics": { "type": ["object", "null"] }
+        },
+        "required": ["schemaVersion", "assistantMessage", "responseType"]
+    })
+}
+
+/// Build Chat Completions `response_format` for an OpenAI-family model.
+///
+/// - Known schema-capable models → `json_schema` (guided; nested free-form is
+///   not provider-strict — local validation remains authoritative).
+/// - Legacy / unknown → `json_object` compatibility path.
+pub fn openai_response_format(model: &str) -> Value {
+    if model_supports_json_schema_response_format(model) {
+        json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": "coreside_agent_response",
+                "strict": false,
+                "schema": agent_response_json_schema()
+            }
+        })
+    } else {
+        json!({ "type": "json_object" })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,5 +479,41 @@ mod tests {
                     .unwrap_or("")
                     .contains("not sent to model")
         }));
+    }
+
+    #[test]
+    fn gpt4o_uses_json_schema_response_format_not_bare_json_object() {
+        let fmt = openai_response_format("gpt-4o-2024-08-06");
+        assert_eq!(fmt["type"], "json_schema");
+        assert_eq!(fmt["json_schema"]["name"], "coreside_agent_response");
+        assert_eq!(fmt["json_schema"]["strict"], false);
+        assert_eq!(
+            fmt["json_schema"]["schema"]["required"]
+                .as_array()
+                .map(|a| a.len()),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn openrouter_prefixed_gpt4o_uses_json_schema() {
+        let fmt = openai_response_format("openai/gpt-4o");
+        assert_eq!(fmt["type"], "json_schema");
+    }
+
+    #[test]
+    fn legacy_turbo_falls_back_to_json_object() {
+        let fmt = openai_response_format("gpt-4-turbo");
+        assert_eq!(fmt["type"], "json_object");
+        assert!(fmt.get("json_schema").is_none());
+    }
+
+    #[test]
+    fn unknown_compatible_model_falls_back_to_json_object() {
+        assert_eq!(
+            openai_response_format("my-local-llama")["type"],
+            "json_object"
+        );
+        assert!(!model_supports_json_schema_response_format(""));
     }
 }

@@ -66,6 +66,7 @@
   --core-header-alpha: 0.847;
   --core-modal-alpha: 1.0;
   --core-readable-scrim-alpha: 0;
+  --core-backdrop-blur: 12px;
   --core-content-overlay: color-mix(in srgb, var(--surface) calc(var(--core-panel-alpha) * 100%), transparent);
   --core-sidebar-overlay: color-mix(in srgb, var(--surface) calc(var(--core-sidebar-alpha) * 100%), transparent);
   --core-card-overlay: color-mix(in srgb, var(--surface) calc(var(--core-card-alpha) * 100%), transparent);

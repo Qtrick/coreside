@@ -42,6 +42,16 @@ body {
     color var(--transition);
 }
 
+/* When a wallpaper is active, keep the page chrome transparent so translucent
+ * panels reveal the live wallpaper layer instead of an opaque body fill. */
+body[data-wallpaper-active="true"] {
+  background: transparent;
+}
+
+#root:has(.app-shell[data-wallpaper]) {
+  background: transparent;
+}
+
 /* Subtle decorative wash only when no wallpaper is active. */
 body:not([data-wallpaper-active="true"]) {
   background:
@@ -234,7 +244,7 @@ body > .window-overlay-root > *,
 
 .app-shell[data-wallpaper] .sidebar {
   background: var(--core-sidebar-overlay);
-  backdrop-filter: blur(14px);
+  backdrop-filter: blur(var(--core-backdrop-blur, 12px));
 }
 
 .app-shell[data-wallpaper] .chat-panel,
@@ -244,7 +254,7 @@ body > .window-overlay-root > *,
 .app-shell[data-wallpaper] .project-page,
 .app-shell[data-wallpaper] .projects-list-page {
   background: var(--core-content-overlay);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(var(--core-backdrop-blur, 12px));
 }
 
 .app-shell.sidebar-collapsed {
@@ -268,6 +278,7 @@ body > .window-overlay-root > *,
   padding: var(--space-4);
   border-right: 1px solid var(--core-border);
   background: var(--core-sidebar-overlay);
+  /* Fixed blur when no wallpaper. Wallpaper mode overrides via --core-backdrop-blur. */
   backdrop-filter: blur(10px);
   min-width: 0;
 }
@@ -4803,6 +4814,106 @@ body > .window-overlay-root > *,
 .inline-surface-actions {
   display: flex;
   gap: 0.15rem;
+}
+
+.interactive-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.interactive-status[data-replay="true"] {
+  background: color-mix(in srgb, var(--accent-secondary) 10%, var(--core-muted-overlay));
+}
+
+.interactive-status-text {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.interactive-status-error {
+  flex: 1;
+  min-width: 0;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.interactive-status-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.interactive-status-undo {
+  margin-left: 0;
+}
+
+.interactive-history {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem 0.5rem 0.5rem;
+  max-height: 9rem;
+  overflow: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--core-muted-overlay);
+}
+
+.interactive-history-empty {
+  padding: 0.35rem 0.4rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.interactive-history-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.4rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.interactive-history-item:hover,
+.interactive-history-item:focus-visible {
+  background: var(--core-control-overlay);
+}
+
+.interactive-history-item[data-active="true"] {
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));
+}
+
+.interactive-history-seq {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  min-width: 2.2rem;
+}
+
+.interactive-history-action {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.interactive-history-actor {
+  color: var(--text-secondary);
+}
+
+.interactive-history-checkpoint {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
 }
 
 .inline-surface-body {

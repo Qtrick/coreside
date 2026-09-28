@@ -322,6 +322,29 @@ impl AppState {
         self.active_requests.lock().insert(key.to_string(), token);
     }
 
+    /// Atomically claim the active-request slot for `key`.
+    /// Returns `true` if this caller owns the slot, `false` if another turn is already active.
+    /// Unlike [`Self::register_request`], never overwrites an existing cancel token.
+    pub fn try_register_request(&self, key: &str, token: CancellationToken) -> bool {
+        use std::collections::hash_map::Entry;
+        match self.active_requests.lock().entry(key.to_string()) {
+            Entry::Vacant(slot) => {
+                slot.insert(token);
+                true
+            }
+            Entry::Occupied(_) => false,
+        }
+    }
+
+    /// RAII claim: on drop, releases the active-request slot if still held.
+    /// Call after [`Self::try_register_request`] succeeds so early returns cannot orphan the slot.
+    pub fn active_request_guard<'a>(&'a self, key: &str) -> ActiveRequestGuard<'a> {
+        ActiveRequestGuard {
+            state: self,
+            key: key.to_string(),
+        }
+    }
+
     pub fn take_request(&self, key: &str) -> Option<CancellationToken> {
         self.active_requests.lock().remove(key)
     }
@@ -343,9 +366,62 @@ impl AppState {
     }
 }
 
+/// Releases an active-request slot when dropped (early error paths included).
+pub struct ActiveRequestGuard<'a> {
+    state: &'a AppState,
+    key: String,
+}
+
+impl Drop for ActiveRequestGuard<'_> {
+    fn drop(&mut self) {
+        let _ = self.state.take_request(&self.key);
+    }
+}
+
 #[cfg(test)]
 impl AppState {
     pub fn new_for_test(db: Database) -> Self {
         Self::new(config::load_config(), db)
+    }
+}
+
+#[cfg(test)]
+mod request_slot_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn test_state() -> (TempDir, AppState) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open_path(&dir.path().join("req.db")).unwrap();
+        (dir, AppState::new_for_test(db))
+    }
+
+    #[test]
+    fn try_register_request_is_exclusive_and_does_not_overwrite() {
+        let (_dir, state) = test_state();
+        let first = CancellationToken::new();
+        let second = CancellationToken::new();
+        assert!(state.try_register_request("c1", first.clone()));
+        assert!(!state.try_register_request("c1", second.clone()));
+        // First token must still be the one that cancel_request hits.
+        assert!(state.cancel_request("c1"));
+        assert!(first.is_cancelled());
+        assert!(!second.is_cancelled());
+        state.take_request("c1");
+        assert!(state.try_register_request("c1", second));
+        state.take_request("c1");
+    }
+
+    #[test]
+    fn active_request_guard_releases_slot_on_drop() {
+        let (_dir, state) = test_state();
+        let token = CancellationToken::new();
+        assert!(state.try_register_request("c2", token));
+        {
+            let _guard = state.active_request_guard("c2");
+            assert!(!state.try_register_request("c2", CancellationToken::new()));
+        }
+        assert!(state.try_register_request("c2", CancellationToken::new()));
+        state.take_request("c2");
     }
 }

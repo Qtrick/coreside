@@ -88,6 +88,21 @@ describe("interface transparency", () => {
     expect(max.cardAlpha).toBe(0.08);
     expect(max.controlAlpha).toBe(0.18);
     expect(max.modalAlpha).toBe(0.45);
+    expect(max.backdropBlurPx).toBe(0);
+    expect(results[0]!.backdropBlurPx).toBe(0);
+    // Mid transparency keeps some blur; it must fall as transparency rises.
+    expect(results[2]!.backdropBlurPx).toBeGreaterThan(results[5]!.backdropBlurPx);
+  });
+
+  it("collapses backdrop blur toward zero as interface transparency rises", () => {
+    const solid = computeInterfaceTransparencyTokens(0, { wallpaperActive: true });
+    const balanced = computeInterfaceTransparencyTokens(35, { wallpaperActive: true });
+    const immersive = computeInterfaceTransparencyTokens(70, { wallpaperActive: true });
+    const max = computeInterfaceTransparencyTokens(100, { wallpaperActive: true });
+    expect(solid.backdropBlurPx).toBe(0);
+    expect(balanced.backdropBlurPx).toBeGreaterThan(max.backdropBlurPx);
+    expect(immersive.backdropBlurPx).toBeGreaterThan(max.backdropBlurPx);
+    expect(max.backdropBlurPx).toBe(0);
   });
 
   it("keeps Solid (0%) fully opaque including sidebar", () => {

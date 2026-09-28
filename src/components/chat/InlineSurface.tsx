@@ -21,6 +21,12 @@ import {
 import { mergeStateForDefinitionPatch } from "@/lib/surface-ops";
 import { verifySurfaceElement } from "@/lib/visual-verification";
 import { persistenceScheduler } from "@/lib/persistence-scheduler";
+import {
+  compactStateForModel,
+  hasInteractiveDefinition,
+  useInteractiveSurface,
+} from "@/lib/interactive-surface";
+import { InteractiveStatusBar } from "@/components/tool-renderer/InteractiveStatusBar";
 import { toToolDefinition, SoftwareDocumentSchema } from "@/lib/software-document";
 import type { SurfaceRecord } from "@/types/runtime-v2";
 import type { ToolDefinition, ToolState } from "@/types/tool";
@@ -126,6 +132,63 @@ export function InlineSurfaceCard({
   const sendMessage = useAppStore((s) => s.sendMessage);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const setSurfaceDraftConflict = useAppStore((s) => s.setSurfaceDraftConflict);
+
+  const isInteractive = hasInteractiveDefinition(surface.definition);
+  const flushPendingState = useCallback(
+    () =>
+      persistenceScheduler.flush(`surface:${surface.id}`, async (_key, s) => {
+        const newRev = await api.saveSurfaceState(surface.id, s, stateRevisionRef.current);
+        if (typeof newRev === "number") {
+          stateRevisionRef.current = newRev;
+        }
+      }),
+    [surface.id],
+  );
+  const interactive = useInteractiveSurface({
+    surfaceId: surface.id,
+    stateRevisionRef,
+    setState,
+    beforeDispatch: flushPendingState,
+  });
+  const hydrateInteractive = interactive.hydrate;
+
+  useEffect(() => {
+    if (!hydrated || !isInteractive) return;
+    hydrateInteractive().catch((e: unknown) => {
+      setError(e instanceof Error ? e.message : String(e));
+    });
+  }, [hydrated, isInteractive, hydrateInteractive, surface.currentRevision]);
+
+  // When an AI actor must move, ask the agent once per committed sequence.
+  // The agent answers with an `interactive.action` operation that Rust validates.
+  const interactiveView = interactive.view;
+  const requestedAiTurnRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!interactiveView?.waitingFor) return;
+    const turnKey = `${surface.id}:${interactiveView.seq}`;
+    if (requestedAiTurnRef.current === turnKey) return;
+    requestedAiTurnRef.current = turnKey;
+    void sendMessage(`App interaction (interactive.ai_turn)`, [], [], {
+      formId: surface.id,
+      eventName: "interactive.ai_turn",
+      applicationId: surface.id,
+      surfaceId: surface.id,
+      surfaceRevision: surface.currentRevision,
+      stateRevision: interactiveView.stateRevision,
+      componentId: null,
+      idempotencyKey: `ai-turn-${surface.id}-${interactiveView.seq}`,
+      fields: {
+        silent: true,
+        actor: interactiveView.waitingFor,
+        stateRevision: interactiveView.stateRevision,
+        legalActions: interactiveView.legalActions.map((a) => ({
+          actionId: a.actionId,
+          parameters: a.parameters,
+        })),
+        state: compactStateForModel(interactiveView.state),
+      },
+    }).catch(() => undefined);
+  }, [interactiveView, sendMessage, surface.currentRevision, surface.id]);
 
   const contentVersion = surface.currentRevision + Object.keys(state).length;
   const { showNewUpdates, jumpToLatest } = useNewUpdatesIndicator(
@@ -446,6 +509,19 @@ export function InlineSurfaceCard({
           ) : null}
         </div>
       </header>
+      {isInteractive && !collapsed ? (
+        <InteractiveStatusBar
+          view={interactive.view}
+          error={interactive.error}
+          pending={interactive.pending}
+          history={interactive.history}
+          replaySeq={interactive.replaySeq}
+          onUndo={() => void interactive.undo()}
+          onLoadHistory={() => void interactive.loadHistory()}
+          onReplayAt={(seq) => void interactive.replayAt(seq)}
+          onClearReplay={interactive.clearReplay}
+        />
+      ) : null}
       <DraftConflictBanner />
       {error ? (
         <p className="tr-validation" role="alert">
@@ -480,9 +556,17 @@ export function InlineSurfaceCard({
           ) : null}
           <ToolRenderer
             tool={tool}
-            state={state}
-            onStateChange={handleStateChange}
-            onPersistState={persistState}
+            state={
+              interactive.replayState
+                ? { ...state, ...interactive.replayState }
+                : state
+            }
+            onStateChange={
+              interactive.replaySeq != null ? () => undefined : handleStateChange
+            }
+            onPersistState={
+              interactive.replaySeq != null ? undefined : persistState
+            }
             isCustomizing={isCustomizing}
             selectedComponentId={selectedComponentId}
             onSelectComponent={(c) => setSelectedComponentId(c.id)}
@@ -495,6 +579,11 @@ export function InlineSurfaceCard({
             onPendingApproval={() => {
               window.dispatchEvent(new Event("coreside:pending-approval"));
             }}
+            onInteractiveDispatch={
+              isInteractive && interactive.replaySeq == null
+                ? interactive.dispatch
+                : undefined
+            }
             onSubmitToAgent={async (payload) => {
               if (interactionLockRef.current) {
                 // Drop concurrent interaction to preserve turn serialization and authoritative state

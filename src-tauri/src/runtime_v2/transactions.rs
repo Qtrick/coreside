@@ -950,6 +950,17 @@ fn apply_one(
                 vec![]
             };
 
+            if let Some(rules) = super::interactive::interactive_definition_of(&surface.definition)?
+            {
+                let owned = rules.owned_keys();
+                if let Some(k) = touched_keys.iter().find(|k| owned.contains(*k)) {
+                    return Err(format!(
+                        "operation '{}' rejected: state key '{k}' on surface '{sid}' is owned by the interactive rules engine",
+                        op.id
+                    ));
+                }
+            }
+
             // Enforce state contracts on every touched key. If no contracts are declared,
             // infer safe model contracts from component bindings so that newly generated surfaces
             // or legacy surfaces always enforce contract discipline without an empty-contract bypass.
@@ -1346,8 +1357,61 @@ fn apply_one(
                 .map_err(|e| e.to_string())?;
             Ok(None)
         }
+        "interactive.action" => {
+            let sid = resolve_effective_surface_id(op)
+                .ok_or_else(|| "interactive.action requires surfaceId".to_string())?;
+            let action_id = op
+                .payload
+                .get("actionId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "interactive.action requires actionId".to_string())?;
+            let expected = op
+                .payload
+                .get("stateRevision")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| "interactive.action requires stateRevision".to_string())?;
+            let params_v = op.payload.get("params").cloned().unwrap_or_else(|| json!({}));
+            let event_id: String = format!("op-{}-{}", txn.id, op.id)
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
+                .take(128)
+                .collect();
+            super::interactive::dispatch(
+                db,
+                &sid,
+                expected,
+                &event_id,
+                action_id,
+                &params_v,
+                super::interactive::Origin::Ai,
+            )
+            .map_err(|e| format!("interactive.action rejected: {e}"))?;
+            Ok(Some(get_surface(db, &sid).map_err(|e| e.to_string())?))
+        }
         other => Err(format!("unsupported operation in apply: {other}")),
     }
+}
+
+/// Keys owned by the interactive rules engine only change through its action
+/// log, so a transaction undo restores everything else from the snapshot.
+fn keep_engine_owned_state(db: &Database, sid: &str, snapshot: &Value) -> DbResult<Value> {
+    let Ok(surface) = get_surface(db, sid) else {
+        return Ok(snapshot.clone());
+    };
+    let Some(rules) = super::interactive::interactive_definition_of(&surface.definition)
+        .map_err(DbError::Invalid)?
+    else {
+        return Ok(snapshot.clone());
+    };
+    let (current, _) = super::surfaces::get_surface_state_with_revision(db, sid)?;
+    let mut restored = snapshot.as_object().cloned().unwrap_or_default();
+    for key in rules.owned_keys() {
+        match current.get(&key) {
+            Some(v) => restored.insert(key, v.clone()),
+            None => restored.remove(&key),
+        };
+    }
+    Ok(Value::Object(restored))
 }
 
 pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<AppTransactionRecord> {
@@ -1420,11 +1484,15 @@ pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<App
             if sid == "created_surfaces" {
                 continue;
             }
+            let restored_state = match snap.get("state") {
+                Some(st) => Some(keep_engine_owned_state(db, sid, st)?),
+                None => None,
+            };
             if let Some(def) = snap.get("definition") {
                 update_surface_definition(db, sid, def, "undo transaction", None)?;
             }
-            if let Some(st) = snap.get("state") {
-                super::surfaces::save_surface_state(db, sid, st)?;
+            if let Some(st) = restored_state {
+                super::surfaces::save_surface_state(db, sid, &st)?;
             }
         }
         let now = now_rfc3339();
@@ -2011,6 +2079,7 @@ mod tests {
                 key: "saveResult".into(),
                 type_name: "object".into(),
                 initial_value: json!(null),
+                nullable: true,
                 scope: StateScope::Session,
                 description: Some("Action result".into()),
                 preservation_policy: None,

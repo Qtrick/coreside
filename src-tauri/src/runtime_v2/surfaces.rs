@@ -489,6 +489,22 @@ pub fn update_surface_definition(
     };
     validate_definition_components_for_packs(definition, &effective_packs)
         .map_err(DbError::Invalid)?;
+    // Fail closed if a replacement interactive schema would expose previously hidden keys.
+    // Do not rely on SoftwareDocument::from_value — flat tool defs must be covered too.
+    if let (Some(old_i), Some(new_i)) = (
+        current.definition.get("interactive"),
+        definition.get("interactive"),
+    ) {
+        if let (Ok(old_rules), Ok(new_rules)) = (
+            super::rules_engine::InteractiveAppDefinition::parse_and_admit(old_i),
+            super::rules_engine::InteractiveAppDefinition::parse_and_admit(new_i),
+        ) {
+            super::rules_engine::assert_interactive_read_policies_not_broadened(
+                &old_rules, &new_rules,
+            )
+            .map_err(DbError::Invalid)?;
+        }
+    }
     if let Some(tool_id) = current.tool_id.as_ref() {
         crate::security::assert_not_protected(tool_id).map_err(DbError::Invalid)?;
     }
@@ -761,6 +777,8 @@ pub fn save_surface_state_user_cas(
     }
     let surface = get_surface(db, surface_id)?;
     let (mut current_state, current_rev) = get_surface_state_with_revision(db, surface_id)?;
+    super::interactive::guard_owned_key_writes(&surface.definition, &current_state, patch_or_state)
+        .map_err(DbError::Invalid)?;
     let exp_rev = match expected_revision {
         Some(r) => {
             if r != current_rev {

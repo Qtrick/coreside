@@ -437,7 +437,7 @@ impl AiProvider for OpenRouterProvider {
             "model": self.model,
             "messages": messages,
             "temperature": 0.4,
-            "response_format": { "type": "json_object" }
+            "response_format": super::openai_family::openai_response_format(&self.model)
         });
 
         let payload = self.post_chat(body, request.cancel.clone()).await?;
@@ -473,7 +473,7 @@ impl AiProvider for OpenRouterProvider {
             "messages": messages,
             "temperature": 0.4,
             "stream": true,
-            "response_format": { "type": "json_object" }
+            "response_format": super::openai_family::openai_response_format(&self.model)
         });
         let _ = tx
             .send(ProviderStreamEvent::ResponseStarted {

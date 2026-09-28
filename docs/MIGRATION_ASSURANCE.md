@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 31 forward migrations (001–031; includes `031_surface_event_deliveries.sql`)
+**Count:** 32 forward migrations (001–032; includes `032_interactive_action_log.sql`)
 
 ## Inventory
 
@@ -39,6 +39,7 @@
 | 029 | `029_queue_turn_binding.sql` | Queue item turn binding: explicit turn_id relationship and crash recovery isolation |
 | 030 | `030_patch_scheduler_target_readiness.sql` | Target readiness: deferred patch scheduling, target dependency promotion, TTL timeout |
 | 031 | `031_surface_event_deliveries.sql` | Surface event deliveries: durable delivery lifecycle, attempt counts, declarative handler schema |
+| 032 | `032_interactive_action_log.sql` | Interactive rules-engine action log: ordered checkpoints, event_id idempotency, exact replay reconstruction |
 
 ## What is verified
 

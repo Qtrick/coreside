@@ -174,6 +174,7 @@ pub const SUPPORTED_MODEL_OPERATIONS: &[&str] = &[
     "subscription.create",
     "subscription.update",
     "subscription.delete",
+    "interactive.action",
 ];
 
 /// Internal operations used by host subsystems and commands (not directly model-facing).

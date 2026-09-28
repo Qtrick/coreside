@@ -47,6 +47,17 @@ describe("wallpaper compositing proof", () => {
     expect(root.style.getPropertyValue("--core-modal-overlay")).toMatch(
       /color-mix/,
     );
+    expect(root.style.getPropertyValue("--core-backdrop-blur")).toMatch(/px$/);
+  });
+
+  it("sets backdrop blur to 0px at maximum transparency", () => {
+    const tokens = computeInterfaceTransparencyTokens(100, {
+      wallpaperActive: true,
+    });
+    applyInterfaceTransparencyCssVars(tokens);
+    expect(
+      document.documentElement.style.getPropertyValue("--core-backdrop-blur"),
+    ).toBe("0px");
   });
 
   it("forces solid overlays when wallpaper is inactive even if preference is high", () => {
@@ -57,6 +68,10 @@ describe("wallpaper compositing proof", () => {
     expect(
       document.documentElement.style.getPropertyValue("--core-content-overlay"),
     ).toMatch(/100%/);
+    // Blur var collapses; base .sidebar keeps a fixed blur so chrome is unchanged.
+    expect(
+      document.documentElement.style.getPropertyValue("--core-backdrop-blur"),
+    ).toBe("0px");
   });
 
   it("proves monotonic wallpaper pixel contribution through panels (visual model)", () => {

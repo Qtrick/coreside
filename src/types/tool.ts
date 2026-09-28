@@ -133,6 +133,12 @@ export const ActionSchema = z.discriminatedUnion("type", [
     eventPayload: z.record(z.unknown()).optional(),
   }),
   z.object({
+    type: z.literal("dispatchInteractive"),
+    actionId: z.string().min(1),
+    params: z.record(z.unknown()).optional(),
+    paramsFromState: z.record(z.string()).optional(),
+  }),
+  z.object({
     type: z.literal("invokeRegisteredAction"),
     actionName: z.string().min(1),
     input: z.record(z.unknown()).optional(),

@@ -226,3 +226,49 @@ export type BranchDiffRecord = {
 };
 
 
+
+/** Parameter contract of an interactive (rules-engine) action. */
+export type InteractiveParamContract = {
+  type: string;
+  required?: boolean;
+  nullable?: boolean;
+  min?: number;
+  max?: number;
+  minLength?: number;
+  maxLength?: number;
+  allowedValues?: unknown[];
+  description?: string;
+};
+
+export type InteractiveLegalAction = {
+  actionId: string;
+  description: string | null;
+  parameters: Record<string, InteractiveParamContract>;
+  requiresParameters: boolean;
+};
+
+/** Authoritative view returned by the Rust rules engine for an interactive surface. */
+export type InteractiveView = {
+  surfaceId: string;
+  applicationId: string;
+  stateRevision: number;
+  state: Record<string, unknown>;
+  actor: string | null;
+  waitingFor: string | null;
+  status: string;
+  winner: string | null;
+  message: string | null;
+  legalActions: InteractiveLegalAction[];
+  seq: number;
+  duplicate: boolean;
+  reinitialized: boolean;
+};
+
+export type InteractiveHistoryEntry = {
+  seq: number;
+  eventId: string;
+  actionId: string;
+  actor: string;
+  params: unknown;
+  checkpoint: boolean;
+};

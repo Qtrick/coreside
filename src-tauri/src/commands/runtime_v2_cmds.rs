@@ -7,7 +7,7 @@ use tauri::{ipc::Channel, State, WebviewWindow};
 use super::CommandError;
 use crate::runtime_v2::packs::CapabilityPackMeta as PackMeta;
 use crate::runtime_v2::{
-    self, activate_next, append_ledger_entry, branch_from_message, bundled_packs,
+    self, interactive, activate_next, append_ledger_entry, branch_from_message, bundled_packs,
     cancel_queue_item, complete_queue_item, create_inline_surface, create_snapshot, delete_draft,
     delete_snapshot, diff_branch, enqueue, ensure_initial_route, flush_scheduler, get_continuity,
     get_conversation_events, get_draft, get_item, get_provider_profile, get_route_state,
@@ -16,10 +16,9 @@ use crate::runtime_v2::{
     list_turn_timeline_events, navigate_route, promote_inline_to_tool, recover_stale_active,
     remove_queued, route_back, route_forward, save_continuity, save_draft, save_surface_state,
     schedule_and_apply, schedule_patches, set_route_state, store_diagnostics, surfaces,
-    suspend_surface, undo_transaction, update_surface_definition, ActionOutcome, AgentResponseV2,
+    suspend_surface, undo_transaction, update_surface_definition, AgentResponseV2,
     AppOperation, AppTransactionRecord, ApplyResult, ChatBranchRecord, ContextLedgerEntry,
-    ContinuitySnapshot, ConversationEventRecord, DeterministicRng, InteractiveAppDefinition,
-    LegalActionSummary, NavigateResult, PatchPriority, ProviderConformanceRecord, QueueItem,
+    ContinuitySnapshot, ConversationEventRecord, InteractiveAppDefinition, NavigateResult, PatchPriority, ProviderConformanceRecord, QueueItem,
     RouteState, ScheduleRequest, ScheduledPatch, SnapshotRecord, SurfaceDraft, SurfaceRecord,
     SuspensionState, TurnTimelineEvent,
 };
@@ -1111,18 +1110,14 @@ pub fn runtime_v2_reconstruct_replay_state(
 
 #[tauri::command]
 pub fn runtime_v2_validate_interactive_definition(
-    definition: InteractiveAppDefinition,
+    definition: Value,
 ) -> Result<Value, CommandError> {
-    definition
-        .validate()
+    let def = InteractiveAppDefinition::parse_and_admit(&definition)
         .map_err(|e| CommandError::new("invalid_definition", e))?;
-    definition
-        .run_self_tests()
-        .map_err(|e| CommandError::new("self_test_failed", e))?;
     Ok(serde_json::json!({
         "valid": true,
         "selfTestsPassed": true,
-        "actionsCount": definition.actions.len(),
+        "actionsCount": def.actions.len(),
     }))
 }
 
@@ -1130,69 +1125,113 @@ pub fn runtime_v2_validate_interactive_definition(
 pub fn runtime_v2_get_interactive_fixture(
     name: String,
 ) -> Result<InteractiveAppDefinition, CommandError> {
-    match name.to_lowercase().as_str() {
-        "tic-tac-toe" | "tictactoe" => {
-            Ok(runtime_v2::rules_engine::fixtures::fixture_tic_tac_toe())
-        }
-        "connect-four" | "connectfour" => {
-            Ok(runtime_v2::rules_engine::fixtures::fixture_connect_four())
-        }
-        "checkers" => Ok(runtime_v2::rules_engine::fixtures::fixture_checkers()),
-        "chess" => Ok(runtime_v2::rules_engine::fixtures::fixture_chess()),
-        "2048" => Ok(runtime_v2::rules_engine::fixtures::fixture_2048()),
-        "minesweeper" => Ok(runtime_v2::rules_engine::fixtures::fixture_minesweeper()),
-        "sudoku" => Ok(runtime_v2::rules_engine::fixtures::fixture_sudoku()),
-        "card-deck" | "cards" => Ok(runtime_v2::rules_engine::fixtures::fixture_card_deck()),
-        "quiz" => Ok(runtime_v2::rules_engine::fixtures::fixture_quiz()),
-        "calculator" => Ok(runtime_v2::rules_engine::fixtures::fixture_calculator()),
-        "simulation" => Ok(runtime_v2::rules_engine::fixtures::fixture_simulation()),
-        "synthetic" | "custom" => {
-            Ok(runtime_v2::rules_engine::fixtures::fixture_custom_rule_game())
-        }
-        other => Err(CommandError::new(
+    runtime_v2::rules_fixtures::get_fixture(&name).ok_or_else(|| {
+        CommandError::new(
             "not_found",
-            format!("Interactive fixture '{other}' not found"),
-        )),
-    }
+            format!("Interactive fixture '{name}' not found"),
+        )
+    })
+}
+
+fn scoped_interactive_surface(
+    window: &WebviewWindow,
+    db: &crate::db::Database,
+    surface_id: &str,
+) -> Result<(), CommandError> {
+    let surface = get_surface(db, surface_id)?;
+    windows::enforce_caller_surface_scope(window, surface.tool_id.as_deref(), &surface.id)?;
+    Ok(())
+}
+
+/// Current authoritative view of an interactive surface (initializes on first use).
+#[tauri::command]
+pub fn runtime_v2_interactive_view(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    surface_id: String,
+) -> Result<interactive::InteractiveView, CommandError> {
+    state.require_profile()?;
+    let mut db = state.db.lock();
+    scoped_interactive_surface(&window, &db, &surface_id)?;
+    Ok(interactive::get_view(&mut db, &surface_id)?)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InteractiveDispatchArgs {
+    pub surface_id: String,
+    pub expected_state_revision: i64,
+    pub event_id: String,
+    pub action_id: String,
+    #[serde(default)]
+    pub params: Value,
+}
+
+/// Execute a user gesture through the Rust rules engine. The renderer never
+/// decides legality; it receives the committed view back.
+#[tauri::command]
+pub fn runtime_v2_interactive_dispatch(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    args: InteractiveDispatchArgs,
+) -> Result<interactive::InteractiveView, CommandError> {
+    state.require_profile()?;
+    let mut db = state.db.lock();
+    scoped_interactive_surface(&window, &db, &args.surface_id)?;
+    Ok(interactive::dispatch(
+        &mut db,
+        &args.surface_id,
+        args.expected_state_revision,
+        &args.event_id,
+        &args.action_id,
+        &args.params,
+        interactive::Origin::User,
+    )?)
 }
 
 #[tauri::command]
-pub fn runtime_v2_is_legal_action(
-    definition: InteractiveAppDefinition,
-    state: Value,
-    action_id: String,
-    params: Option<Value>,
-    actor: String,
-) -> Result<bool, CommandError> {
-    let p = params.unwrap_or_else(|| serde_json::json!({}));
-    definition
-        .is_legal_action(&state, &action_id, &p, &actor)
-        .map_err(|e| CommandError::new("validation_error", e))
+pub fn runtime_v2_interactive_undo(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    surface_id: String,
+    expected_state_revision: i64,
+    event_id: String,
+) -> Result<interactive::InteractiveView, CommandError> {
+    state.require_profile()?;
+    let mut db = state.db.lock();
+    scoped_interactive_surface(&window, &db, &surface_id)?;
+    Ok(interactive::undo(
+        &mut db,
+        &surface_id,
+        expected_state_revision,
+        &event_id,
+    )?)
 }
 
 #[tauri::command]
-pub fn runtime_v2_execute_interactive_action(
-    definition: InteractiveAppDefinition,
-    mut state: Value,
-    action_id: String,
-    params: Option<Value>,
-    actor: String,
-    random_seed: Option<u64>,
-) -> Result<ActionOutcome, CommandError> {
-    let mut rng = DeterministicRng::new(random_seed.or(definition.random_seed).unwrap_or(42));
-    let p = params.unwrap_or_else(|| serde_json::json!({}));
-    definition
-        .execute_action(&mut state, &action_id, &p, &actor, &mut rng)
-        .map_err(|e| CommandError::new("illegal_action", e))
+pub fn runtime_v2_interactive_history(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    surface_id: String,
+) -> Result<Vec<interactive::HistoryEntry>, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    scoped_interactive_surface(&window, &db, &surface_id)?;
+    Ok(interactive::history(&db, &surface_id)?)
 }
 
+/// Read-only reconstruction of the public state after action `seq`.
 #[tauri::command]
-pub fn runtime_v2_get_legal_actions(
-    definition: InteractiveAppDefinition,
-    state: Value,
-    actor: String,
-) -> Result<Vec<LegalActionSummary>, CommandError> {
-    Ok(definition.get_legal_actions(&state, &actor))
+pub fn runtime_v2_interactive_replay(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    surface_id: String,
+    seq: i64,
+) -> Result<Value, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    scoped_interactive_surface(&window, &db, &surface_id)?;
+    Ok(interactive::replay_view(&db, &surface_id, seq)?)
 }
 
 #[cfg(test)]

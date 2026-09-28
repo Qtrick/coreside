@@ -1370,6 +1370,24 @@ mod tests {
     }
 
     #[test]
+    fn detector_stays_ndjson_for_follow_up_chunks_without_version_marker() {
+        // Follow-up SSE deltas after the first NDJSON frame often omit "v" and may
+        // not start with '{'. The sticky detector must keep accepting them — the
+        // old per-chunk heuristic dropped these and discarded durable ops.
+        let mut d = ProgressiveProtocolDetector::default();
+        let start = "{\"v\": \"coreside.ops.v1\", \"type\": \"start\", \"groupId\": \"g-1\", \"schemaVersion\": \"2\"}\n";
+        assert_eq!(d.feed(start), DetectedStreamingProtocol::CoresideOpsNdjson);
+        assert!(d.is_coreside_ndjson());
+        // Continuation chunk: no protocol marker, not necessarily a fresh object start.
+        assert_eq!(
+            d.feed("{\"type\": \"op\", \"frameId\": 1, \"op\": {\"id\": \"op-1\"}}\n"),
+            DetectedStreamingProtocol::CoresideOpsNdjson
+        );
+        assert!(d.is_coreside_ndjson());
+        assert_eq!(d.feed("plain trailing prose"), DetectedStreamingProtocol::CoresideOpsNdjson);
+    }
+
+    #[test]
     fn detector_prioritizes_ndjson_first_line_over_payload_key_mentions() {
         let mut d = ProgressiveProtocolDetector::default();
         // Batched start + op flush where the op payload text quotes response

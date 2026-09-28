@@ -951,6 +951,40 @@ export const api = {
       payload,
     }),
   runtimeV2Limits: () => invoke<Record<string, unknown>>("runtime_v2_limits"),
+  interactiveView: (surfaceId: string) =>
+    invoke<import("@/types/runtime-v2").InteractiveView>("runtime_v2_interactive_view", {
+      surfaceId,
+    }),
+  interactiveDispatch: (args: {
+    surfaceId: string;
+    expectedStateRevision: number;
+    eventId: string;
+    actionId: string;
+    params: Record<string, unknown>;
+  }) =>
+    invoke<import("@/types/runtime-v2").InteractiveView>("runtime_v2_interactive_dispatch", {
+      args,
+    }),
+  interactiveUndo: (surfaceId: string, expectedStateRevision: number, eventId: string) =>
+    invoke<import("@/types/runtime-v2").InteractiveView>("runtime_v2_interactive_undo", {
+      surfaceId,
+      expectedStateRevision,
+      eventId,
+    }),
+  interactiveHistory: (surfaceId: string) =>
+    invoke<import("@/types/runtime-v2").InteractiveHistoryEntry[]>(
+      "runtime_v2_interactive_history",
+      { surfaceId },
+    ),
+  interactiveReplay: (surfaceId: string, seq: number) =>
+    invoke<Record<string, unknown>>("runtime_v2_interactive_replay", { surfaceId, seq }),
+  validateInteractiveDefinition: (definition: unknown) =>
+    invoke<{ valid: boolean; selfTestsPassed: boolean; actionsCount: number }>(
+      "runtime_v2_validate_interactive_definition",
+      { definition },
+    ),
+  getInteractiveFixture: (name: string) =>
+    invoke<Record<string, unknown>>("runtime_v2_get_interactive_fixture", { name }),
   runtimeV2ReconstructReplayState: (
     conversationId: string,
     targetTurnId?: string | null,

@@ -9,7 +9,12 @@ import {
   type ReactNode,
 } from "react";
 import { AlertTriangle, X } from "lucide-react";
-import { applyActionsAsync, collectDeclaredBindings, setDottedPath } from "@/lib/actions";
+import {
+  applyActionsAsync,
+  collectDeclaredBindings,
+  setDottedPath,
+  type InteractiveDispatchOutcome,
+} from "@/lib/actions";
 import { api } from "@/lib/tauri";
 import type { ActionOutcome } from "@/types/application-kernel";
 import type { ActionDefinition, DataSource, ToolComponent, ToolDefinition, ToolState } from "@/types/tool";
@@ -38,6 +43,10 @@ type ToolRendererProps = {
     silent?: boolean;
   }) => void;
   onPendingApproval?: (outcome: Extract<ActionOutcome, { status: "pendingApproval" }>) => void;
+  onInteractiveDispatch?: (payload: {
+    actionId: string;
+    params: Record<string, unknown>;
+  }) => Promise<InteractiveDispatchOutcome>;
 };
 
 type ToolErrorBoundaryProps = {
@@ -200,6 +209,7 @@ export function ToolRenderer({
   onSelectComponent,
   onSubmitToAgent,
   onPendingApproval,
+  onInteractiveDispatch,
 }: ToolRendererProps) {
   const effectiveMode = mode ?? (isCustomizing ? "customize" : "live");
   const isPreviewMode = effectiveMode === "preview";
@@ -376,7 +386,14 @@ export function ToolRenderer({
           }
           return outcome;
         },
+        onDispatchInteractive: onInteractiveDispatch
+          ? (p) => onInteractiveDispatch({ actionId: p.actionId, params: p.params })
+          : undefined,
       });
+
+      if (result.committedState) {
+        stateRef.current = { ...stateRef.current, ...result.committedState };
+      }
 
       if (result.changedKeys.length > 0) {
         // Merge only modified keys into the latest live state to avoid stale-state overwrites
@@ -432,6 +449,7 @@ export function ToolRenderer({
       applicationId,
       conversationId,
       onPendingApproval,
+      onInteractiveDispatch,
       onPersistState,
       onStateChange,
       onSubmitToAgent,

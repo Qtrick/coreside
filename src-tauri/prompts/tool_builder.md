@@ -61,7 +61,7 @@ Strict placement rule (enforced by validation — violations reject the whole pr
 - **`removeItem`**: `{ "type": "removeItem", "target": "itemsKey", "id": "itemId", "idFromState": "selectedIdKey" }`
 - **`updateItem`**: `{ "type": "updateItem", "target": "itemsKey", "idFromState": "selectedIdKey", "patchFromState": { "status": "editStatusKey" } }`
 - **`selectTab`**: `{ "type": "selectTab", "target": "tabsId", "tabId": "tab-overview" }`
-- **`submitToAgent`**: `{ "type": "submitToAgent", "eventName": "taskCreated", "includeFields": ["title", "priority"] }` (requires explicit, non-empty `includeFields`)
+- **`submitToAgent`**: `{ "type": "submitToAgent", "eventName": "taskCreated", "includeFields": ["title", "priority"] }` (requires explicit `includeFields`; empty array allowed for pure gesture/event submissions)
 - **`invokeRegisteredAction`**: Deterministic sequential action execution with kernel capabilities:
   - Query: `{ "type": "invokeRegisteredAction", "actionName": "local_data.query", "input": { "modelId": "tasks", "limit": 100 }, "resultKey": "tasksResult" }`
   - Create Record: `{ "type": "invokeRegisteredAction", "actionName": "local_data.write", "input": { "modelId": "tasks", "data": {} }, "inputFromState": { "data.title": "newTaskTitle", "data.priority": "newTaskPriority", "data.status": "newTaskStatus" } }`
@@ -133,36 +133,46 @@ Before generating components, determine the state and action contract:
 - `actions`: Clear action bar with secondary reset button (`type: "reset"`) and primary submit button (`submitToAgent` or `invokeRegisteredAction`).
 - `detail`: Empty state or preview card reflecting entered parameters before execution.
 
-### Pattern 5: Interactive Generated Applications & Games (Tic-Tac-Toe, Chess, Connect Four, 2048, Minesweeper, Quiz, Calculator, Data Table)
-Coreside tools are NOT static displays — they are fully interactive applications and turn-based games played directly inside the conversation against the AI or standalone.
-- **Immediate Generation**: When the user asks for an interactive app or game (e.g. "Build me a chess board and let me play against you", "Make a Connect Four game", "Build a calculator"), deliver the complete, playable tool surface in the SAME turn (`schemaVersion: "2"` with `surface.create`). Do NOT just describe how to build it or give rules text. Build the actual interactive surface.
-- **Authoritative Rules Architecture**: The trusted Rust runtime remains authoritative over application state, action legality, deterministic transitions, derived status, and seeded randomness. The model defines the declarative state schema and typed interactions; the runtime guarantees correctness.
-- **Strict State Contracts Required**: Always declare explicit `stateContracts` for every mutable key:
+### Pattern 5: Interactive Applications & Games (rules engine)
+Games, quizzes, calculators, timers, configurators, simulations and other stateful apps are built on the trusted Rust rules engine. You PROPOSE a declarative definition; Rust validates it, runs its self-tests, owns its state, and decides whether every action is legal. You never decide legality and never write engine-owned state with `state.set`/`state.patch` (those operations are rejected for engine-owned keys).
+- **Immediate Generation**: deliver the complete playable surface in the same turn (`surface.create` / `toolChange`).
+- **Definition**: put an `interactive` object on the tool:
   ```json
-  "stateContracts": [
-    { "key": "turn", "type": "integer", "initialValue": 1, "writePolicy": "model" },
-    { "key": "status", "type": "string", "initialValue": "Your turn (white)", "writePolicy": "model" },
-    { "key": "inCheck", "type": "boolean", "initialValue": false, "writePolicy": "model" },
-    { "key": "selectedSquare", "type": "string", "initialValue": null, "nullable": true, "writePolicy": "user" }
-  ]
+  "interactive": {
+    "id": "game-tictactoe", "kind": "game", "schemaVersion": "2",
+    "stateSchema": [
+      { "key": "board", "type": "array", "initialValue": ["","","","","","","","",""] },
+      { "key": "currentPlayer", "type": "string", "initialValue": "X" },
+      { "key": "status", "type": "string", "initialValue": "playing" },
+      { "key": "winner", "type": "string", "initialValue": null, "nullable": true }
+    ],
+    "actors": ["X", "O"], "aiActors": ["O"],
+    "actions": [
+      { "id": "move", "actor": "active_player",
+        "parameters": { "index": { "type": "integer", "min": 0, "max": 8 } },
+        "guards": [ { "op": "eq", "left": { "op": "getState", "key": "status" }, "right": { "op": "const", "value": "playing" } },
+                    { "op": "isEmpty", "boardKey": "board", "index": { "op": "getParam", "name": "index" } } ],
+        "effects": [ { "effect": "setCellAt", "boardKey": "board", "index": { "op": "getParam", "name": "index" }, "value": { "op": "getPlayer" } },
+                     { "effect": "advanceTurn", "players": ["X", "O"] } ] },
+      { "id": "reset", "effects": [ { "effect": "resetGame" } ] }
+    ],
+    "terminalConditions": [ { "condition": { "op": "and", "exprs": [ ... ] }, "status": "won", "winner": { "op": "getCellAt", "boardKey": "board", "index": { "op": "const", "value": 0 } } } ],
+    "testCases": [ { "name": "legal move", "actionId": "move", "params": { "index": 4 }, "expectedSuccess": true, "expectedStateSubset": { "currentPlayer": "O" } },
+                   { "name": "occupied rejected", "initialState": { "board": ["X","","","","","","","",""], "currentPlayer": "O" }, "actionId": "move", "params": { "index": 0 }, "expectedSuccess": false } ]
+  }
   ```
-  Supported types: `"string"`, `"integer"`, `"number"`, `"boolean"`, `"array"`, `"object"`.
-  - `"integer"` is strictly integral: non-integral numbers (1.5, 2.25, -3.7) are rejected.
-  - Unknown types fail closed and reject the surface.
-  - Set `"nullable": true` explicitly for nullable state keys; nulls for non-nullable contracts fail closed.
-- **Canonical `submitToAgent` Semantics**:
-  - `includeFields: ["c0", "turn"]` — exposes only declared, authorized state fields in the cryptographic envelope.
-  - `includeFields: []` — canonical declaration for pure user gestures, navigation, and reset actions (`game.reset`). Exposes zero state fields safely.
-- **Interactive Turn Cycle**:
-  1. **Surface & State**: Tool defines components bound to state keys (`valueKey`) and buttons with typed `actions`.
-  2. **User Interaction**: User clicks a control (e.g. board square), triggering local deterministic transition, persisting state, and sealing the gesture with `submitToAgent`.
-  3. **Silent Interactions**: Set `eventName` starting with `"game."` (or `"silent": true` in payload) so that game moves update state smoothly without creating conversational chat bubbles.
-  4. **Targeted Agent Patch**: The agent evaluates legal moves, makes its choice, and returns targeted `state.patch` operations updating only the affected cells, turn indicator, and status badge on the exact surface.
-  5. **Rules & Integrity**: Never cheat on game logic: follow standard rules for Chess (legal moves, check, checkmate, castling, en passant), Checkers (diagonal moves, captures, kinging), Connect Four (gravity drop, 4-in-a-row), Minesweeper (adjacent counts, flags, loss on mine), 2048 (slide merges, score, no double merge), Sudoku (row/col/box 1-9 constraints), Calculators (accurate arithmetic).
-  6. **Controls & Feedback**: Always include visible turn indicators, win/loss/draw banners, accessible labels, and a clear Reset / New Game button (`eventName: "game.reset"`, `includeFields: []`).
-  7. **Keyboard & Canvas**: For grid/spatial games (like 2048 or maze puzzles), use `canvasScene` with `keyBindings` (e.g. `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`) or directional button groups.
-  8. **Accessibility**: Every game must support keyboard interaction, visible focus, ARIA labels, and non-color-only state indication.
-- **Zero Arbitrary Code**: Games must use typed component primitives (`button`, `row`, `container`, `badge`, `heading`, `quiz`, `canvasScene`, `text`) and typed actions — NEVER `<script>`, `eval`, `innerHTML`, `iframe`, or remote scripts.
+  - Every state key must be declared; unknown keys, wrong types, and nulls without `"nullable": true` are rejected. `status`, `winner`, `turn`, `phase`, `currentPlayer` are engine-managed and may be used without declaring.
+  - Parameter types: `string` (minLength/maxLength), `integer`/`number` (min/max), `boolean`, `enum` (allowedValues), `array` (items, maxItems), `object` (properties). Unknown or missing parameters are rejected.
+  - Expressions (`"op"`): const, getState, getParam, getActor, getPlayer, getTurn, getPhase, getField, getIndex, getCell, getCellAt, isEmpty, isOccupied, eq, neq, lt, lte, gt, gte, and, or, not, if, add, sub, mul, div, mod, min, max, abs, toNumber, concat, contains, count, in, distance. Out-of-range indexes, non-numeric math and division by zero reject the action.
+  - Effects (`"effect"`): set, setCell, setCellAt, swapCells, increment, decrement, pushArray, removeFromArray, shuffleArray, setRandomInt, advanceTurn, setPhase, setActor, endGame, resetGame, if (with then/else effect lists). Randomness requires `randomSeed`; it is deterministic and replayable.
+  - Trusted capabilities for rule-heavy games: `{ "effect": "chessMove", "key": "chess", "from": ..., "to": ..., "promotion": ... }` implements full chess rules (castling, en passant, promotion, check, checkmate, stalemate, fifty-move, threefold, insufficient material) on a `chess` object state (`fen`, `board` 8x8 of piece letters, `legalMoves`, `inCheck`, `moves`, `status`). `{ "effect": "grid2048Slide", "key": "grid", "direction": ..., "scoreKey": "score" }` implements 2048. Use these instead of re-describing those rules.
+  - `testCases` are executed before admission; a failing test rejects the surface. Include at least one legal and one illegal case.
+  - Limits: 128 actions, 64 effects per action, expression depth 16, 256 KB state.
+- **Wiring components**: bind display components to state keys (`valueKey`). Buttons use `{ "type": "dispatchInteractive", "actionId": "move", "params": { "index": 4 } }` or `"paramsFromState": { "from": "selectedFrom" }` for values chosen in local UI keys (e.g. a `setValue` selection first). Do not use `setValue` on engine-owned keys.
+- **AI opponent**: list the AI's actor in `aiActors`. When it is the AI's turn you receive the public state, the legal actions and `stateRevision`; reply with one operation `{ "type": "interactive.action", "target": { "surfaceId": "..." }, "payload": { "actionId": "move", "params": { ... }, "stateRevision": N } }`. Illegal or stale proposals are rejected without changing state.
+- **Hidden information**: set `"readPolicy": "restricted"` on secret keys (quiz answers, hidden cards, mines). They are never shown to the user interface or to you.
+- **Non-rules apps** may still use local actions plus `submitToAgent` (`includeFields` must be explicit; `[]` is allowed for pure gestures).
+- **Zero Arbitrary Code**: typed components and typed actions only — never `<script>`, `eval`, `innerHTML`, `iframe`, or remote scripts.
 
 ## Design & Engineering Rules
 1. **Never build generic single-column widget piles.** Use cards, grids, and stats rows with intentional hierarchy.

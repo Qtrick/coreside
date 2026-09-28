@@ -4,6 +4,8 @@ import { ApplicationDetailsPanel } from "@/components/applications/ApplicationDe
 import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
 import { AppRouteShell } from "@/components/tool-renderer/AppRouteShell";
 import { ToolHeaderActions } from "@/components/tool-canvas/ToolHeaderActions";
+import { InteractiveStatusBar } from "@/components/tool-renderer/InteractiveStatusBar";
+import { hasInteractiveDefinition, useInteractiveSurface } from "@/lib/interactive-surface";
 import { api } from "@/lib/tauri";
 import { consumerErrorMessage } from "@/lib/consumer-errors";
 import {
@@ -200,6 +202,28 @@ export function ToolCanvas() {
     };
   }, [activeToolId]);
 
+  const interactiveRevisionRef = useRef(stateRevision);
+  interactiveRevisionRef.current = stateRevision;
+  const isInteractive = hasInteractiveDefinition(canonicalSurface?.definition);
+  const adoptInteractiveState = useCallback(
+    (update: (current: Record<string, unknown>) => Record<string, unknown>) =>
+      setCanonicalState((current) => update(current ?? {})),
+    [],
+  );
+  const interactive = useInteractiveSurface({
+    surfaceId: surfaceId ?? "",
+    stateRevisionRef: interactiveRevisionRef,
+    setState: adoptInteractiveState,
+    onAdopt: (view) => setStateRevision(view.stateRevision),
+  });
+  const hydrateInteractive = interactive.hydrate;
+  const canonicalSurfaceId = canonicalSurface?.id;
+  const canonicalDefinitionRevision = canonicalSurface?.currentRevision;
+  useEffect(() => {
+    if (!isInteractive || !canonicalSurfaceId) return;
+    hydrateInteractive().catch(() => undefined);
+  }, [isInteractive, canonicalSurfaceId, canonicalDefinitionRevision, hydrateInteractive]);
+
   const onStateChange = useCallback(
     (state: Record<string, unknown>) => {
       if (canonicalSurface && activeTool) {
@@ -383,12 +407,17 @@ export function ToolCanvas() {
   );
   const canonicalDef = canonicalSurface ? asToolDefinition(canonicalSurface) : null;
   const renderTool = previewOverlay?.tool ?? canonicalDef ?? activeTool;
-  const renderState =
+  const isPreviewPaint = Boolean(previewOverlay);
+  const liveState =
     previewOverlay?.state ??
     (canonicalSurface && canonicalState && Object.keys(canonicalState).length > 0
       ? { ...toolState, ...canonicalState }
       : toolState);
-  const isPreviewPaint = Boolean(previewOverlay);
+  const inspectingReplay =
+    !isPreviewPaint && isInteractive && interactive.replayState != null;
+  const renderState = inspectingReplay
+    ? { ...liveState, ...interactive.replayState }
+    : liveState;
 
   const surfacesById = useMemo(() => {
     const map: Record<string, ToolDefinition> = {};
@@ -618,11 +647,29 @@ export function ToolCanvas() {
             onPendingApproval={onPendingApproval}
           />
         ) : (
+          <>
+          {isInteractive && !isPreviewPaint ? (
+            <InteractiveStatusBar
+              view={interactive.view}
+              error={interactive.error}
+              pending={interactive.pending}
+              history={interactive.history}
+              replaySeq={interactive.replaySeq}
+              onUndo={() => void interactive.undo()}
+              onLoadHistory={() => void interactive.loadHistory()}
+              onReplayAt={(seq) => void interactive.replayAt(seq)}
+              onClearReplay={interactive.clearReplay}
+            />
+          ) : null}
           <ToolRenderer
             tool={renderTool ?? activeTool}
             state={renderState}
-            onStateChange={isPreviewPaint ? () => undefined : onStateChange}
-            onPersistState={isPreviewPaint ? async () => undefined : onPersistState}
+            onStateChange={
+              isPreviewPaint || inspectingReplay ? () => undefined : onStateChange
+            }
+            onPersistState={
+              isPreviewPaint || inspectingReplay ? async () => undefined : onPersistState
+            }
             isCustomizing={isCustomizing}
             mode={isPreviewPaint ? "preview" : isCustomizing ? "customize" : "live"}
             selectedComponentId={selectedComponentId}
@@ -634,7 +681,13 @@ export function ToolCanvas() {
             projectId={activeProjectId}
             onSubmitToAgent={isPreviewPaint ? undefined : onSubmitToAgent}
             onPendingApproval={onPendingApproval}
+            onInteractiveDispatch={
+              isInteractive && !isPreviewPaint && !inspectingReplay
+                ? interactive.dispatch
+                : undefined
+            }
           />
+          </>
         )}
       </div>
 

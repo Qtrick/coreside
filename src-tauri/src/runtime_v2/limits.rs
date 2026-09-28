@@ -17,6 +17,9 @@ pub const MAX_CODE_EDITOR_CHARS: usize = 200_000;
 pub const MAX_DEFINITION_JSON_BYTES: usize = 512_000;
 pub const MAX_STATE_JSON_BYTES: usize = 256_000;
 pub const MAX_QUEUED_TURNS: usize = 5;
+/// Hard cap on a single user message body (UTF-8 chars). Mirrors Partial Update's
+/// prompt admission bound so oversized payloads fail closed before persistence.
+pub const MAX_USER_MESSAGE_CHARS: usize = 20_000;
 pub const MAX_BRANCH_DEPTH: usize = 32;
 pub const MAX_SNAPSHOTS_PER_CONVERSATION: usize = 50;
 pub const MAX_DIAGNOSTICS_RETENTION: usize = 100;
@@ -51,6 +54,8 @@ pub fn limits_json() -> serde_json::Value {
         "maxSvgNodes": MAX_SVG_NODES,
         "maxCanvasObjects": MAX_CANVAS_OBJECTS,
         "maxCodeEditorChars": MAX_CODE_EDITOR_CHARS,
+        "maxQueuedTurns": MAX_QUEUED_TURNS,
+        "maxUserMessageChars": MAX_USER_MESSAGE_CHARS,
         "maxReplayOpsLoaded": MAX_REPLAY_OPS_LOADED,
         "maxInlineSurfacesVisible": MAX_INLINE_SURFACES_VISIBLE,
         "maxManifestBytes": MAX_MANIFEST_JSON_BYTES,

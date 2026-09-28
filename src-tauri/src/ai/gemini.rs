@@ -130,6 +130,14 @@ impl GeminiProvider {
                                 "components": {
                                     "type": "array",
                                     "items": { "type": "object" }
+                                },
+                                "stateContracts": {
+                                    "type": "array",
+                                    "items": { "type": "object" }
+                                },
+                                "interactive": {
+                                    "type": "object",
+                                    "description": "Optional rules-engine definition (see Interactive Applications). Rust validates it and owns its state."
                                 }
                             },
                             "required": ["id", "name", "components"]

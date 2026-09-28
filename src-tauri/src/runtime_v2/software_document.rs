@@ -72,7 +72,7 @@ pub struct StateContract {
     pub key: String,
     #[serde(rename = "type", default = "default_type_name")]
     pub type_name: String,
-    #[serde(default)]
+    #[serde(default, alias = "initial")]
     pub initial_value: Value,
     #[serde(default)]
     pub nullable: bool,
@@ -158,11 +158,11 @@ pub fn validate_state_value_type(
 }
 
 impl StateContract {
-    /// True when state value may be null (either explicitly declared nullable,
-    /// defaulted to null on declaration for migration compatibility, or typed "any").
+    /// True when state value may be null.
+    /// Nullability must be explicit (`nullable: true`) or typed as "any"/"null".
+    /// An initial value of null alone does NOT widen the contract.
     pub fn is_effective_nullable(&self) -> bool {
         self.nullable
-            || self.initial_value.is_null()
             || self.type_name.eq_ignore_ascii_case("any")
             || self.type_name.eq_ignore_ascii_case("null")
     }
@@ -288,6 +288,9 @@ pub struct SoftwareDocument {
     pub design_tokens: Option<Value>,
     #[serde(default)]
     pub capability_packs: Vec<String>,
+    /// Rules-engine definition. When present, Rust owns the declared state keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interactive: Option<Value>,
 }
 
 fn default_doc_version() -> u32 {
@@ -308,6 +311,7 @@ impl SoftwareDocument {
             action_contracts: Vec::new(),
             design_tokens: None,
             capability_packs: vec!["coreside.core".into()],
+            interactive: None,
         }
     }
 
@@ -491,6 +495,7 @@ impl SoftwareDocument {
         };
         doc.state_contracts = tool.state_contracts.clone();
         doc.action_contracts = tool.action_contracts.clone();
+        doc.interactive = tool.interactive.clone();
 
         // Check if components contain synthetic section containers
         let has_synthetic_sections = tool.components.iter().any(|c| {
@@ -721,6 +726,7 @@ impl SoftwareDocument {
                 components: all_components,
                 state_contracts: self.state_contracts.clone(),
                 action_contracts: self.action_contracts.clone(),
+                interactive: self.interactive.clone(),
             };
         }
 
@@ -817,6 +823,7 @@ impl SoftwareDocument {
             components: root_components,
             state_contracts: self.state_contracts.clone(),
             action_contracts: self.action_contracts.clone(),
+            interactive: self.interactive.clone(),
         }
     }
 
@@ -1886,6 +1893,54 @@ pub fn admit_software_document_with_state(
         all_comps.extend(sec.components.clone());
     }
     super::packs::validate_tool_components_for_packs(&all_comps, allowed_packs)?;
+
+    // Interactive rules definition: structure, contracts and embedded self-tests.
+    let rules = match candidate.interactive {
+        Some(ref interactive) => Some(
+            super::rules_engine::InteractiveAppDefinition::parse_and_admit(interactive)
+                .map_err(|e| format!("interactive definition rejected: {e}"))?,
+        ),
+        None => None,
+    };
+    // Anti-broadening for interactive stateSchema (mirrors Rule B for stateContracts).
+    // Without this, an applied definition update can `__adopt` owned state while
+    // flipping restricted keys to public, leaking hidden answers/mines/hands.
+    if let Some(ref new_rules) = rules {
+        if let Some(existing_doc) = existing {
+            if let Some(ref old_interactive) = existing_doc.interactive {
+                if let Ok(old_rules) =
+                    super::rules_engine::InteractiveAppDefinition::parse_and_admit(old_interactive)
+                {
+                    super::rules_engine::assert_interactive_read_policies_not_broadened(
+                        &old_rules, new_rules,
+                    )?;
+                }
+            }
+        }
+    }
+    fn check_dispatch(
+        comps: &[ToolComponent],
+        rules: Option<&super::rules_engine::InteractiveAppDefinition>,
+    ) -> Result<(), String> {
+        for comp in comps {
+            for action in comp.actions.iter().flatten() {
+                if let ActionDefinition::DispatchInteractive { action_id, .. } = action {
+                    let known = rules.is_some_and(|r| r.actions.iter().any(|a| &a.id == action_id));
+                    if !known {
+                        return Err(format!(
+                            "component '{}' dispatches unknown interactive action '{action_id}'",
+                            comp.id
+                        ));
+                    }
+                }
+            }
+            if let Some(children) = &comp.children {
+                check_dispatch(children, rules)?;
+            }
+        }
+        Ok(())
+    }
+    check_dispatch(&all_comps, rules.as_ref())?;
 
     // 3. State contracts validation & security check
     let mut state_keys = HashSet::new();

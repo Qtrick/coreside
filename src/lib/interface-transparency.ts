@@ -27,6 +27,11 @@ export type InterfaceTransparencyTokens = {
   headerAlpha: number;
   modalAlpha: number;
   scrimAlpha: number;
+  /**
+   * Panel frosted-glass blur in px. Must fall with transparency — fixed blur
+   * keeps chrome looking opaque even when panel alpha approaches 0.
+   */
+  backdropBlurPx: number;
 };
 
 /** Clamp preference into the allowed consumer range. */
@@ -72,6 +77,7 @@ export function computeInterfaceTransparencyTokens(
       headerAlpha: 1,
       modalAlpha: 1,
       scrimAlpha: 0,
+      backdropBlurPx: 0,
     };
   }
 
@@ -87,6 +93,7 @@ export function computeInterfaceTransparencyTokens(
       headerAlpha: 1,
       modalAlpha: 1,
       scrimAlpha: 0,
+      backdropBlurPx: 0,
     };
   }
 
@@ -106,6 +113,11 @@ export function computeInterfaceTransparencyTokens(
   // Modals: keep stronger surface for transient high-information UI.
   const modalAlpha = clamp01(Math.max(0.45, 1 - perceptual * 0.55));
   const scrimAlpha = clamp01(boost / 100 + (effective > 40 ? 0.08 : 0));
+  // Frosted blur must collapse toward 0 as transparency rises; otherwise the
+  // sampled backdrop itself paints an opaque-looking veil over the wallpaper.
+  // Only wallpaper-scoped CSS consumes --core-backdrop-blur; base chrome keeps
+  // a fixed blur so inactive-wallpaper mode is unaffected when this is 0.
+  const backdropBlurPx = Math.round(12 * (1 - perceptual) * 10) / 10;
 
   return {
     preference: pref,
@@ -117,6 +129,7 @@ export function computeInterfaceTransparencyTokens(
     headerAlpha,
     modalAlpha,
     scrimAlpha,
+    backdropBlurPx,
   };
 }
 
@@ -139,6 +152,10 @@ export function applyInterfaceTransparencyCssVars(
   root.style.setProperty(
     "--core-readable-scrim-alpha",
     String(tokens.scrimAlpha),
+  );
+  root.style.setProperty(
+    "--core-backdrop-blur",
+    `${tokens.backdropBlurPx}px`,
   );
   root.style.setProperty(
     "--core-content-overlay",

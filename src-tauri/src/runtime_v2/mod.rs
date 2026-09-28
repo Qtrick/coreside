@@ -2,10 +2,14 @@
 
 pub mod app_routes;
 pub mod branch;
+pub mod chess;
 pub mod context_ledger;
 pub mod continuity;
 pub mod drafts;
 pub mod events;
+pub mod interactive;
+#[cfg(test)]
+mod interactive_tests;
 pub mod limits;
 pub mod operations;
 pub mod outbox;
@@ -19,6 +23,7 @@ pub mod provider_conformance;
 pub mod queue;
 pub mod replay;
 pub mod rules_engine;
+pub mod rules_fixtures;
 pub mod software_document;
 pub mod streaming;
 pub mod surfaces;
