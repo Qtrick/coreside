@@ -7,21 +7,21 @@ use tauri::{ipc::Channel, State, WebviewWindow};
 use super::CommandError;
 use crate::runtime_v2::packs::CapabilityPackMeta as PackMeta;
 use crate::runtime_v2::{
-    self, activate_next, append_ledger_entry, branch_from_message, bundled_packs,
-    cancel_queue_item, complete_queue_item, create_inline_surface, create_snapshot, delete_draft,
-    delete_snapshot, diff_branch, enqueue, ensure_initial_route, flush_scheduler, get_continuity,
-    get_conversation_events, get_draft, get_item, get_provider_profile, get_route_state,
-    get_snapshot, get_surface, get_surface_state, get_transaction, interactive, list_branches,
-    list_diagnostics, list_inline_surfaces, list_ledger_entries, list_queue, list_snapshots,
-    list_transactions, list_turn_timeline_events, navigate_route, promote_inline_to_tool,
-    recover_stale_active, remove_queued, route_back, route_forward, save_continuity, save_draft,
-    save_surface_state, schedule_and_apply, schedule_patches, set_route_state, store_diagnostics,
-    surfaces, suspend_surface, undo_transaction, update_surface_definition, AgentResponseV2,
-    AppOperation, AppTransactionRecord, ApplyResult, ChatBranchRecord, ContextLedgerEntry,
-    ContinuitySnapshot, ConversationEventRecord, InteractiveAppDefinition, NavigateResult,
-    PatchPriority, ProviderConformanceRecord, QueueItem, RouteState, ScheduleRequest,
-    ScheduledPatch, SnapshotRecord, SurfaceDraft, SurfaceRecord, SuspensionState,
-    TurnTimelineEvent,
+    self, activate_next, advance_conversation_sync_cursor, append_ledger_entry, branch_from_message,
+    bundled_packs, cancel_queue_item, complete_queue_item, create_inline_surface, create_snapshot,
+    delete_draft, delete_snapshot, diff_branch, enqueue, ensure_initial_route, flush_scheduler,
+    get_continuity, get_conversation_events, get_conversation_sync_cursor, get_draft, get_item,
+    get_provider_profile, get_route_state, get_snapshot, get_surface, get_surface_state,
+    get_transaction, interactive, list_branches, list_diagnostics, list_inline_surfaces,
+    list_ledger_entries, list_queue, list_snapshots, list_transactions, list_turn_timeline_events,
+    navigate_route, promote_inline_to_tool, recover_stale_active, remove_queued, route_back,
+    route_forward, save_continuity, save_draft, save_surface_state, schedule_and_apply,
+    schedule_patches, set_route_state, store_diagnostics, surfaces, suspend_surface,
+    undo_transaction, update_surface_definition, AgentResponseV2, AppOperation,
+    AppTransactionRecord, ApplyResult, ChatBranchRecord, ContextLedgerEntry, ContinuitySnapshot,
+    ConversationEventRecord, InteractiveAppDefinition, NavigateResult, PatchPriority,
+    ProviderConformanceRecord, QueueItem, RouteState, ScheduleRequest, ScheduledPatch,
+    SnapshotRecord, SurfaceDraft, SurfaceRecord, SuspensionState, TurnTimelineEvent,
 };
 use crate::state::AppState;
 use crate::windows;
@@ -572,13 +572,58 @@ pub fn get_conversation_events_cmd(
     limit: Option<i64>,
 ) -> Result<Vec<ConversationEventRecord>, CommandError> {
     state.require_profile()?;
+    let trimmed = conversation_id.trim();
+    if trimmed.is_empty() {
+        return Err(CommandError::new("invalid", "conversationId is required"));
+    }
     let db = state.db.lock();
+    if !crate::db::conversation_exists(&db, trimmed) {
+        return Err(CommandError::new(
+            "not_found",
+            format!("conversation {trimmed}"),
+        ));
+    }
     Ok(get_conversation_events(
         &db,
-        &conversation_id,
+        trimmed,
         after_sequence,
         limit,
     )?)
+}
+
+#[tauri::command]
+pub fn get_conversation_sync_cursor_cmd(
+    state: State<'_, AppState>,
+    conversation_id: String,
+) -> Result<i64, CommandError> {
+    state.require_profile()?;
+    let trimmed = conversation_id.trim();
+    if trimmed.is_empty() {
+        return Err(CommandError::new("invalid", "conversationId is required"));
+    }
+    let db = state.db.lock();
+    if !crate::db::conversation_exists(&db, trimmed) {
+        return Err(CommandError::new(
+            "not_found",
+            format!("conversation {trimmed}"),
+        ));
+    }
+    Ok(get_conversation_sync_cursor(&db, trimmed)?)
+}
+
+#[tauri::command]
+pub fn advance_conversation_sync_cursor_cmd(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    sequence: i64,
+) -> Result<i64, CommandError> {
+    state.require_profile()?;
+    let trimmed = conversation_id.trim();
+    if trimmed.is_empty() {
+        return Err(CommandError::new("invalid", "conversationId is required"));
+    }
+    let db = state.db.lock();
+    Ok(advance_conversation_sync_cursor(&db, trimmed, sequence)?)
 }
 
 #[derive(Debug, Deserialize)]

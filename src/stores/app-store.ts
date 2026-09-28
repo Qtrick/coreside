@@ -38,6 +38,9 @@ import type { ActionLogMode } from "@/lib/action-log";
 import { validateToolDefinition } from "@/lib/tool-schema";
 import { normalizeCanonicalHex } from "@/lib/wallpaper-hex";
 import {
+  catchUpConversationEvents as runConversationCatchUp,
+} from "@/lib/sync/conversation-catch-up";
+import {
   applyPreviewSurfaceOverlay,
   clearPreviewOverlaysForConversation,
   clearPreviewOverlaysMatching,
@@ -330,46 +333,19 @@ type SyncListenerSet = (partial: {
 
 /**
  * Apply durable conversation_event_log rows missed while the Channel was down.
- * Reloads surfaces for transaction_applied events; advances the cursor always.
- * Pages until exhausted so a long gap cannot stall the cursor mid-stream.
+ * Delegates to the shared catch-up helper (durable SQLite watermark + paging).
  */
 async function catchUpConversationEvents(
   conversationId: string,
   get: SyncListenerGet,
 ) {
-  let after = conversationEventCursor.get(conversationId) ?? 0;
-  try {
-    let needsReload = false;
-    const pageLimit = 200;
-    // Bound pages so a pathological log cannot hang the UI thread forever.
-    for (let page = 0; page < 20; page += 1) {
-      const events = await api.getConversationEvents({
-        conversationId,
-        afterSequence: after,
-        limit: pageLimit,
-      });
-      if (events.length === 0) break;
-      let maxSeq = after;
-      for (const ev of events) {
-        if (ev.sequence > maxSeq) maxSeq = ev.sequence;
-        // Durable apply marker written by the transaction kernel. Channel-only
-        // "sync" events are not persisted — live subscribe covers those.
-        if (ev.eventType === "surface.transaction_applied") {
-          needsReload = true;
-        }
-      }
-      if (maxSeq > after) {
-        conversationEventCursor.set(conversationId, maxSeq);
-        after = maxSeq;
-      }
-      if (events.length < pageLimit) break;
-    }
-    if (needsReload && get().activeConversationId === conversationId) {
-      await get().reloadActiveSurfaces();
-    }
-  } catch {
-    // Best-effort; live Channel remains authoritative while connected.
-  }
+  await runConversationCatchUp({
+    conversationId,
+    memoryCursor: conversationEventCursor,
+    api,
+    isActive: () => get().activeConversationId === conversationId,
+    onTransactionApplied: () => get().reloadActiveSurfaces(),
+  });
 }
 
 /** Shared Sync/Conflict apply path for scoped Channel + residual global bus. */

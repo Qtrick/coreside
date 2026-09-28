@@ -2676,6 +2676,7 @@ async fn send_message_inner(
         .and_then(|s| s.surface_id.clone());
     let mut interactive_repaired_ops: Option<Vec<crate::runtime_v2::AppOperation>> = None;
     let mut interactive_repair_exhausted = false;
+    let mut interactive_repair_error: Option<String> = None;
     if let Some(ref sid) = interactive_ai_surface {
         let mut candidate_ops = parsed.payload.normalized_operations().unwrap_or_default();
         if candidate_ops
@@ -2704,6 +2705,10 @@ async fn send_message_inner(
                         break;
                     }
                     Err(rejection) => {
+                        // Speculative progressive paint must not survive a rejected
+                        // interactive.action — clear before repair so UI cannot look
+                        // committed to the illegal proposal.
+                        preview_txn.mark_interrupted();
                         record_action(
                             &app,
                             on_event.as_ref(),
@@ -2734,14 +2739,9 @@ async fn send_message_inner(
                         {
                             interactive_repaired_ops = Some(Vec::new());
                             interactive_repair_exhausted = true;
-                            emit_turn(
-                                &app,
-                                on_event.as_ref(),
-                                AgentTurnEvent::Error {
-                                    conversation_id: conversation_id.clone(),
-                                    message: rejection.safe_message.clone(),
-                                },
-                            );
+                            // Defer Error emit to the shared exhaustion path so the
+                            // frontend sees one failure event, not two.
+                            interactive_repair_error = Some(rejection.safe_message.clone());
                             break;
                         }
                         // Attempt identity lives on the rejection + timeline (turn stays active).
@@ -2803,13 +2803,9 @@ async fn send_message_inner(
                                     Err(_) => {
                                         interactive_repaired_ops = Some(Vec::new());
                                         interactive_repair_exhausted = true;
-                                        emit_turn(
-                                            &app,
-                                            on_event.as_ref(),
-                                            AgentTurnEvent::Error {
-                                                conversation_id: conversation_id.clone(),
-                                                message: "Interactive AI repair response could not be parsed.".into(),
-                                            },
+                                        interactive_repair_error = Some(
+                                            "Interactive AI repair response could not be parsed."
+                                                .into(),
                                         );
                                         break;
                                     }
@@ -2823,14 +2819,8 @@ async fn send_message_inner(
                             Err(_) => {
                                 interactive_repaired_ops = Some(Vec::new());
                                 interactive_repair_exhausted = true;
-                                emit_turn(
-                                    &app,
-                                    on_event.as_ref(),
-                                    AgentTurnEvent::Error {
-                                        conversation_id: conversation_id.clone(),
-                                        message: "Interactive AI repair failed.".into(),
-                                    },
-                                );
+                                interactive_repair_error =
+                                    Some("Interactive AI repair failed.".into());
                                 break;
                             }
                         }
@@ -2839,9 +2829,76 @@ async fn send_message_inner(
             }
         }
     }
-    // `interactive_repair_exhausted` is recorded via Error events above when
-    // the turn must surface failure; empty ops still prevent illegal commits.
-    let _ = interactive_repair_exhausted;
+    // Repair exhaustion must fail the turn — never TypedTerminal→Published with
+    // empty ops (that left journal "published" while the Channel reported error).
+    if interactive_repair_exhausted {
+        preview_txn.mark_interrupted();
+        let cancelled = cancel.is_cancelled();
+        let (cat, msg) = if cancelled {
+            ("cancelled", "User cancelled request")
+        } else {
+            (
+                "interactive_repair_exhausted",
+                interactive_repair_error
+                    .as_deref()
+                    .unwrap_or("Interactive AI action could not be repaired"),
+            )
+        };
+        if has_turn_record {
+            let db = state.db.lock();
+            let _ = crate::runtime_v2::transition_turn(
+                &db,
+                &turn_id,
+                &attempt_id,
+                if cancelled {
+                    // User cancel is recoverable (matches restart interrupt), not Failed.
+                    crate::runtime_v2::TurnState::InterruptedRecoverable
+                } else {
+                    crate::runtime_v2::TurnState::Failed
+                },
+                crate::runtime_v2::TurnPatch {
+                    error_category: Some(cat.into()),
+                    error_message: Some(msg.into()),
+                    ..Default::default()
+                },
+            );
+        }
+        state.take_request(&request_key);
+        if schedule_drain {
+            schedule_queued_turn_drain(&app, &conversation_id);
+        }
+        note_timeline(
+            state,
+            &conversation_id,
+            &turn_id,
+            if cancelled { "cancellation" } else { "failure" },
+            json!({
+                "scope": "interactive.ai_repair",
+                "category": cat,
+            }),
+        );
+        if cancelled {
+            emit_turn(
+                &app,
+                on_event.as_ref(),
+                AgentTurnEvent::Operation {
+                    conversation_id: conversation_id.clone(),
+                    operation_id: String::new(),
+                    status: "interrupted".into(),
+                },
+            );
+        }
+        // Single Error event for this failure path (loop no longer emits its own).
+        emit_turn(
+            &app,
+            on_event.as_ref(),
+            AgentTurnEvent::Error {
+                conversation_id: conversation_id.clone(),
+                message: msg.into(),
+            },
+        );
+        return Err(CommandError::new(cat, msg));
+    }
 
     if has_turn_record {
         let db = state.db.lock();

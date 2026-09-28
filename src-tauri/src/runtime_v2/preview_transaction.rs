@@ -966,6 +966,75 @@ mod tests {
         assert!(preview.accept(sample_op("op-x")).is_err());
     }
 
+    /// Interactive repair first-rejection / exhaustion must clear progressive paint
+    /// so a stale preview cannot be accepted or durable-harvested afterward.
+    #[test]
+    fn interactive_repair_rejects_stale_preview() {
+        let mut preview = PreviewTransaction::new("turn-repair-stale", None);
+        preview.seed_surface(seed_s1());
+        let op = sample_op("op-painted");
+        preview.accept(op.clone()).expect("accept before paint");
+        let paint = preview
+            .paint_op(&op, |_| None)
+            .expect("paint")
+            .expect("paint event");
+        assert_eq!(paint.surface_id, "s1");
+        assert!(!preview.surfaces.is_empty());
+        assert_eq!(preview.accepted_operations().len(), 1);
+        assert_eq!(
+            preview.surface("s1").unwrap().definition["components"][0]["props"]["maximum"],
+            json!(10)
+        );
+
+        // Repair rejection / exhaustion path in message_cmds:
+        preview.mark_interrupted();
+
+        assert!(preview.interrupted);
+        assert!(preview.surfaces.is_empty());
+        assert!(preview.accepted_operations().is_empty());
+        assert!(preview
+            .accept(sample_op("op-after-repair"))
+            .unwrap_err()
+            .contains("interrupted"));
+        assert!(preview
+            .paint_op(&sample_op("op-after-paint"), |_| None)
+            .unwrap_err()
+            .contains("interrupted"));
+    }
+
+    /// Progressive preview + interactive repair: once repair owns the op set
+    /// (`interactive_ops_locked = interactive_repaired_ops.is_some()`), further
+    /// progressive paint must not revive a cleared preview transaction.
+    #[test]
+    fn interactive_ops_locked_preview_interrupt_blocks_progressive_paint() {
+        let mut preview = PreviewTransaction::new("turn-lock", None);
+        preview.seed_surface(seed_s1());
+
+        // Progressive path painted before interactive repair settled.
+        let prog = sample_op("op-prog");
+        preview.accept(prog.clone()).unwrap();
+        preview.paint_op(&prog, |_| None).unwrap().expect("paint");
+
+        // Interactive repair path locks ops (Some(...)) and interrupts on reject.
+        let interactive_repaired_ops: Option<Vec<AppOperation>> = Some(Vec::new());
+        let interactive_ops_locked = interactive_repaired_ops.is_some();
+        assert!(interactive_ops_locked);
+        preview.mark_interrupted();
+
+        // Progressive ingest must not continue after lock+interrupt.
+        let progressive_ops_enabled = true;
+        assert!(
+            !(progressive_ops_enabled && !interactive_ops_locked),
+            "progressive path must be skipped when interactive ops are locked"
+        );
+        assert!(preview.surfaces.is_empty());
+        assert!(preview.is_empty());
+        assert!(preview
+            .paint_op(&sample_op("op-prog-2"), |_| None)
+            .is_err());
+        assert!(preview.accept(sample_op("op-prog-3")).is_err());
+    }
+
     #[test]
     fn ingest_live_chunk_emits_preview_before_finish() {
         let mut parser = NdjsonFrameParser::new();

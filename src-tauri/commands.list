@@ -1,4 +1,5 @@
 activate_next_queue_cmd
+advance_conversation_sync_cursor_cmd
 append_context_ledger_cmd
 apply_operations_cmd
 apply_persisted_dock_icon
@@ -7,8 +8,8 @@ archive_project_cmd
 assign_chats_to_project
 assign_conversation_to_project_cmd
 branch_conversation_cmd
-cancel_queue_item_cmd
 cancel_chat_attachment
+cancel_queue_item_cmd
 cancel_request
 cleanup_crawler_cache
 cleanup_tutorial_sample
@@ -50,6 +51,8 @@ get_app_info
 get_bootstrap_status
 get_chat_attachment_src
 get_continuity_cmd
+get_conversation_events_cmd
+get_conversation_sync_cursor_cmd
 get_crawler_cache_stats
 get_crawler_installation
 get_crawler_status
@@ -142,7 +145,6 @@ list_context_ledger_cmd
 list_conversation_surfaces
 list_conversations
 list_diagnostics_cmd
-list_turn_timeline_cmd
 list_exa_usage
 list_export_formats
 list_managed_backups
@@ -154,6 +156,7 @@ list_search_sessions_cmd
 list_snapshots_cmd
 list_tools
 list_transactions_cmd
+list_turn_timeline_cmd
 list_unassigned_conversations_cmd
 list_workspace_backgrounds
 media_asset_usage_cmd

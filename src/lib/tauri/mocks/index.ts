@@ -2648,6 +2648,14 @@ export async function mockInvoke<T>(
     case "subscribe_conversation_sync":
       // Channel registration is a no-op in web/vitest mocks.
       return undefined as T;
+    case "get_conversation_events_cmd":
+      return [] as T;
+    case "get_conversation_sync_cursor_cmd":
+      return 0 as T;
+    case "advance_conversation_sync_cursor_cmd": {
+      const a = (args ?? {}) as { sequence?: number };
+      return (typeof a.sequence === "number" ? a.sequence : 0) as T;
+    }
     case "create_snapshot_cmd": {
       const a = (args ?? {}) as {
         conversationId?: string;

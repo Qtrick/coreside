@@ -284,6 +284,8 @@ pub fn run() {
             commands::route_back_cmd,
             commands::route_forward_cmd,
             commands::get_conversation_events_cmd,
+            commands::get_conversation_sync_cursor_cmd,
+            commands::advance_conversation_sync_cursor_cmd,
             commands::append_context_ledger_cmd,
             commands::list_context_ledger_cmd,
             commands::get_provider_profile_cmd,

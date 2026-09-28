@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-advance-conversation-sync-cursor-cmd"
+description = "Enables the advance_conversation_sync_cursor_cmd command without any pre-configured scope."
+commands.allow = ["advance_conversation_sync_cursor_cmd"]
+
+[[permission]]
+identifier = "deny-advance-conversation-sync-cursor-cmd"
+description = "Denies the advance_conversation_sync_cursor_cmd command without any pre-configured scope."
+commands.deny = ["advance_conversation_sync_cursor_cmd"]

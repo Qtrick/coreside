@@ -12,7 +12,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::db::{now_rfc3339, Database, DbError, DbResult};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -552,6 +552,83 @@ pub fn get_conversation_events(
     Ok(out)
 }
 
+/// Durable catch-up watermark for one conversation (0 = never advanced).
+pub fn get_conversation_sync_cursor(db: &Database, conversation_id: &str) -> DbResult<i64> {
+    let seq: Option<i64> = db
+        .conn()
+        .query_row(
+            "SELECT last_sequence FROM conversation_sync_cursors WHERE conversation_id = ?1",
+            params![conversation_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(seq.unwrap_or(0).max(0))
+}
+
+/// Monotonic advance of the durable catch-up watermark.
+///
+/// Returns the stored cursor after the attempt. Never moves backwards: if
+/// `sequence` is less than or equal to the current watermark, the existing
+/// value is returned unchanged. Never advances past the highest sequence
+/// currently present in `conversation_event_log` (a buggy client cannot
+/// permanently skip catch-up by forging an inflated watermark). Requires the
+/// conversation to exist so a forged id cannot create orphan cursor rows.
+pub fn advance_conversation_sync_cursor(
+    db: &Database,
+    conversation_id: &str,
+    sequence: i64,
+) -> DbResult<i64> {
+    if sequence < 0 {
+        return Err(DbError::Invalid(
+            "conversation sync cursor sequence must be non-negative".into(),
+        ));
+    }
+    let exists: bool = db
+        .conn()
+        .query_row(
+            "SELECT 1 FROM conversations WHERE id = ?1",
+            params![conversation_id],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if !exists {
+        return Err(DbError::NotFound(format!("conversation {conversation_id}")));
+    }
+    let max_logged: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COALESCE(MAX(sequence), 0) FROM conversation_event_log
+             WHERE conversation_id = ?1",
+            params![conversation_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let capped = sequence.min(max_logged);
+    let now = now_rfc3339();
+    let current = get_conversation_sync_cursor(db, conversation_id)?;
+    if capped <= current {
+        return Ok(current);
+    }
+    db.conn().execute(
+        "INSERT INTO conversation_sync_cursors (conversation_id, last_sequence, updated_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(conversation_id) DO UPDATE SET
+           last_sequence = CASE
+             WHEN excluded.last_sequence > conversation_sync_cursors.last_sequence
+             THEN excluded.last_sequence
+             ELSE conversation_sync_cursors.last_sequence
+           END,
+           updated_at = CASE
+             WHEN excluded.last_sequence > conversation_sync_cursors.last_sequence
+             THEN excluded.updated_at
+             ELSE conversation_sync_cursors.updated_at
+           END",
+        params![conversation_id, capped, now],
+    )?;
+    get_conversation_sync_cursor(db, conversation_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -786,5 +863,239 @@ mod tests {
         assert!(get_turn(&db, &recent_committed.id).is_ok());
         assert!(get_turn(&db, &old_committed.id).is_err());
         assert!(get_turn(&db, &old_failed.id).is_err());
+    }
+
+    fn reach_provider_started(db: &Database, idem: &str) -> TurnJournalRecord {
+        let turn = create_turn(db, "c1", None, idem, None).unwrap();
+        transition_turn(
+            db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::Claimed,
+            TurnPatch::default(),
+        )
+        .unwrap();
+        transition_turn(
+            db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::ProviderStarted,
+            TurnPatch::default(),
+        )
+        .unwrap();
+        get_turn(db, &turn.id).unwrap()
+    }
+
+    #[test]
+    fn provider_started_can_transition_to_failed() {
+        let db = db();
+        let turn = reach_provider_started(&db, "idem-ps-fail");
+        transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::Failed,
+            TurnPatch {
+                error_category: Some("interactive_repair_exhausted".into()),
+                error_message: Some("repair could not produce valid ops".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let settled = get_turn(&db, &turn.id).unwrap();
+        assert_eq!(settled.state, TurnState::Failed);
+        assert!(settled.finalized_at.is_some());
+        // Must not silently continue the happy path after failure.
+        assert!(transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::TypedTerminal,
+            TurnPatch::default(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn provider_started_can_transition_to_interrupted_recoverable() {
+        let db = db();
+        let turn = reach_provider_started(&db, "idem-ps-ir");
+        transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::InterruptedRecoverable,
+            TurnPatch {
+                error_category: Some("interactive_repair_exhausted".into()),
+                error_message: Some("interrupted during interactive repair".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let settled = get_turn(&db, &turn.id).unwrap();
+        assert_eq!(settled.state, TurnState::InterruptedRecoverable);
+        // Recoverable interrupt is not a published settlement.
+        assert!(transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::Published,
+            TurnPatch::default(),
+        )
+        .is_err());
+        assert!(transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::TypedTerminal,
+            TurnPatch::default(),
+        )
+        .is_err());
+    }
+
+    fn seed_conversation(db: &mut Database, id: &str) {
+        crate::db::ensure_default_workspace(db).unwrap();
+        let now = now_rfc3339();
+        db.conn()
+            .execute(
+                "INSERT INTO conversations (id, workspace_id, title, created_at, updated_at)
+                 VALUES (?1, ?2, 'Catch-up', ?3, ?3)",
+                rusqlite::params![id, crate::db::DEFAULT_WORKSPACE_ID, now],
+            )
+            .unwrap();
+    }
+
+    fn seed_events(db: &Database, conversation_id: &str, count: i64) {
+        for i in 1..=count {
+            append_conversation_event(
+                db,
+                conversation_id,
+                None,
+                None,
+                "action",
+                &serde_json::json!({ "n": i }),
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn sync_cursor_defaults_to_zero_and_advances_monotonically() {
+        let mut db = db();
+        seed_conversation(&mut db, "c-sync");
+        seed_events(&db, "c-sync", 200);
+        assert_eq!(get_conversation_sync_cursor(&db, "c-sync").unwrap(), 0);
+        assert_eq!(
+            advance_conversation_sync_cursor(&db, "c-sync", 10).unwrap(),
+            10
+        );
+        assert_eq!(
+            advance_conversation_sync_cursor(&db, "c-sync", 5).unwrap(),
+            10,
+            "cursor must not move backwards"
+        );
+        assert_eq!(
+            advance_conversation_sync_cursor(&db, "c-sync", 10).unwrap(),
+            10,
+            "equal advance is a no-op"
+        );
+        assert_eq!(
+            advance_conversation_sync_cursor(&db, "c-sync", 200).unwrap(),
+            200
+        );
+        assert_eq!(get_conversation_sync_cursor(&db, "c-sync").unwrap(), 200);
+        // Inflated sequence is capped to MAX(log) — cannot permanently skip catch-up.
+        assert_eq!(
+            advance_conversation_sync_cursor(&db, "c-sync", 9999).unwrap(),
+            200
+        );
+    }
+
+    #[test]
+    fn sync_cursor_rejects_unknown_conversation_and_negative() {
+        let missing = db();
+        let err = advance_conversation_sync_cursor(&missing, "missing-conv", 1).unwrap_err();
+        assert!(matches!(err, DbError::NotFound(_)));
+        let mut db = db();
+        seed_conversation(&mut db, "c-neg");
+        let err = advance_conversation_sync_cursor(&db, "c-neg", -1).unwrap_err();
+        assert!(matches!(err, DbError::Invalid(_)));
+        assert_eq!(get_conversation_sync_cursor(&db, "c-neg").unwrap(), 0);
+        // Empty log: advance is a no-op (capped to 0).
+        assert_eq!(
+            advance_conversation_sync_cursor(&db, "c-neg", 50).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn sync_cursor_is_conversation_scoped() {
+        let mut db = db();
+        seed_conversation(&mut db, "c-a");
+        seed_conversation(&mut db, "c-b");
+        seed_events(&db, "c-a", 50);
+        seed_events(&db, "c-b", 3);
+        advance_conversation_sync_cursor(&db, "c-a", 50).unwrap();
+        advance_conversation_sync_cursor(&db, "c-b", 3).unwrap();
+        assert_eq!(get_conversation_sync_cursor(&db, "c-a").unwrap(), 50);
+        assert_eq!(get_conversation_sync_cursor(&db, "c-b").unwrap(), 3);
+    }
+
+    #[test]
+    fn sync_cursor_cascades_when_conversation_deleted() {
+        let mut db = db();
+        seed_conversation(&mut db, "c-cascade");
+        seed_events(&db, "c-cascade", 42);
+        advance_conversation_sync_cursor(&db, "c-cascade", 42).unwrap();
+        assert_eq!(get_conversation_sync_cursor(&db, "c-cascade").unwrap(), 42);
+        db.conn()
+            .execute(
+                "DELETE FROM conversations WHERE id = ?1",
+                params!["c-cascade"],
+            )
+            .unwrap();
+        // Row must be gone (CASCADE); getter returns the zero default.
+        let remaining: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM conversation_sync_cursors WHERE conversation_id = ?1",
+                params!["c-cascade"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0);
+        assert_eq!(get_conversation_sync_cursor(&db, "c-cascade").unwrap(), 0);
+    }
+
+    #[test]
+    fn catch_up_pages_resume_from_persisted_cursor() {
+        let mut db = db();
+        seed_conversation(&mut db, "c-page");
+        // Seed 201 events so two 200-sized pages are required.
+        for i in 1..=201 {
+            append_conversation_event(
+                &db,
+                "c-page",
+                None,
+                None,
+                if i == 100 || i == 201 {
+                    "surface.transaction_applied"
+                } else {
+                    "action"
+                },
+                &serde_json::json!({ "n": i }),
+            )
+            .unwrap();
+        }
+        // Simulate crash after first page of 200.
+        advance_conversation_sync_cursor(&db, "c-page", 200).unwrap();
+        let remaining = get_conversation_events(&db, "c-page", Some(200), Some(200)).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].sequence, 201);
+        assert_eq!(remaining[0].event_type, "surface.transaction_applied");
+        advance_conversation_sync_cursor(&db, "c-page", 201).unwrap();
+        assert!(get_conversation_events(&db, "c-page", Some(201), Some(200))
+            .unwrap()
+            .is_empty());
     }
 }

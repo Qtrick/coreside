@@ -731,6 +731,15 @@ export const api = {
       afterSequence: args.afterSequence ?? null,
       limit: args.limit ?? null,
     }),
+  /** Durable catch-up watermark (survives reload). */
+  getConversationSyncCursor: (conversationId: string) =>
+    invoke<number>("get_conversation_sync_cursor_cmd", { conversationId }),
+  /** Monotonic advance of the durable catch-up watermark after a successful page. */
+  advanceConversationSyncCursor: (conversationId: string, sequence: number) =>
+    invoke<number>("advance_conversation_sync_cursor_cmd", {
+      conversationId,
+      sequence,
+    }),
   saveDraft: (args: {
     surfaceId: string;
     componentId: string;

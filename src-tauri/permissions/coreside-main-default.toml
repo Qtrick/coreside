@@ -6,6 +6,7 @@ identifier = "coreside-main-default"
 description = "Allow every Coreside application command from the main window (Rust still enforces profile/authz)."
 permissions = [
   "allow-activate-next-queue-cmd",
+  "allow-advance-conversation-sync-cursor-cmd",
   "allow-append-context-ledger-cmd",
   "allow-apply-operations-cmd",
   "allow-apply-persisted-dock-icon",
@@ -58,6 +59,7 @@ permissions = [
   "allow-get-chat-attachment-src",
   "allow-get-continuity-cmd",
   "allow-get-conversation-events-cmd",
+  "allow-get-conversation-sync-cursor-cmd",
   "allow-get-crawler-cache-stats",
   "allow-get-crawler-installation",
   "allow-get-crawler-status",

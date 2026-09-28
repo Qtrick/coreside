@@ -37,6 +37,8 @@
     "audit:storage": "node scripts/storage-audit.mjs --mode=audit",
     "clean:dev": "node scripts/storage-audit.mjs --mode=clean",
     "clean:dev:dry": "node scripts/storage-audit.mjs --mode=dry-run",
+    "clean:dev:smart": "node scripts/storage-audit.mjs --mode=smart",
+    "test:storage-audit": "node --test scripts/storage-audit.test.mjs",
     "test:packaged-smoke": "node scripts/packaged-smoke.mjs",
     "test:preservation-integration": "node scripts/preservation-integration.mjs",
     "test:watch": "vitest",

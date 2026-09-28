@@ -13,6 +13,7 @@ fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "activate_next_queue_cmd",
+            "advance_conversation_sync_cursor_cmd",
             "append_context_ledger_cmd",
             "apply_operations_cmd",
             "apply_persisted_dock_icon",
@@ -65,6 +66,8 @@ fn main() {
             "get_bootstrap_status",
             "get_chat_attachment_src",
             "get_continuity_cmd",
+            "get_conversation_events_cmd",
+            "get_conversation_sync_cursor_cmd",
             "get_crawler_cache_stats",
             "get_crawler_installation",
             "get_crawler_status",
