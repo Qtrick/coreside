@@ -411,7 +411,8 @@ fn check_value_bounds(value: &Value, depth: usize) -> Result<(), String> {
             if let Some(k) = o.keys().find(|k| FORBIDDEN_KEYS.contains(&k.as_str())) {
                 return Err(format!("Forbidden object key '{k}'"));
             }
-            o.values().try_for_each(|v| check_value_bounds(v, depth + 1))
+            o.values()
+                .try_for_each(|v| check_value_bounds(v, depth + 1))
         }
         _ => Ok(()),
     }
@@ -829,7 +830,14 @@ impl InteractiveAppDefinition {
         if let Some(obj) = self.initial_state.as_object() {
             keys.extend(obj.keys().cloned());
         }
-        for k in ["status", "winner", "turn", "phase", "currentPlayer", RNG_STATE_KEY] {
+        for k in [
+            "status",
+            "winner",
+            "turn",
+            "phase",
+            "currentPlayer",
+            RNG_STATE_KEY,
+        ] {
             keys.insert(k.to_string());
         }
         keys
@@ -1020,7 +1028,12 @@ impl InteractiveAppDefinition {
         Ok(state)
     }
 
-    fn apply_derived(&self, state: &mut Value, params: &Value, actor: &str) -> Result<Value, String> {
+    fn apply_derived(
+        &self,
+        state: &mut Value,
+        params: &Value,
+        actor: &str,
+    ) -> Result<Value, String> {
         let ctx = Ctx { params, actor };
         let mut derived = json!({});
         for def in &self.derived_state {
@@ -1070,8 +1083,22 @@ impl InteractiveAppDefinition {
 }
 
 fn contract_hides_from_public(c: &StateContract) -> bool {
-    matches!(c.read_policy.as_str(), "restricted" | "private" | "hidden")
-        || c.sensitivity.as_deref() == Some("sensitive")
+    super::visibility::contract_hides(c)
+}
+
+impl InteractiveAppDefinition {
+    /// Renderer-safe projection of this definition (no seeds, tests, or hidden initials).
+    pub fn renderer_view(&self) -> Value {
+        super::visibility::project_interactive_definition(
+            self,
+            super::visibility::Audience::Renderer,
+        )
+    }
+
+    /// Model-safe projection (hidden values redacted; action contracts retained).
+    pub fn model_view(&self) -> Value {
+        super::visibility::project_interactive_definition(self, super::visibility::Audience::Model)
+    }
 }
 
 /// Reject interactive definition updates that would expose previously hidden keys.
@@ -1127,15 +1154,13 @@ impl InteractiveAppDefinition {
             }
             let actor = match &tc.actor {
                 Some(a) => a.clone(),
-                None => self
-                    .resolve_user_actor(&state)
-                    .or_else(|_| {
-                        state
-                            .get("currentPlayer")
-                            .and_then(Value::as_str)
-                            .map(str::to_string)
-                            .ok_or_else(|| "no actor".to_string())
-                    })?,
+                None => self.resolve_user_actor(&state).or_else(|_| {
+                    state
+                        .get("currentPlayer")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .ok_or_else(|| "no actor".to_string())
+                })?,
             };
             let result = self.execute_action(&mut state, &tc.action_id, &tc.params, &actor);
             match (tc.expected_success, result) {
@@ -1195,7 +1220,8 @@ impl InteractiveAppDefinition {
         };
         let phase = state.get("phase").and_then(Value::as_str).unwrap_or("main");
         actor_ok
-            && (action.allowed_phases.is_empty() || action.allowed_phases.iter().any(|p| p == phase))
+            && (action.allowed_phases.is_empty()
+                || action.allowed_phases.iter().any(|p| p == phase))
     }
 
     /// Check if a candidate action is legally permissible under current state.
@@ -1227,10 +1253,7 @@ impl InteractiveAppDefinition {
         self.actions
             .iter()
             .filter_map(|action| {
-                let requires = action
-                    .parameters
-                    .values()
-                    .any(|s| s.as_contract().required);
+                let requires = action.parameters.values().any(|s| s.as_contract().required);
                 let legal = if requires {
                     self.actor_and_phase_allowed(action, state, actor)
                 } else {
@@ -1263,7 +1286,11 @@ impl InteractiveAppDefinition {
         self.validate_state(state)
             .map_err(|e| format!("Corrupted interactive state: {e}"))?;
         let action = self.find_action(action_id)?;
-        let params = if params.is_null() { json!({}) } else { params.clone() };
+        let params = if params.is_null() {
+            json!({})
+        } else {
+            params.clone()
+        };
         if !self.is_legal_action(state, action_id, &params, actor)? {
             return Err(format!(
                 "Action '{action_id}' is not allowed in the current state"
@@ -1318,9 +1345,15 @@ impl InteractiveAppDefinition {
                 .and_then(Value::as_str)
                 .unwrap_or("active")
                 .to_string(),
-            winner: next.get("winner").and_then(Value::as_str).map(str::to_string),
+            winner: next
+                .get("winner")
+                .and_then(Value::as_str)
+                .map(str::to_string),
             turn: next.get("turn").and_then(Value::as_i64),
-            phase: next.get("phase").and_then(Value::as_str).map(str::to_string),
+            phase: next
+                .get("phase")
+                .and_then(Value::as_str)
+                .map(str::to_string),
             current_player: next
                 .get("currentPlayer")
                 .and_then(Value::as_str)
@@ -1369,9 +1402,9 @@ fn check_expr_shape(expr: &RuleExpr, depth: usize) -> Result<(), String> {
             check_expr_shape(row, d)?;
             check_expr_shape(col, d)
         }
-        RuleExpr::Distance { r1, c1, r2, c2 } => {
-            [r1, c1, r2, c2].iter().try_for_each(|e| check_expr_shape(e, d))
-        }
+        RuleExpr::Distance { r1, c1, r2, c2 } => [r1, c1, r2, c2]
+            .iter()
+            .try_for_each(|e| check_expr_shape(e, d)),
         RuleExpr::And { exprs } | RuleExpr::Or { exprs } | RuleExpr::Concat { exprs } => {
             if exprs.len() > 32 {
                 return Err("Too many operands".into());
@@ -1421,7 +1454,11 @@ fn validate_state_ref(key: &str) -> Result<(), String> {
 }
 
 /// Returns whether the effect (or a nested effect) consumes randomness.
-fn check_effect_shape(effect: &RuleEffect, depth: usize, count: &mut usize) -> Result<bool, String> {
+fn check_effect_shape(
+    effect: &RuleEffect,
+    depth: usize,
+    count: &mut usize,
+) -> Result<bool, String> {
     *count += 1;
     if *count > MAX_NESTED_EFFECTS || depth > 4 {
         return Err("Effect nesting exceeds runtime limits".into());
@@ -1634,7 +1671,8 @@ fn evaluate(expr: &RuleExpr, state: &Value, ctx: &Ctx, depth: usize) -> Result<V
         return Err("Maximum expression evaluation depth exceeded".into());
     }
     let ev = |e: &RuleExpr| evaluate(e, state, ctx, depth + 1);
-    let pair = |l: &RuleExpr, r: &RuleExpr| -> Result<(Value, Value), String> { Ok((ev(l)?, ev(r)?)) };
+    let pair =
+        |l: &RuleExpr, r: &RuleExpr| -> Result<(Value, Value), String> { Ok((ev(l)?, ev(r)?)) };
 
     Ok(match expr {
         RuleExpr::Const { value } => value.clone(),
@@ -1643,10 +1681,7 @@ fn evaluate(expr: &RuleExpr, state: &Value, ctx: &Ctx, depth: usize) -> Result<V
         RuleExpr::GetActor => json!(ctx.actor),
         RuleExpr::GetPlayer => state.get("currentPlayer").cloned().unwrap_or(Value::Null),
         RuleExpr::GetTurn => state.get("turn").cloned().unwrap_or(Value::Null),
-        RuleExpr::GetPhase => state
-            .get("phase")
-            .cloned()
-            .unwrap_or_else(|| json!("main")),
+        RuleExpr::GetPhase => state.get("phase").cloned().unwrap_or_else(|| json!("main")),
         RuleExpr::GetField { expr, field } => ev(expr)?
             .as_object()
             .ok_or("getField requires an object")?
@@ -1814,7 +1849,9 @@ fn evaluate(expr: &RuleExpr, state: &Value, ctx: &Ctx, depth: usize) -> Result<V
             let (a, i) = pair(array, item)?;
             match &a {
                 Value::Array(arr) => json!(arr.iter().any(|x| values_equal(x, &i))),
-                Value::String(s) => json!(s.contains(i.as_str().ok_or("contains needle must be a string")?)),
+                Value::String(s) => {
+                    json!(s.contains(i.as_str().ok_or("contains needle must be a string")?))
+                }
                 _ => return Err("contains requires an array or string".into()),
             }
         }
@@ -1904,7 +1941,10 @@ fn apply_effect(
         } => {
             let (f, t) = (ev(from_index, state)?, ev(to_index, state)?);
             let b = existing_array(state, board_key)?;
-            let (fi, ti) = (index_in(&f, b.len(), "fromIndex")?, index_in(&t, b.len(), "toIndex")?);
+            let (fi, ti) = (
+                index_in(&f, b.len(), "fromIndex")?,
+                index_in(&t, b.len(), "toIndex")?,
+            );
             b.swap(fi, ti);
         }
         RuleEffect::Increment { key, amount } | RuleEffect::Decrement { key, amount } => {
@@ -2032,7 +2072,10 @@ fn apply_effect(
             score_key,
         } => {
             let dir = ev(direction, state)?;
-            let dir = dir.as_str().ok_or("direction must be a string")?.to_string();
+            let dir = dir
+                .as_str()
+                .ok_or("direction must be a string")?
+                .to_string();
             let grid = parse_grid(state.get(key).ok_or("grid missing")?)?;
             let (mut next, gained) = slide_grid(&grid, &dir)?;
             if next == grid {
@@ -2054,9 +2097,11 @@ fn apply_effect(
                 state[sk] = arith(cur, &json!(gained), "score", i64::checked_add, |a, b| a + b)?;
             }
             let won = next.iter().flatten().any(|&v| v >= 2048);
-            let can_move = ["up", "down", "left", "right"]
-                .iter()
-                .any(|d| slide_grid(&next, d).map(|(g, _)| g != next).unwrap_or(false));
+            let can_move = ["up", "down", "left", "right"].iter().any(|d| {
+                slide_grid(&next, d)
+                    .map(|(g, _)| g != next)
+                    .unwrap_or(false)
+            });
             if won {
                 state["status"] = json!("won");
             } else if !can_move {
@@ -2076,7 +2121,10 @@ fn parse_grid(v: &Value) -> Result<Vec<Vec<i64>>, String> {
     }
     rows.iter()
         .map(|r| {
-            let r = r.as_array().filter(|r| r.len() == n).ok_or("grid must be square")?;
+            let r = r
+                .as_array()
+                .filter(|r| r.len() == n)
+                .ok_or("grid must be square")?;
             r.iter()
                 .map(|c| match c.as_i64() {
                     Some(x) if x == 0 || (x >= 2 && x <= 1 << 20 && x & (x - 1) == 0) => Ok(x),
@@ -2178,10 +2226,14 @@ mod tests {
             json!({"by": 1, "extra": true}),
             json!([1]),
         ] {
-            assert!(d.execute_action(&mut s, "add", &bad, "user").is_err(), "{bad}");
+            assert!(
+                d.execute_action(&mut s, "add", &bad, "user").is_err(),
+                "{bad}"
+            );
         }
         assert_eq!(s["count"], 0);
-        d.execute_action(&mut s, "add", &json!({"by": 3}), "user").unwrap();
+        d.execute_action(&mut s, "add", &json!({"by": 3}), "user")
+            .unwrap();
         assert_eq!(s["count"], 3);
     }
 
@@ -2190,9 +2242,13 @@ mod tests {
         let d = counter_def();
         let mut s = d.initial_instance_state().unwrap();
         let before = s.clone();
-        assert!(d.execute_action(&mut s, "badThenGood", &json!({}), "user").is_err());
+        assert!(d
+            .execute_action(&mut s, "badThenGood", &json!({}), "user")
+            .is_err());
         assert_eq!(s, before, "partial increment must not leak");
-        assert!(d.execute_action(&mut s, "corrupt", &json!({}), "user").is_err());
+        assert!(d
+            .execute_action(&mut s, "corrupt", &json!({}), "user")
+            .is_err());
         assert_eq!(s, before, "post-state type violation must be rejected");
     }
 
@@ -2201,12 +2257,18 @@ mod tests {
         let d = counter_def();
         let mut extra = d.initial_instance_state().unwrap();
         extra["injected"] = json!(1);
-        assert!(d.execute_action(&mut extra, "add", &json!({"by": 1}), "user").is_err());
+        assert!(d
+            .execute_action(&mut extra, "add", &json!({"by": 1}), "user")
+            .is_err());
         let mut missing = json!({"items": []});
-        assert!(d.execute_action(&mut missing, "add", &json!({"by": 1}), "user").is_err());
+        assert!(d
+            .execute_action(&mut missing, "add", &json!({"by": 1}), "user")
+            .is_err());
         let mut polluted = d.initial_instance_state().unwrap();
         polluted["items"] = json!([{"__proto__": {"x": 1}}]);
-        assert!(d.execute_action(&mut polluted, "add", &json!({"by": 1}), "user").is_err());
+        assert!(d
+            .execute_action(&mut polluted, "add", &json!({"by": 1}), "user")
+            .is_err());
     }
 
     #[test]
@@ -2265,7 +2327,8 @@ mod tests {
         bad_op["derivedState"] = json!([{ "key": "d", "expr": { "op": "eval", "code": "1" } }]);
         assert!(InteractiveAppDefinition::parse_and_admit(&bad_op).is_err());
         let mut bad_effect = base;
-        bad_effect["actions"] = json!([{ "id": "a", "effects": [{ "effect": "fetch", "url": "http://x" }] }]);
+        bad_effect["actions"] =
+            json!([{ "id": "a", "effects": [{ "effect": "fetch", "url": "http://x" }] }]);
         assert!(InteractiveAppDefinition::parse_and_admit(&bad_effect).is_err());
     }
 
@@ -2329,13 +2392,26 @@ mod tests {
         assert_eq!(s["mover"], "A");
 
         let out = d.execute_action(&mut s, "pass", &json!({}), "A").unwrap();
-        assert_eq!(out.status, "b_to_move", "terminal must see the new currentPlayer");
-        assert_eq!(s["mover"], "B", "derived state must see the new currentPlayer");
+        assert_eq!(
+            out.status, "b_to_move",
+            "terminal must see the new currentPlayer"
+        );
+        assert_eq!(
+            s["mover"], "B",
+            "derived state must see the new currentPlayer"
+        );
         assert_eq!(out.current_player.as_deref(), Some("B"));
 
         let out = d.execute_action(&mut s, "pass", &json!({}), "B").unwrap();
-        assert_eq!(out.status, "turn_limit", "terminal must see the new turn (3), not the old (2)");
-        assert_eq!(out.winner.as_deref(), Some("A"), "winner evaluated on post-state");
+        assert_eq!(
+            out.status, "turn_limit",
+            "terminal must see the new turn (3), not the old (2)"
+        );
+        assert_eq!(
+            out.winner.as_deref(),
+            Some("A"),
+            "winner evaluated on post-state"
+        );
 
         let mut s = d.initial_instance_state().unwrap();
         let out = d.execute_action(&mut s, "finish", &json!({}), "A").unwrap();
@@ -2347,19 +2423,62 @@ mod tests {
         use super::super::rules_fixtures::get_fixture;
         type Step = (&'static str, Value);
         let cases: Vec<(&str, &str, Vec<Step>)> = vec![
-            ("tic-tac-toe", "reset", vec![("move", json!({"index": 0})), ("move", json!({"index": 4})), ("move", json!({"index": 8}))]),
-            ("chess", "reset", vec![
-                ("move", json!({"from": "e2", "to": "e4"})),
-                ("move", json!({"from": "e7", "to": "e5"})),
-                ("move", json!({"from": "g1", "to": "f3"})),
-            ]),
-            ("2048", "reset", vec![("slide", json!({"direction": "left"})), ("slide", json!({"direction": "up"})), ("slide", json!({"direction": "right"}))]),
-            ("card-deck", "reset", vec![("shuffle", json!({})), ("draw", json!({})), ("shuffle", json!({})), ("discard", json!({"index": 0}))]),
-            ("controls", "reset", vec![
-                ("increment", json!({})), ("toggle", json!({})), ("setVolume", json!({"value": 7})),
-                ("setMode", json!({"mode": "dark"})), ("setNote", json!({"text": "hi"})),
-            ]),
-            ("quiz", "restart", vec![("answer", json!({"choice": 1})), ("answer", json!({"choice": 2}))]),
+            (
+                "tic-tac-toe",
+                "reset",
+                vec![
+                    ("move", json!({"index": 0})),
+                    ("move", json!({"index": 4})),
+                    ("move", json!({"index": 8})),
+                ],
+            ),
+            (
+                "chess",
+                "reset",
+                vec![
+                    ("move", json!({"from": "e2", "to": "e4"})),
+                    ("move", json!({"from": "e7", "to": "e5"})),
+                    ("move", json!({"from": "g1", "to": "f3"})),
+                ],
+            ),
+            (
+                "2048",
+                "reset",
+                vec![
+                    ("slide", json!({"direction": "left"})),
+                    ("slide", json!({"direction": "up"})),
+                    ("slide", json!({"direction": "right"})),
+                ],
+            ),
+            (
+                "card-deck",
+                "reset",
+                vec![
+                    ("shuffle", json!({})),
+                    ("draw", json!({})),
+                    ("shuffle", json!({})),
+                    ("discard", json!({"index": 0})),
+                ],
+            ),
+            (
+                "controls",
+                "reset",
+                vec![
+                    ("increment", json!({})),
+                    ("toggle", json!({})),
+                    ("setVolume", json!({"value": 7})),
+                    ("setMode", json!({"mode": "dark"})),
+                    ("setNote", json!({"text": "hi"})),
+                ],
+            ),
+            (
+                "quiz",
+                "restart",
+                vec![
+                    ("answer", json!({"choice": 1})),
+                    ("answer", json!({"choice": 2})),
+                ],
+            ),
         ];
         for (name, reset, steps) in cases {
             let d = get_fixture(name).unwrap();
@@ -2373,14 +2492,19 @@ mod tests {
             assert_ne!(s, baseline, "{name}: steps must change state");
             let actor = d.resolve_user_actor(&s).unwrap();
             d.execute_action(&mut s, reset, &json!({}), &actor).unwrap();
-            assert_eq!(s, baseline, "{name}: reset must restore every declared/derived/RNG key");
+            assert_eq!(
+                s, baseline,
+                "{name}: reset must restore every declared/derived/RNG key"
+            );
             if d.random_seed.is_some() {
                 // Replaying the same steps after reset reproduces the same random outcomes.
                 let mut again = s.clone();
                 let mut fresh = baseline.clone();
                 for (action, params) in &steps {
-                    d.execute_action(&mut again, action, params, "player").unwrap();
-                    d.execute_action(&mut fresh, action, params, "player").unwrap();
+                    d.execute_action(&mut again, action, params, "player")
+                        .unwrap();
+                    d.execute_action(&mut fresh, action, params, "player")
+                        .unwrap();
                 }
                 assert_eq!(again, fresh);
             }
@@ -2401,7 +2525,10 @@ mod tests {
             let mut s = d.initial_instance_state().unwrap();
             s["cells"] = json!(["a", "b", "c"]);
             let before = s.clone();
-            assert!(d.execute_action(&mut s, "a", &json!({}), "user").is_err(), "{effects}");
+            assert!(
+                d.execute_action(&mut s, "a", &json!({}), "user").is_err(),
+                "{effects}"
+            );
             assert_eq!(s, before, "state and __rng must be untouched: {effects}");
         }
     }
@@ -2473,7 +2600,8 @@ mod tests {
             d["actions"][0]["parameters"] = json!({ k: { "type": "integer" } });
             bad.push(d);
             let mut d = base();
-            d["actions"][0]["parameters"] = json!({ "p": { "type": "object", "properties": { k: { "type": "integer" } } } });
+            d["actions"][0]["parameters"] =
+                json!({ "p": { "type": "object", "properties": { k: { "type": "integer" } } } });
             bad.push(d);
             let mut d = base();
             d["actions"][0]["guards"] = json!([c(json!({ k: { "polluted": true } }))]);
@@ -2482,13 +2610,15 @@ mod tests {
             d["actions"][0]["effects"] = json!([{ "effect": "set", "key": "n", "value": { "op": "getField", "expr": c(json!({})), "field": k } }]);
             bad.push(d);
             let mut d = base();
-            d["actions"][0]["effects"] = json!([{ "effect": "set", "key": k, "value": c(json!(1)) }]);
+            d["actions"][0]["effects"] =
+                json!([{ "effect": "set", "key": k, "value": c(json!(1)) }]);
             bad.push(d);
             let mut d = base();
             d["actions"][0]["id"] = json!(k);
             bad.push(d);
             let mut d = base();
-            d["stateSchema"] = json!([{ "key": "blob", "type": "array", "initialValue": [{ k: 1 }] }]);
+            d["stateSchema"] =
+                json!([{ "key": "blob", "type": "array", "initialValue": [{ k: 1 }] }]);
             bad.push(d);
             let mut d = base();
             d["metadata"] = json!({ "nested": { k: 1 } });
@@ -2502,11 +2632,15 @@ mod tests {
         d["actions"][0]["guards"] = json!([st(RNG_STATE_KEY)]);
         bad.push(d);
         let mut d = base();
-        d["actions"][0]["effects"] = json!([{ "effect": "set", "key": RNG_STATE_KEY, "value": c(json!({})) }]);
+        d["actions"][0]["effects"] =
+            json!([{ "effect": "set", "key": RNG_STATE_KEY, "value": c(json!({})) }]);
         bad.push(d);
 
         for d in bad {
-            assert!(InteractiveAppDefinition::parse_and_admit(&d).is_err(), "must reject: {d}");
+            assert!(
+                InteractiveAppDefinition::parse_and_admit(&d).is_err(),
+                "must reject: {d}"
+            );
         }
 
         // Runtime: forbidden keys inside free-form param values and in state.
@@ -2518,11 +2652,17 @@ mod tests {
         }))
         .unwrap();
         let mut s = d.initial_instance_state().unwrap();
-        assert!(d.execute_action(&mut s, "a", &json!({"list": [{"constructor": 1}]}), "user").is_err());
-        assert!(d.execute_action(&mut s, "a", &json!({"list": [1]}), "user").is_ok());
+        assert!(d
+            .execute_action(&mut s, "a", &json!({"list": [{"constructor": 1}]}), "user")
+            .is_err());
+        assert!(d
+            .execute_action(&mut s, "a", &json!({"list": [1]}), "user")
+            .is_ok());
         let mut polluted = s.clone();
         polluted["prototype"] = json!(1);
-        assert!(d.execute_action(&mut polluted, "a", &json!({"list": []}), "user").is_err());
+        assert!(d
+            .execute_action(&mut polluted, "a", &json!({"list": []}), "user")
+            .is_err());
     }
 
     #[test]
@@ -2564,9 +2704,12 @@ mod tests {
         }))
         .unwrap();
         let mut s = d.initial_instance_state().unwrap();
-        d.execute_action(&mut s, "spam", &json!({}), "user").unwrap();
+        d.execute_action(&mut s, "spam", &json!({}), "user")
+            .unwrap();
         let before = s.clone();
-        let err = d.execute_action(&mut s, "spam", &json!({}), "user").unwrap_err();
+        let err = d
+            .execute_action(&mut s, "spam", &json!({}), "user")
+            .unwrap_err();
         assert!(err.contains("byte limit"), "{err}");
         assert_eq!(s, before);
     }
@@ -2591,21 +2734,42 @@ mod tests {
         let ok = |s: &mut Value, p: Value| d.execute_action(s, "a", &p, "user").map(|_| ());
 
         assert!(ok(&mut s, json!({"must": "x"})).is_ok());
-        assert!(ok(&mut s, json!({"must": null})).is_ok(), "nullable required accepts null");
+        assert!(
+            ok(&mut s, json!({"must": null})).is_ok(),
+            "nullable required accepts null"
+        );
         assert!(ok(&mut s, json!({})).is_err(), "required param missing");
-        assert!(ok(&mut s, json!({"must": "x", "opt": null})).is_err(), "optional but not nullable");
+        assert!(
+            ok(&mut s, json!({"must": "x", "opt": null})).is_err(),
+            "optional but not nullable"
+        );
         assert!(ok(&mut s, json!({"must": "x", "nul": null})).is_ok());
 
         assert!(ok(&mut s, json!({"must": "x", "cfg": {"size": 2}})).is_ok());
         assert!(ok(&mut s, json!({"must": "x", "cfg": {"size": 2, "tag": "t"}})).is_ok());
-        assert!(ok(&mut s, json!({"must": "x", "cfg": {"size": 2, "evil": 1}})).is_err(), "unknown nested property");
-        assert!(ok(&mut s, json!({"must": "x", "cfg": {}})).is_err(), "missing nested required property");
-        assert!(ok(&mut s, json!({"must": "x", "cfg": {"size": 9}})).is_err(), "nested bound");
+        assert!(
+            ok(&mut s, json!({"must": "x", "cfg": {"size": 2, "evil": 1}})).is_err(),
+            "unknown nested property"
+        );
+        assert!(
+            ok(&mut s, json!({"must": "x", "cfg": {}})).is_err(),
+            "missing nested required property"
+        );
+        assert!(
+            ok(&mut s, json!({"must": "x", "cfg": {"size": 9}})).is_err(),
+            "nested bound"
+        );
         assert!(ok(&mut s, json!({"must": "x", "cfg": [1]})).is_err());
 
         assert!(ok(&mut s, json!({"must": "x", "list": [1, 2]})).is_ok());
-        assert!(ok(&mut s, json!({"must": "x", "list": [1, 2, 3]})).is_err(), "maxItems");
-        assert!(ok(&mut s, json!({"must": "x", "list": ["1"]})).is_err(), "item type");
+        assert!(
+            ok(&mut s, json!({"must": "x", "list": [1, 2, 3]})).is_err(),
+            "maxItems"
+        );
+        assert!(
+            ok(&mut s, json!({"must": "x", "list": ["1"]})).is_err(),
+            "item type"
+        );
 
         let shape = |params: Value| {
             InteractiveAppDefinition::parse_and_admit(&json!({

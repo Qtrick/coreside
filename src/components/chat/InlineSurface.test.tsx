@@ -1,10 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { InlineSurfaceCard } from "./InlineSurface";
+import { api } from "@/lib/tauri";
 import type { SurfaceRecord } from "@/types/runtime-v2";
 
 const mockSendMessage = vi.fn();
 const mockSetSurfaceDraftConflict = vi.fn();
+const rendererStates: Array<Record<string, unknown>> = [];
 
 vi.mock("@/stores/app-store", () => ({
   useAppStore: (selector: (s: unknown) => unknown) => {
@@ -27,6 +29,11 @@ vi.mock("@/lib/tauri", () => ({
     saveSurfaceState: vi.fn().mockResolvedValue(3),
     suspendSurface: vi.fn().mockResolvedValue(undefined),
     saveContinuity: vi.fn().mockResolvedValue(undefined),
+    interactiveView: vi.fn(),
+    interactiveDispatch: vi.fn(),
+    interactiveUndo: vi.fn(),
+    interactiveHistory: vi.fn().mockResolvedValue([]),
+    interactiveReplay: vi.fn(),
   },
   TauriCommandError: class TauriCommandError extends Error {
     code: string;
@@ -37,11 +44,26 @@ vi.mock("@/lib/tauri", () => ({
   },
 }));
 
-// Mock ToolRenderer to simulate user actions
+vi.mock("@/components/tool-renderer/InteractiveStatusBar", () => ({
+  InteractiveStatusBar: () => null,
+}));
+
+// Mock ToolRenderer to simulate user actions and capture state props
 vi.mock("@/components/tool-renderer/ToolRenderer", () => ({
-  ToolRenderer: ({ onSubmitToAgent }: { onSubmitToAgent: (payload: { componentId: string; eventName: string; values: Record<string, unknown> }) => Promise<void> }) => {
+  ToolRenderer: ({
+    state,
+    onSubmitToAgent,
+  }: {
+    state: Record<string, unknown>;
+    onSubmitToAgent: (payload: {
+      componentId: string;
+      eventName: string;
+      values: Record<string, unknown>;
+    }) => Promise<void>;
+  }) => {
+    rendererStates.push({ ...state });
     return (
-      <div data-testid="mock-tool-renderer">
+      <div data-testid="mock-tool-renderer" data-state-keys={Object.keys(state).join(",")}>
         <button
           type="button"
           data-testid="interactive-btn"
@@ -85,9 +107,31 @@ const sampleSurface: SurfaceRecord = {
   updatedAt: "2026-09-27T00:00:00Z",
 };
 
+const quizSurface: SurfaceRecord = {
+  ...sampleSurface,
+  id: "surf-quiz",
+  name: "Planets Quiz",
+  definition: {
+    id: "tool-quiz",
+    name: "Planets Quiz",
+    layout: { type: "single-column" },
+    components: [],
+    interactive: {
+      id: "app-quiz",
+      kind: "quiz",
+      stateSchema: [{ key: "answers", readPolicy: "restricted" }],
+    },
+  },
+};
+
 describe("InlineSurfaceCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    rendererStates.length = 0;
+    vi.mocked(api.getSurfaceStateWithRevision).mockResolvedValue({
+      state: { count: 0 },
+      stateRevision: 2,
+    });
   });
 
   it("renders surface title and revision", async () => {
@@ -154,5 +198,42 @@ describe("InlineSurfaceCard", () => {
     await waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it("interactive path does not seed React state from raw restricted answers", async () => {
+    vi.mocked(api.getSurfaceStateWithRevision).mockResolvedValue({
+      state: { answers: [1, 0, 0], score: 0, status: "in_progress" },
+      stateRevision: 7,
+    });
+    vi.mocked(api.interactiveView).mockResolvedValue({
+      surfaceId: "surf-quiz",
+      applicationId: "app-quiz",
+      stateRevision: 7,
+      state: { score: 0, status: "in_progress", currentQuestion: 0 },
+      actor: "user",
+      waitingFor: null,
+      status: "in_progress",
+      winner: null,
+      message: null,
+      legalActions: [],
+      seq: 1,
+      duplicate: false,
+      reinitialized: false,
+    });
+
+    render(<InlineSurfaceCard surface={quizSurface} conversationId="conv-100" />);
+
+    await waitFor(() => {
+      expect(api.interactiveView).toHaveBeenCalledWith("surf-quiz");
+    });
+    await waitFor(() => {
+      expect(rendererStates.some((s) => s.score === 0 && s.status === "in_progress")).toBe(true);
+    });
+
+    for (const state of rendererStates) {
+      expect(state).not.toHaveProperty("answers");
+    }
+    // Raw getSurfaceStateWithRevision must not be used as the interactive seed payload.
+    expect(api.getSurfaceState).not.toHaveBeenCalled();
   });
 });

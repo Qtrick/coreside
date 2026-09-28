@@ -20,6 +20,7 @@ pub fn list_tools(
     let mut tools = db::list_tools(&db, workspace_id.as_deref())?;
     for tool in &mut tools {
         tool.definition.normalize_for_frontend();
+        project_tool_interactive_for_renderer(&mut tool.definition);
     }
     Ok(tools)
 }
@@ -35,6 +36,7 @@ pub fn get_tool(
     let db = state.db.lock();
     let mut tool = db::get_tool(&db, &tool_id)?;
     tool.definition.normalize_for_frontend();
+    project_tool_interactive_for_renderer(&mut tool.definition);
     Ok(tool)
 }
 
@@ -50,8 +52,26 @@ pub fn get_tool_versions(
     let mut versions = db::get_tool_versions(&db, &tool_id)?;
     for v in &mut versions {
         v.definition.normalize_for_frontend();
+        project_tool_interactive_for_renderer(&mut v.definition);
     }
     Ok(versions)
+}
+
+fn project_tool_interactive_for_renderer(def: &mut crate::ai::ToolDefinition) {
+    if let Some(interactive) = def.interactive.take() {
+        let wrapper = serde_json::json!({ "interactive": interactive });
+        let projected = crate::runtime_v2::visibility::project_definition_value(
+            &wrapper,
+            crate::runtime_v2::visibility::Audience::Renderer,
+        );
+        def.interactive = projected.get("interactive").cloned();
+    }
+    // Top-level state contracts can also hold restricted initials (mirrors model projection).
+    for sc in &mut def.state_contracts {
+        if crate::runtime_v2::visibility::contract_hides(sc) {
+            sc.initial_value = serde_json::Value::Null;
+        }
+    }
 }
 
 /// Accepts frontend invoke shape:

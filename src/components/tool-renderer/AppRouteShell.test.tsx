@@ -32,6 +32,12 @@ vi.mock("@/lib/tauri", () => ({
   },
 }));
 
+vi.mock("./ToolRenderer", () => ({
+  ToolRenderer: ({ state }: { state: Record<string, unknown> }) => (
+    <div data-testid="scoped-state">{JSON.stringify(state)}</div>
+  ),
+}));
+
 const baseManifest: ApplicationManifest = {
   schemaVersion: "1",
   applicationId: "app-test",
@@ -119,6 +125,40 @@ describe("AppRouteShell", () => {
 
     await waitFor(() => {
       expect(mockGetSurfaceStateWithRevision).toHaveBeenCalledWith("surface-main");
+    });
+  });
+
+  it("interactive routes use parent state instead of seeding empty per-surface state", async () => {
+    mockGetSurfaceStateWithRevision.mockResolvedValue({
+      state: { score: 9 },
+      stateRevision: 5,
+    });
+    const parentState = { score: 3, lastResult: "correct" };
+    render(
+      <AppRouteShell
+        applicationId="app-test"
+        manifest={baseManifest}
+        surfacesById={{
+          "surface-main": {
+            id: "surface-main",
+            name: "Quiz",
+            description: "",
+            layout: { type: "single-column" },
+            components: [],
+            interactive: { id: "app-quiz", kind: "quiz" },
+          } as never,
+        }}
+        state={parentState}
+        onStateChange={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mockGetSurfaceStateWithRevision).toHaveBeenCalledWith("surface-main");
+    });
+    // Parent public InteractiveView state must remain visible (empty {} must not win).
+    await waitFor(() => {
+      expect(screen.getByTestId("scoped-state").textContent).toBe(JSON.stringify(parentState));
     });
   });
 });

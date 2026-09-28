@@ -299,15 +299,12 @@ pub fn apply_transaction_deferred(
         "UPDATE app_operations SET apply_status = 'applied', validation_status = 'valid' WHERE transaction_id = ?1",
         [transaction_id],
     )?;
-    db.conn()
-        .execute_batch("RELEASE SAVEPOINT runtime_v2_apply")
-        .map_err(DbError::Sqlite)?;
 
-    // Append durable conversation event log for reconnect catch-up.
-    // Log but do not fail — the transaction already committed successfully.
+    // Append durable conversation event log INSIDE the same savepoint so a
+    // failure rolls back the state mutation instead of silently losing catch-up.
     if let Some(ref conv_id) = txn.conversation_id {
-        if let Err(e) = super::turn_journal::append_conversation_event(
-            db,
+        if let Err(e) = super::turn_journal::append_conversation_event_on_conn(
+            db.conn(),
             conv_id,
             txn.turn_id.as_deref(),
             None,
@@ -319,13 +316,19 @@ pub fn apply_transaction_deferred(
                 "surfaces": surfaces.iter().map(|s| &s.id).collect::<Vec<_>>(),
             }),
         ) {
-            tracing::warn!(
-                transaction_id = %transaction_id,
-                error = %e,
-                "conversation event log append failed after commit — reconnect catch-up may miss this event"
+            // Defensive: clear the open savepoint even when an outer BEGIN will
+            // also ROLLBACK — callers that invoke this without an outer txn
+            // must not leave runtime_v2_apply dangling.
+            let _ = db.conn().execute_batch(
+                "ROLLBACK TO SAVEPOINT runtime_v2_apply; RELEASE SAVEPOINT runtime_v2_apply",
             );
+            return Err(e);
         }
     }
+
+    db.conn()
+        .execute_batch("RELEASE SAVEPOINT runtime_v2_apply")
+        .map_err(DbError::Sqlite)?;
 
     Ok(ApplyResult {
         transaction: get_transaction(db, transaction_id)?,
@@ -1370,7 +1373,11 @@ fn apply_one(
                 .get("stateRevision")
                 .and_then(Value::as_i64)
                 .ok_or_else(|| "interactive.action requires stateRevision".to_string())?;
-            let params_v = op.payload.get("params").cloned().unwrap_or_else(|| json!({}));
+            let params_v = op
+                .payload
+                .get("params")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             let event_id: String = format!("op-{}-{}", txn.id, op.id)
                 .chars()
                 .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))

@@ -22,7 +22,6 @@ import { mergeStateForDefinitionPatch } from "@/lib/surface-ops";
 import { verifySurfaceElement } from "@/lib/visual-verification";
 import { persistenceScheduler } from "@/lib/persistence-scheduler";
 import {
-  compactStateForModel,
   hasInteractiveDefinition,
   useInteractiveSurface,
 } from "@/lib/interactive-surface";
@@ -160,7 +159,8 @@ export function InlineSurfaceCard({
   }, [hydrated, isInteractive, hydrateInteractive, surface.currentRevision]);
 
   // When an AI actor must move, ask the agent once per committed sequence.
-  // The agent answers with an `interactive.action` operation that Rust validates.
+  // Frontend only identifies the surface — Rust regenerates authoritative public
+  // state, legal actions, actor, and revision for the model context.
   const interactiveView = interactive.view;
   const requestedAiTurnRef = useRef<string | null>(null);
   useEffect(() => {
@@ -179,13 +179,9 @@ export function InlineSurfaceCard({
       idempotencyKey: `ai-turn-${surface.id}-${interactiveView.seq}`,
       fields: {
         silent: true,
-        actor: interactiveView.waitingFor,
-        stateRevision: interactiveView.stateRevision,
-        legalActions: interactiveView.legalActions.map((a) => ({
-          actionId: a.actionId,
-          parameters: a.parameters,
-        })),
-        state: compactStateForModel(interactiveView.state),
+        // Trigger only — authoritative AI context is resolved in Rust.
+        trigger: "ai_turn",
+        actorHint: interactiveView.waitingFor,
       },
     }).catch(() => undefined);
   }, [interactiveView, sendMessage, surface.currentRevision, surface.id]);
@@ -218,6 +214,40 @@ export function InlineSurfaceCard({
     let cancelled = false;
     void (async () => {
       try {
+        // Interactive surfaces must NOT seed React state from raw surface state
+        // (hidden keys). Hydrate only continuity + revision; public state comes
+        // from useInteractiveSurface → runtime_v2_interactive_view.
+        if (hasInteractiveDefinition(latestSurfaceRef.current.definition)) {
+          const continuity = await api.getContinuity(surface.id).catch(() => null);
+          if (cancelled) return;
+          const rev = await api
+            .getSurfaceStateWithRevision(surface.id)
+            .then((r) => r.stateRevision)
+            .catch(() => 1);
+          stateRevisionRef.current = rev;
+          setState({});
+          setHydrated(true);
+          previousToolRef.current = asToolDefinition(latestSurfaceRef.current);
+          if (continuity && bodyRef.current) {
+            restoreScrollSnapshot(
+              bodyRef.current,
+              continuity.scroll as Record<string, { scrollTop: number }>,
+            );
+            restoreFocusSnapshot(
+              bodyRef.current,
+              continuity.focus as {
+                componentId?: string | null;
+                fieldId?: string | null;
+              },
+            );
+            restoreMediaSnapshot(
+              bodyRef.current,
+              continuity.media as Record<string, { paused?: boolean }>,
+            );
+          }
+          return;
+        }
+
         const [{ state: savedState, stateRevision }, continuity] = await Promise.all([
           api.getSurfaceStateWithRevision(surface.id).catch(async () => {
             const fallback = await api.getSurfaceState(surface.id).catch(() => ({}));

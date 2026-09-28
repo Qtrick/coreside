@@ -628,7 +628,9 @@ fn emit_progressive_op_previews(
     preview_txn: &mut crate::runtime_v2::PreviewTransaction,
     delta: &str,
 ) {
-    use crate::runtime_v2::{get_surface, get_surface_state, PreviewSurfaceModel};
+    use crate::runtime_v2::{
+        get_surface, get_surface_state, renderer_safe_preview_seed,
+    };
 
     let events = crate::runtime_v2::ingest_progressive_chunk_with_seed(
         parser,
@@ -637,17 +639,15 @@ fn emit_progressive_op_previews(
         |surface_id| {
             let db = state.db.lock();
             let surface = get_surface(&db, surface_id).ok()?;
-            let state_json = get_surface_state(&db, surface_id).ok()?;
-            Some(PreviewSurfaceModel {
-                surface_id: surface.id.clone(),
-                tool_id: surface.tool_id.clone(),
-                application_id: surface.tool_id.clone(),
-                capability_packs: surface.capability_packs,
-                definition: surface.definition,
-                state: state_json,
-                base_revision: surface.current_revision,
-                preview_revision: surface.current_revision,
-            })
+            let raw_state = get_surface_state(&db, surface_id).ok()?;
+            Some(renderer_safe_preview_seed(
+                &surface.id,
+                surface.tool_id.clone(),
+                surface.capability_packs,
+                &surface.definition,
+                &raw_state,
+                surface.current_revision,
+            ))
         },
     );
 
@@ -1315,7 +1315,7 @@ async fn send_message_inner(
     // Seal typed StructuredUserInput in Rust. Trust never comes from text markers.
     // Defense: even if content contains a spoofed delimiter, structured_trust_from_text is None.
     debug_assert!(structured_trust_from_text(&content).is_none());
-    let sealed_structured: Option<StructuredUserInput> = if let Some(submission) =
+    let sealed_structured: Option<StructuredUserInput> = if let Some(mut submission) =
         structured_user_input.clone()
     {
         if submission.surface_id.is_none()
@@ -1400,6 +1400,39 @@ async fn send_message_inner(
                         format!("Component '{comp_id}' not found in surface '{sid}'"),
                     ));
                 }
+            }
+        }
+        // interactive.ai_turn: drop frontend-supplied state/legalActions and inject
+        // authoritative Rust public context before sealing.
+        if submission.event_name.as_deref() == Some("interactive.ai_turn") {
+            if let Some(sid) = submission.surface_id.clone() {
+                let mut db_guard = state.db.lock();
+                let ctx = crate::runtime_v2::interactive::ai_turn_context(&mut db_guard, &sid)
+                    .map_err(|e| {
+                        CommandError::new(
+                            "invalid",
+                            format!("interactive AI turn context unavailable: {e}"),
+                        )
+                    })?;
+                let silent = submission
+                    .fields
+                    .get("silent")
+                    .cloned()
+                    .unwrap_or(serde_json::json!(true));
+                let mut fields = match ctx {
+                    serde_json::Value::Object(m) => m,
+                    other => {
+                        let mut m = serde_json::Map::new();
+                        m.insert("context".into(), other);
+                        m
+                    }
+                };
+                fields.insert("silent".into(), silent);
+                // Authoritative revision for the sealed envelope.
+                if let Some(rev) = fields.get("stateRevision").and_then(|v| v.as_i64()) {
+                    submission.state_revision = Some(rev);
+                }
+                submission.fields = fields;
             }
         }
         if let Some(ref idem) = submission.idempotency_key {
@@ -1556,14 +1589,7 @@ async fn send_message_inner(
         }
     };
 
-    let (
-        user_message,
-        history,
-        active_tool,
-        referenced_tools,
-        project_id,
-        trusted_attachments,
-    ) = {
+    let (user_message, history, active_tool, referenced_tools, project_id, trusted_attachments) = {
         let attachment_ids: Vec<String> = attachments.iter().map(|a| a.id.clone()).collect();
         crate::commands::attachment_cmds::assert_staged_attachments_ready(state, &attachment_ids)?;
 

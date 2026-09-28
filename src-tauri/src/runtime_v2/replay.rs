@@ -42,13 +42,17 @@ pub struct ReplayStateSnapshot {
 /// In-memory state reconstruction at a target historical turn or transaction.
 ///
 /// Guaranteed read-only: zero database mutation, zero side effects.
+/// Fail-closed on missing conversation, corrupt definitions/packs/operations,
+/// or a target that does not exist.
 pub fn reconstruct_replay_state(
     db: &Database,
     conversation_id: &str,
     target_turn_id: Option<&str>,
     target_transaction_id: Option<&str>,
 ) -> DbResult<ReplayStateSnapshot> {
-    // 1. Verify conversation exists
+    use rusqlite::OptionalExtension;
+
+    // 1. Verify conversation exists — never treat query errors as "missing".
     let conv_exists: bool = db
         .conn()
         .query_row(
@@ -56,6 +60,7 @@ pub fn reconstruct_replay_state(
             [conversation_id],
             |_| Ok(true),
         )
+        .optional()?
         .unwrap_or(false);
     if !conv_exists {
         return Err(DbError::NotFound(format!("conversation {conversation_id}")));
@@ -86,10 +91,20 @@ pub fn reconstruct_replay_state(
             [&sid],
             |row| row.get(0),
         );
-        let historical_def_str = earliest_def_res.unwrap_or(def_str);
-        let def: Value = serde_json::from_str(&historical_def_str)
-            .unwrap_or(json!({"type":"container","id":"root"}));
-        let packs: Vec<String> = serde_json::from_str(&packs_str).unwrap_or_default();
+        let historical_def_str = match earliest_def_res {
+            Ok(s) => s,
+            Err(rusqlite::Error::QueryReturnedNoRows) => def_str,
+            Err(e) => {
+                return Err(DbError::Invalid(format!(
+                    "corrupted surface version for {sid}: {e}"
+                )));
+            }
+        };
+        let def: Value = serde_json::from_str(&historical_def_str).map_err(|e| {
+            DbError::Invalid(format!("corrupted historical definition for {sid}: {e}"))
+        })?;
+        let packs: Vec<String> = serde_json::from_str(&packs_str)
+            .map_err(|e| DbError::Invalid(format!("corrupted capability packs for {sid}: {e}")))?;
 
         let initial_model = PreviewSurfaceModel {
             surface_id: sid.clone(),
@@ -123,6 +138,7 @@ pub fn reconstruct_replay_state(
     let mut applied_tx_count = 0usize;
     let mut applied_op_count = 0usize;
     let mut reached_target = false;
+    let wants_target = target_transaction_id.is_some() || target_turn_id.is_some();
 
     for tx in tx_rows {
         let (tx_id, turn_id_opt, ops_json, _created_at) = tx?;
@@ -130,10 +146,13 @@ pub fn reconstruct_replay_state(
             break;
         }
 
-        let ops: Vec<AppOperation> = serde_json::from_str(&ops_json).unwrap_or_default();
+        let ops: Vec<AppOperation> = serde_json::from_str(&ops_json).map_err(|e| {
+            DbError::Invalid(format!("corrupted operations for transaction {tx_id}: {e}"))
+        })?;
         for op in &ops {
-            // Apply operation in memory
-            let _ = preview_txn.paint_op(op, |_| None);
+            preview_txn
+                .paint_op(op, |_| None)
+                .map_err(|e| DbError::Invalid(format!("replay op failed in {tx_id}: {e}")))?;
             applied_op_count += 1;
         }
         applied_tx_count += 1;
@@ -150,19 +169,35 @@ pub fn reconstruct_replay_state(
         }
     }
 
-    // 4. Construct read-only replayed surfaces
+    if wants_target && !reached_target {
+        return Err(DbError::NotFound(format!(
+            "replay target not found in conversation {conversation_id}"
+        )));
+    }
+
+    // 4. Construct read-only replayed surfaces (public projections only).
     let mut result_surfaces = Vec::new();
     for (sid, model) in &preview_txn.surfaces {
+        let public_state = super::visibility::project_surface_state(
+            &model.definition,
+            &model.state,
+            super::visibility::Audience::Renderer,
+        );
+        let public_def = super::visibility::project_definition_value(
+            &model.definition,
+            super::visibility::Audience::Renderer,
+        );
         result_surfaces.push(ReplayedSurface {
             surface_id: sid.clone(),
             name: model
                 .definition
                 .get("title")
+                .or_else(|| model.definition.get("name"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("Replayed Surface")
                 .to_string(),
-            definition: model.definition.clone(),
-            state: model.state.clone(),
+            definition: public_def,
+            state: public_state,
             revision: model.preview_revision,
             is_read_only: true,
         });
@@ -342,5 +377,77 @@ mod tests {
         assert_eq!(snap_b.surfaces.len(), 0);
         assert_eq!(snap_b.transaction_count, 0);
         assert_eq!(snap_b.operation_count, 0);
+    }
+
+    #[test]
+    fn replay_missing_target_returns_not_found() {
+        let mut db = test_db();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "Missing Target",
+            None,
+        )
+        .unwrap();
+        let _surf = crate::runtime_v2::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Board",
+            &json!({"type":"container","id":"root"}),
+            &[],
+        )
+        .unwrap();
+
+        let err_turn =
+            reconstruct_replay_state(&db, &conv.id, Some("turn-does-not-exist"), None).unwrap_err();
+        assert!(
+            matches!(err_turn, DbError::NotFound(ref m) if m.contains("replay target")),
+            "{err_turn:?}"
+        );
+
+        let err_tx =
+            reconstruct_replay_state(&db, &conv.id, None, Some("tx-does-not-exist")).unwrap_err();
+        assert!(
+            matches!(err_tx, DbError::NotFound(ref m) if m.contains("replay target")),
+            "{err_tx:?}"
+        );
+    }
+
+    #[test]
+    fn replay_corrupt_operations_json_returns_invalid() {
+        let mut db = test_db();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "Corrupt Ops",
+            None,
+        )
+        .unwrap();
+        let _surf = crate::runtime_v2::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Board",
+            &json!({"type":"container","id":"root"}),
+            &[],
+        )
+        .unwrap();
+
+        db.conn()
+            .execute(
+                "INSERT INTO app_transactions (id, conversation_id, turn_id, status, operations_json, created_at)
+                 VALUES ('tx-bad', ?1, 'turn-1', 'applied', 'NOT-JSON{{{', '2026-09-01T10:00:00Z')",
+                rusqlite::params![conv.id],
+            )
+            .unwrap();
+
+        let err = reconstruct_replay_state(&db, &conv.id, Some("turn-1"), None).unwrap_err();
+        assert!(
+            matches!(err, DbError::Invalid(ref m) if m.contains("corrupted operations")),
+            "{err:?}"
+        );
     }
 }

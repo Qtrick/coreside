@@ -435,7 +435,7 @@ pub fn fixture_timer() -> InteractiveAppDefinition {
     build(json!({
         "id": "app-timer",
         "kind": "timer",
-        "metadata": { "title": "Stopwatch", "hostTick": { "actionId": "tick", "intervalSeconds": 1 } },
+        "metadata": { "title": "Stopwatch" },
         "stateSchema": [
             { "key": "running", "type": "boolean", "initialValue": false },
             { "key": "elapsed", "type": "integer", "initialValue": 0 },
@@ -589,9 +589,14 @@ mod tests {
     fn all_fixtures_admit_and_pass_self_tests() {
         for name in FIXTURE_NAMES {
             let def = get_fixture(name).expect(name);
-            def.run_self_tests().unwrap_or_else(|e| panic!("{name}: {e}"));
-            let reparsed = InteractiveAppDefinition::parse_and_admit(&serde_json::to_value(&def).unwrap());
-            assert!(reparsed.is_ok(), "{name} must round-trip through the model schema");
+            def.run_self_tests()
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let reparsed =
+                InteractiveAppDefinition::parse_and_admit(&serde_json::to_value(&def).unwrap());
+            assert!(
+                reparsed.is_ok(),
+                "{name} must round-trip through the model schema"
+            );
         }
         assert!(get_fixture("checkers").is_none());
     }

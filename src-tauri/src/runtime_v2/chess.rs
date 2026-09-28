@@ -325,7 +325,12 @@ impl Position {
     /// en passant capture is actually legal (matching chess.js semantics).
     pub fn repetition_key(&self) -> String {
         let ep = match self.ep {
-            Some(sq) if self.legal_moves().iter().any(|m| m.to == sq && self.is_ep(m)) => {
+            Some(sq)
+                if self
+                    .legal_moves()
+                    .iter()
+                    .any(|m| m.to == sq && self.is_ep(m)) =>
+            {
                 square_name(sq)
             }
             _ => "-".into(),
@@ -817,12 +822,7 @@ fn string_list(obj: &Value, key: &str) -> Result<Vec<String>, String> {
 
 /// Apply a move to the persisted chess object. Fails closed on corrupt state,
 /// illegal moves, or moves after the game has ended.
-pub fn apply_move(
-    chess: &Value,
-    from: &str,
-    to: &str,
-    promotion: &Value,
-) -> Result<Value, String> {
+pub fn apply_move(chess: &Value, from: &str, to: &str, promotion: &Value) -> Result<Value, String> {
     let fen = chess
         .get("fen")
         .and_then(Value::as_str)
@@ -925,7 +925,10 @@ mod tests {
         let after = play_uci(start.clone(), &["e2e4"]).unwrap();
         assert!(after["fen"].as_str().unwrap().contains(" b KQkq e3 0 1"));
         assert!(play_uci(start.clone(), &["e2e5"]).is_err(), "triple push");
-        assert!(play_uci(start.clone(), &["e2d3"]).is_err(), "diagonal w/o capture");
+        assert!(
+            play_uci(start.clone(), &["e2d3"]).is_err(),
+            "diagonal w/o capture"
+        );
         // Double move blocked by piece on e3.
         let blocked = from_fen("rnbqkbnr/pppppppp/8/8/8/4N3/PPPPPPPP/RNBQKB1R w KQkq - 0 1");
         assert!(play_uci(blocked, &["e2e4"]).is_err());
@@ -938,14 +941,35 @@ mod tests {
     fn piece_movement_rules() {
         let start = from_fen(START_FEN);
         assert!(play_uci(start.clone(), &["g1f3"]).is_ok(), "knight");
-        assert!(play_uci(start.clone(), &["g1g3"]).is_err(), "knight not straight");
-        assert!(play_uci(start.clone(), &["f1c4"]).is_err(), "bishop blocked");
-        assert!(play_uci(start.clone(), &["e2e4", "e7e5", "f1c4"]).is_ok(), "bishop");
+        assert!(
+            play_uci(start.clone(), &["g1g3"]).is_err(),
+            "knight not straight"
+        );
+        assert!(
+            play_uci(start.clone(), &["f1c4"]).is_err(),
+            "bishop blocked"
+        );
+        assert!(
+            play_uci(start.clone(), &["e2e4", "e7e5", "f1c4"]).is_ok(),
+            "bishop"
+        );
         assert!(play_uci(start.clone(), &["a1a3"]).is_err(), "rook blocked");
-        assert!(play_uci(start.clone(), &["a2a4", "a7a6", "a1a3"]).is_ok(), "rook");
-        assert!(play_uci(start.clone(), &["e2e4", "e7e5", "d1h5"]).is_ok(), "queen");
-        assert!(play_uci(start.clone(), &["e2e4", "e7e5", "e1e2"]).is_ok(), "king");
-        assert!(play_uci(start, &["e2e4", "e7e5", "e1e3"]).is_err(), "king two squares");
+        assert!(
+            play_uci(start.clone(), &["a2a4", "a7a6", "a1a3"]).is_ok(),
+            "rook"
+        );
+        assert!(
+            play_uci(start.clone(), &["e2e4", "e7e5", "d1h5"]).is_ok(),
+            "queen"
+        );
+        assert!(
+            play_uci(start.clone(), &["e2e4", "e7e5", "e1e2"]).is_ok(),
+            "king"
+        );
+        assert!(
+            play_uci(start, &["e2e4", "e7e5", "e1e3"]).is_err(),
+            "king two squares"
+        );
     }
 
     #[test]
@@ -953,7 +977,10 @@ mod tests {
         let obj = play_uci(from_fen(START_FEN), &["e2e4", "d7d5"]).unwrap();
         let cap = play_uci(obj.clone(), &["e4d5"]).unwrap();
         assert!(cap["fen"].as_str().unwrap().ends_with(" 0 2"));
-        assert!(play_uci(obj, &["d1d2"]).is_err(), "cannot capture own piece");
+        assert!(
+            play_uci(obj, &["d1d2"]).is_err(),
+            "cannot capture own piece"
+        );
     }
 
     #[test]
@@ -985,9 +1012,15 @@ mod tests {
     fn castling_both_sides_and_rights() {
         let fen = "r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w KQkq - 0 1";
         let ks = play_uci(from_fen(fen), &["e1g1"]).unwrap();
-        assert!(ks["fen"].as_str().unwrap().starts_with("r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R4RK1 b kq"));
+        assert!(ks["fen"]
+            .as_str()
+            .unwrap()
+            .starts_with("r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R4RK1 b kq"));
         let qs = play_uci(from_fen(fen), &["e1c1"]).unwrap();
-        assert!(qs["fen"].as_str().unwrap().starts_with("r3k2r/pppppppp/8/8/8/8/PPPPPPPP/2KR3R b kq"));
+        assert!(qs["fen"]
+            .as_str()
+            .unwrap()
+            .starts_with("r3k2r/pppppppp/8/8/8/8/PPPPPPPP/2KR3R b kq"));
 
         // King move loses both rights.
         let km = play_uci(from_fen(fen), &["e1f1", "a7a6", "f1e1", "a6a5"]).unwrap();
@@ -1072,8 +1105,14 @@ mod tests {
         assert!(ins("4k3/8/8/8/8/8/8/4K3 w - - 0 1"));
         assert!(ins("4k3/8/8/8/8/8/8/4KN2 w - - 0 1"));
         assert!(ins("4k3/8/8/8/8/8/8/4KB2 w - - 0 1"));
-        assert!(ins("4kb2/8/8/8/8/8/8/2B1K3 w - - 0 1"), "same-colored bishops");
-        assert!(!ins("4k1b1/8/8/8/8/8/8/2B1K3 w - - 0 1"), "opposite bishops");
+        assert!(
+            ins("4kb2/8/8/8/8/8/8/2B1K3 w - - 0 1"),
+            "same-colored bishops"
+        );
+        assert!(
+            !ins("4k1b1/8/8/8/8/8/8/2B1K3 w - - 0 1"),
+            "opposite bishops"
+        );
         assert!(!ins("4k3/8/8/8/8/8/8/3NKN2 w - - 0 1"), "two knights");
         assert!(!ins("4k3/8/8/8/8/8/P7/4K3 w - - 0 1"));
         let obj = play_uci(from_fen("4k3/8/8/8/8/8/3r4/4K3 w - - 0 1"), &["e1d2"]).unwrap();
@@ -1091,7 +1130,10 @@ mod tests {
         let mut bad_hist = obj;
         bad_hist["positionHistory"] = json!([1, 2]);
         assert!(apply_move(&bad_hist, "g1", "f3", &Value::Null).is_err());
-        assert!(Position::from_fen("8/8/8/8/8/8/8/8 w - - 0 1").is_err(), "no kings");
+        assert!(
+            Position::from_fen("8/8/8/8/8/8/8/8 w - - 0 1").is_err(),
+            "no kings"
+        );
         assert!(parse_square("i9").is_err());
         let _ = sq("a1");
     }

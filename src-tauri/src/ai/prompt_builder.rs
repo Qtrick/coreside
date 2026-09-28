@@ -22,6 +22,7 @@ const TOOL_BUILDER_PROMPT: &str = include_str!("../../prompts/tool_builder.md");
 const TOOL_EDITOR_PROMPT: &str = include_str!("../../prompts/tool_editor.md");
 const RESPONSE_RULES_PROMPT: &str = include_str!("../../prompts/response_rules.md");
 const PROTECTED_RESOURCES_PROMPT: &str = include_str!("../../prompts/protected_resources.md");
+const INTERACTIVE_RUNTIME_PROMPT: &str = include_str!("../../prompts/interactive_runtime.md");
 
 #[derive(Debug, Clone)]
 pub struct PromptBundle {
@@ -30,6 +31,7 @@ pub struct PromptBundle {
     pub tool_editor: String,
     pub response_rules: String,
     pub protected_resources: String,
+    pub interactive_runtime: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -75,6 +77,10 @@ pub fn load_prompts() -> PromptBundle {
                 "protected_resources.md",
                 PROTECTED_RESOURCES_PROMPT,
             ),
+            interactive_runtime: require_nonempty(
+                "interactive_runtime.md",
+                INTERACTIVE_RUNTIME_PROMPT,
+            ),
         })
         .clone()
 }
@@ -90,6 +96,10 @@ pub fn prompt_integrity_report() -> PromptIntegrityReport {
         (
             "protected_resources.md",
             bundle.protected_resources.as_str(),
+        ),
+        (
+            "interactive_runtime.md",
+            bundle.interactive_runtime.as_str(),
         ),
     ]
     .into_iter()
@@ -148,25 +158,41 @@ pub fn build_agent_prompt_with_references(
             .to_string(),
     );
 
-    if !referenced_tools.is_empty() {
+    let has_interactive = active_tool
+        .map(|t| t.interactive.is_some())
+        .unwrap_or(false)
+        || referenced_tools.iter().any(|t| t.interactive.is_some());
+
+    let model_safe_active = active_tool.map(project_tool_for_model);
+    let model_safe_refs: Vec<ToolDefinition> = referenced_tools
+        .iter()
+        .map(project_tool_for_model)
+        .collect();
+
+    if !model_safe_refs.is_empty() {
         parts.push(prompts.tool_editor);
         parts.push("## Explicitly referenced tools (JSON)".to_string());
         parts.push(
-            serde_json::to_string_pretty(referenced_tools).unwrap_or_else(|_| "[]".to_string()),
+            serde_json::to_string_pretty(&model_safe_refs).unwrap_or_else(|_| "[]".to_string()),
         );
-        if let Some(tool) = active_tool {
-            if !referenced_tools.iter().any(|t| t.id == tool.id) {
+        if let Some(tool) = &model_safe_active {
+            if !model_safe_refs.iter().any(|t| t.id == tool.id) {
                 parts.push("## Active tool (JSON)".to_string());
                 parts.push(serde_json::to_string_pretty(tool).unwrap_or_else(|_| "{}".to_string()));
             }
         }
-    } else if let Some(tool) = active_tool {
+    } else if let Some(tool) = &model_safe_active {
         parts.push(prompts.tool_editor);
         parts.push("## Active tool (JSON)".to_string());
         parts.push(serde_json::to_string_pretty(tool).unwrap_or_else(|_| "{}".to_string()));
     } else {
         parts.push(prompts.tool_builder);
     }
+
+    if has_interactive {
+        parts.push(prompts.interactive_runtime);
+    }
+
     parts.push(crate::runtime_v2::agent_pack_catalog_markdown());
     parts
         .push(crate::application_kernel::registered_actions::registered_actions_catalog_markdown());
@@ -216,6 +242,25 @@ pub fn build_agent_prompt_with_references(
     );
 
     parts.join("\n\n")
+}
+
+/// Project a tool definition so the model never receives hidden interactive values.
+fn project_tool_for_model(tool: &ToolDefinition) -> ToolDefinition {
+    let mut out = tool.clone();
+    if let Some(interactive) = out.interactive.take() {
+        let wrapper = serde_json::json!({ "interactive": interactive });
+        let projected = crate::runtime_v2::visibility::project_definition_value(
+            &wrapper,
+            crate::runtime_v2::visibility::Audience::Model,
+        );
+        out.interactive = projected.get("interactive").cloned();
+    }
+    for sc in &mut out.state_contracts {
+        if crate::runtime_v2::visibility::contract_hides(sc) {
+            sc.initial_value = serde_json::Value::Null;
+        }
+    }
+    out
 }
 
 #[cfg(test)]

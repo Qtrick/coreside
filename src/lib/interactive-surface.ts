@@ -29,36 +29,23 @@ export function interactiveStatusText(view: InteractiveView): string | null {
   return null;
 }
 
-const MODEL_STATE_BUDGET_BYTES = 5000;
+const MODEL_STATE_BUDGET_BYTES = 48_000;
 
 /**
- * Bound the public state sent to the model for an AI turn: repeatedly keep the
- * newest half of the largest array until the JSON fits the structured-input budget.
+ * Bound check for public interactive state sent with an AI-turn trigger.
+ * Never silently truncates arrays/objects — oversized state fails closed.
  */
 export function compactStateForModel(
   state: Record<string, unknown>,
   budget = MODEL_STATE_BUDGET_BYTES,
 ): Record<string, unknown> {
-  const copy = structuredClone(state) as Record<string, unknown>;
-  for (let guard = 0; guard < 64 && JSON.stringify(copy).length > budget; guard += 1) {
-    let largest: { holder: Record<string, unknown>; key: string; size: number } | null = null;
-    const visit = (holder: Record<string, unknown>, depth: number) => {
-      for (const [key, value] of Object.entries(holder)) {
-        if (Array.isArray(value) && value.length > 1) {
-          const size = JSON.stringify(value).length;
-          if (!largest || size > largest.size) largest = { holder, key, size };
-        } else if (value && typeof value === "object" && depth < 2) {
-          visit(value as Record<string, unknown>, depth + 1);
-        }
-      }
-    };
-    visit(copy, 0);
-    if (!largest) break;
-    const { holder, key } = largest as { holder: Record<string, unknown>; key: string };
-    const arr = holder[key] as unknown[];
-    holder[key] = arr.slice(Math.floor(arr.length / 2));
+  const encoded = JSON.stringify(state);
+  if (encoded.length > budget) {
+    throw new Error(
+      `Interactive public state exceeds model budget (${encoded.length} > ${budget} bytes)`,
+    );
   }
-  return copy;
+  return state;
 }
 
 function describe(error: unknown): string {
@@ -95,7 +82,8 @@ export function useInteractiveSurface({
     (next: InteractiveView) => {
       stateRevisionRef.current = next.stateRevision;
       setView(next);
-      setState((current) => ({ ...current, ...next.state }));
+      // Replace — never merge into possibly-stale raw state that could retain hidden keys.
+      setState(() => ({ ...(next.state as ToolState) }));
       onAdopt?.(next);
     },
     [onAdopt, setState, stateRevisionRef],

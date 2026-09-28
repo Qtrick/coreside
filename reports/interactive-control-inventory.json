@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-27T22:34:57.190Z",
-  "commit": "f02e69c0d634e93d27184f971834d1cbce249668",
+  "generatedAt": "2026-09-28T15:46:56.928Z",
+  "commit": "47a4732c6567ee601f4e9497d2529f3272972975",
   "dirty": true,
   "command": "audit:interactive-controls",
   "evidenceLevel": "Scaffolded",
   "note": "Static regex inventory only — not runtime interactivity proof.",
-  "filesScanned": 91,
-  "filesWithControls": 67,
-  "approximateTotalControls": 742,
+  "filesScanned": 93,
+  "filesWithControls": 68,
+  "approximateTotalControls": 750,
   "files": [
     {
       "file": "src/components/action-log/ActionLog.tsx",
@@ -630,6 +630,15 @@
       "counts": {
         "button": 3,
         "onClick": 3
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/tool-renderer/InteractiveStatusBar.tsx",
+      "approximateControlCount": 8,
+      "counts": {
+        "button": 4,
+        "onClick": 4
       },
       "flags": {}
     },

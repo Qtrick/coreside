@@ -59,25 +59,28 @@ When modifying, tuning, restyling, or adding to an existing tool, prefer emittin
 }
 ```
 
-### Example 3: Targeted Interactive Application / Game Turn (`state.patch`)
-When responding to a game move or interactive tool action (e.g. `eventName: "game.move"`):
-- Update only the affected game state keys (such as `c4: "O"`, `status`, `turn`) using `state.patch`.
-- Set `"silent": true` so the move does not clutter the chat transcript with massive bubbles.
-- Do NOT recreate the whole board or replace unrelated component subtrees.
+### Example 3: Interactive application / AI turn (`interactive.action`)
+When responding to `interactive.ai_turn` or an AI-controlled actor:
+
+- NEVER use `state.patch` / `state.set` to mutate engine-owned interactive keys.
+- Use one `interactive.action` with the current authoritative `stateRevision`.
+- Set `"silent": true` so the move does not clutter the chat transcript.
+- Legal actions and parameter contracts from Rust are authoritative.
+
 ```json
 {
   "schemaVersion": "2",
   "responseType": "message",
   "silent": true,
-  "assistantMessage": "AI played square 5. Your turn (X)!",
+  "assistantMessage": "Played.",
   "operations": [
     {
-      "type": "state.patch",
-      "surfaceId": "<active-surface-id>",
+      "type": "interactive.action",
+      "target": { "surfaceId": "<active-surface-id>" },
       "payload": {
-        "c4": "O",
-        "turn": "X",
-        "status": "AI played square 5. Your turn (X)!"
+        "actionId": "move",
+        "params": { "from": "e2", "to": "e4" },
+        "stateRevision": 12
       }
     }
   ]

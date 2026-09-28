@@ -14,7 +14,7 @@
 
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -232,7 +232,8 @@ fn read_rows(db: &Database, surface_id: &str, upto: Option<i64>) -> DbResult<Vec
             event_id,
             action_id,
             actor,
-            params: serde_json::from_str(&params_json).map_err(|e| corrupted("action params", e))?,
+            params: serde_json::from_str(&params_json)
+                .map_err(|e| corrupted("action params", e))?,
             definition_revision: def_rev,
             post_state_hash: hash,
             snapshot: snap
@@ -256,14 +257,12 @@ fn last_row(db: &Database, surface_id: &str) -> DbResult<Option<(i64, i64)>> {
 }
 
 fn last_checkpoint_seq(db: &Database, surface_id: &str) -> DbResult<i64> {
-    Ok(db
-        .conn()
-        .query_row(
-            "SELECT COALESCE(MAX(seq), 0) FROM interactive_action_log
+    Ok(db.conn().query_row(
+        "SELECT COALESCE(MAX(seq), 0) FROM interactive_action_log
              WHERE surface_id = ?1 AND snapshot_json IS NOT NULL",
-            [surface_id],
-            |r| r.get(0),
-        )?)
+        [surface_id],
+        |r| r.get(0),
+    )?)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -343,6 +342,8 @@ fn commit(
 
 struct Loaded {
     def: InteractiveAppDefinition,
+    /// Full surface definition (for projecting non-owned rest through top-level contracts).
+    surface_definition: Value,
     owned: Value,
     rest: Map<String, Value>,
     revision: i64,
@@ -365,6 +366,7 @@ fn ensure_initialized(db: &mut Database, surface_id: &str) -> DbResult<Loaded> {
                 .map_err(|e| corrupted("state", e))?;
             return Ok(Loaded {
                 def,
+                surface_definition: surface.definition,
                 owned,
                 rest,
                 revision,
@@ -401,6 +403,7 @@ fn ensure_initialized(db: &mut Database, surface_id: &str) -> DbResult<Loaded> {
     )?;
     Ok(Loaded {
         def,
+        surface_definition: surface.definition,
         owned: next_owned,
         rest,
         revision: new_rev,
@@ -410,7 +413,12 @@ fn ensure_initialized(db: &mut Database, surface_id: &str) -> DbResult<Loaded> {
     })
 }
 
-fn view_of(surface_id: &str, l: &Loaded, message: Option<String>, duplicate: bool) -> InteractiveView {
+fn view_of(
+    surface_id: &str,
+    l: &Loaded,
+    message: Option<String>,
+    duplicate: bool,
+) -> InteractiveView {
     let (actor, waiting_for) = match l.def.resolve_user_actor(&l.owned) {
         Ok(a) => (Some(a), None),
         Err(_) => (
@@ -426,11 +434,18 @@ fn view_of(surface_id: &str, l: &Loaded, message: Option<String>, duplicate: boo
         .or(waiting_for.as_deref())
         .map(|a| l.def.get_legal_actions(&l.owned, a))
         .unwrap_or_default();
+    // Public interactive state + non-owned rest filtered by top-level contracts.
+    // Never merge raw `rest` — restricted/sensitive keys must not leak via incidental state.
+    let public = super::visibility::project_surface_state(
+        &l.surface_definition,
+        &merge(&l.owned, l.rest.clone()),
+        super::visibility::Audience::Renderer,
+    );
     InteractiveView {
         surface_id: surface_id.to_string(),
         application_id: l.def.id.clone(),
         state_revision: l.revision,
-        state: merge(&l.def.public_view(&l.owned), l.rest.clone()),
+        state: public,
         actor,
         waiting_for,
         status: l
@@ -439,7 +454,11 @@ fn view_of(surface_id: &str, l: &Loaded, message: Option<String>, duplicate: boo
             .and_then(Value::as_str)
             .unwrap_or("active")
             .to_string(),
-        winner: l.owned.get("winner").and_then(Value::as_str).map(str::to_string),
+        winner: l
+            .owned
+            .get("winner")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         message,
         legal_actions: legal,
         seq: l.seq,
@@ -451,6 +470,30 @@ fn view_of(surface_id: &str, l: &Loaded, message: Option<String>, duplicate: boo
 pub fn get_view(db: &mut Database, surface_id: &str) -> DbResult<InteractiveView> {
     let loaded = ensure_initialized(db, surface_id)?;
     Ok(view_of(surface_id, &loaded, None, false))
+}
+
+/// Authoritative model context for an AI turn. Frontend trigger fields are ignored;
+/// Rust regenerates public state, legal actions, actor, and revision.
+pub fn ai_turn_context(db: &mut Database, surface_id: &str) -> DbResult<Value> {
+    let loaded = ensure_initialized(db, surface_id)?;
+    let view = view_of(surface_id, &loaded, None, false);
+    let catalog = super::visibility::model_capability_catalog(&loaded.def, &view.state);
+    Ok(json!({
+        "surfaceId": view.surface_id,
+        "applicationId": view.application_id,
+        "stateRevision": view.state_revision,
+        "seq": view.seq,
+        "status": view.status,
+        "winner": view.winner,
+        "waitingFor": view.waiting_for,
+        "actor": view.actor,
+        "legalActions": view.legal_actions,
+        "publicState": view.state,
+        "modelDefinition": loaded.def.model_view(),
+        "capabilityCatalog": catalog,
+        "authority": "rust",
+        "instruction": "Propose one interactive.action using legalActions and stateRevision. Hidden state is unavailable.",
+    }))
 }
 
 fn validate_event_id(event_id: &str) -> DbResult<()> {
@@ -498,7 +541,10 @@ pub fn dispatch(
     }
 
     let actor = match origin {
-        Origin::User => loaded.def.resolve_user_actor(&loaded.owned).map_err(DbError::Invalid)?,
+        Origin::User => loaded
+            .def
+            .resolve_user_actor(&loaded.owned)
+            .map_err(DbError::Invalid)?,
         Origin::Ai => {
             let cp = loaded
                 .owned
@@ -520,8 +566,8 @@ pub fn dispatch(
         .map_err(DbError::Invalid)?;
     let merged = merge(&next_owned, loaded.rest.clone());
     let seq = loaded.seq + 1;
-    let checkpoint = (seq - last_checkpoint_seq(db, surface_id)? >= CHECKPOINT_INTERVAL)
-        .then_some(&next_owned);
+    let checkpoint =
+        (seq - last_checkpoint_seq(db, surface_id)? >= CHECKPOINT_INTERVAL).then_some(&next_owned);
     loaded.revision = match commit(
         db,
         surface_id,
@@ -545,7 +591,11 @@ pub fn dispatch(
     Ok(view_of(surface_id, &loaded, outcome.message, false))
 }
 
-fn definition_at(db: &Database, surface_id: &str, revision: i64) -> DbResult<InteractiveAppDefinition> {
+fn definition_at(
+    db: &Database,
+    surface_id: &str,
+    revision: i64,
+) -> DbResult<InteractiveAppDefinition> {
     let json: Option<String> = db
         .conn()
         .query_row(
@@ -578,7 +628,9 @@ pub fn reconstruct(db: &Database, surface_id: &str, seq: i64) -> DbResult<Value>
     let start = rows
         .iter()
         .rposition(|r| r.snapshot.is_some())
-        .ok_or_else(|| DbError::NotFound(format!("no interactive checkpoint at or before {seq}")))?;
+        .ok_or_else(|| {
+            DbError::NotFound(format!("no interactive checkpoint at or before {seq}"))
+        })?;
     let mut state = rows[start].snapshot.clone().unwrap_or(Value::Null);
     if state_hash(&state) != rows[start].post_state_hash {
         return Err(corrupted("checkpoint", "hash mismatch"));
@@ -590,10 +642,16 @@ pub fn reconstruct(db: &Database, surface_id: &str, seq: i64) -> DbResult<Value>
         // instead of calling execute_action on a synthetic action id.
         if matches!(row.action_id.as_str(), "__init" | "__adopt" | "__undo") {
             let snap = row.snapshot.as_ref().ok_or_else(|| {
-                corrupted("replay", format!("seq {} missing checkpoint snapshot", row.seq))
+                corrupted(
+                    "replay",
+                    format!("seq {} missing checkpoint snapshot", row.seq),
+                )
             })?;
             if state_hash(snap) != row.post_state_hash {
-                return Err(corrupted("replay", format!("seq {} checkpoint hash mismatch", row.seq)));
+                return Err(corrupted(
+                    "replay",
+                    format!("seq {} checkpoint hash mismatch", row.seq),
+                ));
             }
             state = snap.clone();
             continue;
@@ -627,6 +685,7 @@ pub struct HistoryEntry {
     pub event_id: String,
     pub action_id: String,
     pub actor: String,
+    /// Redacted parameter projection — never raw secret action params.
     pub params: Value,
     pub checkpoint: bool,
 }
@@ -639,7 +698,7 @@ pub fn history(db: &Database, surface_id: &str) -> DbResult<Vec<HistoryEntry>> {
             event_id: r.event_id,
             action_id: r.action_id,
             actor: r.actor,
-            params: r.params,
+            params: super::visibility::redact_history_params(&r.params),
             checkpoint: r.snapshot.is_some(),
         })
         .collect();
@@ -652,14 +711,19 @@ pub fn history(db: &Database, surface_id: &str) -> DbResult<Vec<HistoryEntry>> {
 /// Public view of the reconstructed state at `seq` (for the replay UI/model).
 /// Merges historical engine-owned keys with the live non-owned rest so the
 /// renderer keeps incidental UI state while inspecting a past board/position.
+/// Both sides are projected through the central visibility policy.
 pub fn replay_view(db: &Database, surface_id: &str, seq: i64) -> DbResult<Value> {
     let surface = get_surface(db, surface_id)?;
     let def = require_definition(&surface.definition)?;
     let (current, _) = get_surface_state_with_revision(db, surface_id)?;
+    let reconstructed = reconstruct(db, surface_id, seq)?;
+    // Build a temporary merged state then project through the surface definition.
     let (_, rest) = split_owned(&def, &current);
-    Ok(merge(
-        &def.public_view(&reconstruct(db, surface_id, seq)?),
-        rest,
+    let merged = merge(&reconstructed, rest);
+    Ok(super::visibility::project_surface_state(
+        &surface.definition,
+        &merged,
+        super::visibility::Audience::Renderer,
     ))
 }
 

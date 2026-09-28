@@ -30,6 +30,7 @@ pub mod surfaces;
 pub mod transactions;
 pub mod turn_journal;
 pub mod turn_timeline;
+pub mod visibility;
 
 pub use rules_engine::{
     ActionOutcome, DerivedStateDef, DeterministicRng, InteractiveAppDefinition, LegalActionSummary,
@@ -98,8 +99,8 @@ pub use preservation::{
 #[allow(unused_imports)]
 pub use preview_transaction::{
     finish_progressive_ingest, ingest_live_chunk, ingest_live_chunk_with_seed,
-    ingest_progressive_chunk_with_seed, PreviewOpEvent, PreviewPaintEvent, PreviewSurfaceModel,
-    PreviewTransaction, RejectedPreviewOp,
+    ingest_progressive_chunk_with_seed, renderer_safe_preview_seed, PreviewOpEvent,
+    PreviewPaintEvent, PreviewSurfaceModel, PreviewTransaction, RejectedPreviewOp,
 };
 #[allow(unused_imports)]
 pub use progressive_ops::{

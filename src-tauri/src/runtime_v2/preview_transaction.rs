@@ -33,6 +33,36 @@ pub struct PreviewSurfaceModel {
     pub preview_revision: i64,
 }
 
+/// Build a renderer-safe progressive-preview seed from authoritative DB rows.
+///
+/// Preview overlays are Channel-delivered to React; never seed restricted
+/// interactive state or definition initials into this path.
+pub fn renderer_safe_preview_seed(
+    surface_id: &str,
+    tool_id: Option<String>,
+    capability_packs: Vec<String>,
+    authoritative_definition: &Value,
+    authoritative_state: &Value,
+    revision: i64,
+) -> PreviewSurfaceModel {
+    use super::visibility::{project_definition_value, project_surface_state, Audience};
+
+    PreviewSurfaceModel {
+        surface_id: surface_id.to_string(),
+        tool_id: tool_id.clone(),
+        application_id: tool_id,
+        capability_packs,
+        definition: project_definition_value(authoritative_definition, Audience::Renderer),
+        state: project_surface_state(
+            authoritative_definition,
+            authoritative_state,
+            Audience::Renderer,
+        ),
+        base_revision: revision,
+        preview_revision: revision,
+    }
+}
+
 /// Paint payload for Channel `PreviewSurface` events.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewPaintEvent {
@@ -1566,5 +1596,89 @@ mod tests {
             "expected rejection reason to mention 'not allowed' or 'internal', got: {reason}"
         );
         assert!(preview.accepted.is_empty());
+    }
+
+    #[test]
+    fn renderer_safe_preview_seed_strips_restricted_state_and_initials() {
+        let definition = json!({
+            "id": "quiz-tool",
+            "root": { "id": "root", "type": "Container", "props": {}, "children": [] },
+            "stateContracts": [
+                {
+                    "key": "answers",
+                    "type": "array",
+                    "initialValue": [1, 0, 0],
+                    "readPolicy": "restricted"
+                },
+                {
+                    "key": "score",
+                    "type": "number",
+                    "initialValue": 0,
+                    "writePolicy": "system"
+                }
+            ],
+            "interactive": {
+                "id": "quiz",
+                "kind": "quiz",
+                "stateSchema": [
+                    {
+                        "key": "answers",
+                        "type": "array",
+                        "initialValue": [1, 0, 0],
+                        "readPolicy": "restricted"
+                    },
+                    {
+                        "key": "score",
+                        "type": "number",
+                        "initialValue": 0
+                    }
+                ],
+                "actions": [],
+                "actors": ["player"]
+            }
+        });
+        let authoritative_state = json!({
+            "answers": [1, 0, 0],
+            "score": 2,
+            "__rng": { "counter": 9 }
+        });
+
+        let seed = renderer_safe_preview_seed(
+            "surf-quiz",
+            Some("tool-quiz".into()),
+            vec!["core.ui".into()],
+            &definition,
+            &authoritative_state,
+            7,
+        );
+
+        assert_eq!(seed.surface_id, "surf-quiz");
+        assert_eq!(seed.base_revision, 7);
+        assert!(
+            seed.state.get("answers").is_none(),
+            "restricted answers must not enter preview seed: {}",
+            seed.state
+        );
+        assert!(seed.state.get("__rng").is_none());
+        assert_eq!(seed.state["score"], 2);
+
+        let interactive = &seed.definition["interactive"];
+        let state_schema = interactive["stateSchema"]
+            .as_array()
+            .expect("projected stateSchema");
+        let answers = state_schema
+            .iter()
+            .find(|c| c["key"] == "answers")
+            .expect("answers contract");
+        assert!(
+            answers["initialValue"].is_null()
+                || answers.get("valueRedacted") == Some(&json!(true)),
+            "restricted initialValue must be redacted in preview definition: {answers}"
+        );
+        let encoded = format!("{}{}", seed.definition, seed.state);
+        assert!(
+            !encoded.contains("[1,0,0]") && !encoded.contains("[1, 0, 0]"),
+            "preview seed serialization must not embed quiz answers: {encoded}"
+        );
     }
 }

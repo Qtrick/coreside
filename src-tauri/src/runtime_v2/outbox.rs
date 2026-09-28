@@ -147,9 +147,9 @@ pub fn flush_pending_outbox(db: &mut Database, bus: Option<&mut EventBus>) -> Db
                     let mut delivery_ok = true;
                     let mut last_err = String::new();
                     for sub_id in &matched {
-                        if let Err(e) = super::events::execute_durable_event_delivery(
-                            db, bus, ev, sub_id, 0,
-                        ) {
+                        if let Err(e) =
+                            super::events::execute_durable_event_delivery(db, bus, ev, sub_id, 0)
+                        {
                             delivery_ok = false;
                             last_err = e.to_string();
                             break;
@@ -377,8 +377,9 @@ mod tests {
 
         let dir = tempdir().unwrap();
         let mut db = crate::db::Database::open_path(&dir.path().join("o.db")).unwrap();
-        let conv = crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "Chat", None)
-            .unwrap();
+        let conv =
+            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "Chat", None)
+                .unwrap();
         let def = serde_json::json!({
             "id": "ttt", "name": "TTT", "layout": "stack",
             "components": [{ "id": "title", "type": "heading", "props": { "text": "TTT" } }],
@@ -450,7 +451,10 @@ mod tests {
 
         let (status, last_error, attempts, delivered_at) = outbox_row(&db, &failing);
         assert_eq!(status, "failed");
-        assert!(last_error.as_deref().unwrap_or("").contains("owned"), "{last_error:?}");
+        assert!(
+            last_error.as_deref().unwrap_or("").contains("owned"),
+            "{last_error:?}"
+        );
         assert_eq!(attempts, 1);
         assert_eq!(delivered_at, None);
         assert_eq!(
@@ -470,7 +474,10 @@ mod tests {
 
         // Failed rows are terminal: later flushes neither retry nor re-count them.
         assert_eq!(flush_pending_outbox(&mut db, Some(&mut bus)).unwrap(), 0);
-        assert_eq!(outbox_row(&db, &failing), ("failed".into(), last_error, 1, None));
+        assert_eq!(
+            outbox_row(&db, &failing),
+            ("failed".into(), last_error, 1, None)
+        );
 
         // A healthy handler in the same bus is delivered and applied.
         let healthy = enqueue_outbox(
@@ -480,14 +487,25 @@ mod tests {
             None,
             None,
             0,
-            &event("evt-note", "set_note", "src-b", serde_json::json!({ "note": "hi" })),
+            &event(
+                "evt-note",
+                "set_note",
+                "src-b",
+                serde_json::json!({ "note": "hi" }),
+            ),
         )
         .unwrap();
         assert_eq!(flush_pending_outbox(&mut db, Some(&mut bus)).unwrap(), 1);
         let (status, last_error, attempts, delivered_at) = outbox_row(&db, &healthy);
-        assert_eq!((status.as_str(), last_error, attempts), ("delivered", None, 1));
+        assert_eq!(
+            (status.as_str(), last_error, attempts),
+            ("delivered", None, 1)
+        );
         assert!(delivered_at.is_some());
-        assert_eq!(get_surface_state_with_revision(&db, &sid).unwrap().0["note"], "hi");
+        assert_eq!(
+            get_surface_state_with_revision(&db, &sid).unwrap().0["note"],
+            "hi"
+        );
         assert_eq!(outbox_row(&db, &failing).0, "failed");
     }
 

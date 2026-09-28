@@ -1384,7 +1384,10 @@ mod tests {
             DetectedStreamingProtocol::CoresideOpsNdjson
         );
         assert!(d.is_coreside_ndjson());
-        assert_eq!(d.feed("plain trailing prose"), DetectedStreamingProtocol::CoresideOpsNdjson);
+        assert_eq!(
+            d.feed("plain trailing prose"),
+            DetectedStreamingProtocol::CoresideOpsNdjson
+        );
     }
 
     #[test]

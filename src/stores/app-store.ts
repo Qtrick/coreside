@@ -22,6 +22,7 @@ import type {
   ToolSummary,
 } from "@/types/tool";
 import { persistenceScheduler } from "@/lib/persistence-scheduler";
+import { hasInteractiveDefinition } from "@/lib/interactive-surface";
 import {
   api,
   TauriCommandError,
@@ -1971,10 +1972,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     ]);
     // Selecting another tool, or closing the canvas, wins over a late load.
     if (get().activeToolId !== id) return;
-    const mergedState: ToolState = {
-      ...(state ?? {}),
-      ...(surfaceStateWithRev?.state ?? {}),
-    };
+    // Interactive tools: never seed toolState from raw surface/tool state.
+    // Public interactive state is adopted exclusively via InteractiveView.
+    // api.getTool returns a ToolDefinition (interactive may be top-level).
+    const interactive = hasInteractiveDefinition(tool);
+    const mergedState: ToolState = interactive
+      ? {}
+      : {
+          ...(state ?? {}),
+          ...(surfaceStateWithRev?.state ?? {}),
+        };
     persistenceScheduler.initToolState(id, mergedState);
     set({
       activeTool: tool,

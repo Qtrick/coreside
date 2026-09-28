@@ -445,16 +445,37 @@ pub fn append_conversation_event(
     event_type: &str,
     payload: &Value,
 ) -> DbResult<(String, i64)> {
+    let tx = db.conn().unchecked_transaction()?;
+    let result = append_conversation_event_on_conn(
+        &tx,
+        conversation_id,
+        turn_id,
+        attempt_id,
+        event_type,
+        payload,
+    )?;
+    tx.commit()?;
+    Ok(result)
+}
+
+/// Same as [`append_conversation_event`] but uses an existing connection/savepoint
+/// so callers can keep state mutation + event log atomic.
+pub fn append_conversation_event_on_conn(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    turn_id: Option<&str>,
+    attempt_id: Option<&str>,
+    event_type: &str,
+    payload: &Value,
+) -> DbResult<(String, i64)> {
     let id = format!("cev-{}", Uuid::new_v4());
     let now = now_rfc3339();
-    let tx = db.conn().unchecked_transaction()?;
-    // Ensure counter row exists, then atomically increment.
-    tx.execute(
+    conn.execute(
         "INSERT OR IGNORE INTO conversation_event_sequences (conversation_id, next_sequence)
          VALUES (?1, 1)",
         [conversation_id],
     )?;
-    let seq: i64 = tx.query_row(
+    let seq: i64 = conn.query_row(
         "UPDATE conversation_event_sequences
          SET next_sequence = next_sequence + 1
          WHERE conversation_id = ?1
@@ -462,7 +483,7 @@ pub fn append_conversation_event(
         [conversation_id],
         |r| r.get(0),
     )?;
-    tx.execute(
+    conn.execute(
         "INSERT INTO conversation_event_log (
             id, conversation_id, sequence, turn_id, attempt_id, event_type, payload_json, created_at
          ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
@@ -477,7 +498,6 @@ pub fn append_conversation_event(
             now
         ],
     )?;
-    tx.commit()?;
     Ok((id, seq))
 }
 

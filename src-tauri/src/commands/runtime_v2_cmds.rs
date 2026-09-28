@@ -7,20 +7,21 @@ use tauri::{ipc::Channel, State, WebviewWindow};
 use super::CommandError;
 use crate::runtime_v2::packs::CapabilityPackMeta as PackMeta;
 use crate::runtime_v2::{
-    self, interactive, activate_next, append_ledger_entry, branch_from_message, bundled_packs,
+    self, activate_next, append_ledger_entry, branch_from_message, bundled_packs,
     cancel_queue_item, complete_queue_item, create_inline_surface, create_snapshot, delete_draft,
     delete_snapshot, diff_branch, enqueue, ensure_initial_route, flush_scheduler, get_continuity,
     get_conversation_events, get_draft, get_item, get_provider_profile, get_route_state,
-    get_snapshot, get_surface, get_surface_state, get_transaction, list_branches, list_diagnostics,
-    list_inline_surfaces, list_ledger_entries, list_queue, list_snapshots, list_transactions,
-    list_turn_timeline_events, navigate_route, promote_inline_to_tool, recover_stale_active,
-    remove_queued, route_back, route_forward, save_continuity, save_draft, save_surface_state,
-    schedule_and_apply, schedule_patches, set_route_state, store_diagnostics, surfaces,
-    suspend_surface, undo_transaction, update_surface_definition, AgentResponseV2,
+    get_snapshot, get_surface, get_surface_state, get_transaction, interactive, list_branches,
+    list_diagnostics, list_inline_surfaces, list_ledger_entries, list_queue, list_snapshots,
+    list_transactions, list_turn_timeline_events, navigate_route, promote_inline_to_tool,
+    recover_stale_active, remove_queued, route_back, route_forward, save_continuity, save_draft,
+    save_surface_state, schedule_and_apply, schedule_patches, set_route_state, store_diagnostics,
+    surfaces, suspend_surface, undo_transaction, update_surface_definition, AgentResponseV2,
     AppOperation, AppTransactionRecord, ApplyResult, ChatBranchRecord, ContextLedgerEntry,
-    ContinuitySnapshot, ConversationEventRecord, InteractiveAppDefinition, NavigateResult, PatchPriority, ProviderConformanceRecord, QueueItem,
-    RouteState, ScheduleRequest, ScheduledPatch, SnapshotRecord, SurfaceDraft, SurfaceRecord,
-    SuspensionState, TurnTimelineEvent,
+    ContinuitySnapshot, ConversationEventRecord, InteractiveAppDefinition, NavigateResult,
+    PatchPriority, ProviderConformanceRecord, QueueItem, RouteState, ScheduleRequest,
+    ScheduledPatch, SnapshotRecord, SurfaceDraft, SurfaceRecord, SuspensionState,
+    TurnTimelineEvent,
 };
 use crate::state::AppState;
 use crate::windows;
@@ -95,7 +96,14 @@ pub fn list_conversation_surfaces(
 ) -> Result<Vec<SurfaceRecord>, CommandError> {
     state.require_profile()?;
     let db = state.db.lock();
-    Ok(list_inline_surfaces(&db, &conversation_id)?)
+    let mut surfaces = list_inline_surfaces(&db, &conversation_id)?;
+    for s in &mut surfaces {
+        s.definition = crate::runtime_v2::visibility::project_definition_value(
+            &s.definition,
+            crate::runtime_v2::visibility::Audience::Renderer,
+        );
+    }
+    Ok(surfaces)
 }
 
 #[tauri::command]
@@ -106,8 +114,12 @@ pub fn get_surface_cmd(
 ) -> Result<SurfaceRecord, CommandError> {
     state.require_profile()?;
     let db = state.db.lock();
-    let surface = get_surface(&db, &surface_id)?;
+    let mut surface = get_surface(&db, &surface_id)?;
     windows::enforce_caller_surface_scope(&window, surface.tool_id.as_deref(), &surface.id)?;
+    surface.definition = crate::runtime_v2::visibility::project_definition_value(
+        &surface.definition,
+        crate::runtime_v2::visibility::Audience::Renderer,
+    );
     Ok(surface)
 }
 
@@ -211,13 +223,19 @@ pub fn get_surface_state_cmd(
     let db = state.db.lock();
     let surface = get_surface(&db, &surface_id)?;
     windows::enforce_caller_surface_scope(&window, surface.tool_id.as_deref(), &surface.id)?;
-    Ok(get_surface_state(&db, &surface_id)?)
+    let raw = get_surface_state(&db, &surface_id)?;
+    Ok(crate::runtime_v2::visibility::project_surface_state(
+        &surface.definition,
+        &raw,
+        crate::runtime_v2::visibility::Audience::Renderer,
+    ))
 }
 
 /// Returns the current state value AND the current state revision together.
 /// Use this instead of getSurface() + getSurfaceState() to avoid a TOCTOU race
 /// where the definition revision and state revision might diverge between two calls.
 /// The returned `stateRevision` is the correct value to pass to saveSurfaceState().
+/// Interactive surfaces return the public projection only — never raw hidden state.
 #[tauri::command]
 pub fn get_surface_state_with_revision_cmd(
     window: WebviewWindow,
@@ -229,8 +247,13 @@ pub fn get_surface_state_with_revision_cmd(
     let surface = get_surface(&db, &surface_id)?;
     windows::enforce_caller_surface_scope(&window, surface.tool_id.as_deref(), &surface.id)?;
     let (state_val, state_revision) = surfaces::get_surface_state_with_revision(&db, &surface_id)?;
+    let public = crate::runtime_v2::visibility::project_surface_state(
+        &surface.definition,
+        &state_val,
+        crate::runtime_v2::visibility::Audience::Renderer,
+    );
     Ok(serde_json::json!({
-        "state": state_val,
+        "state": public,
         "stateRevision": state_revision,
     }))
 }

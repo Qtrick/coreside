@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@/lib/tauri";
 import { surfaceIdForTool } from "@/lib/surface-ops";
+import { hasInteractiveDefinition } from "@/lib/interactive-surface";
 import {
   canNavigateBack,
   canNavigateForward,
@@ -215,38 +216,73 @@ export function AppRouteShell({
       null
     : null;
   const routeSurfaceId = activeRoute?.surfaceId ?? surfaceId ?? activeTool?.id ?? "";
+  const routeDef =
+    surfacesById[routeSurfaceId] ??
+    surfacesById[surfaceIdForTool(routeSurfaceId)] ??
+    null;
+  const routeIsInteractive = hasInteractiveDefinition(routeDef);
 
-  // Multi-route state: load and scope state per active surface with atomic revision
+  // Multi-route state: load and scope state per active surface with atomic revision.
+  // Interactive routes must NOT seed an empty `{}` into perSurfaceState — `{}` is
+  // truthy and would shadow the parent InteractiveView hydration forever.
   useEffect(() => {
     // Guard: no routes or in preview — do not load from backend
     if (!routeSurfaceId || !routes.length || isPreview) return;
     let cancelled = false;
+
+    if (routeIsInteractive) {
+      setPerSurfaceState((prev) => {
+        if (!(routeSurfaceId in prev)) return prev;
+        const next = { ...prev };
+        delete next[routeSurfaceId];
+        return next;
+      });
+      void api
+        .getSurfaceStateWithRevision(routeSurfaceId)
+        .then((res) => {
+          if (cancelled || !res) return;
+          setPerSurfaceRevision((prev) => ({
+            ...prev,
+            [routeSurfaceId]: res.stateRevision,
+          }));
+        })
+        .catch(() => undefined);
+      return () => {
+        cancelled = true;
+      };
+    }
+
     void api
       .getSurfaceStateWithRevision(routeSurfaceId)
       .then((res) => {
-        if (!cancelled && res?.state && typeof res.state === "object") {
+        if (cancelled || !res) return;
+        setPerSurfaceRevision((prev) => ({ ...prev, [routeSurfaceId]: res.stateRevision }));
+        if (res.state && typeof res.state === "object") {
           setPerSurfaceState((prev) => ({ ...prev, [routeSurfaceId]: res.state as ToolState }));
-          setPerSurfaceRevision((prev) => ({ ...prev, [routeSurfaceId]: res.stateRevision }));
         }
       })
       .catch(() => {
-        void api.getSurfaceState(routeSurfaceId).then((st) => {
-          if (!cancelled && st && typeof st === "object") {
-            setPerSurfaceState((prev) => ({ ...prev, [routeSurfaceId]: st }));
-          }
-        }).catch(() => {});
+        void api
+          .getSurfaceState(routeSurfaceId)
+          .then((st) => {
+            if (!cancelled && st && typeof st === "object") {
+              setPerSurfaceState((prev) => ({ ...prev, [routeSurfaceId]: st }));
+            }
+          })
+          .catch(() => undefined);
       });
     return () => {
       cancelled = true;
     };
-  }, [routeSurfaceId, isPreview, routes.length]);
+  }, [routeSurfaceId, isPreview, routes.length, routeIsInteractive]);
 
   const currentScopedState = useMemo(() => {
-    if (routeSurfaceId && perSurfaceState[routeSurfaceId]) {
+    if (routeIsInteractive) return state;
+    if (routeSurfaceId && perSurfaceState[routeSurfaceId] !== undefined) {
       return perSurfaceState[routeSurfaceId];
     }
     return state;
-  }, [routeSurfaceId, perSurfaceState, state]);
+  }, [routeIsInteractive, routeSurfaceId, perSurfaceState, state]);
 
   const handleRouteStateChange = useCallback(
     (nextState: ToolState) => {
@@ -269,8 +305,16 @@ export function AppRouteShell({
           // On OCC conflict or failure, reload authoritative state and revision
           const fresh = await api.getSurfaceStateWithRevision(routeSurfaceId).catch(() => null);
           if (fresh) {
-            setPerSurfaceState((prev) => ({ ...prev, [routeSurfaceId]: fresh.state as ToolState }));
             setPerSurfaceRevision((prev) => ({ ...prev, [routeSurfaceId]: fresh.stateRevision }));
+            if (routeIsInteractive) {
+              // Parent owns interactive public state — do not shadow via perSurfaceState.
+              onStateChange(fresh.state as ToolState);
+            } else {
+              setPerSurfaceState((prev) => ({
+                ...prev,
+                [routeSurfaceId]: fresh.state as ToolState,
+              }));
+            }
           }
         }
       }
@@ -278,7 +322,14 @@ export function AppRouteShell({
         await onPersistState(nextState);
       }
     },
-    [routeSurfaceId, isPreview, onPersistState, perSurfaceRevision],
+    [
+      routeSurfaceId,
+      isPreview,
+      onPersistState,
+      onStateChange,
+      perSurfaceRevision,
+      routeIsInteractive,
+    ],
   );
 
   // Early return is now AFTER all hooks — React rules compliant

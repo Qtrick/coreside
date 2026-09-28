@@ -189,7 +189,12 @@ export function ToolCanvas() {
       if (cancelled) return;
       if (surf) {
         setCanonicalSurface(surf);
-        setCanonicalState(stWithRev?.state ?? {});
+        // Interactive: never seed from raw state — public view arrives via hydrate.
+        if (hasInteractiveDefinition(surf.definition)) {
+          setCanonicalState({});
+        } else {
+          setCanonicalState(stWithRev?.state ?? {});
+        }
         setStateRevision(stWithRev?.stateRevision ?? 0);
       } else {
         setCanonicalSurface(null);
