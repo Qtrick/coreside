@@ -32,6 +32,11 @@ export type CatchUpOptions = {
   pageLimit?: number;
   /** Injected yield between pages (tests can no-op). */
   yieldBetweenPages?: () => Promise<void>;
+  /**
+   * Optional per-conversation single-flight map. Concurrent catch-ups for the
+   * same id share one run (subscribe success + error paths, remount thrash).
+   */
+  inFlight?: Map<string, Promise<void>>;
 };
 
 /**
@@ -39,10 +44,28 @@ export type CatchUpOptions = {
  * successful page (including any transaction reload). Never advances past
  * unapplied work. Duplicate sequences are ignored. Stops when the conversation
  * is no longer active.
+ *
+ * Not `async`: when `inFlight` is set we must return the same Promise object
+ * to coalesced callers (an async wrapper would allocate a new Promise each time).
  */
-export async function catchUpConversationEvents(
+export function catchUpConversationEvents(
   options: CatchUpOptions,
 ): Promise<void> {
+  const flights = options.inFlight;
+  if (!flights) {
+    return runCatchUpPages(options);
+  }
+  const key = options.conversationId;
+  const existing = flights.get(key);
+  if (existing) return existing;
+  const run = runCatchUpPages(options).finally(() => {
+    if (flights.get(key) === run) flights.delete(key);
+  });
+  flights.set(key, run);
+  return run;
+}
+
+async function runCatchUpPages(options: CatchUpOptions): Promise<void> {
   const {
     conversationId,
     memoryCursor,

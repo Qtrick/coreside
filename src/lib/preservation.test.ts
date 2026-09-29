@@ -145,4 +145,60 @@ describe("focus snapshot helpers", () => {
 
     document.body.removeChild(root);
   });
+
+  it("captures and restores contenteditable selection offsets", () => {
+    const root = document.createElement("div");
+    const editable = document.createElement("div");
+    editable.setAttribute("contenteditable", "true");
+    editable.dataset.componentId = "rich-1";
+    editable.id = "rich-field";
+    editable.appendChild(document.createTextNode("Hello world"));
+    root.appendChild(editable);
+    document.body.appendChild(root);
+
+    // Restore path (authoritative in production after focus lands).
+    restoreFocusSnapshot(root, {
+      componentId: "rich-1",
+      fieldId: "rich-field",
+      selectionAnchorOffset: 2,
+      selectionFocusOffset: 7,
+    });
+    expect(document.activeElement).toBe(editable);
+    const restored = window.getSelection();
+    expect(restored?.rangeCount).toBeGreaterThan(0);
+    expect(restored?.toString()).toBe("llo w");
+
+    // Backward restore must still select the same span (direction is best-effort).
+    restoreFocusSnapshot(root, {
+      componentId: "rich-1",
+      fieldId: "rich-field",
+      selectionAnchorOffset: 7,
+      selectionFocusOffset: 2,
+    });
+    expect(window.getSelection()?.toString()).toBe("llo w");
+
+    // Capture path: pin activeElement (jsdom) and seed a live Selection.
+    Object.defineProperty(document, "activeElement", {
+      configurable: true,
+      get: () => editable,
+    });
+    const textNode = editable.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(textNode, 1);
+    range.setEnd(textNode, 4);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+
+    const snap = captureFocusSnapshot(root);
+    expect(snap.componentId).toBe("rich-1");
+    expect(snap.fieldId).toBe("rich-field");
+    // jsdom Selection support varies; offsets must be set when Selection is live.
+    if (sel && sel.rangeCount > 0 && editable.contains(sel.anchorNode!)) {
+      expect(snap.selectionAnchorOffset).toBe(1);
+      expect(snap.selectionFocusOffset).toBe(4);
+    }
+
+    document.body.removeChild(root);
+  });
 });

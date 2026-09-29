@@ -128,6 +128,9 @@ export function InlineSurfaceCard({
   // Hydration is keyed on `surface.id`, but its async body must record the
   // newest definition, not the one captured when the effect first ran.
   const latestSurfaceRef = useRef(surface);
+  // Keep the ref current every render so in-flight hydration cannot seal a
+  // stale definition after `initial` / `setSurface` advances.
+  latestSurfaceRef.current = surface;
   const sendMessage = useAppStore((s) => s.sendMessage);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const setSurfaceDraftConflict = useAppStore((s) => s.setSurfaceDraftConflict);
@@ -212,21 +215,23 @@ export function InlineSurfaceCard({
 
   useEffect(() => {
     let cancelled = false;
+    const hydrateSurfaceId = surface.id;
     void (async () => {
       try {
         // Interactive surfaces must NOT seed React state from raw surface state
         // (hidden keys). Hydrate only continuity + revision; public state comes
         // from useInteractiveSurface → runtime_v2_interactive_view.
         if (hasInteractiveDefinition(latestSurfaceRef.current.definition)) {
-          const continuity = await api.getContinuity(surface.id).catch(() => null);
-          if (cancelled) return;
+          // Continuity is best-effort; revision is authoritative and must not soft-fail to 1.
+          const continuity = await api.getContinuity(hydrateSurfaceId).catch(() => null);
+          if (cancelled || latestSurfaceRef.current.id !== hydrateSurfaceId) return;
           const rev = await api
-            .getSurfaceStateWithRevision(surface.id)
-            .then((r) => r.stateRevision)
-            .catch(() => 1);
+            .getSurfaceStateWithRevision(hydrateSurfaceId)
+            .then((r) => r.stateRevision);
+          if (cancelled || latestSurfaceRef.current.id !== hydrateSurfaceId) return;
           stateRevisionRef.current = rev;
-          setState({});
-          setHydrated(true);
+          // Seal continuity against the newest definition, not the one from
+          // effect scheduling time (latestSurfaceRef is updated every render).
           previousToolRef.current = asToolDefinition(latestSurfaceRef.current);
           if (continuity && bodyRef.current) {
             restoreScrollSnapshot(
@@ -245,20 +250,22 @@ export function InlineSurfaceCard({
               continuity.media as Record<string, { paused?: boolean }>,
             );
           }
+          setState({});
+          setError(null);
+          setHydrated(true);
           return;
         }
 
         const [{ state: savedState, stateRevision }, continuity] = await Promise.all([
-          api.getSurfaceStateWithRevision(surface.id).catch(async () => {
-            const fallback = await api.getSurfaceState(surface.id).catch(() => ({}));
+          api.getSurfaceStateWithRevision(hydrateSurfaceId).catch(async () => {
+            // Fallback once; if both fail, throw so we fail closed below.
+            const fallback = await api.getSurfaceState(hydrateSurfaceId);
             return { state: fallback ?? {}, stateRevision: 1 };
           }),
-          api.getContinuity(surface.id).catch(() => null),
+          api.getContinuity(hydrateSurfaceId).catch(() => null),
         ]);
-        if (cancelled) return;
+        if (cancelled || latestSurfaceRef.current.id !== hydrateSurfaceId) return;
         stateRevisionRef.current = stateRevision;
-        setState(savedState ?? {});
-        setHydrated(true);
         previousToolRef.current = asToolDefinition(latestSurfaceRef.current);
         if (continuity && bodyRef.current) {
           restoreScrollSnapshot(
@@ -277,11 +284,14 @@ export function InlineSurfaceCard({
             continuity.media as Record<string, { paused?: boolean }>,
           );
         }
-      } catch {
-        if (!cancelled) {
-          setState({});
-          setHydrated(true);
-          previousToolRef.current = asToolDefinition(latestSurfaceRef.current);
+        setState(savedState ?? {});
+        setError(null);
+        setHydrated(true);
+      } catch (e) {
+        if (!cancelled && latestSurfaceRef.current.id === hydrateSurfaceId) {
+          // Fail closed: do not pretend hydration succeeded with empty state.
+          setError(e instanceof Error ? e.message : String(e));
+          setHydrated(false);
         }
       }
     })();

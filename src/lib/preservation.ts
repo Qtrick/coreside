@@ -17,6 +17,9 @@ export type FocusSnapshot = {
   fieldId?: string | null;
   selectionStart?: number | null;
   selectionEnd?: number | null;
+  /** Contenteditable caret/selection as text offsets within the focused node. */
+  selectionAnchorOffset?: number | null;
+  selectionFocusOffset?: number | null;
 };
 
 export type ScrollSnapshot = Record<
@@ -50,7 +53,139 @@ function activeElementSnapshot(root: HTMLElement | null): FocusSnapshot {
     active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement
       ? active.selectionEnd
       : null;
-  return { componentId, fieldId, selectionStart, selectionEnd };
+  let selectionAnchorOffset: number | null = null;
+  let selectionFocusOffset: number | null = null;
+  const contentEditable =
+    active instanceof HTMLElement &&
+    (active.isContentEditable ||
+      active.getAttribute("contenteditable") === "true" ||
+      active.getAttribute("contenteditable") === "");
+  if (
+    contentEditable &&
+    !(active instanceof HTMLInputElement) &&
+    !(active instanceof HTMLTextAreaElement)
+  ) {
+    const sel = document.getSelection();
+    if (sel && sel.rangeCount > 0 && sel.anchorNode && active.contains(sel.anchorNode)) {
+      selectionAnchorOffset = textOffsetInRoot(active, sel.anchorNode, sel.anchorOffset);
+      selectionFocusOffset = textOffsetInRoot(active, sel.focusNode, sel.focusOffset);
+    }
+  }
+  return {
+    componentId,
+    fieldId,
+    selectionStart,
+    selectionEnd,
+    selectionAnchorOffset,
+    selectionFocusOffset,
+  };
+}
+
+function subtreeTextLength(node: Node): number {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent?.length ?? 0;
+  let total = 0;
+  for (let i = 0; i < node.childNodes.length; i++) {
+    total += subtreeTextLength(node.childNodes[i]!);
+  }
+  return total;
+}
+
+/** Map a DOM Selection point to a UTF-16 code-unit offset within `root`'s text. */
+function textOffsetInRoot(
+  root: Node,
+  node: Node | null,
+  offset: number,
+): number | null {
+  if (!node) return null;
+  if (node.nodeType === Node.TEXT_NODE) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let total = 0;
+    let current: Node | null = walker.nextNode();
+    while (current) {
+      if (current === node) {
+        return total + Math.max(0, Math.min(offset, current.textContent?.length ?? 0));
+      }
+      total += current.textContent?.length ?? 0;
+      current = walker.nextNode();
+    }
+    return null;
+  }
+  // Element caret: `offset` is a child index.
+  if (node !== root && !root.contains(node)) return null;
+  let total = 0;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let current: Node | null = walker.nextNode();
+  while (current) {
+    if (node.contains(current)) break;
+    if (node.compareDocumentPosition(current) & Node.DOCUMENT_POSITION_FOLLOWING) break;
+    total += current.textContent?.length ?? 0;
+    current = walker.nextNode();
+  }
+  const childLimit = Math.max(0, Math.min(offset, node.childNodes.length));
+  for (let i = 0; i < childLimit; i++) {
+    total += subtreeTextLength(node.childNodes[i]!);
+  }
+  return total;
+}
+
+function setContentEditableSelection(
+  root: HTMLElement,
+  anchorOffset: number,
+  focusOffset: number,
+): void {
+  const anchor = pointFromTextOffset(root, anchorOffset);
+  const focus = pointFromTextOffset(root, focusOffset);
+  if (!anchor || !focus) return;
+  const sel = document.getSelection();
+  if (!sel) return;
+  try {
+    // Handles forward and backward selections without Range ordering tricks.
+    sel.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
+  } catch {
+    const forward = anchorOffset <= focusOffset;
+    const start = forward ? anchor : focus;
+    const end = forward ? focus : anchor;
+    const range = document.createRange();
+    try {
+      range.setStart(start.node, start.offset);
+      range.setEnd(end.node, end.offset);
+    } catch {
+      return;
+    }
+    sel.removeAllRanges();
+    sel.addRange(range);
+    if (!forward) {
+      try {
+        sel.collapseToEnd();
+        sel.extend(start.node, start.offset);
+      } catch {
+        // leave forward range when extend is unavailable
+      }
+    }
+  }
+}
+
+function pointFromTextOffset(
+  root: Node,
+  offset: number,
+): { node: Node; offset: number } | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let remaining = Math.max(0, offset);
+  let current: Node | null = walker.nextNode();
+  let last: Node | null = null;
+  while (current) {
+    last = current;
+    const len = current.textContent?.length ?? 0;
+    if (remaining <= len) {
+      return { node: current, offset: remaining };
+    }
+    remaining -= len;
+    current = walker.nextNode();
+  }
+  if (last) {
+    return { node: last, offset: last.textContent?.length ?? 0 };
+  }
+  return { node: root, offset: 0 };
 }
 
 export function captureFocusSnapshot(root: HTMLElement | null): FocusSnapshot {
@@ -101,6 +236,20 @@ export function restoreFocusSnapshot(
     } catch {
       // Some input types do not support selection.
     }
+    return;
+  }
+  if (
+    (target.isContentEditable ||
+      target.getAttribute("contenteditable") === "true" ||
+      target.getAttribute("contenteditable") === "") &&
+    typeof snapshot.selectionAnchorOffset === "number" &&
+    typeof snapshot.selectionFocusOffset === "number"
+  ) {
+    setContentEditableSelection(
+      target,
+      snapshot.selectionAnchorOffset,
+      snapshot.selectionFocusOffset,
+    );
   }
 }
 

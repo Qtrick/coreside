@@ -44,9 +44,13 @@ vi.mock("@/lib/tauri", () => ({
   },
 }));
 
-vi.mock("@/components/tool-renderer/InteractiveStatusBar", () => ({
-  InteractiveStatusBar: () => null,
-}));
+vi.mock("@/lib/preservation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/preservation")>();
+  return {
+    ...actual,
+    restoreScrollSnapshot: vi.fn(actual.restoreScrollSnapshot),
+  };
+});
 
 // Mock ToolRenderer to simulate user actions and capture state props
 vi.mock("@/components/tool-renderer/ToolRenderer", () => ({
@@ -235,5 +239,87 @@ describe("InlineSurfaceCard", () => {
     }
     // Raw getSurfaceStateWithRevision must not be used as the interactive seed payload.
     expect(api.getSurfaceState).not.toHaveBeenCalled();
+  });
+
+  it("keeps latestSurfaceRef current so hydration seals the newest definition", async () => {
+    let resolveContinuity: ((value: never) => void) | null = null;
+    vi.mocked(api.getContinuity).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveContinuity = resolve as (value: never) => void;
+        }),
+    );
+    vi.mocked(api.getSurfaceStateWithRevision).mockResolvedValue({
+      state: { count: 1 },
+      stateRevision: 3,
+    });
+
+    const { rerender } = render(
+      <InlineSurfaceCard surface={sampleSurface} conversationId="conv-100" />,
+    );
+
+    // Mid-hydration: definition advances while continuity is still pending.
+    const updated: SurfaceRecord = {
+      ...sampleSurface,
+      currentRevision: 6,
+      definition: {
+        ...(sampleSurface.definition as object),
+        name: "Counter App v2",
+        components: [{ id: "c1", type: "text", props: { text: "updated" } }],
+      },
+    };
+    rerender(<InlineSurfaceCard surface={updated} conversationId="conv-100" />);
+
+    resolveContinuity!(null as never);
+
+    await waitFor(() => {
+      expect(screen.getByText("r6")).toBeDefined();
+    });
+    await waitFor(() => {
+      expect(api.getSurfaceStateWithRevision).toHaveBeenCalled();
+    });
+  });
+
+  it("fails closed when hydration throws instead of marking empty state as hydrated", async () => {
+    const preservation = await import("@/lib/preservation");
+    vi.mocked(preservation.restoreScrollSnapshot).mockImplementation(() => {
+      throw new Error("continuity restore exploded");
+    });
+    vi.mocked(api.getContinuity).mockResolvedValue({
+      id: "cont-1",
+      surfaceId: sampleSurface.id,
+      windowId: "main",
+      scroll: { root: { scrollTop: 10 } },
+      focus: {},
+      media: {},
+      suspensionState: "active",
+      updatedAt: "2026-09-29T00:00:00Z",
+    });
+    vi.mocked(api.getSurfaceStateWithRevision).mockResolvedValue({
+      state: { count: 0 },
+      stateRevision: 2,
+    });
+
+    render(<InlineSurfaceCard surface={sampleSurface} conversationId="conv-100" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeDefined();
+    });
+    expect(screen.getByRole("alert").textContent).toMatch(/continuity restore exploded/);
+    expect(api.interactiveView).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when surface state APIs both fail", async () => {
+    vi.mocked(api.getSurfaceStateWithRevision).mockRejectedValue(new Error("rev unavailable"));
+    vi.mocked(api.getSurfaceState).mockRejectedValue(new Error("state unavailable"));
+    vi.mocked(api.getContinuity).mockRejectedValue(new Error("no continuity"));
+
+    render(<InlineSurfaceCard surface={sampleSurface} conversationId="conv-100" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeDefined();
+    });
+    expect(screen.getByRole("alert").textContent).toMatch(/state unavailable|rev unavailable/);
+    expect(api.interactiveView).not.toHaveBeenCalled();
   });
 });

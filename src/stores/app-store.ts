@@ -318,6 +318,8 @@ let conversationSyncUnlisten: (() => void) | null = null;
 let conversationSyncConversationId: string | null = null;
 /** Per-conversation catch-up cursor for conversation_event_log. */
 const conversationEventCursor = new Map<string, number>();
+/** ponytail: one in-flight catch-up per conversation; ceiling = process-local. */
+const conversationCatchUpInFlight = new Map<string, Promise<void>>();
 
 type SyncListenerGet = () => {
   reloadActiveSurfaces: () => Promise<void>;
@@ -342,6 +344,7 @@ async function catchUpConversationEvents(
   await runConversationCatchUp({
     conversationId,
     memoryCursor: conversationEventCursor,
+    inFlight: conversationCatchUpInFlight,
     api,
     isActive: () => get().activeConversationId === conversationId,
     onTransactionApplied: () => get().reloadActiveSurfaces(),

@@ -29,25 +29,56 @@ pub fn enqueue(
     prompt: &Value,
     priority: i64,
 ) -> DbResult<QueueItem> {
-    let queued_count: i64 = db.conn().query_row(
-        "SELECT COUNT(*) FROM agent_request_queue
-         WHERE conversation_id = ?1 AND status IN ('queued', 'active')",
-        [conversation_id],
-        |r| r.get(0),
-    )?;
-    if queued_count as usize >= MAX_QUEUED_TURNS {
-        return Err(DbError::Invalid(format!(
-            "queue full: max {MAX_QUEUED_TURNS} turns per conversation"
-        )));
+    // BEGIN IMMEDIATE so concurrent connections cannot both observe count < max
+    // and then both insert (TOCTOU past MAX_QUEUED_TURNS). Nested callers use a
+    // savepoint under an already-open write transaction.
+    let nested = !db.conn().is_autocommit();
+    if nested {
+        db.conn().execute_batch("SAVEPOINT queue_enqueue")?;
+    } else {
+        db.conn().execute_batch("BEGIN IMMEDIATE")?;
     }
-    let id = format!("q-{}", Uuid::new_v4());
-    let now = now_rfc3339();
-    db.conn().execute(
-        "INSERT INTO agent_request_queue (id, conversation_id, priority, status, prompt_json, created_at)
-         VALUES (?1, ?2, ?3, 'queued', ?4, ?5)",
-        params![id, conversation_id, priority, prompt.to_string(), now],
-    )?;
-    get_item(db, &id)
+    let enqueued = (|| -> DbResult<QueueItem> {
+        let queued_count: i64 = db.conn().query_row(
+            "SELECT COUNT(*) FROM agent_request_queue
+             WHERE conversation_id = ?1 AND status IN ('queued', 'active')",
+            [conversation_id],
+            |r| r.get(0),
+        )?;
+        if queued_count as usize >= MAX_QUEUED_TURNS {
+            return Err(DbError::Invalid(format!(
+                "queue full: max {MAX_QUEUED_TURNS} turns per conversation"
+            )));
+        }
+        let id = format!("q-{}", Uuid::new_v4());
+        let now = now_rfc3339();
+        db.conn().execute(
+            "INSERT INTO agent_request_queue (id, conversation_id, priority, status, prompt_json, created_at)
+             VALUES (?1, ?2, ?3, 'queued', ?4, ?5)",
+            params![id, conversation_id, priority, prompt.to_string(), now],
+        )?;
+        get_item(db, &id)
+    })();
+    match enqueued {
+        Ok(item) => {
+            if nested {
+                db.conn().execute_batch("RELEASE queue_enqueue")?;
+            } else {
+                db.conn().execute_batch("COMMIT")?;
+            }
+            Ok(item)
+        }
+        Err(err) => {
+            if nested {
+                let _ = db
+                    .conn()
+                    .execute_batch("ROLLBACK TO queue_enqueue; RELEASE queue_enqueue");
+            } else {
+                let _ = db.conn().execute_batch("ROLLBACK");
+            }
+            Err(err)
+        }
+    }
 }
 
 pub fn get_item(db: &Database, id: &str) -> DbResult<QueueItem> {
@@ -288,6 +319,137 @@ mod tests {
     fn test_db() -> Database {
         let dir = tempdir().unwrap();
         Database::open_path(&dir.path().join("q.db")).unwrap()
+    }
+
+    #[test]
+    fn enqueue_respects_capacity_under_concurrent_writers() {
+        use crate::runtime_v2::limits::MAX_QUEUED_TURNS;
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("q-race.db");
+        let mut db = Database::open_path(&db_path).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "QueueRace", None).unwrap();
+        drop(db);
+
+        let conversation_id = conv.id.clone();
+        let path = db_path.clone();
+        let threads = MAX_QUEUED_TURNS + 8;
+        let mut handles = Vec::new();
+        for i in 0..threads {
+            let path = path.clone();
+            let cid = conversation_id.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut thread_db = Database::open_path(&path).expect("open");
+                enqueue(
+                    &mut thread_db,
+                    &cid,
+                    &json!({"content": format!("item-{i}")}),
+                    100,
+                )
+                .is_ok()
+            }));
+        }
+
+        let mut successes = 0usize;
+        for handle in handles {
+            if handle.join().expect("join") {
+                successes += 1;
+            }
+        }
+        assert_eq!(
+            successes, MAX_QUEUED_TURNS,
+            "exactly MAX_QUEUED_TURNS concurrent enqueues must succeed"
+        );
+
+        let db = Database::open_path(&db_path).unwrap();
+        let live: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM agent_request_queue
+                 WHERE conversation_id = ?1 AND status IN ('queued', 'active')",
+                [&conversation_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(live as usize, MAX_QUEUED_TURNS);
+    }
+
+    #[test]
+    fn enqueue_rejects_when_queue_is_full() {
+        use crate::runtime_v2::limits::MAX_QUEUED_TURNS;
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "QueueFull", None).unwrap();
+        for i in 0..MAX_QUEUED_TURNS {
+            enqueue(
+                &mut db,
+                &conv.id,
+                &json!({"content": format!("fill-{i}")}),
+                100,
+            )
+            .unwrap();
+        }
+        let err = enqueue(&mut db, &conv.id, &json!({"content": "overflow"}), 100).unwrap_err();
+        assert!(matches!(err, DbError::Invalid(_)));
+    }
+
+    #[test]
+    fn enqueue_nested_under_outer_transaction_rolls_back_with_outer() {
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "QueueNestedRollback", None).unwrap();
+        db.conn().execute_batch("BEGIN IMMEDIATE").unwrap();
+        let item = enqueue(
+            &mut db,
+            &conv.id,
+            &json!({"content": "nested-item"}),
+            100,
+        )
+        .unwrap();
+        let item_id = item.id.clone();
+        db.conn().execute_batch("ROLLBACK").unwrap();
+        assert!(
+            get_item(&db, &item_id).is_err(),
+            "nested enqueue must not survive outer ROLLBACK"
+        );
+    }
+
+    #[test]
+    fn enqueue_capacity_error_inside_outer_txn_does_not_poison_connection() {
+        use crate::runtime_v2::limits::MAX_QUEUED_TURNS;
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "QueueNestedPoison", None).unwrap();
+        for i in 0..MAX_QUEUED_TURNS {
+            enqueue(
+                &mut db,
+                &conv.id,
+                &json!({"content": format!("fill-{i}")}),
+                100,
+            )
+            .unwrap();
+        }
+
+        db.conn().execute_batch("BEGIN IMMEDIATE").unwrap();
+        db.conn()
+            .execute(
+                "UPDATE conversations SET title = 'still-committable' WHERE id = ?1",
+                [&conv.id],
+            )
+            .unwrap();
+        let err = enqueue(&mut db, &conv.id, &json!({"content": "overflow"}), 100).unwrap_err();
+        assert!(matches!(err, DbError::Invalid(_)));
+        db.conn()
+            .execute_batch("COMMIT")
+            .expect("capacity savepoint rollback must leave outer txn healthy");
+
+        let title: String = db
+            .conn()
+            .query_row(
+                "SELECT title FROM conversations WHERE id = ?1",
+                [&conv.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "still-committable");
     }
 
     #[test]

@@ -349,20 +349,52 @@ fn approval_context(approval: &ApprovalRequest) -> ActionRunContext {
 
 /// Consume an approved approval for a specific call. Returns `Ok(true)` for the
 /// single caller that wins the compare-and-set; every later attempt gets false.
+///
+/// Claim receipt + status update are one atomic transition: a failed update
+/// must not leave `consumed:<id>` claimed while the row stays `approved`.
 pub fn consume(db: &mut Database, id: &str, expected_call_hash: &str) -> DbResult<bool> {
     expire_stale(db)?;
-    let approval = get_approval(db, id)?;
-    if approval.status != "approved" || approval.call_hash != expected_call_hash {
-        return Ok(false);
+    db.conn().execute_batch("SAVEPOINT approval_consume")?;
+    let consumed = (|| -> DbResult<bool> {
+        let approval = get_approval(db, id)?;
+        if approval.status != "approved" || approval.call_hash != expected_call_hash {
+            return Ok(false);
+        }
+        if !claim(db, &format!("consumed:{id}"))? {
+            return Ok(false);
+        }
+        let n = db.conn().execute(
+            "UPDATE runtime_approvals SET status = 'consumed', consumed_at = ?2
+             WHERE id = ?1 AND status = 'approved' AND call_hash = ?3",
+            params![id, now_rfc3339(), expected_call_hash],
+        )?;
+        if n != 1 {
+            // Lost the row-level CAS after winning the claim receipt. Roll back via
+            // Err so the claim does not stick; mapped to Ok(false) below.
+            return Err(DbError::Invalid(
+                "approval consume cas conflict: approved row changed under claim".into(),
+            ));
+        }
+        Ok(true)
+    })();
+    match consumed {
+        Ok(result) => {
+            db.conn().execute_batch("RELEASE approval_consume")?;
+            Ok(result)
+        }
+        Err(err) => {
+            let _ = db
+                .conn()
+                .execute_batch("ROLLBACK TO approval_consume; RELEASE approval_consume");
+            // CAS lose must block the action without looking like storage failure
+            // (gateway maps Ok(false) → approval_invalid).
+            if matches!(&err, DbError::Invalid(msg) if msg.contains("cas conflict")) {
+                Ok(false)
+            } else {
+                Err(err)
+            }
+        }
     }
-    if !claim(db, &format!("consumed:{id}"))? {
-        return Ok(false);
-    }
-    db.conn().execute(
-        "UPDATE runtime_approvals SET status = 'consumed', consumed_at = ?2 WHERE id = ?1",
-        params![id, now_rfc3339()],
-    )?;
-    Ok(true)
 }
 
 /// Insert a receipt. `true` means this caller claimed it first.
@@ -525,6 +557,94 @@ mod tests {
         assert!(preview.chars().count() <= MAX_INPUT_PREVIEW_CHARS);
         let secret = input_preview(&json!({ "key": "AIzaSyA1234567890abcdefghijklmno" }));
         assert!(!secret.contains("AIzaSyA1234567890abcdefghijklmno"));
+    }
+
+    #[test]
+    fn consume_rolls_back_claim_when_status_update_aborts() {
+        let (mut db, _dir) = test_db();
+        let d = find_action("local_data.write").unwrap();
+        let a = create_pending(&mut db, &ctx(), d, &json!({"modelId": "m"}), None).unwrap();
+        decide(&mut db, &a.id, true, None, "user").unwrap();
+
+        // Force the status UPDATE to abort after the claim INSERT would succeed.
+        db.conn()
+            .execute_batch(
+                "CREATE TEMP TRIGGER abort_consume_update
+                 BEFORE UPDATE OF status ON runtime_approvals
+                 WHEN NEW.status = 'consumed'
+                 BEGIN
+                   SELECT RAISE(ABORT, 'forced consume failure');
+                 END;",
+            )
+            .unwrap();
+
+        let err = consume(&mut db, &a.id, &a.call_hash);
+        assert!(err.is_err(), "forced update abort must surface as Err");
+
+        // Approval must remain consumable — claim receipt must not outlive the row.
+        assert_eq!(get_approval(&db, &a.id).unwrap().status, "approved");
+        let claim_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM runtime_approval_claims WHERE id = ?1",
+                [format!("consumed:{}", a.id)],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(claim_count, 0, "failed consume must roll back claim");
+
+        db.conn()
+            .execute_batch("DROP TRIGGER abort_consume_update")
+            .unwrap();
+        assert!(consume(&mut db, &a.id, &a.call_hash).unwrap());
+        assert_eq!(get_approval(&db, &a.id).unwrap().status, "consumed");
+    }
+
+    #[test]
+    fn consume_cas_conflict_returns_false_and_keeps_approval_consumable() {
+        let (mut db, _dir) = test_db();
+        let d = find_action("local_data.write").unwrap();
+        let a = create_pending(&mut db, &ctx(), d, &json!({"modelId": "m"}), None).unwrap();
+        decide(&mut db, &a.id, true, None, "user").unwrap();
+
+        // Simulate a lost row-level CAS: claim would succeed, but the approved
+        // row is flipped under us so UPDATE matches 0 rows.
+        db.conn()
+            .execute_batch(
+                "CREATE TEMP TRIGGER steal_approved_row
+                 BEFORE INSERT ON runtime_approval_claims
+                 WHEN NEW.id LIKE 'consumed:%'
+                 BEGIN
+                   UPDATE runtime_approvals SET status = 'expired'
+                   WHERE status = 'approved';
+                 END;",
+            )
+            .unwrap();
+
+        assert!(
+            !consume(&mut db, &a.id, &a.call_hash).unwrap(),
+            "CAS lose must be Ok(false), not storage Err"
+        );
+        let claim_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM runtime_approval_claims WHERE id = ?1",
+                [format!("consumed:{}", a.id)],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(claim_count, 0, "CAS lose must roll back claim receipt");
+    }
+
+    #[test]
+    fn consume_rejects_after_descriptor_row_still_approved_hash_mismatch() {
+        let (mut db, _dir) = test_db();
+        let d = find_action("local_data.write").unwrap();
+        let a = create_pending(&mut db, &ctx(), d, &json!({"modelId": "m"}), None).unwrap();
+        decide(&mut db, &a.id, true, None, "user").unwrap();
+        assert!(!consume(&mut db, &a.id, "wrong-hash").unwrap());
+        assert_eq!(get_approval(&db, &a.id).unwrap().status, "approved");
+        assert!(consume(&mut db, &a.id, &a.call_hash).unwrap());
     }
 
     #[test]

@@ -795,6 +795,26 @@ pub struct ChatAttachmentInput {
     pub local_filename: Option<String>,
 }
 
+/// Maps provider/stream failures onto turn settlement.
+/// User cancel is recoverable (matches restart interrupt / interactive repair cancel).
+fn settlement_for_provider_error(
+    e: &crate::ai::AiError,
+) -> (&'static str, &'static str, crate::runtime_v2::TurnState) {
+    if matches!(e, crate::ai::AiError::Cancelled) {
+        (
+            "cancelled",
+            "User cancelled request",
+            crate::runtime_v2::TurnState::InterruptedRecoverable,
+        )
+    } else {
+        (
+            "provider_error",
+            e.code(),
+            crate::runtime_v2::TurnState::Failed,
+        )
+    }
+}
+
 fn attachment_ids_from_queue_prompt(
     prompt: &serde_json::Value,
 ) -> Result<Vec<String>, CommandError> {
@@ -2283,16 +2303,12 @@ async fn send_message_inner(
         Err(e) => {
             if has_turn_record {
                 let db = state.db.lock();
-                let (cat, msg) = if matches!(e, crate::ai::AiError::Cancelled) {
-                    ("cancelled", "User cancelled request")
-                } else {
-                    ("provider_error", e.code())
-                };
+                let (cat, msg, next_state) = settlement_for_provider_error(&e);
                 let _ = crate::runtime_v2::transition_turn(
                     &db,
                     &turn_id,
                     &attempt_id,
-                    crate::runtime_v2::TurnState::Failed,
+                    next_state,
                     crate::runtime_v2::TurnPatch {
                         error_category: Some(cat.into()),
                         error_message: Some(msg.into()),
@@ -2602,16 +2618,12 @@ async fn send_message_inner(
             Err(e) => {
                 if has_turn_record {
                     let db = state.db.lock();
-                    let (cat, msg) = if matches!(e, crate::ai::AiError::Cancelled) {
-                        ("cancelled", "User cancelled request")
-                    } else {
-                        ("provider_error", e.code())
-                    };
+                    let (cat, msg, next_state) = settlement_for_provider_error(&e);
                     let _ = crate::runtime_v2::transition_turn(
                         &db,
                         &turn_id,
                         &attempt_id,
-                        crate::runtime_v2::TurnState::Failed,
+                        next_state,
                         crate::runtime_v2::TurnPatch {
                             error_category: Some(cat.into()),
                             error_message: Some(msg.into()),
@@ -3741,6 +3753,42 @@ mod queue_attachment_tests {
         });
         let err = attachment_ids_from_queue_prompt(&prompt).unwrap_err();
         assert_eq!(err.code, "invalid");
+    }
+}
+
+#[cfg(test)]
+mod provider_settlement_tests {
+    use super::settlement_for_provider_error;
+    use crate::ai::AiError;
+    use crate::runtime_v2::TurnState;
+
+    #[test]
+    fn user_cancel_settles_as_interrupted_recoverable() {
+        let (cat, msg, state) = settlement_for_provider_error(&AiError::Cancelled);
+        assert_eq!(cat, "cancelled");
+        assert_eq!(msg, "User cancelled request");
+        assert_eq!(state, TurnState::InterruptedRecoverable);
+        assert_ne!(
+            state,
+            TurnState::Failed,
+            "user cancel must not terminal-fail the turn"
+        );
+    }
+
+    #[test]
+    fn non_cancel_provider_errors_settle_as_failed() {
+        let cases = [
+            AiError::Timeout,
+            AiError::Http("boom".into()),
+            AiError::Provider("upstream".into()),
+            AiError::Parse("bad json".into()),
+        ];
+        for err in cases {
+            let (cat, msg, state) = settlement_for_provider_error(&err);
+            assert_eq!(cat, "provider_error");
+            assert_eq!(msg, err.code());
+            assert_eq!(state, TurnState::Failed);
+        }
     }
 }
 

@@ -141,6 +141,11 @@ pub fn evaluate_target_readiness(db: &Database, op: &AppOperation) -> TargetRead
         }
         match super::surfaces::get_surface(db, sid) {
             Ok(surface) => {
+                if surface.archived || surface.lifecycle_state == "archived" {
+                    return TargetReadiness::Rejected(format!(
+                        "target surface {sid} is archived and can no longer receive patches"
+                    ));
+                }
                 if let Some(base_rev) = op.base_revision {
                     if surface.current_revision < base_rev {
                         return TargetReadiness::Deferred {
@@ -1801,6 +1806,95 @@ mod tests {
         assert_eq!(
             count, 0,
             "no scheduler items may be queued when dependencies are invalid"
+        );
+    }
+
+    #[test]
+    fn evaluate_target_readiness_rejects_archived_surface() {
+        let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "Arch", None)
+                .unwrap();
+        let surface = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Archived Target",
+            &serde_json::json!({
+                "id": "tool-arch",
+                "name": "Archived Target",
+                "layout": { "type": "single-column" },
+                "components": []
+            }),
+            &[],
+        )
+        .unwrap();
+        crate::runtime_v2::surfaces::archive_surface(&mut db, &surface.id).unwrap();
+
+        let mut op = simple_op("op-arch", vec![]);
+        op.target.surface_id = Some(surface.id.clone());
+        let readiness = evaluate_target_readiness(&db, &op);
+        assert!(
+            matches!(readiness, TargetReadiness::Rejected(ref msg) if msg.contains("archived")),
+            "archived target must reject, got {readiness:?}"
+        );
+    }
+
+    #[test]
+    fn schedule_patches_rejects_archived_target_without_queueing() {
+        let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "ArchSched", None)
+                .unwrap();
+        let surface = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Archived Schedule Target",
+            &serde_json::json!({
+                "id": "tool-arch-sched",
+                "name": "Archived Schedule Target",
+                "layout": { "type": "single-column" },
+                "components": []
+            }),
+            &[],
+        )
+        .unwrap();
+        crate::runtime_v2::surfaces::archive_surface(&mut db, &surface.id).unwrap();
+
+        let mut op = simple_op("op-arch-sched", vec![]);
+        op.target.surface_id = Some(surface.id.clone());
+        let req = ScheduleRequest {
+            conversation_id: Some(conv.id.clone()),
+            turn_id: Some("turn-arch-sched".into()),
+            surface_id: Some(surface.id.clone()),
+            priority: PatchPriority::ApprovedPersistentChange,
+            operations: vec![op],
+            source_type: "user".into(),
+            from_agent: false,
+            model: None,
+            provider: None,
+        };
+
+        let err = schedule_patches(&mut db, &req).unwrap_err();
+        assert!(
+            matches!(err, crate::db::DbError::Invalid(ref msg) if msg.contains("archived")),
+            "schedule must reject archived target, got {err:?}"
+        );
+
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM patch_scheduler_items WHERE turn_id = 'turn-arch-sched'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "archived rejection must not leave scheduler rows queued"
         );
     }
 }

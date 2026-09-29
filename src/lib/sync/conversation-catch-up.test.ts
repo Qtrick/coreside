@@ -375,6 +375,185 @@ describe("catchUpConversationEvents", () => {
     expect(store.durable.get("c-apply-fail")).toBe(0);
   });
 
+  it("overlapping catch-up leaves cursor unmoved when both hit failed reload", async () => {
+    const store: Store = {
+      events: new Map([
+        [
+          "c-overlap-fail",
+          [
+            { sequence: 1, eventType: "message.created" },
+            { sequence: 2, eventType: "surface.transaction_applied" },
+            { sequence: 3, eventType: "message.created" },
+          ],
+        ],
+      ]),
+      durable: new Map([["c-overlap-fail", 0]]),
+    };
+    const memoryCursor = new Map<string, number>();
+    let releaseFirstReload: (() => void) | null = null;
+    const firstReloadGate = new Promise<void>((resolve) => {
+      releaseFirstReload = resolve;
+    });
+    let firstEnteredReload = false;
+    const advances: number[] = [];
+
+    const first = catchUpConversationEvents({
+      conversationId: "c-overlap-fail",
+      memoryCursor,
+      api: makeApi(store, {
+        onAdvance: (_id, seq) => advances.push(seq),
+      }),
+      isActive: () => true,
+      onTransactionApplied: async () => {
+        firstEnteredReload = true;
+        await firstReloadGate;
+        throw new Error("first reload failed");
+      },
+      yieldBetweenPages: noYield,
+    });
+
+    await vi.waitFor(() => {
+      expect(firstEnteredReload).toBe(true);
+    });
+    expect(memoryCursor.get("c-overlap-fail")).toBeUndefined();
+    expect(store.durable.get("c-overlap-fail")).toBe(0);
+
+    // Overlapping catch-up while the first is still mid-reload also fails closed.
+    await catchUpConversationEvents({
+      conversationId: "c-overlap-fail",
+      memoryCursor,
+      api: makeApi(store, {
+        onAdvance: (_id, seq) => advances.push(seq),
+      }),
+      isActive: () => true,
+      onTransactionApplied: () => {
+        throw new Error("second reload failed");
+      },
+      yieldBetweenPages: noYield,
+    });
+
+    expect(advances).toEqual([]);
+    expect(memoryCursor.get("c-overlap-fail")).toBeUndefined();
+    expect(store.durable.get("c-overlap-fail")).toBe(0);
+
+    releaseFirstReload!();
+    await first;
+
+    expect(advances).toEqual([]);
+    expect(memoryCursor.get("c-overlap-fail")).toBeUndefined();
+    expect(store.durable.get("c-overlap-fail")).toBe(0);
+  });
+
+  it("overlapping catch-up resumes from shared watermark without regressing", async () => {
+    const total = 400;
+    const store: Store = {
+      events: new Map(),
+      durable: new Map([["c-overlap", 0]]),
+    };
+    seedEvents(store, "c-overlap", total);
+    const memoryCursor = new Map<string, number>();
+    let releaseYield: (() => void) | null = null;
+    const yieldGate = new Promise<void>((resolve) => {
+      releaseYield = resolve;
+    });
+    let yields = 0;
+
+    const first = catchUpConversationEvents({
+      conversationId: "c-overlap",
+      memoryCursor,
+      api: makeApi(store),
+      isActive: () => true,
+      onTransactionApplied: () => {},
+      pageLimit: 200,
+      yieldBetweenPages: async () => {
+        yields += 1;
+        if (yields === 1) {
+          await yieldGate;
+        }
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(memoryCursor.get("c-overlap")).toBe(200);
+    });
+    expect(store.durable.get("c-overlap")).toBe(200);
+
+    await catchUpConversationEvents({
+      conversationId: "c-overlap",
+      memoryCursor,
+      api: makeApi(store),
+      isActive: () => true,
+      onTransactionApplied: () => {},
+      pageLimit: 200,
+      yieldBetweenPages: noYield,
+    });
+
+    expect(memoryCursor.get("c-overlap")).toBe(total);
+    expect(store.durable.get("c-overlap")).toBe(total);
+
+    releaseYield!();
+    await first;
+
+    expect(memoryCursor.get("c-overlap")).toBe(total);
+    expect(store.durable.get("c-overlap")).toBe(total);
+  });
+
+  it("inFlight single-flight coalesces concurrent catch-ups into one run", async () => {
+    const store: Store = {
+      events: new Map(),
+      durable: new Map([["c-sf", 0]]),
+    };
+    seedEvents(store, "c-sf", 50, {
+      eventType: "surface.transaction_applied",
+    });
+    const memoryCursor = new Map<string, number>();
+    const inFlight = new Map<string, Promise<void>>();
+    let releaseReload: (() => void) | null = null;
+    const reloadGate = new Promise<void>((resolve) => {
+      releaseReload = resolve;
+    });
+    let reloadCalls = 0;
+    let fetchCalls = 0;
+
+    const api = makeApi(store);
+    const wrappedApi: ConversationCatchUpApi = {
+      ...api,
+      async getConversationEvents(args) {
+        fetchCalls += 1;
+        return api.getConversationEvents(args);
+      },
+    };
+
+    const shared = {
+      conversationId: "c-sf",
+      memoryCursor,
+      inFlight,
+      api: wrappedApi,
+      isActive: () => true,
+      onTransactionApplied: async () => {
+        reloadCalls += 1;
+        await reloadGate;
+      },
+      yieldBetweenPages: noYield,
+    };
+
+    const a = catchUpConversationEvents(shared);
+    await vi.waitFor(() => {
+      expect(reloadCalls).toBe(1);
+    });
+    const b = catchUpConversationEvents(shared);
+    expect(b).toBe(a);
+    expect(reloadCalls).toBe(1);
+    expect(fetchCalls).toBe(1);
+
+    releaseReload!();
+    await Promise.all([a, b]);
+
+    expect(reloadCalls).toBe(1);
+    expect(memoryCursor.get("c-sf")).toBe(50);
+    expect(inFlight.size).toBe(0);
+  });
+
   it("keeps forged/wrong conversation cursors isolated", async () => {
     const store: Store = {
       events: new Map(),
