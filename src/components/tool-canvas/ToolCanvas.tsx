@@ -18,6 +18,7 @@ import {
 } from "@/lib/preservation";
 import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
 import { classifyToolHeaderDensity } from "@/lib/layout-mode";
+import { persistenceScheduler } from "@/lib/persistence-scheduler";
 import { surfaceIdForTool } from "@/lib/surface-ops";
 import type { ToolDefinition } from "@/types/tool";
 import type { SurfaceRecord } from "@/types/runtime-v2";
@@ -168,6 +169,7 @@ export function ToolCanvas() {
   );
 
   const activeToolId = activeTool?.id;
+  const activeToolVersion = activeTool?.version ?? null;
 
   useEffect(() => {
     if (!activeToolId) {
@@ -182,6 +184,7 @@ export function ToolCanvas() {
     // Previously we called getSurface() + getSurfaceState() and used surf.currentRevision
     // as the OCC guard — that was WRONG because currentRevision tracks the definition
     // revision, not the state revision. They are separate monotonic counters.
+    // Also re-fetch when activeTool.version changes so agent Sync patches paint.
     void Promise.all([
       api.getSurface(sid).catch(() => null),
       api.getSurfaceStateWithRevision(sid).catch(() => null),
@@ -193,6 +196,9 @@ export function ToolCanvas() {
         if (hasInteractiveDefinition(surf.definition)) {
           setCanonicalState({});
         } else {
+          // Canonical = server state. Live typing wins via liveState merge
+          // ({ ...canonicalState, ...toolState }); selectTool already reconciled
+          // dirty overlays for Sync reloads with resetKeys awareness.
           setCanonicalState(stWithRev?.state ?? {});
         }
         setStateRevision(stWithRev?.stateRevision ?? 0);
@@ -205,10 +211,11 @@ export function ToolCanvas() {
     return () => {
       cancelled = true;
     };
-  }, [activeToolId]);
+  }, [activeToolId, activeToolVersion]);
 
   const interactiveRevisionRef = useRef(stateRevision);
   interactiveRevisionRef.current = stateRevision;
+  const interactionLockRef = useRef(false);
   const isInteractive = hasInteractiveDefinition(canonicalSurface?.definition);
   const adoptInteractiveState = useCallback(
     (update: (current: Record<string, unknown>) => Record<string, unknown>) =>
@@ -356,34 +363,66 @@ export function ToolCanvas() {
   }, [activeTool]);
 
   const onSubmitToAgent = useCallback(
-    (payload: {
+    async (payload: {
       toolId: string;
       eventName: string;
       componentId?: string;
       values: Record<string, unknown>;
       silent?: boolean;
     }) => {
-      const summary = `Tool form submitted (${payload.eventName})`;
-      const isSilent = Boolean(
-        payload.silent ||
-        payload.eventName.startsWith("game.") ||
-        payload.eventName.endsWith(".silent") ||
-        payload.values.silent === true
-      );
-      // Single authority: send_message seals StructuredUserInput in Rust.
-      // Do not also appendContextLedger here — that created a second ledger-* id
-      // which was skipped on this turn then reinjected on the next ordinary turn.
-      void sendMessage(summary, [], [], {
-        formId: payload.toolId,
-        applicationId: payload.toolId,
-        eventName: payload.eventName,
-        fields: {
-          ...payload.values,
-          ...(isSilent ? { silent: true } : {}),
-        },
-      });
+      if (interactionLockRef.current) return;
+      const toolId = activeTool?.id;
+      if (!toolId) return;
+      interactionLockRef.current = true;
+      try {
+        const summary = `Tool form submitted (${payload.eventName})`;
+        const isSilent = Boolean(
+          payload.silent ||
+            payload.eventName.startsWith("game.") ||
+            payload.eventName.endsWith(".silent") ||
+            payload.values.silent === true,
+        );
+        const sid = surfaceId ?? surfaceIdForTool(toolId);
+        // Flush scheduled ToolCanvas state with OCC before sealing the envelope.
+        await persistenceScheduler.flush(toolId, async (tid, s) => {
+          await api.saveToolState(tid, s);
+          const newRev = await api.saveSurfaceState(
+            sid,
+            s,
+            interactiveRevisionRef.current,
+          );
+          if (typeof newRev === "number") {
+            interactiveRevisionRef.current = newRev;
+            setStateRevision(newRev);
+          }
+        });
+        // Single authority: send_message seals StructuredUserInput in Rust.
+        await sendMessage(summary, [], [], {
+          formId: payload.componentId ?? toolId,
+          applicationId: applicationId ?? toolId,
+          surfaceId: sid,
+          surfaceRevision:
+            canonicalSurface?.currentRevision ?? activeTool.version ?? null,
+          stateRevision: interactiveRevisionRef.current,
+          componentId: payload.componentId ?? null,
+          idempotencyKey: `idem-${crypto.randomUUID()}`,
+          eventName: payload.eventName,
+          fields: {
+            ...payload.values,
+            ...(isSilent ? { silent: true } : {}),
+          },
+        });
+      } finally {
+        interactionLockRef.current = false;
+      }
     },
-    [sendMessage],
+    [
+      activeTool,
+      applicationId,
+      canonicalSurface?.currentRevision,
+      sendMessage,
+      surfaceId,
+    ],
   );
 
   const onPendingApproval = useCallback(
@@ -416,7 +455,8 @@ export function ToolCanvas() {
   const liveState =
     previewOverlay?.state ??
     (canonicalSurface && canonicalState && Object.keys(canonicalState).length > 0
-      ? { ...toolState, ...canonicalState }
+      ? // Store/toolState last so Sync dirty reconciliation and live typing win.
+        { ...canonicalState, ...toolState }
       : toolState);
   const inspectingReplay =
     !isPreviewPaint && isInteractive && interactive.replayState != null;

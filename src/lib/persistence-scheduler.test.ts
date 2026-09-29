@@ -1,9 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PersistenceScheduler } from "./persistence-scheduler";
+import { reconcileDirtyOverCanonical } from "./preservation";
 
 describe("PersistenceScheduler", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("batches rapid typing into a single debounced persistence call", async () => {
@@ -163,6 +168,52 @@ describe("PersistenceScheduler", () => {
     // 4. onRollback MUST NOT be called because hydrationEpoch changed!
     expect(onRollback).not.toHaveBeenCalled();
     expect(scheduler.getCurrentState("tool-1")).toEqual({ version: "brand-new" });
+  });
+
+  it("exposes unpersisted dirty typing for same-tool Sync reconcile", async () => {
+    const scheduler = new PersistenceScheduler(500);
+    const saveFn = vi.fn().mockResolvedValue(undefined);
+
+    scheduler.initToolState("tool-notes", { title: "server", filter: "all" });
+    // User is mid-keystroke; debounce has not flushed yet.
+    void scheduler.schedule("tool-notes", { title: "user-typing", filter: "all" }, saveFn);
+
+    // Only keys that diverged from last persisted state are dirty.
+    const dirty = scheduler.peekDirtyState("tool-notes");
+    expect(dirty).toEqual({ title: "user-typing" });
+    expect(dirty).not.toHaveProperty("filter");
+
+    // Agent Sync reloads canonical disk/surface state that still has the old title.
+    const canonicalFromServer = { title: "server", filter: "all", count: 2 };
+    const reconciled = reconcileDirtyOverCanonical(canonicalFromServer, dirty!);
+    expect(reconciled).toEqual({
+      title: "user-typing",
+      filter: "all",
+      count: 2,
+    });
+
+    await scheduler.flush("tool-notes", saveFn);
+    expect(scheduler.peekDirtyState("tool-notes")).toBeNull();
+  });
+
+  it("does not report dirty overlay when current matches last persisted values", async () => {
+    const scheduler = new PersistenceScheduler(50);
+    const saveFn = vi.fn().mockResolvedValue(undefined);
+
+    scheduler.initToolState("tool-clean", { title: "saved" });
+    expect(scheduler.peekDirtyState("tool-clean")).toBeNull();
+
+    // Schedule identical values with a gen bump — no key diverged.
+    void scheduler.schedule("tool-clean", { title: "saved" }, saveFn);
+    expect(scheduler.peekDirtyState("tool-clean")).toBeNull();
+
+    await scheduler.schedule(
+      "tool-clean",
+      { title: "saved-again" },
+      saveFn,
+      { immediate: true },
+    );
+    expect(scheduler.peekDirtyState("tool-clean")).toBeNull();
   });
 });
 

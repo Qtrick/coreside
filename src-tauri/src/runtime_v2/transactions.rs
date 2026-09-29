@@ -6,10 +6,10 @@ use uuid::Uuid;
 
 use super::operations::{validate_operations, AppOperation, Audience};
 use super::packs::{validate_definition_components, validate_tool_components_for_packs};
-use super::patch::{apply_component_op, find_component, find_component_mut};
 use super::preservation::{
-    apply_preservation_on_replace, invalidate_component_live_state, resolve_policy_for_apply,
-    upsert_preservation,
+    apply_preservation_on_replace, clear_surface_state_keys, component_value_key,
+    invalidate_component_live_state, resolve_policy_for_apply, should_preserve,
+    upsert_preservation, PreservationPolicy,
 };
 use super::surfaces::{
     archive_surface, create_inline_surface, delete_surface, get_surface, restore_surface,
@@ -567,9 +567,55 @@ fn apply_one(
                     Some(&current_state),
                     false,
                 )?;
+                // Preserve compatible component live props across full definition swaps.
+                let mut candidate_doc = candidate_doc;
+                if let Some(ref prior) = original_doc {
+                    apply_definition_preservation(
+                        db,
+                        sid,
+                        prior,
+                        &mut candidate_doc,
+                        &op.payload,
+                    )?;
+                }
                 doc = candidate_doc;
-            } else {
+            } else if op.op_type == "component.replace" {
+                apply_component_replace_with_preservation(db, sid, &mut doc, op)?;
+                let _notes = doc.validate_and_repair();
+                super::software_document::admit_software_document_with_state(
+                    original_doc.as_ref(),
+                    &doc,
+                    &surface.capability_packs,
+                    Some(&current_state),
+                    false,
+                )?;
+            } else if op.op_type == "component.remove" {
+                let cid = op
+                    .target
+                    .component_id
+                    .as_deref()
+                    .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                    .ok_or_else(|| "componentId required".to_string())?;
+                let old = doc.find_component(cid).cloned();
+                // Component is gone — live state for its identity/valueKey must drop.
+                let vk = old.as_ref().and_then(component_value_key);
+                invalidate_component_live_state(db, sid, cid, vk).map_err(|e| e.to_string())?;
                 doc.apply_operation(op)?;
+                let _notes = doc.validate_and_repair();
+                super::software_document::admit_software_document_with_state(
+                    original_doc.as_ref(),
+                    &doc,
+                    &surface.capability_packs,
+                    Some(&current_state),
+                    false,
+                )?;
+            } else {
+                // update_props / insert / move / visibility / actions / children
+                if op.op_type == "component.update_props" {
+                    maybe_preserve_or_reset_on_update_props(db, sid, &mut doc, op)?;
+                } else {
+                    doc.apply_operation(op)?;
+                }
                 let _notes = doc.validate_and_repair();
                 super::software_document::admit_software_document_with_state(
                     original_doc.as_ref(),
@@ -1328,17 +1374,25 @@ fn apply_one(
             } else {
                 (None, txn.conversation_id.clone(), txn.project_id.clone())
             };
+            // application_id is NOT tool_id. Only set when a manifest exists for that id.
+            let auth_application_id = auth_tool_id.as_ref().and_then(|tid| {
+                if crate::application_kernel::manifest::get_manifest(db, tid).is_ok() {
+                    Some(tid.clone())
+                } else {
+                    None
+                }
+            });
             let source_ref = super::events::EventRef {
                 surface_id: if src_surface_id.is_empty() {
                     None
                 } else {
                     Some(src_surface_id.to_string())
                 },
-                tool_id: auth_tool_id.clone(),
+                tool_id: auth_tool_id,
                 conversation_id: auth_conv_id,
                 project_id: auth_proj_id,
                 component_id: op.target.component_id.clone(),
-                application_id: auth_tool_id,
+                application_id: auth_application_id,
             };
             let ev = super::events::SurfaceEvent {
                 id: format!("evt-{}", Uuid::new_v4()),
@@ -1588,6 +1642,191 @@ fn prop_preservation_key(comp: &ToolComponent) -> Option<&str> {
         })
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
+}
+
+/// Authoritative `component.replace` with dimension-aware preservation + OCC invalidation.
+fn apply_component_replace_with_preservation(
+    db: &mut Database,
+    surface_id: &str,
+    doc: &mut super::software_document::SoftwareDocument,
+    op: &AppOperation,
+) -> Result<(), String> {
+    let cid = op
+        .target
+        .component_id
+        .as_deref()
+        .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+        .ok_or_else(|| "componentId required".to_string())?;
+    let old = doc
+        .find_component(cid)
+        .cloned()
+        .ok_or_else(|| format!("component '{cid}' not found"))?;
+    let mut new_comp: ToolComponent = serde_json::from_value(
+        op.payload
+            .get("component")
+            .cloned()
+            .unwrap_or_else(|| op.payload.clone()),
+    )
+    .map_err(|e| format!("invalid component payload: {e}"))?;
+    // Stable identity: replace keeps the targeted component id.
+    new_comp.id = cid.to_string();
+
+    let policy = resolve_policy_for_apply(db, surface_id, Some(cid), &op.payload);
+    let preserved = apply_preservation_on_replace(&old, &mut new_comp, policy);
+    let old_vk = component_value_key(&old).map(|s| s.to_string());
+    let new_vk = component_value_key(&new_comp).map(|s| s.to_string());
+    let incoming_key = prop_preservation_key(&new_comp);
+    let stored_key = prop_preservation_key(&old);
+    let compatible = old.component_type == new_comp.component_type;
+
+    doc.replace_component(cid, new_comp.clone())?;
+
+    let _ = upsert_preservation(
+        db,
+        surface_id,
+        cid,
+        policy,
+        incoming_key.or(stored_key),
+        &new_comp.component_type,
+        None,
+    );
+
+    let must_reset = !preserved
+        || !should_preserve(policy, incoming_key, stored_key, compatible)
+        || matches!(
+            policy,
+            PreservationPolicy::Replace | PreservationPolicy::ResetExplicitly
+        );
+    if must_reset {
+        invalidate_component_live_state(db, surface_id, cid, old_vk.as_deref())
+            .map_err(|e| e.to_string())?;
+    } else if old_vk.as_deref() != new_vk.as_deref() {
+        // Continuity kept, but valueKey renamed — drop the orphaned binding only.
+        if let Some(ref ovk) = old_vk {
+            clear_surface_state_keys(db, surface_id, &[ovk.as_str()]).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// `component.update_props`: honor reset/replace policies; otherwise leave state alone.
+fn maybe_preserve_or_reset_on_update_props(
+    db: &mut Database,
+    surface_id: &str,
+    doc: &mut super::software_document::SoftwareDocument,
+    op: &AppOperation,
+) -> Result<(), String> {
+    let cid = op
+        .target
+        .component_id
+        .as_deref()
+        .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+        .ok_or_else(|| "componentId required".to_string())?;
+    let old = doc.find_component(cid).cloned();
+    let old_vk = old.as_ref().and_then(component_value_key).map(|s| s.to_string());
+    let policy = resolve_policy_for_apply(db, surface_id, Some(cid), &op.payload);
+    if matches!(
+        policy,
+        PreservationPolicy::Replace | PreservationPolicy::ResetExplicitly
+    ) {
+        invalidate_component_live_state(db, surface_id, cid, old_vk.as_deref())
+            .map_err(|e| e.to_string())?;
+    }
+    doc.apply_operation(op)?;
+    if let Some(comp) = doc.find_component(cid) {
+        let new_vk = component_value_key(comp).map(|s| s.to_string());
+        // valueKey rename under a preserving update_props must not leave an orphan binding.
+        if !matches!(
+            policy,
+            PreservationPolicy::Replace | PreservationPolicy::ResetExplicitly
+        ) && old_vk.as_deref() != new_vk.as_deref()
+        {
+            if let Some(ref ovk) = old_vk {
+                clear_surface_state_keys(db, surface_id, &[ovk.as_str()])
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        let _ = upsert_preservation(
+            db,
+            surface_id,
+            cid,
+            policy,
+            prop_preservation_key(comp),
+            &comp.component_type,
+            None,
+        );
+    }
+    Ok(())
+}
+
+/// Full definition swap: preserve prop-level live dimensions for matching component ids.
+fn apply_definition_preservation(
+    db: &mut Database,
+    surface_id: &str,
+    prior: &super::software_document::SoftwareDocument,
+    next: &mut super::software_document::SoftwareDocument,
+    payload: &Value,
+) -> Result<(), String> {
+    let prior_flat = prior.flatten_components();
+    let next_ids: std::collections::HashSet<String> = next
+        .flatten_components()
+        .into_iter()
+        .map(|c| c.id)
+        .collect();
+
+    for old in &prior_flat {
+        if !next_ids.contains(&old.id) {
+            invalidate_component_live_state(
+                db,
+                surface_id,
+                &old.id,
+                component_value_key(old),
+            )
+            .map_err(|e| e.to_string())?;
+            continue;
+        }
+        let mut new_comp = next
+            .find_component(&old.id)
+            .cloned()
+            .ok_or_else(|| format!("component '{}' missing after flatten", old.id))?;
+        let policy = resolve_policy_for_apply(db, surface_id, Some(&old.id), payload);
+        let preserved = apply_preservation_on_replace(old, &mut new_comp, policy);
+        let incoming_key = prop_preservation_key(&new_comp);
+        let stored_key = prop_preservation_key(old);
+        let compatible = old.component_type == new_comp.component_type;
+        let _ = upsert_preservation(
+            db,
+            surface_id,
+            &old.id,
+            policy,
+            incoming_key.or(stored_key),
+            &new_comp.component_type,
+            None,
+        );
+        let must_reset = !preserved
+            || matches!(
+                policy,
+                PreservationPolicy::Replace | PreservationPolicy::ResetExplicitly
+            )
+            || !should_preserve(policy, incoming_key, stored_key, compatible);
+        let old_vk = component_value_key(old).map(|s| s.to_string());
+        let new_vk = component_value_key(&new_comp).map(|s| s.to_string());
+        if must_reset {
+            invalidate_component_live_state(db, surface_id, &old.id, old_vk.as_deref())
+                .map_err(|e| e.to_string())?;
+        } else {
+            if old_vk.as_deref() != new_vk.as_deref() {
+                if let Some(ref ovk) = old_vk {
+                    clear_surface_state_keys(db, surface_id, &[ovk.as_str()])
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            if let Some(comp) = next.find_component_mut(&old.id) {
+                *comp = new_comp;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -2752,6 +2991,452 @@ mod tests {
                 .any(|c| c.contains("Forbidden") || c.contains("cross-chat violation")),
             "cross-conversation subscription must fail with conflict, got {:?}",
             res.conflicts
+        );
+    }
+
+    /// Authoritative path: component.replace must preserve user-input props via apply_transaction.
+    #[test]
+    fn component_replace_preserves_user_input_through_apply_transaction() {
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "PresTxn", None).unwrap();
+        let def = json!({
+            "id": "task-tracker",
+            "name": "Task Tracker",
+            "layout": "stack",
+            "components": [{
+                "id": "title-input",
+                "type": "textInput",
+                "valueKey": "taskTitle",
+                "props": {
+                    "label": "Title",
+                    "value": "user-typing",
+                    "preservationKey": "focus:taskTitle",
+                    "preservationPolicy": "preserve_user_input"
+                }
+            }]
+        });
+        let surface =
+            create_inline_surface(&mut db, &conv.id, None, None, "Tracker", &def, &[]).unwrap();
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "replace_label",
+            &[op(
+                "component.replace",
+                Some(&surface.id),
+                json!({
+                    "componentId": "title-input",
+                    "preservationPolicy": "preserve_user_input",
+                    "component": {
+                        "id": "title-input",
+                        "type": "textInput",
+                        "valueKey": "taskTitle",
+                        "props": {
+                            "label": "Task title",
+                            "preservationKey": "focus:taskTitle"
+                        }
+                    }
+                }),
+            )],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "applied", "conflicts: {:?}", res.conflicts);
+
+        let surf = get_surface(&db, &surface.id).unwrap();
+        let doc = crate::runtime_v2::SoftwareDocument::from_value(&surf.definition).unwrap();
+        let comp = doc.find_component("title-input").expect("component survives");
+        assert_eq!(
+            comp.props.as_ref().and_then(|p| p.get("value")),
+            Some(&json!("user-typing")),
+            "live value must survive replace through apply_transaction"
+        );
+        assert_eq!(
+            comp.props.as_ref().and_then(|p| p.get("label")),
+            Some(&json!("Task title")),
+            "agent label change must apply"
+        );
+
+        // Reset policy must drop the live value.
+        let reset_txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "reset_input",
+            &[op(
+                "component.replace",
+                Some(&surface.id),
+                json!({
+                    "componentId": "title-input",
+                    "preservationPolicy": "reset_explicitly",
+                    "component": {
+                        "id": "title-input",
+                        "type": "textInput",
+                        "valueKey": "taskTitle",
+                        "props": { "label": "Title", "value": "" }
+                    }
+                }),
+            )],
+            false,
+        )
+        .unwrap();
+        let reset_res = apply_transaction(&mut db, &reset_txn.id).unwrap();
+        assert_eq!(reset_res.transaction.status, "applied");
+        let surf2 = get_surface(&db, &surface.id).unwrap();
+        let doc2 = crate::runtime_v2::SoftwareDocument::from_value(&surf2.definition).unwrap();
+        let comp2 = doc2.find_component("title-input").unwrap();
+        assert_eq!(
+            comp2.props.as_ref().and_then(|p| p.get("value")),
+            Some(&json!("")),
+            "reset_explicitly must not keep prior value"
+        );
+    }
+
+    #[test]
+    fn preserve_focus_policy_does_not_merge_value_on_replace() {
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "PresDim", None).unwrap();
+        let def = json!({
+            "id": "d",
+            "name": "Dim",
+            "layout": "stack",
+            "components": [{
+                "id": "field",
+                "type": "textInput",
+                "props": {
+                    "value": "typed",
+                    "scrollTop": 99,
+                    "label": "Old"
+                }
+            }]
+        });
+        let surface =
+            create_inline_surface(&mut db, &conv.id, None, None, "Dim", &def, &[]).unwrap();
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "focus_only",
+            &[op(
+                "component.replace",
+                Some(&surface.id),
+                json!({
+                    "componentId": "field",
+                    "preservationPolicy": "preserve_focus",
+                    "component": {
+                        "id": "field",
+                        "type": "textInput",
+                        "props": { "label": "New" }
+                    }
+                }),
+            )],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "applied");
+        let surf = get_surface(&db, &surface.id).unwrap();
+        let doc = crate::runtime_v2::SoftwareDocument::from_value(&surf.definition).unwrap();
+        let props = doc.find_component("field").unwrap().props.as_ref().unwrap();
+        assert!(props.get("value").is_none(), "preserve_focus must not copy value");
+        assert!(props.get("scrollTop").is_none(), "preserve_focus must not copy scroll");
+        assert_eq!(props.get("label"), Some(&json!("New")));
+    }
+
+    /// Authoritative path: removing a bound input must drop its valueKey from surface state.
+    #[test]
+    fn component_remove_clears_value_key_state_through_apply_transaction() {
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "RemVk", None).unwrap();
+        let def = json!({
+            "id": "form",
+            "name": "Form",
+            "layout": "stack",
+            "components": [
+                {
+                    "id": "title-input",
+                    "type": "textInput",
+                    "valueKey": "taskTitle",
+                    "props": { "label": "Task title" }
+                },
+                {
+                    "id": "keep-input",
+                    "type": "textInput",
+                    "valueKey": "notes",
+                    "props": { "label": "Session notes" }
+                }
+            ]
+        });
+        let surface =
+            create_inline_surface(&mut db, &conv.id, None, None, "Form", &def, &[]).unwrap();
+        crate::runtime_v2::surfaces::save_surface_state_occ(
+            &mut db,
+            &surface.id,
+            &json!({
+                "taskTitle": "user typed title",
+                "title-input": "legacy-id-key",
+                "title-input:draft": "partial",
+                "notes": "keep me",
+                "unrelated": true
+            }),
+            1,
+        )
+        .unwrap();
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "remove_title",
+            &[op(
+                "component.remove",
+                Some(&surface.id),
+                json!({ "componentId": "title-input" }),
+            )],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
+
+        let surf = get_surface(&db, &surface.id).unwrap();
+        let doc = crate::runtime_v2::SoftwareDocument::from_value(&surf.definition).unwrap();
+        assert!(
+            doc.find_component("title-input").is_none(),
+            "removed component must leave definition"
+        );
+        assert!(doc.find_component("keep-input").is_some());
+
+        let (state, _) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id)
+                .unwrap();
+        assert!(
+            state.get("taskTitle").is_none(),
+            "valueKey state must clear on remove, got {state}"
+        );
+        assert!(state.get("title-input").is_none());
+        assert!(state.get("title-input:draft").is_none());
+        assert_eq!(state.get("notes"), Some(&json!("keep me")));
+        assert_eq!(state.get("unrelated"), Some(&json!(true)));
+    }
+
+    /// event.dispatch must not equate tool_id with application_id without a manifest.
+    #[test]
+    fn event_dispatch_omits_application_id_when_tool_has_no_manifest() {
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "EvtNoApp", None).unwrap();
+        let tool = ToolDefinition {
+            id: "tool-no-manifest".into(),
+            name: "No Manifest Tool".into(),
+            description: String::new(),
+            layout: json!("stack"),
+            components: vec![ToolComponent {
+                id: "t".into(),
+                component_type: "text".into(),
+                value_key: None,
+                props: Some(json!({"text": "hi"})),
+                children: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let saved = apply_tool_change(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            &tool,
+            "create",
+            None,
+            "seed",
+        )
+        .unwrap();
+        let surface = upsert_surface_from_tool(
+            &mut db,
+            &saved.definition,
+            DEFAULT_WORKSPACE_ID,
+            saved.current_version,
+        )
+        .unwrap();
+        // Bind conversation so event origin can resolve conversation_id.
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET conversation_id = ?1 WHERE id = ?2",
+                rusqlite::params![conv.id, surface.id],
+            )
+            .unwrap();
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "dispatch",
+            &[op(
+                "event.dispatch",
+                Some(&surface.id),
+                json!({
+                    "eventType": "custom.ping",
+                    "scope": "surface",
+                    "payload": { "ok": true }
+                }),
+            )],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
+
+        let source_json: String = db
+            .conn()
+            .query_row(
+                "SELECT source_json FROM surface_events ORDER BY created_at DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let source: serde_json::Value = serde_json::from_str(&source_json).unwrap();
+        assert_eq!(
+            source.get("toolId").and_then(|v| v.as_str()),
+            Some("tool-no-manifest"),
+            "source must carry authoritative tool_id"
+        );
+        assert!(
+            source.get("applicationId").is_none()
+                || source.get("applicationId") == Some(&json!(null)),
+            "application_id must not equal tool_id without a manifest, got {source}"
+        );
+    }
+
+    #[test]
+    fn event_dispatch_sets_application_id_when_manifest_exists() {
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use std::collections::HashMap;
+
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "EvtWithApp", None).unwrap();
+        let tool_id = "app-with-manifest";
+        let tool = ToolDefinition {
+            id: tool_id.into(),
+            name: "Manifested Tool".into(),
+            description: String::new(),
+            layout: json!("stack"),
+            components: vec![ToolComponent {
+                id: "t".into(),
+                component_type: "text".into(),
+                value_key: None,
+                props: Some(json!({"text": "hi"})),
+                children: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let saved = apply_tool_change(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            &tool,
+            "create",
+            None,
+            "seed",
+        )
+        .unwrap();
+        let surface = upsert_surface_from_tool(
+            &mut db,
+            &saved.definition,
+            DEFAULT_WORKSPACE_ID,
+            saved.current_version,
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET conversation_id = ?1 WHERE id = ?2",
+                rusqlite::params![conv.id, surface.id],
+            )
+            .unwrap();
+        upsert_manifest(
+            &mut db,
+            ApplicationManifest {
+                schema_version: "1".into(),
+                application_id: tool_id.into(),
+                instance_id: "instance-1".into(),
+                name: "Manifested".into(),
+                description: String::new(),
+                version: 1,
+                surfaces: vec![],
+                routes: vec![],
+                data_models: vec![],
+                settings: vec![],
+                capabilities: vec!["coreside.core".into()],
+                permissions: vec![],
+                events: vec![],
+                tests: vec![],
+                search_keywords: vec![],
+                tags: vec![],
+                agent_description: String::new(),
+                project_id: None,
+                conversation_id: None,
+                organization_id: None,
+                ownership: None,
+                application_action_access: vec![],
+                surface_action_access: HashMap::new(),
+                component_action_access: HashMap::new(),
+                action_descriptor_hashes: HashMap::new(),
+            },
+        )
+        .unwrap();
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "dispatch",
+            &[op(
+                "event.dispatch",
+                Some(&surface.id),
+                json!({
+                    "eventType": "custom.ping",
+                    "scope": "surface",
+                    "payload": {}
+                }),
+            )],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "applied", "conflicts: {:?}", res.conflicts);
+
+        let source_json: String = db
+            .conn()
+            .query_row(
+                "SELECT source_json FROM surface_events ORDER BY created_at DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let source: serde_json::Value = serde_json::from_str(&source_json).unwrap();
+        assert_eq!(
+            source.get("applicationId").and_then(|v| v.as_str()),
+            Some(tool_id),
+            "manifested tool must set application_id, got {source}"
         );
     }
 }

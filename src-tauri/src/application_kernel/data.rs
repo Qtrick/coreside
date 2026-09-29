@@ -168,9 +168,10 @@ pub fn get_model(
             |row| row.get(0),
         )
         .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => {
-                DbError::NotFound(format!("model {application_id}/{model_id}"))
-            }
+            rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(format!(
+                "model_missing: application='{application_id}' model='{model_id}'. \
+                 Call data.model_upsert for this model before data.record_create/update."
+            )),
             other => DbError::Sqlite(other),
         })?;
     serde_json::from_str(&json).map_err(|e| DbError::Invalid(e.to_string()))
@@ -654,5 +655,21 @@ mod tests {
     fn rejects_bad_enum() {
         let m = habit_model();
         assert!(validate_record(&m, &json!({"name":"x","frequency":"hourly"})).is_err());
+    }
+
+    #[test]
+    fn get_model_missing_is_typed_for_agent_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::Database::open_path(&dir.path().join("t.db")).unwrap();
+        let err = get_model(&db, "app-missing", "tasks").expect_err("missing model");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("model_missing"),
+            "expected typed model_missing, got {msg}"
+        );
+        assert!(
+            msg.contains("data.model_upsert"),
+            "error should tell agent to upsert first: {msg}"
+        );
     }
 }

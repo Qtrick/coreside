@@ -141,6 +141,8 @@ pub struct ApplicationStatePromptSlice {
     pub tool_id: String,
     pub tool_name: String,
     pub projected_state: serde_json::Value,
+    /// Compact data-model catalog for this application (ids + field names only).
+    pub data_models: Vec<serde_json::Value>,
 }
 
 const MAX_STATE_SLICE_JSON_BYTES: usize = 8_192;
@@ -176,6 +178,20 @@ pub fn format_application_state_prompt(slices: &[ApplicationStatePromptSlice]) -
             "\n### {} (`{}`)\n```json\n{json}\n```\n",
             slice.tool_name, slice.tool_id
         ));
+        if !slice.data_models.is_empty() {
+            let models_raw = serde_json::to_string_pretty(&slice.data_models)
+                .unwrap_or_else(|_| "[]".into());
+            let models_json = crate::security::redact_secrets(&models_raw, None);
+            block.push_str(&format!(
+                "#### Data models (call data.model_upsert before record CRUD if missing)\n\
+                 ```json\n{models_json}\n```\n"
+            ));
+        } else {
+            block.push_str(
+                "#### Data models\n\
+                 None registered. Use `data.model_upsert` before `data.record_create`.\n",
+            );
+        }
     }
     Some(block)
 }
@@ -422,11 +438,19 @@ mod tests {
             tool_id: "task-tracker".into(),
             tool_name: "Task Tracker".into(),
             projected_state: serde_json::json!({ "tasks": [{"title": "Buy milk"}] }),
+            data_models: vec![serde_json::json!({
+                "modelId": "tasks",
+                "displayName": "Tasks",
+                "schemaVersion": 1,
+                "fields": [{"fieldId": "title", "type": "text", "required": true}]
+            })],
         }];
         let p = build_agent_prompt_with_references_and_state(None, &[], None, None, &slices);
         assert!(p.contains("Current application state (model-visible)"));
         assert!(p.contains("Task Tracker"));
         assert!(p.contains("Buy milk"));
+        assert!(p.contains("data.model_upsert"));
+        assert!(p.contains("\"modelId\": \"tasks\""));
     }
 
     #[test]
@@ -438,9 +462,32 @@ mod tests {
                 "title": "ok",
                 "token": "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF"
             }),
+            data_models: vec![],
         }];
         let block = format_application_state_prompt(&slices).expect("block");
         assert!(block.contains("ok"));
+        assert!(!block.contains("sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF"));
+        assert!(block.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn format_application_state_redacts_data_model_default_secrets() {
+        let slices = vec![ApplicationStatePromptSlice {
+            tool_id: "cfg".into(),
+            tool_name: "Config".into(),
+            projected_state: serde_json::json!({ "ok": true }),
+            data_models: vec![serde_json::json!({
+                "modelId": "secrets",
+                "fields": [{
+                    "fieldId": "apiKey",
+                    "type": "text",
+                    "required": false,
+                    "default": "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF"
+                }]
+            })],
+        }];
+        let block = format_application_state_prompt(&slices).expect("block");
+        assert!(block.contains("Data models"));
         assert!(!block.contains("sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF"));
         assert!(block.contains("[REDACTED]"));
     }
@@ -459,6 +506,7 @@ mod tests {
             tool_id: "wide".into(),
             tool_name: "Wide".into(),
             projected_state: serde_json::json!({ "note": big }),
+            data_models: vec![],
         }];
         let block = format_application_state_prompt(&slices).expect("block");
         assert!(block.contains("…(truncated)"));

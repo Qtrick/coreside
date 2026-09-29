@@ -22,6 +22,7 @@ import type {
   ToolSummary,
 } from "@/types/tool";
 import { persistenceScheduler } from "@/lib/persistence-scheduler";
+import { reconcileDirtyOverCanonical } from "@/lib/preservation";
 import { hasInteractiveDefinition } from "@/lib/interactive-surface";
 import {
   api,
@@ -264,7 +265,7 @@ type AppStore = {
   branchConversation: (sourceMessageId: string, branchName?: string) => Promise<void>;
 
   refreshTools: () => Promise<void>;
-  selectTool: (id: string | null) => Promise<void>;
+  selectTool: (id: string | null, opts?: { preserveDirty?: boolean }) => Promise<void>;
   closeToolCanvas: () => Promise<void>;
   openToolWindow: () => Promise<void>;
   undoTool: () => Promise<void>;
@@ -1972,8 +1973,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ tools });
   },
 
-  selectTool: async (id) => {
+  selectTool: async (id, opts) => {
     const prevToolId = get().activeToolId;
+    // Dirty overlay is Sync-reload only — never carry unpersisted typing across
+    // conversation navigation that reopens the same tool id.
+    const preserveDirty = opts?.preserveDirty === true;
+    const dirtyOverlay =
+      preserveDirty && prevToolId && prevToolId === id
+        ? persistenceScheduler.peekDirtyState(prevToolId)
+        : null;
+    // Snapshot pre-init lastPersisted so we can detect agent resets vs local typing.
+    const lastPersistedBefore =
+      preserveDirty && prevToolId && prevToolId === id
+        ? (persistenceScheduler.getLastPersistedState(prevToolId) ?? {})
+        : {};
     if (prevToolId && prevToolId !== id) {
       await persistenceScheduler.flush(prevToolId, async (toolId, s) => {
         await api.saveToolState(toolId, s);
@@ -2011,10 +2024,37 @@ export const useAppStore = create<AppStore>((set, get) => ({
           ...(state ?? {}),
           ...(surfaceStateWithRev?.state ?? {}),
         };
-    persistenceScheduler.initToolState(id, mergedState);
+    // Keys the server changed since our last persist are agent/other writes —
+    // do not let dirty typing undo reset_explicitly or state.patch.
+    const resetKeys =
+      !interactive && dirtyOverlay
+        ? [
+            ...new Set([
+              ...Object.keys(lastPersistedBefore),
+              ...Object.keys(mergedState),
+            ]),
+          ].filter((key) => !Object.is(lastPersistedBefore[key], mergedState[key]))
+        : [];
+    const reconciled: ToolState =
+      !interactive && dirtyOverlay
+        ? reconcileDirtyOverCanonical(mergedState, dirtyOverlay, resetKeys)
+        : mergedState;
+    persistenceScheduler.initToolState(id, reconciled);
+    // Dirty overlay was treated as hydrated; re-arm persistence so typing reaches disk.
+    if (!interactive && dirtyOverlay) {
+      void persistenceScheduler.schedule(
+        id,
+        reconciled,
+        async (toolId, s) => {
+          await api.saveToolState(toolId, s);
+          const surfaceId = surfaceIdForTool(toolId);
+          await api.saveSurfaceState(surfaceId, s).catch(() => undefined);
+        },
+      );
+    }
     set({
       activeTool: tool,
-      toolState: mergedState,
+      toolState: reconciled,
     });
     void get().maybeExpandForTool(id);
   },
@@ -2850,7 +2890,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const toolId = get().activeToolId;
     if (toolId) {
       try {
-        await get().selectTool(toolId);
+        // Sync reload must keep unpersisted typing; chat navigation must not.
+        await get().selectTool(toolId, { preserveDirty: true });
       } catch {
         // ignore
       }

@@ -370,3 +370,23 @@ export function shouldPreserveComponent(
       return compatible;
   }
 }
+
+/**
+ * Merge unpersisted local user edits over canonical state after an agent Sync reload.
+ * Dirty keys win; keys listed in `resetKeys` (explicit reset / removed bindings) stay canonical.
+ */
+export function reconcileDirtyOverCanonical(
+  canonical: Record<string, unknown>,
+  dirty: Record<string, unknown>,
+  resetKeys: Iterable<string> = [],
+): Record<string, unknown> {
+  const blocked = new Set(
+    [...resetKeys].map((k) => k.trim()).filter(Boolean),
+  );
+  const next: Record<string, unknown> = { ...canonical };
+  for (const [key, value] of Object.entries(dirty)) {
+    if (blocked.has(key)) continue;
+    next[key] = value;
+  }
+  return next;
+}

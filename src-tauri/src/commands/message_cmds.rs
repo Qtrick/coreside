@@ -91,16 +91,56 @@ fn collect_application_state_for_prompt(
             &raw_state,
             crate::runtime_v2::visibility::Audience::Model,
         );
-        if projected.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+        let data_models = compact_data_models_for_prompt(db, &tool.id);
+        let state_empty = projected.as_object().map(|o| o.is_empty()).unwrap_or(true);
+        if state_empty && data_models.is_empty() {
             continue;
         }
         out.push(ApplicationStatePromptSlice {
             tool_id: tool.id.clone(),
             tool_name: tool.name.clone(),
             projected_state: projected,
+            data_models,
         });
     }
     out
+}
+
+/// Compact model catalog for prompt discoverability (no record payloads).
+fn compact_data_models_for_prompt(
+    db: &crate::db::Database,
+    application_id: &str,
+) -> Vec<serde_json::Value> {
+    let Ok(models) = crate::application_kernel::data::list_models(db, application_id) else {
+        return Vec::new();
+    };
+    models
+        .into_iter()
+        .take(12)
+        .map(|m| {
+            json!({
+                "modelId": m.model_id,
+                "displayName": m.display_name,
+                "schemaVersion": m.schema_version,
+                "fields": m.fields.iter().map(|f| {
+                    let mut field = json!({
+                        "fieldId": f.field_id,
+                        "type": f.field_type,
+                        "required": f.required,
+                    });
+                    if let Some(obj) = field.as_object_mut() {
+                        if let Some(ref default) = f.default {
+                            obj.insert("default".into(), default.clone());
+                        }
+                        if let Some(ref enum_values) = f.enum_values {
+                            obj.insert("enumValues".into(), json!(enum_values));
+                        }
+                    }
+                    field
+                }).collect::<Vec<_>>(),
+            })
+        })
+        .collect()
 }
 
 const MAX_TOOL_USE_ROUNDS: usize = 6;

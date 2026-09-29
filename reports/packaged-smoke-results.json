@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-27T22:41:09.719Z",
-  "commit": "f02e69c0d634e93d27184f971834d1cbce249668",
+  "generatedAt": "2026-09-29T19:08:16.536Z",
+  "commit": "1d87ef99d4d8101b110522dfcc42500932f45fa1",
   "dirty": true,
   "command": "test:packaged-smoke",
   "launchedApp": false,
@@ -12,28 +12,15 @@
   "launch": {
     "step": "open",
     "status": 1,
-    "stderr": "_LSOpenURLsWithCompletionHandler() failed with error -54.\n"
+    "stderr": "The application cannot be opened for an unexpected reason, error=Error Domain=NSOSStatusErrorDomain Code=-10827 \"kLSNoExecutableErr: The executable is missing\" UserInfo={_LSLine=4288, _LSFunction=_LSOpenStuffCallLocal, _LSFile=LSOpenCore.mm, _LSErrorMessage=kLSNoExecutableErr}\n"
   },
   "rootsPresent": [
-    "src-tauri/target/release/bundle",
     "src-tauri/target/debug/bundle"
   ],
   "artifacts": [
-    "src-tauri/target/release/bundle/dmg/Coreside_0.1.0_aarch64.dmg",
-    "src-tauri/target/release/bundle/macos/Coreside.app",
     "src-tauri/target/debug/bundle/macos/Coreside.app"
   ],
   "artifactHashes": [
-    {
-      "path": "src-tauri/target/release/bundle/dmg/Coreside_0.1.0_aarch64.dmg",
-      "sha256": "dcf42a0f488bd5b7069c0af0f2666a710264ef00c2ce728832f34b8f6ff50c6f",
-      "size": 13477862
-    },
-    {
-      "path": "src-tauri/target/release/bundle/macos/Coreside.app",
-      "kind": "directory_bundle",
-      "note": "Directory bundle (.app) — no single-file hash."
-    },
     {
       "path": "src-tauri/target/debug/bundle/macos/Coreside.app",
       "kind": "directory_bundle",
@@ -43,8 +30,8 @@
   "packageScanExitCode": 0,
   "packagingResults": {
     "status": "passed",
-    "rootsFound": 2,
-    "filesScanned": 20,
+    "rootsFound": 1,
+    "filesScanned": 7,
     "findingsCount": 0
   },
   "sourceIndependence": null,

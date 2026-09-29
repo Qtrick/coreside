@@ -5,6 +5,7 @@ import {
   restoreScrollSnapshot,
   captureFocusSnapshot,
   restoreFocusSnapshot,
+  reconcileDirtyOverCanonical,
 } from "./preservation";
 import {
   canNavigateBack,
@@ -33,6 +34,56 @@ describe("shouldPreserveComponent", () => {
     expect(
       shouldPreserveComponent("preserve_if_compatible", "text", "heading"),
     ).toBe(false);
+  });
+});
+
+describe("reconcileDirtyOverCanonical", () => {
+  it("keeps dirty typing over canonical while applying unrelated keys", () => {
+    const next = reconcileDirtyOverCanonical(
+      { title: "server", filter: "all", count: 2 },
+      { title: "user-typing" },
+    );
+    expect(next).toEqual({ title: "user-typing", filter: "all", count: 2 });
+  });
+
+  it("honors explicit reset keys", () => {
+    const next = reconcileDirtyOverCanonical(
+      { title: "", notes: "kept" },
+      { title: "stale-dirty", notes: "local" },
+      ["title"],
+    );
+    expect(next.title).toBe("");
+    expect(next.notes).toBe("local");
+  });
+
+  it("preserves empty-string dirty values (cleared field mid-typing)", () => {
+    const next = reconcileDirtyOverCanonical(
+      { title: "server-title", notes: "n" },
+      { title: "" },
+    );
+    expect(next.title).toBe("");
+    expect(next.notes).toBe("n");
+  });
+
+  it("trims blank reset keys and leaves other dirty keys intact", () => {
+    const next = reconcileDirtyOverCanonical(
+      { a: 1, b: 2, c: 3 },
+      { a: 9, b: 8, c: 7 },
+      [" a ", "", "b"],
+    );
+    expect(next).toEqual({ a: 1, b: 2, c: 7 });
+  });
+
+  it("skips overlay when server diverged from last persist (reset inference)", () => {
+    const lastPersisted: Record<string, unknown> = { title: "hel", filter: "all" };
+    const canonical: Record<string, unknown> = { filter: "all" };
+    const dirty = { title: "hello" };
+    const resetKeys = [...Object.keys(lastPersisted), ...Object.keys(canonical)].filter(
+      (k) => !Object.is(lastPersisted[k], canonical[k]),
+    );
+    const next = reconcileDirtyOverCanonical(canonical, dirty, resetKeys);
+    expect(next.title).toBeUndefined();
+    expect(next.filter).toBe("all");
   });
 });
 

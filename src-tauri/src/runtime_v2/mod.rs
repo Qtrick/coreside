@@ -92,9 +92,10 @@ pub use patch_scheduler::{
 };
 #[allow(unused_imports)]
 pub use preservation::{
-    apply_preservation_on_replace, get_preservation, invalidate_component_live_state,
-    list_preservation_for_surface, resolve_policy_for_apply, should_preserve, upsert_preservation,
-    PreservationPolicy, PreservationRecord,
+    apply_preservation_on_replace, clear_surface_state_keys, component_value_key, get_preservation,
+    invalidate_component_live_state, list_preservation_for_surface, prop_keys_for_policy,
+    resolve_policy_for_apply, should_preserve, upsert_preservation, PreservationPolicy,
+    PreservationRecord,
 };
 #[allow(unused_imports)]
 pub use preview_transaction::{

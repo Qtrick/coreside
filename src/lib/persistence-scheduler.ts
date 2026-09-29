@@ -250,6 +250,23 @@ export class PersistenceScheduler {
     return count;
   }
 
+  /** Unpersisted local overlay for same-tool Sync reload reconciliation.
+   * Returns only keys that diverged from lastPersistedState (true dirty delta).
+   */
+  public peekDirtyState(toolId: string): ToolState | null {
+    const tracker = this.trackers.get(toolId);
+    if (!tracker || tracker.currentGen <= tracker.lastPersistedGen) return null;
+    const dirty: ToolState = {};
+    let any = false;
+    for (const [key, value] of Object.entries(tracker.currentState)) {
+      if (!Object.is(tracker.lastPersistedState[key], value)) {
+        dirty[key] = value;
+        any = true;
+      }
+    }
+    return any ? dirty : null;
+  }
+
   public getCurrentState(toolId: string): ToolState | undefined {
     return this.trackers.get(toolId)?.currentState;
   }
