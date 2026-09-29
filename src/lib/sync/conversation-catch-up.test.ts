@@ -593,4 +593,77 @@ describe("catchUpConversationEvents", () => {
     expect(store.durable.get("c-a")).toBe(100);
     expect(store.durable.get("c-b")).toBe(3);
   });
+
+  it("does not let one client durable map poison another client's catch-up", async () => {
+    // Mirrors per-window SQLite cursors: each client has its own durable watermark.
+    // If Window B advances while Window A is offline, A must still catch up.
+    const events = new Map<string, ConversationCatchUpEvent[]>();
+    const list: ConversationCatchUpEvent[] = [];
+    for (let i = 1; i <= 30; i++) {
+      list.push({
+        sequence: i,
+        eventType:
+          i === 15 || i === 30
+            ? "surface.transaction_applied"
+            : "message.created",
+      });
+    }
+    events.set("c-multi", list);
+
+    const durableA = new Map<string, number>([["c-multi", 0]]);
+    const durableB = new Map<string, number>([["c-multi", 0]]);
+    const memoryA = new Map<string, number>();
+    const memoryB = new Map<string, number>();
+    let reloadsA = 0;
+    let reloadsB = 0;
+
+    const apiFor = (durable: Map<string, number>): ConversationCatchUpApi => ({
+      async getConversationSyncCursor(conversationId) {
+        return durable.get(conversationId) ?? 0;
+      },
+      async getConversationEvents({ conversationId, afterSequence, limit }) {
+        const after = afterSequence ?? 0;
+        const pageLimit = limit ?? 200;
+        return (events.get(conversationId) ?? [])
+          .filter((e) => e.sequence > after)
+          .slice(0, pageLimit);
+      },
+      async advanceConversationSyncCursor(conversationId, sequence) {
+        const current = durable.get(conversationId) ?? 0;
+        const next = Math.max(current, sequence);
+        durable.set(conversationId, next);
+        return next;
+      },
+    });
+
+    // Window B stays online and consumes everything.
+    await catchUpConversationEvents({
+      conversationId: "c-multi",
+      memoryCursor: memoryB,
+      api: apiFor(durableB),
+      isActive: () => true,
+      onTransactionApplied: () => {
+        reloadsB += 1;
+      },
+      yieldBetweenPages: noYield,
+    });
+    expect(durableB.get("c-multi")).toBe(30);
+    expect(reloadsB).toBeGreaterThan(0);
+
+    // Window A reconnects — its durable watermark is still 0.
+    await catchUpConversationEvents({
+      conversationId: "c-multi",
+      memoryCursor: memoryA,
+      api: apiFor(durableA),
+      isActive: () => true,
+      onTransactionApplied: () => {
+        reloadsA += 1;
+      },
+      yieldBetweenPages: noYield,
+    });
+    expect(durableA.get("c-multi")).toBe(30);
+    expect(reloadsA).toBeGreaterThan(0);
+    // B's advance must not have skipped A's catch-up.
+    expect(durableA.get("c-multi")).toBe(durableB.get("c-multi"));
+  });
 });

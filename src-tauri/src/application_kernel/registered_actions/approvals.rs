@@ -288,10 +288,16 @@ pub fn decide(
             return Err(DbError::Invalid("approval was already decided".into()));
         }
         let status = if approve { "approved" } else { "denied" };
-        db.conn().execute(
-            "UPDATE runtime_approvals SET status = ?2, decided_at = ?3 WHERE id = ?1",
+        let n = db.conn().execute(
+            "UPDATE runtime_approvals SET status = ?2, decided_at = ?3
+             WHERE id = ?1 AND status = 'pending'",
             params![id, status, now_rfc3339()],
         )?;
+        if n != 1 {
+            return Err(DbError::Invalid(
+                "approval is no longer pending and cannot be decided".into(),
+            ));
+        }
 
         let mut grant = None;
         if let Some((descriptor, scope, duration, input_hash)) = prepared_grant {
@@ -511,6 +517,105 @@ mod tests {
             .unwrap();
         assert!(list_pending(&mut db).unwrap().is_empty());
         assert!(decide(&mut db, &a.id, true, None, "user").is_err());
+    }
+
+    #[test]
+    fn decide_rejects_when_already_expired_before_claim() {
+        let (mut db, _dir) = test_db();
+        let d = find_action("local_data.write").unwrap();
+        let a = create_pending(&mut db, &ctx(), d, &json!({"modelId": "m"}), None).unwrap();
+        db.conn()
+            .execute(
+                "UPDATE runtime_approvals SET status = 'expired' WHERE id = ?1",
+                [&a.id],
+            )
+            .unwrap();
+        let err = decide(&mut db, &a.id, true, None, "user").unwrap_err();
+        assert!(matches!(err, DbError::Invalid(_)));
+        assert_eq!(get_approval(&db, &a.id).unwrap().status, "expired");
+        let claims: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM runtime_approval_claims WHERE id = ?1",
+                [format!("decided:{}", a.id)],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(claims, 0, "early reject must not leave a decide claim");
+    }
+
+    #[test]
+    fn decide_cas_rejects_when_status_flips_after_pending_read() {
+        // Real CAS window: status is still pending at get_approval, then a
+        // concurrent expire wins between claim INSERT and the status UPDATE.
+        // Mirror consume_cas_conflict — flip under the claim INSERT trigger.
+        //
+        // Same-connection TEMP TRIGGER UPDATE is rolled back with the decide
+        // savepoint (as with consume_cas_conflict); assert the decision did
+        // not stick and the claim receipt did not leak.
+        let (mut db, _dir) = test_db();
+        let d = find_action("local_data.write").unwrap();
+        let a = create_pending(&mut db, &ctx(), d, &json!({"modelId": "m"}), None).unwrap();
+
+        db.conn()
+            .execute_batch(
+                "CREATE TEMP TRIGGER steal_pending_on_decide_claim
+                 BEFORE INSERT ON runtime_approval_claims
+                 WHEN NEW.id LIKE 'decided:%'
+                 BEGIN
+                   UPDATE runtime_approvals SET status = 'expired'
+                   WHERE status = 'pending';
+                 END;",
+            )
+            .unwrap();
+
+        let err = decide(&mut db, &a.id, true, None, "user").unwrap_err();
+        assert!(matches!(err, DbError::Invalid(_)));
+        let after = get_approval(&db, &a.id).unwrap();
+        assert_ne!(
+            after.status, "approved",
+            "CAS lose must not leave the approval approved"
+        );
+        assert!(after.decided_at.is_none());
+        let claims: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM runtime_approval_claims WHERE id = ?1",
+                [format!("decided:{}", a.id)],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            claims, 0,
+            "CAS lose must roll back the decided: claim receipt"
+        );
+
+        db.conn()
+            .execute_batch("DROP TRIGGER steal_pending_on_decide_claim")
+            .unwrap();
+    }
+
+    #[test]
+    fn decide_rejects_when_a_concurrent_expire_stale_sweep_wins_the_race() {
+        let (mut db, _dir) = test_db();
+        let d = find_action("local_data.write").unwrap();
+        let a = create_pending(&mut db, &ctx(), d, &json!({"modelId": "m"}), None).unwrap();
+
+        db.conn()
+            .execute(
+                "UPDATE runtime_approvals SET expires_at = '2000-01-01T00:00:00Z' WHERE id = ?1",
+                [&a.id],
+            )
+            .unwrap();
+
+        let swept = expire_stale(&mut db).unwrap();
+        assert_eq!(swept, 1);
+        assert_eq!(get_approval(&db, &a.id).unwrap().status, "expired");
+
+        let err = decide(&mut db, &a.id, true, None, "user").unwrap_err();
+        assert!(matches!(err, DbError::Invalid(_)));
+        assert_eq!(get_approval(&db, &a.id).unwrap().status, "expired");
+        assert!(get_approval(&db, &a.id).unwrap().decided_at.is_none());
     }
 
     #[test]

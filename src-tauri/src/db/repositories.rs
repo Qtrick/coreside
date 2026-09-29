@@ -223,6 +223,17 @@ pub fn delete_conversation(db: &mut Database, id: &str) -> DbResult<()> {
              )",
             [id],
         )?;
+        // Resource dependency edges have no FK cascade — clean before surfaces go.
+        conn.execute(
+            "DELETE FROM application_dependencies
+             WHERE (source_type = 'conversation' AND source_id = ?1)
+                OR (target_type = 'conversation' AND target_id = ?1)
+                OR (source_type = 'surface' AND source_id IN (
+                     SELECT id FROM surfaces WHERE conversation_id = ?1))
+                OR (target_type = 'surface' AND target_id IN (
+                     SELECT id FROM surfaces WHERE conversation_id = ?1))",
+            [id],
+        )?;
         conn.execute("DELETE FROM surfaces WHERE conversation_id = ?1", [id])?;
         // Clean conversation-owned tables without FK constraints (orphan rows).
         // These tables reference conversation_id but have no ON DELETE CASCADE.

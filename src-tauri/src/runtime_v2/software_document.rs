@@ -92,8 +92,12 @@ pub struct StateContract {
     pub origin: String,
 }
 
+/// Default origin for deserialized contracts that omit the field.
+///
+/// Fail closed toward `"model"`: omitted provenance must not look user-authorized.
+/// Explicit user-authorized contracts use [`StateContract::new_for_user`].
 fn default_origin() -> String {
-    "user".to_string()
+    "model".to_string()
 }
 
 fn default_type_name() -> String {
@@ -2269,12 +2273,20 @@ fn validate_component_bindings(
                 | crate::ai::ActionDefinition::UpdateItem { target, .. } => {
                     if !target.is_empty() && !contracts.is_empty() {
                         if let Some(sc) = contracts.iter().find(|s| &s.key == target) {
-                            if sc.write_policy == "readonly" {
+                            // User-click actions may target writePolicy "user" keys
+                            // (same authority as valueKey → user CAS). Block readonly
+                            // and system — never model-owned escalation via UI actions.
+                            if sc.write_policy == "readonly" || sc.write_policy == "system" {
                                 return Err(format!(
-                                    "component '{}' action mutates readonly state key '{target}'",
-                                    comp.id
+                                    "component '{}' action mutates {} state key '{target}'",
+                                    comp.id, sc.write_policy
                                 ));
                             }
+                        } else {
+                            return Err(format!(
+                                "component '{}' action mutates undeclared state key '{target}'",
+                                comp.id
+                            ));
                         }
                     }
                 }

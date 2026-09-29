@@ -121,6 +121,30 @@ pub fn upsert_surface_from_tool(
     };
     validate_definition_components_for_packs(&persisted_def_value, &packs)
         .map_err(DbError::Invalid)?;
+
+    // Full replace freezes trusted contracts from the existing doc; still admit
+    // so model-authored bindings cannot target restricted/opaque keys.
+    let existing_doc_for_admit = existing.as_ref().and_then(|(_, _, _, json)| {
+        serde_json::from_str::<Value>(json)
+            .ok()
+            .and_then(|v| super::software_document::SoftwareDocument::from_value(&v).ok())
+    });
+    let current_state = if existing.is_some() {
+        get_surface_state_with_revision(db, &id)
+            .ok()
+            .map(|(s, _)| s)
+    } else {
+        None
+    };
+    super::software_document::admit_software_document_with_state(
+        existing_doc_for_admit.as_ref(),
+        &doc,
+        &packs,
+        current_state.as_ref(),
+        false,
+    )
+    .map_err(|e| DbError::Invalid(format!("software document admission failed: {e}")))?;
+
     let packs_json = serde_json::to_string(&packs)?;
 
     if existing.is_some() {
@@ -148,6 +172,16 @@ pub fn upsert_surface_from_tool(
                 now,
                 now
             ],
+        )?;
+        crate::application_kernel::lifecycle::add_dependency(
+            db,
+            crate::application_kernel::lifecycle::DependencyEdge {
+                source_type: "workspace".into(),
+                source_id: workspace_id.to_string(),
+                target_type: "surface".into(),
+                target_id: id.clone(),
+                relationship_type: "hosts".into(),
+            },
         )?;
     }
 
@@ -255,8 +289,17 @@ pub fn create_inline_surface(
          VALUES (?1, ?2, 1, ?3, 'inline create', ?4)",
         params![version_id, id, def_json, now],
     )?;
-    // ponytail: dependency edges on create are optional; delete_surface cleans both
-    // directions. Wire add_dependency(conversation→surface) when impact UI needs it.
+    // Conversation owns this inline surface — reverse-impact / delete warnings.
+    crate::application_kernel::lifecycle::add_dependency(
+        db,
+        crate::application_kernel::lifecycle::DependencyEdge {
+            source_type: "conversation".into(),
+            source_id: conversation_id.to_string(),
+            target_type: "surface".into(),
+            target_id: id.clone(),
+            relationship_type: "owns".into(),
+        },
+    )?;
     get_surface(db, &id)
 }
 
@@ -799,9 +842,10 @@ pub fn save_surface_state_user_cas(
                 let contract = doc.state_contracts.iter().find(|sc| &sc.key == key);
                 match contract {
                     Some(c) => {
-                        if c.write_policy == "readonly" {
+                        if c.write_policy == "readonly" || c.write_policy == "system" {
                             return Err(DbError::Invalid(format!(
-                                "cannot write to readonly state key '{key}' on surface '{surface_id}'"
+                                "cannot write to {} state key '{key}' on surface '{surface_id}'",
+                                c.write_policy
                             )));
                         }
                     }
@@ -1198,5 +1242,148 @@ mod tests {
             &[],
         );
         assert!(matches!(res, Err(DbError::NotFound(_))));
+    }
+
+    #[test]
+    fn create_inline_surface_writes_conversation_owns_edge() {
+        let mut db = test_db();
+        let conv = crate::db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Dep Chat", None)
+            .unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Dep Surface",
+            &minimal_def("Dep Surface"),
+            &[],
+        )
+        .unwrap();
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM application_dependencies
+                 WHERE source_type = 'conversation' AND source_id = ?1
+                   AND target_type = 'surface' AND target_id = ?2
+                   AND relationship_type = 'owns'",
+                params![conv.id, surface.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        // Idempotent re-add must not duplicate.
+        crate::application_kernel::lifecycle::add_dependency(
+            &mut db,
+            crate::application_kernel::lifecycle::DependencyEdge {
+                source_type: "conversation".into(),
+                source_id: conv.id.clone(),
+                target_type: "surface".into(),
+                target_id: surface.id.clone(),
+                relationship_type: "owns".into(),
+            },
+        )
+        .unwrap();
+        let count2: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM application_dependencies
+                 WHERE source_type = 'conversation' AND source_id = ?1
+                   AND target_type = 'surface' AND target_id = ?2",
+                params![conv.id, surface.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count2, 1);
+
+        delete_surface(&mut db, &surface.id, DeleteSurfaceOptions::default()).unwrap();
+        let after_delete: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM application_dependencies
+                 WHERE target_id = ?1 OR source_id = ?1",
+                params![surface.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(after_delete, 0);
+    }
+
+    #[test]
+    fn upsert_surface_from_tool_first_create_writes_hosts_edge_and_admits() {
+        let mut db = test_db();
+        let tool = ToolDefinition {
+            id: "tool-hosts-edge".into(),
+            name: "Hosts Edge".into(),
+            description: "d".into(),
+            layout: json!("stack"),
+            components: vec![crate::ai::ToolComponent {
+                id: "h".into(),
+                component_type: "heading".into(),
+                value_key: None,
+                props: Some(json!({"text": "Hi"})),
+                children: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let applied =
+            apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "test")
+                .unwrap();
+        let surface =
+            upsert_surface_from_tool(&mut db, &applied.definition, DEFAULT_WORKSPACE_ID, 1)
+                .unwrap();
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM application_dependencies
+                 WHERE source_type = 'workspace' AND source_id = ?1
+                   AND target_type = 'surface' AND target_id = ?2
+                   AND relationship_type = 'hosts'",
+                params![DEFAULT_WORKSPACE_ID, surface.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        // Re-upsert must not duplicate the hosts edge.
+        upsert_surface_from_tool(&mut db, &applied.definition, DEFAULT_WORKSPACE_ID, 2).unwrap();
+        let count2: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM application_dependencies
+                 WHERE target_type = 'surface' AND target_id = ?1
+                   AND relationship_type = 'hosts'",
+                params![surface.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count2, 1);
+    }
+
+    #[test]
+    fn delete_conversation_cleans_dependency_edges() {
+        let mut db = test_db();
+        let conv = crate::db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Edge Chat", None)
+            .unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Edge Surface",
+            &minimal_def("Edge Surface"),
+            &[],
+        )
+        .unwrap();
+        crate::db::delete_conversation(&mut db, &conv.id).unwrap();
+        let remaining: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM application_dependencies
+                 WHERE source_id IN (?1, ?2) OR target_id IN (?1, ?2)",
+                params![conv.id, surface.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 }

@@ -247,19 +247,46 @@ impl PreviewTransaction {
                     .as_deref()
                     .ok_or_else(|| "surfaceId required".to_string())?;
                 self.ensure_seeded(sid, &mut seed)?;
-                let state = op
+                let incoming = op
                     .payload
                     .get("state")
+                    .or_else(|| op.payload.get("values"))
                     .cloned()
                     .unwrap_or_else(|| op.payload.clone());
+                let key_mode = op.payload.get("key").and_then(|v| v.as_str());
+                {
+                    let model = self
+                        .surfaces
+                        .get(sid)
+                        .ok_or_else(|| format!("preview surface missing: {sid}"))?;
+                    authorize_preview_state_mutation(model, op, &incoming, key_mode)?;
+                }
                 let model = self
                     .surfaces
                     .get_mut(sid)
                     .ok_or_else(|| format!("preview surface missing: {sid}"))?;
-                if op.op_type == "state.patch" {
-                    super::surfaces::merge_json_objects(&mut model.state, &state);
+                if let Some(key) = key_mode {
+                    let val = op.payload.get("value").cloned().unwrap_or(Value::Null);
+                    if !model.state.is_object() {
+                        model.state = json!({});
+                    }
+                    if let Some(map) = model.state.as_object_mut() {
+                        map.insert(key.to_string(), val);
+                    }
+                } else if op.op_type == "state.patch" {
+                    super::surfaces::merge_json_objects(&mut model.state, &incoming);
+                } else if let Some(obj) = incoming.as_object() {
+                    // Match durable state.set: merge touched keys only — never wipe.
+                    if !model.state.is_object() {
+                        model.state = json!({});
+                    }
+                    if let Some(cur) = model.state.as_object_mut() {
+                        for (k, v) in obj {
+                            cur.insert(k.clone(), v.clone());
+                        }
+                    }
                 } else {
-                    model.state = state;
+                    return Err("preview state.set requires an object or {key, value}".into());
                 }
                 model.preview_revision = model.preview_revision.saturating_add(1);
                 Ok(Some(self.make_paint(sid)?))
@@ -486,6 +513,108 @@ impl PreviewTransaction {
             sequence: self.paint_sequence,
         })
     }
+}
+
+/// Authorize speculative state writes with the same contract rules as durable apply.
+fn authorize_preview_state_mutation(
+    model: &PreviewSurfaceModel,
+    op: &AppOperation,
+    incoming: &Value,
+    key_mode: Option<&str>,
+) -> Result<(), String> {
+    let touched_keys: Vec<String> = if let Some(key) = key_mode {
+        vec![key.to_string()]
+    } else if let Some(obj) = incoming.as_object() {
+        obj.keys().cloned().collect()
+    } else {
+        return Err("preview state mutation requires an object or {key, value}".into());
+    };
+
+    if let Some(rules) = super::interactive::interactive_definition_of(&model.definition)? {
+        let owned = rules.owned_keys();
+        if let Some(k) = touched_keys.iter().find(|k| owned.contains(k.as_str())) {
+            return Err(format!(
+                "preview rejected: state key '{k}' is owned by the interactive rules engine"
+            ));
+        }
+    }
+
+    let mut doc = super::software_document::SoftwareDocument::from_value(&model.definition)
+        .map_err(|e| format!("preview state authorization failed: {e}"))?;
+    if doc.state_contracts.is_empty() {
+        doc.infer_missing_contracts_if_empty();
+    }
+    let has_explicit_contracts = model
+        .definition
+        .as_object()
+        .map(|o| {
+            o.contains_key("stateContracts")
+                && !o
+                    .get("stateContracts")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.is_empty())
+                    .unwrap_or(false)
+        })
+        .unwrap_or(false);
+
+    for k in &touched_keys {
+        let target_val = if key_mode.is_some() {
+            op.payload.get("value").unwrap_or(&Value::Null)
+        } else if let Some(obj) = incoming.as_object() {
+            obj.get(k).unwrap_or(&Value::Null)
+        } else {
+            &Value::Null
+        };
+
+        let synthesized;
+        let sc = if let Some(found) = doc.state_contracts.iter().find(|s| &s.key == k) {
+            found
+        } else if !has_explicit_contracts {
+            let already_present = model
+                .state
+                .as_object()
+                .map(|o| o.contains_key(k))
+                .unwrap_or(false);
+            if already_present {
+                return Err(format!(
+                    "preview cannot write opaque state key '{k}' without a declared contract"
+                ));
+            }
+            synthesized = super::software_document::StateContract::new_with_origin(
+                k.clone(),
+                Value::Null,
+                super::software_document::StateScope::Persistent,
+                "legacy",
+            );
+            &synthesized
+        } else {
+            return Err(format!(
+                "preview state key '{k}' has no declared state contract"
+            ));
+        };
+
+        if sc.write_policy == "readonly"
+            || sc.write_policy == "user"
+            || sc.write_policy == "system"
+        {
+            return Err(format!(
+                "preview cannot write to {} state key '{k}'",
+                sc.write_policy
+            ));
+        }
+        if sc.read_policy == "restricted" || sc.sensitivity.as_deref() == Some("sensitive") {
+            return Err(format!(
+                "preview cannot write to restricted/sensitive state key '{k}'"
+            ));
+        }
+        super::software_document::validate_state_value_type(
+            k,
+            target_val,
+            &sc.type_name,
+            sc.is_effective_nullable(),
+        )?;
+    }
+    Ok(())
 }
 
 /// Classify parser errors: incomplete buffering vs fatal framing loss.
@@ -1831,6 +1960,72 @@ mod tests {
     fn make_paint_strips_restricted_keys_from_state_set() {
         let mut preview = PreviewTransaction::new("turn-state-leak", None);
         preview.seed_surface(PreviewSurfaceModel {
+            surface_id: "s-form".into(),
+            tool_id: Some("t-form".into()),
+            application_id: Some("t-form".into()),
+            capability_packs: vec!["core.ui".into()],
+            definition: json!({
+                "id": "form",
+                "name": "Form",
+                "stateContracts": [
+                    {
+                        "key": "secretNote",
+                        "type": "string",
+                        "initialValue": "",
+                        "readPolicy": "restricted",
+                        "writePolicy": "model",
+                        "origin": "model"
+                    },
+                    {
+                        "key": "title",
+                        "type": "string",
+                        "initialValue": "",
+                        "writePolicy": "model",
+                        "origin": "model"
+                    }
+                ],
+                "components": []
+            }),
+            state: json!({ "title": "hi" }),
+            base_revision: 1,
+            preview_revision: 1,
+        });
+        // Restricted keys must be rejected at paint_op — not silently applied then stripped.
+        let restricted_op: AppOperation = serde_json::from_value(json!({
+            "id": "op-set-restricted",
+            "type": "state.set",
+            "target": { "surfaceId": "s-form" },
+            "payload": { "secretNote": "leak", "title": "ok" }
+        }))
+        .unwrap();
+        let err = preview
+            .paint_op(&restricted_op, |_| None)
+            .expect_err("restricted preview state.write must fail");
+        assert!(
+            err.contains("restricted") || err.contains("sensitive"),
+            "expected restricted rejection, got: {err}"
+        );
+
+        let title_op: AppOperation = serde_json::from_value(json!({
+            "id": "op-set-title",
+            "type": "state.set",
+            "target": { "surfaceId": "s-form" },
+            "payload": { "title": "ok" }
+        }))
+        .unwrap();
+        let paint = preview
+            .paint_op(&title_op, |_| None)
+            .expect("paint")
+            .expect("state paint");
+        assert!(paint.state_json.get("secretNote").is_none());
+        assert_eq!(paint.state_json["title"], "ok");
+        assert_eq!(preview.surfaces["s-form"].state["title"], json!("ok"));
+    }
+
+    #[test]
+    fn make_paint_projects_preseeded_restricted_state() {
+        let mut preview = PreviewTransaction::new("turn-preseed-leak", None);
+        preview.seed_surface(PreviewSurfaceModel {
             surface_id: "s-quiz".into(),
             tool_id: Some("t-quiz".into()),
             application_id: Some("t-quiz".into()),
@@ -1853,27 +2048,49 @@ mod tests {
                     "actors": ["player"]
                 }
             }),
-            state: json!({ "score": 0 }),
+            // Authoritative seed still holds restricted values for apply fidelity;
+            // egress paint must strip them.
+            state: json!({ "answers": [9, 9, 9], "score": 3 }),
+            base_revision: 1,
+            preview_revision: 1,
+        });
+        let paint = preview.make_paint("s-quiz").expect("paint");
+        assert!(paint.state_json.get("answers").is_none());
+        assert_eq!(paint.state_json["score"], 3);
+    }
+
+    #[test]
+    fn preview_rejects_user_write_policy_state_keys() {
+        let mut preview = PreviewTransaction::new("turn-user-write", None);
+        preview.seed_surface(PreviewSurfaceModel {
+            surface_id: "s1".into(),
+            tool_id: None,
+            application_id: None,
+            capability_packs: vec!["core.ui".into()],
+            definition: json!({
+                "id": "doc",
+                "name": "Doc",
+                "stateContracts": [{
+                    "key": "draft",
+                    "type": "string",
+                    "initialValue": "",
+                    "writePolicy": "user",
+                    "origin": "user"
+                }],
+                "components": []
+            }),
+            state: json!({ "draft": "mine" }),
             base_revision: 1,
             preview_revision: 1,
         });
         let op: AppOperation = serde_json::from_value(json!({
-            "id": "op-set",
+            "id": "op1",
             "type": "state.set",
-            "target": { "surfaceId": "s-quiz" },
-            "payload": { "answers": [9, 9, 9], "score": 3 }
+            "target": { "surfaceId": "s1" },
+            "payload": { "draft": "hijack" }
         }))
         .unwrap();
-        let paint = preview
-            .paint_op(&op, |_| None)
-            .expect("paint")
-            .expect("state paint");
-        assert!(paint.state_json.get("answers").is_none());
-        assert_eq!(paint.state_json["score"], 3);
-        // Speculative model still holds the streamed values; egress must not.
-        assert_eq!(
-            preview.surfaces["s-quiz"].state["answers"],
-            json!([9, 9, 9])
-        );
+        let err = preview.paint_op(&op, |_| None).expect_err("user writePolicy");
+        assert!(err.contains("user"), "got: {err}");
     }
 }

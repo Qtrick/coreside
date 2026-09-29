@@ -503,7 +503,7 @@ mod tests {
             .iter()
             .map(|(n, _)| *n)
             .collect::<Vec<_>>();
-        assert_eq!(names.len(), 32);
+        assert_eq!(names.len(), 34);
         for (i, name) in names.iter().enumerate() {
             let expected = format!("{:03}_", i + 1);
             assert!(
@@ -511,8 +511,8 @@ mod tests {
                 "migration {i} should start with {expected}, got {name}"
             );
         }
-        assert_eq!(names[31], LATEST_MIGRATION);
-        assert_eq!(LATEST_MIGRATION, "032_interactive_action_log");
+        assert_eq!(names[33], LATEST_MIGRATION);
+        assert_eq!(LATEST_MIGRATION, "034_conversation_sync_cursors_per_client");
     }
 
     #[test]
@@ -705,5 +705,99 @@ mod tests {
             Some(SPLIT_JSON)
         );
         assert_eq!(setting_value(&again, "dock_icon"), None);
+    }
+
+    #[test]
+    fn upgrade_from_033_remaps_sync_cursors_to_main_client() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("from033-sync-cursors.db");
+        {
+            let db = Database::open_path_through(&path, "033_conversation_sync_cursors").unwrap();
+            seed_core_user_data(&db);
+            // 033 schema: conversation_id PRIMARY KEY, no client_id.
+            db.conn()
+                .execute(
+                    "INSERT INTO conversation_sync_cursors (conversation_id, last_sequence, updated_at)
+                     VALUES ('conv-biology', 42, '2026-09-29T00:00:00Z')",
+                    [],
+                )
+                .unwrap();
+            assert_eq!(db.applied_migrations().unwrap().len(), 33);
+            let cols: Vec<String> = {
+                let mut stmt = db
+                    .conn()
+                    .prepare("PRAGMA table_info(conversation_sync_cursors)")
+                    .unwrap();
+                stmt.query_map([], |r| r.get::<_, String>(1))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap()
+            };
+            assert!(
+                !cols.iter().any(|c| c == "client_id"),
+                "033 schema must not yet have client_id: {cols:?}"
+            );
+        }
+
+        let db = Database::open_path(&path).unwrap();
+        assert_latest(&db);
+        assert_fk_ok(&db);
+
+        let (client_id, seq): (String, i64) = db
+            .conn()
+            .query_row(
+                "SELECT client_id, last_sequence FROM conversation_sync_cursors
+                 WHERE conversation_id = 'conv-biology'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(client_id, "main");
+        assert_eq!(seq, 42);
+
+        // Composite PK must accept a second client without clobbering main.
+        db.conn()
+            .execute(
+                "INSERT INTO conversation_sync_cursors
+                 (conversation_id, client_id, last_sequence, updated_at)
+                 VALUES ('conv-biology', 'tool-counter', 10, '2026-09-29T01:00:00Z')",
+                [],
+            )
+            .unwrap();
+        let main_seq: i64 = db
+            .conn()
+            .query_row(
+                "SELECT last_sequence FROM conversation_sync_cursors
+                 WHERE conversation_id = 'conv-biology' AND client_id = 'main'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(main_seq, 42);
+        let row_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM conversation_sync_cursors
+                 WHERE conversation_id = 'conv-biology'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(row_count, 2);
+
+        // CASCADE still drops all client rows with the conversation.
+        db.conn()
+            .execute("DELETE FROM conversations WHERE id = 'conv-biology'", [])
+            .unwrap();
+        let remaining: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM conversation_sync_cursors
+                 WHERE conversation_id = 'conv-biology'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 }

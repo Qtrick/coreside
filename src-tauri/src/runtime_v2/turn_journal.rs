@@ -552,20 +552,48 @@ pub fn get_conversation_events(
     Ok(out)
 }
 
-/// Durable catch-up watermark for one conversation (0 = never advanced).
-pub fn get_conversation_sync_cursor(db: &Database, conversation_id: &str) -> DbResult<i64> {
+/// Durable catch-up watermark for one (conversation, client) pair (0 = never advanced).
+///
+/// `client_id` is the Tauri window label (or equivalent webview session id). Cursors
+/// must not be shared across windows — advancing one client's watermark must not
+/// cause another client to skip catch-up.
+pub fn get_conversation_sync_cursor(
+    db: &Database,
+    conversation_id: &str,
+    client_id: &str,
+) -> DbResult<i64> {
+    let client = normalize_sync_client_id(client_id)?;
     let seq: Option<i64> = db
         .conn()
         .query_row(
-            "SELECT last_sequence FROM conversation_sync_cursors WHERE conversation_id = ?1",
-            params![conversation_id],
+            "SELECT last_sequence FROM conversation_sync_cursors
+             WHERE conversation_id = ?1 AND client_id = ?2",
+            params![conversation_id, client],
             |r| r.get(0),
         )
         .optional()?;
     Ok(seq.unwrap_or(0).max(0))
 }
 
-/// Monotonic advance of the durable catch-up watermark.
+fn normalize_sync_client_id(client_id: &str) -> DbResult<String> {
+    let trimmed = client_id.trim();
+    if trimmed.is_empty() || trimmed.len() > 256 {
+        return Err(DbError::Invalid(
+            "conversation sync client_id must be 1..=256 characters".into(),
+        ));
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
+        return Err(DbError::Invalid(
+            "conversation sync client_id contains invalid characters".into(),
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Monotonic advance of the durable catch-up watermark for one client.
 ///
 /// Returns the stored cursor after the attempt. Never moves backwards: if
 /// `sequence` is less than or equal to the current watermark, the existing
@@ -576,6 +604,7 @@ pub fn get_conversation_sync_cursor(db: &Database, conversation_id: &str) -> DbR
 pub fn advance_conversation_sync_cursor(
     db: &Database,
     conversation_id: &str,
+    client_id: &str,
     sequence: i64,
 ) -> DbResult<i64> {
     if sequence < 0 {
@@ -583,6 +612,7 @@ pub fn advance_conversation_sync_cursor(
             "conversation sync cursor sequence must be non-negative".into(),
         ));
     }
+    let client = normalize_sync_client_id(client_id)?;
     let exists: bool = db
         .conn()
         .query_row(
@@ -606,14 +636,14 @@ pub fn advance_conversation_sync_cursor(
         .unwrap_or(0);
     let capped = sequence.min(max_logged);
     let now = now_rfc3339();
-    let current = get_conversation_sync_cursor(db, conversation_id)?;
+    let current = get_conversation_sync_cursor(db, conversation_id, &client)?;
     if capped <= current {
         return Ok(current);
     }
     db.conn().execute(
-        "INSERT INTO conversation_sync_cursors (conversation_id, last_sequence, updated_at)
-         VALUES (?1, ?2, ?3)
-         ON CONFLICT(conversation_id) DO UPDATE SET
+        "INSERT INTO conversation_sync_cursors (conversation_id, client_id, last_sequence, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(conversation_id, client_id) DO UPDATE SET
            last_sequence = CASE
              WHEN excluded.last_sequence > conversation_sync_cursors.last_sequence
              THEN excluded.last_sequence
@@ -624,9 +654,9 @@ pub fn advance_conversation_sync_cursor(
              THEN excluded.updated_at
              ELSE conversation_sync_cursors.updated_at
            END",
-        params![conversation_id, capped, now],
+        params![conversation_id, client, capped, now],
     )?;
-    get_conversation_sync_cursor(db, conversation_id)
+    get_conversation_sync_cursor(db, conversation_id, &client)
 }
 
 #[cfg(test)]
@@ -984,29 +1014,32 @@ mod tests {
         let mut db = db();
         seed_conversation(&mut db, "c-sync");
         seed_events(&db, "c-sync", 200);
-        assert_eq!(get_conversation_sync_cursor(&db, "c-sync").unwrap(), 0);
+        assert_eq!(get_conversation_sync_cursor(&db, "c-sync", "main").unwrap(), 0);
         assert_eq!(
-            advance_conversation_sync_cursor(&db, "c-sync", 10).unwrap(),
+            advance_conversation_sync_cursor(&db, "c-sync", "main", 10).unwrap(),
             10
         );
         assert_eq!(
-            advance_conversation_sync_cursor(&db, "c-sync", 5).unwrap(),
+            advance_conversation_sync_cursor(&db, "c-sync", "main", 5).unwrap(),
             10,
             "cursor must not move backwards"
         );
         assert_eq!(
-            advance_conversation_sync_cursor(&db, "c-sync", 10).unwrap(),
+            advance_conversation_sync_cursor(&db, "c-sync", "main", 10).unwrap(),
             10,
             "equal advance is a no-op"
         );
         assert_eq!(
-            advance_conversation_sync_cursor(&db, "c-sync", 200).unwrap(),
+            advance_conversation_sync_cursor(&db, "c-sync", "main", 200).unwrap(),
             200
         );
-        assert_eq!(get_conversation_sync_cursor(&db, "c-sync").unwrap(), 200);
+        assert_eq!(
+            get_conversation_sync_cursor(&db, "c-sync", "main").unwrap(),
+            200
+        );
         // Inflated sequence is capped to MAX(log) — cannot permanently skip catch-up.
         assert_eq!(
-            advance_conversation_sync_cursor(&db, "c-sync", 9999).unwrap(),
+            advance_conversation_sync_cursor(&db, "c-sync", "main", 9999).unwrap(),
             200
         );
     }
@@ -1014,31 +1047,37 @@ mod tests {
     #[test]
     fn sync_cursor_rejects_unknown_conversation_and_negative() {
         let missing = db();
-        let err = advance_conversation_sync_cursor(&missing, "missing-conv", 1).unwrap_err();
+        let err = advance_conversation_sync_cursor(&missing, "missing-conv", "main", 1)
+            .unwrap_err();
         assert!(matches!(err, DbError::NotFound(_)));
         let mut db = db();
         seed_conversation(&mut db, "c-neg");
-        let err = advance_conversation_sync_cursor(&db, "c-neg", -1).unwrap_err();
+        let err = advance_conversation_sync_cursor(&db, "c-neg", "main", -1).unwrap_err();
         assert!(matches!(err, DbError::Invalid(_)));
-        assert_eq!(get_conversation_sync_cursor(&db, "c-neg").unwrap(), 0);
+        assert_eq!(get_conversation_sync_cursor(&db, "c-neg", "main").unwrap(), 0);
         // Empty log: advance is a no-op (capped to 0).
         assert_eq!(
-            advance_conversation_sync_cursor(&db, "c-neg", 50).unwrap(),
+            advance_conversation_sync_cursor(&db, "c-neg", "main", 50).unwrap(),
             0
         );
     }
 
     #[test]
-    fn sync_cursor_is_conversation_scoped() {
+    fn sync_cursor_is_conversation_and_client_scoped() {
         let mut db = db();
         seed_conversation(&mut db, "c-a");
         seed_conversation(&mut db, "c-b");
         seed_events(&db, "c-a", 50);
         seed_events(&db, "c-b", 3);
-        advance_conversation_sync_cursor(&db, "c-a", 50).unwrap();
-        advance_conversation_sync_cursor(&db, "c-b", 3).unwrap();
-        assert_eq!(get_conversation_sync_cursor(&db, "c-a").unwrap(), 50);
-        assert_eq!(get_conversation_sync_cursor(&db, "c-b").unwrap(), 3);
+        advance_conversation_sync_cursor(&db, "c-a", "main", 50).unwrap();
+        advance_conversation_sync_cursor(&db, "c-b", "main", 3).unwrap();
+        assert_eq!(get_conversation_sync_cursor(&db, "c-a", "main").unwrap(), 50);
+        assert_eq!(get_conversation_sync_cursor(&db, "c-b", "main").unwrap(), 3);
+        // Window B advancing must not poison Window A's watermark.
+        advance_conversation_sync_cursor(&db, "c-a", "tool-1", 50).unwrap();
+        assert_eq!(get_conversation_sync_cursor(&db, "c-a", "main").unwrap(), 50);
+        assert_eq!(get_conversation_sync_cursor(&db, "c-a", "tool-1").unwrap(), 50);
+        assert_eq!(get_conversation_sync_cursor(&db, "c-a", "other").unwrap(), 0);
     }
 
     #[test]
@@ -1046,15 +1085,19 @@ mod tests {
         let mut db = db();
         seed_conversation(&mut db, "c-cascade");
         seed_events(&db, "c-cascade", 42);
-        advance_conversation_sync_cursor(&db, "c-cascade", 42).unwrap();
-        assert_eq!(get_conversation_sync_cursor(&db, "c-cascade").unwrap(), 42);
+        advance_conversation_sync_cursor(&db, "c-cascade", "main", 42).unwrap();
+        advance_conversation_sync_cursor(&db, "c-cascade", "tool-x", 20).unwrap();
+        assert_eq!(
+            get_conversation_sync_cursor(&db, "c-cascade", "main").unwrap(),
+            42
+        );
         db.conn()
             .execute(
                 "DELETE FROM conversations WHERE id = ?1",
                 params!["c-cascade"],
             )
             .unwrap();
-        // Row must be gone (CASCADE); getter returns the zero default.
+        // Rows must be gone (CASCADE); getter returns the zero default.
         let remaining: i64 = db
             .conn()
             .query_row(
@@ -1064,7 +1107,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(remaining, 0);
-        assert_eq!(get_conversation_sync_cursor(&db, "c-cascade").unwrap(), 0);
+        assert_eq!(
+            get_conversation_sync_cursor(&db, "c-cascade", "main").unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -1088,14 +1134,26 @@ mod tests {
             .unwrap();
         }
         // Simulate crash after first page of 200.
-        advance_conversation_sync_cursor(&db, "c-page", 200).unwrap();
+        advance_conversation_sync_cursor(&db, "c-page", "main", 200).unwrap();
         let remaining = get_conversation_events(&db, "c-page", Some(200), Some(200)).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].sequence, 201);
         assert_eq!(remaining[0].event_type, "surface.transaction_applied");
-        advance_conversation_sync_cursor(&db, "c-page", 201).unwrap();
+        advance_conversation_sync_cursor(&db, "c-page", "main", 201).unwrap();
         assert!(get_conversation_events(&db, "c-page", Some(201), Some(200))
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn sync_cursor_rejects_invalid_client_id() {
+        let mut db = db();
+        seed_conversation(&mut db, "c-bad-client");
+        seed_events(&db, "c-bad-client", 1);
+        let err = advance_conversation_sync_cursor(&db, "c-bad-client", "", 1).unwrap_err();
+        assert!(matches!(err, DbError::Invalid(_)));
+        let err = advance_conversation_sync_cursor(&db, "c-bad-client", "bad id!", 1)
+            .unwrap_err();
+        assert!(matches!(err, DbError::Invalid(_)));
     }
 }

@@ -594,6 +594,7 @@ pub fn get_conversation_events_cmd(
 #[tauri::command]
 pub fn get_conversation_sync_cursor_cmd(
     state: State<'_, AppState>,
+    window: WebviewWindow,
     conversation_id: String,
 ) -> Result<i64, CommandError> {
     state.require_profile()?;
@@ -601,6 +602,7 @@ pub fn get_conversation_sync_cursor_cmd(
     if trimmed.is_empty() {
         return Err(CommandError::new("invalid", "conversationId is required"));
     }
+    let client_id = window.label().to_string();
     let db = state.db.lock();
     if !crate::db::conversation_exists(&db, trimmed) {
         return Err(CommandError::new(
@@ -608,12 +610,13 @@ pub fn get_conversation_sync_cursor_cmd(
             format!("conversation {trimmed}"),
         ));
     }
-    Ok(get_conversation_sync_cursor(&db, trimmed)?)
+    Ok(get_conversation_sync_cursor(&db, trimmed, &client_id)?)
 }
 
 #[tauri::command]
 pub fn advance_conversation_sync_cursor_cmd(
     state: State<'_, AppState>,
+    window: WebviewWindow,
     conversation_id: String,
     sequence: i64,
 ) -> Result<i64, CommandError> {
@@ -622,8 +625,11 @@ pub fn advance_conversation_sync_cursor_cmd(
     if trimmed.is_empty() {
         return Err(CommandError::new("invalid", "conversationId is required"));
     }
+    let client_id = window.label().to_string();
     let db = state.db.lock();
-    Ok(advance_conversation_sync_cursor(&db, trimmed, sequence)?)
+    Ok(advance_conversation_sync_cursor(
+        &db, trimmed, &client_id, sequence,
+    )?)
 }
 
 #[derive(Debug, Deserialize)]

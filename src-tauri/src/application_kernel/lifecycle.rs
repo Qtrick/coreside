@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::db::{now_rfc3339, Database, DbError, DbResult};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 pub const LIFECYCLE_STATES: &[&str] = &[
     "draft",
@@ -29,6 +29,27 @@ pub struct DependencyEdge {
 }
 
 pub fn add_dependency(db: &mut Database, edge: DependencyEdge) -> DbResult<()> {
+    let existing: bool = db
+        .conn()
+        .query_row(
+            "SELECT 1 FROM application_dependencies
+             WHERE source_type = ?1 AND source_id = ?2
+               AND target_type = ?3 AND target_id = ?4
+               AND relationship_type = ?5",
+            params![
+                edge.source_type,
+                edge.source_id,
+                edge.target_type,
+                edge.target_id,
+                edge.relationship_type
+            ],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if existing {
+        return Ok(());
+    }
     db.conn().execute(
         "INSERT INTO application_dependencies (
             id, source_type, source_id, target_type, target_id, relationship_type, created_at

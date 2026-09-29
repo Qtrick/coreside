@@ -20,6 +20,9 @@ permissions = [
   "allow-get-settings",
   # Conversation-scoped Sync/Conflict (avoids process-wide agent-turn when subscribed).
   "allow-subscribe-conversation-sync",
+  # Per-window catch-up cursors (bound to caller window.label in Rust).
+  "allow-get-conversation-sync-cursor-cmd",
+  "allow-advance-conversation-sync-cursor-cmd",
   # Scoped route state query and navigation for tool window
   "allow-get-route-state-cmd",
   "allow-navigate-route-cmd",

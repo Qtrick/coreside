@@ -1023,7 +1023,25 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
             .deleted_conversations
             .lock()
             .contains(&conversation_id)
+            || {
+                let db = state.db.lock();
+                !db::conversation_exists(&db, &conversation_id)
+            }
         {
+            // activate_next already claimed this row — fail it closed so drain
+            // cannot leave a permanently-active orphan after delete races.
+            let mut db = state.db.lock();
+            if let Err(e) = crate::runtime_v2::complete_queue_item(
+                &mut db,
+                &item.id,
+                Some("conversation deleted"),
+            ) {
+                tracing::warn!(
+                    error = %e,
+                    queue_item = %item.id,
+                    "queue complete after conversation delete race failed"
+                );
+            }
             return;
         }
         crate::commands::emit_queue_changed(

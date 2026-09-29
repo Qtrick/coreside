@@ -984,6 +984,16 @@ fn apply_one(
                 })
                 .unwrap_or(false);
 
+            // Load current state before authorization so opaque (undeclared-but-present)
+            // keys cannot be claimed via legacy synthesis.
+            let (mut current, current_rev) =
+                super::surfaces::get_surface_state_with_revision(db, sid)
+                    .map_err(|e| e.to_string())?;
+
+            if !current.is_object() {
+                current = json!({});
+            }
+
             for k in &touched_keys {
                 let target_val = if key_mode.is_some() {
                     op.payload.get("value").unwrap_or(&Value::Null)
@@ -997,6 +1007,15 @@ fn apply_one(
                 let sc = if let Some(found) = doc.state_contracts.iter().find(|s| &s.key == k) {
                     found
                 } else if !has_explicit_contracts {
+                    let already_present = current
+                        .as_object()
+                        .map(|o| o.contains_key(k))
+                        .unwrap_or(false);
+                    if already_present {
+                        return Err(format!(
+                            "cannot write to opaque state key '{k}' on surface '{sid}' without a declared contract"
+                        ));
+                    }
                     // Legacy compatibility path: infer safe default contract so legacy tools don't break,
                     // but newly generated Runtime V2 surfaces with explicit contracts are strictly enforced.
                     synthesized = super::software_document::StateContract::new_with_origin(
@@ -1012,9 +1031,13 @@ fn apply_one(
                     ));
                 };
 
-                if sc.write_policy == "readonly" {
+                if sc.write_policy == "readonly"
+                    || sc.write_policy == "user"
+                    || sc.write_policy == "system"
+                {
                     return Err(format!(
-                        "cannot write to readonly state key '{k}' on surface '{sid}'"
+                        "cannot write to {} state key '{k}' on surface '{sid}'",
+                        sc.write_policy
                     ));
                 }
                 if sc.read_policy == "restricted" || sc.sensitivity.as_deref() == Some("sensitive")
@@ -1029,15 +1052,6 @@ fn apply_one(
                     &sc.type_name,
                     sc.is_effective_nullable(),
                 )?;
-            }
-
-            // Load current state fail-closed with revision
-            let (mut current, current_rev) =
-                super::surfaces::get_surface_state_with_revision(db, sid)
-                    .map_err(|e| e.to_string())?;
-
-            if !current.is_object() {
-                current = json!({});
             }
 
             // Apply updates while strictly preserving unrelated state (including opaque keys)
@@ -2458,6 +2472,239 @@ mod tests {
             "expected undeclared state key conflict, got {:?}",
             undeclared_res.conflicts
         );
+    }
+
+    #[test]
+    fn state_set_rejects_user_write_policy_and_opaque_keys() {
+        let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Auth Chat", None)
+                .unwrap();
+
+        // Explicit contracts: user-writable draft must not accept model state.set.
+        let doc = json!({
+            "schemaVersion": "coreside.document/v2",
+            "documentId": "auth-doc",
+            "title": "Auth Doc",
+            "stateContracts": [
+                {
+                    "key": "draft",
+                    "type": "string",
+                    "initial": "",
+                    "writePolicy": "user",
+                    "origin": "user"
+                },
+                {
+                    "key": "label",
+                    "type": "string",
+                    "initial": "",
+                    "writePolicy": "model",
+                    "origin": "model"
+                }
+            ],
+            "sections": [{ "id": "main", "components": [] }]
+        });
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Auth Surface",
+            &doc,
+            &["coreside.core".to_string()],
+        )
+        .unwrap();
+
+        let user_txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "user_write_blocked",
+            &[op(
+                "state.set",
+                Some(&surface.id),
+                json!({ "values": { "draft": "hijack" } }),
+            )],
+            false,
+        )
+        .unwrap();
+        let user_res = apply_transaction(&mut db, &user_txn.id).unwrap();
+        assert_eq!(user_res.transaction.status, "failed");
+        assert!(
+            user_res
+                .conflicts
+                .iter()
+                .any(|c| c.contains("user") || c.contains("cannot write")),
+            "expected user writePolicy rejection, got {:?}",
+            user_res.conflicts
+        );
+
+        // Opaque key: empty contracts + pre-existing state key must reject model write.
+        let legacy = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Legacy Surface",
+            &json!({
+                "id": "legacy-doc",
+                "name": "Legacy",
+                "components": []
+            }),
+            &[],
+        )
+        .unwrap();
+        let (mut st, rev) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &legacy.id).unwrap();
+        if let Some(obj) = st.as_object_mut() {
+            obj.insert("secretVault".into(), json!("opaque-value"));
+        }
+        crate::runtime_v2::surfaces::save_surface_state_occ(&mut db, &legacy.id, &st, rev)
+            .unwrap();
+
+        let opaque_txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "opaque_blocked",
+            &[op(
+                "state.set",
+                Some(&legacy.id),
+                json!({ "values": { "secretVault": "stolen" } }),
+            )],
+            false,
+        )
+        .unwrap();
+        let opaque_res = apply_transaction(&mut db, &opaque_txn.id).unwrap();
+        assert_eq!(opaque_res.transaction.status, "failed");
+        assert!(
+            opaque_res
+                .conflicts
+                .iter()
+                .any(|c| c.contains("opaque")),
+            "expected opaque key rejection, got {:?}",
+            opaque_res.conflicts
+        );
+        let (after, _) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &legacy.id).unwrap();
+        assert_eq!(after["secretVault"], json!("opaque-value"));
+    }
+
+    #[test]
+    fn state_set_rejects_system_write_policy() {
+        let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Auth Chat", None)
+                .unwrap();
+
+        // System-owned keys (e.g. runtime-managed metadata) must reject model writes
+        // just like user-owned keys, even though the write-policy string differs.
+        let doc = json!({
+            "schemaVersion": "coreside.document/v2",
+            "documentId": "auth-doc-system",
+            "title": "Auth Doc System",
+            "stateContracts": [
+                {
+                    "key": "systemLock",
+                    "type": "boolean",
+                    "initial": false,
+                    "writePolicy": "system",
+                    "origin": "system"
+                }
+            ],
+            "sections": [{ "id": "main", "components": [] }]
+        });
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Auth Surface System",
+            &doc,
+            &["coreside.core".to_string()],
+        )
+        .unwrap();
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "system_write_blocked",
+            &[op(
+                "state.set",
+                Some(&surface.id),
+                json!({ "values": { "systemLock": true } }),
+            )],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "failed");
+        assert!(
+            res.conflicts
+                .iter()
+                .any(|c| c.contains("system") || c.contains("cannot write")),
+            "expected system writePolicy rejection, got {:?}",
+            res.conflicts
+        );
+        let (state, _) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id)
+                .unwrap();
+        // Rejection must leave state untouched (no seed of initial contracts into state bag).
+        assert_ne!(state.get("systemLock"), Some(&json!(true)));
+    }
+
+    #[test]
+    fn state_set_legacy_synthesis_allows_brand_new_opaque_key() {
+        // Contrast case for `state_set_rejects_user_write_policy_and_opaque_keys`:
+        // when contracts are empty, a model write to a key that is NOT already
+        // present in current state must still succeed via legacy synthesis — the
+        // opaque-key rejection only applies to *pre-existing* undeclared keys.
+        let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Legacy Chat", None)
+                .unwrap();
+        let legacy = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Legacy Surface New Key",
+            &json!({
+                "id": "legacy-doc-new-key",
+                "name": "Legacy New Key",
+                "components": []
+            }),
+            &[],
+        )
+        .unwrap();
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "legacy_new_key_allowed",
+            &[op(
+                "state.set",
+                Some(&legacy.id),
+                json!({ "values": { "brandNewKey": "hello" } }),
+            )],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            res.transaction.status, "applied",
+            "expected legacy synthesis to allow a brand-new opaque key, got conflicts {:?}",
+            res.conflicts
+        );
+        let (state, _) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &legacy.id).unwrap();
+        assert_eq!(state["brandNewKey"], json!("hello"));
     }
 
     #[test]

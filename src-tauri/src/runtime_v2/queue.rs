@@ -199,10 +199,24 @@ pub fn complete(db: &mut Database, id: &str, error: Option<&str>) -> DbResult<Qu
     } else {
         "completed"
     };
-    db.conn().execute(
-        "UPDATE agent_request_queue SET status = ?1, finished_at = ?2, error_message = ?3 WHERE id = ?4",
+    let n = db.conn().execute(
+        "UPDATE agent_request_queue SET status = ?1, finished_at = ?2, error_message = ?3
+         WHERE id = ?4 AND status = 'active'",
         params![status, now, error, id],
     )?;
+    if n == 0 {
+        let item = get_item(db, id)?;
+        // Idempotent: already terminal with the same outcome class is OK.
+        if (status == "completed" && item.status == "completed")
+            || (status == "failed" && item.status == "failed")
+        {
+            return Ok(item);
+        }
+        return Err(DbError::Invalid(format!(
+            "queue item {id} is not active (status={}) and cannot be completed",
+            item.status
+        )));
+    }
     get_item(db, id)
 }
 
@@ -707,5 +721,25 @@ mod tests {
             item_recovered.error_message,
             Some("recovered after interruption".to_string())
         );
+    }
+
+    #[test]
+    fn complete_requires_active_status() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Queue", None).unwrap();
+        let queued = enqueue(&mut db, &conv.id, &json!({"content": "task"}), 100).unwrap();
+        let err = complete(&mut db, &queued.id, None).unwrap_err();
+        assert!(matches!(err, DbError::Invalid(_)));
+        assert_eq!(get_item(&db, &queued.id).unwrap().status, "queued");
+
+        let active = activate_next(&mut db, &conv.id).unwrap().expect("active");
+        let done = complete(&mut db, &active.id, None).unwrap();
+        assert_eq!(done.status, "completed");
+        // Idempotent complete of already-completed is OK.
+        let again = complete(&mut db, &active.id, None).unwrap();
+        assert_eq!(again.status, "completed");
+        // Failed after completed is not OK.
+        let err = complete(&mut db, &active.id, Some("nope")).unwrap_err();
+        assert!(matches!(err, DbError::Invalid(_)));
     }
 }
