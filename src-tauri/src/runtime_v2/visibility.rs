@@ -73,8 +73,12 @@ fn interactive_def_for_projection(definition: &Value) -> Option<InteractiveAppDe
 
 /// Project a full surface state using interactive schema contracts when present,
 /// otherwise top-level SoftwareDocument `stateContracts`.
+///
+/// Renderer keeps fail-open for undeclared UI keys. Model and History are
+/// fail-closed on undeclared rest keys so prompt/log projection cannot leak
+/// incidental secrets when contracts are missing or incomplete.
 pub fn project_surface_state(definition: &Value, state: &Value, audience: Audience) -> Value {
-    let _ = audience; // same public-state policy for renderer/model/history today
+    let strict_rest = matches!(audience, Audience::Model | Audience::History);
     let rest_contracts = top_level_state_contracts(definition);
     if let Some(def) = interactive_def_for_projection(definition) {
         let owned = def.owned_keys();
@@ -92,11 +96,14 @@ pub fn project_surface_state(definition: &Value, state: &Value, audience: Audien
         // public_view must only see engine-owned keys — never incidental rest —
         // so top-level restricted rest keys cannot sneak in via undeclared-key pass-through.
         let public_owned = def.public_view(&Value::Object(owned_state));
-        let public_rest =
-            project_state_with_contracts(&Value::Object(rest), &rest_contracts, false);
+        let public_rest = project_state_with_contracts(
+            &Value::Object(rest),
+            &rest_contracts,
+            strict_rest,
+        );
         return merge_objects(&public_owned, &public_rest);
     }
-    project_state_with_contracts(state, &rest_contracts, false)
+    project_state_with_contracts(state, &rest_contracts, strict_rest)
 }
 
 fn top_level_state_contracts(definition: &Value) -> Vec<StateContract> {
@@ -542,6 +549,30 @@ mod tests {
             assert!(public.get("__rng").is_none(), "rng leaked for {audience:?}");
             assert_eq!(public["theme"], "dark");
             assert!(public.get("questions").is_some());
+        }
+    }
+
+    #[test]
+    fn model_and_history_omit_undeclared_rest_keys() {
+        let definition = json!({
+            "stateContracts": [
+                { "key": "theme", "type": "string", "initialValue": "light", "writePolicy": "user" }
+            ]
+        });
+        let state = json!({
+            "theme": "dark",
+            "incidentalSecret": "sk-live-should-not-reach-model",
+        });
+        let renderer = project_surface_state(&definition, &state, Audience::Renderer);
+        assert_eq!(renderer["theme"], "dark");
+        assert_eq!(renderer["incidentalSecret"], "sk-live-should-not-reach-model");
+        for audience in [Audience::Model, Audience::History] {
+            let public = project_surface_state(&definition, &state, audience);
+            assert_eq!(public["theme"], "dark");
+            assert!(
+                public.get("incidentalSecret").is_none(),
+                "undeclared rest leaked for {audience:?}: {public}"
+            );
         }
     }
 

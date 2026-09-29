@@ -16,8 +16,36 @@ use uuid::Uuid;
 use super::operations::AppOperation;
 use super::packs::{required_packs_for_definition, validate_definition_components_for_packs};
 use super::patch::apply_component_op;
+use super::software_document::{admit_software_document, SoftwareDocument};
 use super::streaming::{NdjsonFrameParser, StreamEvent};
 use crate::ai::ToolComponent;
+
+/// Preview admission must be at least as strict as durable apply for definitions.
+fn admit_preview_definition(
+    existing_definition: Option<&Value>,
+    candidate: &Value,
+    capability_packs: &[String],
+) -> Result<(), String> {
+    validate_definition_components_for_packs(candidate, capability_packs)?;
+    // Fail closed on malformed existing — silently treating it as None would skip
+    // Rule B / interactive anti-broadening and make preview weaker than durable.
+    let existing_doc = match existing_definition {
+        Some(v) => Some(definition_as_software_document(v)?),
+        None => None,
+    };
+    let candidate_doc = definition_as_software_document(candidate)?;
+    admit_software_document(existing_doc.as_ref(), &candidate_doc, capability_packs)
+}
+
+fn definition_as_software_document(definition: &Value) -> Result<SoftwareDocument, String> {
+    if definition.get("sections").is_some() {
+        return SoftwareDocument::from_value(definition)
+            .map_err(|e| format!("invalid software document in preview: {e}"));
+    }
+    let tool_def: crate::ai::ToolDefinition = serde_json::from_value(definition.clone())
+        .map_err(|e| format!("cannot convert definition to software document: {e}"))?;
+    Ok(SoftwareDocument::from_tool_definition(&tool_def))
+}
 
 /// Speculative in-memory surface clone for progressive paint.
 #[derive(Debug, Clone)]
@@ -354,7 +382,8 @@ impl PreviewTransaction {
                     .get(&surface_id)
                     .map(|model| model.capability_packs.clone())
                     .unwrap_or(required_packs_for_definition(&tool)?);
-                validate_definition_components_for_packs(&tool, &capability_packs)?;
+                let existing = self.surfaces.get(&surface_id).map(|m| m.definition.clone());
+                admit_preview_definition(existing.as_ref(), &tool, &capability_packs)?;
                 self.seed_surface(PreviewSurfaceModel {
                     surface_id: surface_id.clone(),
                     tool_id: Some(tool_id.clone()),
@@ -404,7 +433,11 @@ impl PreviewTransaction {
 
         if op.op_type == "chat.inline_surface_update" {
             if let Some(definition) = op.payload.get("definition") {
-                validate_definition_components_for_packs(definition, &model.capability_packs)?;
+                admit_preview_definition(
+                    Some(&model.definition),
+                    definition,
+                    &model.capability_packs,
+                )?;
                 model.definition = definition.clone();
                 model.preview_revision = model.preview_revision.saturating_add(1);
                 return Ok(());
@@ -416,20 +449,20 @@ impl PreviewTransaction {
             model.definition.get("sections").is_some() || op.op_type.starts_with("surface.");
         if is_structured {
             let mut doc = if model.definition.get("sections").is_some() {
-                super::software_document::SoftwareDocument::from_value(&model.definition)
+                SoftwareDocument::from_value(&model.definition)
                     .map_err(|e| format!("invalid software document in preview: {e}"))?
             } else {
                 let tool_def: crate::ai::ToolDefinition =
                     serde_json::from_value(model.definition.clone()).map_err(|e| {
                         format!("cannot convert definition to software document: {e}")
                     })?;
-                super::software_document::SoftwareDocument::from_tool_definition(&tool_def)
+                SoftwareDocument::from_tool_definition(&tool_def)
             };
 
             doc.apply_operation(op)?;
             let candidate = serde_json::to_value(&doc)
                 .map_err(|e| format!("cannot serialize software document: {e}"))?;
-            validate_definition_components_for_packs(&candidate, &model.capability_packs)?;
+            admit_preview_definition(Some(&model.definition), &candidate, &model.capability_packs)?;
             model.definition = candidate;
             model.preview_revision = model.preview_revision.saturating_add(1);
             return Ok(());
@@ -477,15 +510,28 @@ impl PreviewTransaction {
         } else {
             candidate = json!({ "components": components });
         }
-        validate_definition_components_for_packs(&candidate, &model.capability_packs)?;
-        // Preserve tool identity when definition is component-only.
+        // Preserve tool identity before admission (id/title required by SoftwareDocument).
+        // Copy from the speculative model only — never fabricate a name that would
+        // let nameless candidates pass preview while durable admit rejects them.
         if candidate.get("id").is_none() {
-            if let Some(tool_id) = &model.tool_id {
-                if let Some(obj) = candidate.as_object_mut() {
+            if let Some(obj) = candidate.as_object_mut() {
+                if let Some(tool_id) = &model.tool_id {
                     obj.insert("id".into(), json!(tool_id));
+                } else if let Some(id) = model.definition.get("id").cloned() {
+                    obj.insert("id".into(), id);
                 }
             }
         }
+        if candidate.get("name").is_none() && candidate.get("title").is_none() {
+            if let Some(obj) = candidate.as_object_mut() {
+                if let Some(name) = model.definition.get("name").cloned() {
+                    obj.insert("name".into(), name);
+                } else if let Some(title) = model.definition.get("title").cloned() {
+                    obj.insert("title".into(), title);
+                }
+            }
+        }
+        admit_preview_definition(Some(&model.definition), &candidate, &model.capability_packs)?;
         model.definition = candidate;
         model.preview_revision = model.preview_revision.saturating_add(1);
         Ok(())
@@ -1555,6 +1601,199 @@ mod tests {
                 .as_deref(),
             Some("existing-tool")
         );
+    }
+
+    /// Preview `surface.create` must enforce the seeded surface pack boundary the
+    /// same way durable apply does — an ungranted pack cannot paint.
+    #[test]
+    fn surface_create_rejects_ungranted_pack_on_seeded_surface() {
+        let mut preview = PreviewTransaction::new("turn-create-pack", None);
+        let before = sample_definition();
+        let op: AppOperation = serde_json::from_value(json!({
+            "id": "create-svg",
+            "type": "surface.create",
+            "target": {"surfaceId": "surf-existing-tool"},
+            "payload": {
+                "definition": {
+                    "id": "existing-tool",
+                    "name": "WithSvg",
+                    "components": [{"id": "svg", "type": "svgScene", "props": {}}]
+                }
+            }
+        }))
+        .unwrap();
+
+        let err = preview
+            .paint_op(&op, |surface_id| {
+                (surface_id == "surf-existing-tool").then(|| PreviewSurfaceModel {
+                    surface_id: "surf-existing-tool".into(),
+                    tool_id: Some("existing-tool".into()),
+                    application_id: Some("existing-tool".into()),
+                    capability_packs: vec!["coreside.core".into()],
+                    definition: before.clone(),
+                    state: json!({}),
+                    base_revision: 2,
+                    preview_revision: 2,
+                })
+            })
+            .unwrap_err();
+        assert!(
+            err.contains("has not been granted"),
+            "expected pack admission rejection, got: {err}"
+        );
+        assert_eq!(
+            preview.surface("surf-existing-tool").unwrap().definition,
+            before,
+            "rejected surface.create must not mutate the speculative definition"
+        );
+        assert_eq!(
+            preview.surface("surf-existing-tool").unwrap().preview_revision,
+            2
+        );
+    }
+
+    /// Preview full replace must reject definitions that weaken trusted contracts
+    /// (parity with `admit_software_document` Rule B).
+    #[test]
+    fn full_replace_rejects_readonly_write_policy_broadening() {
+        let mut preview = PreviewTransaction::new("turn-weaken-write", None);
+        let existing_def = json!({
+            "id": "tool-secure",
+            "name": "Secure",
+            "description": "test",
+            "stateContracts": [{
+                "key": "score",
+                "type": "number",
+                "initialValue": 0,
+                "writePolicy": "readonly",
+                "origin": "model"
+            }],
+            "components": [{
+                "id": "c1",
+                "type": "progress",
+                "props": { "maximum": 5, "value": 1 }
+            }]
+        });
+        preview.seed_surface(PreviewSurfaceModel {
+            surface_id: "surf-tool-secure".into(),
+            tool_id: Some("tool-secure".into()),
+            application_id: Some("tool-secure".into()),
+            capability_packs: vec!["coreside.core".into()],
+            definition: existing_def.clone(),
+            state: json!({ "score": 0 }),
+            base_revision: 1,
+            preview_revision: 1,
+        });
+
+        let op: AppOperation = serde_json::from_value(json!({
+            "id": "weaken-op",
+            "type": "tool.full_replace",
+            "target": {"toolId": "tool-secure"},
+            "payload": {
+                "action": "replace",
+                "targetToolId": "tool-secure",
+                "tool": {
+                    "id": "tool-secure",
+                    "name": "Secure",
+                    "stateContracts": [{
+                        "key": "score",
+                        "type": "number",
+                        "initialValue": 0,
+                        "writePolicy": "model",
+                        "origin": "model"
+                    }],
+                    "components": [{
+                        "id": "c1",
+                        "type": "progress",
+                        "props": { "maximum": 5, "value": 1 }
+                    }]
+                }
+            }
+        }))
+        .unwrap();
+
+        let err = preview.paint_op(&op, |_| None).unwrap_err();
+        assert!(
+            err.contains("cannot broaden write policy") || err.contains("readonly"),
+            "expected write-policy anti-broadening rejection, got: {err}"
+        );
+        assert_eq!(
+            preview.surface("surf-tool-secure").unwrap().definition,
+            existing_def
+        );
+        assert_eq!(
+            preview.surface("surf-tool-secure").unwrap().preview_revision,
+            1
+        );
+    }
+
+    /// Inline definition updates must also go through admit — restricted read
+    /// policies cannot be broadened in speculative paint.
+    #[test]
+    fn inline_surface_update_rejects_restricted_read_policy_broadening() {
+        let mut preview = PreviewTransaction::new("turn-weaken-read", None);
+        let existing_def = json!({
+            "id": "quiz-tool",
+            "name": "Quiz",
+            "description": "test",
+            "stateContracts": [{
+                "key": "answers",
+                "type": "array",
+                "initialValue": [1, 0, 0],
+                "readPolicy": "restricted",
+                "writePolicy": "system",
+                "origin": "model"
+            }],
+            "components": [{
+                "id": "c1",
+                "type": "progress",
+                "props": { "maximum": 5, "value": 1 }
+            }]
+        });
+        preview.seed_surface(PreviewSurfaceModel {
+            surface_id: "s-quiz".into(),
+            tool_id: Some("quiz-tool".into()),
+            application_id: Some("quiz-tool".into()),
+            capability_packs: vec!["coreside.core".into()],
+            definition: existing_def.clone(),
+            state: json!({ "answers": [1, 0, 0] }),
+            base_revision: 3,
+            preview_revision: 3,
+        });
+
+        let op: AppOperation = serde_json::from_value(json!({
+            "id": "broaden-read",
+            "type": "chat.inline_surface_update",
+            "target": {"surfaceId": "s-quiz"},
+            "payload": {
+                "definition": {
+                    "id": "quiz-tool",
+                    "name": "Quiz",
+                    "stateContracts": [{
+                        "key": "answers",
+                        "type": "array",
+                        "initialValue": [1, 0, 0],
+                        "readPolicy": "public",
+                        "writePolicy": "system",
+                        "origin": "model"
+                    }],
+                    "components": [{
+                        "id": "c1",
+                        "type": "progress",
+                        "props": { "maximum": 5, "value": 1 }
+                    }]
+                }
+            }
+        }))
+        .unwrap();
+
+        let err = preview.paint_op(&op, |_| None).unwrap_err();
+        assert!(
+            err.contains("cannot broaden read policy") || err.contains("restricted"),
+            "expected read-policy anti-broadening rejection, got: {err}"
+        );
+        assert_eq!(preview.surface("s-quiz").unwrap().definition, existing_def);
+        assert_eq!(preview.surface("s-quiz").unwrap().preview_revision, 3);
     }
 
     #[test]

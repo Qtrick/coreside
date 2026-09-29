@@ -188,14 +188,60 @@ fn event_exists(db: &Database, surface_id: &str, event_id: &str) -> DbResult<boo
         .is_some())
 }
 
+/// Load the stored action binding for an event_id, if any.
+fn stored_event_binding(
+    db: &Database,
+    surface_id: &str,
+    event_id: &str,
+) -> DbResult<Option<(String, Value)>> {
+    let row = db.conn().query_row(
+        "SELECT action_id, params_json FROM interactive_action_log
+         WHERE surface_id = ?1 AND event_id = ?2",
+        params![surface_id, event_id],
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+    );
+    match row {
+        Ok((action_id, params_json)) => {
+            let params: Value =
+                serde_json::from_str(&params_json).map_err(|e| corrupted("action params", e))?;
+            Ok(Some((action_id, params)))
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Same event_id may soft-retry only when action_id + params match the stored row.
+fn ensure_duplicate_payload_matches(
+    db: &Database,
+    surface_id: &str,
+    event_id: &str,
+    action_id: &str,
+    params_v: &Value,
+) -> DbResult<()> {
+    let Some((stored_action, stored_params)) = stored_event_binding(db, surface_id, event_id)?
+    else {
+        return Ok(());
+    };
+    if stored_action != action_id || stored_params != *params_v {
+        return Err(DbError::Conflict(format!(
+            "interactive event_id '{event_id}' was already used for a different action or params"
+        )));
+    }
+    Ok(())
+}
+
 /// Soft-idempotent recovery when a concurrent retry lost the UNIQUE(event_id) race.
 fn soft_duplicate_view(
     db: &mut Database,
     surface_id: &str,
     event_id: &str,
+    action_id: &str,
+    params_v: &Value,
     err: DbError,
 ) -> DbResult<InteractiveView> {
     if is_constraint_violation(&err) {
+        ensure_duplicate_payload_matches(db, surface_id, event_id, action_id, params_v)?;
         if event_exists(db, surface_id, event_id)? {
             let loaded = ensure_initialized(db, surface_id)?;
             return Ok(view_of(surface_id, &loaded, None, true));
@@ -719,6 +765,7 @@ pub fn dispatch(
         .optional()?;
     let mut loaded = ensure_initialized(db, surface_id)?;
     if duplicate.is_some() {
+        ensure_duplicate_payload_matches(db, surface_id, event_id, action_id, params_v)?;
         return Ok(view_of(surface_id, &loaded, None, true));
     }
     if loaded.reinitialized || expected_state_revision != loaded.revision {
@@ -772,7 +819,9 @@ pub fn dispatch(
         checkpoint,
     ) {
         Ok(rev) => rev,
-        Err(err) => return soft_duplicate_view(db, surface_id, event_id, err),
+        Err(err) => {
+            return soft_duplicate_view(db, surface_id, event_id, action_id, params_v, err)
+        }
     };
     loaded.owned = next_owned;
     loaded.seq = seq;
@@ -933,8 +982,10 @@ pub fn undo(
         )
         .optional()?;
     let loaded = ensure_initialized(db, surface_id)?;
-    // Soft-idempotent: retries with the same event_id must not UNIQUE-fail.
+    // Soft-idempotent: retries with the same event_id must not UNIQUE-fail,
+    // but only when the stored row is also an undo (same action + null params).
     if duplicate.is_some() {
+        ensure_duplicate_payload_matches(db, surface_id, event_id, "__undo", &Value::Null)?;
         return Ok(view_of(surface_id, &loaded, None, true));
     }
     if expected_state_revision != loaded.revision {
@@ -977,7 +1028,9 @@ pub fn undo(
         Some(&prior),
     ) {
         Ok(rev) => rev,
-        Err(err) => return soft_duplicate_view(db, surface_id, event_id, err),
+        Err(err) => {
+            return soft_duplicate_view(db, surface_id, event_id, "__undo", &Value::Null, err)
+        }
     };
     let l = Loaded {
         owned: prior,

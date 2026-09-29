@@ -5,6 +5,7 @@ import {
   clearPreviewOverlaysMatching,
   clearPreviewSurfaceOverlays,
   getPreviewOverlayForTool,
+  getPreviewOverlayForSurface,
   previewOverlayKey,
   type PreviewSurfaceOverlay,
 } from "./surface-overlay";
@@ -244,5 +245,42 @@ describe("preview surface overlay", () => {
     );
     expect(getPreviewOverlayForTool(overlays, "tool-1", "conv-other")).toBeNull();
     expect(getPreviewOverlayForTool(overlays, "missing", "conv-1")).toBeNull();
+  });
+
+  it("resolves overlay for inline surface by surface id", () => {
+    const overlays = {
+      "tool-1": sampleOverlay({
+        conversationId: "conv-1",
+        surfaceId: "surf-inline-1",
+        toolId: null,
+      }),
+      "surf-inline-1": sampleOverlay({
+        conversationId: "conv-1",
+        surfaceId: "surf-inline-1",
+        toolId: null,
+      }),
+    };
+    expect(
+      getPreviewOverlayForSurface(overlays, "surf-inline-1", "conv-1")?.surfaceId,
+    ).toBe("surf-inline-1");
+    expect(
+      getPreviewOverlayForSurface(overlays, "surf-inline-1", "conv-other"),
+    ).toBeNull();
+  });
+
+  it("resolves toolId-keyed overlay when inline surface only has surface id", () => {
+    const overlays = {
+      "tool-paint": sampleOverlay({
+        conversationId: "conv-1",
+        toolId: "tool-paint",
+        surfaceId: "surf-inline-99",
+      }),
+    };
+    expect(
+      getPreviewOverlayForSurface(overlays, "surf-inline-99", "conv-1")?.toolId,
+    ).toBe("tool-paint");
+    expect(
+      getPreviewOverlayForSurface(overlays, "surf-inline-99", "conv-other"),
+    ).toBeNull();
   });
 });

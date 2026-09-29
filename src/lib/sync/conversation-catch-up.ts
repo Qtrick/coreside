@@ -1,6 +1,11 @@
 /**
  * Durable conversation event catch-up — Partial Update reconnect semantics
- * without Durable Object state: SQLite event log + monotonic client watermark.
+ * without Durable Object state: SQLite event log + monotonic per-window watermark.
+ *
+ * The TypeScript API takes only `conversationId`. The authoritative client /
+ * window identity is bound in Rust from `WebviewWindow::label()` and cannot be
+ * forged from the frontend. Each webview therefore has an independent cursor
+ * for the same conversation.
  */
 
 export type ConversationCatchUpEvent = {

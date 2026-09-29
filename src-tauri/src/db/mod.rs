@@ -162,10 +162,14 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         "034_conversation_sync_cursors_per_client",
         include_str!("../../migrations/034_conversation_sync_cursors_per_client.sql"),
     ),
+    (
+        "035_apply_idempotency_request_hash",
+        include_str!("../../migrations/035_apply_idempotency_request_hash.sql"),
+    ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "034_conversation_sync_cursors_per_client";
+pub const LATEST_MIGRATION: &str = "035_apply_idempotency_request_hash";
 
 #[derive(Debug, Error)]
 pub enum DbError {

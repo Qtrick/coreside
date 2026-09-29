@@ -137,6 +137,48 @@ pub fn enforce_caller_surface_scope(
     ))
 }
 
+/// Tool windows may only subscribe to / catch up on conversations that own
+/// their bound tool's surface. Main window is unrestricted here (ACL still applies).
+pub fn enforce_caller_conversation_scope(
+    window: &tauri::WebviewWindow,
+    db: &db::Database,
+    conversation_id: &str,
+) -> Result<(), CommandError> {
+    let Some(bound) = caller_bound_tool_id(window) else {
+        return Ok(());
+    };
+    if bound.is_empty() {
+        return Err(CommandError::new(
+            "forbidden",
+            "This tool window cannot access conversations.",
+        ));
+    }
+    let cid = conversation_id.trim();
+    if cid.is_empty() {
+        return Err(CommandError::new(
+            "invalid",
+            "conversationId is required",
+        ));
+    }
+    let owned: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM surfaces
+             WHERE conversation_id = ?1
+               AND (tool_id = ?2 OR id = ?3)",
+            rusqlite::params![cid, bound, format!("surf-{bound}")],
+            |r| r.get(0),
+        )
+        .map_err(|e| CommandError::from(db::DbError::from(e)))?;
+    if owned > 0 {
+        return Ok(());
+    }
+    Err(CommandError::new(
+        "forbidden",
+        "This tool window cannot access another conversation.",
+    ))
+}
+
 pub fn inspect(app: &AppHandle) -> Result<OrchestratorInspect, CommandError> {
     orchestrator::inspect(app)
 }
@@ -225,5 +267,74 @@ mod tests {
             Some("bad/id"),
             "x"
         ));
+    }
+
+    #[test]
+    fn conversation_ownership_predicate_scopes_tool_surfaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scope.db");
+        let mut db = crate::db::Database::open_path(&path).unwrap();
+        let conv =
+            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "C", None)
+                .unwrap();
+        let other =
+            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "O", None)
+                .unwrap();
+        let mut tool = crate::ai::response_schema::ToolDefinition {
+            id: "notes".into(),
+            name: "Notes".into(),
+            ..Default::default()
+        };
+        tool.normalize_for_frontend();
+        crate::db::apply_tool_change(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            &tool,
+            "create",
+            None,
+            "scope test",
+        )
+        .unwrap();
+        let def = serde_json::json!({
+            "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+        });
+        let surf = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Notes",
+            &def,
+            &[],
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET tool_id = 'notes' WHERE id = ?1",
+                [&surf.id],
+            )
+            .unwrap();
+        let owned: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM surfaces
+                 WHERE conversation_id = ?1
+                   AND (tool_id = ?2 OR id = ?3)",
+                rusqlite::params![conv.id, "notes", "surf-notes"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(owned > 0);
+        let foreign: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM surfaces
+                 WHERE conversation_id = ?1
+                   AND (tool_id = ?2 OR id = ?3)",
+                rusqlite::params![other.id, "notes", "surf-notes"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(foreign, 0);
     }
 }

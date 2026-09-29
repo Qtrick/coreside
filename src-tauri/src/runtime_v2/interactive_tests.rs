@@ -338,8 +338,8 @@ fn stale_duplicate_and_illegal_dispatches_do_not_mutate_state() {
     assert_eq!(raw_state_json(&e.db, &sid), snapshot);
     assert_eq!(log_count(&e.db, &sid), rows);
 
-    // Duplicate event id: no second application, even with a different payload.
-    let dup = dispatch(
+    // Duplicate event id with a different payload must conflict — not soft-succeed.
+    let mismatched = dispatch(
         &mut e.db,
         &sid,
         v1.state_revision,
@@ -347,11 +347,45 @@ fn stale_duplicate_and_illegal_dispatches_do_not_mutate_state() {
         "move",
         &json!({"index": 0}),
         Origin::User,
+    );
+    assert!(
+        matches!(mismatched, Err(DbError::Conflict(_))),
+        "same event_id + different params must conflict, got {mismatched:?}"
+    );
+    assert_eq!(raw_state_json(&e.db, &sid), snapshot);
+    assert_eq!(log_count(&e.db, &sid), rows);
+
+    // Exact retry (same action + params) remains soft-idempotent.
+    let dup = dispatch(
+        &mut e.db,
+        &sid,
+        v1.state_revision,
+        "ev-1",
+        "move",
+        &json!({"index": 4}),
+        Origin::User,
     )
     .unwrap();
     assert!(dup.duplicate);
     assert_eq!(dup.state_revision, v1.state_revision);
     assert_eq!(dup.state["board"][0], "");
+    assert_eq!(raw_state_json(&e.db, &sid), snapshot);
+    assert_eq!(log_count(&e.db, &sid), rows);
+
+    // Same event_id + same params but a different action_id must conflict.
+    let mismatched_action = dispatch(
+        &mut e.db,
+        &sid,
+        v1.state_revision,
+        "ev-1",
+        "reset",
+        &json!({"index": 4}),
+        Origin::User,
+    );
+    assert!(
+        matches!(mismatched_action, Err(DbError::Conflict(_))),
+        "same event_id + different action_id must conflict, got {mismatched_action:?}"
+    );
     assert_eq!(raw_state_json(&e.db, &sid), snapshot);
     assert_eq!(log_count(&e.db, &sid), rows);
 
@@ -405,6 +439,200 @@ fn stale_duplicate_and_illegal_dispatches_do_not_mutate_state() {
         Origin::User,
     );
     assert!(reserved.is_err());
+}
+
+/// Concurrent identical (event_id, action, params) dispatches must apply once.
+/// The loser may soft-duplicate immediately or Conflict then soft-succeed on retry
+/// after observing the winner's commit (CAS-first commit path).
+#[test]
+fn concurrent_identical_event_id_applies_once() {
+    use std::sync::{Arc, Barrier};
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("interactive-race.db");
+    let mut db = Database::open_path(&db_path).unwrap();
+    let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Race", None)
+        .unwrap()
+        .id;
+    let sid = create_inline_surface(
+        &mut db,
+        &conv,
+        None,
+        None,
+        "App",
+        &surface_def(fixture_json("tic-tac-toe")),
+        &[],
+    )
+    .unwrap()
+    .id;
+    let v0 = get_view(&mut db, &sid).unwrap();
+    let rev = v0.state_revision;
+    let rows_before = log_count(&db, &sid);
+    drop(db);
+
+    let barrier = Arc::new(Barrier::new(2));
+    let mut handles = Vec::new();
+    for _ in 0..2 {
+        let path = db_path.clone();
+        let sid = sid.clone();
+        let barrier = Arc::clone(&barrier);
+        handles.push(std::thread::spawn(move || {
+            let mut thread_db = Database::open_path(&path).expect("open");
+            barrier.wait();
+            dispatch(
+                &mut thread_db,
+                &sid,
+                rev,
+                "race-ev-1",
+                "move",
+                &json!({"index": 4}),
+                Origin::User,
+            )
+        }));
+    }
+
+    let results: Vec<Result<InteractiveView, DbError>> =
+        handles.into_iter().map(|h| h.join().expect("join")).collect();
+
+    let mut db = Database::open_path(&db_path).unwrap();
+    let (state, state_rev) = raw_state(&db, &sid);
+    assert_eq!(state["board"][4], "X", "move must apply exactly once: {state}");
+    assert_eq!(
+        log_count(&db, &sid),
+        rows_before + 1,
+        "exactly one action log row for the raced event"
+    );
+
+    let oks: Vec<_> = results.iter().filter_map(|r| r.as_ref().ok()).collect();
+    let conflicts = results.iter().filter(|r| matches!(r, Err(DbError::Conflict(_)))).count();
+    assert!(
+        !oks.is_empty(),
+        "at least one concurrent dispatch must succeed: {results:?}"
+    );
+    assert!(
+        oks.iter().any(|v| !v.duplicate),
+        "at least one success must be the primary apply: {results:?}"
+    );
+    assert_eq!(
+        oks.len() + conflicts,
+        2,
+        "each racer must Ok or Conflict, got {results:?}"
+    );
+
+    // Soft-duplicate recovery: any Conflict loser retries with the post-commit revision.
+    if conflicts > 0 {
+        let retry = dispatch(
+            &mut db,
+            &sid,
+            state_rev,
+            "race-ev-1",
+            "move",
+            &json!({"index": 4}),
+            Origin::User,
+        )
+        .expect("retry after race must soft-duplicate");
+        assert!(retry.duplicate);
+        assert_eq!(retry.state_revision, state_rev);
+        assert_eq!(raw_state(&db, &sid).0["board"][4], "X");
+        assert_eq!(log_count(&db, &sid), rows_before + 1);
+    } else {
+        assert!(
+            oks.iter().any(|v| v.duplicate),
+            "when both Ok, one must be soft-duplicate: {results:?}"
+        );
+    }
+}
+
+/// Concurrent same event_id with divergent payloads: winner applies, loser Conflicts,
+/// and a mismatched retry must keep conflicting (never soft-adopt the winner).
+#[test]
+fn concurrent_divergent_event_id_payload_conflicts() {
+    use std::sync::{Arc, Barrier};
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("interactive-race-diverge.db");
+    let mut db = Database::open_path(&db_path).unwrap();
+    let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "RaceDiverge", None)
+        .unwrap()
+        .id;
+    let sid = create_inline_surface(
+        &mut db,
+        &conv,
+        None,
+        None,
+        "App",
+        &surface_def(fixture_json("tic-tac-toe")),
+        &[],
+    )
+    .unwrap()
+    .id;
+    let v0 = get_view(&mut db, &sid).unwrap();
+    let rev = v0.state_revision;
+    let rows_before = log_count(&db, &sid);
+    drop(db);
+
+    let barrier = Arc::new(Barrier::new(2));
+    let payloads = [json!({"index": 4}), json!({"index": 0})];
+    let mut handles = Vec::new();
+    for params in payloads {
+        let path = db_path.clone();
+        let sid = sid.clone();
+        let barrier = Arc::clone(&barrier);
+        handles.push(std::thread::spawn(move || {
+            let mut thread_db = Database::open_path(&path).expect("open");
+            barrier.wait();
+            dispatch(
+                &mut thread_db,
+                &sid,
+                rev,
+                "race-diverge-1",
+                "move",
+                &params,
+                Origin::User,
+            )
+        }));
+    }
+
+    let results: Vec<Result<InteractiveView, DbError>> =
+        handles.into_iter().map(|h| h.join().expect("join")).collect();
+
+    let mut db = Database::open_path(&db_path).unwrap();
+    let (state, state_rev) = raw_state(&db, &sid);
+    let applied_index = if state["board"][4] == "X" {
+        4
+    } else if state["board"][0] == "X" {
+        0
+    } else {
+        panic!("exactly one racer must apply a move: {state}");
+    };
+    assert_eq!(log_count(&db, &sid), rows_before + 1);
+
+    let oks: Vec<_> = results.iter().filter_map(|r| r.as_ref().ok()).collect();
+    let conflicts = results.iter().filter(|r| matches!(r, Err(DbError::Conflict(_)))).count();
+    assert_eq!(oks.len(), 1, "exactly one divergent racer applies: {results:?}");
+    assert!(!oks[0].duplicate);
+    assert_eq!(conflicts, 1, "loser must Conflict: {results:?}");
+
+    let loser_params = if applied_index == 4 {
+        json!({"index": 0})
+    } else {
+        json!({"index": 4})
+    };
+    let mismatched = dispatch(
+        &mut db,
+        &sid,
+        state_rev,
+        "race-diverge-1",
+        "move",
+        &loser_params,
+        Origin::User,
+    );
+    assert!(
+        matches!(mismatched, Err(DbError::Conflict(_))),
+        "mismatched payload retry must keep conflicting, got {mismatched:?}"
+    );
+    assert_eq!(raw_state(&db, &sid).0["board"][applied_index], "X");
+    assert_eq!(log_count(&db, &sid), rows_before + 1);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 # Application Approvals and Grants
 
 **Status:** Implemented  
-**TTL:** Pending approvals expire after **15 minutes**
+**TTL:** Pending approvals expire after **15 minutes**. Approved-but-unused approvals expire **15 minutes after the decision** (consume must happen within that window).
 
 ## Two layers
 
@@ -33,6 +33,9 @@ Statuses: `pending` → `approved` / `denied` / `expired` → `consumed`
 
 - Only actor `user` may decide (no agent self-approval)
 - Decide + consume use CAS receipts in `runtime_approval_claims`
+- `expire_stale` expires both `pending` and `approved` rows whose `expires_at` has passed
+- Approving refreshes `expires_at` to decision time + approved-unused TTL
+- `consume` sweeps stale rows first, then CAS-updates only while still `approved` and within `expires_at`
 - Frozen `input_json` is stored for trusted re-execution after approve
 - `kernel_decide_approval` re-runs the frozen call exactly once through the gateway
 

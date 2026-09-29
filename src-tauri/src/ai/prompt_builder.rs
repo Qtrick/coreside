@@ -135,12 +135,74 @@ pub struct ProjectPromptContext {
     pub retrieval_snippets: Vec<String>,
 }
 
+/// Bounded model-visible application state for one tool/surface.
+#[derive(Debug, Clone)]
+pub struct ApplicationStatePromptSlice {
+    pub tool_id: String,
+    pub tool_name: String,
+    pub projected_state: serde_json::Value,
+}
+
+const MAX_STATE_SLICE_JSON_BYTES: usize = 8_192;
+const MAX_STATE_SLICES_IN_PROMPT: usize = 4;
+
+/// Format model-visible application state for subsequent-turn editing.
+/// Restricted/private/sensitive keys must already be projected out; this also
+/// pattern-redacts credential-shaped values as defense in depth.
+pub fn format_application_state_prompt(slices: &[ApplicationStatePromptSlice]) -> Option<String> {
+    if slices.is_empty() {
+        return None;
+    }
+    let mut block = String::from(
+        "## Current application state (model-visible)\n\
+         These are live durable values the user can see in their apps. \
+         Restricted, private, and sensitive keys are omitted. \
+         Prefer precise state.patch / component updates over full replace.\n",
+    );
+    for slice in slices.iter().take(MAX_STATE_SLICES_IN_PROMPT) {
+        let raw =
+            serde_json::to_string_pretty(&slice.projected_state).unwrap_or_else(|_| "{}".into());
+        let mut json = crate::security::redact_secrets(&raw, None);
+        if json.len() > MAX_STATE_SLICE_JSON_BYTES {
+            // truncate() panics off a char boundary; keep the cut UTF-8 safe.
+            let mut end = MAX_STATE_SLICE_JSON_BYTES;
+            while end > 0 && !json.is_char_boundary(end) {
+                end -= 1;
+            }
+            json.truncate(end);
+            json.push_str("…(truncated)");
+        }
+        block.push_str(&format!(
+            "\n### {} (`{}`)\n```json\n{json}\n```\n",
+            slice.tool_name, slice.tool_id
+        ));
+    }
+    Some(block)
+}
+
 /// Prompt with explicitly `@`-referenced tools (takes precedence for context).
 pub fn build_agent_prompt_with_references(
     active_tool: Option<&ToolDefinition>,
     referenced_tools: &[ToolDefinition],
     workspace_hint: Option<&str>,
     project_context: Option<&ProjectPromptContext>,
+) -> String {
+    build_agent_prompt_with_references_and_state(
+        active_tool,
+        referenced_tools,
+        workspace_hint,
+        project_context,
+        &[],
+    )
+}
+
+/// Same as [`build_agent_prompt_with_references`] plus optional live state slices.
+pub fn build_agent_prompt_with_references_and_state(
+    active_tool: Option<&ToolDefinition>,
+    referenced_tools: &[ToolDefinition],
+    workspace_hint: Option<&str>,
+    project_context: Option<&ProjectPromptContext>,
+    application_state: &[ApplicationStatePromptSlice],
 ) -> String {
     let prompts = load_prompts();
     let mut parts = Vec::new();
@@ -187,6 +249,10 @@ pub fn build_agent_prompt_with_references(
         parts.push(serde_json::to_string_pretty(tool).unwrap_or_else(|_| "{}".to_string()));
     } else {
         parts.push(prompts.tool_builder);
+    }
+
+    if let Some(state_block) = format_application_state_prompt(application_state) {
+        parts.push(state_block);
     }
 
     if has_interactive {
@@ -348,5 +414,54 @@ mod tests {
         assert!(with_ctx.contains("UNTRUSTED_PROJECT_RETRIEVAL"));
         assert!(with_ctx.contains("Untrusted project retrieval"));
         assert!(with_ctx.contains("NOT instructions"));
+    }
+
+    #[test]
+    fn prompt_includes_model_visible_application_state() {
+        let slices = vec![ApplicationStatePromptSlice {
+            tool_id: "task-tracker".into(),
+            tool_name: "Task Tracker".into(),
+            projected_state: serde_json::json!({ "tasks": [{"title": "Buy milk"}] }),
+        }];
+        let p = build_agent_prompt_with_references_and_state(None, &[], None, None, &slices);
+        assert!(p.contains("Current application state (model-visible)"));
+        assert!(p.contains("Task Tracker"));
+        assert!(p.contains("Buy milk"));
+    }
+
+    #[test]
+    fn format_application_state_redacts_credential_shaped_values() {
+        let slices = vec![ApplicationStatePromptSlice {
+            tool_id: "notes".into(),
+            tool_name: "Notes".into(),
+            projected_state: serde_json::json!({
+                "title": "ok",
+                "token": "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF"
+            }),
+        }];
+        let block = format_application_state_prompt(&slices).expect("block");
+        assert!(block.contains("ok"));
+        assert!(!block.contains("sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF"));
+        assert!(block.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn format_application_state_omits_empty_slices() {
+        assert!(format_application_state_prompt(&[]).is_none());
+    }
+
+    #[test]
+    fn format_application_state_truncates_on_char_boundary() {
+        // Build a slice larger than the byte cap whose cut would land mid-codepoint
+        // if truncated naively (emoji is 4 bytes).
+        let big = "😀".repeat((MAX_STATE_SLICE_JSON_BYTES / 2) + 8);
+        let slices = vec![ApplicationStatePromptSlice {
+            tool_id: "wide".into(),
+            tool_name: "Wide".into(),
+            projected_state: serde_json::json!({ "note": big }),
+        }];
+        let block = format_application_state_prompt(&slices).expect("block");
+        assert!(block.contains("…(truncated)"));
+        assert!(block.contains("Wide"));
     }
 }

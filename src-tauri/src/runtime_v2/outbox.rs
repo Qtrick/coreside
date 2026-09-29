@@ -208,14 +208,38 @@ pub fn flush_pending_outbox(db: &mut Database, bus: Option<&mut EventBus>) -> Db
 pub fn lookup_idempotency_outcome(
     db: &Database,
     scope_key: &str,
+    request_hash: &str,
 ) -> DbResult<Option<(String, Value)>> {
     let row = db.conn().query_row(
-        "SELECT outcome, result_json FROM apply_idempotency_outcomes WHERE scope_key = ?1",
+        "SELECT outcome, result_json, request_hash FROM apply_idempotency_outcomes WHERE scope_key = ?1",
         [scope_key],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        },
     );
     match row {
-        Ok((outcome, json)) => {
+        Ok((outcome, json, stored_hash)) => {
+            // Empty stored_hash = pre-035 residue (migration 035 deletes these).
+            // Never replay an unbound body — drop the row and miss so a fresh
+            // apply can proceed under the hash-bound contract.
+            if stored_hash.is_empty() {
+                let _ = db.conn().execute(
+                    "DELETE FROM apply_idempotency_outcomes
+                     WHERE scope_key = ?1 AND request_hash = ''",
+                    [scope_key],
+                )?;
+                return Ok(None);
+            }
+            if stored_hash != request_hash {
+                return Err(crate::db::DbError::Conflict(format!(
+                    "idempotency key was already used for a different request body \
+                     (scope={scope_key})"
+                )));
+            }
             let value: Value = serde_json::from_str(&json).unwrap_or(Value::Null);
             Ok(Some((outcome, value)))
         }
@@ -233,13 +257,14 @@ pub fn store_idempotency_outcome(
     transaction_id: Option<&str>,
     outcome: &str,
     result: &Value,
+    request_hash: &str,
 ) -> DbResult<()> {
     let now = now_rfc3339();
     db.conn().execute(
         "INSERT OR IGNORE INTO apply_idempotency_outcomes (
             scope_key, profile_id, conversation_id, turn_id, transaction_id,
-            outcome, result_json, created_at
-         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            outcome, result_json, created_at, request_hash
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         params![
             scope_key,
             profile_id,
@@ -248,9 +273,23 @@ pub fn store_idempotency_outcome(
             transaction_id,
             outcome,
             result.to_string(),
-            now
+            now,
+            request_hash
         ],
     )?;
+    // INSERT OR IGNORE is silent when scope_key already exists. A concurrent
+    // apply with a different body must not commit — verify the bound hash.
+    let stored_hash: String = db.conn().query_row(
+        "SELECT request_hash FROM apply_idempotency_outcomes WHERE scope_key = ?1",
+        [scope_key],
+        |r| r.get(0),
+    )?;
+    if stored_hash != request_hash {
+        return Err(crate::db::DbError::Conflict(format!(
+            "idempotency key was already used for a different request body \
+             (scope={scope_key})"
+        )));
+    }
     Ok(())
 }
 
@@ -544,5 +583,87 @@ mod tests {
             idempotency_scope_key(Some("c"), Some("t"), &idempotency_keys_for_batch(&ops))
                 .is_none()
         );
+    }
+
+    #[test]
+    fn store_rejects_when_scope_already_bound_to_different_hash() {
+        let dir = tempdir().unwrap();
+        let db = crate::db::Database::open_path(&dir.path().join("idem-hash.db")).unwrap();
+        let scope = "c|t|shared-key";
+        store_idempotency_outcome(
+            &db,
+            scope,
+            None,
+            Some("c"),
+            Some("t"),
+            Some("txn-1"),
+            "committed",
+            &serde_json::json!({"apply": 1}),
+            "hash-a",
+        )
+        .unwrap();
+        let err = store_idempotency_outcome(
+            &db,
+            scope,
+            None,
+            Some("c"),
+            Some("t"),
+            Some("txn-2"),
+            "committed",
+            &serde_json::json!({"apply": 2}),
+            "hash-b",
+        )
+        .unwrap_err();
+        assert!(matches!(err, crate::db::DbError::Conflict(_)), "{err:?}");
+    }
+
+    #[test]
+    fn lookup_drops_empty_request_hash_residue() {
+        let dir = tempdir().unwrap();
+        let db = crate::db::Database::open_path(&dir.path().join("idem-empty.db")).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO apply_idempotency_outcomes (
+                    scope_key, profile_id, conversation_id, turn_id, transaction_id,
+                    outcome, result_json, created_at, request_hash
+                 ) VALUES ('c|t|k', NULL, 'c', 't', 'txn', 'committed', '{}',
+                           '2026-09-29T00:00:00Z', '')",
+                [],
+            )
+            .unwrap();
+        let hit = lookup_idempotency_outcome(&db, "c|t|k", "any-body-hash").unwrap();
+        assert!(hit.is_none(), "unbound residue must not replay");
+        let left: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM apply_idempotency_outcomes WHERE scope_key = 'c|t|k'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn lookup_rejects_when_scope_bound_to_different_hash() {
+        let dir = tempdir().unwrap();
+        let db = crate::db::Database::open_path(&dir.path().join("idem-lookup-conflict.db")).unwrap();
+        store_idempotency_outcome(
+            &db,
+            "c|t|shared-key",
+            None,
+            Some("c"),
+            Some("t"),
+            Some("txn-1"),
+            "committed",
+            &serde_json::json!({"apply": 1}),
+            "hash-a",
+        )
+        .unwrap();
+        let err = lookup_idempotency_outcome(&db, "c|t|shared-key", "hash-b").unwrap_err();
+        assert!(matches!(err, crate::db::DbError::Conflict(_)), "{err:?}");
+        // Matching hash still recovers the prior outcome.
+        let hit = lookup_idempotency_outcome(&db, "c|t|shared-key", "hash-a").unwrap();
+        assert!(hit.is_some());
     }
 }

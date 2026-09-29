@@ -40,7 +40,10 @@ pub use mock::MockAiProvider;
 pub use ollama::{ollama_server_ready, OllamaProvider};
 pub use openai::OpenAiProvider;
 pub use openrouter::OpenRouterProvider;
-pub use prompt_builder::{build_agent_prompt_with_references, PROMPT_VERSION};
+pub use prompt_builder::{
+    build_agent_prompt_with_references, build_agent_prompt_with_references_and_state,
+    ApplicationStatePromptSlice, PROMPT_VERSION,
+};
 #[allow(unused_imports)] // Stream types are the public foundation for Phase 7 wiring.
 pub use provider::{
     AgentMessage, AgentRequest, AgentResponse, AiProvider, ProviderHealth, ProviderStreamEvent,

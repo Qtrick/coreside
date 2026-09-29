@@ -13,7 +13,7 @@ use super::packs::{
 };
 use crate::ai::{layout_type_string, ToolDefinition};
 use crate::db::{now_rfc3339, Database, DbError, DbResult};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 /// Options for [`delete_surface`]. Linked tools are kept unless explicitly requested.
 #[derive(Debug, Clone, Default)]
@@ -356,6 +356,37 @@ pub fn get_surface(db: &Database, id: &str) -> DbResult<SurfaceRecord> {
             rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(format!("surface {id}")),
             other => DbError::Sqlite(other),
         })
+}
+
+/// Resolve which surface state to inject into model prompts for a tool.
+///
+/// Prefer an active conversation-local surface bound to `tool_id` (inline first)
+/// so personal/canvas state is not leaked into a chat that is editing a distinct
+/// inline instance of the same tool id. Fall back to the canonical `surf-{toolId}`.
+pub fn resolve_prompt_surface_for_tool(
+    db: &Database,
+    conversation_id: &str,
+    tool_id: &str,
+) -> DbResult<Option<SurfaceRecord>> {
+    let local_id: Option<String> = db.conn().query_row(
+        "SELECT id FROM surfaces
+         WHERE conversation_id = ?1 AND tool_id = ?2 AND archived = 0
+         ORDER BY CASE WHEN placement = 'chat_inline' THEN 0 ELSE 1 END,
+                  updated_at DESC
+         LIMIT 1",
+        params![conversation_id, tool_id],
+        |row| row.get(0),
+    )
+    .optional()?;
+    if let Some(id) = local_id {
+        return Ok(Some(get_surface(db, &id)?));
+    }
+    let canonical = surface_id_for_tool(tool_id);
+    match get_surface(db, &canonical) {
+        Ok(surf) => Ok(Some(surf)),
+        Err(DbError::NotFound(_)) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// Authoritatively resolve a surface and verify that its persisted conversation_id
@@ -1306,6 +1337,66 @@ mod tests {
             )
             .unwrap();
         assert_eq!(after_delete, 0);
+    }
+
+    #[test]
+    fn resolve_prompt_surface_prefers_conversation_inline_over_canonical_tool() {
+        let mut db = test_db();
+        let tool = ToolDefinition {
+            id: "tracker".into(),
+            name: "Tracker".into(),
+            description: "d".into(),
+            layout: json!("stack"),
+            components: vec![crate::ai::ToolComponent {
+                id: "h".into(),
+                component_type: "heading".into(),
+                value_key: None,
+                props: Some(json!({"text": "Hi"})),
+                children: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let applied =
+            apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "test")
+                .unwrap();
+        let canvas =
+            upsert_surface_from_tool(&mut db, &applied.definition, DEFAULT_WORKSPACE_ID, 1)
+                .unwrap();
+        save_surface_state(&mut db, &canvas.id, &json!({"secretCanvas": "personal"})).unwrap();
+
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        let inline = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Inline Tracker",
+            &minimal_def("Inline Tracker"),
+            &[],
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET tool_id = ?1 WHERE id = ?2",
+                params!["tracker", inline.id],
+            )
+            .unwrap();
+        save_surface_state(&mut db, &inline.id, &json!({"draft": "inline-only"})).unwrap();
+
+        let resolved = resolve_prompt_surface_for_tool(&db, &conv.id, "tracker")
+            .unwrap()
+            .expect("conversation-local surface");
+        assert_eq!(resolved.id, inline.id);
+        let state = get_surface_state(&db, &resolved.id).unwrap();
+        assert_eq!(state["draft"], "inline-only");
+        assert!(state.get("secretCanvas").is_none());
+
+        let other = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Other", None).unwrap();
+        let fallback = resolve_prompt_surface_for_tool(&db, &other.id, "tracker")
+            .unwrap()
+            .expect("canonical fallback");
+        assert_eq!(fallback.id, canvas.id);
     }
 
     #[test]

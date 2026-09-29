@@ -80,6 +80,10 @@ pub fn subscribe_conversation_sync(
             "conversation_id is required",
         ));
     }
+    {
+        let db = state.db.lock();
+        windows::enforce_caller_conversation_scope(&window, &db, &conversation_id)?;
+    }
     state.subscribe_sync(conversation_id, window.label().to_string(), on_event);
     Ok(())
 }
@@ -455,6 +459,7 @@ pub fn get_route_state_cmd(
     _window_id: Option<String>,
 ) -> Result<RouteState, CommandError> {
     state.require_profile()?;
+    windows::enforce_caller_tool_scope(&window, &application_id)?;
     let effective_window = window.label();
     let db = state.db.lock();
     Ok(get_route_state(&db, &application_id, effective_window)?)
@@ -479,6 +484,7 @@ pub fn set_route_state_cmd(
     args: SetRouteStateArgs,
 ) -> Result<RouteState, CommandError> {
     state.require_profile()?;
+    windows::enforce_caller_tool_scope(&window, &args.application_id)?;
     let effective_window = window.label();
     let mut db = state.db.lock();
     // SECURITY: Reject caller-provided history. Use navigate_route for navigation.
@@ -512,6 +518,7 @@ pub fn navigate_route_cmd(
     args: NavigateRouteArgs,
 ) -> Result<NavigateResult, CommandError> {
     state.require_profile()?;
+    windows::enforce_caller_tool_scope(&window, &args.application_id)?;
     let effective_window = window.label();
     let mut db = state.db.lock();
     Ok(navigate_route(
@@ -531,6 +538,7 @@ pub fn route_back_cmd(
     application_id: String,
 ) -> Result<NavigateResult, CommandError> {
     state.require_profile()?;
+    windows::enforce_caller_tool_scope(&window, &application_id)?;
     let effective_window = window.label();
     let mut db = state.db.lock();
     Ok(route_back(&mut db, &application_id, effective_window)?)
@@ -543,6 +551,7 @@ pub fn route_forward_cmd(
     application_id: String,
 ) -> Result<NavigateResult, CommandError> {
     state.require_profile()?;
+    windows::enforce_caller_tool_scope(&window, &application_id)?;
     let effective_window = window.label();
     let mut db = state.db.lock();
     Ok(route_forward(&mut db, &application_id, effective_window)?)
@@ -555,6 +564,7 @@ pub fn ensure_initial_route_cmd(
     application_id: String,
 ) -> Result<RouteState, CommandError> {
     state.require_profile()?;
+    windows::enforce_caller_tool_scope(&window, &application_id)?;
     let effective_window = window.label();
     let mut db = state.db.lock();
     Ok(ensure_initial_route(
@@ -566,6 +576,7 @@ pub fn ensure_initial_route_cmd(
 
 #[tauri::command]
 pub fn get_conversation_events_cmd(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     conversation_id: String,
     after_sequence: Option<i64>,
@@ -577,6 +588,7 @@ pub fn get_conversation_events_cmd(
         return Err(CommandError::new("invalid", "conversationId is required"));
     }
     let db = state.db.lock();
+    windows::enforce_caller_conversation_scope(&window, &db, trimmed)?;
     if !crate::db::conversation_exists(&db, trimmed) {
         return Err(CommandError::new(
             "not_found",
@@ -604,6 +616,7 @@ pub fn get_conversation_sync_cursor_cmd(
     }
     let client_id = window.label().to_string();
     let db = state.db.lock();
+    windows::enforce_caller_conversation_scope(&window, &db, trimmed)?;
     if !crate::db::conversation_exists(&db, trimmed) {
         return Err(CommandError::new(
             "not_found",
@@ -627,6 +640,7 @@ pub fn advance_conversation_sync_cursor_cmd(
     }
     let client_id = window.label().to_string();
     let db = state.db.lock();
+    windows::enforce_caller_conversation_scope(&window, &db, trimmed)?;
     Ok(advance_conversation_sync_cursor(
         &db, trimmed, &client_id, sequence,
     )?)

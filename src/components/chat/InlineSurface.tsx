@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronsDownUp,
   ChevronsUpDown,
@@ -27,6 +27,7 @@ import {
 } from "@/lib/interactive-surface";
 import { InteractiveStatusBar } from "@/components/tool-renderer/InteractiveStatusBar";
 import { toToolDefinition, SoftwareDocumentSchema } from "@/lib/software-document";
+import { getPreviewOverlayForSurface } from "@/lib/preview/surface-overlay";
 import type { SurfaceRecord } from "@/types/runtime-v2";
 import type { ToolDefinition, ToolState } from "@/types/tool";
 import { useAppStore } from "@/stores/app-store";
@@ -134,6 +135,7 @@ export function InlineSurfaceCard({
   const sendMessage = useAppStore((s) => s.sendMessage);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const setSurfaceDraftConflict = useAppStore((s) => s.setSurfaceDraftConflict);
+  const previewSurfacesByKey = useAppStore((s) => s.previewSurfacesByKey);
 
   const isInteractive = hasInteractiveDefinition(surface.definition);
   const flushPendingState = useCallback(
@@ -301,6 +303,24 @@ export function InlineSurfaceCard({
   }, [surface.id]);
 
   const tool = asToolDefinition(surface);
+  const previewOverlay = useMemo(
+    () =>
+      getPreviewOverlayForSurface(
+        previewSurfacesByKey,
+        surface.id,
+        conversationId,
+        surface.toolId,
+      ),
+    [previewSurfacesByKey, surface.id, surface.toolId, conversationId],
+  );
+  const isPreviewPaint = Boolean(previewOverlay);
+  const renderTool = previewOverlay?.tool ?? tool;
+  const renderState = isPreviewPaint
+    ? (previewOverlay?.state ?? state)
+    : interactive.replayState
+      ? { ...state, ...interactive.replayState }
+      : state;
+
   const manifestLookupId = surface.toolId?.trim() || tool.id;
 
   useEffect(() => {
@@ -484,6 +504,15 @@ export function InlineSurfaceCard({
         <div className="inline-surface-title">
           <strong>{surface.name || tool.name}</strong>
           <span className="muted">r{surface.currentRevision}</span>
+          {isPreviewPaint ? (
+            <span
+              className="muted"
+              style={{ fontSize: "0.75rem", marginLeft: "0.5rem" }}
+              aria-live="polite"
+            >
+              Preview
+            </span>
+          ) : null}
           {isInteractionPending ? (
             <span
               className="muted"
@@ -595,19 +624,19 @@ export function InlineSurfaceCard({
             </button>
           ) : null}
           <ToolRenderer
-            tool={tool}
-            state={
-              interactive.replayState
-                ? { ...state, ...interactive.replayState }
-                : state
-            }
+            tool={renderTool}
+            state={renderState}
             onStateChange={
-              interactive.replaySeq != null ? () => undefined : handleStateChange
+              isPreviewPaint || interactive.replaySeq != null
+                ? () => undefined
+                : handleStateChange
             }
             onPersistState={
-              interactive.replaySeq != null ? undefined : persistState
+              isPreviewPaint || interactive.replaySeq != null
+                ? undefined
+                : persistState
             }
-            isCustomizing={isCustomizing}
+            isCustomizing={isCustomizing && !isPreviewPaint}
             selectedComponentId={selectedComponentId}
             onSelectComponent={(c) => setSelectedComponentId(c.id)}
             // Prefer a real kernel application id when present; never invent one
@@ -616,65 +645,74 @@ export function InlineSurfaceCard({
             surfaceId={surface.id}
             conversationId={conversationId}
             projectId={activeProjectId}
+            mode={isPreviewPaint ? "preview" : isCustomizing ? "customize" : "live"}
             onPendingApproval={() => {
               window.dispatchEvent(new Event("coreside:pending-approval"));
             }}
             onInteractiveDispatch={
-              isInteractive && interactive.replaySeq == null
+              !isPreviewPaint && isInteractive && interactive.replaySeq == null
                 ? interactive.dispatch
                 : undefined
             }
-            onSubmitToAgent={async (payload) => {
-              if (interactionLockRef.current) {
-                // Drop concurrent interaction to preserve turn serialization and authoritative state
-                return;
-              }
-              interactionLockRef.current = true;
-              setIsInteractionPending(true);
-              try {
-                const summary = `App interaction (${payload.eventName})`;
-                const isSilent = Boolean(
-                  payload.silent ||
-                  payload.eventName.startsWith("game.") ||
-                  payload.eventName.endsWith(".silent") ||
-                  payload.values.silent === true
-                );
-                // Order guarantee: flush any in-flight or scheduled state persistence to SQLite
-                // and obtain the fresh authoritative state revision before sealing the interaction envelope.
-                await persistenceScheduler.flush(
-                  `surface:${surface.id}`,
-                  async (_key, s) => {
-                    const newRev = await api.saveSurfaceState(surface.id, s, stateRevisionRef.current);
-                    if (typeof newRev === "number") {
-                      stateRevisionRef.current = newRev;
+            onSubmitToAgent={
+              isPreviewPaint
+                ? undefined
+                : async (payload) => {
+                    if (interactionLockRef.current) {
+                      // Drop concurrent interaction to preserve turn serialization and authoritative state
+                      return;
                     }
-                  },
-                );
-                // Single authority: send_message seals StructuredUserInput in Rust.
-                void saveComponentDraft(
-                  payload.componentId ?? "form",
-                  payload.values,
-                  payload.componentId ?? null,
-                );
-                await sendMessage(summary, [], [], {
-                  formId: payload.componentId ?? surface.id,
-                  eventName: payload.eventName,
-                  applicationId: surface.id,
-                  surfaceId: surface.id,
-                  surfaceRevision: surface.currentRevision,
-                  stateRevision: stateRevisionRef.current,
-                  componentId: payload.componentId ?? null,
-                  idempotencyKey: `idem-${crypto.randomUUID()}`,
-                  fields: {
-                    ...payload.values,
-                    ...(isSilent ? { silent: true } : {}),
-                  },
-                });
-              } finally {
-                interactionLockRef.current = false;
-                setIsInteractionPending(false);
-              }
-            }}
+                    interactionLockRef.current = true;
+                    setIsInteractionPending(true);
+                    try {
+                      const summary = `App interaction (${payload.eventName})`;
+                      const isSilent = Boolean(
+                        payload.silent ||
+                          payload.eventName.startsWith("game.") ||
+                          payload.eventName.endsWith(".silent") ||
+                          payload.values.silent === true,
+                      );
+                      // Order guarantee: flush any in-flight or scheduled state persistence to SQLite
+                      // and obtain the fresh authoritative state revision before sealing the interaction envelope.
+                      await persistenceScheduler.flush(
+                        `surface:${surface.id}`,
+                        async (_key, s) => {
+                          const newRev = await api.saveSurfaceState(
+                            surface.id,
+                            s,
+                            stateRevisionRef.current,
+                          );
+                          if (typeof newRev === "number") {
+                            stateRevisionRef.current = newRev;
+                          }
+                        },
+                      );
+                      // Single authority: send_message seals StructuredUserInput in Rust.
+                      void saveComponentDraft(
+                        payload.componentId ?? "form",
+                        payload.values,
+                        payload.componentId ?? null,
+                      );
+                      await sendMessage(summary, [], [], {
+                        formId: payload.componentId ?? surface.id,
+                        eventName: payload.eventName,
+                        applicationId: surface.id,
+                        surfaceId: surface.id,
+                        surfaceRevision: surface.currentRevision,
+                        stateRevision: stateRevisionRef.current,
+                        componentId: payload.componentId ?? null,
+                        idempotencyKey: `idem-${crypto.randomUUID()}`,
+                        fields: {
+                          ...payload.values,
+                          ...(isSilent ? { silent: true } : {}),
+                        },
+                      });
+                    } finally {
+                      interactionLockRef.current = false;
+                      setIsInteractionPending(false);
+                    }
+                  }
+            }
           />
         </div>
       ) : null}

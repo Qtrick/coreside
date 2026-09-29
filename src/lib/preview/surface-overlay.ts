@@ -178,3 +178,36 @@ export function getPreviewOverlayForTool(
   if (conv && overlay.conversationId !== conv) return null;
   return overlay;
 }
+
+/**
+ * Resolve overlay for an inline surface by surface id (and optional tool id).
+ * Conversation must match when provided.
+ *
+ * Preview paints are usually keyed by toolId, while inline surfaces may only
+ * know `surface.id`. Fall back to a conversation-scoped surfaceId scan so
+ * progressive preview still paints.
+ */
+export function getPreviewOverlayForSurface(
+  overlays: Record<string, PreviewSurfaceOverlay>,
+  surfaceId: string | null | undefined,
+  conversationId?: string | null,
+  toolId?: string | null,
+): PreviewSurfaceOverlay | null {
+  const sid = (surfaceId ?? "").trim();
+  if (!sid) return null;
+  const conv = (conversationId ?? "").trim();
+  const byTool = getPreviewOverlayForTool(overlays, toolId, conversationId);
+  if (byTool && byTool.surfaceId === sid) return byTool;
+  const byKey = overlays[sid] ?? null;
+  if (byKey) {
+    if (conv && byKey.conversationId !== conv) return null;
+    if (byKey.surfaceId !== sid && byKey.toolId !== sid) return null;
+    return byKey;
+  }
+  for (const overlay of Object.values(overlays)) {
+    if (overlay.surfaceId !== sid) continue;
+    if (conv && overlay.conversationId !== conv) continue;
+    return overlay;
+  }
+  return null;
+}

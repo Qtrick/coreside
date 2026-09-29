@@ -731,10 +731,17 @@ export const api = {
       afterSequence: args.afterSequence ?? null,
       limit: args.limit ?? null,
     }),
-  /** Durable catch-up watermark (survives reload). */
+  /**
+   * Per-window durable catch-up watermark for this conversation.
+   * Client identity is derived from the native WebviewWindow label in Rust —
+   * the frontend cannot supply or forge a client id.
+   */
   getConversationSyncCursor: (conversationId: string) =>
     invoke<number>("get_conversation_sync_cursor_cmd", { conversationId }),
-  /** Monotonic advance of the durable catch-up watermark after a successful page. */
+  /**
+   * Monotonic advance of this window's durable catch-up watermark after a
+   * successful page. Same native-window client binding as get.
+   */
   advanceConversationSyncCursor: (conversationId: string, sequence: number) =>
     invoke<number>("advance_conversation_sync_cursor_cmd", {
       conversationId,

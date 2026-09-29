@@ -16,7 +16,11 @@ use super::context::ActionRunContext;
 use super::descriptor::ActionDescriptor;
 use super::grants::{mint_grant, GrantDuration, GrantScope, RuntimeGrant};
 
+/// Lifetime of a pending (undecided) approval from creation.
 pub const APPROVAL_TTL_MINUTES: i64 = 15;
+/// Lifetime of an approved-but-unused approval from the decision instant.
+/// Prevents an indefinitely valid consume token after the user walks away.
+pub const APPROVED_UNUSED_TTL_MINUTES: i64 = 15;
 const MAX_INPUT_PREVIEW_CHARS: usize = 200;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,9 +186,11 @@ pub fn list_pending(db: &mut Database) -> DbResult<Vec<ApprovalRequest>> {
 }
 
 pub fn expire_stale(db: &mut Database) -> DbResult<u64> {
+    // Pending and approved-but-unused both honor expires_at. Denied/consumed/
+    // already-expired rows are left alone.
     let n = db.conn().execute(
         "UPDATE runtime_approvals SET status = 'expired'
-         WHERE status = 'pending' AND expires_at <= ?1",
+         WHERE status IN ('pending', 'approved') AND expires_at <= ?1",
         [now_rfc3339()],
     )?;
     Ok(n as u64)
@@ -288,11 +294,28 @@ pub fn decide(
             return Err(DbError::Invalid("approval was already decided".into()));
         }
         let status = if approve { "approved" } else { "denied" };
-        let n = db.conn().execute(
-            "UPDATE runtime_approvals SET status = ?2, decided_at = ?3
-             WHERE id = ?1 AND status = 'pending'",
-            params![id, status, now_rfc3339()],
-        )?;
+        let decided_now = chrono::Utc::now();
+        let decided_at = decided_now.to_rfc3339();
+        // Approving starts a fresh unused window from the decision instant so a
+        // user who decides near the end of the pending TTL still has time to
+        // finish the trusted re-run. Denied rows keep their original expires_at.
+        let n = if approve {
+            let unused_expires = (decided_now
+                + chrono::Duration::minutes(APPROVED_UNUSED_TTL_MINUTES))
+            .to_rfc3339();
+            db.conn().execute(
+                "UPDATE runtime_approvals
+                 SET status = ?2, decided_at = ?3, expires_at = ?4
+                 WHERE id = ?1 AND status = 'pending'",
+                params![id, status, decided_at, unused_expires],
+            )?
+        } else {
+            db.conn().execute(
+                "UPDATE runtime_approvals SET status = ?2, decided_at = ?3
+                 WHERE id = ?1 AND status = 'pending'",
+                params![id, status, decided_at],
+            )?
+        };
         if n != 1 {
             return Err(DbError::Invalid(
                 "approval is no longer pending and cannot be decided".into(),
@@ -356,6 +379,11 @@ fn approval_context(approval: &ApprovalRequest) -> ActionRunContext {
 /// Consume an approved approval for a specific call. Returns `Ok(true)` for the
 /// single caller that wins the compare-and-set; every later attempt gets false.
 ///
+/// `expire_stale` runs first so approved-but-unused past `expires_at` cannot be
+/// consumed (status flips to `expired` before the approved check). The row
+/// UPDATE also requires `expires_at > now` so a TTL that elapses between the
+/// sweep and the CAS still loses.
+///
 /// Claim receipt + status update are one atomic transition: a failed update
 /// must not leave `consumed:<id>` claimed while the row stays `approved`.
 pub fn consume(db: &mut Database, id: &str, expected_call_hash: &str) -> DbResult<bool> {
@@ -369,10 +397,11 @@ pub fn consume(db: &mut Database, id: &str, expected_call_hash: &str) -> DbResul
         if !claim(db, &format!("consumed:{id}"))? {
             return Ok(false);
         }
+        let now = now_rfc3339();
         let n = db.conn().execute(
             "UPDATE runtime_approvals SET status = 'consumed', consumed_at = ?2
-             WHERE id = ?1 AND status = 'approved' AND call_hash = ?3",
-            params![id, now_rfc3339(), expected_call_hash],
+             WHERE id = ?1 AND status = 'approved' AND call_hash = ?3 AND expires_at > ?4",
+            params![id, now, expected_call_hash, now],
         )?;
         if n != 1 {
             // Lost the row-level CAS after winning the claim receipt. Roll back via
@@ -414,8 +443,9 @@ fn claim(db: &Database, receipt: &str) -> DbResult<bool> {
 
 pub fn has_live_approvals(db: &Database) -> DbResult<bool> {
     let count: i64 = db.conn().query_row(
-        "SELECT COUNT(*) FROM runtime_approvals WHERE status IN ('pending','approved')",
-        [],
+        "SELECT COUNT(*) FROM runtime_approvals
+         WHERE status IN ('pending','approved') AND expires_at > ?1",
+        [now_rfc3339()],
         |r| r.get(0),
     )?;
     Ok(count > 0)
@@ -817,5 +847,137 @@ mod tests {
         assert_eq!(successes, 1, "Exactly one thread must successfully decide");
         let final_status = get_approval(&db, &approval_id).unwrap().status;
         assert!(final_status == "approved" || final_status == "denied");
+    }
+
+    #[test]
+    fn approved_but_unused_expires_and_cannot_be_consumed() {
+        let (mut db, _dir) = test_db();
+        let d = find_action("local_data.write").unwrap();
+        let a = create_pending(&mut db, &ctx(), d, &json!({"modelId": "m"}), None).unwrap();
+        decide(&mut db, &a.id, true, None, "user").unwrap();
+        assert_eq!(get_approval(&db, &a.id).unwrap().status, "approved");
+
+        db.conn()
+            .execute(
+                "UPDATE runtime_approvals SET expires_at = '2000-01-01T00:00:00Z' WHERE id = ?1",
+                [&a.id],
+            )
+            .unwrap();
+
+        let swept = expire_stale(&mut db).unwrap();
+        assert!(swept >= 1);
+        assert_eq!(get_approval(&db, &a.id).unwrap().status, "expired");
+        assert!(
+            !consume(&mut db, &a.id, &a.call_hash).unwrap(),
+            "expired approved approval must not be consumable"
+        );
+    }
+
+    #[test]
+    fn approving_refreshes_unused_expires_at_window() {
+        let (mut db, _dir) = test_db();
+        let d = find_action("local_data.write").unwrap();
+        let a = create_pending(&mut db, &ctx(), d, &json!({"modelId": "m"}), None).unwrap();
+        // Force pending expiry into the past without sweeping yet.
+        db.conn()
+            .execute(
+                "UPDATE runtime_approvals SET expires_at = '2000-01-01T00:00:00Z' WHERE id = ?1",
+                [&a.id],
+            )
+            .unwrap();
+        // decide calls expire_stale first — pending past TTL cannot be decided.
+        assert!(decide(&mut db, &a.id, true, None, "user").is_err());
+
+        let b = create_pending(&mut db, &ctx(), d, &json!({"modelId": "m2"}), None).unwrap();
+        decide(&mut db, &b.id, true, None, "user").unwrap();
+        let after = get_approval(&db, &b.id).unwrap();
+        assert_eq!(after.status, "approved");
+        let decided = after.decided_at.as_deref().expect("decided_at set");
+        assert!(
+            after.expires_at.as_str() > decided,
+            "approve must set expires_at after decided_at for the unused window"
+        );
+        assert!(consume(&mut db, &b.id, &b.call_hash).unwrap());
+    }
+
+    #[test]
+    fn has_live_approvals_ignores_rows_past_expires_at() {
+        let (mut db, _dir) = test_db();
+        let d = find_action("local_data.write").unwrap();
+        let pending = create_pending(&mut db, &ctx(), d, &json!({"modelId": "p"}), None).unwrap();
+        assert!(has_live_approvals(&db).unwrap());
+
+        db.conn()
+            .execute(
+                "UPDATE runtime_approvals SET expires_at = '2000-01-01T00:00:00Z' WHERE id = ?1",
+                [&pending.id],
+            )
+            .unwrap();
+        // Status still pending — filter is expires_at, not a prior expire_stale sweep.
+        assert_eq!(get_approval(&db, &pending.id).unwrap().status, "pending");
+        assert!(
+            !has_live_approvals(&db).unwrap(),
+            "pending past expires_at must not count as live"
+        );
+
+        let approved = create_pending(&mut db, &ctx(), d, &json!({"modelId": "a"}), None).unwrap();
+        decide(&mut db, &approved.id, true, None, "user").unwrap();
+        assert!(has_live_approvals(&db).unwrap());
+
+        db.conn()
+            .execute(
+                "UPDATE runtime_approvals SET expires_at = '2000-01-01T00:00:00Z' WHERE id = ?1",
+                [&approved.id],
+            )
+            .unwrap();
+        assert_eq!(get_approval(&db, &approved.id).unwrap().status, "approved");
+        assert!(
+            !has_live_approvals(&db).unwrap(),
+            "approved-but-unused past expires_at must not count as live"
+        );
+    }
+
+    #[test]
+    fn consume_rejects_when_expires_at_elapses_between_sweep_and_cas() {
+        // expire_stale saw a still-valid approved row; TTL then elapses before the
+        // row UPDATE. The expires_at > now CAS must lose without leaving a claim.
+        let (mut db, _dir) = test_db();
+        let d = find_action("local_data.write").unwrap();
+        let a = create_pending(&mut db, &ctx(), d, &json!({"modelId": "m"}), None).unwrap();
+        decide(&mut db, &a.id, true, None, "user").unwrap();
+
+        db.conn()
+            .execute_batch(
+                "CREATE TEMP TRIGGER elapse_approved_ttl_on_consume_claim
+                 BEFORE INSERT ON runtime_approval_claims
+                 WHEN NEW.id LIKE 'consumed:%'
+                 BEGIN
+                   UPDATE runtime_approvals
+                   SET expires_at = '2000-01-01T00:00:00Z'
+                   WHERE status = 'approved';
+                 END;",
+            )
+            .unwrap();
+
+        assert!(
+            !consume(&mut db, &a.id, &a.call_hash).unwrap(),
+            "TTL race must be Ok(false), not a consumable win"
+        );
+        let claim_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM runtime_approval_claims WHERE id = ?1",
+                [format!("consumed:{}", a.id)],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(claim_count, 0, "TTL CAS lose must roll back claim receipt");
+        // Trigger UPDATE is rolled back with the consume savepoint; row stays approved.
+        assert_eq!(get_approval(&db, &a.id).unwrap().status, "approved");
+
+        db.conn()
+            .execute_batch("DROP TRIGGER elapse_approved_ttl_on_consume_claim")
+            .unwrap();
+        assert!(consume(&mut db, &a.id, &a.call_hash).unwrap());
     }
 }

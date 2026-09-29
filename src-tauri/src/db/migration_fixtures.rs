@@ -503,7 +503,7 @@ mod tests {
             .iter()
             .map(|(n, _)| *n)
             .collect::<Vec<_>>();
-        assert_eq!(names.len(), 34);
+        assert_eq!(names.len(), 35);
         for (i, name) in names.iter().enumerate() {
             let expected = format!("{:03}_", i + 1);
             assert!(
@@ -511,8 +511,8 @@ mod tests {
                 "migration {i} should start with {expected}, got {name}"
             );
         }
-        assert_eq!(names[33], LATEST_MIGRATION);
-        assert_eq!(LATEST_MIGRATION, "034_conversation_sync_cursors_per_client");
+        assert_eq!(names[34], LATEST_MIGRATION);
+        assert_eq!(LATEST_MIGRATION, "035_apply_idempotency_request_hash");
     }
 
     #[test]
@@ -799,5 +799,87 @@ mod tests {
             )
             .unwrap();
         assert_eq!(remaining, 0);
+    }
+
+    #[test]
+    fn upgrade_from_034_adds_idempotency_request_hash() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("from034-idem-hash.db");
+        {
+            let db = Database::open_path_through(
+                &path,
+                "034_conversation_sync_cursors_per_client",
+            )
+            .unwrap();
+            assert_eq!(db.applied_migrations().unwrap().len(), 34);
+            for (scope, txn) in [("c|t|k", "txn"), ("c|t|k2-unbound", "txn-b")] {
+                db.conn()
+                    .execute(
+                        "INSERT INTO apply_idempotency_outcomes (
+                            scope_key, profile_id, conversation_id, turn_id, transaction_id,
+                            outcome, result_json, created_at
+                         ) VALUES (?1, NULL, 'c', 't', ?2, 'committed', '{}', '2026-09-29T00:00:00Z')",
+                        rusqlite::params![scope, txn],
+                    )
+                    .unwrap();
+            }
+            let cols: Vec<String> = {
+                let mut stmt = db
+                    .conn()
+                    .prepare("PRAGMA table_info(apply_idempotency_outcomes)")
+                    .unwrap();
+                stmt.query_map([], |r| r.get::<_, String>(1))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap()
+            };
+            assert!(
+                !cols.iter().any(|c| c == "request_hash"),
+                "034 schema must not yet have request_hash: {cols:?}"
+            );
+            let pre: i64 = db
+                .conn()
+                .query_row("SELECT COUNT(*) FROM apply_idempotency_outcomes", [], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(pre, 2);
+        }
+
+        let db = Database::open_path(&path).unwrap();
+        assert_latest(&db);
+        assert_fk_ok(&db);
+
+        let remaining: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM apply_idempotency_outcomes", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            remaining, 0,
+            "pre-035 unbound rows must all be deleted so empty request_hash cannot replay any body"
+        );
+
+        // New writes store a non-empty hash.
+        db.conn()
+            .execute(
+                "INSERT INTO apply_idempotency_outcomes (
+                    scope_key, profile_id, conversation_id, turn_id, transaction_id,
+                    outcome, result_json, created_at, request_hash
+                 ) VALUES ('c|t|k2', NULL, 'c', 't', 'txn2', 'committed', '{}',
+                           '2026-09-29T00:00:00Z', 'abc123')",
+                [],
+            )
+            .unwrap();
+        let stored: String = db
+            .conn()
+            .query_row(
+                "SELECT request_hash FROM apply_idempotency_outcomes WHERE scope_key = 'c|t|k2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, "abc123");
     }
 }

@@ -10,7 +10,8 @@ use uuid::Uuid;
 
 use super::CommandError;
 use crate::ai::{
-    adopt_stored_structured_input, build_agent_prompt_with_references, build_user_parts,
+    adopt_stored_structured_input, build_agent_prompt_with_references_and_state, build_user_parts,
+    ApplicationStatePromptSlice,
     chat_with_auto, hash_tool_results, is_allowed_setting_key, parse_agent_response,
     project_context_for_prompt, seal_from_ledger_payload, seal_local_user_submission,
     seal_tool_result_envelope, structured_metadata_value, structured_trust_from_text,
@@ -34,6 +35,72 @@ fn note_timeline(
 ) {
     let db = state.db.lock();
     crate::runtime_v2::try_append_turn_timeline_event(&db, conversation_id, turn_id, kind, payload);
+}
+
+/// Collect bounded model-visible live state for active and @-referenced tools.
+///
+/// Surface resolution is conversation-scoped: an inline instance of a tool in
+/// this chat wins over the personal `surf-{toolId}` canvas so model prompts do
+/// not receive the wrong placement's state.
+fn collect_application_state_for_prompt(
+    db: &crate::db::Database,
+    conversation_id: &str,
+    active_tool: Option<&crate::ai::response_schema::ToolDefinition>,
+    referenced_tools: &[crate::ai::response_schema::ToolDefinition],
+) -> Vec<ApplicationStatePromptSlice> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut candidates: Vec<&crate::ai::response_schema::ToolDefinition> = Vec::new();
+    if let Some(t) = active_tool {
+        candidates.push(t);
+    }
+    for t in referenced_tools {
+        candidates.push(t);
+    }
+    for tool in candidates {
+        if !seen.insert(tool.id.clone()) {
+            continue;
+        }
+        if out.len() >= 4 {
+            break;
+        }
+        let (definition, raw_state) =
+            match crate::runtime_v2::surfaces::resolve_prompt_surface_for_tool(
+                db,
+                conversation_id,
+                &tool.id,
+            ) {
+                Ok(Some(surf)) => {
+                    let state = crate::runtime_v2::surfaces::get_surface_state(db, &surf.id)
+                        .unwrap_or_else(|_| json!({}));
+                    (surf.definition, state)
+                }
+                Ok(None) | Err(_) => {
+                    let state = db::get_tool_state(db, &tool.id)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| json!({}));
+                    (
+                        serde_json::to_value(tool).unwrap_or_else(|_| json!({})),
+                        state,
+                    )
+                }
+            };
+        let projected = crate::runtime_v2::visibility::project_surface_state(
+            &definition,
+            &raw_state,
+            crate::runtime_v2::visibility::Audience::Model,
+        );
+        if projected.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+            continue;
+        }
+        out.push(ApplicationStatePromptSlice {
+            tool_id: tool.id.clone(),
+            tool_name: tool.name.clone(),
+            projected_state: projected,
+        });
+    }
+    out
 }
 
 const MAX_TOOL_USE_ROUNDS: usize = 6;
@@ -1879,11 +1946,22 @@ async fn send_message_inner(
         }
     };
 
-    let system_prompt = build_agent_prompt_with_references(
+    let application_state_slices = {
+        let db = state.db.lock();
+        collect_application_state_for_prompt(
+            &db,
+            &conversation_id,
+            active_tool.as_ref(),
+            &referenced_tools,
+        )
+    };
+
+    let system_prompt = build_agent_prompt_with_references_and_state(
         active_tool.as_ref(),
         &referenced_tools,
         None,
         project_context.as_ref(),
+        &application_state_slices,
     );
 
     let mut chat_messages: Vec<AgentMessage> = history

@@ -377,14 +377,21 @@ pub fn apply_change(
     }
 
     // Durable idempotency: only when every op is keyed (partial keys would skip unkeyed ops).
+    // Scope is conversation|turn|sorted keys; request_hash binds the exact operation bodies
+    // so same-key/different-payload cannot silently replay a prior commit (Vendo parity).
     let idem_keys = idempotency_keys_for_batch(&req.operations);
+    // Fail closed: never hash Null on serialize failure (would bind unrelated bodies).
+    let ops_value = serde_json::to_value(&req.operations).map_err(|e| {
+        KernelError::Validation(format!("cannot hash operations for idempotency: {e}"))
+    })?;
+    let request_hash = registered_actions::canonical::hash_value(&ops_value);
     if let Some(scope) = idempotency_scope_key(
         req.conversation_id.as_deref(),
         req.turn_id.as_deref(),
         &idem_keys,
     ) {
         if let Some((outcome, prior)) =
-            lookup_idempotency_outcome(db, &scope).map_err(KernelError::Db)?
+            lookup_idempotency_outcome(db, &scope, &request_hash).map_err(KernelError::Db)?
         {
             if outcome == "committed" {
                 let apply: Option<ApplyResult> =
@@ -433,6 +440,55 @@ pub fn apply_change(
 
     let mut deferred = Vec::new();
     let inner = (|| -> Result<ChangeResult, KernelError> {
+        // Re-check under the write lock. The pre-txn lookup can race with another
+        // apply that commits the same scope between miss and BEGIN IMMEDIATE —
+        // without this, same-key/same-payload concurrency would double-apply.
+        if let Some(scope) = idempotency_scope_key(
+            req.conversation_id.as_deref(),
+            req.turn_id.as_deref(),
+            &idem_keys,
+        ) {
+            if let Some((outcome, prior)) =
+                lookup_idempotency_outcome(db, &scope, &request_hash).map_err(KernelError::Db)?
+            {
+                if outcome == "committed" {
+                    let apply: Option<ApplyResult> = serde_json::from_value(
+                        prior.get("apply").cloned().unwrap_or(Value::Null),
+                    )
+                    .ok();
+                    let recovered_ok = apply.as_ref().is_some_and(|a| {
+                        a.transaction.status == "applied" && a.conflicts.is_empty()
+                    });
+                    if recovered_ok {
+                        return Ok(ChangeResult {
+                            apply,
+                            proposal_id: None,
+                            risk: risk.clone(),
+                            impact_summary: impact.clone(),
+                            policy: policy.clone(),
+                            verification: None,
+                            operations: None,
+                            summary: Some(req.summary.clone()),
+                            outcome: CommitOutcome::RecoveredPriorCommitted,
+                            conflicts: vec![],
+                        });
+                    }
+                    return Ok(ChangeResult {
+                        apply: None,
+                        proposal_id: None,
+                        risk: risk.clone(),
+                        impact_summary: impact.clone(),
+                        policy: policy.clone(),
+                        verification: None,
+                        operations: None,
+                        summary: Some(req.summary.clone()),
+                        outcome: CommitOutcome::FailedBeforeCommit,
+                        conflicts: vec!["corrupt idempotency outcome record".into()],
+                    });
+                }
+            }
+        }
+
         if let Some(ref cid) = req.conversation_id {
             if !crate::db::conversation_exists(db, cid) {
                 return Err(KernelError::Validation(format!(
@@ -520,6 +576,7 @@ pub fn apply_change(
                 Some(&txn.id),
                 "committed",
                 &stored,
+                &request_hash,
             )
             .map_err(KernelError::Db)?;
         }
@@ -1033,6 +1090,8 @@ pub fn capability_catalog() -> Value {
             "maxInputBytes": registered_actions::breakers::MAX_INPUT_BYTES,
             "maxOutputBytes": registered_actions::breakers::MAX_OUTPUT_BYTES,
             "approvalTtlMinutes": registered_actions::approvals::APPROVAL_TTL_MINUTES,
+            "approvedUnusedTtlMinutes":
+                registered_actions::approvals::APPROVED_UNUSED_TTL_MINUTES,
         },
         "operationFamilies": [
             "surface", "component", "state", "setting", "layout",
@@ -1289,6 +1348,234 @@ mod tests {
             first.apply.as_ref().map(|a| a.transaction.id.clone()),
             second.apply.as_ref().map(|a| a.transaction.id.clone())
         );
+    }
+
+    #[test]
+    fn same_idempotency_key_different_payload_conflicts() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "IdemConflict", None).unwrap();
+        let def = json!({
+            "id": "d",
+            "name": "Inline",
+            "layout": "stack",
+            "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}],
+            "stateContracts": [
+                { "key": "x" }
+            ]
+        });
+        let surface =
+            create_inline_surface(&mut db, &conv.id, None, None, "Inline", &def, &[]).unwrap();
+
+        let mut first_op = op("state.set");
+        first_op.target.surface_id = Some(surface.id.clone());
+        first_op.idempotency_key = Some("shared-key".into());
+        first_op.payload = json!({ "state": { "x": 1 } });
+
+        let first = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                project_id: None,
+                turn_id: Some("turn-idem-conflict".into()),
+                summary: "idem first".into(),
+                operations: vec![first_op],
+                silent: false,
+                source_type: "user".into(),
+                provider: None,
+                model: None,
+                require_approval: false,
+                approval_granted: true,
+                proposal_id: None,
+            },
+        )
+        .unwrap();
+        assert!(first.is_committed());
+
+        let mut second_op = op("state.set");
+        second_op.target.surface_id = Some(surface.id.clone());
+        second_op.idempotency_key = Some("shared-key".into());
+        second_op.payload = json!({ "state": { "x": 999 } });
+
+        let err = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id),
+                project_id: None,
+                turn_id: Some("turn-idem-conflict".into()),
+                summary: "idem different body".into(),
+                operations: vec![second_op],
+                silent: false,
+                source_type: "user".into(),
+                provider: None,
+                model: None,
+                require_approval: false,
+                approval_granted: true,
+                proposal_id: None,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, KernelError::Db(crate::db::DbError::Conflict(_))),
+            "same key + different payload must conflict, got {err:?}"
+        );
+        assert_eq!(
+            err.category(),
+            "conflict",
+            "IPC must surface Db Conflict as conflict, not unknown_error"
+        );
+
+        let state = crate::runtime_v2::surfaces::get_surface_state(&db, &surface.id).unwrap();
+        assert_eq!(state.get("x"), Some(&json!(1)), "first body must remain");
+    }
+
+    #[test]
+    fn empty_request_hash_residue_allows_fresh_apply() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Residue", None).unwrap();
+        let def = json!({
+            "id": "d",
+            "name": "Inline",
+            "layout": "stack",
+            "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}],
+            "stateContracts": [{ "key": "x" }]
+        });
+        let surface =
+            create_inline_surface(&mut db, &conv.id, None, None, "Inline", &def, &[]).unwrap();
+
+        // Pre-035 unbound residue for this scope — must be dropped, not replayed.
+        let scope = format!("{}|{}|residue-key", conv.id, "turn-residue");
+        db.conn()
+            .execute(
+                "INSERT INTO apply_idempotency_outcomes (
+                    scope_key, profile_id, conversation_id, turn_id, transaction_id,
+                    outcome, result_json, created_at, request_hash
+                 ) VALUES (?1, NULL, ?2, 'turn-residue', 'txn-old', 'committed',
+                           '{\"apply\":null}', '2026-09-29T00:00:00Z', '')",
+                rusqlite::params![scope, conv.id],
+            )
+            .unwrap();
+
+        let mut o = op("state.set");
+        o.target.surface_id = Some(surface.id.clone());
+        o.idempotency_key = Some("residue-key".into());
+        o.payload = json!({ "state": { "x": 7 } });
+
+        let result = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                project_id: None,
+                turn_id: Some("turn-residue".into()),
+                summary: "after residue".into(),
+                operations: vec![o],
+                silent: false,
+                source_type: "user".into(),
+                provider: None,
+                model: None,
+                require_approval: false,
+                approval_granted: true,
+                proposal_id: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(result.outcome, CommitOutcome::Committed);
+        let state = crate::runtime_v2::surfaces::get_surface_state(&db, &surface.id).unwrap();
+        assert_eq!(state.get("x"), Some(&json!(7)));
+    }
+
+    #[test]
+    fn concurrent_apply_same_key_same_payload_commits_once() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("concurrent-idem.db");
+        let mut db = Database::open_path(&db_path).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "ConcIdem", None).unwrap();
+        let def = json!({
+            "id": "d",
+            "name": "Inline",
+            "layout": "stack",
+            "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}],
+            "stateContracts": [{ "key": "x" }]
+        });
+        let surface =
+            create_inline_surface(&mut db, &conv.id, None, None, "Inline", &def, &[]).unwrap();
+        drop(db);
+
+        let mut o = op("state.set");
+        o.target.surface_id = Some(surface.id.clone());
+        o.idempotency_key = Some("shared-concurrent-key".into());
+        o.payload = json!({ "state": { "x": 42 } });
+        let req = ChangeRequest {
+            conversation_id: Some(conv.id.clone()),
+            project_id: None,
+            turn_id: Some("turn-concurrent".into()),
+            summary: "concurrent idem".into(),
+            operations: vec![o],
+            silent: false,
+            source_type: "user".into(),
+            provider: None,
+            model: None,
+            require_approval: false,
+            approval_granted: true,
+            proposal_id: None,
+        };
+
+        let num_threads = 8;
+        let mut handles = Vec::new();
+        for _ in 0..num_threads {
+            let path = db_path.clone();
+            let req = req.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut thread_db = Database::open_path(&path).expect("open db in thread");
+                apply_change(&mut thread_db, None, req)
+            }));
+        }
+
+        let mut txn_ids = std::collections::HashSet::new();
+        let mut successes = 0usize;
+        for handle in handles {
+            let result = handle.join().expect("thread join").expect("apply ok");
+            assert!(
+                result.outcome == CommitOutcome::Committed
+                    || result.outcome == CommitOutcome::RecoveredPriorCommitted,
+                "unexpected outcome {:?}",
+                result.outcome
+            );
+            successes += 1;
+            if let Some(apply) = result.apply.as_ref() {
+                txn_ids.insert(apply.transaction.id.clone());
+            }
+        }
+        assert_eq!(successes, num_threads);
+        assert_eq!(
+            txn_ids.len(),
+            1,
+            "exactly one transaction must win; got {txn_ids:?}"
+        );
+
+        let db = Database::open_path(&db_path).unwrap();
+        let state = crate::runtime_v2::surfaces::get_surface_state(&db, &surface.id).unwrap();
+        assert_eq!(state.get("x"), Some(&json!(42)));
+        let outcome_rows: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM apply_idempotency_outcomes",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(outcome_rows, 1);
+        let applied_txns: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM app_transactions WHERE status = 'applied'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(applied_txns, 1, "must not double-apply under concurrency");
     }
 
     #[test]
