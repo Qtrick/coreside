@@ -672,4 +672,330 @@ mod tests {
             "error should tell agent to upsert first: {msg}"
         );
     }
+
+    #[test]
+    fn record_update_denies_cross_application_ownership() {
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use std::collections::HashMap;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("own.db")).unwrap();
+
+        for app in ["app-a", "app-b"] {
+            upsert_manifest(
+                &mut db,
+                ApplicationManifest {
+                    schema_version: "1".into(),
+                    application_id: app.into(),
+                    instance_id: format!("inst-{app}"),
+                    name: app.into(),
+                    description: String::new(),
+                    version: 1,
+                    surfaces: vec![],
+                    routes: vec![],
+                    data_models: vec![],
+                    settings: vec![],
+                    capabilities: vec!["coreside.core".into()],
+                    permissions: vec!["local_data.write".into(), "local_data.read".into()],
+                    events: vec![],
+                    tests: vec![],
+                    search_keywords: vec![],
+                    tags: vec![],
+                    agent_description: String::new(),
+                    project_id: None,
+                    conversation_id: None,
+                    organization_id: None,
+                    ownership: None,
+                    application_action_access: vec!["local_data.write".into()],
+                    surface_action_access: HashMap::new(),
+                    component_action_access: HashMap::new(),
+                    action_descriptor_hashes: HashMap::new(),
+                },
+            )
+            .unwrap();
+            crate::application_kernel::permissions::grant_permission(
+                &mut db,
+                app,
+                "local_data.write",
+                json!({}),
+                "test",
+            )
+            .unwrap();
+            upsert_model(&mut db, app, habit_model()).unwrap();
+        }
+
+        let rec_id = create_record(
+            &mut db,
+            "app-a",
+            "habit",
+            json!({"name": "Water", "frequency": "daily"}),
+        )
+        .unwrap();
+
+        let err = update_record(
+            &mut db,
+            "app-b",
+            &rec_id,
+            json!({"name": "Hacked", "frequency": "daily"}),
+            None,
+        )
+        .expect_err("cross-app update must fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not found") || msg.contains("NotFound") || msg.contains("record"),
+            "expected ownership denial, got {msg}"
+        );
+
+        let still = query_records(&db, "app-a", "habit", 10).unwrap();
+        assert_eq!(still.len(), 1);
+        assert_eq!(still[0]["name"], "Water");
+    }
+
+    #[test]
+    fn record_delete_denies_cross_application_ownership() {
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use std::collections::HashMap;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("del.db")).unwrap();
+
+        for app in ["app-a", "app-b"] {
+            upsert_manifest(
+                &mut db,
+                ApplicationManifest {
+                    schema_version: "1".into(),
+                    application_id: app.into(),
+                    instance_id: format!("inst-{app}"),
+                    name: app.into(),
+                    description: String::new(),
+                    version: 1,
+                    surfaces: vec![],
+                    routes: vec![],
+                    data_models: vec![],
+                    settings: vec![],
+                    capabilities: vec!["coreside.core".into()],
+                    permissions: vec!["local_data.write".into(), "local_data.read".into()],
+                    events: vec![],
+                    tests: vec![],
+                    search_keywords: vec![],
+                    tags: vec![],
+                    agent_description: String::new(),
+                    project_id: None,
+                    conversation_id: None,
+                    organization_id: None,
+                    ownership: None,
+                    application_action_access: vec!["local_data.write".into()],
+                    surface_action_access: HashMap::new(),
+                    component_action_access: HashMap::new(),
+                    action_descriptor_hashes: HashMap::new(),
+                },
+            )
+            .unwrap();
+            crate::application_kernel::permissions::grant_permission(
+                &mut db,
+                app,
+                "local_data.write",
+                json!({}),
+                "test",
+            )
+            .unwrap();
+            upsert_model(&mut db, app, habit_model()).unwrap();
+        }
+
+        let rec_id = create_record(
+            &mut db,
+            "app-a",
+            "habit",
+            json!({"name": "Water", "frequency": "daily"}),
+        )
+        .unwrap();
+
+        let err = delete_record(&mut db, "app-b", &rec_id).expect_err("cross-app delete");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not found") || msg.contains("NotFound") || msg.contains("record"),
+            "expected ownership denial, got {msg}"
+        );
+
+        let still = query_records(&db, "app-a", "habit", 10).unwrap();
+        assert_eq!(still.len(), 1);
+    }
+
+    /// Vertical slice: Task model CRUD with schema evolution and restart survival.
+    #[test]
+    fn task_tracker_data_vertical_slice_crud_migrate_survive() {
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use std::collections::HashMap;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("tasks.db");
+        let mut db = crate::db::Database::open_path(&db_path).unwrap();
+
+        upsert_manifest(
+            &mut db,
+            ApplicationManifest {
+                schema_version: "1".into(),
+                application_id: "app-tasks".into(),
+                instance_id: "inst-tasks".into(),
+                name: "Task Tracker".into(),
+                description: String::new(),
+                version: 1,
+                surfaces: vec![],
+                routes: vec![],
+                data_models: vec![],
+                settings: vec![],
+                capabilities: vec!["coreside.core".into()],
+                permissions: vec!["local_data.write".into(), "local_data.read".into()],
+                events: vec![],
+                tests: vec![],
+                search_keywords: vec![],
+                tags: vec![],
+                agent_description: String::new(),
+                project_id: None,
+                conversation_id: None,
+                organization_id: None,
+                ownership: None,
+                application_action_access: vec!["local_data.write".into()],
+                surface_action_access: HashMap::new(),
+                component_action_access: HashMap::new(),
+                action_descriptor_hashes: HashMap::new(),
+            },
+        )
+        .unwrap();
+        crate::application_kernel::permissions::grant_permission(
+            &mut db,
+            "app-tasks",
+            "local_data.write",
+            json!({}),
+            "test",
+        )
+        .unwrap();
+
+        let v1 = DataModelDefinition {
+            model_id: "Task".into(),
+            display_name: "Task".into(),
+            schema_version: 1,
+            fields: vec![
+                DataField {
+                    field_id: "title".into(),
+                    field_type: "text".into(),
+                    required: true,
+                    default: None,
+                    enum_values: None,
+                },
+                DataField {
+                    field_id: "status".into(),
+                    field_type: "enum".into(),
+                    required: true,
+                    default: Some(json!("pending")),
+                    enum_values: Some(vec!["pending".into(), "completed".into()]),
+                },
+            ],
+        };
+        upsert_model(&mut db, "app-tasks", v1).unwrap();
+
+        let id = create_record(
+            &mut db,
+            "app-tasks",
+            "Task",
+            json!({"title": "Buy groceries", "status": "pending"}),
+        )
+        .unwrap();
+        // v1 update without new fields
+        update_record(
+            &mut db,
+            "app-tasks",
+            &id,
+            json!({"title": "Buy groceries", "status": "completed"}),
+            None,
+        )
+        .unwrap();
+
+        let v2 = DataModelDefinition {
+            model_id: "Task".into(),
+            display_name: "Task".into(),
+            schema_version: 2,
+            fields: vec![
+                DataField {
+                    field_id: "title".into(),
+                    field_type: "text".into(),
+                    required: true,
+                    default: None,
+                    enum_values: None,
+                },
+                DataField {
+                    field_id: "description".into(),
+                    field_type: "long_text".into(),
+                    required: false,
+                    default: None,
+                    enum_values: None,
+                },
+                DataField {
+                    field_id: "status".into(),
+                    field_type: "enum".into(),
+                    required: true,
+                    default: Some(json!("pending")),
+                    enum_values: Some(vec!["pending".into(), "completed".into()]),
+                },
+                DataField {
+                    field_id: "priority".into(),
+                    field_type: "enum".into(),
+                    required: false,
+                    default: Some(json!("normal")),
+                    enum_values: Some(vec![
+                        "low".into(),
+                        "normal".into(),
+                        "high".into(),
+                    ]),
+                },
+                DataField {
+                    field_id: "due_date".into(),
+                    field_type: "date".into(),
+                    required: false,
+                    default: None,
+                    enum_values: None,
+                },
+                DataField {
+                    field_id: "tags".into(),
+                    field_type: "text".into(),
+                    required: false,
+                    default: None,
+                    enum_values: None,
+                },
+            ],
+        };
+        upsert_model(&mut db, "app-tasks", v2).unwrap();
+
+        update_record(
+            &mut db,
+            "app-tasks",
+            &id,
+            json!({
+                "title": "Buy groceries",
+                "status": "pending",
+                "priority": "high",
+                "tags": "errands"
+            }),
+            None,
+        )
+        .unwrap();
+
+        let listed = query_records(&db, "app-tasks", "Task", 20).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["title"], "Buy groceries");
+        assert_eq!(listed[0]["priority"], "high");
+
+        drop(db);
+        let db2 = crate::db::Database::open_path(&db_path).unwrap();
+        let after = query_records(&db2, "app-tasks", "Task", 20).unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0]["title"], "Buy groceries");
+        assert_eq!(after[0]["_id"], id);
+
+        let mut db2 = crate::db::Database::open_path(&db_path).unwrap();
+        delete_record(&mut db2, "app-tasks", &id).unwrap();
+        assert!(query_records(&db2, "app-tasks", "Task", 20)
+            .unwrap()
+            .is_empty());
+    }
 }

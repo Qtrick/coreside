@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   shouldPreserveComponent,
   captureScrollSnapshot,
@@ -6,6 +6,10 @@ import {
   captureFocusSnapshot,
   restoreFocusSnapshot,
   reconcileDirtyOverCanonical,
+  inferBaselineResetKeys,
+  mergeDirtyReconcileResetKeys,
+  resolvePendingInteractionIdempotencyKey,
+  runRendererMountPatchFlush,
 } from "./preservation";
 import {
   canNavigateBack,
@@ -78,12 +82,112 @@ describe("reconcileDirtyOverCanonical", () => {
     const lastPersisted: Record<string, unknown> = { title: "hel", filter: "all" };
     const canonical: Record<string, unknown> = { filter: "all" };
     const dirty = { title: "hello" };
-    const resetKeys = [...Object.keys(lastPersisted), ...Object.keys(canonical)].filter(
-      (k) => !Object.is(lastPersisted[k], canonical[k]),
-    );
+    const resetKeys = inferBaselineResetKeys(lastPersisted, canonical);
     const next = reconcileDirtyOverCanonical(canonical, dirty, resetKeys);
     expect(next.title).toBeUndefined();
     expect(next.filter).toBe("all");
+  });
+
+  it("keeps never-persisted dirty when server injects a new default without baseline", () => {
+    const lastPersisted: Record<string, unknown> = {};
+    const canonical: Record<string, unknown> = { title: "agent-default" };
+    const dirty = { title: "user-typing" };
+    const resetKeys = inferBaselineResetKeys(lastPersisted, canonical);
+    const next = reconcileDirtyOverCanonical(canonical, dirty, resetKeys);
+    expect(next.title).toBe("user-typing");
+  });
+
+  it("honors explicit reset key even when never persisted", () => {
+    const next = reconcileDirtyOverCanonical(
+      { title: "" },
+      { title: "stale-dirty" },
+      ["title"],
+    );
+    expect(next.title).toBe("");
+  });
+});
+
+describe("inferBaselineResetKeys", () => {
+  it("only flags keys that had a persisted baseline and diverged", () => {
+    expect(
+      inferBaselineResetKeys({ title: "hel", filter: "all" }, { filter: "all" }),
+    ).toEqual(["title"]);
+    expect(inferBaselineResetKeys({}, { title: "new-default" })).toEqual([]);
+  });
+});
+
+describe("mergeDirtyReconcileResetKeys", () => {
+  it("merges baseline inference with explicit Sync resetStateKeys", () => {
+    const keys = mergeDirtyReconcileResetKeys(
+      { a: 1, b: 2 },
+      { a: 9, b: 2 },
+      [" c ", "b"],
+    );
+    expect(keys.sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("does not treat never-persisted dirty as reset without explicit keys", () => {
+    const resetKeys = mergeDirtyReconcileResetKeys(
+      {},
+      { title: "agent-default" },
+      [],
+    );
+    const next = reconcileDirtyOverCanonical(
+      { title: "agent-default" },
+      { title: "user-typing" },
+      resetKeys,
+    );
+    expect(next.title).toBe("user-typing");
+  });
+});
+
+describe("resolvePendingInteractionIdempotencyKey", () => {
+  it("reuses idempotency key for the same logical interaction", () => {
+    const first = resolvePendingInteractionIdempotencyKey(
+      null,
+      "tool:submit::1",
+      (k) => `idem-${k}-fixed`,
+    );
+    const second = resolvePendingInteractionIdempotencyKey(
+      first.pending,
+      "tool:submit::1",
+      () => "should-not-run",
+    );
+    expect(second.idempotencyKey).toBe("idem-tool:submit::1-fixed");
+    expect(second.pending).toBe(first.pending);
+  });
+
+  it("issues a new key when the logical interaction changes", () => {
+    const first = resolvePendingInteractionIdempotencyKey(
+      null,
+      "tool:submit::1",
+      (k) => `idem-${k}-a`,
+    );
+    const second = resolvePendingInteractionIdempotencyKey(
+      first.pending,
+      "tool:submit::2",
+      (k) => `idem-${k}-b`,
+    );
+    expect(second.idempotencyKey).toBe("idem-tool:submit::2-b");
+    expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
+  });
+});
+
+describe("runRendererMountPatchFlush", () => {
+  it("skips flush when no canonical surface id", async () => {
+    const flush = vi.fn(async () => undefined);
+    await runRendererMountPatchFlush(null, flush, "conv-1");
+    expect(flush).not.toHaveBeenCalled();
+  });
+
+  it("flushes deferred patches with renderer_mount args", async () => {
+    const flush = vi.fn(async () => undefined);
+    await runRendererMountPatchFlush("surf-1", flush, "conv-9");
+    expect(flush).toHaveBeenCalledWith({
+      conversationId: "conv-9",
+      sourceType: "renderer_mount",
+      approvalGranted: true,
+    });
   });
 });
 

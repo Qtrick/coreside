@@ -68,7 +68,9 @@ pub use drafts::{
     DraftConflict, SurfaceDraft,
 };
 #[allow(unused_imports)]
-pub use events::{EventBus, EventBusError, EventRef, Subscription, SurfaceEvent};
+pub use events::{
+    EventBus, EventBusError, EventRef, Subscription, SurfaceEvent,
+};
 #[allow(unused_imports)]
 pub use operations::{
     normalize_and_validate_model_operations, normalize_operations_for_validation,
@@ -93,9 +95,9 @@ pub use patch_scheduler::{
 #[allow(unused_imports)]
 pub use preservation::{
     apply_preservation_on_replace, clear_surface_state_keys, component_value_key, get_preservation,
-    invalidate_component_live_state, list_preservation_for_surface, prop_keys_for_policy,
-    resolve_policy_for_apply, should_preserve, upsert_preservation, PreservationPolicy,
-    PreservationRecord,
+    invalidate_component_live_state, list_preservation_for_surface, overlay_live_state_on_component,
+    prop_keys_for_policy, resolve_policy_for_apply, should_preserve, upsert_preservation,
+    PreservationPolicy, PreservationRecord,
 };
 #[allow(unused_imports)]
 pub use preview_transaction::{

@@ -361,6 +361,7 @@ pub(crate) fn resolve_effective_surface_id(op: &AppOperation) -> Option<String> 
         })
 }
 
+
 fn apply_one(
     db: &mut Database,
     op: &AppOperation,
@@ -502,6 +503,8 @@ fn apply_one(
                 &packs,
             )
             .map_err(|e| e.to_string())?;
+            // Surface row now exists — promote patches that were waiting on this target.
+            let _ = super::patch_scheduler::promote_deferred_patches(db, Some(&s.id));
             Ok(Some(s))
         }
         "chat.inline_surface_update"
@@ -517,6 +520,10 @@ fn apply_one(
                 .ok_or_else(|| "surfaceId or toolId required".to_string())?;
             let sid = &effective_sid;
             let surface = get_surface(db, sid).map_err(|e| e.to_string())?;
+            crate::application_kernel::manifest::check_tool_application_accepts_mutations(
+                db,
+                surface.tool_id.as_deref(),
+            )?;
             let effective_base =
                 effective_base_revision(op, surface.current_revision, initial_revisions, sid);
 
@@ -1350,7 +1357,7 @@ fn apply_one(
                 .and_then(|v| v.as_str())
                 .unwrap_or("custom")
                 .to_string();
-            let target_ref: super::events::EventRef = match op.payload.get("target") {
+            let claimed_target: super::events::EventRef = match op.payload.get("target") {
                 Some(v) => serde_json::from_value(v.clone())
                     .map_err(|e| format!("invalid target in event.dispatch: {e}"))?,
                 None => super::events::EventRef {
@@ -1362,6 +1369,13 @@ fn apply_one(
                     application_id: op.target.application_id.clone(),
                 },
             };
+            // Fail-closed: never trust model-asserted application/project/conversation.
+            let target_ref = super::events::resolve_authoritative_event_target(
+                db,
+                &claimed_target,
+                txn.conversation_id.as_deref(),
+                txn.project_id.as_deref(),
+            )?;
             // Authoritative event origin: derive from authoritative surface record and transaction context.
             // Do NOT accept untrusted spoofed source from op.payload.
             let src_surface_id = op.target.surface_id.as_deref().unwrap_or("");
@@ -1375,13 +1389,11 @@ fn apply_one(
                 (None, txn.conversation_id.clone(), txn.project_id.clone())
             };
             // application_id is NOT tool_id. Only set when a manifest exists for that id.
-            let auth_application_id = auth_tool_id.as_ref().and_then(|tid| {
-                if crate::application_kernel::manifest::get_manifest(db, tid).is_ok() {
-                    Some(tid.clone())
-                } else {
-                    None
-                }
-            });
+            let auth_application_id =
+                crate::application_kernel::manifest::authoritative_application_id(
+                    db,
+                    auth_tool_id.as_deref(),
+                );
             let source_ref = super::events::EventRef {
                 surface_id: if src_surface_id.is_empty() {
                     None
@@ -1673,6 +1685,11 @@ fn apply_component_replace_with_preservation(
 
     let policy = resolve_policy_for_apply(db, surface_id, Some(cid), &op.payload);
     let preserved = apply_preservation_on_replace(&old, &mut new_comp, policy);
+    if preserved {
+        let _ = super::preservation::overlay_live_state_on_component(
+            db, surface_id, &old, &mut new_comp, policy,
+        );
+    }
     let old_vk = component_value_key(&old).map(|s| s.to_string());
     let new_vk = component_value_key(&new_comp).map(|s| s.to_string());
     let incoming_key = prop_preservation_key(&new_comp);
@@ -1791,6 +1808,11 @@ fn apply_definition_preservation(
             .ok_or_else(|| format!("component '{}' missing after flatten", old.id))?;
         let policy = resolve_policy_for_apply(db, surface_id, Some(&old.id), payload);
         let preserved = apply_preservation_on_replace(old, &mut new_comp, policy);
+        if preserved {
+            let _ = super::preservation::overlay_live_state_on_component(
+                db, surface_id, old, &mut new_comp, policy,
+            );
+        }
         let incoming_key = prop_preservation_key(&new_comp);
         let stored_key = prop_preservation_key(old);
         let compatible = old.component_type == new_comp.component_type;
@@ -3437,6 +3459,165 @@ mod tests {
             source.get("applicationId").and_then(|v| v.as_str()),
             Some(tool_id),
             "manifested tool must set application_id, got {source}"
+        );
+    }
+
+    #[test]
+    fn event_dispatch_rejects_spoofed_target_application_id() {
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "EvtSpoof", None).unwrap();
+        let tool = ToolDefinition {
+            id: "tool-local".into(),
+            name: "Local".into(),
+            description: String::new(),
+            layout: json!("stack"),
+            components: vec![ToolComponent {
+                id: "t".into(),
+                component_type: "text".into(),
+                value_key: None,
+                props: Some(json!({"text": "hi"})),
+                children: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let saved = apply_tool_change(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            &tool,
+            "create",
+            None,
+            "seed",
+        )
+        .unwrap();
+        let surface = upsert_surface_from_tool(
+            &mut db,
+            &saved.definition,
+            DEFAULT_WORKSPACE_ID,
+            saved.current_version,
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET conversation_id = ?1 WHERE id = ?2",
+                rusqlite::params![conv.id, surface.id],
+            )
+            .unwrap();
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "spoof-target",
+            &[op(
+                "event.dispatch",
+                Some(&surface.id),
+                json!({
+                    "eventType": "custom.ping",
+                    "scope": "surface",
+                    "target": {
+                        "surfaceId": surface.id,
+                        "applicationId": "app-other-spoofed"
+                    },
+                    "payload": {}
+                }),
+            )],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_ne!(
+            res.transaction.status, "applied",
+            "spoofed applicationId must fail closed, conflicts={:?}",
+            res.conflicts
+        );
+        assert!(
+            res.conflicts.iter().any(|c| c.contains("spoof") || c.contains("application")),
+            "expected spoof denial in conflicts: {:?}",
+            res.conflicts
+        );
+    }
+
+    #[test]
+    fn component_replace_preserves_live_surface_state_over_empty_definition_props() {
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "LivePreserve", None).unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Tracker",
+            &json!({
+                "id": "tool-tracker",
+                "name": "Tracker",
+                "layout": "stack",
+                "components": [{
+                    "id": "title-input",
+                    "type": "textInput",
+                    "valueKey": "taskTitle",
+                    "props": { "label": "Title", "value": "" }
+                }]
+            }),
+            &[],
+        )
+        .unwrap();
+        crate::runtime_v2::surfaces::save_surface_state_occ(
+            &mut db,
+            &surface.id,
+            &json!({ "taskTitle": "Buy milk" }),
+            1,
+        )
+        .unwrap();
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "replace-input",
+            &[op(
+                "component.replace",
+                Some(&surface.id),
+                json!({
+                    "componentId": "title-input",
+                    "component": {
+                        "id": "title-input",
+                        "type": "textInput",
+                        "valueKey": "taskTitle",
+                        "props": { "label": "Title", "value": "", "placeholder": "Task title" }
+                    }
+                }),
+            )],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
+
+        let (state, _) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id)
+                .unwrap();
+        assert_eq!(
+            state.get("taskTitle"),
+            Some(&json!("Buy milk")),
+            "live surface_state must survive replace, got {state}"
+        );
+        let surf = get_surface(&db, &surface.id).unwrap();
+        let doc = crate::runtime_v2::SoftwareDocument::from_value(&surf.definition).unwrap();
+        let comp = doc.find_component("title-input").unwrap();
+        assert_eq!(
+            comp.props.as_ref().and_then(|p| p.get("value")),
+            Some(&json!("Buy milk")),
+            "definition props.value must overlay live state, got {:?}",
+            comp.props
         );
     }
 }

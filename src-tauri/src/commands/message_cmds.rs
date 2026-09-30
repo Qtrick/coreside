@@ -411,6 +411,10 @@ pub enum AgentTurnEvent {
         revision: Option<i64>,
         #[serde(rename = "syncKind")]
         sync_kind: String,
+        /// Keys an applied transaction intentionally reset (reset_explicitly / replace /
+        /// explicit state.clear). Frontend must not re-overlay never-persisted dirty for these.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        reset_state_keys: Vec<String>,
     },
     #[serde(rename_all = "camelCase")]
     Conflict {
@@ -450,6 +454,69 @@ fn make_text_event(
     }
 }
 
+/// Collect state keys an applied op intentionally reset so Sync can fail-closed
+/// against never-persisted dirty overlays for those keys only.
+fn reset_state_keys_from_ops(ops: &[crate::runtime_v2::operations::AppOperation]) -> Vec<String> {
+    let mut keys = Vec::new();
+    for op in ops {
+        let policy = op
+            .payload
+            .get("preservationPolicy")
+            .or_else(|| op.payload.get("preservation_policy"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let is_reset = matches!(policy, "reset_explicitly" | "replace");
+        match op.op_type.as_str() {
+            "state.set" | "state.patch" | "state.clear" if is_reset || op.op_type == "state.clear" => {
+                if let Some(k) = op
+                    .payload
+                    .get("key")
+                    .or_else(|| op.payload.get("stateKey"))
+                    .and_then(|v| v.as_str())
+                {
+                    keys.push(k.to_string());
+                }
+            }
+            "component.replace" | "component.update_props" | "component.remove" if is_reset => {
+                if let Some(vk) = op
+                    .payload
+                    .get("valueKey")
+                    .or_else(|| op.payload.pointer("/component/valueKey"))
+                    .or_else(|| op.payload.pointer("/component/props/valueKey"))
+                    .and_then(|v| v.as_str())
+                {
+                    keys.push(vk.to_string());
+                }
+                if let Some(cid) = op
+                    .target
+                    .component_id
+                    .as_deref()
+                    .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
+                {
+                    keys.push(cid.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+/// Manifest-backed application scope for Sync — never equate `tool_id` without proof.
+fn sync_application_id_from_surfaces(
+    db: &crate::db::Database,
+    surfaces: &[crate::runtime_v2::surfaces::SurfaceRecord],
+) -> Option<String> {
+    surfaces.iter().find_map(|s| {
+        crate::application_kernel::manifest::authoritative_application_id(
+            db,
+            s.tool_id.as_deref(),
+        )
+    })
+}
+
 fn sync_scoped_from_turn(event: &AgentTurnEvent) -> Option<crate::state::SyncScopedEvent> {
     match event {
         AgentTurnEvent::Sync {
@@ -459,6 +526,7 @@ fn sync_scoped_from_turn(event: &AgentTurnEvent) -> Option<crate::state::SyncSco
             application_id,
             revision,
             sync_kind,
+            reset_state_keys,
         } => Some(crate::state::SyncScopedEvent::Sync {
             conversation_id: conversation_id.clone(),
             surface_ids: surface_ids.clone(),
@@ -466,6 +534,7 @@ fn sync_scoped_from_turn(event: &AgentTurnEvent) -> Option<crate::state::SyncSco
             application_id: application_id.clone(),
             revision: *revision,
             sync_kind: sync_kind.clone(),
+            reset_state_keys: reset_state_keys.clone(),
         }),
         AgentTurnEvent::Conflict {
             conversation_id,
@@ -748,6 +817,10 @@ fn emit_progressive_op_previews(
             Some(renderer_safe_preview_seed(
                 &surface.id,
                 surface.tool_id.clone(),
+                crate::application_kernel::manifest::authoritative_application_id(
+                    &db,
+                    surface.tool_id.as_deref(),
+                ),
                 surface.capability_packs,
                 &surface.definition,
                 &raw_state,
@@ -1494,9 +1567,17 @@ async fn send_message_inner(
                 }
             }
             if let Some(ref app_id) = submission.application_id {
-                let matches_app = surf.id == *app_id
-                    || surf.tool_id.as_deref() == Some(app_id)
-                    || surf.instance_id == *app_id;
+                let auth_app = crate::application_kernel::manifest::authoritative_application_id(
+                    &db_guard,
+                    surf.tool_id.as_deref(),
+                );
+                let matches_app = if let Some(auth) = auth_app {
+                    auth == *app_id
+                } else {
+                    surf.id == *app_id
+                        || surf.tool_id.as_deref() == Some(app_id.as_str())
+                        || surf.instance_id == *app_id
+                };
                 if !matches_app {
                     return Err(CommandError::new(
                         "invalid",
@@ -3477,6 +3558,10 @@ async fn send_message_inner(
                                         .collect();
                                     tool_ids.sort();
                                     tool_ids.dedup();
+                                    let sync_application_id = {
+                                        let db = state.db.lock();
+                                        sync_application_id_from_surfaces(&db, &result.surfaces)
+                                    };
                                     emit_turn(
                                         &app,
                                         on_event.as_ref(),
@@ -3484,16 +3569,15 @@ async fn send_message_inner(
                                             conversation_id: Some(conversation_id.clone()),
                                             surface_ids,
                                             tool_ids,
-                                            // Prefer first surface tool as application scope when known.
-                                            application_id: result
-                                                .surfaces
-                                                .iter()
-                                                .find_map(|s| s.tool_id.clone()),
+                                            application_id: sync_application_id,
                                             revision: result
                                                 .surfaces
                                                 .first()
                                                 .map(|s| s.current_revision),
                                             sync_kind: "transaction_applied".into(),
+                                            reset_state_keys: reset_state_keys_from_ops(
+                                                &result.transaction.operations,
+                                            ),
                                         },
                                     );
                                     note_timeline(

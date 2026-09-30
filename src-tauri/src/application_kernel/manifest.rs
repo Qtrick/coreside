@@ -337,6 +337,50 @@ pub fn upsert_manifest(db: &mut Database, mut m: ApplicationManifest) -> DbResul
 
 use rusqlite::OptionalExtension;
 
+/// Resolve application identity only when a durable manifest exists.
+/// `tool_id` must never be treated as `application_id` without this proof.
+pub fn authoritative_application_id(
+    db: &Database,
+    tool_or_candidate_id: Option<&str>,
+) -> Option<String> {
+    let id = tool_or_candidate_id?.trim();
+    if id.is_empty() {
+        return None;
+    }
+    match get_manifest(db, id) {
+        Ok(_) => Some(id.to_string()),
+        Err(_) => None,
+    }
+}
+
+/// True when a manifest exists and the application is not disabled/suspended.
+pub fn application_accepts_mutations(db: &Database, application_id: &str) -> bool {
+    match get_manifest(db, application_id) {
+        Ok(rec) => {
+            !rec.disabled
+                && rec.lifecycle_state != "disabled"
+                && rec.lifecycle_state != "suspended"
+                && rec.lifecycle_state != "failed"
+        }
+        Err(_) => false,
+    }
+}
+
+/// Fail closed when a surface's manifest-backed application cannot receive mutations.
+pub fn check_tool_application_accepts_mutations(
+    db: &Database,
+    tool_id: Option<&str>,
+) -> Result<(), String> {
+    if let Some(app_id) = authoritative_application_id(db, tool_id) {
+        if !application_accepts_mutations(db, &app_id) {
+            return Err(format!(
+                "application '{app_id}' is disabled or suspended and cannot receive mutations"
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn get_manifest(db: &Database, application_id: &str) -> DbResult<ManifestRecord> {
     // SECURITY: we extract raw fields first, then parse manifest_json separately.
     // A malformed manifest must NEVER silently become an empty "Invalid" manifest — an

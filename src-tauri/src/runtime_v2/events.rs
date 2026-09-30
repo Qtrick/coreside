@@ -533,6 +533,128 @@ fn resolve_template_value(template: &Value, event_payload: &Value) -> Value {
     }
 }
 
+/// Resolve an event target against durable ownership.
+/// Model-asserted application/project/conversation/tool ids are fail-closed
+/// unless they match the authoritative surface (or transaction) record.
+pub fn resolve_authoritative_event_target(
+    db: &Database,
+    claimed: &EventRef,
+    fallback_conversation_id: Option<&str>,
+    fallback_project_id: Option<&str>,
+) -> Result<EventRef, String> {
+    if let Some(sid) = claimed.surface_id.as_deref().filter(|s| !s.trim().is_empty()) {
+        let surface = super::surfaces::get_surface(db, sid)
+            .map_err(|e| format!("event target surface '{sid}' not found: {e}"))?;
+        if surface.archived || surface.lifecycle_state == "archived" {
+            return Err(format!("event target surface '{sid}' is archived"));
+        }
+        let auth_app = crate::application_kernel::manifest::authoritative_application_id(
+            db,
+            surface.tool_id.as_deref(),
+        );
+        if let Some(claimed_app) = claimed.application_id.as_deref() {
+            if auth_app.as_deref() != Some(claimed_app) {
+                return Err(format!(
+                    "event target application spoof denied: claimed '{claimed_app}', authoritative {:?}",
+                    auth_app
+                ));
+            }
+        }
+        if let Some(claimed_tool) = claimed.tool_id.as_deref() {
+            if surface.tool_id.as_deref() != Some(claimed_tool) {
+                return Err(format!(
+                    "event target tool spoof denied: claimed '{claimed_tool}', authoritative {:?}",
+                    surface.tool_id
+                ));
+            }
+        }
+        if let Some(claimed_proj) = claimed.project_id.as_deref() {
+            if surface.project_id.as_deref() != Some(claimed_proj) {
+                return Err(format!(
+                    "event target project spoof denied: claimed '{claimed_proj}', authoritative {:?}",
+                    surface.project_id
+                ));
+            }
+        }
+        if let Some(claimed_conv) = claimed.conversation_id.as_deref() {
+            if surface.conversation_id.as_deref() != Some(claimed_conv) {
+                return Err(format!(
+                    "event target conversation spoof denied: claimed '{claimed_conv}', authoritative {:?}",
+                    surface.conversation_id
+                ));
+            }
+        }
+        return Ok(EventRef {
+            surface_id: Some(sid.to_string()),
+            tool_id: surface.tool_id.clone(),
+            conversation_id: surface.conversation_id.clone(),
+            project_id: surface.project_id.clone(),
+            component_id: claimed.component_id.clone(),
+            application_id: auth_app,
+        });
+    }
+
+    // No surface target: only allow application_id when a manifest proves it,
+    // and never accept a claimed application that does not exist.
+    let auth_app = if let Some(claimed_app) = claimed.application_id.as_deref() {
+        let resolved = crate::application_kernel::manifest::authoritative_application_id(
+            db,
+            Some(claimed_app),
+        );
+        if resolved.is_none() {
+            return Err(format!(
+                "event target application '{claimed_app}' has no durable manifest"
+            ));
+        }
+        resolved
+    } else {
+        None
+    };
+
+    Ok(EventRef {
+        surface_id: None,
+        tool_id: claimed.tool_id.clone(),
+        conversation_id: claimed
+            .conversation_id
+            .clone()
+            .or_else(|| fallback_conversation_id.map(|s| s.to_string())),
+        project_id: claimed
+            .project_id
+            .clone()
+            .or_else(|| fallback_project_id.map(|s| s.to_string())),
+        component_id: claimed.component_id.clone(),
+        application_id: auth_app,
+    })
+}
+
+fn registered_action_handler_result(
+    outcome: crate::application_kernel::registered_actions::ActionOutcome,
+    action_name: &str,
+    surface_id: &str,
+) -> Result<Value, String> {
+    use crate::application_kernel::registered_actions::ActionOutcome;
+    match outcome {
+        ActionOutcome::Ok { data, .. } => Ok(serde_json::json!({
+            "status": "success",
+            "action": action_name,
+            "surfaceId": surface_id,
+            "output": data,
+        })),
+        ActionOutcome::PendingApproval { approval_id, .. } => Ok(serde_json::json!({
+            "status": "pending_approval",
+            "approvalId": approval_id,
+            "action": action_name,
+            "surfaceId": surface_id,
+        })),
+        ActionOutcome::Error { message, code } => Err(format!(
+            "action '{action_name}' failed with {code}: {message}"
+        )),
+        ActionOutcome::Blocked { reason, .. } => Err(format!(
+            "action '{action_name}' was blocked: {reason}"
+        )),
+    }
+}
+
 /// Helper to execute a single AppOperation within a standard transaction for an event handler.
 fn apply_handler_op(
     db: &mut Database,
@@ -739,109 +861,58 @@ pub fn execute_durable_event_delivery(
             } => {
                 match super::get_surface(db, &sub.owner_surface_id) {
                     Ok(surface) => {
-                        if let Some(expected_app) = application_id {
-                            if surface.tool_id.as_deref() != Some(expected_app) {
-                                Err(format!(
-                                "cross-application action invocation denied: surface owned by {:?}, requested {}",
-                                surface.tool_id, expected_app
-                            ))
+                        // application_id is manifest-backed only — never equate tool_id.
+                        let auth_app =
+                            crate::application_kernel::manifest::authoritative_application_id(
+                                db,
+                                surface.tool_id.as_deref(),
+                            );
+                        let cross_app_denied = application_id.as_ref().and_then(|expected_app| {
+                            if auth_app.as_deref() != Some(expected_app.as_str()) {
+                                Some(format!(
+                                    "cross-application action invocation denied: surface application {:?}, requested {}",
+                                    auth_app, expected_app
+                                ))
                             } else {
-                                let resolved_params =
-                                    resolve_template_value(parameters, &event.payload);
-                                let ctx = crate::application_kernel::registered_actions::ActionRunContext {
-                                actor: "event_handler".into(),
-                                venue: crate::application_kernel::registered_actions::Venue::Application,
-                                presence: crate::application_kernel::registered_actions::Presence::Present,
-                                application_id: surface.tool_id.clone().or(application_id.clone()),
-                                project_id: surface.project_id.clone(),
-                                conversation_id: surface.conversation_id.clone(),
-                                session_id: crate::application_kernel::registered_actions::context::session_id().to_string(),
-                                run_id: format!("run-{}", Uuid::new_v4()),
-                                trigger: Some(format!("event:{}", event.event_type)),
-                                surface_id: Some(sub.owner_surface_id.clone()),
-                                component_id: None,
-                                depth: depth as u32,
-                            };
-                                let outcome = crate::application_kernel::registered_actions::execute_registered_action(
+                                None
+                            }
+                        });
+                        if let Some(msg) = cross_app_denied {
+                            Err(msg)
+                        } else {
+                            let resolved_params =
+                                resolve_template_value(parameters, &event.payload);
+                            let ctx =
+                                crate::application_kernel::registered_actions::ActionRunContext {
+                                    actor: "event_handler".into(),
+                                    venue:
+                                        crate::application_kernel::registered_actions::Venue::Application,
+                                    presence:
+                                        crate::application_kernel::registered_actions::Presence::Present,
+                                    application_id: auth_app,
+                                    project_id: surface.project_id.clone(),
+                                    conversation_id: surface.conversation_id.clone(),
+                                    session_id:
+                                        crate::application_kernel::registered_actions::context::session_id()
+                                            .to_string(),
+                                    run_id: format!("run-{}", Uuid::new_v4()),
+                                    trigger: Some(format!("event:{}", event.event_type)),
+                                    surface_id: Some(sub.owner_surface_id.clone()),
+                                    component_id: None,
+                                    depth: depth as u32,
+                                };
+                            let outcome = crate::application_kernel::registered_actions::execute_registered_action(
                                 db,
                                 &ctx,
                                 action_name,
                                 &resolved_params,
                                 None,
                             );
-                                match outcome {
-                                crate::application_kernel::registered_actions::ActionOutcome::Ok { data, .. } => {
-                                    Ok(serde_json::json!({
-                                        "status": "success",
-                                        "action": action_name,
-                                        "surfaceId": sub.owner_surface_id,
-                                        "output": data,
-                                    }))
-                                }
-                                crate::application_kernel::registered_actions::ActionOutcome::PendingApproval { approval_id, .. } => {
-                                    Ok(serde_json::json!({
-                                        "status": "pending_approval",
-                                        "approvalId": approval_id,
-                                        "action": action_name,
-                                        "surfaceId": sub.owner_surface_id,
-                                    }))
-                                }
-                                crate::application_kernel::registered_actions::ActionOutcome::Error { message, code } => {
-                                    Err(format!("action '{action_name}' failed with {code}: {message}"))
-                                }
-                                crate::application_kernel::registered_actions::ActionOutcome::Blocked { reason, .. } => {
-                                    Err(format!("action '{action_name}' was blocked: {reason}"))
-                                }
-                            }
-                            }
-                        } else {
-                            let resolved_params =
-                                resolve_template_value(parameters, &event.payload);
-                            let ctx = crate::application_kernel::registered_actions::ActionRunContext {
-                            actor: "event_handler".into(),
-                            venue: crate::application_kernel::registered_actions::Venue::Application,
-                            presence: crate::application_kernel::registered_actions::Presence::Present,
-                            application_id: surface.tool_id.clone(),
-                            project_id: surface.project_id.clone(),
-                            conversation_id: surface.conversation_id.clone(),
-                            session_id: crate::application_kernel::registered_actions::context::session_id().to_string(),
-                            run_id: format!("run-{}", Uuid::new_v4()),
-                            trigger: Some(format!("event:{}", event.event_type)),
-                            surface_id: Some(sub.owner_surface_id.clone()),
-                            component_id: None,
-                            depth: depth as u32,
-                        };
-                            let outcome = crate::application_kernel::registered_actions::execute_registered_action(
-                            db,
-                            &ctx,
-                            action_name,
-                            &resolved_params,
-                            None,
-                        );
-                            match outcome {
-                            crate::application_kernel::registered_actions::ActionOutcome::Ok { data, .. } => {
-                                Ok(serde_json::json!({
-                                    "status": "success",
-                                    "action": action_name,
-                                    "surfaceId": sub.owner_surface_id,
-                                    "output": data,
-                                }))
-                            }
-                            crate::application_kernel::registered_actions::ActionOutcome::PendingApproval { approval_id, .. } => {
-                                Ok(serde_json::json!({
-                                    "status": "pending_approval",
-                                    "approvalId": approval_id,
-                                    "action": action_name,
-                                    "surfaceId": sub.owner_surface_id,
-                                }))
-                            }
-                            crate::application_kernel::registered_actions::ActionOutcome::Error { message, code } => {
-                                Err(format!("action '{action_name}' failed with {code}: {message}"))
-                            }
-                            crate::application_kernel::registered_actions::ActionOutcome::Blocked { reason, .. } => {
-                                Err(format!("action '{action_name}' was blocked: {reason}"))
-                            }
-                        }
+                            registered_action_handler_result(
+                                outcome,
+                                action_name,
+                                &sub.owner_surface_id,
+                            )
                         }
                     }
                     Err(e) => Err(format!("surface not found: {e}")),
@@ -1414,5 +1485,266 @@ mod tests {
             )
             .unwrap();
         assert_ne!(evt_status, "processed");
+    }
+
+    #[test]
+    fn resolve_authoritative_event_target_strips_unmanifested_application_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("auth_target.db")).unwrap();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "AuthTarget",
+            None,
+        )
+        .unwrap();
+        let surf = super::super::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Inline",
+            &json!({"type":"container","id":"root"}),
+            &[],
+        )
+        .unwrap();
+        let claimed = EventRef {
+            surface_id: Some(surf.id.clone()),
+            application_id: Some("not-a-real-app".into()),
+            ..Default::default()
+        };
+        let err = resolve_authoritative_event_target(&db, &claimed, None, None)
+            .expect_err("spoofed application must fail");
+        assert!(
+            err.contains("spoof denied") || err.contains("authoritative"),
+            "expected spoof denial, got {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_authoritative_event_target_sets_manifest_backed_application_id() {
+        use crate::ai::{ToolComponent, ToolDefinition};
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use crate::db::{apply_tool_change, create_conversation, DEFAULT_WORKSPACE_ID, Database};
+        use crate::runtime_v2::surfaces::upsert_surface_from_tool;
+        use std::collections::HashMap;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("auth_app.db")).unwrap();
+        let conv = create_conversation(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            "AuthApp",
+            None,
+        )
+        .unwrap();
+        let tool_id = "app-manifest-tool";
+        let tool = ToolDefinition {
+            id: tool_id.into(),
+            name: "Manifest Tool".into(),
+            description: String::new(),
+            layout: json!("stack"),
+            components: vec![ToolComponent {
+                id: "t".into(),
+                component_type: "text".into(),
+                value_key: None,
+                props: Some(json!({"text": "hi"})),
+                children: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let saved = apply_tool_change(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            &tool,
+            "create",
+            None,
+            "seed",
+        )
+        .unwrap();
+        let surface = upsert_surface_from_tool(
+            &mut db,
+            &saved.definition,
+            DEFAULT_WORKSPACE_ID,
+            saved.current_version,
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET conversation_id = ?1 WHERE id = ?2",
+                rusqlite::params![conv.id, surface.id],
+            )
+            .unwrap();
+        upsert_manifest(
+            &mut db,
+            ApplicationManifest {
+                schema_version: "1".into(),
+                application_id: tool_id.into(),
+                instance_id: "inst-1".into(),
+                name: "Manifest".into(),
+                description: String::new(),
+                version: 1,
+                surfaces: vec![],
+                routes: vec![],
+                data_models: vec![],
+                settings: vec![],
+                capabilities: vec!["coreside.core".into()],
+                permissions: vec![],
+                events: vec![],
+                tests: vec![],
+                search_keywords: vec![],
+                tags: vec![],
+                agent_description: String::new(),
+                project_id: None,
+                conversation_id: None,
+                organization_id: None,
+                ownership: None,
+                application_action_access: vec![],
+                surface_action_access: HashMap::new(),
+                component_action_access: HashMap::new(),
+                action_descriptor_hashes: HashMap::new(),
+            },
+        )
+        .unwrap();
+
+        let resolved = resolve_authoritative_event_target(
+            &db,
+            &EventRef {
+                surface_id: Some(surface.id.clone()),
+                ..Default::default()
+            },
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(resolved.application_id.as_deref(), Some(tool_id));
+        assert_eq!(resolved.tool_id.as_deref(), Some(tool_id));
+    }
+
+    #[test]
+    fn invoke_registered_action_denies_cross_application_handler() {
+        use crate::ai::{ToolComponent, ToolDefinition};
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use crate::db::{apply_tool_change, create_conversation, DEFAULT_WORKSPACE_ID, Database};
+        use crate::runtime_v2::surfaces::upsert_surface_from_tool;
+        use std::collections::HashMap;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("invoke_app.db")).unwrap();
+        let conv = create_conversation(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            "InvokeApp",
+            None,
+        )
+        .unwrap();
+        let tool_id = "app-real";
+        let tool = ToolDefinition {
+            id: tool_id.into(),
+            name: "Real App".into(),
+            description: String::new(),
+            layout: json!("stack"),
+            components: vec![ToolComponent {
+                id: "t".into(),
+                component_type: "text".into(),
+                value_key: None,
+                props: Some(json!({"text": "hi"})),
+                children: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let saved = apply_tool_change(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            &tool,
+            "create",
+            None,
+            "seed",
+        )
+        .unwrap();
+        let surface = upsert_surface_from_tool(
+            &mut db,
+            &saved.definition,
+            DEFAULT_WORKSPACE_ID,
+            saved.current_version,
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET conversation_id = ?1 WHERE id = ?2",
+                rusqlite::params![conv.id, surface.id],
+            )
+            .unwrap();
+        upsert_manifest(
+            &mut db,
+            ApplicationManifest {
+                schema_version: "1".into(),
+                application_id: tool_id.into(),
+                instance_id: "inst-1".into(),
+                name: "Real App".into(),
+                description: String::new(),
+                version: 1,
+                surfaces: vec![],
+                routes: vec![],
+                data_models: vec![],
+                settings: vec![],
+                capabilities: vec!["coreside.core".into()],
+                permissions: vec![],
+                events: vec![],
+                tests: vec![],
+                search_keywords: vec![],
+                tags: vec![],
+                agent_description: String::new(),
+                project_id: None,
+                conversation_id: None,
+                organization_id: None,
+                ownership: None,
+                application_action_access: vec![],
+                surface_action_access: HashMap::new(),
+                component_action_access: HashMap::new(),
+                action_descriptor_hashes: HashMap::new(),
+            },
+        )
+        .unwrap();
+
+        let mut bus = EventBus::new();
+        bus.add_subscription(Subscription {
+            id: "sub-action".into(),
+            owner_surface_id: surface.id.clone(),
+            event_types: vec!["ping".into()],
+            source_filter: EventRef::default(),
+            target: EventRef::default(),
+            handler: Some(EventHandler::InvokeRegisteredAction {
+                action_name: "noop".into(),
+                parameters: json!({}),
+                application_id: Some("app-other".into()),
+            }),
+            enabled: true,
+        })
+        .unwrap();
+
+        let ev = SurfaceEvent {
+            id: "evt-action".into(),
+            event_type: "ping".into(),
+            scope: "surface".into(),
+            source: EventRef {
+                surface_id: Some(surface.id.clone()),
+                conversation_id: Some(conv.id.clone()),
+                ..Default::default()
+            },
+            target: EventRef::default(),
+            payload: json!({}),
+            idempotency_key: None,
+        };
+
+        let res = execute_durable_event_delivery(&mut db, &mut bus, &ev, "sub-action", 0);
+        assert!(res.is_err(), "cross-app handler must fail, got {res:?}");
+        let msg = res.unwrap_err().to_string();
+        assert!(
+            msg.contains("cross-application") || msg.contains("denied"),
+            "expected cross-app denial, got {msg}"
+        );
     }
 }

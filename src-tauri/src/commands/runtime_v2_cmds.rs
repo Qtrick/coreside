@@ -1485,6 +1485,7 @@ mod sync_event_tests {
                 application_id: None,
                 revision: Some(1),
                 sync_kind: "transaction_applied".into(),
+                reset_state_keys: vec![],
             },
         );
 

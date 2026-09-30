@@ -390,3 +390,68 @@ export function reconcileDirtyOverCanonical(
   }
   return next;
 }
+
+/** Keys whose persisted baseline diverged from canonical after Sync (agent reset). */
+export function inferBaselineResetKeys(
+  lastPersisted: Record<string, unknown>,
+  canonical: Record<string, unknown>,
+): string[] {
+  return Object.keys(lastPersisted).filter(
+    (key) => !Object.is(lastPersisted[key], canonical[key]),
+  );
+}
+
+/** Baseline reset inference plus explicit Sync resetStateKeys (deduped). */
+export function mergeDirtyReconcileResetKeys(
+  lastPersisted: Record<string, unknown>,
+  canonical: Record<string, unknown>,
+  explicitResetKeys: Iterable<string> = [],
+): string[] {
+  const baseline = inferBaselineResetKeys(lastPersisted, canonical);
+  const explicit = [...explicitResetKeys]
+    .map((k) => k.trim())
+    .filter(Boolean);
+  return [...new Set([...baseline, ...explicit])];
+}
+
+export type PendingInteractionIdempotency = {
+  logicalKey: string;
+  idempotencyKey: string;
+} | null;
+
+/** Reuse idempotency key for retries of the same logical interaction. */
+export function resolvePendingInteractionIdempotencyKey(
+  pending: PendingInteractionIdempotency,
+  logicalKey: string,
+  createKey: (logicalKey: string) => string,
+): { idempotencyKey: string; pending: PendingInteractionIdempotency } {
+  if (
+    pending?.idempotencyKey &&
+    pending.logicalKey === logicalKey
+  ) {
+    return { idempotencyKey: pending.idempotencyKey, pending };
+  }
+  const idempotencyKey = createKey(logicalKey);
+  return {
+    idempotencyKey,
+    pending: { logicalKey, idempotencyKey },
+  };
+}
+
+/** Promote deferred patches when the Tool Canvas renderer is mounted. */
+export async function runRendererMountPatchFlush(
+  canonicalSurfaceId: string | null | undefined,
+  flushPatchScheduler: (args: {
+    conversationId: string | null;
+    sourceType: "renderer_mount";
+    approvalGranted: true;
+  }) => Promise<unknown>,
+  activeConversationId: string | null,
+): Promise<void> {
+  if (!canonicalSurfaceId) return;
+  await flushPatchScheduler({
+    conversationId: activeConversationId,
+    sourceType: "renderer_mount",
+    approvalGranted: true,
+  });
+}

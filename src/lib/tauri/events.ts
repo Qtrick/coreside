@@ -43,6 +43,8 @@ export type AgentTurnEvent =
       applicationId?: string | null;
       revision?: number | null;
       syncKind: string;
+      /** Keys intentionally reset by the applied transaction. */
+      resetStateKeys?: string[];
     }
   | {
       kind: "conflict";

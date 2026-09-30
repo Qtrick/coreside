@@ -146,6 +146,14 @@ pub fn evaluate_target_readiness(db: &Database, op: &AppOperation) -> TargetRead
                         "target surface {sid} is archived and can no longer receive patches"
                     ));
                 }
+                if let Err(msg) =
+                    crate::application_kernel::manifest::check_tool_application_accepts_mutations(
+                        db,
+                        surface.tool_id.as_deref(),
+                    )
+                {
+                    return TargetReadiness::Rejected(msg);
+                }
                 if let Some(base_rev) = op.base_revision {
                     if surface.current_revision < base_rev {
                         return TargetReadiness::Deferred {

@@ -15,6 +15,8 @@ import {
   restoreFocusSnapshot,
   restoreMediaSnapshot,
   restoreScrollSnapshot,
+  resolvePendingInteractionIdempotencyKey,
+  runRendererMountPatchFlush,
 } from "@/lib/preservation";
 import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
 import { classifyToolHeaderDensity } from "@/lib/layout-mode";
@@ -216,6 +218,11 @@ export function ToolCanvas() {
   const interactiveRevisionRef = useRef(stateRevision);
   interactiveRevisionRef.current = stateRevision;
   const interactionLockRef = useRef(false);
+  /** Stable idempotency for in-flight interaction retries until success. */
+  const pendingIdempotencyRef = useRef<{
+    logicalKey: string;
+    idempotencyKey: string;
+  } | null>(null);
   const isInteractive = hasInteractiveDefinition(canonicalSurface?.definition);
   const adoptInteractiveState = useCallback(
     (update: (current: Record<string, unknown>) => Record<string, unknown>) =>
@@ -235,6 +242,18 @@ export function ToolCanvas() {
     if (!isInteractive || !canonicalSurfaceId) return;
     hydrateInteractive().catch(() => undefined);
   }, [isInteractive, canonicalSurfaceId, canonicalDefinitionRevision, hydrateInteractive]);
+
+  // After the canvas mounts (or remounts after Sync), promote deferred patches
+  // whose durable target now exists. Mount readiness is signaled by this flush —
+  // SQLite alone must not pretend the renderer is live.
+  useEffect(() => {
+    if (!canonicalSurfaceId) return;
+    void runRendererMountPatchFlush(
+      canonicalSurfaceId,
+      (args) => api.flushPatchScheduler(args),
+      activeConversationId,
+    ).catch(() => undefined);
+  }, [canonicalSurfaceId, canonicalDefinitionRevision, activeConversationId]);
 
   const onStateChange = useCallback(
     (state: Record<string, unknown>) => {
@@ -396,6 +415,19 @@ export function ToolCanvas() {
             setStateRevision(newRev);
           }
         });
+        const logicalKey = [
+          toolId,
+          payload.eventName,
+          payload.componentId ?? "",
+          String(interactiveRevisionRef.current),
+        ].join(":");
+        const { idempotencyKey, pending } =
+          resolvePendingInteractionIdempotencyKey(
+            pendingIdempotencyRef.current,
+            logicalKey,
+            (key) => `idem-${key}-${crypto.randomUUID()}`,
+          );
+        pendingIdempotencyRef.current = pending;
         // Single authority: send_message seals StructuredUserInput in Rust.
         await sendMessage(summary, [], [], {
           formId: payload.componentId ?? toolId,
@@ -405,13 +437,15 @@ export function ToolCanvas() {
             canonicalSurface?.currentRevision ?? activeTool.version ?? null,
           stateRevision: interactiveRevisionRef.current,
           componentId: payload.componentId ?? null,
-          idempotencyKey: `idem-${crypto.randomUUID()}`,
+          idempotencyKey,
           eventName: payload.eventName,
           fields: {
             ...payload.values,
             ...(isSilent ? { silent: true } : {}),
           },
         });
+        // Success — next click is a new logical interaction.
+        pendingIdempotencyRef.current = null;
       } finally {
         interactionLockRef.current = false;
       }

@@ -22,7 +22,7 @@ import type {
   ToolSummary,
 } from "@/types/tool";
 import { persistenceScheduler } from "@/lib/persistence-scheduler";
-import { reconcileDirtyOverCanonical } from "@/lib/preservation";
+import { reconcileDirtyOverCanonical, mergeDirtyReconcileResetKeys } from "@/lib/preservation";
 import { hasInteractiveDefinition } from "@/lib/interactive-surface";
 import {
   api,
@@ -265,7 +265,7 @@ type AppStore = {
   branchConversation: (sourceMessageId: string, branchName?: string) => Promise<void>;
 
   refreshTools: () => Promise<void>;
-  selectTool: (id: string | null, opts?: { preserveDirty?: boolean }) => Promise<void>;
+  selectTool: (id: string | null, opts?: { preserveDirty?: boolean; resetKeys?: string[] }) => Promise<void>;
   closeToolCanvas: () => Promise<void>;
   openToolWindow: () => Promise<void>;
   undoTool: () => Promise<void>;
@@ -303,7 +303,7 @@ type AppStore = {
   resolveSurfaceDraftConflict: (
     action: "keep" | "apply" | "cancel",
   ) => Promise<void>;
-  reloadActiveSurfaces: () => Promise<void>;
+  reloadActiveSurfaces: (resetKeys?: string[]) => Promise<void>;
 
   refreshAiStatus: () => Promise<void>;
   testConnection: () => Promise<void>;
@@ -323,7 +323,7 @@ const conversationEventCursor = new Map<string, number>();
 const conversationCatchUpInFlight = new Map<string, Promise<void>>();
 
 type SyncListenerGet = () => {
-  reloadActiveSurfaces: () => Promise<void>;
+  reloadActiveSurfaces: (resetKeys?: string[]) => Promise<void>;
   activeConversationId: string | null;
   activeToolId: string | null;
   previewSurfacesByKey: Record<string, PreviewSurfaceOverlay>;
@@ -416,7 +416,7 @@ function applySyncOrConflictEvent(
     if (!shouldApplyAgentTurnSync(event, scope)) {
       return;
     }
-    void get().reloadActiveSurfaces();
+    void get().reloadActiveSurfaces(event.resetStateKeys ?? []);
   }
 }
 
@@ -2026,14 +2026,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
         };
     // Keys the server changed since our last persist are agent/other writes —
     // do not let dirty typing undo reset_explicitly or state.patch.
+    // Never-persisted dirty keys have no lastPersisted baseline: only treat a
+    // key as reset when it *had* a persisted baseline that diverged, OR when
+    // Sync carried an explicit resetStateKeys list from the applied transaction.
     const resetKeys =
       !interactive && dirtyOverlay
-        ? [
-            ...new Set([
-              ...Object.keys(lastPersistedBefore),
-              ...Object.keys(mergedState),
-            ]),
-          ].filter((key) => !Object.is(lastPersistedBefore[key], mergedState[key]))
+        ? mergeDirtyReconcileResetKeys(
+            lastPersistedBefore,
+            mergedState,
+            opts?.resetKeys ?? [],
+          )
         : [];
     const reconciled: ToolState =
       !interactive && dirtyOverlay
@@ -2886,12 +2888,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
-  reloadActiveSurfaces: async () => {
+  reloadActiveSurfaces: async (resetKeys) => {
     const toolId = get().activeToolId;
     if (toolId) {
       try {
         // Sync reload must keep unpersisted typing; chat navigation must not.
-        await get().selectTool(toolId, { preserveDirty: true });
+        await get().selectTool(toolId, {
+          preserveDirty: true,
+          resetKeys: resetKeys ?? [],
+        });
       } catch {
         // ignore
       }

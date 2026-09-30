@@ -49,6 +49,8 @@ pub enum SyncScopedEvent {
         revision: Option<i64>,
         #[serde(rename = "syncKind")]
         sync_kind: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        reset_state_keys: Vec<String>,
     },
     #[serde(rename_all = "camelCase")]
     Conflict {

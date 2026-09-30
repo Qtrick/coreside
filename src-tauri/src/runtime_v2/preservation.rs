@@ -228,6 +228,55 @@ pub fn apply_preservation_on_replace(
     true
 }
 
+/// After definition-prop merge, overlay authoritative `surface_state` for the
+/// component's valueKey / component id so empty definition props cannot erase
+/// newer user input that already lives in canonical state.
+pub fn overlay_live_state_on_component(
+    db: &Database,
+    surface_id: &str,
+    old: &crate::ai::ToolComponent,
+    new: &mut crate::ai::ToolComponent,
+    policy: PreservationPolicy,
+) -> bool {
+    if matches!(
+        policy,
+        PreservationPolicy::Replace | PreservationPolicy::ResetExplicitly
+    ) {
+        return false;
+    }
+    let vk = component_value_key(new)
+        .or_else(|| component_value_key(old))
+        .map(|s| s.to_string());
+    let Ok((state, _)) = super::surfaces::get_surface_state_with_revision(db, surface_id) else {
+        return false;
+    };
+    let live = vk
+        .as_deref()
+        .and_then(|k| state.get(k))
+        .or_else(|| state.get(&old.id))
+        .or_else(|| state.get(&new.id))
+        .cloned();
+    let Some(live_val) = live else {
+        return false;
+    };
+    let keys = prop_keys_for_policy(policy);
+    // Always project into `value` when the policy preserves value-bearing dims
+    // or when PreserveIfCompatible (default continuity).
+    let should_write_value = keys.is_empty()
+        || keys.contains(&"value")
+        || matches!(policy, PreservationPolicy::PreserveIfCompatible);
+    if !should_write_value {
+        return false;
+    }
+    let mut merged = match new.props.take() {
+        Some(Value::Object(m)) => m,
+        Some(_) | None => serde_json::Map::new(),
+    };
+    merged.insert("value".into(), live_val);
+    new.props = Some(Value::Object(merged));
+    true
+}
+
 /// Resolve valueKey from a component (field or props).
 pub fn component_value_key(comp: &crate::ai::ToolComponent) -> Option<&str> {
     comp.value_key
@@ -776,6 +825,66 @@ mod tests {
         assert!(state.get("oldTitle").is_none());
         assert_eq!(state["cmp-1"], "keep");
         assert_eq!(state["other"], 1);
+    }
+
+    #[test]
+    fn overlay_live_state_projects_surface_state_over_empty_props() {
+        use crate::ai::ToolComponent;
+        use crate::db::{create_conversation, DEFAULT_WORKSPACE_ID};
+        use crate::runtime_v2::surfaces::{create_inline_surface, save_surface_state_occ};
+        use serde_json::json;
+
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Overlay", None).unwrap();
+        let def = json!({
+            "id": "d",
+            "name": "Form",
+            "layout": "stack",
+            "components": [{
+                "id": "title-input",
+                "type": "textInput",
+                "valueKey": "taskTitle",
+                "props": { "label": "Title", "value": "" }
+            }]
+        });
+        let surface =
+            create_inline_surface(&mut db, &conv.id, None, None, "Form", &def, &[]).unwrap();
+        save_surface_state_occ(
+            &mut db,
+            &surface.id,
+            &json!({ "taskTitle": "from-surface-state" }),
+            1,
+        )
+        .unwrap();
+
+        let old = ToolComponent {
+            id: "title-input".into(),
+            component_type: "textInput".into(),
+            value_key: Some("taskTitle".into()),
+            props: Some(json!({ "label": "Title", "value": "" })),
+            children: None,
+            ..Default::default()
+        };
+        let mut new = ToolComponent {
+            id: "title-input".into(),
+            component_type: "textInput".into(),
+            value_key: Some("taskTitle".into()),
+            props: Some(json!({ "label": "Title", "placeholder": "Title" })),
+            children: None,
+            ..Default::default()
+        };
+        assert!(overlay_live_state_on_component(
+            &db,
+            &surface.id,
+            &old,
+            &mut new,
+            PreservationPolicy::PreserveIfCompatible
+        ));
+        assert_eq!(
+            new.props.as_ref().and_then(|p| p.get("value")),
+            Some(&json!("from-surface-state"))
+        );
     }
 
     #[test]

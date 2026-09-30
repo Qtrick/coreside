@@ -65,9 +65,12 @@ pub struct PreviewSurfaceModel {
 ///
 /// Preview overlays are Channel-delivered to React; never seed restricted
 /// interactive state or definition initials into this path.
+/// Pass `application_id` only when a durable manifest proves the relationship —
+/// never equate it to `tool_id` without that proof.
 pub fn renderer_safe_preview_seed(
     surface_id: &str,
     tool_id: Option<String>,
+    application_id: Option<String>,
     capability_packs: Vec<String>,
     authoritative_definition: &Value,
     authoritative_state: &Value,
@@ -77,8 +80,8 @@ pub fn renderer_safe_preview_seed(
 
     PreviewSurfaceModel {
         surface_id: surface_id.to_string(),
-        tool_id: tool_id.clone(),
-        application_id: tool_id,
+        tool_id,
+        application_id,
         capability_packs,
         definition: project_definition_value(authoritative_definition, Audience::Renderer),
         state: project_surface_state(
@@ -387,7 +390,8 @@ impl PreviewTransaction {
                 self.seed_surface(PreviewSurfaceModel {
                     surface_id: surface_id.clone(),
                     tool_id: Some(tool_id.clone()),
-                    application_id: Some(tool_id),
+                    // Speculative create has no durable manifest yet.
+                    application_id: None,
                     capability_packs,
                     definition: tool,
                     state: self
@@ -2088,6 +2092,7 @@ mod tests {
         let seed = renderer_safe_preview_seed(
             "surf-quiz",
             Some("tool-quiz".into()),
+            None, // no manifest → application_id must stay None
             vec!["core.ui".into()],
             &definition,
             &authoritative_state,
