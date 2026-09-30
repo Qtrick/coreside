@@ -442,9 +442,11 @@ export function resolvePendingInteractionIdempotencyKey(
 export async function runRendererMountPatchFlush(
   canonicalSurfaceId: string | null | undefined,
   flushPatchScheduler: (args: {
+    surfaceId: string;
     conversationId: string | null;
     sourceType: "renderer_mount";
-    approvalGranted: true;
+    /** Mount lifecycle must not grant strong-risk approval. */
+    approvalGranted: false;
   }) => Promise<unknown>,
   activeConversationId: string | null,
   registerMount?: (args: {
@@ -475,9 +477,10 @@ export async function runRendererMountPatchFlush(
     // Mount is authoritative even if deferred flush fails (retry on next mount).
     try {
       await flushPatchScheduler({
+        surfaceId: canonicalSurfaceId,
         conversationId: activeConversationId,
         sourceType: "renderer_mount",
-        approvalGranted: true,
+        approvalGranted: false,
       });
     } catch {
       // keep registered instance id for cleanup
@@ -485,9 +488,10 @@ export async function runRendererMountPatchFlush(
     return rendererInstanceId;
   }
   await flushPatchScheduler({
+    surfaceId: canonicalSurfaceId,
     conversationId: activeConversationId,
     sourceType: "renderer_mount",
-    approvalGranted: true,
+    approvalGranted: false,
   });
   return rendererInstanceId;
 }
@@ -513,9 +517,10 @@ export function startRendererMountLifecycle(args: {
     rendererInstanceId?: string | null;
   }) => Promise<unknown>;
   flushPatchScheduler: (args: {
+    surfaceId: string;
     conversationId: string | null;
     sourceType: "renderer_mount";
-    approvalGranted: true;
+    approvalGranted: false;
   }) => Promise<unknown>;
 }): () => void {
   let cancelled = false;

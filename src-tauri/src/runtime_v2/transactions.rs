@@ -530,7 +530,7 @@ fn apply_one(
             )
             .map_err(|e| e.to_string())?;
             // Surface row now exists — promote patches that were waiting on this target.
-            let _ = super::patch_scheduler::promote_deferred_patches(db, Some(&s.id));
+            let _ = super::patch_scheduler::promote_deferred_patches(db, Some(&s.id), None);
             Ok(Some(s))
         }
         "chat.inline_surface_update"

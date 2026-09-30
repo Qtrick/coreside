@@ -788,14 +788,18 @@ export const api = {
       args,
     }),
   flushPatchScheduler: (args?: {
+    surfaceId?: string | null;
     conversationId?: string | null;
     sourceType?: string;
     approvalGranted?: boolean;
   }) =>
     invoke<Record<string, unknown>[]>("flush_patch_scheduler_cmd", {
+      surfaceId: args?.surfaceId ?? "",
+      // Ignored by Rust. Conversation scope is the mounted surface row.
       conversationId: args?.conversationId ?? null,
       sourceType: args?.sourceType ?? "user",
-      approvalGranted: args?.approvalGranted ?? true,
+      // Ignored by Rust. Mount flush cannot grant strong-risk approval.
+      approvalGranted: args?.approvalGranted ?? false,
     }),
   registerSurfaceMount: (args: {
     surfaceId: string;

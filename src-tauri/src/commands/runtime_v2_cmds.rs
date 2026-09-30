@@ -7,21 +7,22 @@ use tauri::{ipc::Channel, State, WebviewWindow};
 use super::CommandError;
 use crate::runtime_v2::packs::CapabilityPackMeta as PackMeta;
 use crate::runtime_v2::{
-    self, activate_next, advance_conversation_sync_cursor, append_ledger_entry, branch_from_message,
-    bundled_packs, cancel_queue_item, complete_queue_item, create_inline_surface, create_snapshot,
-    delete_draft, delete_snapshot, diff_branch, enqueue, ensure_initial_route, flush_scheduler,
-    get_continuity, get_conversation_events, get_conversation_sync_cursor, get_draft, get_item,
-    get_provider_profile, get_route_state, get_snapshot, get_surface, get_surface_state,
-    get_transaction, interactive, list_branches, list_diagnostics, list_inline_surfaces,
-    list_ledger_entries, list_queue, list_snapshots, list_transactions, list_turn_timeline_events,
-    navigate_route, promote_inline_to_tool, recover_stale_active, remove_queued, route_back,
-    route_forward, save_continuity, save_draft, save_surface_state, schedule_and_apply,
-    schedule_patches, set_route_state, store_diagnostics, surfaces, suspend_surface,
-    undo_transaction, update_surface_definition, AgentResponseV2, AppOperation,
-    AppTransactionRecord, ApplyResult, ChatBranchRecord, ContextLedgerEntry, ContinuitySnapshot,
-    ConversationEventRecord, InteractiveAppDefinition, NavigateResult, PatchPriority,
-    ProviderConformanceRecord, QueueItem, RouteState, ScheduleRequest, ScheduledPatch,
-    SnapshotRecord, SurfaceDraft, SurfaceRecord, SuspensionState, TurnTimelineEvent,
+    self, activate_next, advance_conversation_sync_cursor, append_ledger_entry,
+    branch_from_message, bundled_packs, cancel_queue_item, complete_queue_item,
+    create_inline_surface, create_snapshot, delete_draft, delete_snapshot, diff_branch, enqueue,
+    ensure_initial_route, flush_scheduler, get_continuity, get_conversation_events,
+    get_conversation_sync_cursor, get_draft, get_item, get_provider_profile, get_route_state,
+    get_snapshot, get_surface, get_surface_state, get_transaction, interactive, list_branches,
+    list_diagnostics, list_inline_surfaces, list_ledger_entries, list_queue, list_snapshots,
+    list_transactions, list_turn_timeline_events, navigate_route, promote_inline_to_tool,
+    recover_stale_active, remove_queued, route_back, route_forward, save_continuity, save_draft,
+    save_surface_state, schedule_and_apply, schedule_patches, set_route_state, store_diagnostics,
+    surfaces, suspend_surface, undo_transaction, update_surface_definition, AgentResponseV2,
+    AppOperation, AppTransactionRecord, ApplyResult, ChatBranchRecord, ContextLedgerEntry,
+    ContinuitySnapshot, ConversationEventRecord, InteractiveAppDefinition, NavigateResult,
+    PatchPriority, ProviderConformanceRecord, QueueItem, RouteState, ScheduleRequest,
+    ScheduledPatch, SnapshotRecord, SurfaceDraft, SurfaceRecord, SuspensionState,
+    TurnTimelineEvent,
 };
 use crate::state::AppState;
 use crate::windows;
@@ -46,6 +47,7 @@ pub fn emit_queue_changed(
 /// Register a Channel for queue mutations on one conversation (main window only).
 #[tauri::command]
 pub fn subscribe_conversation_queue(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     conversation_id: String,
     on_event: Channel<QueueChangedEvent>,
@@ -57,6 +59,10 @@ pub fn subscribe_conversation_queue(
             "invalid_argument",
             "conversation_id is required",
         ));
+    }
+    {
+        let db = state.db.lock();
+        windows::enforce_caller_conversation_scope(&window, &db, &conversation_id)?;
     }
     state.subscribe_queue(conversation_id, on_event);
     Ok(())
@@ -95,11 +101,13 @@ pub fn list_capability_packs() -> Result<Vec<PackMeta>, CommandError> {
 
 #[tauri::command]
 pub fn list_conversation_surfaces(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     conversation_id: String,
 ) -> Result<Vec<SurfaceRecord>, CommandError> {
     state.require_profile()?;
     let db = state.db.lock();
+    windows::enforce_caller_conversation_scope(&window, &db, conversation_id.trim())?;
     let mut surfaces = list_inline_surfaces(&db, &conversation_id)?;
     for s in &mut surfaces {
         s.definition = crate::runtime_v2::visibility::project_definition_value(
@@ -148,11 +156,13 @@ fn project_surface_for_renderer(mut surface: SurfaceRecord) -> SurfaceRecord {
 
 #[tauri::command]
 pub fn create_inline_surface_cmd(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     args: CreateInlineSurfaceArgs,
 ) -> Result<SurfaceRecord, CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
+    windows::enforce_caller_conversation_scope(&window, &db, args.conversation_id.trim())?;
     let packs = args.capability_packs.unwrap_or_default();
     let surface = create_inline_surface(
         &mut db,
@@ -177,11 +187,14 @@ pub struct UpdateSurfaceArgs {
 
 #[tauri::command]
 pub fn update_surface_cmd(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     args: UpdateSurfaceArgs,
 ) -> Result<SurfaceRecord, CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
+    let existing = get_surface(&db, &args.surface_id)?;
+    windows::enforce_caller_surface_scope(&window, existing.tool_id.as_deref(), &existing.id)?;
     let surface = update_surface_definition(
         &mut db,
         &args.surface_id,
@@ -367,6 +380,7 @@ pub struct SchedulePatchesArgs {
 
 #[tauri::command]
 pub fn schedule_patches_cmd(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     args: SchedulePatchesArgs,
 ) -> Result<Vec<ScheduledPatch>, CommandError> {
@@ -377,6 +391,17 @@ pub fn schedule_patches_cmd(
     let mut db = state.db.lock();
     let priority = PatchPriority::parse(&args.priority)
         .ok_or_else(|| CommandError::new("invalid", "unknown patch priority"))?;
+    // Renderer IPC cannot assign recovery or preview priority. Those lanes are
+    // trusted runtime paths. Direct manipulation is the user gesture.
+    if !matches!(
+        priority,
+        PatchPriority::DirectUserInteraction | PatchPriority::ApprovedPersistentChange
+    ) {
+        return Err(CommandError::new(
+            "forbidden",
+            "This window cannot assign that patch priority.",
+        ));
+    }
 
     // Derive authoritative surface and conversation scope from persisted database state
     let (authorized_conversation_id, authorized_surface_id) = if let Some(ref sid) = args.surface_id
@@ -387,11 +412,18 @@ pub fn schedule_patches_cmd(
             args.conversation_id.as_deref(),
             None,
         )?;
+        windows::enforce_caller_surface_scope(&window, surface.tool_id.as_deref(), &surface.id)?;
+        if let Some(conv) = surface.conversation_id.as_deref() {
+            windows::enforce_caller_conversation_scope(&window, &db, conv)?;
+        }
         (
             surface.conversation_id.or(args.conversation_id),
             Some(sid.clone()),
         )
     } else {
+        if let Some(ref cid) = args.conversation_id {
+            windows::enforce_caller_conversation_scope(&window, &db, cid)?;
+        }
         (args.conversation_id, None)
     };
 
@@ -413,24 +445,29 @@ pub fn schedule_patches_cmd(
         model: None,
         provider: None,
     };
+    let mounts = state.mount_registry.lock();
+    // Strong-risk ops (delete, migrate, package, permission) are not granted by
+    // this command. Lightweight direct edits still apply immediately.
+    let approval_granted = args.apply_immediately.unwrap_or(false)
+        && !req.operations.iter().any(|op| {
+            crate::application_kernel::classify_risk(std::slice::from_ref(op)) == "strong"
+        });
     if args.apply_immediately.unwrap_or(false) {
         let mut bus = state.event_bus.lock();
         let mut bus_opt = Some(&mut *bus);
-        let result = schedule_and_apply(
-            &mut db,
-            &mut bus_opt,
-            req,
-            true, // User direct manipulation is self-authorized
-        )?;
+        let result =
+            schedule_and_apply(&mut db, &mut bus_opt, req, approval_granted, Some(&mounts))?;
         return Ok(result.scheduled);
     }
-    Ok(schedule_patches(&mut db, &req)?)
+    Ok(schedule_patches(&mut db, &req, Some(&mounts))?)
 }
 
 #[tauri::command]
 pub fn flush_patch_scheduler_cmd(
+    window: WebviewWindow,
     state: State<'_, AppState>,
-    conversation_id: Option<String>,
+    surface_id: String,
+    _conversation_id: Option<String>,
     _source_type: Option<String>,
     _approval_granted: Option<bool>,
 ) -> Result<Vec<crate::application_kernel::ChangeResult>, CommandError> {
@@ -438,16 +475,42 @@ pub fn flush_patch_scheduler_cmd(
     state
         .quiescence
         .require_active(crate::quiescence::QuiescedSubsystem::PatchScheduler)?;
+    let surface_id = surface_id.trim().to_string();
+    if surface_id.is_empty() {
+        return Err(CommandError::new(
+            "invalid",
+            "surfaceId is required to flush the patch scheduler",
+        ));
+    }
     let mut db = state.db.lock();
+    let surface = get_surface(&db, &surface_id)?;
+    windows::enforce_caller_surface_scope(&window, surface.tool_id.as_deref(), &surface.id)?;
+    if let Some(conv) = surface.conversation_id.as_deref() {
+        windows::enforce_caller_conversation_scope(&window, &db, conv)?;
+    }
+    let mounts = state.mount_registry.lock();
+    // Authority is the mount this Tauri window registered, not the conversation
+    // id the renderer sent. A window that has not mounted the surface cannot
+    // flush that conversation's queue.
+    let mounted = mounts.fresh_mount(window.label(), &surface_id);
+    let Some(reg) = mounted else {
+        return Err(CommandError::new(
+            "forbidden",
+            "This window has no fresh mount for that surface.",
+        ));
+    };
+    let conversation_id = reg.conversation_id.clone().or(surface.conversation_id);
     let mut bus = state.event_bus.lock();
     let mut bus_opt = Some(&mut *bus);
-    // IPC flush is always user-initiated; agent changes in queue still require explicit approval
+    // approval_granted false: mount lifecycle must not approve strong-risk ops.
+    // User/direct lightweight patches still apply inside flush_scheduler.
     Ok(flush_scheduler(
         &mut db,
         &mut bus_opt,
         conversation_id.as_deref(),
         "user",
-        true,
+        false,
+        Some(&mounts),
     )?)
 }
 
@@ -484,7 +547,7 @@ pub fn register_surface_mount_cmd(
     args: RegisterSurfaceMountArgs,
 ) -> Result<SurfaceMountDto, CommandError> {
     state.require_profile()?;
-    let db = state.db.lock();
+    let mut db = state.db.lock();
     let surface = get_surface(&db, &args.surface_id)?;
     windows::enforce_caller_surface_scope(&window, surface.tool_id.as_deref(), &surface.id)?;
     if let Some(conv) = surface.conversation_id.as_deref() {
@@ -501,6 +564,12 @@ pub fn register_surface_mount_cmd(
         args.definition_revision.unwrap_or(0),
         args.state_revision.unwrap_or(0),
     )?;
+    // Mount is the signal deferred renderer ops were waiting for.
+    let _ = crate::runtime_v2::promote_deferred_patches(
+        &mut db,
+        Some(&args.surface_id),
+        Some(&registry),
+    );
     Ok(SurfaceMountDto {
         surface_id: reg.surface_id,
         conversation_id: reg.conversation_id,
@@ -980,11 +1049,13 @@ pub struct BranchArgs {
 
 #[tauri::command]
 pub fn branch_conversation_cmd(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     args: BranchArgs,
 ) -> Result<(ChatBranchRecord, Vec<SurfaceRecord>), CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
+    windows::enforce_caller_conversation_scope(&window, &db, args.source_conversation_id.trim())?;
     let (branch, surfaces) = branch_from_message(
         &mut db,
         &args.source_conversation_id,

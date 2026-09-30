@@ -182,6 +182,47 @@ pub fn evaluate_target_readiness(db: &Database, op: &AppOperation) -> TargetRead
     }
 }
 
+/// Scheduler hot path: durable SQLite readiness, then renderer readiness when
+/// the operation cannot be displayed without a live mount.
+///
+/// `ActiveTurnPreview` upgrades renderer-optional surface edits to
+/// renderer-required. Approved durable construction does not.
+pub fn resolve_operation_readiness(
+    db: &Database,
+    mounts: Option<&super::mount_registry::MountRegistry>,
+    op: &AppOperation,
+    priority: PatchPriority,
+) -> TargetReadiness {
+    use super::mount_registry::{
+        classify_operation_readiness, operation_delivery, OperationDelivery,
+    };
+    let durable = evaluate_target_readiness(db, op);
+    let mut delivery = operation_delivery(&op.op_type);
+    if delivery == OperationDelivery::RendererOptional
+        && priority == PatchPriority::ActiveTurnPreview
+        && op.target.surface_id.is_some()
+    {
+        delivery = OperationDelivery::RendererRequired;
+    }
+    if delivery != OperationDelivery::RendererRequired {
+        return durable;
+    }
+    // Renderer-required ops must name a surface. An empty target must not
+    // produce deferred_target="" (unpromotable) or burn the missing-surface budget.
+    let surface_id = match op.target.surface_id.as_deref().map(str::trim) {
+        Some(sid) if !sid.is_empty() => sid.to_string(),
+        _ => {
+            return TargetReadiness::Rejected(
+                "renderer-required operation needs a non-empty target surface_id".into(),
+            );
+        }
+    };
+    let renderer = mounts
+        .map(|registry| registry.evaluate_renderer_readiness(&surface_id, None, None))
+        .unwrap_or(super::mount_registry::RendererReadiness::NotMounted);
+    classify_operation_readiness(durable, renderer, true, &surface_id)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduleRequest {
@@ -308,7 +349,11 @@ fn supersede_preview_items(
     Ok(ids)
 }
 
-pub fn schedule_patches(db: &mut Database, req: &ScheduleRequest) -> DbResult<Vec<ScheduledPatch>> {
+pub fn schedule_patches(
+    db: &mut Database,
+    req: &ScheduleRequest,
+    mounts: Option<&super::mount_registry::MountRegistry>,
+) -> DbResult<Vec<ScheduledPatch>> {
     if req.from_agent {
         validate_agent_priority(req.priority).map_err(DbError::Invalid)?;
     }
@@ -418,7 +463,7 @@ pub fn schedule_patches(db: &mut Database, req: &ScheduleRequest) -> DbResult<Ve
                 .as_deref()
                 .or(op.target.surface_id.as_deref());
 
-            let readiness = evaluate_target_readiness(db, op);
+            let readiness = resolve_operation_readiness(db, mounts, op, req.priority);
             let (initial_status, def_target, def_reason, defer_count) = match readiness {
                 TargetReadiness::Ready => ("queued", None, None, 0i64),
                 TargetReadiness::Deferred {
@@ -709,6 +754,7 @@ pub fn recover_scheduler(db: &mut Database) -> DbResult<u64> {
 pub fn promote_deferred_patches(
     db: &mut Database,
     target_surface_id: Option<&str>,
+    mounts: Option<&super::mount_registry::MountRegistry>,
 ) -> DbResult<usize> {
     let now = now_rfc3339();
     let now_epoch = chrono::DateTime::parse_from_rfc3339(&now)
@@ -716,7 +762,7 @@ pub fn promote_deferred_patches(
         .unwrap_or(0);
 
     let mut query = String::from(
-        "SELECT id, operation_id, conversation_id, surface_id, deferred_target, defer_count, created_at, payload_json
+        "SELECT id, operation_id, conversation_id, surface_id, deferred_target, defer_count, created_at, payload_json, priority
          FROM patch_scheduler_items
          WHERE status = 'deferred_target_pending'",
     );
@@ -733,6 +779,7 @@ pub fn promote_deferred_patches(
         i64,
         String,
         String,
+        String,
     )> = {
         let mut stmt = db.conn().prepare(&query)?;
         let map_fn = |r: &rusqlite::Row| {
@@ -745,6 +792,7 @@ pub fn promote_deferred_patches(
                 r.get(5)?,
                 r.get(6)?,
                 r.get(7)?,
+                r.get(8)?,
             ))
         };
         if let Some(target) = target_surface_id {
@@ -756,8 +804,17 @@ pub fn promote_deferred_patches(
     };
 
     let mut promoted = 0usize;
-    for (id, _op_id, conv_id, _surface_id, _def_target, defer_count, created_at, payload_json) in
-        rows
+    for (
+        id,
+        _op_id,
+        conv_id,
+        _surface_id,
+        _def_target,
+        defer_count,
+        created_at,
+        payload_json,
+        priority_raw,
+    ) in rows
     {
         // 1. Check conversation validity (if conversation was deleted, cancel patch)
         if let Some(ref cid) = conv_id {
@@ -777,30 +834,6 @@ pub fn promote_deferred_patches(
             }
         }
 
-        // 2. Check TTL (60s)
-        let created_epoch = chrono::DateTime::parse_from_rfc3339(&created_at)
-            .map(|dt| dt.timestamp())
-            .unwrap_or(0);
-        if now_epoch.saturating_sub(created_epoch) > DEFERRED_PATCH_TTL_SECS {
-            db.conn().execute(
-                "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
-                 error_category = 'target_timeout' WHERE id = ?2",
-                params![now, id],
-            )?;
-            continue;
-        }
-
-        // 3. Check retry count limit
-        if defer_count > MAX_DEFERRED_PATCH_RETRIES {
-            db.conn().execute(
-                "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
-                 error_category = 'target_missing_retries_exceeded' WHERE id = ?2",
-                params![now, id],
-            )?;
-            continue;
-        }
-
-        // 4. Parse operation and re-evaluate target readiness
         let op: AppOperation = match serde_json::from_str(&payload_json) {
             Ok(o) => o,
             Err(_) => {
@@ -812,22 +845,63 @@ pub fn promote_deferred_patches(
                 continue;
             }
         };
+        let priority =
+            PatchPriority::parse(&priority_raw).unwrap_or(PatchPriority::ApprovedPersistentChange);
+        let readiness = resolve_operation_readiness(db, mounts, &op, priority);
+        // ponytail: a missing renderer is not a missing surface. Do not burn the
+        // 60s/3-retry target budget while the document already exists. Ceiling:
+        // renderer-deferred rows live until mount, conversation delete, or the
+        // global queue cap. Upgrade path: a dedicated renderer-defer TTL.
+        let renderer_wait = matches!(
+            &readiness,
+            TargetReadiness::Deferred { reason, .. } if reason.starts_with("renderer:")
+        );
 
-        match evaluate_target_readiness(db, &op) {
+        if !renderer_wait {
+            let created_epoch = chrono::DateTime::parse_from_rfc3339(&created_at)
+                .map(|dt| dt.timestamp())
+                .unwrap_or(0);
+            if now_epoch.saturating_sub(created_epoch) > DEFERRED_PATCH_TTL_SECS {
+                db.conn().execute(
+                    "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
+                     error_category = 'target_timeout' WHERE id = ?2",
+                    params![now, id],
+                )?;
+                continue;
+            }
+            if defer_count > MAX_DEFERRED_PATCH_RETRIES {
+                db.conn().execute(
+                    "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
+                     error_category = 'target_missing_retries_exceeded' WHERE id = ?2",
+                    params![now, id],
+                )?;
+                continue;
+            }
+        }
+
+        match readiness {
             TargetReadiness::Ready => {
-                // Target is now ready! Promote to queued so scheduler can apply it.
                 db.conn().execute(
                     "UPDATE patch_scheduler_items SET status = 'queued', defer_reason = NULL WHERE id = ?1",
                     params![id],
                 )?;
                 promoted += 1;
             }
-            TargetReadiness::Deferred { reason, .. } => {
-                // Still not ready: increment defer_count and update reason
-                db.conn().execute(
-                    "UPDATE patch_scheduler_items SET defer_count = defer_count + 1, defer_reason = ?1 WHERE id = ?2",
-                    params![reason, id],
-                )?;
+            TargetReadiness::Deferred {
+                reason,
+                target_surface_id,
+            } => {
+                if renderer_wait {
+                    db.conn().execute(
+                        "UPDATE patch_scheduler_items SET defer_reason = ?1, deferred_target = ?2 WHERE id = ?3",
+                        params![reason, target_surface_id, id],
+                    )?;
+                } else {
+                    db.conn().execute(
+                        "UPDATE patch_scheduler_items SET defer_count = defer_count + 1, defer_reason = ?1 WHERE id = ?2",
+                        params![reason, id],
+                    )?;
+                }
             }
             TargetReadiness::Rejected(_) => {
                 db.conn().execute(
@@ -847,9 +921,10 @@ pub fn flush_scheduler(
     conversation_id: Option<&str>,
     source_type: &str,
     approval_granted: bool,
+    mounts: Option<&super::mount_registry::MountRegistry>,
 ) -> DbResult<Vec<ChangeResult>> {
-    // Promote any deferred patches whose target surfaces are now ready
-    let _ = promote_deferred_patches(db, None)?;
+    // Promote any deferred patches whose target surfaces or renderers are now ready
+    let _ = promote_deferred_patches(db, None, mounts)?;
     // Reconcile against committed transactions first
     let _ = recover_scheduler(db)?;
 
@@ -869,9 +944,48 @@ pub fn flush_scheduler(
         rows.collect::<Result<Vec<_>, _>>()?
     };
 
+    // Re-check renderer readiness immediately before apply. A mount can
+    // disappear after the patch was queued. Durable-only ops stay queued.
+    let now_gate = now_rfc3339();
+    let mut executable: Vec<String> = Vec::new();
+    for patch_id in &ids {
+        let patch = get_scheduled_patch(db, patch_id)?;
+        let op: AppOperation = match serde_json::from_value(patch.payload.clone()) {
+            Ok(op) => op,
+            Err(_) => {
+                db.conn().execute(
+                    "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
+                     error_category = 'corrupt_payload' WHERE id = ?2",
+                    params![now_gate, patch_id],
+                )?;
+                continue;
+            }
+        };
+        match resolve_operation_readiness(db, mounts, &op, patch.priority) {
+            TargetReadiness::Ready => executable.push(patch_id.clone()),
+            TargetReadiness::Deferred {
+                target_surface_id,
+                reason,
+            } => {
+                db.conn().execute(
+                    "UPDATE patch_scheduler_items SET status = 'deferred_target_pending',
+                     deferred_target = ?1, defer_reason = ?2 WHERE id = ?3",
+                    params![target_surface_id, reason, patch_id],
+                )?;
+            }
+            TargetReadiness::Rejected(_) => {
+                db.conn().execute(
+                    "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
+                     error_category = 'target_rejected' WHERE id = ?2",
+                    params![now_gate, patch_id],
+                )?;
+            }
+        }
+    }
+
     // Build dependency graph and topologically sort patches
     let mut patches: HashMap<String, ScheduledPatch> = HashMap::new();
-    for patch_id in &ids {
+    for patch_id in &executable {
         let patch = get_scheduled_patch(db, patch_id)?;
         patches.insert(patch_id.clone(), patch);
     }
@@ -880,6 +994,7 @@ pub fn flush_scheduler(
     let mut in_degree: HashMap<String, usize> = HashMap::new();
     let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
     let mut missing_dep_patches: HashSet<String> = HashSet::new();
+    let mut waiting_on_deferred: HashSet<String> = HashSet::new();
 
     // Map both patch id and operation_id to patch id in current queued set
     let mut op_to_patch_id: HashMap<String, String> = HashMap::new();
@@ -902,22 +1017,44 @@ pub fn flush_scheduler(
                     .push(id.clone());
                 *in_degree.entry(id.clone()).or_insert(0) += 1;
             } else {
-                let is_applied: bool = db
+                let dep_status: Option<String> = db
                     .conn()
                     .query_row(
-                        "SELECT 1 FROM patch_scheduler_items WHERE (id = ?1 OR operation_id = ?1) AND status = 'applied'",
+                        "SELECT status FROM patch_scheduler_items WHERE id = ?1 OR operation_id = ?1 LIMIT 1",
                         [dep_id],
-                        |_| Ok(true),
+                        |r| r.get(0),
                     )
-                    .unwrap_or(false);
-                if !is_applied {
-                    missing_dep_patches.insert(id.clone());
+                    .optional()?;
+                match dep_status.as_deref() {
+                    Some("applied") => {}
+                    // Dependency is waiting on a surface or renderer. Leave this
+                    // patch queued so a later flush can run it after promotion.
+                    Some("deferred_target_pending") => {
+                        waiting_on_deferred.insert(id.clone());
+                    }
+                    _ => {
+                        missing_dep_patches.insert(id.clone());
+                    }
                 }
             }
         }
     }
 
     let now = now_rfc3339();
+
+    // Transitive wait: B waits on deferred A, C depends on B → C must also wait,
+    // not be marked dependency_cycle / dependency_missing.
+    let mut wait_queue: VecDeque<String> = waiting_on_deferred.iter().cloned().collect();
+    while let Some(waiting_id) = wait_queue.pop_front() {
+        if let Some(deps) = dependents.get(&waiting_id) {
+            for dep_id in deps {
+                if !missing_dep_patches.contains(dep_id) && waiting_on_deferred.insert(dep_id.clone())
+                {
+                    wait_queue.push_back(dep_id.clone());
+                }
+            }
+        }
+    }
 
     // Transitive failure propagation: any patch depending on a missing or failed patch is dependency_failed
     let mut failed_dep_patches: HashSet<String> = HashSet::new();
@@ -927,6 +1064,7 @@ pub fn flush_scheduler(
         if let Some(deps) = dependents.get(&failed_id) {
             for dep_id in deps {
                 if !missing_dep_patches.contains(dep_id)
+                    && !waiting_on_deferred.contains(dep_id)
                     && failed_dep_patches.insert(dep_id.clone())
                 {
                     fail_queue.push_back(dep_id.clone());
@@ -945,6 +1083,10 @@ pub fn flush_scheduler(
         in_degree.remove(id);
     }
 
+    for id in &waiting_on_deferred {
+        in_degree.remove(id);
+    }
+
     // Patches whose dependencies failed or were missing fail closed as dependency_failed!
     for id in &failed_dep_patches {
         db.conn().execute(
@@ -959,7 +1101,10 @@ pub fn flush_scheduler(
     let mut ready: Vec<String> = in_degree
         .iter()
         .filter(|(id, d)| {
-            **d == 0 && !missing_dep_patches.contains(*id) && !failed_dep_patches.contains(*id)
+            **d == 0
+                && !missing_dep_patches.contains(*id)
+                && !failed_dep_patches.contains(*id)
+                && !waiting_on_deferred.contains(*id)
         })
         .map(|(id, _)| id.clone())
         .collect();
@@ -984,6 +1129,7 @@ pub fn flush_scheduler(
                     if *deg == 0
                         && !missing_dep_patches.contains(dep_id)
                         && !failed_dep_patches.contains(dep_id)
+                        && !waiting_on_deferred.contains(dep_id)
                     {
                         newly_ready.push(dep_id.clone());
                     }
@@ -1004,7 +1150,11 @@ pub fn flush_scheduler(
 
     // Any remaining items in in_degree with deg > 0 are true dependency cycles! Fail closed!
     for (id, deg) in &in_degree {
-        if *deg > 0 && !missing_dep_patches.contains(id) && !failed_dep_patches.contains(id) {
+        if *deg > 0
+            && !missing_dep_patches.contains(id)
+            && !failed_dep_patches.contains(id)
+            && !waiting_on_deferred.contains(id)
+        {
             db.conn().execute(
                 "UPDATE patch_scheduler_items SET status = 'failed', failed_at = ?1,
                  error_category = 'dependency_cycle' WHERE id = ?2 AND status = 'queued'",
@@ -1022,10 +1172,19 @@ pub fn flush_scheduler(
             .map_err(|e| DbError::Invalid(e.to_string()))?;
 
         let effective_source_type = patch.source_type.as_deref().unwrap_or("agent");
+        let risk = crate::application_kernel::classify_risk(std::slice::from_ref(&op));
+        // Agent patches never self-approve. Strong-risk patches require the
+        // caller's explicit grant. A renderer mount flush passes grant=false,
+        // so lifecycle cannot approve deletes, migrations, or packages.
+        // Lightweight user edits still apply: the user already queued them.
         let effective_approval = if effective_source_type == "agent" {
             false
+        } else if risk == "strong" {
+            approval_granted
         } else {
             approval_granted
+                || effective_source_type == "user"
+                || effective_source_type == "direct_manipulation"
         };
 
         let result = apply_change(
@@ -1093,6 +1252,7 @@ pub fn schedule_and_apply(
     bus: &mut Option<&mut EventBus>,
     req: ScheduleRequest,
     approval_granted: bool,
+    mounts: Option<&super::mount_registry::MountRegistry>,
 ) -> DbResult<ScheduleAndApplyResult> {
     if let Some(cycle) = detect_dependency_cycle(&req.operations) {
         return Err(DbError::Invalid(format!(
@@ -1116,7 +1276,7 @@ pub fn schedule_and_apply(
 
     // Validate dependency order & references BEFORE scheduling any patches durably
     let order = topological_order(&req.operations).map_err(DbError::Invalid)?;
-    let scheduled = schedule_patches(db, &req)?;
+    let scheduled = schedule_patches(db, &req, mounts)?;
 
     // Filter operations whose patch status is 'queued' (ready to apply now).
     // Deferred operations remain in 'deferred_target_pending' until target surface is ready.
@@ -1207,7 +1367,7 @@ pub fn schedule_and_apply(
             );
         }
         // Surface creation may have unblocked deferred patches: promote them
-        let _ = promote_deferred_patches(db, None);
+        let _ = promote_deferred_patches(db, None, mounts);
     } else if change_result.proposal_id.is_some() {
         for patch in &scheduled {
             if patch.status != "deferred_target_pending" {
@@ -1356,7 +1516,7 @@ mod tests {
             model: None,
             provider: None,
         };
-        let scheduled = schedule_patches(&mut db, &req).unwrap();
+        let scheduled = schedule_patches(&mut db, &req, None).unwrap();
         assert_eq!(scheduled.len(), 3);
 
         let patch_a_id = &scheduled[0].id;
@@ -1364,7 +1524,7 @@ mod tests {
         let patch_c_id = &scheduled[2].id;
 
         // Flush the scheduler
-        let _ = flush_scheduler(&mut db, &mut None, Some(&conv.id), "user", true).unwrap();
+        let _ = flush_scheduler(&mut db, &mut None, Some(&conv.id), "user", true, None).unwrap();
 
         // Check statuses and error_categories
         let patch_a = get_scheduled_patch(&db, patch_a_id).unwrap();
@@ -1455,7 +1615,7 @@ mod tests {
         };
 
         // 2. Schedule and apply: since target surface does not exist, patch is deferred
-        let res = schedule_and_apply(&mut db, &mut None, req, true).unwrap();
+        let res = schedule_and_apply(&mut db, &mut None, req, true, None).unwrap();
         assert_eq!(res.scheduled.len(), 1);
         assert_eq!(res.scheduled[0].status, "deferred_target_pending");
         assert_eq!(res.scheduled[0].deferred_target, Some("surf-future".into()));
@@ -1466,7 +1626,7 @@ mod tests {
         );
 
         // 3. Flushing while target is still missing leaves it deferred (increments defer_count)
-        let promoted = promote_deferred_patches(&mut db, Some("surf-future")).unwrap();
+        let promoted = promote_deferred_patches(&mut db, Some("surf-future"), None).unwrap();
         assert_eq!(promoted, 0);
         let patch_after_check = get_scheduled_patch(&db, &res.scheduled[0].id).unwrap();
         assert_eq!(patch_after_check.status, "deferred_target_pending");
@@ -1491,7 +1651,7 @@ mod tests {
             .unwrap();
 
         // 5. Promote deferred patches: target now exists!
-        let promoted = promote_deferred_patches(&mut db, Some("surf-future")).unwrap();
+        let promoted = promote_deferred_patches(&mut db, Some("surf-future"), None).unwrap();
         assert_eq!(
             promoted, 1,
             "Patch should be promoted to queued now that surface exists"
@@ -1502,7 +1662,7 @@ mod tests {
 
         // 6. Flush scheduler applies the now-ready patch cleanly
         let applied_results =
-            flush_scheduler(&mut db, &mut None, Some(&conv.id), "user", true).unwrap();
+            flush_scheduler(&mut db, &mut None, Some(&conv.id), "user", true, None).unwrap();
         assert_eq!(applied_results.len(), 1);
         assert!(applied_results[0].is_committed());
 
@@ -1551,7 +1711,7 @@ mod tests {
             provider: None,
         };
 
-        let res = schedule_patches(&mut db, &req).unwrap();
+        let res = schedule_patches(&mut db, &req, None).unwrap();
         let patch_id = &res[0].id;
 
         // Manually age created_at past TTL (70 seconds ago)
@@ -1563,7 +1723,7 @@ mod tests {
             )
             .unwrap();
 
-        let promoted = promote_deferred_patches(&mut db, Some("surf-never")).unwrap();
+        let promoted = promote_deferred_patches(&mut db, Some("surf-never"), None).unwrap();
         assert_eq!(promoted, 0);
 
         let patch = get_scheduled_patch(&db, patch_id).unwrap();
@@ -1620,7 +1780,7 @@ mod tests {
             provider: None,
         };
 
-        let res = schedule_patches(&mut db, &req).unwrap();
+        let res = schedule_patches(&mut db, &req, None).unwrap();
         let patch_id = &res[0].id;
 
         // Delete the conversation
@@ -1628,7 +1788,7 @@ mod tests {
             .execute("DELETE FROM conversations WHERE id = ?1", [&conv.id])
             .unwrap();
 
-        let promoted = promote_deferred_patches(&mut db, Some("surf-abandoned")).unwrap();
+        let promoted = promote_deferred_patches(&mut db, Some("surf-abandoned"), None).unwrap();
         assert_eq!(promoted, 0);
 
         let patch = get_scheduled_patch(&db, patch_id).unwrap();
@@ -1736,7 +1896,7 @@ mod tests {
             model: None,
             provider: None,
         };
-        let res1 = schedule_patches(&mut db, &req1).unwrap();
+        let res1 = schedule_patches(&mut db, &req1, None).unwrap();
         let initial_patch_id = &res1[0].id;
         assert_eq!(res1[0].status, "queued");
 
@@ -1756,7 +1916,7 @@ mod tests {
         };
 
         // This must fail
-        assert!(schedule_patches(&mut db, &req2).is_err());
+        assert!(schedule_patches(&mut db, &req2, None).is_err());
 
         // Invariant: The initial preview MUST NOT be marked superseded!
         let initial_patch = get_scheduled_patch(&db, initial_patch_id).unwrap();
@@ -1801,7 +1961,7 @@ mod tests {
         };
 
         // Must fail with topological order error
-        let err = schedule_and_apply(&mut db, &mut None, req, true).unwrap_err();
+        let err = schedule_and_apply(&mut db, &mut None, req, true, None).unwrap_err();
         assert!(
             format!("{err:?}").contains("depends_on") || format!("{err}").contains("depends_on")
         );
@@ -1856,9 +2016,13 @@ mod tests {
     #[test]
     fn schedule_patches_rejects_archived_target_without_queueing() {
         let mut db = test_db();
-        let conv =
-            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "ArchSched", None)
-                .unwrap();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "ArchSched",
+            None,
+        )
+        .unwrap();
         let surface = crate::runtime_v2::surfaces::create_inline_surface(
             &mut db,
             &conv.id,
@@ -1890,7 +2054,7 @@ mod tests {
             provider: None,
         };
 
-        let err = schedule_patches(&mut db, &req).unwrap_err();
+        let err = schedule_patches(&mut db, &req, None).unwrap_err();
         assert!(
             matches!(err, crate::db::DbError::Invalid(ref msg) if msg.contains("archived")),
             "schedule must reject archived target, got {err:?}"
@@ -1908,5 +2072,500 @@ mod tests {
             count, 0,
             "archived rejection must not leave scheduler rows queued"
         );
+    }
+
+    #[test]
+    fn durable_edit_does_not_wait_for_a_renderer() {
+        let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "Dur", None)
+                .unwrap();
+        let surface = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Durable",
+            &serde_json::json!({
+                "id": "doc",
+                "name": "Durable",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "a"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        let mut op = simple_op("op-durable", vec![]);
+        op.op_type = "component.update_props".into();
+        op.target.surface_id = Some(surface.id.clone());
+        op.target.component_id = Some("t".into());
+        let req = ScheduleRequest {
+            conversation_id: Some(conv.id),
+            turn_id: None,
+            surface_id: Some(surface.id),
+            priority: PatchPriority::ApprovedPersistentChange,
+            operations: vec![op],
+            source_type: "agent".into(),
+            from_agent: true,
+            model: None,
+            provider: None,
+        };
+        let scheduled = schedule_patches(&mut db, &req, None).unwrap();
+        assert_eq!(scheduled[0].status, "queued");
+    }
+
+    #[test]
+    fn renderer_required_waits_for_mount_and_redefers_after_window_clear() {
+        let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "Rend", None)
+                .unwrap();
+        let surface = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Live",
+            &serde_json::json!({
+                "id": "doc",
+                "name": "Live",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "a"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        let op = AppOperation {
+            id: "op-route".into(),
+            op_type: "route.navigate".into(),
+            target: OperationTarget {
+                surface_id: Some(surface.id.clone()),
+                ..Default::default()
+            },
+            base_revision: None,
+            payload: serde_json::json!({ "routeId": "main" }),
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        };
+        let req = ScheduleRequest {
+            conversation_id: Some(conv.id.clone()),
+            turn_id: None,
+            surface_id: Some(surface.id.clone()),
+            priority: PatchPriority::ApprovedPersistentChange,
+            operations: vec![op],
+            source_type: "user".into(),
+            from_agent: false,
+            model: None,
+            provider: None,
+        };
+        let deferred = schedule_patches(&mut db, &req, None).unwrap();
+        assert_eq!(deferred[0].status, "deferred_target_pending");
+        assert!(
+            deferred[0]
+                .defer_reason
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("renderer:"),
+            "missing renderer must be distinct from a missing surface"
+        );
+
+        let mut mounts = crate::runtime_v2::mount_registry::MountRegistry::new();
+        mounts
+            .register(
+                &db,
+                "main",
+                &surface.id,
+                "rend-1",
+                None,
+                Some(&conv.id),
+                1,
+                0,
+            )
+            .unwrap();
+        let promoted = promote_deferred_patches(&mut db, Some(&surface.id), Some(&mounts)).unwrap();
+        assert_eq!(promoted, 1);
+        let queued = get_scheduled_patch(&db, &deferred[0].id).unwrap();
+        assert_eq!(queued.status, "queued");
+
+        mounts.clear_window("main");
+        let _ = flush_scheduler(
+            &mut db,
+            &mut None,
+            Some(&conv.id),
+            "user",
+            false,
+            Some(&mounts),
+        )
+        .unwrap();
+        let again = get_scheduled_patch(&db, &deferred[0].id).unwrap();
+        assert_eq!(
+            again.status, "deferred_target_pending",
+            "unmounted renderer must not apply a renderer-required op"
+        );
+    }
+
+    #[test]
+    fn preview_surface_edit_waits_for_mount() {
+        let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "Prev", None)
+                .unwrap();
+        let surface = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Preview",
+            &serde_json::json!({
+                "id": "doc",
+                "name": "Preview",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "a"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        let mut op = simple_op("op-preview", vec![]);
+        op.op_type = "component.update_props".into();
+        op.target.surface_id = Some(surface.id.clone());
+        op.target.component_id = Some("t".into());
+        let req = ScheduleRequest {
+            conversation_id: Some(conv.id.clone()),
+            turn_id: None,
+            surface_id: Some(surface.id.clone()),
+            priority: PatchPriority::ActiveTurnPreview,
+            operations: vec![op],
+            source_type: "system".into(),
+            from_agent: false,
+            model: None,
+            provider: None,
+        };
+        let deferred = schedule_patches(&mut db, &req, None).unwrap();
+        assert_eq!(deferred[0].status, "deferred_target_pending");
+
+        let mut mounts = crate::runtime_v2::mount_registry::MountRegistry::new();
+        mounts
+            .register(
+                &db,
+                "main",
+                &surface.id,
+                "rend-p",
+                None,
+                Some(&conv.id),
+                1,
+                0,
+            )
+            .unwrap();
+        let promoted = promote_deferred_patches(&mut db, Some(&surface.id), Some(&mounts)).unwrap();
+        assert_eq!(promoted, 1);
+    }
+
+    #[test]
+    fn flush_without_grant_does_not_apply_strong_delete() {
+        let mut db = test_db();
+        let conv =
+            crate::db::create_conversation(&mut db, crate::db::DEFAULT_WORKSPACE_ID, "Del", None)
+                .unwrap();
+        let surface = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Keep",
+            &serde_json::json!({
+                "id": "doc",
+                "name": "Keep",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "a"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        let op = AppOperation {
+            id: "op-del".into(),
+            op_type: "surface.delete".into(),
+            target: OperationTarget {
+                surface_id: Some(surface.id.clone()),
+                ..Default::default()
+            },
+            base_revision: None,
+            payload: serde_json::json!({}),
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            requires_approval: None,
+            destructive: Some(true),
+            audience: None,
+        };
+        let req = ScheduleRequest {
+            conversation_id: Some(conv.id.clone()),
+            turn_id: None,
+            surface_id: Some(surface.id.clone()),
+            priority: PatchPriority::ApprovedPersistentChange,
+            operations: vec![op],
+            source_type: "user".into(),
+            from_agent: false,
+            model: None,
+            provider: None,
+        };
+        let scheduled = schedule_patches(&mut db, &req, None).unwrap();
+        assert_eq!(scheduled[0].status, "queued");
+        let _ = flush_scheduler(&mut db, &mut None, Some(&conv.id), "user", false, None).unwrap();
+        let patch = get_scheduled_patch(&db, &scheduled[0].id).unwrap();
+        assert_eq!(
+            patch.status, "pending_approval",
+            "renderer flush must not approve a strong delete"
+        );
+        assert!(
+            crate::runtime_v2::surfaces::get_surface(&db, &surface.id).is_ok(),
+            "surface must still exist"
+        );
+    }
+
+    #[test]
+    fn dependent_of_renderer_deferred_navigate_stays_queued_on_flush() {
+        let mut db = test_db();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "DepWait",
+            None,
+        )
+        .unwrap();
+        let surface = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "NavDep",
+            &serde_json::json!({
+                "id": "doc",
+                "name": "NavDep",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "a"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        let navigate = AppOperation {
+            id: "op-nav".into(),
+            op_type: "route.navigate".into(),
+            target: OperationTarget {
+                surface_id: Some(surface.id.clone()),
+                ..Default::default()
+            },
+            base_revision: None,
+            payload: serde_json::json!({ "routeId": "main" }),
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        };
+        let mut follower = simple_op("op-after-nav", vec!["op-nav".into()]);
+        follower.op_type = "component.update_props".into();
+        follower.target.surface_id = Some(surface.id.clone());
+        follower.target.component_id = Some("t".into());
+        follower.payload = serde_json::json!({ "patch": { "props": { "text": "b" } } });
+        let req = ScheduleRequest {
+            conversation_id: Some(conv.id.clone()),
+            turn_id: None,
+            surface_id: Some(surface.id.clone()),
+            priority: PatchPriority::ApprovedPersistentChange,
+            operations: vec![navigate, follower],
+            source_type: "user".into(),
+            from_agent: false,
+            model: None,
+            provider: None,
+        };
+        let scheduled = schedule_patches(&mut db, &req, None).unwrap();
+        assert_eq!(scheduled.len(), 2);
+        assert_eq!(scheduled[0].status, "deferred_target_pending");
+        assert_eq!(scheduled[1].status, "queued");
+
+        let _ = flush_scheduler(
+            &mut db,
+            &mut None,
+            Some(&conv.id),
+            "user",
+            false,
+            None,
+        )
+        .unwrap();
+
+        let nav = get_scheduled_patch(&db, &scheduled[0].id).unwrap();
+        assert_eq!(
+            nav.status, "deferred_target_pending",
+            "renderer-required navigate must remain deferred without a mount"
+        );
+
+        let after = get_scheduled_patch(&db, &scheduled[1].id).unwrap();
+        assert!(
+            after.status == "queued" || after.status == "deferred_target_pending",
+            "dependent of a deferred navigate must wait, not fail; got {}",
+            after.status
+        );
+        let cat: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT error_category FROM patch_scheduler_items WHERE id = ?1",
+                [&scheduled[1].id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_ne!(
+            cat.as_deref(),
+            Some("dependency_missing"),
+            "waiting on a deferred dependency is not a missing dependency"
+        );
+    }
+
+    #[test]
+    fn transitive_dependent_of_renderer_deferred_stays_queued() {
+        let mut db = test_db();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "TransWait",
+            None,
+        )
+        .unwrap();
+        let surface = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "NavChain",
+            &serde_json::json!({
+                "id": "doc",
+                "name": "NavChain",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "a"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        let navigate = AppOperation {
+            id: "op-nav".into(),
+            op_type: "route.navigate".into(),
+            target: OperationTarget {
+                surface_id: Some(surface.id.clone()),
+                ..Default::default()
+            },
+            base_revision: None,
+            payload: serde_json::json!({ "routeId": "main" }),
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        };
+        let mut mid = simple_op("op-mid", vec!["op-nav".into()]);
+        mid.op_type = "component.update_props".into();
+        mid.target.surface_id = Some(surface.id.clone());
+        mid.target.component_id = Some("t".into());
+        mid.payload = serde_json::json!({ "patch": { "props": { "text": "b" } } });
+        let mut tail = simple_op("op-tail", vec!["op-mid".into()]);
+        tail.op_type = "component.update_props".into();
+        tail.target.surface_id = Some(surface.id.clone());
+        tail.target.component_id = Some("t".into());
+        tail.payload = serde_json::json!({ "patch": { "props": { "text": "c" } } });
+        let req = ScheduleRequest {
+            conversation_id: Some(conv.id.clone()),
+            turn_id: None,
+            surface_id: Some(surface.id.clone()),
+            priority: PatchPriority::ApprovedPersistentChange,
+            operations: vec![navigate, mid, tail],
+            source_type: "user".into(),
+            from_agent: false,
+            model: None,
+            provider: None,
+        };
+        let scheduled = schedule_patches(&mut db, &req, None).unwrap();
+        assert_eq!(scheduled[0].status, "deferred_target_pending");
+        assert_eq!(scheduled[1].status, "queued");
+        assert_eq!(scheduled[2].status, "queued");
+
+        let _ = flush_scheduler(&mut db, &mut None, Some(&conv.id), "user", false, None).unwrap();
+
+        for patch in &scheduled[1..] {
+            let row = get_scheduled_patch(&db, &patch.id).unwrap();
+            assert!(
+                row.status == "queued" || row.status == "deferred_target_pending",
+                "transitive waiter must not fail; {} got {}",
+                patch.operation_id,
+                row.status
+            );
+            let cat: Option<String> = db
+                .conn()
+                .query_row(
+                    "SELECT error_category FROM patch_scheduler_items WHERE id = ?1",
+                    [&patch.id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(
+                cat.as_deref() != Some("dependency_cycle")
+                    && cat.as_deref() != Some("dependency_missing")
+                    && cat.as_deref() != Some("dependency_failed"),
+                "transitive waiter must not be marked a dependency failure; got {cat:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn renderer_required_without_surface_id_is_rejected() {
+        let mut db = test_db();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "NoSurf",
+            None,
+        )
+        .unwrap();
+        let op = AppOperation {
+            id: "op-nav-empty".into(),
+            op_type: "route.navigate".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            payload: serde_json::json!({ "routeId": "main" }),
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        };
+        let req = ScheduleRequest {
+            conversation_id: Some(conv.id),
+            turn_id: None,
+            surface_id: None,
+            priority: PatchPriority::ApprovedPersistentChange,
+            operations: vec![op],
+            source_type: "user".into(),
+            from_agent: false,
+            model: None,
+            provider: None,
+        };
+        let err = schedule_patches(&mut db, &req, None).unwrap_err();
+        assert!(
+            matches!(err, crate::db::DbError::Invalid(ref msg) if msg.contains("surface_id")),
+            "empty renderer target must reject, got {err:?}"
+        );
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM patch_scheduler_items WHERE operation_id = 'op-nav-empty'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "rejected renderer op must not leave a deferred row");
     }
 }

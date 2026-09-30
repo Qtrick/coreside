@@ -10,6 +10,7 @@ import {
   mergeDirtyReconcileResetKeys,
   resolvePendingInteractionIdempotencyKey,
   runRendererMountPatchFlush,
+  startRendererMountLifecycle,
 } from "./preservation";
 import {
   canNavigateBack,
@@ -185,9 +186,10 @@ describe("runRendererMountPatchFlush", () => {
     const flush = vi.fn(async () => undefined);
     const id = await runRendererMountPatchFlush("surf-1", flush, "conv-9");
     expect(flush).toHaveBeenCalledWith({
+      surfaceId: "surf-1",
       conversationId: "conv-9",
       sourceType: "renderer_mount",
-      approvalGranted: true,
+      approvalGranted: false,
     });
     expect(id).toMatch(/^rend-surf-1-/);
   });
@@ -242,6 +244,73 @@ describe("runRendererMountPatchFlush", () => {
     expect(id).toBe("rend-keep");
     expect(register).toHaveBeenCalled();
     expect(flush).toHaveBeenCalled();
+  });
+});
+
+describe("startRendererMountLifecycle", () => {
+  it("passes surfaceId into flushPatchScheduler", async () => {
+    const flush = vi.fn(async () => undefined);
+    const register = vi.fn(async () => undefined);
+    const unregister = vi.fn(async () => undefined);
+    const cleanup = startRendererMountLifecycle({
+      surfaceId: "surf-life",
+      conversationId: "conv-life",
+      definitionRevision: 2,
+      stateRevision: 1,
+      registerMount: register,
+      unregisterMount: unregister,
+      flushPatchScheduler: flush,
+    });
+    await vi.waitFor(() => {
+      expect(flush).toHaveBeenCalled();
+    });
+    expect(flush).toHaveBeenCalledWith({
+      surfaceId: "surf-life",
+      conversationId: "conv-life",
+      sourceType: "renderer_mount",
+      approvalGranted: false,
+    });
+    expect(register).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surfaceId: "surf-life",
+        conversationId: "conv-life",
+        definitionRevision: 2,
+        stateRevision: 1,
+      }),
+    );
+    cleanup();
+  });
+
+  it("cleanup unregisters with the instance id after register resolves", async () => {
+    const flush = vi.fn(async () => undefined);
+    const register = vi.fn(async () => undefined);
+    const unregister = vi.fn(async () => undefined);
+    const cleanup = startRendererMountLifecycle({
+      surfaceId: "surf-clean",
+      conversationId: "conv-clean",
+      registerMount: register,
+      unregisterMount: unregister,
+      flushPatchScheduler: flush,
+    });
+    await vi.waitFor(() => {
+      expect(register).toHaveBeenCalled();
+      expect(flush).toHaveBeenCalled();
+    });
+    const calls = register.mock.calls as unknown as Array<
+      [{ rendererInstanceId: string }]
+    >;
+    const registeredId = calls[0]?.[0]?.rendererInstanceId ?? "";
+    expect(registeredId).toMatch(/^rend-surf-clean-/);
+    // Let the lifecycle .then assign instanceId before cleanup.
+    await Promise.resolve();
+    cleanup();
+    await vi.waitFor(() => {
+      expect(unregister).toHaveBeenCalled();
+    });
+    expect(unregister).toHaveBeenCalledWith({
+      surfaceId: "surf-clean",
+      rendererInstanceId: registeredId,
+    });
   });
 });
 

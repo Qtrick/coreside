@@ -44,14 +44,57 @@ pub enum RendererReadiness {
     Stale {
         reason: String,
     },
-    Rejected(String),
 }
 
+/// How an operation meets a live renderer.
+///
+/// Durable construction must not wait for a window. A live visual update must
+/// not treat a SQLite row as a mounted renderer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperationDelivery {
+    /// Persist even when nothing is mounted (creates, data, manifests).
+    DurableOnly,
+    /// Persist now. A mounted renderer reconciles the result when it appears.
+    RendererOptional,
+    /// Do not apply until a fresh mount exists for the target surface.
+    RendererRequired,
+}
+
+/// Multiple renderer instances may mount one surface (inline + tool window,
+/// or two copies in one window). Readiness is "any fresh instance", not
+/// last-register-wins. The same `renderer_instance_id` replaces only itself.
 #[derive(Debug, Default)]
 pub struct MountRegistry {
-    /// Keyed by surface_id → window_label → registration.
+    /// Keyed by surface_id → renderer_instance_id.
     by_surface: HashMap<String, HashMap<String, SurfaceMountRegistration>>,
     generation: u64,
+}
+
+/// Model-visible and internal operation types, classified without trusting
+/// a caller-supplied window or renderer id.
+pub fn operation_delivery(op_type: &str) -> OperationDelivery {
+    match op_type {
+        // Window navigation is a live view. A route row is not a mounted renderer.
+        "route.navigate" => OperationDelivery::RendererRequired,
+        "surface.create" | "chat.inline_surface_create" | "tool.full_replace" | "tool.create" => {
+            OperationDelivery::DurableOnly
+        }
+        t if t.starts_with("data.")
+            || t.starts_with("manifest.")
+            || t.starts_with("state.")
+            || t.starts_with("surface.")
+            || t.starts_with("component.")
+            || t.starts_with("subscription.")
+            || t.starts_with("chat.")
+            || t == "event.dispatch"
+            || t == "interactive.action"
+            || t == "layout.update"
+            || t == "wallpaper.apply" =>
+        {
+            OperationDelivery::RendererOptional
+        }
+        _ => OperationDelivery::DurableOnly,
+    }
 }
 
 impl MountRegistry {
@@ -80,12 +123,14 @@ impl MountRegistry {
             )));
         }
 
-        let authoritative_app =
-            crate::application_kernel::manifest::authoritative_application_id(
-                db,
-                surface.tool_id.as_deref(),
-            );
-        if let Some(claimed) = claimed_application_id.map(str::trim).filter(|s| !s.is_empty()) {
+        let authoritative_app = crate::application_kernel::manifest::authoritative_application_id(
+            db,
+            surface.tool_id.as_deref(),
+        );
+        if let Some(claimed) = claimed_application_id
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             match authoritative_app.as_deref() {
                 Some(auth) if auth == claimed => {}
                 Some(auth) => {
@@ -142,7 +187,7 @@ impl MountRegistry {
             conversation_id: surface.conversation_id.clone(),
             application_id: authoritative_app,
             window_label: window_label.clone(),
-            renderer_instance_id: instance,
+            renderer_instance_id: instance.clone(),
             definition_revision,
             state_revision,
             generation: self.generation,
@@ -151,7 +196,7 @@ impl MountRegistry {
         self.by_surface
             .entry(surface_id.to_string())
             .or_default()
-            .insert(window_label, reg.clone());
+            .insert(instance, reg.clone());
         Ok(reg)
     }
 
@@ -162,36 +207,65 @@ impl MountRegistry {
         renderer_instance_id: Option<&str>,
     ) -> bool {
         let window_label = normalize_window_label(window_label);
-        let Some(windows) = self.by_surface.get_mut(surface_id) else {
+        let Some(instances) = self.by_surface.get_mut(surface_id) else {
             return false;
         };
-        let Some(existing) = windows.get(&window_label) else {
-            return false;
-        };
-        if let Some(want) = renderer_instance_id.map(str::trim).filter(|s| !s.is_empty()) {
-            if existing.renderer_instance_id != want {
-                return false;
+        let before = instances.len();
+        if let Some(want) = renderer_instance_id
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            if let Some(existing) = instances.get(want) {
+                if existing.window_label != window_label {
+                    return false;
+                }
             }
+            instances.remove(want);
+        } else {
+            instances.retain(|_, reg| reg.window_label != window_label);
         }
-        windows.remove(&window_label);
-        if windows.is_empty() {
+        let removed = instances.len() != before;
+        if instances.is_empty() {
             self.by_surface.remove(surface_id);
         }
-        true
+        removed
     }
 
-    /// Drop all mounts for a window (window close / crash recovery).
+    /// Drop every mount owned by a window. Does not touch durable application rows.
     pub fn clear_window(&mut self, window_label: &str) {
         let window_label = normalize_window_label(window_label);
         let surfaces: Vec<String> = self.by_surface.keys().cloned().collect();
         for sid in surfaces {
-            if let Some(windows) = self.by_surface.get_mut(&sid) {
-                windows.remove(&window_label);
-                if windows.is_empty() {
+            if let Some(instances) = self.by_surface.get_mut(&sid) {
+                instances.retain(|_, reg| reg.window_label != window_label);
+                if instances.is_empty() {
                     self.by_surface.remove(&sid);
                 }
             }
         }
+    }
+
+    pub fn instance_count(&self, surface_id: &str) -> usize {
+        self.by_surface
+            .get(surface_id)
+            .map(|m| m.len())
+            .unwrap_or(0)
+    }
+
+    /// Fresh mount of `surface_id` on this window, if one exists.
+    /// Window label is the Tauri label, never a model-supplied id.
+    pub fn fresh_mount(
+        &self,
+        window_label: &str,
+        surface_id: &str,
+    ) -> Option<&SurfaceMountRegistration> {
+        let label = normalize_window_label(window_label);
+        let now = Instant::now();
+        self.by_surface
+            .get(surface_id)?
+            .values()
+            .filter(|reg| reg.window_label == label && mount_is_fresh(reg, now, None))
+            .max_by_key(|reg| reg.generation)
     }
 
     pub fn evaluate_renderer_readiness(
@@ -200,14 +274,17 @@ impl MountRegistry {
         required_window: Option<&str>,
         min_definition_revision: Option<i64>,
     ) -> RendererReadiness {
-        let Some(windows) = self.by_surface.get(surface_id) else {
+        let Some(instances) = self.by_surface.get(surface_id) else {
             return RendererReadiness::NotMounted;
         };
         let candidates: Vec<&SurfaceMountRegistration> = if let Some(want) = required_window {
             let label = normalize_window_label(want);
-            windows.get(&label).into_iter().collect()
+            instances
+                .values()
+                .filter(|reg| reg.window_label == label)
+                .collect()
         } else {
-            windows.values().collect()
+            instances.values().collect()
         };
         if candidates.is_empty() {
             return RendererReadiness::NotMounted;
@@ -261,17 +338,41 @@ fn normalize_window_label(label: &str) -> String {
     }
 }
 
+fn mount_is_fresh(
+    reg: &SurfaceMountRegistration,
+    now: Instant,
+    min_definition_revision: Option<i64>,
+) -> bool {
+    let Some(ready_at) = reg.ready_at else {
+        return false;
+    };
+    if now.duration_since(ready_at) > MOUNT_STALE_TTL {
+        return false;
+    }
+    if let Some(min_rev) = min_definition_revision {
+        if reg.definition_revision < min_rev {
+            return false;
+        }
+    }
+    true
+}
+
 /// Durable target readiness (SQLite) is separate from renderer readiness.
-/// This helper documents the split for callers that need both.
+/// Renderer defer reasons are prefixed `renderer:` so promotion does not
+/// spend the missing-surface retry budget on an unmounted view.
 pub fn classify_operation_readiness(
     durable: crate::runtime_v2::patch_scheduler::TargetReadiness,
     renderer: RendererReadiness,
     requires_live_renderer: bool,
+    surface_id: &str,
 ) -> crate::runtime_v2::patch_scheduler::TargetReadiness {
     use crate::runtime_v2::patch_scheduler::TargetReadiness;
     match durable {
         TargetReadiness::Rejected(msg) => TargetReadiness::Rejected(msg),
-        TargetReadiness::Deferred { target_surface_id, reason } => TargetReadiness::Deferred {
+        TargetReadiness::Deferred {
+            target_surface_id,
+            reason,
+        } => TargetReadiness::Deferred {
             target_surface_id,
             reason,
         },
@@ -279,14 +380,13 @@ pub fn classify_operation_readiness(
         TargetReadiness::Ready => match renderer {
             RendererReadiness::Ready { .. } => TargetReadiness::Ready,
             RendererReadiness::NotMounted => TargetReadiness::Deferred {
-                target_surface_id: String::new(),
-                reason: "renderer not mounted".into(),
+                target_surface_id: surface_id.to_string(),
+                reason: "renderer: renderer not mounted".into(),
             },
             RendererReadiness::Stale { reason } => TargetReadiness::Deferred {
-                target_surface_id: String::new(),
-                reason,
+                target_surface_id: surface_id.to_string(),
+                reason: format!("renderer: {reason}"),
             },
-            RendererReadiness::Rejected(msg) => TargetReadiness::Rejected(msg),
         },
     }
 }
@@ -325,16 +425,7 @@ mod tests {
         let (conv, sid) = setup_surface(&mut db);
         let mut reg = MountRegistry::new();
         let err = reg
-            .register(
-                &db,
-                "main",
-                &sid,
-                "rend-1",
-                None,
-                Some("conv-other"),
-                1,
-                0,
-            )
+            .register(&db, "main", &sid, "rend-1", None, Some("conv-other"), 1, 0)
             .expect_err("spoofed conversation");
         assert!(err.to_string().contains("conversation identity mismatch"));
         let ok = reg
@@ -396,16 +487,7 @@ mod tests {
 
         let mut reg = MountRegistry::new();
         let err = reg
-            .register(
-                &db,
-                "main",
-                &sid,
-                "rend-1",
-                Some("app-spoofed"),
-                None,
-                1,
-                0,
-            )
+            .register(&db, "main", &sid, "rend-1", Some("app-spoofed"), None, 1, 0)
             .expect_err("spoofed application");
         assert!(
             err.to_string().contains("application identity mismatch"),
@@ -459,13 +541,114 @@ mod tests {
             TargetReadiness::Ready,
             RendererReadiness::NotMounted,
             false,
+            "surf",
         );
         assert_eq!(out, TargetReadiness::Ready);
         let deferred = classify_operation_readiness(
             TargetReadiness::Ready,
             RendererReadiness::NotMounted,
             true,
+            "surf",
         );
-        assert!(matches!(deferred, TargetReadiness::Deferred { .. }));
+        assert!(matches!(
+            deferred,
+            TargetReadiness::Deferred { ref reason, .. } if reason.starts_with("renderer:")
+        ));
+    }
+
+    #[test]
+    fn two_renderers_in_one_window_both_stay_mounted() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("m4.db")).unwrap();
+        let (_conv, sid) = setup_surface(&mut db);
+        let mut reg = MountRegistry::new();
+        reg.register(&db, "main", &sid, "inline", None, None, 1, 0)
+            .unwrap();
+        reg.register(&db, "main", &sid, "canvas", None, None, 1, 0)
+            .unwrap();
+        assert_eq!(reg.instance_count(&sid), 2);
+        assert!(reg.fresh_mount("main", &sid).is_some());
+        assert!(reg.unregister("main", &sid, Some("inline")));
+        assert_eq!(reg.instance_count(&sid), 1);
+        assert!(reg.is_mounted(&sid));
+        reg.clear_window("main");
+        assert!(!reg.is_mounted(&sid));
+        assert!(reg.fresh_mount("main", &sid).is_none());
+    }
+
+    #[test]
+    fn second_window_mount_does_not_drop_the_first() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("m5.db")).unwrap();
+        let (_conv, sid) = setup_surface(&mut db);
+        let mut reg = MountRegistry::new();
+        reg.register(&db, "main", &sid, "rend-main", None, None, 1, 0)
+            .unwrap();
+        reg.register(&db, "tool-app", &sid, "rend-tool", None, None, 1, 0)
+            .unwrap();
+        assert!(reg.fresh_mount("main", &sid).is_some());
+        assert!(reg.fresh_mount("tool-app", &sid).is_some());
+        reg.clear_window("tool-app");
+        assert!(reg.fresh_mount("main", &sid).is_some());
+        assert!(reg.fresh_mount("tool-app", &sid).is_none());
+    }
+
+    #[test]
+    fn stale_instance_cannot_unregister_the_current_one() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("m6.db")).unwrap();
+        let (_conv, sid) = setup_surface(&mut db);
+        let mut reg = MountRegistry::new();
+        reg.register(&db, "main", &sid, "rend-new", None, None, 2, 0)
+            .unwrap();
+        assert!(!reg.unregister("tool-other", &sid, Some("rend-new")));
+        assert!(reg.is_mounted(&sid));
+    }
+
+    #[test]
+    fn reregister_same_instance_updates_without_dropping_peer() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("m7.db")).unwrap();
+        let (_conv, sid) = setup_surface(&mut db);
+        let mut reg = MountRegistry::new();
+        let first = reg
+            .register(&db, "main", &sid, "inline", None, None, 1, 0)
+            .unwrap();
+        reg.register(&db, "main", &sid, "canvas", None, None, 1, 0)
+            .unwrap();
+        assert_eq!(reg.instance_count(&sid), 2);
+
+        let updated = reg
+            .register(&db, "main", &sid, "inline", None, None, 5, 3)
+            .unwrap();
+        assert_eq!(updated.renderer_instance_id, "inline");
+        assert_eq!(updated.definition_revision, 5);
+        assert_eq!(updated.state_revision, 3);
+        assert!(
+            updated.generation > first.generation,
+            "re-register must advance generation for the same instance"
+        );
+        assert_eq!(
+            reg.instance_count(&sid),
+            2,
+            "re-registering one instance must not drop a peer on the same surface"
+        );
+        assert!(reg.is_mounted(&sid));
+        let ready = reg.evaluate_renderer_readiness(&sid, Some("main"), None);
+        match ready {
+            RendererReadiness::Ready {
+                renderer_instance_id,
+                ..
+            } => {
+                assert!(
+                    renderer_instance_id == "inline" || renderer_instance_id == "canvas",
+                    "readiness must still resolve to a live instance"
+                );
+            }
+            other => panic!("expected Ready after peer-preserving re-register, got {other:?}"),
+        }
+        assert!(reg.unregister("main", &sid, Some("canvas")));
+        assert_eq!(reg.instance_count(&sid), 1);
+        assert!(reg.is_mounted(&sid));
     }
 }

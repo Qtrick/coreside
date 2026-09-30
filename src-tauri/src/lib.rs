@@ -556,6 +556,14 @@ pub fn run() {
             tauri::RunEvent::Ready => {
                 branding::apply_display_name();
             }
+            tauri::RunEvent::WindowEvent { label, event, .. } => {
+                if let tauri::WindowEvent::Destroyed = event {
+                    if let Some(state) = app.try_state::<AppState>() {
+                        // Drop renderer mounts only. Durable surfaces stay in SQLite.
+                        state.mount_registry.lock().clear_window(&label);
+                    }
+                }
+            }
             tauri::RunEvent::Exit => {
                 if let Some(state) = app.try_state::<AppState>() {
                     state.cancel_all();

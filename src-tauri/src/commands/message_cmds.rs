@@ -11,14 +11,13 @@ use uuid::Uuid;
 use super::CommandError;
 use crate::ai::{
     adopt_stored_structured_input, build_agent_prompt_with_references_and_state, build_user_parts,
-    ApplicationStatePromptSlice,
     chat_with_auto, hash_tool_results, is_allowed_setting_key, parse_agent_response,
     project_context_for_prompt, seal_from_ledger_payload, seal_local_user_submission,
     seal_tool_result_envelope, structured_metadata_value, structured_trust_from_text,
     tool_result_display_summary, AgentCapability, AgentContentPart, AgentMessage, AgentRequest,
-    AgentRole, ParsedAgentResponse, ResponseType, SettingsChangePayload, SourceCitation,
-    StructuredUserInput, StructuredUserInputSubmission, ToolCallRequest, ToolCallResult,
-    ToolChangePayload, ToolLoop, ToolLoopContext, PROMPT_VERSION,
+    AgentRole, ApplicationStatePromptSlice, ParsedAgentResponse, ResponseType,
+    SettingsChangePayload, SourceCitation, StructuredUserInput, StructuredUserInputSubmission,
+    ToolCallRequest, ToolCallResult, ToolChangePayload, ToolLoop, ToolLoopContext, PROMPT_VERSION,
 };
 use crate::db::{self, Message};
 use crate::search::SearchRegistry;
@@ -467,7 +466,9 @@ fn reset_state_keys_from_ops(ops: &[crate::runtime_v2::operations::AppOperation]
             .unwrap_or("");
         let is_reset = matches!(policy, "reset_explicitly" | "replace");
         match op.op_type.as_str() {
-            "state.set" | "state.patch" | "state.clear" if is_reset || op.op_type == "state.clear" => {
+            "state.set" | "state.patch" | "state.clear"
+                if is_reset || op.op_type == "state.clear" =>
+            {
                 if let Some(k) = op
                     .payload
                     .get("key")
@@ -510,10 +511,7 @@ fn sync_application_id_from_surfaces(
     surfaces: &[crate::runtime_v2::surfaces::SurfaceRecord],
 ) -> Option<String> {
     surfaces.iter().find_map(|s| {
-        crate::application_kernel::manifest::authoritative_application_id(
-            db,
-            s.tool_id.as_deref(),
-        )
+        crate::application_kernel::manifest::authoritative_application_id(db, s.tool_id.as_deref())
     })
 }
 
@@ -3520,6 +3518,7 @@ async fn send_message_inner(
                             );
                             Err(crate::db::DbError::NotFound("conversation deleted".into()))
                         } else {
+                            let mounts = state.mount_registry.lock();
                             let mut bus = state.event_bus.lock();
                             let mut bus_opt = Some(&mut *bus);
                             crate::runtime_v2::patch_scheduler::schedule_and_apply(
@@ -3537,6 +3536,7 @@ async fn send_message_inner(
                                     provider: Some(resolved.response.provider_id.clone()),
                                 },
                                 false,
+                                Some(&mounts),
                             )
                         }
                     };
