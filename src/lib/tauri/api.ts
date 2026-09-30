@@ -797,6 +797,39 @@ export const api = {
       sourceType: args?.sourceType ?? "user",
       approvalGranted: args?.approvalGranted ?? true,
     }),
+  registerSurfaceMount: (args: {
+    surfaceId: string;
+    rendererInstanceId: string;
+    applicationId?: string | null;
+    conversationId?: string | null;
+    definitionRevision?: number | null;
+    stateRevision?: number | null;
+  }) =>
+    invoke<{
+      surfaceId: string;
+      windowLabel: string;
+      rendererInstanceId: string;
+      generation: number;
+    }>("register_surface_mount_cmd", {
+      args: {
+        surfaceId: args.surfaceId,
+        rendererInstanceId: args.rendererInstanceId,
+        applicationId: args.applicationId ?? null,
+        conversationId: args.conversationId ?? null,
+        definitionRevision: args.definitionRevision ?? null,
+        stateRevision: args.stateRevision ?? null,
+      },
+    }),
+  unregisterSurfaceMount: (args: {
+    surfaceId: string;
+    rendererInstanceId?: string | null;
+  }) =>
+    invoke<boolean>("unregister_surface_mount_cmd", {
+      args: {
+        surfaceId: args.surfaceId,
+        rendererInstanceId: args.rendererInstanceId ?? null,
+      },
+    }),
   getRouteState: (applicationId: string, windowId?: string | null) =>
     invoke<import("@/types/runtime-v2").RouteState>("get_route_state_cmd", {
       applicationId,

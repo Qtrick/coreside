@@ -185,6 +185,13 @@ pub fn list_permissions(db: &Database, application_id: &str) -> DbResult<Vec<Per
 }
 
 pub fn assert_can_write_data(db: &Database, application_id: &str) -> DbResult<()> {
+    // Choke point: suspended/disabled apps must not mutate generated data via any
+    // alternate kernel path (record CRUD, migrations, model upserts).
+    if !crate::application_kernel::manifest::application_accepts_mutations(db, application_id) {
+        return Err(DbError::Invalid(format!(
+            "application '{application_id}' is disabled or suspended and cannot receive mutations"
+        )));
+    }
     if has_permission(db, application_id, "local_data.write")? {
         Ok(())
     } else {

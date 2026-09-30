@@ -17,6 +17,7 @@ import {
   restoreFocusSnapshot,
   restoreMediaSnapshot,
   restoreScrollSnapshot,
+  startRendererMountLifecycle,
 } from "@/lib/preservation";
 import { mergeStateForDefinitionPatch } from "@/lib/surface-ops";
 import { verifySurfaceElement } from "@/lib/visual-verification";
@@ -163,6 +164,20 @@ export function InlineSurfaceCard({
     });
   }, [hydrated, isInteractive, hydrateInteractive, surface.currentRevision]);
 
+  // Authoritative mount readiness + deferred patch flush (shared with ToolCanvas).
+  useEffect(() => {
+    if (!hydrated) return;
+    return startRendererMountLifecycle({
+      surfaceId: surface.id,
+      conversationId,
+      definitionRevision: surface.currentRevision,
+      stateRevision: stateRevisionRef.current,
+      registerMount: (args) => api.registerSurfaceMount(args),
+      unregisterMount: (args) => api.unregisterSurfaceMount(args),
+      flushPatchScheduler: (args) => api.flushPatchScheduler(args),
+    });
+  }, [hydrated, surface.id, surface.currentRevision, conversationId]);
+
   // When an AI actor must move, ask the agent once per committed sequence.
   // Frontend only identifies the surface — Rust regenerates authoritative public
   // state, legal actions, actor, and revision for the model context.
@@ -176,7 +191,7 @@ export function InlineSurfaceCard({
     void sendMessage(`App interaction (interactive.ai_turn)`, [], [], {
       formId: surface.id,
       eventName: "interactive.ai_turn",
-      applicationId: surface.id,
+      applicationId: kernelApplicationId,
       surfaceId: surface.id,
       surfaceRevision: surface.currentRevision,
       stateRevision: interactiveView.stateRevision,
@@ -189,7 +204,7 @@ export function InlineSurfaceCard({
         actorHint: interactiveView.waitingFor,
       },
     }).catch(() => undefined);
-  }, [interactiveView, sendMessage, surface.currentRevision, surface.id]);
+  }, [interactiveView, sendMessage, surface.currentRevision, surface.id, kernelApplicationId]);
 
   const contentVersion = surface.currentRevision + Object.keys(state).length;
   const { showNewUpdates, jumpToLatest } = useNewUpdatesIndicator(
@@ -696,7 +711,7 @@ export function InlineSurfaceCard({
                       await sendMessage(summary, [], [], {
                         formId: payload.componentId ?? surface.id,
                         eventName: payload.eventName,
-                        applicationId: surface.id,
+                        applicationId: kernelApplicationId,
                         surfaceId: surface.id,
                         surfaceRevision: surface.currentRevision,
                         stateRevision: stateRevisionRef.current,

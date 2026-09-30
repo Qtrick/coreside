@@ -16,7 +16,7 @@ import {
   restoreMediaSnapshot,
   restoreScrollSnapshot,
   resolvePendingInteractionIdempotencyKey,
-  runRendererMountPatchFlush,
+  startRendererMountLifecycle,
 } from "@/lib/preservation";
 import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
 import { classifyToolHeaderDensity } from "@/lib/layout-mode";
@@ -243,17 +243,20 @@ export function ToolCanvas() {
     hydrateInteractive().catch(() => undefined);
   }, [isInteractive, canonicalSurfaceId, canonicalDefinitionRevision, hydrateInteractive]);
 
-  // After the canvas mounts (or remounts after Sync), promote deferred patches
-  // whose durable target now exists. Mount readiness is signaled by this flush —
-  // SQLite alone must not pretend the renderer is live.
+  // After the canvas mounts (or remounts after Sync), register renderer readiness
+  // and promote deferred patches. SQLite existence alone is not mount readiness.
   useEffect(() => {
     if (!canonicalSurfaceId) return;
-    void runRendererMountPatchFlush(
-      canonicalSurfaceId,
-      (args) => api.flushPatchScheduler(args),
-      activeConversationId,
-    ).catch(() => undefined);
-  }, [canonicalSurfaceId, canonicalDefinitionRevision, activeConversationId]);
+    return startRendererMountLifecycle({
+      surfaceId: canonicalSurfaceId,
+      conversationId: activeConversationId,
+      definitionRevision: canonicalDefinitionRevision,
+      stateRevision: stateRevision ?? undefined,
+      registerMount: (args) => api.registerSurfaceMount(args),
+      unregisterMount: (args) => api.unregisterSurfaceMount(args),
+      flushPatchScheduler: (args) => api.flushPatchScheduler(args),
+    });
+  }, [canonicalSurfaceId, canonicalDefinitionRevision, activeConversationId, stateRevision]);
 
   const onStateChange = useCallback(
     (state: Record<string, unknown>) => {
@@ -431,7 +434,7 @@ export function ToolCanvas() {
         // Single authority: send_message seals StructuredUserInput in Rust.
         await sendMessage(summary, [], [], {
           formId: payload.componentId ?? toolId,
-          applicationId: applicationId ?? toolId,
+          applicationId: manifestRecord?.applicationId ?? null,
           surfaceId: sid,
           surfaceRevision:
             canonicalSurface?.currentRevision ?? activeTool.version ?? null,
@@ -452,8 +455,8 @@ export function ToolCanvas() {
     },
     [
       activeTool,
-      applicationId,
       canonicalSurface?.currentRevision,
+      manifestRecord?.applicationId,
       sendMessage,
       surfaceId,
     ],

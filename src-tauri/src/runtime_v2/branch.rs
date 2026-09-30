@@ -97,6 +97,7 @@ pub fn create_turn_checkpoint(
                 "state": state,
                 "stateRevision": state_rev,
                 "projectId": s.project_id,
+                "toolId": s.tool_id,
             }),
         );
     }
@@ -245,6 +246,9 @@ pub fn branch_from_message(
             crate::db::insert_message(db, &new_conv.id, &m.role, &m.content, m.metadata.as_ref())?;
         }
 
+        // Fork manifest-backed applications so branch data mutations stay isolated.
+        let app_id_map = fork_conversation_applications(db, source_conversation_id, &new_conv.id)?;
+
         // Check for an exact turn boundary checkpoint first
         let checkpoint_row: Option<(String, String, String)> = db
             .conn()
@@ -281,6 +285,10 @@ pub fn branch_from_message(
                     .and_then(|v| serde_json::from_value(v.clone()).ok())
                     .unwrap_or_default();
                 let project_id = sval.get("projectId").and_then(|v| v.as_str());
+                let source_tool_id = sval
+                    .get("toolId")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
 
                 let branched_def = def.clone();
 
@@ -297,6 +305,8 @@ pub fn branch_from_message(
                 if let Some(state) = sval.get("state") {
                     super::surfaces::save_surface_state(db, &created.id, state)?;
                 }
+                let created =
+                    bind_forked_surface_tool(db, created, source_tool_id.as_deref(), &app_id_map)?;
                 cloned_surfaces.push(created);
             }
         } else {
@@ -377,6 +387,12 @@ pub fn branch_from_message(
                 }
 
                 super::surfaces::save_surface_state(db, &created.id, &historical_state)?;
+                let created = bind_forked_surface_tool(
+                    db,
+                    created,
+                    surface.tool_id.as_deref(),
+                    &app_id_map,
+                )?;
                 cloned_surfaces.push(created);
             }
         }
@@ -388,6 +404,7 @@ pub fn branch_from_message(
             "sourceMessageId": source_message_id,
             "checkpointId": chk_id_opt,
             "exact": chk_id_opt.is_some(),
+            "applicationIdMap": app_id_map,
         })
         .to_string();
 
@@ -434,6 +451,71 @@ pub fn branch_from_message(
             Err(e)
         }
     }
+}
+
+/// Fork every manifest-backed application reachable from the source conversation.
+fn fork_conversation_applications(
+    db: &mut Database,
+    source_conversation_id: &str,
+    new_conversation_id: &str,
+) -> DbResult<std::collections::HashMap<String, String>> {
+    use crate::application_kernel::manifest::authoritative_application_id;
+    use std::collections::{HashMap, HashSet};
+
+    let mut source_apps: HashSet<String> = HashSet::new();
+    for surface in list_inline_surfaces(db, source_conversation_id)? {
+        if let Some(app) = authoritative_application_id(db, surface.tool_id.as_deref()) {
+            source_apps.insert(app);
+        }
+    }
+    // Manifests explicitly bound to this conversation.
+    {
+        let mut stmt = db.conn().prepare(
+            "SELECT application_id FROM application_manifests WHERE conversation_id = ?1",
+        )?;
+        let rows = stmt.query_map([source_conversation_id], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            source_apps.insert(row?);
+        }
+    }
+
+    let mut map = HashMap::new();
+    for app_id in source_apps {
+        let forked = crate::application_kernel::data::fork_application_for_branch(
+            db,
+            &app_id,
+            new_conversation_id,
+        )?;
+        map.insert(app_id, forked);
+    }
+    Ok(map)
+}
+
+fn bind_forked_surface_tool(
+    db: &mut Database,
+    surface: SurfaceRecord,
+    source_tool_id: Option<&str>,
+    app_id_map: &std::collections::HashMap<String, String>,
+) -> DbResult<SurfaceRecord> {
+    use crate::application_kernel::manifest::authoritative_application_id;
+
+    let Some(src_tool) = source_tool_id.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(surface);
+    };
+    let bind_to = match app_id_map.get(src_tool) {
+        Some(forked) => forked.as_str(),
+        None => {
+            // Manifest-backed apps must be remapped; plain tool ids stay shared.
+            if authoritative_application_id(db, Some(src_tool)).is_some() {
+                return Err(DbError::Invalid(format!(
+                    "branch fork missing application remapping for '{src_tool}'"
+                )));
+            }
+            src_tool
+        }
+    };
+    super::surfaces::bind_surface_tool_id(db, &surface.id, bind_to)?;
+    super::surfaces::get_surface(db, &surface.id)
 }
 
 pub fn create_snapshot(
@@ -1143,5 +1225,157 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(corrupt_err, DbError::Invalid(_)));
+    }
+
+    #[test]
+    fn branch_forks_generated_data_records() {
+        use crate::application_kernel::data::{
+            create_record, query_records, upsert_model, DataField, DataModelDefinition,
+        };
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use crate::db::create_conversation;
+        use std::collections::HashMap;
+
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("branch_data.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Tasks", None).unwrap();
+
+        upsert_manifest(
+            &mut db,
+            ApplicationManifest {
+                schema_version: "1".into(),
+                application_id: "app-tasks".into(),
+                instance_id: "inst-tasks".into(),
+                name: "Task Tracker".into(),
+                description: String::new(),
+                version: 1,
+                surfaces: vec![],
+                routes: vec![],
+                data_models: vec![],
+                settings: vec![],
+                capabilities: vec!["coreside.core".into()],
+                permissions: vec!["local_data.write".into(), "local_data.read".into()],
+                events: vec![],
+                tests: vec![],
+                search_keywords: vec![],
+                tags: vec![],
+                agent_description: String::new(),
+                project_id: None,
+                conversation_id: Some(conv.id.clone()),
+                organization_id: None,
+                ownership: None,
+                application_action_access: vec!["local_data.write".into()],
+                surface_action_access: HashMap::new(),
+                component_action_access: HashMap::new(),
+                action_descriptor_hashes: HashMap::new(),
+            },
+        )
+        .unwrap();
+        // surfaces.tool_id FK → tools(id)
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES ('app-tasks', ?1, 'Task Tracker', '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                [DEFAULT_WORKSPACE_ID],
+            )
+            .unwrap();
+        crate::application_kernel::permissions::grant_permission(
+            &mut db,
+            "app-tasks",
+            "local_data.write",
+            json!({}),
+            "test",
+        )
+        .unwrap();
+        upsert_model(
+            &mut db,
+            "app-tasks",
+            DataModelDefinition {
+                model_id: "Task".into(),
+                display_name: "Task".into(),
+                schema_version: 1,
+                fields: vec![
+                    DataField {
+                        field_id: "title".into(),
+                        field_type: "text".into(),
+                        required: true,
+                        default: None,
+                        enum_values: None,
+                    },
+                    DataField {
+                        field_id: "status".into(),
+                        field_type: "enum".into(),
+                        required: true,
+                        default: Some(json!("pending")),
+                        enum_values: Some(vec!["pending".into(), "done".into()]),
+                    },
+                ],
+            },
+        )
+        .unwrap();
+        create_record(
+            &mut db,
+            "app-tasks",
+            "Task",
+            json!({"title": "Task 1", "status": "pending"}),
+        )
+        .unwrap();
+        create_record(
+            &mut db,
+            "app-tasks",
+            "Task",
+            json!({"title": "Task 2", "status": "pending"}),
+        )
+        .unwrap();
+
+        let m1 = crate::db::insert_message(&mut db, &conv.id, "user", "build tracker", None)
+            .unwrap();
+        let surf = super::super::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            Some(&m1.id),
+            None,
+            "Task Tracker",
+            &json!({
+                "id": "tt",
+                "name": "Task Tracker",
+                "layout": "stack",
+                "components": [{"id": "h", "type": "heading", "props": {"text": "Tasks"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        super::super::surfaces::bind_surface_tool_id(&mut db, &surf.id, "app-tasks").unwrap();
+
+        let (branch, branch_surfs) = branch_from_message(
+            &mut db,
+            &conv.id,
+            &m1.id,
+            "Experiment",
+            DEFAULT_WORKSPACE_ID,
+        )
+        .unwrap();
+
+        let forked_app = branch_surfs[0]
+            .tool_id
+            .as_deref()
+            .expect("branched surface must bind forked application");
+        assert_ne!(forked_app, "app-tasks");
+
+        create_record(
+            &mut db,
+            forked_app,
+            "Task",
+            json!({"title": "Task 3 experimental", "status": "pending"}),
+        )
+        .unwrap();
+
+        let src = query_records(&db, "app-tasks", "Task", 20).unwrap();
+        let br = query_records(&db, forked_app, "Task", 20).unwrap();
+        assert_eq!(src.len(), 2, "source branch must stay at Task 1/2");
+        assert_eq!(br.len(), 3, "forked branch gets copy + experimental task");
+        assert!(!src.iter().any(|r| r["title"] == "Task 3 experimental"));
+        assert!(br.iter().any(|r| r["title"] == "Task 3 experimental"));
+        assert_eq!(branch.source_conversation_id, conv.id);
     }
 }

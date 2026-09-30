@@ -438,7 +438,7 @@ export function resolvePendingInteractionIdempotencyKey(
   };
 }
 
-/** Promote deferred patches when the Tool Canvas renderer is mounted. */
+/** Promote deferred patches when a surface renderer is mounted. */
 export async function runRendererMountPatchFlush(
   canonicalSurfaceId: string | null | undefined,
   flushPatchScheduler: (args: {
@@ -447,11 +447,115 @@ export async function runRendererMountPatchFlush(
     approvalGranted: true;
   }) => Promise<unknown>,
   activeConversationId: string | null,
-): Promise<void> {
-  if (!canonicalSurfaceId) return;
+  registerMount?: (args: {
+    surfaceId: string;
+    rendererInstanceId: string;
+    conversationId: string | null;
+    definitionRevision?: number;
+    stateRevision?: number;
+  }) => Promise<unknown>,
+  mountMeta?: {
+    definitionRevision?: number;
+    stateRevision?: number;
+    rendererInstanceId?: string;
+  },
+): Promise<string | null> {
+  if (!canonicalSurfaceId) return null;
+  const rendererInstanceId =
+    mountMeta?.rendererInstanceId ??
+    `rend-${canonicalSurfaceId}-${Date.now().toString(36)}`;
+  if (registerMount) {
+    await registerMount({
+      surfaceId: canonicalSurfaceId,
+      rendererInstanceId,
+      conversationId: activeConversationId,
+      definitionRevision: mountMeta?.definitionRevision,
+      stateRevision: mountMeta?.stateRevision,
+    });
+    // Mount is authoritative even if deferred flush fails (retry on next mount).
+    try {
+      await flushPatchScheduler({
+        conversationId: activeConversationId,
+        sourceType: "renderer_mount",
+        approvalGranted: true,
+      });
+    } catch {
+      // keep registered instance id for cleanup
+    }
+    return rendererInstanceId;
+  }
   await flushPatchScheduler({
     conversationId: activeConversationId,
     sourceType: "renderer_mount",
     approvalGranted: true,
   });
+  return rendererInstanceId;
+}
+
+/**
+ * Register + flush with cancel-safe unregister (shared by InlineSurface / ToolCanvas).
+ * Returns an effect cleanup that unregisters even when the async register is still in-flight.
+ */
+export function startRendererMountLifecycle(args: {
+  surfaceId: string;
+  conversationId: string | null;
+  definitionRevision?: number;
+  stateRevision?: number;
+  registerMount: (args: {
+    surfaceId: string;
+    rendererInstanceId: string;
+    conversationId: string | null;
+    definitionRevision?: number;
+    stateRevision?: number;
+  }) => Promise<unknown>;
+  unregisterMount: (args: {
+    surfaceId: string;
+    rendererInstanceId?: string | null;
+  }) => Promise<unknown>;
+  flushPatchScheduler: (args: {
+    conversationId: string | null;
+    sourceType: "renderer_mount";
+    approvalGranted: true;
+  }) => Promise<unknown>;
+}): () => void {
+  let cancelled = false;
+  let instanceId: string | null = null;
+  void runRendererMountPatchFlush(
+    args.surfaceId,
+    args.flushPatchScheduler,
+    args.conversationId,
+    args.registerMount,
+    {
+      definitionRevision: args.definitionRevision,
+      stateRevision: args.stateRevision,
+    },
+  )
+    .then((id) => {
+      if (cancelled) {
+        if (id) {
+          void args
+            .unregisterMount({
+              surfaceId: args.surfaceId,
+              rendererInstanceId: id,
+            })
+            .catch(() => undefined);
+        }
+        return;
+      }
+      instanceId = id;
+    })
+    .catch(() => undefined);
+  return () => {
+    cancelled = true;
+    const id = instanceId;
+    instanceId = null;
+    if (id) {
+      void args
+        .unregisterMount({
+          surfaceId: args.surfaceId,
+          rendererInstanceId: id,
+        })
+        .catch(() => undefined);
+    }
+  };
 }

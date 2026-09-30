@@ -11,6 +11,7 @@ pub mod interactive;
 #[cfg(test)]
 mod interactive_tests;
 pub mod limits;
+pub mod mount_registry;
 pub mod operations;
 pub mod outbox;
 pub mod packs;
@@ -91,6 +92,10 @@ pub use patch_scheduler::{
     preview_rate_limit_hz, promote_deferred_patches, record_manual_edit_provenance,
     schedule_and_apply, schedule_patches, topological_order, validate_agent_priority,
     PatchPriority, ScheduleAndApplyResult, ScheduleRequest, ScheduledPatch, TargetReadiness,
+};
+#[allow(unused_imports)]
+pub use mount_registry::{
+    classify_operation_readiness, MountRegistry, RendererReadiness, SurfaceMountRegistration,
 };
 #[allow(unused_imports)]
 pub use preservation::{

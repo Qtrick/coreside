@@ -465,6 +465,32 @@ fn apply_one(
         }
     }
 
+    // Choke point: suspended/disabled manifest-backed apps cannot mutate via any arm.
+    if let Some(sid) = effective_surface_id.as_deref() {
+        if let Ok(target_surface) = get_surface(db, sid) {
+            crate::application_kernel::manifest::check_tool_application_accepts_mutations(
+                db,
+                target_surface.tool_id.as_deref(),
+            )?;
+        }
+    }
+    if let Some(app) = op
+        .target
+        .application_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if crate::application_kernel::manifest::authoritative_application_id(db, Some(app))
+            .is_some()
+            && !crate::application_kernel::manifest::application_accepts_mutations(db, app)
+        {
+            return Err(format!(
+                "application '{app}' is disabled or suspended and cannot receive mutations"
+            ));
+        }
+    }
+
     match op.op_type.as_str() {
         "chat.inline_surface_create" => {
             let conversation_id = op
@@ -520,10 +546,6 @@ fn apply_one(
                 .ok_or_else(|| "surfaceId or toolId required".to_string())?;
             let sid = &effective_sid;
             let surface = get_surface(db, sid).map_err(|e| e.to_string())?;
-            crate::application_kernel::manifest::check_tool_application_accepts_mutations(
-                db,
-                surface.tool_id.as_deref(),
-            )?;
             let effective_base =
                 effective_base_revision(op, surface.current_revision, initial_revisions, sid);
 
@@ -3618,6 +3640,103 @@ mod tests {
             Some(&json!("Buy milk")),
             "definition props.value must overlay live state, got {:?}",
             comp.props
+        );
+    }
+
+    #[test]
+    fn apply_one_rejects_state_patch_when_application_suspended() {
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use std::collections::HashMap;
+
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "SuspState", None).unwrap();
+        upsert_manifest(
+            &mut db,
+            ApplicationManifest {
+                schema_version: "1".into(),
+                application_id: "app-susp".into(),
+                instance_id: "inst-susp".into(),
+                name: "Susp".into(),
+                description: String::new(),
+                version: 1,
+                surfaces: vec![],
+                routes: vec![],
+                data_models: vec![],
+                settings: vec![],
+                capabilities: vec!["coreside.core".into()],
+                permissions: vec![],
+                events: vec![],
+                tests: vec![],
+                search_keywords: vec![],
+                tags: vec![],
+                agent_description: String::new(),
+                project_id: None,
+                conversation_id: Some(conv.id.clone()),
+                organization_id: None,
+                ownership: None,
+                application_action_access: vec![],
+                surface_action_access: HashMap::new(),
+                component_action_access: HashMap::new(),
+                action_descriptor_hashes: HashMap::new(),
+            },
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT OR IGNORE INTO tools (
+                    id, workspace_id, name, description, layout, definition_json,
+                    current_version, created_at, updated_at
+                 ) VALUES ('app-susp', ?1, 'Susp', '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                [DEFAULT_WORKSPACE_ID],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE application_manifests SET lifecycle_state = 'suspended', disabled = 1
+                 WHERE application_id = 'app-susp'",
+                [],
+            )
+            .unwrap();
+
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Susp Surface",
+            &json!({
+                "id": "doc-susp",
+                "name": "Susp",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "x"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        crate::runtime_v2::surfaces::bind_surface_tool_id(&mut db, &surface.id, "app-susp")
+            .unwrap();
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "patch-while-suspended",
+            &[op(
+                "state.patch",
+                Some(&surface.id),
+                json!({ "patch": { "n": 1 } }),
+            )],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_ne!(res.transaction.status, "applied");
+        assert!(
+            res.conflicts.iter().any(|c| c.contains("suspended") || c.contains("disabled")),
+            "expected suspended/disabled conflict, got {:?}",
+            res.conflicts
         );
     }
 }

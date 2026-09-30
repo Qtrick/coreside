@@ -176,18 +176,93 @@ describe("resolvePendingInteractionIdempotencyKey", () => {
 describe("runRendererMountPatchFlush", () => {
   it("skips flush when no canonical surface id", async () => {
     const flush = vi.fn(async () => undefined);
-    await runRendererMountPatchFlush(null, flush, "conv-1");
+    const id = await runRendererMountPatchFlush(null, flush, "conv-1");
     expect(flush).not.toHaveBeenCalled();
+    expect(id).toBeNull();
   });
 
   it("flushes deferred patches with renderer_mount args", async () => {
     const flush = vi.fn(async () => undefined);
-    await runRendererMountPatchFlush("surf-1", flush, "conv-9");
+    const id = await runRendererMountPatchFlush("surf-1", flush, "conv-9");
     expect(flush).toHaveBeenCalledWith({
       conversationId: "conv-9",
       sourceType: "renderer_mount",
       approvalGranted: true,
     });
+    expect(id).toMatch(/^rend-surf-1-/);
+  });
+
+  it("registers mount before flushing when registerMount is provided", async () => {
+    const flush = vi.fn(async () => undefined);
+    const register = vi.fn(async () => undefined);
+    const id = await runRendererMountPatchFlush(
+      "surf-2",
+      flush,
+      "conv-2",
+      register,
+      { definitionRevision: 3, stateRevision: 4, rendererInstanceId: "rend-fixed" },
+    );
+    expect(register).toHaveBeenCalledWith({
+      surfaceId: "surf-2",
+      rendererInstanceId: "rend-fixed",
+      conversationId: "conv-2",
+      definitionRevision: 3,
+      stateRevision: 4,
+    });
+    expect(flush).toHaveBeenCalled();
+    expect(id).toBe("rend-fixed");
+  });
+
+  it("skips flush when mount registration rejects", async () => {
+    const flush = vi.fn(async () => undefined);
+    const register = vi.fn(async () => {
+      throw new Error("application identity mismatch");
+    });
+    await expect(
+      runRendererMountPatchFlush("surf-3", flush, "conv-3", register, {
+        rendererInstanceId: "rend-fail",
+      }),
+    ).rejects.toThrow(/application identity mismatch/);
+    expect(register).toHaveBeenCalled();
+    expect(flush).not.toHaveBeenCalled();
+  });
+
+  it("returns instance id when flush fails after successful register", async () => {
+    const flush = vi.fn(async () => {
+      throw new Error("flush boom");
+    });
+    const register = vi.fn(async () => undefined);
+    const id = await runRendererMountPatchFlush(
+      "surf-4",
+      flush,
+      "conv-4",
+      register,
+      { rendererInstanceId: "rend-keep" },
+    );
+    expect(id).toBe("rend-keep");
+    expect(register).toHaveBeenCalled();
+    expect(flush).toHaveBeenCalled();
+  });
+});
+
+describe("dirty state vs agent replace", () => {
+  it("keeps unrelated dirty when agent replaces a previously persisted field", () => {
+    const lastPersisted: Record<string, unknown> = {
+      title: "hel",
+      notes: "draft",
+    };
+    const canonical: Record<string, unknown> = {
+      title: "Agent Title",
+      notes: "draft",
+      filter: "all",
+    };
+    const dirty = { title: "hello", notes: "user-notes" };
+    expect(shouldPreserveComponent("replace", "text", "text")).toBe(false);
+    const resetKeys = mergeDirtyReconcileResetKeys(lastPersisted, canonical, []);
+    const next = reconcileDirtyOverCanonical(canonical, dirty, resetKeys);
+    expect(next.title).toBe("Agent Title");
+    expect(next.notes).toBe("user-notes");
+    expect(next.filter).toBe("all");
   });
 });
 

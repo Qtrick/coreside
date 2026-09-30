@@ -303,6 +303,27 @@ pub fn create_inline_surface(
     get_surface(db, &id)
 }
 
+/// Bind a surface to a tool/application lineage id (used when forking applications on branch).
+pub fn bind_surface_tool_id(
+    db: &mut Database,
+    surface_id: &str,
+    tool_id: &str,
+) -> DbResult<()> {
+    let trimmed = tool_id.trim();
+    if trimmed.is_empty() {
+        return Err(DbError::Invalid("tool_id must be non-empty".into()));
+    }
+    crate::security::assert_not_protected(trimmed).map_err(DbError::Invalid)?;
+    let updated = db.conn().execute(
+        "UPDATE surfaces SET tool_id = ?1, updated_at = ?2 WHERE id = ?3",
+        params![trimmed, now_rfc3339(), surface_id],
+    )?;
+    if updated == 0 {
+        return Err(DbError::NotFound(format!("surface {surface_id}")));
+    }
+    Ok(())
+}
+
 pub fn get_surface(db: &Database, id: &str) -> DbResult<SurfaceRecord> {
     db.conn()
         .query_row(

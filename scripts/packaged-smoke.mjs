@@ -63,6 +63,64 @@ function findMacApp(absoluteArtifacts) {
   return absoluteArtifacts.find((p) => p.endsWith(".app") && fs.existsSync(p)) ?? null;
 }
 
+/** Require Contents/MacOS/<name> executable before attempting open. */
+function macAppExecutablePreflight(appPath) {
+  const macosDir = path.join(appPath, "Contents", "MacOS");
+  if (!fs.existsSync(macosDir)) {
+    return {
+      ok: false,
+      detail: { step: "preflight", reason: "missing_Contents_MacOS", macosDir },
+    };
+  }
+  const entries = fs.readdirSync(macosDir);
+  const execName = entries.find((n) => {
+    try {
+      const st = fs.statSync(path.join(macosDir, n));
+      return st.isFile() && (st.mode & 0o111) !== 0;
+    } catch {
+      return false;
+    }
+  });
+  if (!execName) {
+    return {
+      ok: false,
+      detail: {
+        step: "preflight",
+        reason: "missing_or_nonexecutable_binary",
+        macosEntries: entries,
+      },
+    };
+  }
+  return { ok: true, execPath: path.join(macosDir, execName) };
+}
+
+/**
+ * Debug/local Tauri .app bundles are often unsigned. On newer macOS, `open`
+ * then fails with RBSRequestErrorDomain Code=5 / POSIX 163. Ad-hoc sign for
+ * smoke only — never claims notarization or Packaged Verified.
+ */
+function ensureAdHocSignedForSmoke(appPath) {
+  const probe = spawnSync("codesign", ["-dv", appPath], { encoding: "utf8" });
+  const stderr = `${probe.stderr || ""}${probe.stdout || ""}`;
+  if (probe.status === 0 && !/code object is not signed/i.test(stderr)) {
+    return { signed: true, action: "already_signed" };
+  }
+  const sign = spawnSync(
+    "codesign",
+    ["--force", "--deep", "--sign", "-", appPath],
+    { encoding: "utf8" },
+  );
+  if (sign.status !== 0) {
+    return {
+      signed: false,
+      action: "adhoc_sign_failed",
+      status: sign.status,
+      stderr: (sign.stderr || "").slice(0, 500),
+    };
+  }
+  return { signed: true, action: "adhoc_signed" };
+}
+
 /** PIDs whose command line includes this .app bundle path (not any Coreside). */
 function pidsForBundledApp(appPath) {
   const pgrep = spawnSync("pgrep", ["-lf", "Coreside"], { encoding: "utf8" });
@@ -98,6 +156,24 @@ function quitBundledApp(pids) {
 function launchMacApp(appPath) {
   const settleMs = Number(process.env.CORESIDE_PACKAGED_SMOKE_SETTLE_MS || 4000);
   return new Promise((resolve) => {
+    const preflight = macAppExecutablePreflight(appPath);
+    if (!preflight.ok) {
+      resolve({ ok: false, detail: preflight.detail });
+      return;
+    }
+    const signing = ensureAdHocSignedForSmoke(appPath);
+    if (!signing.signed) {
+      resolve({
+        ok: false,
+        detail: {
+          step: "codesign",
+          ...signing,
+          note: "Unsigned debug .app could not be ad-hoc signed for local smoke.",
+        },
+      });
+      return;
+    }
+
     const open = spawnSync("open", ["-n", appPath], { encoding: "utf8" });
     if (open.status !== 0) {
       resolve({
@@ -106,6 +182,8 @@ function launchMacApp(appPath) {
           step: "open",
           status: open.status,
           stderr: (open.stderr || "").slice(0, 500),
+          signing,
+          execPath: preflight.execPath,
         },
       });
       return;
@@ -123,6 +201,7 @@ function launchMacApp(appPath) {
             pgrepStatus: alive.pgrepStatus,
             pgrepStdout: alive.pgrepStdout,
             settleMs,
+            signing,
             note: "No process command line contained the launched .app path (other Coreside instances do not count).",
           },
         });
@@ -139,6 +218,7 @@ function launchMacApp(appPath) {
             settleMs,
             quitStatus,
             matchedPids: alive.pids,
+            signing,
             appPath: path.relative(root, appPath).replace(/\\/g, "/"),
           },
         });

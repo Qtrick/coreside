@@ -278,6 +278,8 @@ pub fn run() {
             commands::delete_draft_cmd,
             commands::schedule_patches_cmd,
             commands::flush_patch_scheduler_cmd,
+            commands::register_surface_mount_cmd,
+            commands::unregister_surface_mount_cmd,
             commands::get_route_state_cmd,
             commands::set_route_state_cmd,
             commands::navigate_route_cmd,

@@ -1,6 +1,6 @@
 //! Tauri commands for Generative Interface Runtime V2.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{ipc::Channel, State, WebviewWindow};
 
@@ -449,6 +449,96 @@ pub fn flush_patch_scheduler_cmd(
         "user",
         true,
     )?)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterSurfaceMountArgs {
+    pub surface_id: String,
+    pub renderer_instance_id: String,
+    pub application_id: Option<String>,
+    pub conversation_id: Option<String>,
+    pub definition_revision: Option<i64>,
+    pub state_revision: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SurfaceMountDto {
+    pub surface_id: String,
+    pub conversation_id: Option<String>,
+    pub application_id: Option<String>,
+    pub window_label: String,
+    pub renderer_instance_id: String,
+    pub definition_revision: i64,
+    pub state_revision: i64,
+    pub generation: u64,
+}
+
+/// Register that a renderer has mounted a surface.
+/// Window identity is taken from the Tauri window — never from the payload.
+#[tauri::command]
+pub fn register_surface_mount_cmd(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    args: RegisterSurfaceMountArgs,
+) -> Result<SurfaceMountDto, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    let surface = get_surface(&db, &args.surface_id)?;
+    windows::enforce_caller_surface_scope(&window, surface.tool_id.as_deref(), &surface.id)?;
+    if let Some(conv) = surface.conversation_id.as_deref() {
+        windows::enforce_caller_conversation_scope(&window, &db, conv)?;
+    }
+    let mut registry = state.mount_registry.lock();
+    let reg = registry.register(
+        &db,
+        window.label(),
+        &args.surface_id,
+        &args.renderer_instance_id,
+        args.application_id.as_deref(),
+        args.conversation_id.as_deref(),
+        args.definition_revision.unwrap_or(0),
+        args.state_revision.unwrap_or(0),
+    )?;
+    Ok(SurfaceMountDto {
+        surface_id: reg.surface_id,
+        conversation_id: reg.conversation_id,
+        application_id: reg.application_id,
+        window_label: reg.window_label,
+        renderer_instance_id: reg.renderer_instance_id,
+        definition_revision: reg.definition_revision,
+        state_revision: reg.state_revision,
+        generation: reg.generation,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnregisterSurfaceMountArgs {
+    pub surface_id: String,
+    pub renderer_instance_id: Option<String>,
+}
+
+#[tauri::command]
+pub fn unregister_surface_mount_cmd(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    args: UnregisterSurfaceMountArgs,
+) -> Result<bool, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    let surface = get_surface(&db, &args.surface_id)?;
+    windows::enforce_caller_surface_scope(&window, surface.tool_id.as_deref(), &surface.id)?;
+    if let Some(conv) = surface.conversation_id.as_deref() {
+        windows::enforce_caller_conversation_scope(&window, &db, conv)?;
+    }
+    let mut registry = state.mount_registry.lock();
+    Ok(registry.unregister(
+        window.label(),
+        &args.surface_id,
+        args.renderer_instance_id.as_deref(),
+    ))
 }
 
 #[tauri::command]

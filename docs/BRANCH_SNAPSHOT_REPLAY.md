@@ -2,8 +2,14 @@
 
 **Product:** Coreside  
 **Phase:** RC3.3 Phase 9 + RC3.4 immutable timeline vertical slice  
-**Last updated:** 2026-08-04  
+**Last updated:** 2026-09-29  
 **Status:** Read-only paced player **Unit Verified** — prefers redacted timeline when present; otherwise transaction stepper. **Not** re-execution.
+
+> **2026-09-29 note:** Conversation branch creation now forks manifest-backed
+> `generated_data_records` into a new `application_id` (`fork_application_for_branch`)
+> so Branch B mutations do not mutate Branch A data. Replay remains read-only
+> inspection (not re-execution). See `runtime_v2::branch` tests
+> `branch_forks_generated_data_records`.
 
 ## What landed
 

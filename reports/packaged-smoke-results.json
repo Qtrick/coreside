@@ -1,18 +1,26 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-29T19:08:16.536Z",
-  "commit": "1d87ef99d4d8101b110522dfcc42500932f45fa1",
+  "generatedAt": "2026-09-30T03:39:52.435Z",
+  "commit": "44e1bb256caeed86bc62ffbc045edcaeef6744a9",
   "dirty": true,
   "command": "test:packaged-smoke",
-  "launchedApp": false,
-  "status": "launch_failed",
-  "reason": "launch_failed",
-  "evidenceLevel": "Scaffolded",
+  "launchedApp": true,
+  "status": "launch_passed",
+  "reason": "artifact_scanned_and_launched",
+  "evidenceLevel": "Integrated – Not Verified",
   "launch": {
-    "step": "open",
-    "status": 1,
-    "stderr": "The application cannot be opened for an unexpected reason, error=Error Domain=NSOSStatusErrorDomain Code=-10827 \"kLSNoExecutableErr: The executable is missing\" UserInfo={_LSLine=4288, _LSFunction=_LSOpenStuffCallLocal, _LSFile=LSOpenCore.mm, _LSErrorMessage=kLSNoExecutableErr}\n"
+    "step": "launched_and_quit",
+    "settleMs": 4000,
+    "quitStatus": 0,
+    "matchedPids": [
+      "79257"
+    ],
+    "signing": {
+      "signed": true,
+      "action": "already_signed"
+    },
+    "appPath": "src-tauri/target/debug/bundle/macos/Coreside.app"
   },
   "rootsPresent": [
     "src-tauri/target/debug/bundle"
@@ -31,10 +39,10 @@
   "packagingResults": {
     "status": "passed",
     "rootsFound": 1,
-    "filesScanned": 7,
+    "filesScanned": 8,
     "findingsCount": 0
   },
   "sourceIndependence": null,
-  "note": "Bundle present but smoke launch failed.",
+  "note": "Bundle scanned and macOS .app launched briefly then quit. Launch-only smoke — not Packaged Verified (BYOK/chat/persistence packaged proof still open).",
   "publicBeta": "Not ready"
 }

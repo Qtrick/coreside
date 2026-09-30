@@ -13,7 +13,7 @@ use crate::crawler::CrawlerSupervisor;
 use crate::db::{BootstrapStatus, Database};
 use crate::maintenance::{MaintenanceMode, MaintenanceStage, MaintenanceStatus};
 use crate::quiescence::{PauseToken, QuiescedSubsystem, QuiescenceCoordinator};
-use crate::runtime_v2::EventBus;
+use crate::runtime_v2::{EventBus, MountRegistry};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -84,6 +84,8 @@ pub struct AppState {
     pub sync_subscribers: Mutex<HashMap<String, HashMap<String, Channel<SyncScopedEvent>>>>,
     pub crawler: Arc<CrawlerSupervisor>,
     pub event_bus: Mutex<EventBus>,
+    /// Ephemeral renderer mount registry (window-authoritative; not durable).
+    pub mount_registry: Mutex<MountRegistry>,
     pub maintenance: Mutex<MaintenanceMode>,
     /// Pause/stop gate for profile-dependent subsystems during maintenance/restore.
     pub quiescence: QuiescenceCoordinator,
@@ -113,6 +115,7 @@ impl AppState {
             sync_subscribers: Mutex::new(HashMap::new()),
             crawler: Arc::new(CrawlerSupervisor::new()),
             event_bus: Mutex::new(event_bus),
+            mount_registry: Mutex::new(MountRegistry::new()),
             maintenance: Mutex::new(MaintenanceMode::default()),
             quiescence: QuiescenceCoordinator::default(),
         }
@@ -303,6 +306,7 @@ impl AppState {
         let mut event_bus = EventBus::load_from_db(&db);
         let _ = crate::runtime_v2::outbox::flush_pending_outbox(&mut db, Some(&mut event_bus));
         *self.event_bus.lock() = event_bus;
+        *self.mount_registry.lock() = MountRegistry::new();
         *self.db.lock() = db;
         *self.bootstrap.lock() = BootstrapStatus::Ready;
         // Invalidate pause tokens issued against the previous profile generation.

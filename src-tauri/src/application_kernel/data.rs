@@ -8,9 +8,25 @@ use uuid::Uuid;
 use crate::db::{now_rfc3339, Database, DbError, DbResult};
 use crate::runtime_v2::limits::MAX_GENERATED_RECORDS_PER_QUERY;
 use crate::runtime_v2::operations::AppOperation;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
+use std::collections::HashSet;
 
 use super::permissions::assert_can_write_data;
+
+/// Drop query meta keys and undeclared fields before validate_record / persist.
+fn sanitize_record_payload(data: &mut Value, known: &HashSet<&str>) {
+    if let Some(obj) = data.as_object_mut() {
+        obj.remove("_id");
+        obj.remove("_version");
+        obj.remove("_createdAt");
+        obj.remove("_updatedAt");
+        obj.retain(|k, _| known.contains(k.as_str()));
+    }
+}
+
+fn known_field_ids(def: &DataModelDefinition) -> HashSet<&str> {
+    def.fields.iter().map(|f| f.field_id.as_str()).collect()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -83,6 +99,15 @@ pub fn validate_record(def: &DataModelDefinition, data: &Value) -> Result<(), St
     let obj = data
         .as_object()
         .ok_or_else(|| "record must be an object".to_string())?;
+    // Strict schema: reject undeclared fields. Extension data requires an explicit
+    // schema field (e.g. type "json") rather than silent open-object storage.
+    // Migrations must sanitize payloads (see sanitize_record_payload) before update.
+    let known = known_field_ids(def);
+    for key in obj.keys() {
+        if !known.contains(key.as_str()) {
+            return Err(format!("unknown field: {key}"));
+        }
+    }
     for f in &def.fields {
         let val = obj.get(&f.field_id);
         if f.required && (val.is_none() || val == Some(&Value::Null)) && f.default.is_none() {
@@ -126,6 +151,7 @@ pub fn upsert_model(
     application_id: &str,
     mut def: DataModelDefinition,
 ) -> DbResult<()> {
+    assert_can_write_data(db, application_id)?;
     validate_model(&def).map_err(DbError::Invalid)?;
     if def.schema_version <= 0 {
         def.schema_version = 1;
@@ -313,6 +339,154 @@ pub fn query_records(
     Ok(out)
 }
 
+/// Fork a manifest-backed application for a conversation branch.
+///
+/// Copies models, records (new IDs), granted permissions, and a `tools` row
+/// (surfaces.tool_id FK) into a new `application_id` bound to `new_conversation_id`.
+/// Branch mutations must not mutate the source application's generated data.
+pub fn fork_application_for_branch(
+    db: &mut Database,
+    source_application_id: &str,
+    new_conversation_id: &str,
+) -> DbResult<String> {
+    use super::manifest::{get_manifest, upsert_manifest};
+
+    let sp_name = format!("sp_fork_{}", Uuid::new_v4().simple());
+    db.conn()
+        .execute_batch(&format!("SAVEPOINT {sp_name};"))?;
+
+    let res = (|| -> DbResult<String> {
+        let source = get_manifest(db, source_application_id)?;
+        let new_app_id = format!("app-branch-{}", Uuid::new_v4());
+        let app_name = source.manifest.name.clone();
+        let mut manifest = source.manifest;
+        manifest.application_id = new_app_id.clone();
+        manifest.instance_id = format!("inst-{}", Uuid::new_v4());
+        manifest.conversation_id = Some(new_conversation_id.to_string());
+        // Fresh INSERT gets lifecycle active / health testing (not source crash state).
+        upsert_manifest(db, manifest)?;
+        ensure_tools_row_for_forked_app(db, source_application_id, &new_app_id, &app_name)?;
+
+        for grant in super::permissions::list_permissions(db, source_application_id)? {
+            if grant.status == "granted" {
+                super::permissions::grant_permission(
+                    db,
+                    &new_app_id,
+                    &grant.permission,
+                    grant.scope,
+                    "branch_fork",
+                )?;
+            }
+        }
+
+        for model in list_models(db, source_application_id)? {
+            let record_count: i64 = db.conn().query_row(
+                "SELECT COUNT(*) FROM generated_data_records
+                 WHERE application_id = ?1 AND model_id = ?2",
+                params![source_application_id, model.model_id],
+                |row| row.get(0),
+            )?;
+            if record_count as usize > MAX_GENERATED_RECORDS_PER_QUERY {
+                return Err(DbError::Invalid(format!(
+                    "cannot fork application '{source_application_id}': model '{}' has {record_count} records (max {MAX_GENERATED_RECORDS_PER_QUERY})",
+                    model.model_id
+                )));
+            }
+            upsert_model(db, &new_app_id, model.clone())?;
+            let known = known_field_ids(&model);
+            let records = query_records(
+                db,
+                source_application_id,
+                &model.model_id,
+                MAX_GENERATED_RECORDS_PER_QUERY,
+            )?;
+            for mut rec in records {
+                sanitize_record_payload(&mut rec, &known);
+                create_record(db, &new_app_id, &model.model_id, rec)?;
+            }
+        }
+
+        Ok(new_app_id)
+    })();
+
+    match res {
+        Ok(id) => {
+            db.conn()
+                .execute_batch(&format!("RELEASE SAVEPOINT {sp_name};"))?;
+            Ok(id)
+        }
+        Err(err) => {
+            let _ = db
+                .conn()
+                .execute_batch(&format!("ROLLBACK TO SAVEPOINT {sp_name};"));
+            let _ = db
+                .conn()
+                .execute_batch(&format!("RELEASE SAVEPOINT {sp_name};"));
+            Err(err)
+        }
+    }
+}
+
+/// `surfaces.tool_id` FK → `tools(id)`; forked application ids must exist as tools.
+fn ensure_tools_row_for_forked_app(
+    db: &mut Database,
+    source_application_id: &str,
+    new_application_id: &str,
+    name: &str,
+) -> DbResult<()> {
+    let now = now_rfc3339();
+    let source_tool: Option<(String, String, String, String, String)> = db
+        .conn()
+        .query_row(
+            "SELECT workspace_id, name, description, layout, definition_json
+             FROM tools WHERE id = ?1",
+            [source_application_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(DbError::Sqlite)?;
+
+    if let Some((workspace_id, src_name, description, layout, definition_json)) = source_tool {
+        db.conn().execute(
+            "INSERT INTO tools (
+                id, workspace_id, name, description, layout, definition_json,
+                current_version, created_at, updated_at
+             ) VALUES (?1,?2,?3,?4,?5,?6,1,?7,?7)",
+            params![
+                new_application_id,
+                workspace_id,
+                format!("{src_name} (branch)"),
+                description,
+                layout,
+                definition_json,
+                now
+            ],
+        )?;
+    } else {
+        db.conn().execute(
+            "INSERT INTO tools (
+                id, workspace_id, name, description, layout, definition_json,
+                current_version, created_at, updated_at
+             ) VALUES (?1,?2,?3,'','stack','{}',1,?4,?4)",
+            params![
+                new_application_id,
+                crate::db::DEFAULT_WORKSPACE_ID,
+                name,
+                now
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DataMigration {
@@ -375,30 +549,6 @@ pub fn apply_migration(
                     .find(|f| f.field_id == old)
                     .ok_or_else(|| DbError::Invalid(format!("field {old} not found")))?;
                 f.field_id = new.into();
-                // Rewrite records
-                let records = query_records(
-                    db,
-                    application_id,
-                    model_id,
-                    MAX_GENERATED_RECORDS_PER_QUERY,
-                )?;
-                for mut rec in records {
-                    if let Some(obj) = rec.as_object_mut() {
-                        if let Some(v) = obj.remove(old) {
-                            obj.insert(new.into(), v);
-                        }
-                        let id = obj
-                            .get("_id")
-                            .and_then(|v| v.as_str())
-                            .ok_or_else(|| DbError::Invalid("record missing _id".into()))?
-                            .to_string();
-                        obj.remove("_id");
-                        obj.remove("_version");
-                        obj.remove("_createdAt");
-                        obj.remove("_updatedAt");
-                        update_record(db, application_id, &id, json!(obj), None)?;
-                    }
-                }
                 format!("Renames {old} to {new}")
             }
             "remove_field" => {
@@ -444,10 +594,38 @@ pub fn apply_migration(
                 now
             ],
         )?;
+        // Persist schema before rewriting records so update_record validates against the new model.
         upsert_model(db, application_id, def)?;
-        // Apply defaults to existing records for add_field
-        if migration.migration_type == "add_field" {
-            if let (Some(fid), Some(default)) = (&migration.field_id, &migration.default) {
+        let updated_def = get_model(db, application_id, model_id)?;
+        let known = known_field_ids(&updated_def);
+        match migration.migration_type.as_str() {
+            "add_field" => {
+                if let (Some(fid), Some(default)) = (&migration.field_id, &migration.default) {
+                    let records = query_records(
+                        db,
+                        application_id,
+                        model_id,
+                        MAX_GENERATED_RECORDS_PER_QUERY,
+                    )?;
+                    for mut rec in records {
+                        if let Some(obj) = rec.as_object_mut() {
+                            if !obj.contains_key(fid) {
+                                let id = obj
+                                    .get("_id")
+                                    .and_then(|v| v.as_str())
+                                    .ok_or_else(|| DbError::Invalid("record missing _id".into()))?
+                                    .to_string();
+                                obj.insert(fid.clone(), default.clone());
+                                sanitize_record_payload(&mut rec, &known);
+                                update_record(db, application_id, &id, rec, None)?;
+                            }
+                        }
+                    }
+                }
+            }
+            "rename_field" => {
+                let old = migration.field_id.as_deref().unwrap_or("");
+                let new = migration.new_field_id.as_deref().unwrap_or("");
                 let records = query_records(
                     db,
                     application_id,
@@ -456,22 +634,40 @@ pub fn apply_migration(
                 )?;
                 for mut rec in records {
                     if let Some(obj) = rec.as_object_mut() {
-                        if !obj.contains_key(fid) {
-                            let id = obj
-                                .get("_id")
-                                .and_then(|v| v.as_str())
-                                .ok_or_else(|| DbError::Invalid("record missing _id".into()))?
-                                .to_string();
-                            obj.insert(fid.clone(), default.clone());
-                            obj.remove("_id");
-                            obj.remove("_version");
-                            obj.remove("_createdAt");
-                            obj.remove("_updatedAt");
-                            update_record(db, application_id, &id, json!(obj), None)?;
+                        if let Some(v) = obj.remove(old) {
+                            obj.insert(new.into(), v);
                         }
+                        let id = obj
+                            .get("_id")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| DbError::Invalid("record missing _id".into()))?
+                            .to_string();
+                        sanitize_record_payload(&mut rec, &known);
+                        update_record(db, application_id, &id, rec, None)?;
                     }
                 }
             }
+            "remove_field" => {
+                // Drop removed / legacy undeclared keys so strict validate_record accepts round-trips.
+                let records = query_records(
+                    db,
+                    application_id,
+                    model_id,
+                    MAX_GENERATED_RECORDS_PER_QUERY,
+                )?;
+                for mut rec in records {
+                    if let Some(obj) = rec.as_object_mut() {
+                        let id = obj
+                            .get("_id")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| DbError::Invalid("record missing _id".into()))?
+                            .to_string();
+                        sanitize_record_payload(&mut rec, &known);
+                        update_record(db, application_id, &id, rec, None)?;
+                    }
+                }
+            }
+            _ => {}
         }
         Ok(impact)
     })();
@@ -995,6 +1191,263 @@ mod tests {
         let mut db2 = crate::db::Database::open_path(&db_path).unwrap();
         delete_record(&mut db2, "app-tasks", &id).unwrap();
         assert!(query_records(&db2, "app-tasks", "Task", 20)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn validate_record_rejects_unknown_fields() {
+        let m = habit_model();
+        let err = validate_record(
+            &m,
+            &json!({"name": "x", "frequency": "daily", "secretExtra": true}),
+        )
+        .expect_err("unknown fields must fail");
+        assert!(
+            err.contains("unknown field"),
+            "expected unknown field error, got {err}"
+        );
+    }
+
+    #[test]
+    fn fork_application_isolates_records_from_source() {
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use std::collections::HashMap;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("fork.db")).unwrap();
+
+        upsert_manifest(
+            &mut db,
+            ApplicationManifest {
+                schema_version: "1".into(),
+                application_id: "app-src".into(),
+                instance_id: "inst-src".into(),
+                name: "Source".into(),
+                description: String::new(),
+                version: 1,
+                surfaces: vec![],
+                routes: vec![],
+                data_models: vec![],
+                settings: vec![],
+                capabilities: vec!["coreside.core".into()],
+                permissions: vec!["local_data.write".into(), "local_data.read".into()],
+                events: vec![],
+                tests: vec![],
+                search_keywords: vec![],
+                tags: vec![],
+                agent_description: String::new(),
+                project_id: None,
+                conversation_id: Some("conv-src".into()),
+                organization_id: None,
+                ownership: None,
+                application_action_access: vec!["local_data.write".into()],
+                surface_action_access: HashMap::new(),
+                component_action_access: HashMap::new(),
+                action_descriptor_hashes: HashMap::new(),
+            },
+        )
+        .unwrap();
+        crate::application_kernel::permissions::grant_permission(
+            &mut db,
+            "app-src",
+            "local_data.write",
+            json!({}),
+            "test",
+        )
+        .unwrap();
+        upsert_model(&mut db, "app-src", habit_model()).unwrap();
+        create_record(
+            &mut db,
+            "app-src",
+            "habit",
+            json!({"name": "Water", "frequency": "daily"}),
+        )
+        .unwrap();
+
+        let forked = fork_application_for_branch(&mut db, "app-src", "conv-branch").unwrap();
+        assert_ne!(forked, "app-src");
+
+        create_record(
+            &mut db,
+            &forked,
+            "habit",
+            json!({"name": "Branch Only", "frequency": "weekly"}),
+        )
+        .unwrap();
+
+        let src = query_records(&db, "app-src", "habit", 20).unwrap();
+        let br = query_records(&db, &forked, "habit", 20).unwrap();
+        assert_eq!(src.len(), 1);
+        assert_eq!(src[0]["name"], "Water");
+        assert_eq!(br.len(), 2);
+        assert!(br.iter().any(|r| r["name"] == "Branch Only"));
+        assert!(br.iter().any(|r| r["name"] == "Water"));
+    }
+
+    fn seed_writable_habit_app(db: &mut crate::db::Database, app_id: &str) {
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use std::collections::HashMap;
+
+        upsert_manifest(
+            db,
+            ApplicationManifest {
+                schema_version: "1".into(),
+                application_id: app_id.into(),
+                instance_id: format!("inst-{app_id}"),
+                name: app_id.into(),
+                description: String::new(),
+                version: 1,
+                surfaces: vec![],
+                routes: vec![],
+                data_models: vec![],
+                settings: vec![],
+                capabilities: vec!["coreside.core".into()],
+                permissions: vec!["local_data.write".into(), "local_data.read".into()],
+                events: vec![],
+                tests: vec![],
+                search_keywords: vec![],
+                tags: vec![],
+                agent_description: String::new(),
+                project_id: None,
+                conversation_id: None,
+                organization_id: None,
+                ownership: None,
+                application_action_access: vec!["local_data.write".into()],
+                surface_action_access: HashMap::new(),
+                component_action_access: HashMap::new(),
+                action_descriptor_hashes: HashMap::new(),
+            },
+        )
+        .unwrap();
+        crate::application_kernel::permissions::grant_permission(
+            db,
+            app_id,
+            "local_data.write",
+            json!({}),
+            "test",
+        )
+        .unwrap();
+        upsert_model(db, app_id, habit_model()).unwrap();
+    }
+
+    #[test]
+    fn suspended_application_cannot_mutate_generated_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("sus.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-sus");
+
+        let id = create_record(
+            &mut db,
+            "app-sus",
+            "habit",
+            json!({"name": "Water", "frequency": "daily"}),
+        )
+        .unwrap();
+
+        db.conn()
+            .execute(
+                "UPDATE application_manifests SET lifecycle_state = 'suspended', health_state = 'suspended'
+                 WHERE application_id = ?1",
+                ["app-sus"],
+            )
+            .unwrap();
+
+        let create_err = create_record(
+            &mut db,
+            "app-sus",
+            "habit",
+            json!({"name": "Nope", "frequency": "daily"}),
+        )
+        .expect_err("suspended create");
+        assert!(
+            create_err.to_string().contains("suspended"),
+            "expected suspended denial, got {create_err}"
+        );
+
+        let update_err = update_record(
+            &mut db,
+            "app-sus",
+            &id,
+            json!({"name": "Hacked", "frequency": "daily"}),
+            None,
+        )
+        .expect_err("suspended update");
+        assert!(
+            update_err.to_string().contains("suspended"),
+            "expected suspended denial, got {update_err}"
+        );
+
+        let delete_err = delete_record(&mut db, "app-sus", &id).expect_err("suspended delete");
+        assert!(
+            delete_err.to_string().contains("suspended"),
+            "expected suspended denial, got {delete_err}"
+        );
+
+        let still = query_records(&db, "app-sus", "habit", 10).unwrap();
+        assert_eq!(still.len(), 1);
+        assert_eq!(still[0]["name"], "Water");
+    }
+
+    #[test]
+    fn create_record_rejects_unknown_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("unk.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-unk");
+
+        let err = create_record(
+            &mut db,
+            "app-unk",
+            "habit",
+            json!({"name": "x", "frequency": "daily", "secretExtra": true}),
+        )
+        .expect_err("unknown field on create");
+        assert!(
+            err.to_string().contains("unknown field"),
+            "expected unknown field error, got {err}"
+        );
+        assert!(query_records(&db, "app-unk", "habit", 10)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn forked_branch_update_does_not_mutate_source_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("iso.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-src");
+
+        create_record(
+            &mut db,
+            "app-src",
+            "habit",
+            json!({"name": "Water", "frequency": "daily"}),
+        )
+        .unwrap();
+
+        let forked = fork_application_for_branch(&mut db, "app-src", "conv-branch").unwrap();
+        let br = query_records(&db, &forked, "habit", 20).unwrap();
+        let branch_id = br[0]["_id"].as_str().unwrap().to_string();
+
+        update_record(
+            &mut db,
+            &forked,
+            &branch_id,
+            json!({"name": "Branch Edited", "frequency": "weekly"}),
+            None,
+        )
+        .unwrap();
+
+        let src_after_update = query_records(&db, "app-src", "habit", 20).unwrap();
+        assert_eq!(src_after_update.len(), 1);
+        assert_eq!(src_after_update[0]["name"], "Water");
+        assert_eq!(src_after_update[0]["frequency"], "daily");
+
+        delete_record(&mut db, &forked, &branch_id).unwrap();
+        let src = query_records(&db, "app-src", "habit", 20).unwrap();
+        assert_eq!(src.len(), 1);
+        assert_eq!(src[0]["name"], "Water");
+        assert!(query_records(&db, &forked, "habit", 20)
             .unwrap()
             .is_empty());
     }

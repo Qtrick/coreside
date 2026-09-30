@@ -123,8 +123,12 @@ pub enum TargetReadiness {
     Rejected(String),
 }
 
-/// Evaluates whether an operation's target is ready. If target surface does not exist yet,
-/// returns Deferred so the patch can wait in a bounded state rather than immediately failing.
+/// Evaluates durable target readiness for the patch scheduler.
+///
+/// This checks SQLite existence, archival, suspended applications, and revision
+/// floors — **not** whether a renderer is currently mounted. Renderer liveness is
+/// tracked separately in `mount_registry` so durable construction is not blocked
+/// when the UI is temporarily unmounted.
 pub fn evaluate_target_readiness(db: &Database, op: &AppOperation) -> TargetReadiness {
     // Surface creations establish a new surface and are ready immediately.
     if op.op_type == "surface.create"

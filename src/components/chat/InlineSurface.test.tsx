@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { InlineSurfaceCard } from "./InlineSurface";
 import { api } from "@/lib/tauri";
@@ -14,6 +14,7 @@ vi.mock("@/stores/app-store", () => ({
       sendMessage: mockSendMessage,
       activeProjectId: "proj-1",
       setSurfaceDraftConflict: mockSetSurfaceDraftConflict,
+      previewSurfacesByKey: {},
     };
     return selector(state);
   },
@@ -25,6 +26,14 @@ vi.mock("@/lib/tauri", () => ({
     getSurfaceState: vi.fn().mockResolvedValue({ count: 0 }),
     getContinuity: vi.fn().mockResolvedValue(null),
     kernelGetManifest: vi.fn().mockResolvedValue({ applicationId: "app-test" }),
+    flushPatchScheduler: vi.fn().mockResolvedValue([]),
+    registerSurfaceMount: vi.fn().mockResolvedValue({
+      surfaceId: "surf-100",
+      windowLabel: "main",
+      rendererInstanceId: "rend-test",
+      generation: 1,
+    }),
+    unregisterSurfaceMount: vi.fn().mockResolvedValue(true),
     saveDraft: vi.fn().mockResolvedValue(undefined),
     saveSurfaceState: vi.fn().mockResolvedValue(3),
     suspendSurface: vi.fn().mockResolvedValue(undefined),
@@ -155,6 +164,12 @@ describe("InlineSurfaceCard", () => {
     await waitFor(() => {
       expect(screen.getByTestId("interactive-btn")).toBeDefined();
     });
+    await waitFor(() => {
+      expect(api.kernelGetManifest).toHaveBeenCalled();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     const btn = screen.getByTestId("interactive-btn");
 
@@ -171,7 +186,7 @@ describe("InlineSurfaceCard", () => {
       expect.objectContaining({
         formId: "btn-counter",
         eventName: "game.move",
-        applicationId: "surf-100",
+        applicationId: "app-test",
         surfaceId: "surf-100",
         surfaceRevision: 5,
         stateRevision: 2,

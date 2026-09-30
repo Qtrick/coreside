@@ -1571,18 +1571,26 @@ async fn send_message_inner(
                     &db_guard,
                     surf.tool_id.as_deref(),
                 );
-                let matches_app = if let Some(auth) = auth_app {
-                    auth == *app_id
-                } else {
-                    surf.id == *app_id
-                        || surf.tool_id.as_deref() == Some(app_id.as_str())
-                        || surf.instance_id == *app_id
-                };
-                if !matches_app {
-                    return Err(CommandError::new(
-                        "invalid",
-                        format!("Application ID mismatch for surface '{sid}': expected '{app_id}'"),
-                    ));
+                // Fail closed: claimed applicationId must match a manifest-backed id.
+                // Never accept surface.id / tool_id / instance_id as application identity.
+                match auth_app {
+                    Some(auth) if auth == *app_id => {}
+                    Some(auth) => {
+                        return Err(CommandError::new(
+                            "invalid",
+                            format!(
+                                "Application ID mismatch for surface '{sid}': claimed '{app_id}', authoritative '{auth}'"
+                            ),
+                        ));
+                    }
+                    None => {
+                        return Err(CommandError::new(
+                            "invalid",
+                            format!(
+                                "applicationId '{app_id}' requires a manifest-backed application on surface '{sid}'"
+                            ),
+                        ));
+                    }
                 }
             }
             if let Some(expected_rev) = submission.surface_revision {
