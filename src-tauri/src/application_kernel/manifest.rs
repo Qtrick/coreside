@@ -598,9 +598,7 @@ pub fn permissions_from_tool(tool: &crate::ai::ToolDefinition) -> Vec<String> {
     };
 
     fn walk(comp: &ToolComponent, consider: &mut dyn FnMut(&str)) {
-        use crate::application_kernel::registered_actions::descriptor::{
-            find_action, ActionRisk,
-        };
+        use crate::application_kernel::registered_actions::descriptor::{find_action, ActionRisk};
         if let Some(actions) = comp.actions.as_ref() {
             for action in actions {
                 if let ActionDefinition::InvokeRegisteredAction { action_name, .. } = action {
@@ -616,9 +614,7 @@ pub fn permissions_from_tool(tool: &crate::ai::ToolDefinition) -> Vec<String> {
                 .and_then(|ds| ds.get("actionName"))
                 .and_then(|v| v.as_str())
             {
-                if find_action(action_name)
-                    .is_some_and(|d| d.risk == ActionRisk::Read)
-                {
+                if find_action(action_name).is_some_and(|d| d.risk == ActionRisk::Read) {
                     consider(action_name);
                 }
             }

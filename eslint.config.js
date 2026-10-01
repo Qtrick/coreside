@@ -15,6 +15,9 @@ export default tseslint.config(
       "supabase/functions/**",
       "services/crawl4ai/.venv/**",
       "services/crawl4ai/.crawler-data/**",
+      // Local research dumps / build outputs — never lint as app source.
+      "reports/**",
+      "target/**",
     ],
   },
   {

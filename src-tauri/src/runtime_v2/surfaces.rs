@@ -61,9 +61,7 @@ fn ensure_models_from_tool_actions(
     tool: &ToolDefinition,
 ) -> DbResult<()> {
     use crate::ai::ActionDefinition;
-    use crate::application_kernel::data::{
-        upsert_model_trusted, DataField, DataModelDefinition,
-    };
+    use crate::application_kernel::data::{upsert_model_trusted, DataField, DataModelDefinition};
     use std::collections::BTreeSet;
 
     let mut model_ids: BTreeSet<String> = BTreeSet::new();
@@ -149,22 +147,14 @@ fn ensure_models_from_tool_actions(
                         field_type: "enum".into(),
                         required: false,
                         default: Some(json!("medium")),
-                        enum_values: Some(vec![
-                            "high".into(),
-                            "medium".into(),
-                            "low".into(),
-                        ]),
+                        enum_values: Some(vec!["high".into(), "medium".into(), "low".into()]),
                     },
                     DataField {
                         field_id: "status".into(),
                         field_type: "enum".into(),
                         required: false,
                         default: Some(json!("todo")),
-                        enum_values: Some(vec![
-                            "todo".into(),
-                            "in_progress".into(),
-                            "done".into(),
-                        ]),
+                        enum_values: Some(vec!["todo".into(), "in_progress".into(), "done".into()]),
                     },
                 ],
             }
@@ -490,11 +480,7 @@ pub fn create_inline_surface(
 }
 
 /// Bind a surface to a tool/application lineage id (used when forking applications on branch).
-pub fn bind_surface_tool_id(
-    db: &mut Database,
-    surface_id: &str,
-    tool_id: &str,
-) -> DbResult<()> {
+pub fn bind_surface_tool_id(db: &mut Database, surface_id: &str, tool_id: &str) -> DbResult<()> {
     let trimmed = tool_id.trim();
     if trimmed.is_empty() {
         return Err(DbError::Invalid("tool_id must be non-empty".into()));
@@ -575,16 +561,18 @@ pub fn resolve_prompt_surface_for_tool(
     conversation_id: &str,
     tool_id: &str,
 ) -> DbResult<Option<SurfaceRecord>> {
-    let local_id: Option<String> = db.conn().query_row(
-        "SELECT id FROM surfaces
+    let local_id: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT id FROM surfaces
          WHERE conversation_id = ?1 AND tool_id = ?2 AND archived = 0
          ORDER BY CASE WHEN placement = 'chat_inline' THEN 0 ELSE 1 END,
                   updated_at DESC
          LIMIT 1",
-        params![conversation_id, tool_id],
-        |row| row.get(0),
-    )
-    .optional()?;
+            params![conversation_id, tool_id],
+            |row| row.get(0),
+        )
+        .optional()?;
     if let Some(id) = local_id {
         return Ok(Some(get_surface(db, &id)?));
     }
@@ -1730,9 +1718,15 @@ mod tests {
             ChangeIntent::CreateSurface { tool, .. } => tool.clone(),
             other => panic!("expected CreateSurface, got {other:?}"),
         };
-        let applied =
-            apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool_v1, "create", None, "v1")
-                .unwrap();
+        let applied = apply_tool_change(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            &tool_v1,
+            "create",
+            None,
+            "v1",
+        )
+        .unwrap();
         let surface =
             upsert_surface_from_tool(&mut db, &applied.definition, DEFAULT_WORKSPACE_ID, 1)
                 .unwrap();
@@ -1753,9 +1747,11 @@ mod tests {
         );
 
         let evolve = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(Some(1));
-        let tool_v2 = match evolve.intents.iter().find(|i| {
-            matches!(i, ChangeIntent::UpdateSurface { .. })
-        }) {
+        let tool_v2 = match evolve
+            .intents
+            .iter()
+            .find(|i| matches!(i, ChangeIntent::UpdateSurface { .. }))
+        {
             Some(ChangeIntent::UpdateSurface { tool, .. }) => tool.clone(),
             _ => panic!("evolve plan missing UpdateSurface"),
         };
@@ -1806,7 +1802,10 @@ mod tests {
                     && ac.component_id.as_deref() == Some("tm-add-btn")
             })
             .expect("write action contract");
-        let from_state = write_ac.input_from_state.as_ref().expect("input_from_state");
+        let from_state = write_ac
+            .input_from_state
+            .as_ref()
+            .expect("input_from_state");
         assert_eq!(
             from_state.get("data.dueDate").map(String::as_str),
             Some("newTaskDueDate"),
@@ -1936,15 +1935,15 @@ mod tests {
             "local_data.write must be granted on first create"
         );
 
-        let model = crate::application_kernel::data::get_model(
-            &db,
-            "tool-task-tracker-seed",
-            "tasks",
-        )
-        .expect("tasks model must be upserted for Task Tracker–shaped tools");
+        let model =
+            crate::application_kernel::data::get_model(&db, "tool-task-tracker-seed", "tasks")
+                .expect("tasks model must be upserted for Task Tracker–shaped tools");
         assert_eq!(model.model_id, "tasks");
         assert!(
-            model.fields.iter().any(|f| f.field_id == "title" && f.required),
+            model
+                .fields
+                .iter()
+                .any(|f| f.field_id == "title" && f.required),
             "tasks model must require title, got {:?}",
             model.fields
         );
@@ -1975,10 +1974,7 @@ mod tests {
             "tool-task-tracker-preseeding",
             "Task Tracker",
             "surf-tool-task-tracker-preseeding",
-            Some(vec![
-                "local_data.read".into(),
-                "local_data.write".into(),
-            ]),
+            Some(vec!["local_data.read".into(), "local_data.write".into()]),
         )
         .unwrap();
         upsert_model(

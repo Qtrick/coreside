@@ -3,6 +3,12 @@ import { useAppStore } from "@/stores/app-store";
 import { api } from "@/lib/tauri";
 import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
 import type { ToolDefinition, ToolState } from "@/types/tool";
+import {
+  consumerRiskHint,
+  deriveEvolutionCopy,
+  proposalStatusPresentation,
+  sanitizeConsumerError,
+} from "@/lib/application-proposal-status";
 
 /**
  * Risk-based change proposal card in the chat stream.
@@ -17,6 +23,7 @@ export function ChangeProposalCard({
   messageId,
   conversationId,
   status: initialStatus,
+  preservationSummary: initialPreservationSummary = "",
 }: {
   proposalId: string;
   summary: string;
@@ -26,6 +33,7 @@ export function ChangeProposalCard({
   messageId: string;
   conversationId: string;
   status?: string;
+  preservationSummary?: string;
 }) {
   const applyPending = useAppStore((s) => s.applyPendingKernelProposal);
   const discardPending = useAppStore((s) => s.discardPendingKernelProposal);
@@ -65,15 +73,29 @@ export function ChangeProposalCard({
     };
   }, [proposalId, initialSummary, initialImpactSummary, initialRisk, initialStatus, initialOperations]);
 
-  const currentStatus = proposalData?.status ?? initialStatus ?? "pending";
+  const currentStatus =
+    busy ? "applying" : (proposalData?.status ?? initialStatus ?? "pending");
   const summary = proposalData?.summary ?? initialSummary;
   const impactSummary = proposalData?.impactSummary ?? initialImpactSummary;
   const risk = proposalData?.risk ?? initialRisk;
   const operations = proposalData?.operations ?? initialOperations;
   const proposalError = proposalData?.error ?? error;
+  const statusUi = proposalStatusPresentation(currentStatus);
+  const riskHint = consumerRiskHint(risk);
+
+  const evolution = useMemo(
+    () =>
+      deriveEvolutionCopy(
+        operations,
+        impactSummary,
+        summary,
+        initialPreservationSummary,
+      ),
+    [operations, impactSummary, summary, initialPreservationSummary],
+  );
 
   const previewTool = useMemo<ToolDefinition | null>(() => {
-    for (const op of (operations as Array<Record<string, unknown>>)) {
+    for (const op of operations as Array<Record<string, unknown>>) {
       if (!op || typeof op !== "object") continue;
       const payload = op.payload as Record<string, unknown> | undefined;
       if (!payload) continue;
@@ -93,41 +115,42 @@ export function ChangeProposalCard({
     return null;
   }, [operations, summary]);
 
-  if (currentStatus === "applied" || currentStatus === "discarded" || currentStatus === "rejected") {
+  const statusBadgeClass =
+    statusUi.tone === "success"
+      ? "proposal-status-badge success"
+      : statusUi.tone === "error"
+        ? "proposal-status-badge error"
+        : statusUi.tone === "warning"
+          ? "proposal-status-badge warning"
+          : statusUi.tone === "active"
+            ? "proposal-status-badge active"
+            : "proposal-status-badge";
+
+  if (statusUi.resolved) {
+    const friendlyError =
+      statusUi.tone === "error" || statusUi.tone === "warning"
+        ? sanitizeConsumerError(proposalError)
+        : null;
     return (
       <aside
         className="change-proposal"
-        aria-label="Proposed change resolved"
+        aria-label="Application change status"
         style={{ margin: "0.75rem 0" }}
       >
-        <p className="muted" style={{ margin: 0 }}>
-          Change {currentStatus}
-          {proposalId ? ` · ${proposalId.slice(0, 12)}…` : ""}
-        </p>
-      </aside>
-    );
-  }
-
-  if (currentStatus === "stale" || currentStatus === "expired" || currentStatus === "failed") {
-    return (
-      <aside
-        className="change-proposal"
-        aria-label="Proposed change unresolved"
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          padding: "0.85rem 1rem",
-          margin: "0.75rem 0",
-          background: "var(--core-muted-overlay, var(--surface-muted, var(--surface)))",
-        }}
-      >
         <p style={{ margin: 0 }}>
-          <strong>Proposal {currentStatus}</strong>{" "}
-          <span className="muted">({proposalId.slice(0, 12)}…)</span>
+          <span className={statusBadgeClass}>{statusUi.label}</span>
         </p>
-        <p className="muted" style={{ margin: "0.35rem 0 0" }}>
-          {proposalError || `This proposal can no longer be applied (${currentStatus}).`}
-        </p>
+        {friendlyError ? (
+          <p className="muted" style={{ margin: "0.35rem 0 0" }}>{friendlyError}</p>
+        ) : statusUi.label === "Discarded" ? (
+          <p className="muted" style={{ margin: "0.35rem 0 0" }}>
+            No changes were applied.
+          </p>
+        ) : statusUi.label === "Ready" ? (
+          <p className="muted" style={{ margin: "0.35rem 0 0" }}>
+            Your application is up to date.
+          </p>
+        ) : null}
       </aside>
     );
   }
@@ -153,7 +176,7 @@ export function ChangeProposalCard({
       stagePending();
       await applyPending();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not apply change");
+      setError(sanitizeConsumerError(e instanceof Error ? e.message : null));
     } finally {
       setBusy(false);
     }
@@ -166,7 +189,7 @@ export function ChangeProposalCard({
       stagePending();
       await discardPending();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not discard change");
+      setError(sanitizeConsumerError(e instanceof Error ? e.message : null));
     } finally {
       setBusy(false);
     }
@@ -184,21 +207,43 @@ export function ChangeProposalCard({
         background: "var(--core-muted-overlay, var(--surface-muted, var(--surface)))",
       }}
     >
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: "0.5rem",
+          marginBottom: "0.35rem",
+        }}
+      >
+        <span className={statusBadgeClass}>{statusUi.label}</span>
+        {riskHint ? <span className="muted" style={{ fontSize: "0.8rem" }}>{riskHint}</span> : null}
+      </div>
+
       <p style={{ margin: 0 }}>
-        <strong>Proposed change</strong>{" "}
-        <span className="muted">
-          ({risk} risk · {proposalId.slice(0, 12)}…)
-        </span>
+        <strong>{evolution.headline}</strong>
       </p>
-      <p style={{ margin: "0.35rem 0 0" }}>{summary}</p>
-      <p className="muted" style={{ margin: "0.35rem 0 0" }}>
-        {impactSummary}
-      </p>
+
+      <div style={{ marginTop: "0.65rem" }}>
+        <p className="muted" style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600 }}>
+          What will change
+        </p>
+        <p style={{ margin: "0.25rem 0 0" }}>{evolution.whatWillChange}</p>
+      </div>
+
+      <div style={{ marginTop: "0.65rem" }}>
+        <p className="muted" style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600 }}>
+          What will be preserved
+        </p>
+        <p style={{ margin: "0.25rem 0 0" }}>{evolution.whatWillBePreserved}</p>
+      </div>
+
       {operations.length === 0 ? (
-        <p className="muted" role="status" style={{ margin: "0.35rem 0 0" }}>
-          This proposal has no operations to apply.
+        <p className="muted" role="status" style={{ margin: "0.65rem 0 0" }}>
+          This preview has no changes to apply yet.
         </p>
       ) : null}
+
       {previewTool ? (
         <div
           className="proposal-tool-visual-preview"
@@ -211,7 +256,11 @@ export function ChangeProposalCard({
             maxHeight: "320px",
             overflowY: "auto",
           }}
+          aria-label="Application preview"
         >
+          <p className="muted" style={{ margin: "0 0 0.5rem", fontSize: "0.75rem" }}>
+            Preview ready
+          </p>
           <ToolRenderer
             tool={previewTool}
             state={previewState}
@@ -220,14 +269,22 @@ export function ChangeProposalCard({
           />
         </div>
       ) : null}
+
+      {proposalError ? (
+        <p className="muted" role="alert" style={{ margin: "0.65rem 0 0", color: "var(--destructive, #dc2626)" }}>
+          {sanitizeConsumerError(proposalError)}
+        </p>
+      ) : null}
+
       <div className="button-row" style={{ marginTop: "0.75rem" }}>
         <button
           type="button"
           className="btn btn-primary"
           disabled={busy || operations.length === 0}
           onClick={() => void apply()}
+          aria-busy={busy}
         >
-          Apply
+          {busy ? "Building…" : "Apply"}
         </button>
         <button
           type="button"

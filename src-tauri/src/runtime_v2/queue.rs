@@ -408,16 +408,10 @@ mod tests {
     #[test]
     fn enqueue_nested_under_outer_transaction_rolls_back_with_outer() {
         let mut db = test_db();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "QueueNestedRollback", None).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "QueueNestedRollback", None)
+            .unwrap();
         db.conn().execute_batch("BEGIN IMMEDIATE").unwrap();
-        let item = enqueue(
-            &mut db,
-            &conv.id,
-            &json!({"content": "nested-item"}),
-            100,
-        )
-        .unwrap();
+        let item = enqueue(&mut db, &conv.id, &json!({"content": "nested-item"}), 100).unwrap();
         let item_id = item.id.clone();
         db.conn().execute_batch("ROLLBACK").unwrap();
         assert!(

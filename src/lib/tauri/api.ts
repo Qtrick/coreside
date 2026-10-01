@@ -1081,8 +1081,16 @@ export const api = {
     invoke<Record<string, unknown>>("kernel_apply_change", { request }),
   kernelCompileIntent: (intent: Record<string, unknown>) =>
     invoke<Record<string, unknown>>("kernel_compile_intent", { intent }),
-  kernelCompileApplicationPlan: (plan: Record<string, unknown>) =>
-    invoke<Record<string, unknown>>("kernel_compile_application_plan", { plan }),
+  kernelCompileApplicationPlan: (
+    plan: Record<string, unknown>,
+    conversationId?: string | null,
+    projectId?: string | null,
+  ) =>
+    invoke<Record<string, unknown>>("kernel_compile_application_plan", {
+      plan,
+      conversationId: conversationId ?? null,
+      projectId: projectId ?? null,
+    }),
   kernelListManifests: () =>
     invoke<import("@/types/application-kernel").ManifestRecord[]>("kernel_list_manifests"),
   kernelGetManifest: (applicationId: string) =>

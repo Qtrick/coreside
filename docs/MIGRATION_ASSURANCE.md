@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 32 forward migrations (001–032; includes `032_interactive_action_log.sql`)
+**Count:** 36 forward migrations (001–036; includes `036_approval_call_context.sql`)
 
 ## Inventory
 
@@ -40,6 +40,10 @@
 | 030 | `030_patch_scheduler_target_readiness.sql` | Target readiness: deferred patch scheduling, target dependency promotion, TTL timeout |
 | 031 | `031_surface_event_deliveries.sql` | Surface event deliveries: durable delivery lifecycle, attempt counts, declarative handler schema |
 | 032 | `032_interactive_action_log.sql` | Interactive rules-engine action log: ordered checkpoints, event_id idempotency, exact replay reconstruction |
+| 033 | `033_conversation_sync_cursors.sql` | Conversation sync cursors for catch-up / reconnect |
+| 034 | `034_conversation_sync_cursors_per_client.sql` | Per-client conversation sync cursors (multi-window catch-up) |
+| 035 | `035_apply_idempotency_request_hash.sql` | Apply idempotency request hash binding (same key + different body → conflict) |
+| 036 | `036_approval_call_context.sql` | Approval call context binding (conversation/venue/presence/project/surface/component) |
 
 ## What is verified
 

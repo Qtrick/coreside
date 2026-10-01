@@ -492,12 +492,17 @@ fn concurrent_identical_event_id_applies_once() {
         }));
     }
 
-    let results: Vec<Result<InteractiveView, DbError>> =
-        handles.into_iter().map(|h| h.join().expect("join")).collect();
+    let results: Vec<Result<InteractiveView, DbError>> = handles
+        .into_iter()
+        .map(|h| h.join().expect("join"))
+        .collect();
 
     let mut db = Database::open_path(&db_path).unwrap();
     let (state, state_rev) = raw_state(&db, &sid);
-    assert_eq!(state["board"][4], "X", "move must apply exactly once: {state}");
+    assert_eq!(
+        state["board"][4], "X",
+        "move must apply exactly once: {state}"
+    );
     assert_eq!(
         log_count(&db, &sid),
         rows_before + 1,
@@ -505,7 +510,10 @@ fn concurrent_identical_event_id_applies_once() {
     );
 
     let oks: Vec<_> = results.iter().filter_map(|r| r.as_ref().ok()).collect();
-    let conflicts = results.iter().filter(|r| matches!(r, Err(DbError::Conflict(_)))).count();
+    let conflicts = results
+        .iter()
+        .filter(|r| matches!(r, Err(DbError::Conflict(_))))
+        .count();
     assert!(
         !oks.is_empty(),
         "at least one concurrent dispatch must succeed: {results:?}"
@@ -594,8 +602,10 @@ fn concurrent_divergent_event_id_payload_conflicts() {
         }));
     }
 
-    let results: Vec<Result<InteractiveView, DbError>> =
-        handles.into_iter().map(|h| h.join().expect("join")).collect();
+    let results: Vec<Result<InteractiveView, DbError>> = handles
+        .into_iter()
+        .map(|h| h.join().expect("join"))
+        .collect();
 
     let mut db = Database::open_path(&db_path).unwrap();
     let (state, state_rev) = raw_state(&db, &sid);
@@ -609,8 +619,15 @@ fn concurrent_divergent_event_id_payload_conflicts() {
     assert_eq!(log_count(&db, &sid), rows_before + 1);
 
     let oks: Vec<_> = results.iter().filter_map(|r| r.as_ref().ok()).collect();
-    let conflicts = results.iter().filter(|r| matches!(r, Err(DbError::Conflict(_)))).count();
-    assert_eq!(oks.len(), 1, "exactly one divergent racer applies: {results:?}");
+    let conflicts = results
+        .iter()
+        .filter(|r| matches!(r, Err(DbError::Conflict(_))))
+        .count();
+    assert_eq!(
+        oks.len(),
+        1,
+        "exactly one divergent racer applies: {results:?}"
+    );
     assert!(!oks[0].duplicate);
     assert_eq!(conflicts, 1, "loser must Conflict: {results:?}");
 

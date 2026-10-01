@@ -16,11 +16,11 @@ mod openai;
 mod openai_family;
 mod openrouter;
 pub mod plan_fixtures;
-#[cfg(test)]
-mod provider_contract_tests;
 pub mod platform;
 mod prompt_builder;
 mod provider;
+#[cfg(test)]
+mod provider_contract_tests;
 mod provider_send;
 mod response_parser;
 pub mod response_schema;

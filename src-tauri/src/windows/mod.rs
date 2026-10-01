@@ -155,10 +155,7 @@ pub fn enforce_caller_conversation_scope(
     }
     let cid = conversation_id.trim();
     if cid.is_empty() {
-        return Err(CommandError::new(
-            "invalid",
-            "conversationId is required",
-        ));
+        return Err(CommandError::new("invalid", "conversationId is required"));
     }
     let owned: i64 = db
         .conn()

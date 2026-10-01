@@ -387,12 +387,8 @@ pub fn branch_from_message(
                 }
 
                 super::surfaces::save_surface_state(db, &created.id, &historical_state)?;
-                let created = bind_forked_surface_tool(
-                    db,
-                    created,
-                    surface.tool_id.as_deref(),
-                    &app_id_map,
-                )?;
+                let created =
+                    bind_forked_surface_tool(db, created, surface.tool_id.as_deref(), &app_id_map)?;
                 cloned_surfaces.push(created);
             }
         }
@@ -1328,8 +1324,8 @@ mod tests {
         )
         .unwrap();
 
-        let m1 = crate::db::insert_message(&mut db, &conv.id, "user", "build tracker", None)
-            .unwrap();
+        let m1 =
+            crate::db::insert_message(&mut db, &conv.id, "user", "build tracker", None).unwrap();
         let surf = super::super::surfaces::create_inline_surface(
             &mut db,
             &conv.id,

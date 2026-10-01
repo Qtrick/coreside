@@ -336,9 +336,8 @@ pub fn decide(
         // user who decides near the end of the pending TTL still has time to
         // finish the trusted re-run. Denied rows keep their original expires_at.
         let n = if approve {
-            let unused_expires = (decided_now
-                + chrono::Duration::minutes(APPROVED_UNUSED_TTL_MINUTES))
-            .to_rfc3339();
+            let unused_expires =
+                (decided_now + chrono::Duration::minutes(APPROVED_UNUSED_TTL_MINUTES)).to_rfc3339();
             db.conn().execute(
                 "UPDATE runtime_approvals
                  SET status = ?2, decided_at = ?3, expires_at = ?4
@@ -629,7 +628,10 @@ mod tests {
         let mut comp_b = surf_a.clone();
         comp_b.component_id = Some("btn-delete".into());
         let c = create_pending(&mut db, &comp_b, d, &input, None).unwrap();
-        assert_ne!(a.id, c.id, "different components must mint distinct pendings");
+        assert_ne!(
+            a.id, c.id,
+            "different components must mint distinct pendings"
+        );
         assert_eq!(list_pending(&mut db).unwrap().len(), 3);
     }
 

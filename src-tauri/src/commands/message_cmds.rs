@@ -63,16 +63,23 @@ fn collect_application_state_for_prompt(
         if out.len() >= 4 {
             break;
         }
-        let (definition, raw_state) =
+        let (definition, raw_state, surface_id, definition_revision, state_revision) =
             match crate::runtime_v2::surfaces::resolve_prompt_surface_for_tool(
                 db,
                 conversation_id,
                 &tool.id,
             ) {
                 Ok(Some(surf)) => {
-                    let state = crate::runtime_v2::surfaces::get_surface_state(db, &surf.id)
-                        .unwrap_or_else(|_| json!({}));
-                    (surf.definition, state)
+                    let (state, state_rev) =
+                        crate::runtime_v2::surfaces::get_surface_state_with_revision(db, &surf.id)
+                            .unwrap_or_else(|_| (json!({}), 0));
+                    (
+                        surf.definition,
+                        state,
+                        Some(surf.id),
+                        Some(surf.current_revision),
+                        Some(state_rev),
+                    )
                 }
                 Ok(None) | Err(_) => {
                     let state = db::get_tool_state(db, &tool.id)
@@ -82,6 +89,9 @@ fn collect_application_state_for_prompt(
                     (
                         serde_json::to_value(tool).unwrap_or_else(|_| json!({})),
                         state,
+                        None,
+                        None,
+                        None,
                     )
                 }
             };
@@ -92,12 +102,16 @@ fn collect_application_state_for_prompt(
         );
         let data_models = compact_data_models_for_prompt(db, &tool.id);
         let state_empty = projected.as_object().map(|o| o.is_empty()).unwrap_or(true);
-        if state_empty && data_models.is_empty() {
+        // Always include when a live surface exists so evolve can observe definitionRevision.
+        if state_empty && data_models.is_empty() && surface_id.is_none() {
             continue;
         }
         out.push(ApplicationStatePromptSlice {
             tool_id: tool.id.clone(),
             tool_name: tool.name.clone(),
+            surface_id,
+            definition_revision,
+            state_revision,
             projected_state: projected,
             data_models,
         });
@@ -3365,6 +3379,48 @@ async fn send_message_inner(
         if let Some(repaired) = interactive_repaired_ops.take() {
             // Interactive AI repair owned the final op set (may be empty after budget exhaust).
             operations_from_payload = Some(repaired);
+        } else if let Some(plan) = parsed.payload.application_plan.as_ref() {
+            // ApplicationPlan must pass SQLite lineage + OCC before becoming durable ops.
+            let scope = crate::application_kernel::lineage::LineageScope {
+                conversation_id: Some(conversation_id.clone()),
+                project_id: project_id.clone(),
+            };
+            let compiled = {
+                let db = state.db.lock();
+                crate::application_kernel::application_plan::compile_plan_against_db(
+                    &db, plan, &scope,
+                )
+            };
+            match compiled {
+                Ok(validated) => {
+                    let ops = crate::runtime_v2::normalize_operations_for_validation(
+                        &validated.compiled.operations,
+                    );
+                    if !ops.is_empty() {
+                        operations_from_payload = Some(ops);
+                    }
+                }
+                Err(e) => {
+                    state.take_request(&request_key);
+                    if schedule_drain {
+                        schedule_queued_turn_drain(&app, &conversation_id);
+                    }
+                    let msg = e.user_message();
+                    emit_turn(
+                        &app,
+                        on_event.as_ref(),
+                        AgentTurnEvent::Error {
+                            conversation_id: conversation_id.clone(),
+                            message: msg.clone(),
+                        },
+                    );
+                    return Err(CommandError::sanitized(
+                        e.category(),
+                        e.user_message(),
+                        api_key_ref,
+                    ));
+                }
+            }
         } else if let Ok(ops) = parsed.payload.normalized_operations() {
             if !ops.is_empty() {
                 operations_from_payload = Some(ops);

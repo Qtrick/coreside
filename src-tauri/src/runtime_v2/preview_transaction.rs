@@ -643,9 +643,7 @@ fn authorize_preview_state_mutation(
             ));
         };
 
-        if sc.write_policy == "readonly"
-            || sc.write_policy == "user"
-            || sc.write_policy == "system"
+        if sc.write_policy == "readonly" || sc.write_policy == "user" || sc.write_policy == "system"
         {
             return Err(format!(
                 "preview cannot write to {} state key '{k}'",
@@ -1208,9 +1206,7 @@ mod tests {
         );
         assert!(preview.surfaces.is_empty());
         assert!(preview.is_empty());
-        assert!(preview
-            .paint_op(&sample_op("op-prog-2"), |_| None)
-            .is_err());
+        assert!(preview.paint_op(&sample_op("op-prog-2"), |_| None).is_err());
         assert!(preview.accept(sample_op("op-prog-3")).is_err());
     }
 
@@ -1651,7 +1647,10 @@ mod tests {
             "rejected surface.create must not mutate the speculative definition"
         );
         assert_eq!(
-            preview.surface("surf-existing-tool").unwrap().preview_revision,
+            preview
+                .surface("surf-existing-tool")
+                .unwrap()
+                .preview_revision,
             2
         );
     }
@@ -1726,7 +1725,10 @@ mod tests {
             existing_def
         );
         assert_eq!(
-            preview.surface("surf-tool-secure").unwrap().preview_revision,
+            preview
+                .surface("surf-tool-secure")
+                .unwrap()
+                .preview_revision,
             1
         );
     }
@@ -2334,7 +2336,9 @@ mod tests {
             "payload": { "draft": "hijack" }
         }))
         .unwrap();
-        let err = preview.paint_op(&op, |_| None).expect_err("user writePolicy");
+        let err = preview
+            .paint_op(&op, |_| None)
+            .expect_err("user writePolicy");
         assert!(err.contains("user"), "got: {err}");
     }
 }

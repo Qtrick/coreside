@@ -1048,7 +1048,8 @@ pub fn flush_scheduler(
     while let Some(waiting_id) = wait_queue.pop_front() {
         if let Some(deps) = dependents.get(&waiting_id) {
             for dep_id in deps {
-                if !missing_dep_patches.contains(dep_id) && waiting_on_deferred.insert(dep_id.clone())
+                if !missing_dep_patches.contains(dep_id)
+                    && waiting_on_deferred.insert(dep_id.clone())
                 {
                     wait_queue.push_back(dep_id.clone());
                 }
@@ -2014,6 +2015,117 @@ mod tests {
     }
 
     #[test]
+    fn schedule_patches_rejects_suspended_application_without_queueing() {
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use std::collections::HashMap;
+
+        let mut db = test_db();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "SusSched",
+            None,
+        )
+        .unwrap();
+        let surface = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Suspended Schedule Target",
+            &serde_json::json!({
+                "id": "tool-sus-sched",
+                "name": "Suspended Schedule Target",
+                "layout": { "type": "single-column" },
+                "components": []
+            }),
+            &[],
+        )
+        .unwrap();
+
+        upsert_manifest(
+            &mut db,
+            ApplicationManifest {
+                schema_version: "1".into(),
+                application_id: "app-sus-sched".into(),
+                instance_id: "inst-sus".into(),
+                name: "Sus".into(),
+                description: String::new(),
+                version: 1,
+                surfaces: vec![],
+                routes: vec![],
+                data_models: vec![],
+                settings: vec![],
+                capabilities: vec!["coreside.core".into()],
+                permissions: vec![],
+                events: vec![],
+                tests: vec![],
+                search_keywords: vec![],
+                tags: vec![],
+                agent_description: String::new(),
+                project_id: None,
+                conversation_id: None,
+                organization_id: None,
+                ownership: None,
+                application_action_access: vec![],
+                surface_action_access: HashMap::new(),
+                component_action_access: HashMap::new(),
+                action_descriptor_hashes: HashMap::new(),
+            },
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES ('app-sus-sched', ?1, 'Sus', '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                [crate::db::DEFAULT_WORKSPACE_ID],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE application_manifests SET lifecycle_state = 'suspended', health_state = 'suspended'
+                 WHERE application_id = 'app-sus-sched'",
+                [],
+            )
+            .unwrap();
+        crate::runtime_v2::surfaces::bind_surface_tool_id(&mut db, &surface.id, "app-sus-sched")
+            .unwrap();
+
+        let mut op = simple_op("op-sus-sched", vec![]);
+        op.target.surface_id = Some(surface.id.clone());
+        let req = ScheduleRequest {
+            conversation_id: Some(conv.id.clone()),
+            turn_id: Some("turn-sus-sched".into()),
+            surface_id: Some(surface.id.clone()),
+            priority: PatchPriority::ApprovedPersistentChange,
+            operations: vec![op],
+            source_type: "user".into(),
+            from_agent: false,
+            model: None,
+            provider: None,
+        };
+
+        let err = schedule_patches(&mut db, &req, None).unwrap_err();
+        assert!(
+            matches!(err, crate::db::DbError::Invalid(ref msg) if msg.contains("suspended")),
+            "schedule must reject suspended application, got {err:?}"
+        );
+
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM patch_scheduler_items WHERE turn_id = 'turn-sus-sched'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "suspended rejection must not leave scheduler rows queued"
+        );
+    }
+
+    #[test]
     fn schedule_patches_rejects_archived_target_without_queueing() {
         let mut db = test_db();
         let conv = crate::db::create_conversation(
@@ -2388,15 +2500,7 @@ mod tests {
         assert_eq!(scheduled[0].status, "deferred_target_pending");
         assert_eq!(scheduled[1].status, "queued");
 
-        let _ = flush_scheduler(
-            &mut db,
-            &mut None,
-            Some(&conv.id),
-            "user",
-            false,
-            None,
-        )
-        .unwrap();
+        let _ = flush_scheduler(&mut db, &mut None, Some(&conv.id), "user", false, None).unwrap();
 
         let nav = get_scheduled_patch(&db, &scheduled[0].id).unwrap();
         assert_eq!(
@@ -2566,6 +2670,9 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(count, 0, "rejected renderer op must not leave a deferred row");
+        assert_eq!(
+            count, 0,
+            "rejected renderer op must not leave a deferred row"
+        );
     }
 }

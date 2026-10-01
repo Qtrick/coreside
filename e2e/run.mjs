@@ -98,6 +98,12 @@ const JOURNEYS = [
     coverage: "full",
   },
   {
+    id: 23,
+    name: "habit-tracker-application",
+    suite: "habit-tracker-application",
+    coverage: "full",
+  },
+  {
     id: 15,
     name: "first-run-welcome",
     suite: "first-run-welcome",
@@ -288,6 +294,8 @@ runSuite("progressive-preview-cancel", { seed: "existing" });
 runSuite("generated-task-tracker");
 // Application evolution: create → add due dates via ApplicationPlan kind=evolve.
 runSuite("application-evolution");
+// Habit Tracker: clean profile, ApplicationPlan mock path (Journey A general create).
+runSuite("habit-tracker-application");
 
 // Seeded local AI privacy disclosure profile.
 runSuite("local-ai-privacy", { seed: "local" });

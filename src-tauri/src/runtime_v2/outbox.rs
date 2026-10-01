@@ -647,7 +647,8 @@ mod tests {
     #[test]
     fn lookup_rejects_when_scope_bound_to_different_hash() {
         let dir = tempdir().unwrap();
-        let db = crate::db::Database::open_path(&dir.path().join("idem-lookup-conflict.db")).unwrap();
+        let db =
+            crate::db::Database::open_path(&dir.path().join("idem-lookup-conflict.db")).unwrap();
         store_idempotency_outcome(
             &db,
             "c|t|shared-key",

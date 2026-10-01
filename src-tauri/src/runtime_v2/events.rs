@@ -542,7 +542,11 @@ pub fn resolve_authoritative_event_target(
     fallback_conversation_id: Option<&str>,
     fallback_project_id: Option<&str>,
 ) -> Result<EventRef, String> {
-    if let Some(sid) = claimed.surface_id.as_deref().filter(|s| !s.trim().is_empty()) {
+    if let Some(sid) = claimed
+        .surface_id
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+    {
         let surface = super::surfaces::get_surface(db, sid)
             .map_err(|e| format!("event target surface '{sid}' not found: {e}"))?;
         if surface.archived || surface.lifecycle_state == "archived" {
@@ -649,9 +653,9 @@ fn registered_action_handler_result(
         ActionOutcome::Error { message, code } => Err(format!(
             "action '{action_name}' failed with {code}: {message}"
         )),
-        ActionOutcome::Blocked { reason, .. } => Err(format!(
-            "action '{action_name}' was blocked: {reason}"
-        )),
+        ActionOutcome::Blocked { reason, .. } => {
+            Err(format!("action '{action_name}' was blocked: {reason}"))
+        }
     }
 }
 
@@ -1525,19 +1529,13 @@ mod tests {
     fn resolve_authoritative_event_target_sets_manifest_backed_application_id() {
         use crate::ai::{ToolComponent, ToolDefinition};
         use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
-        use crate::db::{apply_tool_change, create_conversation, DEFAULT_WORKSPACE_ID, Database};
+        use crate::db::{apply_tool_change, create_conversation, Database, DEFAULT_WORKSPACE_ID};
         use crate::runtime_v2::surfaces::upsert_surface_from_tool;
         use std::collections::HashMap;
 
         let dir = tempfile::tempdir().unwrap();
         let mut db = Database::open_path(&dir.path().join("auth_app.db")).unwrap();
-        let conv = create_conversation(
-            &mut db,
-            DEFAULT_WORKSPACE_ID,
-            "AuthApp",
-            None,
-        )
-        .unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "AuthApp", None).unwrap();
         let tool_id = "app-manifest-tool";
         let tool = ToolDefinition {
             id: tool_id.into(),
@@ -1554,15 +1552,8 @@ mod tests {
             }],
             ..Default::default()
         };
-        let saved = apply_tool_change(
-            &mut db,
-            DEFAULT_WORKSPACE_ID,
-            &tool,
-            "create",
-            None,
-            "seed",
-        )
-        .unwrap();
+        let saved = apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "seed")
+            .unwrap();
         let surface = upsert_surface_from_tool(
             &mut db,
             &saved.definition,
@@ -1626,19 +1617,13 @@ mod tests {
     fn invoke_registered_action_denies_cross_application_handler() {
         use crate::ai::{ToolComponent, ToolDefinition};
         use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
-        use crate::db::{apply_tool_change, create_conversation, DEFAULT_WORKSPACE_ID, Database};
+        use crate::db::{apply_tool_change, create_conversation, Database, DEFAULT_WORKSPACE_ID};
         use crate::runtime_v2::surfaces::upsert_surface_from_tool;
         use std::collections::HashMap;
 
         let dir = tempfile::tempdir().unwrap();
         let mut db = Database::open_path(&dir.path().join("invoke_app.db")).unwrap();
-        let conv = create_conversation(
-            &mut db,
-            DEFAULT_WORKSPACE_ID,
-            "InvokeApp",
-            None,
-        )
-        .unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "InvokeApp", None).unwrap();
         let tool_id = "app-real";
         let tool = ToolDefinition {
             id: tool_id.into(),
@@ -1655,15 +1640,8 @@ mod tests {
             }],
             ..Default::default()
         };
-        let saved = apply_tool_change(
-            &mut db,
-            DEFAULT_WORKSPACE_ID,
-            &tool,
-            "create",
-            None,
-            "seed",
-        )
-        .unwrap();
+        let saved = apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "seed")
+            .unwrap();
         let surface = upsert_surface_from_tool(
             &mut db,
             &saved.definition,

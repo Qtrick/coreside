@@ -237,7 +237,8 @@ impl GeminiProvider {
                         "changeSummary": { "type": "string" }
                     }
                 },
-                "diagnostics": { "type": "object" }
+                "diagnostics": { "type": "object" },
+                "applicationPlan": crate::application_kernel::application_plan::application_plan_json_schema_gemini()
             },
             "required": ["schemaVersion", "assistantMessage", "responseType"]
         })
@@ -946,5 +947,23 @@ mod tests {
             }]
         });
         assert!(GeminiProvider::safety_failure(&ok).is_none());
+    }
+
+    #[test]
+    fn response_schema_includes_application_plan() {
+        let schema = GeminiProvider::response_schema();
+        let plan = schema["properties"]["applicationPlan"]
+            .as_object()
+            .expect("applicationPlan in Gemini responseSchema");
+        assert_eq!(plan.get("type").and_then(|v| v.as_str()), Some("object"));
+        let required = plan["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v.as_str() == Some("kind")));
+        assert!(required.iter().any(|v| v.as_str() == Some("intents")));
+        // Gemini must stay shallow / non-nullable at the plan root.
+        assert!(plan
+            .get("properties")
+            .unwrap()
+            .get("baseRevision")
+            .is_some());
     }
 }

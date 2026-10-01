@@ -1188,6 +1188,40 @@ body > .window-overlay-root > *,
   font-size: 0.95rem;
 }
 
+.proposal-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  background: var(--core-surface-secondary, color-mix(in srgb, var(--border) 40%, transparent));
+  color: var(--core-text-muted, var(--muted-foreground));
+  border: 1px solid var(--border);
+}
+
+.proposal-status-badge.active {
+  color: var(--core-accent-primary, var(--accent-primary));
+  border-color: color-mix(in srgb, var(--core-accent-primary, var(--accent-primary)) 35%, var(--border));
+  background: color-mix(in srgb, var(--core-accent-primary, var(--accent-primary)) 8%, transparent);
+}
+
+.proposal-status-badge.success {
+  color: var(--core-success, #10b981);
+  border-color: color-mix(in srgb, var(--core-success, #10b981) 40%, var(--border));
+}
+
+.proposal-status-badge.warning {
+  color: var(--core-warning, #d97706);
+  border-color: color-mix(in srgb, var(--core-warning, #d97706) 40%, var(--border));
+}
+
+.proposal-status-badge.error {
+  color: var(--destructive, #dc2626);
+  border-color: color-mix(in srgb, var(--destructive, #dc2626) 40%, var(--border));
+}
+
 .preview-actions {
   display: flex;
   gap: var(--space-2);

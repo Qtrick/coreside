@@ -8,6 +8,7 @@ export function kernelProposalFromMetadata(
   risk: string;
   operations: unknown[];
   status: string;
+  preservationSummary: string;
 } | null {
   if (!metadata || typeof metadata !== "object") return null;
   const rv = metadata.runtimeV2;
@@ -23,6 +24,13 @@ export function kernelProposalFromMetadata(
       : typeof metadata.kernelProposalStatus === "string"
         ? metadata.kernelProposalStatus
         : "pending";
+  const preservationSummary =
+    typeof obj.preservationSummary === "string"
+      ? obj.preservationSummary
+      : typeof obj.preservedSummary === "string"
+        ? obj.preservedSummary
+        : "";
+
   return {
     proposalId,
     summary:
@@ -32,5 +40,6 @@ export function kernelProposalFromMetadata(
     risk: typeof obj.risk === "string" ? obj.risk : "strong",
     operations,
     status,
+    preservationSummary,
   };
 }

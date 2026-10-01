@@ -12,6 +12,7 @@ pub mod data;
 pub mod errors;
 pub mod impact;
 pub mod lifecycle;
+pub mod lineage;
 pub mod manifest;
 pub mod packages;
 pub mod permissions;
@@ -454,10 +455,9 @@ pub fn apply_change(
                 lookup_idempotency_outcome(db, &scope, &request_hash).map_err(KernelError::Db)?
             {
                 if outcome == "committed" {
-                    let apply: Option<ApplyResult> = serde_json::from_value(
-                        prior.get("apply").cloned().unwrap_or(Value::Null),
-                    )
-                    .ok();
+                    let apply: Option<ApplyResult> =
+                        serde_json::from_value(prior.get("apply").cloned().unwrap_or(Value::Null))
+                            .ok();
                     let recovered_ok = apply.as_ref().is_some_and(|a| {
                         a.transaction.status == "applied" && a.conflicts.is_empty()
                     });
@@ -1350,7 +1350,8 @@ mod tests {
     #[test]
     fn same_idempotency_key_different_payload_conflicts() {
         let mut db = test_db();
-        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "IdemConflict", None).unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "IdemConflict", None).unwrap();
         let def = json!({
             "id": "d",
             "name": "Inline",
@@ -1557,11 +1558,9 @@ mod tests {
         assert_eq!(state.get("x"), Some(&json!(42)));
         let outcome_rows: i64 = db
             .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM apply_idempotency_outcomes",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM apply_idempotency_outcomes", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(outcome_rows, 1);
         let applied_txns: i64 = db
@@ -1909,13 +1908,9 @@ mod tests {
         let proposal_id = change_res
             .proposal_id
             .expect("agent surface.create must produce proposal");
-        let result = decide_proposal(&mut db, None, &proposal_id, true)
-            .expect("user approve proposal");
-        assert!(
-            result.is_committed(),
-            "conflicts: {:?}",
-            result.conflicts
-        );
+        let result =
+            decide_proposal(&mut db, None, &proposal_id, true).expect("user approve proposal");
+        assert!(result.is_committed(), "conflicts: {:?}", result.conflicts);
 
         let app_id = "tool-task-tracker";
         assert!(crate::application_kernel::manifest::get_manifest(&db, app_id).is_ok());
@@ -2025,8 +2020,8 @@ mod tests {
         use tokio_util::sync::CancellationToken;
 
         let mut db = test_db();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Task Tracker Evolve", None).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Task Tracker Evolve", None)
+            .unwrap();
 
         let provider = MockAiProvider::new();
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -2185,7 +2180,10 @@ mod tests {
         assert!(
             def.components.iter().any(|c| c.id == "tm-new-due"),
             "tm-new-due must be in persisted tool definition; ids={:?}",
-            def.components.iter().map(|c| c.id.as_str()).collect::<Vec<_>>()
+            def.components
+                .iter()
+                .map(|c| c.id.as_str())
+                .collect::<Vec<_>>()
         );
         assert!(
             def.components.iter().any(|c| c.id == "tm-new-title"),
@@ -2262,16 +2260,14 @@ mod tests {
         );
         let result = decide_proposal(&mut db, None, &proposal_id, true)
             .expect("decide_proposal must succeed when surface.create precedes data.model_upsert");
-        assert!(
-            result.is_committed(),
-            "conflicts: {:?}",
-            result.conflicts
-        );
+        assert!(result.is_committed(), "conflicts: {:?}", result.conflicts);
         assert!(
             crate::application_kernel::data::get_model(&db, "tool-task-tracker", "tasks").is_ok(),
             "tasks model must exist after ordered decide_proposal apply"
         );
-        assert!(crate::application_kernel::manifest::get_manifest(&db, "tool-task-tracker").is_ok());
+        assert!(
+            crate::application_kernel::manifest::get_manifest(&db, "tool-task-tracker").is_ok()
+        );
     }
 
     /// Dirty form draft state must survive agent evolve (stable value_keys).

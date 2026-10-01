@@ -96,11 +96,8 @@ pub fn project_surface_state(definition: &Value, state: &Value, audience: Audien
         // public_view must only see engine-owned keys — never incidental rest —
         // so top-level restricted rest keys cannot sneak in via undeclared-key pass-through.
         let public_owned = def.public_view(&Value::Object(owned_state));
-        let public_rest = project_state_with_contracts(
-            &Value::Object(rest),
-            &rest_contracts,
-            strict_rest,
-        );
+        let public_rest =
+            project_state_with_contracts(&Value::Object(rest), &rest_contracts, strict_rest);
         return merge_objects(&public_owned, &public_rest);
     }
     project_state_with_contracts(state, &rest_contracts, strict_rest)
@@ -565,7 +562,10 @@ mod tests {
         });
         let renderer = project_surface_state(&definition, &state, Audience::Renderer);
         assert_eq!(renderer["theme"], "dark");
-        assert_eq!(renderer["incidentalSecret"], "sk-live-should-not-reach-model");
+        assert_eq!(
+            renderer["incidentalSecret"],
+            "sk-live-should-not-reach-model"
+        );
         for audience in [Audience::Model, Audience::History] {
             let public = project_surface_state(&definition, &state, audience);
             assert_eq!(public["theme"], "dark");

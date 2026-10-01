@@ -476,7 +476,11 @@ impl SoftwareDocument {
         let mut inferred: Vec<ActionContract> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
 
-        fn walk(comp: &ToolComponent, inferred: &mut Vec<ActionContract>, seen: &mut HashSet<String>) {
+        fn walk(
+            comp: &ToolComponent,
+            inferred: &mut Vec<ActionContract>,
+            seen: &mut HashSet<String>,
+        ) {
             if let Some(ref actions) = comp.actions {
                 for action in actions {
                     if let ActionDefinition::InvokeRegisteredAction {
@@ -486,8 +490,7 @@ impl SoftwareDocument {
                         ..
                     } = action
                     {
-                        let act_id =
-                            format!("{}-{}", comp.id, action_name.replace('.', "-"));
+                        let act_id = format!("{}-{}", comp.id, action_name.replace('.', "-"));
                         if !seen.insert(act_id.clone()) {
                             continue;
                         }
@@ -496,10 +499,7 @@ impl SoftwareDocument {
                             action_name: action_name.clone(),
                             component_id: Some(comp.id.clone()),
                             descriptor_hash: None,
-                            description: Some(format!(
-                                "Inferred from component '{}'",
-                                comp.id
-                            )),
+                            description: Some(format!("Inferred from component '{}'", comp.id)),
                             result_key: result_key.clone(),
                             input_from_state: input_from_state.clone(),
                         });
@@ -3555,7 +3555,9 @@ mod tests {
             doc.action_contracts
         );
         assert!(
-            doc.state_contracts.iter().any(|sc| sc.key == "newTaskTitle"),
+            doc.state_contracts
+                .iter()
+                .any(|sc| sc.key == "newTaskTitle"),
             "expected newTaskTitle state contract"
         );
         assert!(
@@ -3572,29 +3574,27 @@ mod tests {
             name: "TT".into(),
             description: "d".into(),
             layout: json!({"type": "dashboard"}),
-            components: vec![
-                ToolComponent {
-                    id: "tm-list".into(),
-                    component_type: "dataTable".into(),
-                    value_key: None,
-                    props: Some(json!({
-                        "rowsKey": "tasksResult",
-                        "dataSource": {
-                            "actionName": "local_data.query",
-                            "input": { "modelId": "tasks", "limit": 100 },
-                            "resultKey": "tasksResult"
-                        }
-                    })),
-                    actions: Some(vec![ActionDefinition::InvokeRegisteredAction {
-                        action_name: "local_data.query".into(),
-                        input: Some(json!({"modelId": "tasks", "limit": 100})),
-                        input_from_state: None,
-                        component_id: None,
-                        result_key: Some("tasksResult".into()),
-                    }]),
-                    ..Default::default()
-                },
-            ],
+            components: vec![ToolComponent {
+                id: "tm-list".into(),
+                component_type: "dataTable".into(),
+                value_key: None,
+                props: Some(json!({
+                    "rowsKey": "tasksResult",
+                    "dataSource": {
+                        "actionName": "local_data.query",
+                        "input": { "modelId": "tasks", "limit": 100 },
+                        "resultKey": "tasksResult"
+                    }
+                })),
+                actions: Some(vec![ActionDefinition::InvokeRegisteredAction {
+                    action_name: "local_data.query".into(),
+                    input: Some(json!({"modelId": "tasks", "limit": 100})),
+                    input_from_state: None,
+                    component_id: None,
+                    result_key: Some("tasksResult".into()),
+                }]),
+                ..Default::default()
+            }],
             ..Default::default()
         };
         let doc = SoftwareDocument::from_tool_definition(&tool);

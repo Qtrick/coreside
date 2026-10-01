@@ -806,11 +806,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("from034-idem-hash.db");
         {
-            let db = Database::open_path_through(
-                &path,
-                "034_conversation_sync_cursors_per_client",
-            )
-            .unwrap();
+            let db = Database::open_path_through(&path, "034_conversation_sync_cursors_per_client")
+                .unwrap();
             assert_eq!(db.applied_migrations().unwrap().len(), 34);
             for (scope, txn) in [("c|t|k", "txn"), ("c|t|k2-unbound", "txn-b")] {
                 db.conn()

@@ -19,10 +19,14 @@ src-tauri/target/
 .env.local
 .env.*.local
 
-# MCP config may contain provider keys (e.g. Supabase)
+# MCP config may contain provider keys / PATs (never commit)
 mcp.json
 .mcp.json
 .cursor/mcp.json
+**/.cursor/mcp.json
+**/mcp.json
+!**/.cursor/mcp.json.example
+!**/mcp.json.example
 
 # Editor / OS
 .DS_Store

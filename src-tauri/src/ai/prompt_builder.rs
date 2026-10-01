@@ -140,6 +140,9 @@ pub struct ProjectPromptContext {
 pub struct ApplicationStatePromptSlice {
     pub tool_id: String,
     pub tool_name: String,
+    pub surface_id: Option<String>,
+    pub definition_revision: Option<i64>,
+    pub state_revision: Option<i64>,
     pub projected_state: serde_json::Value,
     /// Compact data-model catalog for this application (ids + field names only).
     pub data_models: Vec<serde_json::Value>,
@@ -162,6 +165,17 @@ pub fn format_application_state_prompt(slices: &[ApplicationStatePromptSlice]) -
          Prefer precise state.patch / component updates over full replace.\n",
     );
     for slice in slices.iter().take(MAX_STATE_SLICES_IN_PROMPT) {
+        let meta = serde_json::json!({
+            "applicationId": slice.tool_id,
+            "surfaceId": slice.surface_id,
+            "definitionRevision": slice.definition_revision,
+            "stateRevision": slice.state_revision,
+        });
+        let meta_json = serde_json::to_string_pretty(&meta).unwrap_or_else(|_| "{}".into());
+        block.push_str(&format!(
+            "\n### {} (`{}`)\n#### Identity / revisions (required for evolve.baseRevision)\n```json\n{meta_json}\n```\n",
+            slice.tool_name, slice.tool_id
+        ));
         let raw =
             serde_json::to_string_pretty(&slice.projected_state).unwrap_or_else(|_| "{}".into());
         let mut json = crate::security::redact_secrets(&raw, None);
@@ -174,13 +188,10 @@ pub fn format_application_state_prompt(slices: &[ApplicationStatePromptSlice]) -
             json.truncate(end);
             json.push_str("…(truncated)");
         }
-        block.push_str(&format!(
-            "\n### {} (`{}`)\n```json\n{json}\n```\n",
-            slice.tool_name, slice.tool_id
-        ));
+        block.push_str(&format!("#### Projected state\n```json\n{json}\n```\n"));
         if !slice.data_models.is_empty() {
-            let models_raw = serde_json::to_string_pretty(&slice.data_models)
-                .unwrap_or_else(|_| "[]".into());
+            let models_raw =
+                serde_json::to_string_pretty(&slice.data_models).unwrap_or_else(|_| "[]".into());
             let models_json = crate::security::redact_secrets(&models_raw, None);
             block.push_str(&format!(
                 "#### Data models (call data.model_upsert before record CRUD if missing)\n\
@@ -437,6 +448,9 @@ mod tests {
         let slices = vec![ApplicationStatePromptSlice {
             tool_id: "task-tracker".into(),
             tool_name: "Task Tracker".into(),
+            surface_id: Some("surf-task-tracker".into()),
+            definition_revision: Some(2),
+            state_revision: Some(5),
             projected_state: serde_json::json!({ "tasks": [{"title": "Buy milk"}] }),
             data_models: vec![serde_json::json!({
                 "modelId": "tasks",
@@ -449,6 +463,7 @@ mod tests {
         assert!(p.contains("Current application state (model-visible)"));
         assert!(p.contains("Task Tracker"));
         assert!(p.contains("Buy milk"));
+        assert!(p.contains("definitionRevision"));
         assert!(p.contains("data.model_upsert"));
         assert!(p.contains("\"modelId\": \"tasks\""));
     }
@@ -458,6 +473,9 @@ mod tests {
         let slices = vec![ApplicationStatePromptSlice {
             tool_id: "notes".into(),
             tool_name: "Notes".into(),
+            surface_id: None,
+            definition_revision: None,
+            state_revision: None,
             projected_state: serde_json::json!({
                 "title": "ok",
                 "token": "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF"
@@ -475,6 +493,9 @@ mod tests {
         let slices = vec![ApplicationStatePromptSlice {
             tool_id: "cfg".into(),
             tool_name: "Config".into(),
+            surface_id: None,
+            definition_revision: None,
+            state_revision: None,
             projected_state: serde_json::json!({ "ok": true }),
             data_models: vec![serde_json::json!({
                 "modelId": "secrets",
@@ -505,6 +526,9 @@ mod tests {
         let slices = vec![ApplicationStatePromptSlice {
             tool_id: "wide".into(),
             tool_name: "Wide".into(),
+            surface_id: None,
+            definition_revision: None,
+            state_revision: None,
             projected_state: serde_json::json!({ "note": big }),
             data_models: vec![],
         }];

@@ -5,12 +5,12 @@
 
 use serde_json::json;
 
+use crate::ai::response_schema::{ActionDefinition, ToolComponent, ToolDefinition};
 use crate::application_kernel::application_plan::{
     ApplicationPlan, ApplicationPlanKind, PlanStep, APPLICATION_PLAN_SCHEMA_VERSION,
 };
 use crate::application_kernel::compiler::ChangeIntent;
 use crate::application_kernel::data::{DataField, DataModelDefinition};
-use crate::ai::response_schema::{ActionDefinition, ToolComponent, ToolDefinition};
 
 fn tasks_model_v1() -> DataModelDefinition {
     DataModelDefinition {
@@ -37,11 +37,7 @@ fn tasks_model_v1() -> DataModelDefinition {
                 field_type: "enum".into(),
                 required: false,
                 default: Some(json!("todo")),
-                enum_values: Some(vec![
-                    "todo".into(),
-                    "in_progress".into(),
-                    "done".into(),
-                ]),
+                enum_values: Some(vec!["todo".into(), "in_progress".into(), "done".into()]),
             },
             DataField {
                 field_id: "completed".into(),
@@ -71,8 +67,7 @@ fn task_tracker_tool_v1() -> ToolDefinition {
     ToolDefinition {
         id: "tool-task-tracker".into(),
         name: "Task Tracker".into(),
-        description: "Track tasks with title, priority, status, and durable local records."
-            .into(),
+        description: "Track tasks with title, priority, status, and durable local records.".into(),
         layout: json!({ "type": "dashboard", "columns": 2, "density": "normal" }),
         components: vec![
             ToolComponent {
@@ -327,6 +322,649 @@ fn task_tracker_tool_v2_due_dates() -> ToolDefinition {
     tool
 }
 
+fn habits_model_v1() -> DataModelDefinition {
+    DataModelDefinition {
+        model_id: "habits".into(),
+        display_name: "Habits".into(),
+        schema_version: 1,
+        fields: vec![
+            DataField {
+                field_id: "title".into(),
+                field_type: "text".into(),
+                required: true,
+                default: None,
+                enum_values: None,
+            },
+            DataField {
+                field_id: "streak".into(),
+                field_type: "integer".into(),
+                required: false,
+                default: Some(json!(0)),
+                enum_values: None,
+            },
+            DataField {
+                field_id: "lastDone".into(),
+                field_type: "date".into(),
+                required: false,
+                default: None,
+                enum_values: None,
+            },
+        ],
+    }
+}
+
+fn habit_tracker_tool_v1() -> ToolDefinition {
+    ToolDefinition {
+        id: "tool-habit-tracker".into(),
+        name: "Habit Tracker".into(),
+        description: "Track habits with streaks and last completion date.".into(),
+        layout: json!({ "type": "single-column", "density": "normal" }),
+        components: vec![
+            ToolComponent {
+                id: "hb-heading".into(),
+                component_type: "heading".into(),
+                props: Some(json!({ "text": "Habit Tracker", "level": 1 })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "hb-list".into(),
+                component_type: "dataTable".into(),
+                props: Some(json!({
+                    "columns": [
+                        { "id": "title", "accessor": "title", "header": "Habit" },
+                        { "id": "streak", "accessor": "streak", "header": "Streak" },
+                        { "id": "lastDone", "accessor": "lastDone", "header": "Last Done" }
+                    ],
+                    "rowsKey": "habitsResult",
+                    "selectionKey": "selectedHabitId",
+                    "dataSource": {
+                        "actionName": "local_data.query",
+                        "input": { "modelId": "habits", "limit": 100 },
+                        "resultKey": "habitsResult"
+                    }
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "hb-new-title".into(),
+                component_type: "textInput".into(),
+                value_key: Some("newHabitTitle".into()),
+                props: Some(json!({
+                    "label": "New Habit",
+                    "placeholder": "Drink water"
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "hb-add-btn".into(),
+                component_type: "button".into(),
+                props: Some(json!({ "label": "Add Habit" })),
+                actions: Some(vec![
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.write".into(),
+                        input: Some(json!({ "modelId": "habits", "data": { "streak": 0 } })),
+                        input_from_state: Some(
+                            [("data.title".into(), "newHabitTitle".into())]
+                                .into_iter()
+                                .collect(),
+                        ),
+                        component_id: None,
+                        result_key: None,
+                    },
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.query".into(),
+                        input: Some(json!({ "modelId": "habits", "limit": 100 })),
+                        input_from_state: None,
+                        component_id: None,
+                        result_key: Some("habitsResult".into()),
+                    },
+                    ActionDefinition::SetValue {
+                        target: "newHabitTitle".into(),
+                        value: json!(""),
+                    },
+                ]),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    }
+}
+
+/// Canonical create plan for Habit Tracker (provider-contract fixture).
+pub fn habit_tracker_create_plan() -> ApplicationPlan {
+    ApplicationPlan {
+        schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+        plan_id: "plan-habit-tracker-create".into(),
+        kind: ApplicationPlanKind::Create,
+        summary: "Create Habit Tracker with habits model and list UI".into(),
+        application_id: Some("tool-habit-tracker".into()),
+        base_revision: None,
+        steps: vec![
+            PlanStep {
+                id: "1".into(),
+                description: "Upsert habits data model (title, streak, lastDone)".into(),
+            },
+            PlanStep {
+                id: "2".into(),
+                description: "Create Habit Tracker surface with table and add form".into(),
+            },
+        ],
+        intents: vec![
+            ChangeIntent::CreateSurface {
+                tool: habit_tracker_tool_v1(),
+                change_summary: Some("Create Habit Tracker with habits model".into()),
+            },
+            ChangeIntent::UpsertDataModel {
+                application_id: "tool-habit-tracker".into(),
+                model: habits_model_v1(),
+            },
+        ],
+        tests: vec![],
+        diagnostics: Some(json!({ "fixture": "habit_tracker_plan" })),
+    }
+}
+
+fn expenses_model_v1() -> DataModelDefinition {
+    DataModelDefinition {
+        model_id: "expenses".into(),
+        display_name: "Expenses".into(),
+        schema_version: 1,
+        fields: vec![
+            DataField {
+                field_id: "amount".into(),
+                field_type: "decimal".into(),
+                required: true,
+                default: None,
+                enum_values: None,
+            },
+            DataField {
+                field_id: "category".into(),
+                field_type: "enum".into(),
+                required: false,
+                default: Some(json!("other")),
+                enum_values: Some(vec![
+                    "food".into(),
+                    "travel".into(),
+                    "supplies".into(),
+                    "services".into(),
+                    "other".into(),
+                ]),
+            },
+            DataField {
+                field_id: "note".into(),
+                field_type: "text".into(),
+                required: false,
+                default: None,
+                enum_values: None,
+            },
+        ],
+    }
+}
+
+fn budget_tracker_tool_v1() -> ToolDefinition {
+    ToolDefinition {
+        id: "tool-budget-tracker".into(),
+        name: "Budget Tracker".into(),
+        description: "Log expenses with amount, category, and notes.".into(),
+        layout: json!({ "type": "single-column", "density": "normal" }),
+        components: vec![
+            ToolComponent {
+                id: "bg-heading".into(),
+                component_type: "heading".into(),
+                props: Some(json!({ "text": "Budget Tracker", "level": 1 })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "bg-table".into(),
+                component_type: "dataTable".into(),
+                props: Some(json!({
+                    "columns": [
+                        { "id": "amount", "accessor": "amount", "header": "Amount" },
+                        { "id": "category", "accessor": "category", "header": "Category" },
+                        { "id": "note", "accessor": "note", "header": "Note" }
+                    ],
+                    "rowsKey": "expensesResult",
+                    "selectionKey": "selectedExpenseId",
+                    "dataSource": {
+                        "actionName": "local_data.query",
+                        "input": { "modelId": "expenses", "limit": 200 },
+                        "resultKey": "expensesResult"
+                    }
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "bg-amount".into(),
+                component_type: "textInput".into(),
+                value_key: Some("newAmount".into()),
+                props: Some(json!({
+                    "label": "Amount",
+                    "placeholder": "25.00"
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "bg-category".into(),
+                component_type: "select".into(),
+                value_key: Some("newCategory".into()),
+                props: Some(json!({
+                    "label": "Category",
+                    "options": [
+                        { "label": "Food", "value": "food" },
+                        { "label": "Travel", "value": "travel" },
+                        { "label": "Supplies", "value": "supplies" },
+                        { "label": "Services", "value": "services" },
+                        { "label": "Other", "value": "other" }
+                    ]
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "bg-note".into(),
+                component_type: "textInput".into(),
+                value_key: Some("newNote".into()),
+                props: Some(json!({
+                    "label": "Note",
+                    "placeholder": "Optional description"
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "bg-add-btn".into(),
+                component_type: "button".into(),
+                props: Some(json!({ "label": "Record Expense" })),
+                actions: Some(vec![
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.write".into(),
+                        input: Some(json!({ "modelId": "expenses", "data": {} })),
+                        input_from_state: Some(
+                            [
+                                ("data.amount".into(), "newAmount".into()),
+                                ("data.category".into(), "newCategory".into()),
+                                ("data.note".into(), "newNote".into()),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        ),
+                        component_id: None,
+                        result_key: None,
+                    },
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.query".into(),
+                        input: Some(json!({ "modelId": "expenses", "limit": 200 })),
+                        input_from_state: None,
+                        component_id: None,
+                        result_key: Some("expensesResult".into()),
+                    },
+                    ActionDefinition::SetValue {
+                        target: "newAmount".into(),
+                        value: json!(""),
+                    },
+                    ActionDefinition::SetValue {
+                        target: "newNote".into(),
+                        value: json!(""),
+                    },
+                ]),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    }
+}
+
+/// Canonical create plan for Budget Tracker (provider-contract fixture).
+pub fn budget_tracker_create_plan() -> ApplicationPlan {
+    ApplicationPlan {
+        schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+        plan_id: "plan-budget-tracker-create".into(),
+        kind: ApplicationPlanKind::Create,
+        summary: "Create Budget Tracker with expenses model and logging UI".into(),
+        application_id: Some("tool-budget-tracker".into()),
+        base_revision: None,
+        steps: vec![
+            PlanStep {
+                id: "1".into(),
+                description: "Upsert expenses data model (amount, category, note)".into(),
+            },
+            PlanStep {
+                id: "2".into(),
+                description: "Create Budget Tracker surface with table and entry form".into(),
+            },
+        ],
+        intents: vec![
+            ChangeIntent::CreateSurface {
+                tool: budget_tracker_tool_v1(),
+                change_summary: Some("Create Budget Tracker with expenses model".into()),
+            },
+            ChangeIntent::UpsertDataModel {
+                application_id: "tool-budget-tracker".into(),
+                model: expenses_model_v1(),
+            },
+        ],
+        tests: vec![],
+        diagnostics: Some(json!({ "fixture": "budget_tracker_plan" })),
+    }
+}
+
+fn journal_entries_model_v1() -> DataModelDefinition {
+    DataModelDefinition {
+        model_id: "entries".into(),
+        display_name: "Journal Entries".into(),
+        schema_version: 1,
+        fields: vec![
+            DataField {
+                field_id: "body".into(),
+                field_type: "text".into(),
+                required: true,
+                default: None,
+                enum_values: None,
+            },
+            DataField {
+                field_id: "mood".into(),
+                field_type: "enum".into(),
+                required: false,
+                default: None,
+                enum_values: Some(vec![
+                    "great".into(),
+                    "good".into(),
+                    "okay".into(),
+                    "low".into(),
+                    "rough".into(),
+                ]),
+            },
+        ],
+    }
+}
+
+fn journal_tool_v1() -> ToolDefinition {
+    ToolDefinition {
+        id: "tool-journal".into(),
+        name: "Journal".into(),
+        description: "Personal journal with optional mood tags.".into(),
+        layout: json!({ "type": "single-column", "density": "comfortable" }),
+        components: vec![
+            ToolComponent {
+                id: "jn-heading".into(),
+                component_type: "heading".into(),
+                props: Some(json!({ "text": "Journal", "level": 1 })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "jn-list".into(),
+                component_type: "dataTable".into(),
+                props: Some(json!({
+                    "columns": [
+                        { "id": "body", "accessor": "body", "header": "Entry" },
+                        { "id": "mood", "accessor": "mood", "header": "Mood" }
+                    ],
+                    "rowsKey": "entriesResult",
+                    "selectionKey": "selectedEntryId",
+                    "dataSource": {
+                        "actionName": "local_data.query",
+                        "input": { "modelId": "entries", "limit": 100 },
+                        "resultKey": "entriesResult"
+                    }
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "jn-body".into(),
+                component_type: "textInput".into(),
+                value_key: Some("newEntryBody".into()),
+                props: Some(json!({
+                    "label": "New Entry",
+                    "placeholder": "What happened today?"
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "jn-mood".into(),
+                component_type: "select".into(),
+                value_key: Some("newEntryMood".into()),
+                props: Some(json!({
+                    "label": "Mood (optional)",
+                    "options": [
+                        { "label": "—", "value": "" },
+                        { "label": "Great", "value": "great" },
+                        { "label": "Good", "value": "good" },
+                        { "label": "Okay", "value": "okay" },
+                        { "label": "Low", "value": "low" },
+                        { "label": "Rough", "value": "rough" }
+                    ]
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "jn-add-btn".into(),
+                component_type: "button".into(),
+                props: Some(json!({ "label": "Save Entry" })),
+                actions: Some(vec![
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.write".into(),
+                        input: Some(json!({ "modelId": "entries", "data": {} })),
+                        input_from_state: Some(
+                            [
+                                ("data.body".into(), "newEntryBody".into()),
+                                ("data.mood".into(), "newEntryMood".into()),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        ),
+                        component_id: None,
+                        result_key: None,
+                    },
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.query".into(),
+                        input: Some(json!({ "modelId": "entries", "limit": 100 })),
+                        input_from_state: None,
+                        component_id: None,
+                        result_key: Some("entriesResult".into()),
+                    },
+                    ActionDefinition::SetValue {
+                        target: "newEntryBody".into(),
+                        value: json!(""),
+                    },
+                ]),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    }
+}
+
+/// Canonical create plan for Journal (provider-contract fixture).
+pub fn journal_create_plan() -> ApplicationPlan {
+    ApplicationPlan {
+        schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+        plan_id: "plan-journal-create".into(),
+        kind: ApplicationPlanKind::Create,
+        summary: "Create Journal with entries model and save UI".into(),
+        application_id: Some("tool-journal".into()),
+        base_revision: None,
+        steps: vec![
+            PlanStep {
+                id: "1".into(),
+                description: "Upsert entries data model (body, optional mood)".into(),
+            },
+            PlanStep {
+                id: "2".into(),
+                description: "Create Journal surface with list and compose form".into(),
+            },
+        ],
+        intents: vec![
+            ChangeIntent::CreateSurface {
+                tool: journal_tool_v1(),
+                change_summary: Some("Create Journal with entries model".into()),
+            },
+            ChangeIntent::UpsertDataModel {
+                application_id: "tool-journal".into(),
+                model: journal_entries_model_v1(),
+            },
+        ],
+        tests: vec![],
+        diagnostics: Some(json!({ "fixture": "journal_plan" })),
+    }
+}
+
+fn study_planner_tool_v1() -> ToolDefinition {
+    ToolDefinition {
+        id: "tool-study-planner".into(),
+        name: "Study Planner".into(),
+        description: "Dashboard and tasks in one surface (multi-surface represented as sections)."
+            .into(),
+        layout: json!({ "type": "dashboard", "columns": 2, "density": "normal" }),
+        components: vec![
+            ToolComponent {
+                id: "sp-dash-heading".into(),
+                component_type: "heading".into(),
+                props: Some(json!({ "text": "Dashboard", "level": 2 })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "sp-dash-summary".into(),
+                component_type: "text".into(),
+                props: Some(json!({
+                    "text": "Overview of study sessions and upcoming focus blocks.",
+                    "tone": "muted"
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "sp-tasks-heading".into(),
+                component_type: "heading".into(),
+                props: Some(json!({ "text": "Tasks", "level": 2 })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "sp-tasks-table".into(),
+                component_type: "dataTable".into(),
+                props: Some(json!({
+                    "columns": [
+                        { "id": "title", "accessor": "title", "header": "Task" },
+                        { "id": "status", "accessor": "status", "header": "Status" }
+                    ],
+                    "rowsKey": "studyTasksResult",
+                    "selectionKey": "selectedStudyTaskId",
+                    "dataSource": {
+                        "actionName": "local_data.query",
+                        "input": { "modelId": "studyTasks", "limit": 100 },
+                        "resultKey": "studyTasksResult"
+                    }
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "sp-new-title".into(),
+                component_type: "textInput".into(),
+                value_key: Some("newStudyTaskTitle".into()),
+                props: Some(json!({
+                    "label": "New Study Task",
+                    "placeholder": "Read chapter 3"
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "sp-add-btn".into(),
+                component_type: "button".into(),
+                props: Some(json!({ "label": "Add Task" })),
+                actions: Some(vec![
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.write".into(),
+                        input: Some(json!({
+                            "modelId": "studyTasks",
+                            "data": { "status": "todo" }
+                        })),
+                        input_from_state: Some(
+                            [("data.title".into(), "newStudyTaskTitle".into())]
+                                .into_iter()
+                                .collect(),
+                        ),
+                        component_id: None,
+                        result_key: None,
+                    },
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.query".into(),
+                        input: Some(json!({ "modelId": "studyTasks", "limit": 100 })),
+                        input_from_state: None,
+                        component_id: None,
+                        result_key: Some("studyTasksResult".into()),
+                    },
+                    ActionDefinition::SetValue {
+                        target: "newStudyTaskTitle".into(),
+                        value: json!(""),
+                    },
+                ]),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    }
+}
+
+fn study_tasks_model_v1() -> DataModelDefinition {
+    DataModelDefinition {
+        model_id: "studyTasks".into(),
+        display_name: "Study Tasks".into(),
+        schema_version: 1,
+        fields: vec![
+            DataField {
+                field_id: "title".into(),
+                field_type: "text".into(),
+                required: true,
+                default: None,
+                enum_values: None,
+            },
+            DataField {
+                field_id: "status".into(),
+                field_type: "enum".into(),
+                required: false,
+                default: Some(json!("todo")),
+                enum_values: Some(vec!["todo".into(), "in_progress".into(), "done".into()]),
+            },
+        ],
+    }
+}
+
+/// Study planner fixture: one CreateSurface with Dashboard + Tasks sections until multi-surface plans are supported.
+pub fn multi_surface_planner_create_plan() -> ApplicationPlan {
+    ApplicationPlan {
+        schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+        plan_id: "plan-study-planner-create".into(),
+        kind: ApplicationPlanKind::Create,
+        summary: "Create Study Planner with dashboard and tasks sections on one surface".into(),
+        application_id: Some("tool-study-planner".into()),
+        base_revision: None,
+        steps: vec![
+            PlanStep {
+                id: "1".into(),
+                description: "Upsert studyTasks model for the tasks panel".into(),
+            },
+            PlanStep {
+                id: "2".into(),
+                description: "Create single surface with Dashboard and Tasks sections (multi-surface deferred)"
+                    .into(),
+            },
+        ],
+        intents: vec![
+            ChangeIntent::CreateSurface {
+                tool: study_planner_tool_v1(),
+                change_summary: Some(
+                    "Create Study Planner with dashboard and tasks sections".into(),
+                ),
+            },
+            ChangeIntent::UpsertDataModel {
+                application_id: "tool-study-planner".into(),
+                model: study_tasks_model_v1(),
+            },
+        ],
+        tests: vec![],
+        diagnostics: Some(json!({
+            "fixture": "multi_surface_planner_plan",
+            "multiSurfaceNote": "Dashboard and Tasks are separate sections on one surface; multiple CreateSurface intents per application are not used in this fixture."
+        })),
+    }
+}
+
 /// Canonical create plan for Task Tracker (provider-contract fixture).
 pub fn task_tracker_create_plan() -> ApplicationPlan {
     ApplicationPlan {
@@ -427,10 +1065,8 @@ mod tests {
     use crate::ai::parse_agent_response;
     use crate::application_kernel::application_plan::compile_plan;
 
-    #[test]
-    fn create_plan_compiles() {
-        let plan = task_tracker_create_plan();
-        let v = compile_plan(&plan).unwrap();
+    fn assert_create_plan_compiles(plan: &ApplicationPlan) {
+        let v = compile_plan(plan).unwrap();
         assert!(v
             .compiled
             .operations
@@ -441,6 +1077,31 @@ mod tests {
             .operations
             .iter()
             .any(|o| o.op_type == "surface.create"));
+    }
+
+    #[test]
+    fn create_plan_compiles() {
+        assert_create_plan_compiles(&task_tracker_create_plan());
+    }
+
+    #[test]
+    fn habit_tracker_create_plan_compiles() {
+        assert_create_plan_compiles(&habit_tracker_create_plan());
+    }
+
+    #[test]
+    fn budget_tracker_create_plan_compiles() {
+        assert_create_plan_compiles(&budget_tracker_create_plan());
+    }
+
+    #[test]
+    fn journal_create_plan_compiles() {
+        assert_create_plan_compiles(&journal_create_plan());
+    }
+
+    #[test]
+    fn multi_surface_planner_create_plan_compiles() {
+        assert_create_plan_compiles(&multi_surface_planner_create_plan());
     }
 
     #[test]

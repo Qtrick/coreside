@@ -9,6 +9,8 @@ on:
       - "src/**"
       - "package.json"
       - "package-lock.json"
+      - "scripts/assert-production-excludes-e2e.mjs"
+      - "scripts/scan-packaged-contents.mjs"
       - ".github/workflows/packaging.yml"
   push:
     branches: [main]
@@ -17,6 +19,8 @@ on:
       - "src/**"
       - "package.json"
       - "package-lock.json"
+      - "scripts/assert-production-excludes-e2e.mjs"
+      - "scripts/scan-packaged-contents.mjs"
       - ".github/workflows/packaging.yml"
 
 permissions:
@@ -71,25 +75,7 @@ jobs:
         run: npm ci
 
       - name: Assert production excludes E2E feature
-        run: |
-          node --input-type=module -e "
-            import fs from 'node:fs';
-            const cargo = fs.readFileSync('src-tauri/Cargo.toml','utf8');
-            if (/default\s*=\s*\[[^\]]*\"e2e\"/.test(cargo)) {
-              console.error('e2e must not be in default features');
-              process.exit(1);
-            }
-            const conf = fs.readFileSync('src-tauri/tauri.conf.json','utf8');
-            if (/\"capabilities\"\s*:\s*\[[^\]]*wdio/.test(conf) || conf.includes('wdio:')) {
-              console.error('production tauri.conf must not enable wdio capability');
-              process.exit(1);
-            }
-            if (conf.includes('withGlobalTauri')) {
-              console.error('production tauri.conf must not enable withGlobalTauri');
-              process.exit(1);
-            }
-            console.log('production e2e exclusion OK');
-          "
+        run: node scripts/assert-production-excludes-e2e.mjs
 
       - name: Build packaged app (unsigned / ad-hoc where required)
         run: npm run build

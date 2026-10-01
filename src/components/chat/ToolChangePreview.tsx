@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
 import type { ToolState } from "@/types/tool";
+import { deriveEvolutionCopy } from "@/lib/application-proposal-status";
 
 export function ToolChangePreview() {
   const pending = useAppStore((s) => s.pendingToolChange);
@@ -9,28 +10,65 @@ export function ToolChangePreview() {
   const applyPendingToolChange = useAppStore((s) => s.applyPendingToolChange);
   const discardPendingToolChange = useAppStore((s) => s.discardPendingToolChange);
   const [previewState, setPreviewState] = useState<ToolState>({});
+  const [busy, setBusy] = useState(false);
+
+  const toolChange = pending?.toolChange;
+  const evolution = useMemo(
+    () =>
+      toolChange
+        ? deriveEvolutionCopy(
+            [{ type: `tool.${toolChange.action}` }],
+            toolChange.changeSummary ?? "",
+            toolChange.tool.description ?? toolChange.tool.name,
+          )
+        : null,
+    [toolChange],
+  );
 
   // Kernel proposal is authoritative when present for the same turn.
   if (!pending || (kernelPending && kernelPending.messageId === pending.messageId)) {
     return null;
   }
 
-  const { toolChange } = pending;
-  const actionLabel =
-    toolChange.action === "create"
-      ? "Create tool"
-      : toolChange.action === "update"
-        ? "Update tool"
-        : "Replace tool";
+  if (!toolChange || !evolution) {
+    return null;
+  }
+
+  const apply = async () => {
+    setBusy(true);
+    try {
+      await applyPendingToolChange();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-    <div className="tool-change-preview" role="region" aria-label="Tool change preview">
-      <h3>
-        {actionLabel}: {toolChange.tool.name}
-      </h3>
-      <p className="muted" style={{ margin: 0 }}>
-        {toolChange.changeSummary || toolChange.tool.description || "Review this change before applying."}
-      </p>
+    <div className="tool-change-preview" role="region" aria-label="Application change preview">
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
+        <span className="proposal-status-badge active">Review changes</span>
+        <span className="muted" style={{ fontSize: "0.8rem" }}>Preview ready</span>
+      </div>
+
+      <h3 style={{ marginTop: "0.5rem" }}>{evolution.headline}</h3>
+
+      <div style={{ marginTop: "0.5rem" }}>
+        <p className="muted" style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600 }}>
+          What will change
+        </p>
+        <p className="muted" style={{ margin: "0.25rem 0 0" }}>
+          {evolution.whatWillChange}
+        </p>
+      </div>
+
+      <div style={{ marginTop: "0.5rem" }}>
+        <p className="muted" style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600 }}>
+          What will be preserved
+        </p>
+        <p className="muted" style={{ margin: "0.25rem 0 0" }}>
+          {evolution.whatWillBePreserved}
+        </p>
+      </div>
 
       {toolChange.tool ? (
         <div
@@ -58,13 +96,16 @@ export function ToolChangePreview() {
         <button
           type="button"
           className="btn btn-primary"
-          onClick={() => void applyPendingToolChange()}
+          disabled={busy}
+          aria-busy={busy}
+          onClick={() => void apply()}
         >
-          Apply
+          {busy ? "Building…" : "Apply"}
         </button>
         <button
           type="button"
           className="btn btn-secondary"
+          disabled={busy}
           onClick={() => void discardPendingToolChange()}
         >
           Discard

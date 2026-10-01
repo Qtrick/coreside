@@ -305,9 +305,7 @@ pub fn invalidate_component_live_state(
     let keys: Vec<String> = obj
         .keys()
         .filter(|k| {
-            *k == component_id
-                || k.starts_with(&prefix)
-                || value_key.is_some_and(|vk| *k == vk)
+            *k == component_id || k.starts_with(&prefix) || value_key.is_some_and(|vk| *k == vk)
         })
         .cloned()
         .collect();
@@ -777,8 +775,7 @@ mod tests {
         use serde_json::json;
 
         let mut db = test_db();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "PresInv", None).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "PresInv", None).unwrap();
         let def = json!({
             "id": "d",
             "name": "Inline",
@@ -806,8 +803,7 @@ mod tests {
         use serde_json::json;
 
         let mut db = test_db();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "PresOrphan", None).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "PresOrphan", None).unwrap();
         let def = json!({
             "id": "d",
             "name": "Inline",
@@ -835,8 +831,7 @@ mod tests {
         use serde_json::json;
 
         let mut db = test_db();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Overlay", None).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Overlay", None).unwrap();
         let def = json!({
             "id": "d",
             "name": "Form",

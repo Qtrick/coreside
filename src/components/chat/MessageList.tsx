@@ -3,6 +3,11 @@ import { useAppStore } from "@/stores/app-store";
 import { shouldShowActionLog } from "@/lib/action-log";
 import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
 import { MessageBubble } from "./MessageBubble";
+import {
+  computeLiveApplicationGenerationIndex,
+  humanizeAgentActionLabel,
+  LIVE_APPLICATION_GENERATION_STEPS,
+} from "@/lib/application-proposal-status";
 
 export function MessageList() {
   const messages = useAppStore((s) => s.messages);
@@ -167,43 +172,6 @@ const STARTER_PROMPTS = [
   },
 ];
 
-function computeLifecyclePhase(
-  actions: string[],
-  streaming: boolean,
-): {
-  phase: "understanding" | "building" | "checking" | "ready";
-  index: number;
-} {
-  const combined = actions.join(" ").toLowerCase();
-  if (
-    combined.includes("validat") ||
-    combined.includes("check") ||
-    combined.includes("verif")
-  ) {
-    return { phase: "checking", index: 2 };
-  }
-  if (
-    streaming ||
-    combined.includes("stream") ||
-    combined.includes("patch") ||
-    combined.includes("build") ||
-    combined.includes("generat")
-  ) {
-    return { phase: "building", index: 1 };
-  }
-  if (actions.length > 0) {
-    return { phase: "understanding", index: 0 };
-  }
-  return { phase: "understanding", index: 0 };
-}
-
-function humanizeActionLabel(raw: string): string {
-  if (raw.startsWith("operation.") || raw.includes("execute_sql")) {
-    return "Refining application components…";
-  }
-  return raw;
-}
-
   if (messages.length === 0 && !liveHere) {
     return (
       <div className="message-list">
@@ -261,7 +229,10 @@ function humanizeActionLabel(raw: string): string {
   });
   const liveEvents = visibleActions.map((label) => ({ label }));
   const showLiveActionLog = shouldShowActionLog(actionLogMode, liveEvents);
-  const lifecycle = computeLifecyclePhase(visibleActions, Boolean(streamingText));
+  const lifecycleIndex = computeLiveApplicationGenerationIndex(
+    visibleActions,
+    Boolean(streamingText),
+  );
 
   return (
     <div className="message-list" ref={listRef} aria-live="polite">
@@ -291,38 +262,23 @@ function humanizeActionLabel(raw: string): string {
           </div>
 
           {/* Human-Readable Generation Lifecycle Indicator */}
-          <div className="generation-lifecycle" aria-label="Generation progress">
-            <div
-              className={`lifecycle-step ${
-                lifecycle.index === 0 ? "active" : lifecycle.index > 0 ? "complete" : ""
-              }`}
-            >
-              <span className="step-dot" /> Understanding
-            </div>
-            <span className="lifecycle-arrow">→</span>
-            <div
-              className={`lifecycle-step ${
-                lifecycle.index === 1 ? "active" : lifecycle.index > 1 ? "complete" : ""
-              }`}
-            >
-              <span className="step-dot" /> Building
-            </div>
-            <span className="lifecycle-arrow">→</span>
-            <div
-              className={`lifecycle-step ${
-                lifecycle.index === 2 ? "active" : lifecycle.index > 2 ? "complete" : ""
-              }`}
-            >
-              <span className="step-dot" /> Checking
-            </div>
-            <span className="lifecycle-arrow">→</span>
-            <div
-              className={`lifecycle-step ${
-                lifecycle.phase === "ready" ? "active complete" : ""
-              }`}
-            >
-              <span className="step-dot" /> Ready
-            </div>
+          <div className="generation-lifecycle" aria-label="Application progress">
+            {LIVE_APPLICATION_GENERATION_STEPS.map((label, index) => (
+              <span key={label} style={{ display: "contents" }}>
+                {index > 0 ? <span className="lifecycle-arrow">→</span> : null}
+                <div
+                  className={`lifecycle-step ${
+                    lifecycleIndex === index
+                      ? "active"
+                      : lifecycleIndex > index
+                        ? "complete"
+                        : ""
+                  }`}
+                >
+                  <span className="step-dot" /> {label}
+                </div>
+              </span>
+            ))}
           </div>
 
           {showLiveActionLog && visibleActions.length > 0 ? (
@@ -332,7 +288,7 @@ function humanizeActionLabel(raw: string): string {
                   key={`${index}-${label}`}
                   className={index === visibleActions.length - 1 ? "current" : ""}
                 >
-                  {humanizeActionLabel(label)}
+                  {humanizeAgentActionLabel(label)}
                 </li>
               ))}
             </ul>
@@ -342,7 +298,7 @@ function humanizeActionLabel(raw: string): string {
               latestAction &&
               !latestAction.toLowerCase().includes("model") &&
               !latestAction.toLowerCase().includes("unavailable")
-                ? humanizeActionLabel(latestAction)
+                ? humanizeAgentActionLabel(latestAction)
                 : "Working…"}
             </p>
           )}

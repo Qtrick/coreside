@@ -361,7 +361,6 @@ pub(crate) fn resolve_effective_surface_id(op: &AppOperation) -> Option<String> 
         })
 }
 
-
 fn apply_one(
     db: &mut Database,
     op: &AppOperation,
@@ -599,13 +598,7 @@ fn apply_one(
                 // Preserve compatible component live props across full definition swaps.
                 let mut candidate_doc = candidate_doc;
                 if let Some(ref prior) = original_doc {
-                    apply_definition_preservation(
-                        db,
-                        sid,
-                        prior,
-                        &mut candidate_doc,
-                        &op.payload,
-                    )?;
+                    apply_definition_preservation(db, sid, prior, &mut candidate_doc, &op.payload)?;
                 }
                 doc = candidate_doc;
             } else if op.op_type == "component.replace" {
@@ -1518,16 +1511,12 @@ fn apply_one(
             // Bind identity without treating tool_id as an existing surface id.
             // Explicit surface_id (or payload surfaceId) must host this application;
             // otherwise tool_id must equal applicationId.
-            let explicit_surface_id = op
-                .target
-                .surface_id
-                .clone()
-                .or_else(|| {
-                    op.payload
-                        .get("surfaceId")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                });
+            let explicit_surface_id = op.target.surface_id.clone().or_else(|| {
+                op.payload
+                    .get("surfaceId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            });
             if let Some(sid) = explicit_surface_id {
                 let surface = get_surface(db, &sid).map_err(|e| e.to_string())?;
                 let surface_app =
@@ -1549,8 +1538,7 @@ fn apply_one(
                 }
             } else {
                 return Err(
-                    "setting.create requires a surface or tool target binding applicationId"
-                        .into(),
+                    "setting.create requires a surface or tool target binding applicationId".into(),
                 );
             }
             let mut rec = crate::application_kernel::manifest::get_manifest(db, app_id)
@@ -1573,9 +1561,8 @@ fn apply_one(
             }
             // Renderer-scoped: store intended route on surface state when a surface is targeted.
             if let Some(sid) = resolve_effective_surface_id(op) {
-                let (mut state, rev) =
-                    super::surfaces::get_surface_state_with_revision(db, &sid)
-                        .map_err(|e| e.to_string())?;
+                let (mut state, rev) = super::surfaces::get_surface_state_with_revision(db, &sid)
+                    .map_err(|e| e.to_string())?;
                 if let Some(obj) = state.as_object_mut() {
                     obj.insert("activeRoute".into(), json!(route_id));
                 } else {
@@ -1799,7 +1786,11 @@ fn apply_component_replace_with_preservation(
     let preserved = apply_preservation_on_replace(&old, &mut new_comp, policy);
     if preserved {
         let _ = super::preservation::overlay_live_state_on_component(
-            db, surface_id, &old, &mut new_comp, policy,
+            db,
+            surface_id,
+            &old,
+            &mut new_comp,
+            policy,
         );
     }
     let old_vk = component_value_key(&old).map(|s| s.to_string());
@@ -1852,7 +1843,10 @@ fn maybe_preserve_or_reset_on_update_props(
         .or_else(|| op.payload.get("componentId").and_then(|v| v.as_str()))
         .ok_or_else(|| "componentId required".to_string())?;
     let old = doc.find_component(cid).cloned();
-    let old_vk = old.as_ref().and_then(component_value_key).map(|s| s.to_string());
+    let old_vk = old
+        .as_ref()
+        .and_then(component_value_key)
+        .map(|s| s.to_string());
     let policy = resolve_policy_for_apply(db, surface_id, Some(cid), &op.payload);
     if matches!(
         policy,
@@ -1905,13 +1899,8 @@ fn apply_definition_preservation(
 
     for old in &prior_flat {
         if !next_ids.contains(&old.id) {
-            invalidate_component_live_state(
-                db,
-                surface_id,
-                &old.id,
-                component_value_key(old),
-            )
-            .map_err(|e| e.to_string())?;
+            invalidate_component_live_state(db, surface_id, &old.id, component_value_key(old))
+                .map_err(|e| e.to_string())?;
             continue;
         }
         let mut new_comp = next
@@ -1922,7 +1911,11 @@ fn apply_definition_preservation(
         let preserved = apply_preservation_on_replace(old, &mut new_comp, policy);
         if preserved {
             let _ = super::preservation::overlay_live_state_on_component(
-                db, surface_id, old, &mut new_comp, policy,
+                db,
+                surface_id,
+                old,
+                &mut new_comp,
+                policy,
             );
         }
         let incoming_key = prop_preservation_key(&new_comp);
@@ -2850,9 +2843,8 @@ mod tests {
     #[test]
     fn state_set_rejects_user_write_policy_and_opaque_keys() {
         let mut db = test_db();
-        let conv =
-            crate::db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Auth Chat", None)
-                .unwrap();
+        let conv = crate::db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Auth Chat", None)
+            .unwrap();
 
         // Explicit contracts: user-writable draft must not accept model state.set.
         let doc = json!({
@@ -2933,8 +2925,7 @@ mod tests {
         if let Some(obj) = st.as_object_mut() {
             obj.insert("secretVault".into(), json!("opaque-value"));
         }
-        crate::runtime_v2::surfaces::save_surface_state_occ(&mut db, &legacy.id, &st, rev)
-            .unwrap();
+        crate::runtime_v2::surfaces::save_surface_state_occ(&mut db, &legacy.id, &st, rev).unwrap();
 
         let opaque_txn = create_transaction(
             &mut db,
@@ -2953,10 +2944,7 @@ mod tests {
         let opaque_res = apply_transaction(&mut db, &opaque_txn.id).unwrap();
         assert_eq!(opaque_res.transaction.status, "failed");
         assert!(
-            opaque_res
-                .conflicts
-                .iter()
-                .any(|c| c.contains("opaque")),
+            opaque_res.conflicts.iter().any(|c| c.contains("opaque")),
             "expected opaque key rejection, got {:?}",
             opaque_res.conflicts
         );
@@ -2968,9 +2956,8 @@ mod tests {
     #[test]
     fn state_set_rejects_system_write_policy() {
         let mut db = test_db();
-        let conv =
-            crate::db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Auth Chat", None)
-                .unwrap();
+        let conv = crate::db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Auth Chat", None)
+            .unwrap();
 
         // System-owned keys (e.g. runtime-managed metadata) must reject model writes
         // just like user-owned keys, even though the write-policy string differs.
@@ -3024,8 +3011,7 @@ mod tests {
             res.conflicts
         );
         let (state, _) =
-            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id)
-                .unwrap();
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
         // Rejection must leave state untouched (no seed of initial contracts into state bag).
         assert_ne!(state.get("systemLock"), Some(&json!(true)));
     }
@@ -3132,8 +3118,7 @@ mod tests {
     #[test]
     fn component_replace_preserves_user_input_through_apply_transaction() {
         let mut db = test_db();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "PresTxn", None).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "PresTxn", None).unwrap();
         let def = json!({
             "id": "task-tracker",
             "name": "Task Tracker",
@@ -3180,11 +3165,17 @@ mod tests {
         )
         .unwrap();
         let res = apply_transaction(&mut db, &txn.id).unwrap();
-        assert_eq!(res.transaction.status, "applied", "conflicts: {:?}", res.conflicts);
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
 
         let surf = get_surface(&db, &surface.id).unwrap();
         let doc = crate::runtime_v2::SoftwareDocument::from_value(&surf.definition).unwrap();
-        let comp = doc.find_component("title-input").expect("component survives");
+        let comp = doc
+            .find_component("title-input")
+            .expect("component survives");
         assert_eq!(
             comp.props.as_ref().and_then(|p| p.get("value")),
             Some(&json!("user-typing")),
@@ -3235,8 +3226,7 @@ mod tests {
     #[test]
     fn preserve_focus_policy_does_not_merge_value_on_replace() {
         let mut db = test_db();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "PresDim", None).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "PresDim", None).unwrap();
         let def = json!({
             "id": "d",
             "name": "Dim",
@@ -3280,8 +3270,14 @@ mod tests {
         let surf = get_surface(&db, &surface.id).unwrap();
         let doc = crate::runtime_v2::SoftwareDocument::from_value(&surf.definition).unwrap();
         let props = doc.find_component("field").unwrap().props.as_ref().unwrap();
-        assert!(props.get("value").is_none(), "preserve_focus must not copy value");
-        assert!(props.get("scrollTop").is_none(), "preserve_focus must not copy scroll");
+        assert!(
+            props.get("value").is_none(),
+            "preserve_focus must not copy value"
+        );
+        assert!(
+            props.get("scrollTop").is_none(),
+            "preserve_focus must not copy scroll"
+        );
         assert_eq!(props.get("label"), Some(&json!("New")));
     }
 
@@ -3289,8 +3285,7 @@ mod tests {
     #[test]
     fn component_remove_clears_value_key_state_through_apply_transaction() {
         let mut db = test_db();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "RemVk", None).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "RemVk", None).unwrap();
         let def = json!({
             "id": "form",
             "name": "Form",
@@ -3356,8 +3351,7 @@ mod tests {
         assert!(doc.find_component("keep-input").is_some());
 
         let (state, _) =
-            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id)
-                .unwrap();
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
         assert!(
             state.get("taskTitle").is_none(),
             "valueKey state must clear on remove, got {state}"
@@ -3372,8 +3366,7 @@ mod tests {
     #[test]
     fn event_dispatch_sets_application_id_when_surface_create_registers_manifest() {
         let mut db = test_db();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "EvtNoApp", None).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "EvtNoApp", None).unwrap();
         let tool = ToolDefinition {
             id: "tool-auto-manifest".into(),
             name: "Auto Manifest Tool".into(),
@@ -3389,15 +3382,8 @@ mod tests {
             }],
             ..Default::default()
         };
-        let saved = apply_tool_change(
-            &mut db,
-            DEFAULT_WORKSPACE_ID,
-            &tool,
-            "create",
-            None,
-            "seed",
-        )
-        .unwrap();
+        let saved = apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "seed")
+            .unwrap();
         let surface = upsert_surface_from_tool(
             &mut db,
             &saved.definition,
@@ -3540,8 +3526,7 @@ mod tests {
         use std::collections::HashMap;
 
         let mut db = test_db();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "EvtWithApp", None).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "EvtWithApp", None).unwrap();
         let tool_id = "app-with-manifest";
         let tool = ToolDefinition {
             id: tool_id.into(),
@@ -3558,15 +3543,8 @@ mod tests {
             }],
             ..Default::default()
         };
-        let saved = apply_tool_change(
-            &mut db,
-            DEFAULT_WORKSPACE_ID,
-            &tool,
-            "create",
-            None,
-            "seed",
-        )
-        .unwrap();
+        let saved = apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "seed")
+            .unwrap();
         let surface = upsert_surface_from_tool(
             &mut db,
             &saved.definition,
@@ -3631,7 +3609,11 @@ mod tests {
         )
         .unwrap();
         let res = apply_transaction(&mut db, &txn.id).unwrap();
-        assert_eq!(res.transaction.status, "applied", "conflicts: {:?}", res.conflicts);
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
 
         let source_json: String = db
             .conn()
@@ -3652,8 +3634,7 @@ mod tests {
     #[test]
     fn event_dispatch_rejects_spoofed_target_application_id() {
         let mut db = test_db();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "EvtSpoof", None).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "EvtSpoof", None).unwrap();
         let tool = ToolDefinition {
             id: "tool-local".into(),
             name: "Local".into(),
@@ -3669,15 +3650,8 @@ mod tests {
             }],
             ..Default::default()
         };
-        let saved = apply_tool_change(
-            &mut db,
-            DEFAULT_WORKSPACE_ID,
-            &tool,
-            "create",
-            None,
-            "seed",
-        )
-        .unwrap();
+        let saved = apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "seed")
+            .unwrap();
         let surface = upsert_surface_from_tool(
             &mut db,
             &saved.definition,
@@ -3721,7 +3695,9 @@ mod tests {
             res.conflicts
         );
         assert!(
-            res.conflicts.iter().any(|c| c.contains("spoof") || c.contains("application")),
+            res.conflicts
+                .iter()
+                .any(|c| c.contains("spoof") || c.contains("application")),
             "expected spoof denial in conflicts: {:?}",
             res.conflicts
         );
@@ -3790,8 +3766,7 @@ mod tests {
         );
 
         let (state, _) =
-            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id)
-                .unwrap();
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
         assert_eq!(
             state.get("taskTitle"),
             Some(&json!("Buy milk")),
@@ -3810,9 +3785,7 @@ mod tests {
 
     #[test]
     fn setting_create_and_route_navigate_apply_without_unsupported_operation() {
-        use crate::application_kernel::manifest::{
-            ensure_manifest_for_tool, get_manifest,
-        };
+        use crate::application_kernel::manifest::{ensure_manifest_for_tool, get_manifest};
 
         let mut db = test_db();
         let conv =
@@ -3824,10 +3797,14 @@ mod tests {
             "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
         });
         let surface =
-            create_inline_surface(&mut db, &conv.id, None, None, "Nav Surface", &def, &[])
-                .unwrap();
-        ensure_manifest_for_tool(&mut db, "app-setting-route", "Setting Route App", &surface.id)
-            .unwrap();
+            create_inline_surface(&mut db, &conv.id, None, None, "Nav Surface", &def, &[]).unwrap();
+        ensure_manifest_for_tool(
+            &mut db,
+            "app-setting-route",
+            "Setting Route App",
+            &surface.id,
+        )
+        .unwrap();
 
         let mut setting_op = op(
             "setting.create",
@@ -3946,7 +3923,10 @@ mod tests {
             result.conflicts
         );
         assert!(
-            result.conflicts.iter().any(|c| c.contains("requires a surface or tool target")),
+            result
+                .conflicts
+                .iter()
+                .any(|c| c.contains("requires a surface or tool target")),
             "expected binding denial, got {:?}",
             result.conflicts
         );
@@ -3958,8 +3938,7 @@ mod tests {
         use std::collections::HashMap;
 
         let mut db = test_db();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "SuspState", None).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "SuspState", None).unwrap();
         upsert_manifest(
             &mut db,
             ApplicationManifest {
@@ -4043,7 +4022,9 @@ mod tests {
         let res = apply_transaction(&mut db, &txn.id).unwrap();
         assert_ne!(res.transaction.status, "applied");
         assert!(
-            res.conflicts.iter().any(|c| c.contains("suspended") || c.contains("disabled")),
+            res.conflicts
+                .iter()
+                .any(|c| c.contains("suspended") || c.contains("disabled")),
             "expected suspended/disabled conflict, got {:?}",
             res.conflicts
         );

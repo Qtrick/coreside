@@ -274,8 +274,7 @@ pub fn compile(intent: ChangeIntent) -> Result<CompiledChange, KernelError> {
             base_revision,
         } => {
             if let Some(ref ct) = component_type {
-                validate_component_type_allowed(ct)
-                    .map_err(KernelError::CapabilityUnavailable)?;
+                validate_component_type_allowed(ct).map_err(KernelError::CapabilityUnavailable)?;
             }
             let mut payload = json!({});
             if let Some(p) = props {

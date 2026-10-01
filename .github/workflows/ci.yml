@@ -56,6 +56,11 @@ jobs:
       - name: Coreside doctor
         run: npm run doctor -- --json
 
+      - name: Stub frontend dist for Tauri context
+        run: |
+          mkdir -p dist
+          printf '%s\n' '<!doctype html><title>coreside-ci</title>' > dist/index.html
+
       - name: Rust format
         run: npm run fmt:check
 
@@ -94,6 +99,14 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+
+      # tauri::generate_context! requires frontendDist ("../dist") to exist.
+      # Cross-compile jobs do not build the web UI; a stub is enough for cargo check.
+      - name: Stub frontend dist for Tauri context
+        shell: bash
+        run: |
+          mkdir -p dist
+          printf '%s\n' '<!doctype html><title>coreside-ci</title>' > dist/index.html
 
       - name: Rust check
         run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets

@@ -259,9 +259,9 @@ pub fn run_test(db: &mut Database, application_id: &str, test_id: &str) -> DbRes
         }));
     }
     // Distinguish structural failure from UI asserts that Rust cannot verify yet.
-    let has_failed_verified = details.iter().any(|d| {
-        d.get("verified") == Some(&json!(true)) && d.get("ok") == Some(&json!(false))
-    });
+    let has_failed_verified = details
+        .iter()
+        .any(|d| d.get("verified") == Some(&json!(true)) && d.get("ok") == Some(&json!(false)));
     let status = if passed {
         "passed"
     } else if !unverified.is_empty() && !has_failed_verified {
@@ -331,7 +331,9 @@ pub fn verify_after_change(
             "SELECT test_id FROM generated_tests WHERE application_id = ?1 AND enabled = 1 ORDER BY test_id LIMIT ?2",
         )?;
         let ids: Vec<String> = stmt
-            .query_map(params![app, MAX_VERIFY_TESTS_PER_APP as i64], |row| row.get(0))?
+            .query_map(params![app, MAX_VERIFY_TESTS_PER_APP as i64], |row| {
+                row.get(0)
+            })?
             .filter_map(|r| r.ok())
             .collect();
         drop(stmt);
@@ -465,8 +467,8 @@ pub fn authorize_renderer_verify(
     crate::security::assert_not_protected(&req.application_id)?;
     crate::security::assert_not_protected(&req.surface_id)?;
 
-    let surface = crate::runtime_v2::surfaces::get_surface(db, &req.surface_id)
-        .map_err(|e| e.to_string())?;
+    let surface =
+        crate::runtime_v2::surfaces::get_surface(db, &req.surface_id).map_err(|e| e.to_string())?;
     let app_matches = surface.tool_id.as_deref() == Some(req.application_id.as_str())
         || surface.id == req.application_id;
     if !app_matches {
@@ -540,10 +542,17 @@ pub fn accept_renderer_fact(
         ));
     }
     if !RENDERER_ASSERTIONS.contains(&fact.assertion.as_str()) {
-        return Err(format!("untrusted renderer fact assertion: {}", fact.assertion));
+        return Err(format!(
+            "untrusted renderer fact assertion: {}",
+            fact.assertion
+        ));
     }
     Ok(RendererVerifyResult {
-        status: if fact.ok { "passed".into() } else { "failed".into() },
+        status: if fact.ok {
+            "passed".into()
+        } else {
+            "failed".into()
+        },
         verified: true,
         message: fact
             .detail
@@ -859,13 +868,14 @@ mod tests {
             },
         )
         .unwrap();
-        let ops: Vec<crate::runtime_v2::operations::AppOperation> = serde_json::from_value(json!([{
-            "id": "op-1",
-            "type": "surface.create",
-            "target": { "applicationId": app_id },
-            "payload": { "applicationId": app_id }
-        }]))
-        .unwrap();
+        let ops: Vec<crate::runtime_v2::operations::AppOperation> =
+            serde_json::from_value(json!([{
+                "id": "op-1",
+                "type": "surface.create",
+                "target": { "applicationId": app_id },
+                "payload": { "applicationId": app_id }
+            }]))
+            .unwrap();
         let v = verify_after_change(&mut db, &ops).unwrap();
         assert_eq!(
             v.status, "verified_with_warnings",

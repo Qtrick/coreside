@@ -20,6 +20,27 @@ impl MockAiProvider {
     }
 
     fn fixture_for(user_text: &str) -> String {
+        Self::fixture_for_with_revision(user_text, None)
+    }
+
+    /// Parse the highest `definitionRevision` advertised in authoritative prompt context.
+    fn observed_definition_revision(system_prompt: &str) -> Option<i64> {
+        let mut best: Option<i64> = None;
+        for (idx, _) in system_prompt.match_indices("\"definitionRevision\"") {
+            let rest = &system_prompt[idx..];
+            let Some(colon) = rest.find(':') else {
+                continue;
+            };
+            let after = rest[colon + 1..].trim_start();
+            let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(n) = digits.parse::<i64>() {
+                best = Some(best.map_or(n, |b| b.max(n)));
+            }
+        }
+        best
+    }
+
+    fn fixture_for_with_revision(user_text: &str, observed_revision: Option<i64>) -> String {
         let lower = user_text.to_lowercase();
 
         if lower.contains("water") || lower.contains("hydrat") {
@@ -132,12 +153,13 @@ impl MockAiProvider {
             || lower.contains("make me")
             || lower.contains("generate")
             || lower.contains("new task tracker");
-        if (lower.contains("due date")
-            || lower.contains("due dates")
-            || lower.contains("add due"))
+        if (lower.contains("due date") || lower.contains("due dates") || lower.contains("add due"))
             && !create_ish
         {
-            let plan = super::plan_fixtures::task_tracker_add_due_dates_plan(None);
+            // OCC-real: evolve fixtures must declare the revision they observed.
+            // Prefer prompt context; deterministic tests without context use rev 1.
+            let rev = observed_revision.unwrap_or(1);
+            let plan = super::plan_fixtures::task_tracker_add_due_dates_plan(Some(rev));
             return super::plan_fixtures::plan_response_json(
                 "I updated your Task Tracker to support optional due dates. Existing tasks are preserved; stable component IDs were kept so dirty form state survives.",
                 &plan,
@@ -156,7 +178,43 @@ impl MockAiProvider {
             );
         }
 
-        if lower.contains("expense") || lower.contains("budget") || lower.contains("spending") {
+        if lower.contains("habit") {
+            let plan = super::plan_fixtures::habit_tracker_create_plan();
+            return super::plan_fixtures::plan_response_json(
+                "I created a Habit Tracker with a habits data model, streak tracking, and durable local_data records.",
+                &plan,
+            );
+        }
+
+        if lower.contains("study planner") || lower.contains("study-planner") {
+            let plan = super::plan_fixtures::multi_surface_planner_create_plan();
+            return super::plan_fixtures::plan_response_json(
+                "I created a Study Planner with dashboard and tasks sections on one surface (multi-surface routing is represented as sections for now).",
+                &plan,
+            );
+        }
+
+        if lower.contains("journal") || lower.contains("diary") || lower.contains("notes journal") {
+            let plan = super::plan_fixtures::journal_create_plan();
+            return super::plan_fixtures::plan_response_json(
+                "I created a Journal with durable entries, optional mood tags, and local_data persistence.",
+                &plan,
+            );
+        }
+
+        if lower.contains("budget tracker")
+            || lower.contains("budget-tracker")
+            || (lower.contains("budget") && !lower.contains("expense"))
+            || (lower.contains("spending") && !lower.contains("expense"))
+        {
+            let plan = super::plan_fixtures::budget_tracker_create_plan();
+            return super::plan_fixtures::plan_response_json(
+                "I created a Budget Tracker with an expenses data model, category enum, and durable local_data logging.",
+                &plan,
+            );
+        }
+
+        if lower.contains("expense") || lower.contains("spending") {
             return json!({
                 "schemaVersion": SCHEMA_VERSION,
                 "assistantMessage": "I created an Expense Tracker with category management, statistics, and a persistent data table.",
@@ -860,7 +918,10 @@ impl MockAiProvider {
             }).to_string();
         }
 
-        Self::fixture_for(user_text)
+        Self::fixture_for_with_revision(
+            user_text,
+            Self::observed_definition_revision(&request.system_prompt),
+        )
     }
 }
 

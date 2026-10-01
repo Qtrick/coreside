@@ -897,12 +897,11 @@ impl AgentResponsePayload {
     pub fn normalized_operations(&self) -> Result<Vec<crate::runtime_v2::AppOperation>, String> {
         // ApplicationPlan is authoritative when present.
         if let Some(plan) = &self.application_plan {
-            let validated =
-                crate::application_kernel::application_plan::compile_plan(plan).map_err(|e| {
-                    format!("applicationPlan rejected: {e}")
-                })?;
-            let ops =
-                crate::runtime_v2::normalize_operations_for_validation(&validated.compiled.operations);
+            let validated = crate::application_kernel::application_plan::compile_plan(plan)
+                .map_err(|e| format!("applicationPlan rejected: {e}"))?;
+            let ops = crate::runtime_v2::normalize_operations_for_validation(
+                &validated.compiled.operations,
+            );
             return Ok(ops);
         }
 

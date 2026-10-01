@@ -400,8 +400,7 @@ pub fn fork_application_for_branch(
     use super::manifest::{get_manifest, upsert_manifest};
 
     let sp_name = format!("sp_fork_{}", Uuid::new_v4().simple());
-    db.conn()
-        .execute_batch(&format!("SAVEPOINT {sp_name};"))?;
+    db.conn().execute_batch(&format!("SAVEPOINT {sp_name};"))?;
 
     let res = (|| -> DbResult<String> {
         let source = get_manifest(db, source_application_id)?;
@@ -1292,11 +1291,7 @@ mod tests {
                     field_type: "enum".into(),
                     required: false,
                     default: Some(json!("normal")),
-                    enum_values: Some(vec![
-                        "low".into(),
-                        "normal".into(),
-                        "high".into(),
-                    ]),
+                    enum_values: Some(vec!["low".into(), "normal".into(), "high".into()]),
                 },
                 DataField {
                     field_id: "due_date".into(),
@@ -1423,11 +1418,7 @@ mod tests {
                     field_type: "enum".into(),
                     required: false,
                     default: Some(json!("todo")),
-                    enum_values: Some(vec![
-                        "todo".into(),
-                        "in_progress".into(),
-                        "done".into(),
-                    ]),
+                    enum_values: Some(vec!["todo".into(), "in_progress".into(), "done".into()]),
                 },
             ],
         };
@@ -1628,7 +1619,9 @@ mod tests {
         );
         // Category permissions still copy by design.
         assert!(crate::application_kernel::permissions::has_permission(
-            &db, &forked, "local_data.write"
+            &db,
+            &forked,
+            "local_data.write"
         )
         .unwrap());
     }
@@ -1853,7 +1846,10 @@ mod tests {
         .unwrap();
         let rows = query_records(&db, "app-occ-ok", "habit", 10).unwrap();
         assert_eq!(rows[0]["_version"], 2);
-        assert_eq!(rows[0]["name"], "Water", "partial OCC update must preserve siblings");
+        assert_eq!(
+            rows[0]["name"], "Water",
+            "partial OCC update must preserve siblings"
+        );
         assert_eq!(rows[0]["frequency"], "weekly");
     }
 
@@ -1962,9 +1958,7 @@ mod tests {
         let src = query_records(&db, "app-src", "habit", 20).unwrap();
         assert_eq!(src.len(), 1);
         assert_eq!(src[0]["name"], "Water");
-        assert!(query_records(&db, &forked, "habit", 20)
-            .unwrap()
-            .is_empty());
+        assert!(query_records(&db, &forked, "habit", 20).unwrap().is_empty());
     }
 
     #[test]
@@ -2164,8 +2158,7 @@ mod tests {
             destructive: Some(true),
             ..Default::default()
         };
-        apply_kernel_operations(&mut db, &[op])
-            .expect("confirmed destructive drop must succeed");
+        apply_kernel_operations(&mut db, &[op]).expect("confirmed destructive drop must succeed");
 
         let kept = get_model(&db, "app-destr-ok", "habit").unwrap();
         assert_eq!(kept.schema_version, 2);

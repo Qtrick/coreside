@@ -464,6 +464,26 @@ pub fn schedule_patches_cmd(
     Ok(schedule_patches(&mut db, &req, Some(&mounts))?)
 }
 
+/// Conversation scope for `flush_patch_scheduler_cmd`. The renderer IPC payload
+/// must not choose the conversation; only a fresh mount on this window grants flush.
+pub(crate) fn flush_conversation_from_fresh_mount(
+    mounts: &crate::runtime_v2::mount_registry::MountRegistry,
+    window_label: &str,
+    surface_id: &str,
+    surface_conversation_id: Option<&str>,
+) -> Result<Option<String>, CommandError> {
+    let Some(reg) = mounts.fresh_mount(window_label, surface_id) else {
+        return Err(CommandError::new(
+            "forbidden",
+            "This window has no fresh mount for that surface.",
+        ));
+    };
+    Ok(reg
+        .conversation_id
+        .clone()
+        .or_else(|| surface_conversation_id.map(str::to_string)))
+}
+
 #[tauri::command]
 pub fn flush_patch_scheduler_cmd(
     window: WebviewWindow,
@@ -490,17 +510,13 @@ pub fn flush_patch_scheduler_cmd(
         windows::enforce_caller_conversation_scope(&window, &db, conv)?;
     }
     let mounts = state.mount_registry.lock();
-    // Authority is the mount this Tauri window registered, not the conversation
-    // id the renderer sent. A window that has not mounted the surface cannot
-    // flush that conversation's queue.
-    let mounted = mounts.fresh_mount(window.label(), &surface_id);
-    let Some(reg) = mounted else {
-        return Err(CommandError::new(
-            "forbidden",
-            "This window has no fresh mount for that surface.",
-        ));
-    };
-    let conversation_id = reg.conversation_id.clone().or(surface.conversation_id);
+    // `_conversation_id` is ignored; see `flush_conversation_from_fresh_mount`.
+    let conversation_id = flush_conversation_from_fresh_mount(
+        &mounts,
+        window.label(),
+        &surface_id,
+        surface.conversation_id.as_deref(),
+    )?;
     let mut bus = state.event_bus.lock();
     let mut bus_opt = Some(&mut *bus);
     // approval_granted false: mount lifecycle must not approve strong-risk ops.
@@ -1494,6 +1510,83 @@ pub fn runtime_v2_interactive_replay(
     let db = state.db.lock();
     scoped_interactive_surface(&window, &db, &surface_id)?;
     Ok(interactive::replay_view(&db, &surface_id, seq)?)
+}
+
+#[cfg(test)]
+mod flush_patch_scheduler_authority_tests {
+    use super::flush_conversation_from_fresh_mount;
+    use crate::db::Database;
+    use crate::runtime_v2::mount_registry::{test_setup_surface, MountRegistry};
+    use tempfile::tempdir;
+
+    #[test]
+    fn fresh_mount_on_window_a_does_not_authorize_window_b() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("flush-win.db")).unwrap();
+        let (conv, sid) = test_setup_surface(&mut db);
+        let mut reg = MountRegistry::new();
+        reg.register(&db, "window-a", &sid, "rend-a", None, Some(&conv), 1, 0)
+            .unwrap();
+
+        let ok = flush_conversation_from_fresh_mount(&reg, "window-a", &sid, Some(&conv));
+        assert!(ok.is_ok());
+
+        let err = flush_conversation_from_fresh_mount(&reg, "window-b", &sid, Some(&conv))
+            .expect_err("other window must not flush");
+        assert_eq!(err.code, "forbidden");
+        assert!(
+            err.message.contains("no fresh mount"),
+            "unexpected message: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn missing_mount_fails_closed() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("flush-miss.db")).unwrap();
+        let (conv, sid) = test_setup_surface(&mut db);
+        let reg = MountRegistry::new();
+
+        let err = flush_conversation_from_fresh_mount(&reg, "main", &sid, Some(&conv))
+            .expect_err("unmounted surface");
+        assert_eq!(err.code, "forbidden");
+    }
+
+    #[test]
+    fn stale_mount_fails_closed_for_flush_authority() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("flush-stale.db")).unwrap();
+        let (conv, sid) = test_setup_surface(&mut db);
+        let mut reg = MountRegistry::new();
+        reg.register(&db, "main", &sid, "rend-1", None, Some(&conv), 1, 0)
+            .unwrap();
+        reg.test_expire_mount(&sid, "rend-1");
+
+        let err = flush_conversation_from_fresh_mount(&reg, "main", &sid, Some(&conv))
+            .expect_err("stale mount");
+        assert_eq!(err.code, "forbidden");
+    }
+
+    #[test]
+    fn conversation_scope_comes_from_mount_not_renderer_payload() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("flush-conv.db")).unwrap();
+        let (conv, sid) = test_setup_surface(&mut db);
+        let mut reg = MountRegistry::new();
+        reg.register(&db, "main", &sid, "rend-1", None, Some(&conv), 1, 0)
+            .unwrap();
+
+        let resolved =
+            flush_conversation_from_fresh_mount(&reg, "main", &sid, Some(&conv)).unwrap();
+        assert_eq!(
+            resolved.as_deref(),
+            Some(conv.as_str()),
+            "flush uses mount-backed conversation, not an IPC conversation argument"
+        );
+        // `flush_patch_scheduler_cmd` names the renderer field `_conversation_id` and never
+        // passes it into this helper — spoofed ids cannot widen flush scope.
+    }
 }
 
 #[cfg(test)]

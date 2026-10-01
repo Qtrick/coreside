@@ -819,9 +819,7 @@ pub fn dispatch(
         checkpoint,
     ) {
         Ok(rev) => rev,
-        Err(err) => {
-            return soft_duplicate_view(db, surface_id, event_id, action_id, params_v, err)
-        }
+        Err(err) => return soft_duplicate_view(db, surface_id, event_id, action_id, params_v, err),
     };
     loaded.owned = next_owned;
     loaded.seq = seq;

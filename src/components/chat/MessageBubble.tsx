@@ -247,6 +247,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
                 messageId={message.id}
                 conversationId={message.conversationId}
                 status={kernelProposal.status}
+                preservationSummary={kernelProposal.preservationSummary}
               />
             ) : null}
             <ActionLog message={message} />

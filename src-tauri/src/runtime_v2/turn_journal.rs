@@ -1014,7 +1014,10 @@ mod tests {
         let mut db = db();
         seed_conversation(&mut db, "c-sync");
         seed_events(&db, "c-sync", 200);
-        assert_eq!(get_conversation_sync_cursor(&db, "c-sync", "main").unwrap(), 0);
+        assert_eq!(
+            get_conversation_sync_cursor(&db, "c-sync", "main").unwrap(),
+            0
+        );
         assert_eq!(
             advance_conversation_sync_cursor(&db, "c-sync", "main", 10).unwrap(),
             10
@@ -1047,14 +1050,17 @@ mod tests {
     #[test]
     fn sync_cursor_rejects_unknown_conversation_and_negative() {
         let missing = db();
-        let err = advance_conversation_sync_cursor(&missing, "missing-conv", "main", 1)
-            .unwrap_err();
+        let err =
+            advance_conversation_sync_cursor(&missing, "missing-conv", "main", 1).unwrap_err();
         assert!(matches!(err, DbError::NotFound(_)));
         let mut db = db();
         seed_conversation(&mut db, "c-neg");
         let err = advance_conversation_sync_cursor(&db, "c-neg", "main", -1).unwrap_err();
         assert!(matches!(err, DbError::Invalid(_)));
-        assert_eq!(get_conversation_sync_cursor(&db, "c-neg", "main").unwrap(), 0);
+        assert_eq!(
+            get_conversation_sync_cursor(&db, "c-neg", "main").unwrap(),
+            0
+        );
         // Empty log: advance is a no-op (capped to 0).
         assert_eq!(
             advance_conversation_sync_cursor(&db, "c-neg", "main", 50).unwrap(),
@@ -1071,13 +1077,25 @@ mod tests {
         seed_events(&db, "c-b", 3);
         advance_conversation_sync_cursor(&db, "c-a", "main", 50).unwrap();
         advance_conversation_sync_cursor(&db, "c-b", "main", 3).unwrap();
-        assert_eq!(get_conversation_sync_cursor(&db, "c-a", "main").unwrap(), 50);
+        assert_eq!(
+            get_conversation_sync_cursor(&db, "c-a", "main").unwrap(),
+            50
+        );
         assert_eq!(get_conversation_sync_cursor(&db, "c-b", "main").unwrap(), 3);
         // Window B advancing must not poison Window A's watermark.
         advance_conversation_sync_cursor(&db, "c-a", "tool-1", 50).unwrap();
-        assert_eq!(get_conversation_sync_cursor(&db, "c-a", "main").unwrap(), 50);
-        assert_eq!(get_conversation_sync_cursor(&db, "c-a", "tool-1").unwrap(), 50);
-        assert_eq!(get_conversation_sync_cursor(&db, "c-a", "other").unwrap(), 0);
+        assert_eq!(
+            get_conversation_sync_cursor(&db, "c-a", "main").unwrap(),
+            50
+        );
+        assert_eq!(
+            get_conversation_sync_cursor(&db, "c-a", "tool-1").unwrap(),
+            50
+        );
+        assert_eq!(
+            get_conversation_sync_cursor(&db, "c-a", "other").unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -1152,8 +1170,7 @@ mod tests {
         seed_events(&db, "c-bad-client", 1);
         let err = advance_conversation_sync_cursor(&db, "c-bad-client", "", 1).unwrap_err();
         assert!(matches!(err, DbError::Invalid(_)));
-        let err = advance_conversation_sync_cursor(&db, "c-bad-client", "bad id!", 1)
-            .unwrap_err();
+        let err = advance_conversation_sync_cursor(&db, "c-bad-client", "bad id!", 1).unwrap_err();
         assert!(matches!(err, DbError::Invalid(_)));
     }
 }

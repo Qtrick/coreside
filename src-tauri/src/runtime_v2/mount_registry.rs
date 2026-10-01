@@ -259,13 +259,31 @@ impl MountRegistry {
         window_label: &str,
         surface_id: &str,
     ) -> Option<&SurfaceMountRegistration> {
+        self.fresh_mount_at(window_label, surface_id, Instant::now())
+    }
+
+    pub(crate) fn fresh_mount_at(
+        &self,
+        window_label: &str,
+        surface_id: &str,
+        now: Instant,
+    ) -> Option<&SurfaceMountRegistration> {
         let label = normalize_window_label(window_label);
-        let now = Instant::now();
         self.by_surface
             .get(surface_id)?
             .values()
             .filter(|reg| reg.window_label == label && mount_is_fresh(reg, now, None))
             .max_by_key(|reg| reg.generation)
+    }
+
+    /// Test-only: expire a mount so `fresh_mount` treats it as stale.
+    #[cfg(test)]
+    pub fn test_expire_mount(&mut self, surface_id: &str, renderer_instance_id: &str) {
+        if let Some(instances) = self.by_surface.get_mut(surface_id) {
+            if let Some(reg) = instances.get_mut(renderer_instance_id) {
+                reg.ready_at = Some(Instant::now() - MOUNT_STALE_TTL - Duration::from_secs(1));
+            }
+        }
     }
 
     pub fn evaluate_renderer_readiness(
@@ -403,6 +421,30 @@ pub fn classify_operation_readiness(
 }
 
 #[cfg(test)]
+pub(crate) fn test_setup_surface(db: &mut Database) -> (String, String) {
+    use crate::db::{create_conversation, DEFAULT_WORKSPACE_ID};
+    use serde_json::json;
+
+    let conv = create_conversation(db, DEFAULT_WORKSPACE_ID, "Mount Conv", None).unwrap();
+    let surf = crate::runtime_v2::surfaces::create_inline_surface(
+        db,
+        &conv.id,
+        None,
+        None,
+        "Mounted",
+        &json!({
+            "id": "doc-1",
+            "name": "Mounted",
+            "layout": "stack",
+            "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+        }),
+        &[],
+    )
+    .unwrap();
+    (conv.id, surf.id)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::{create_conversation, Database, DEFAULT_WORKSPACE_ID};
@@ -410,23 +452,7 @@ mod tests {
     use tempfile::tempdir;
 
     fn setup_surface(db: &mut Database) -> (String, String) {
-        let conv = create_conversation(db, DEFAULT_WORKSPACE_ID, "Mount Conv", None).unwrap();
-        let surf = crate::runtime_v2::surfaces::create_inline_surface(
-            db,
-            &conv.id,
-            None,
-            None,
-            "Mounted",
-            &json!({
-                "id": "doc-1",
-                "name": "Mounted",
-                "layout": "stack",
-                "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
-            }),
-            &[],
-        )
-        .unwrap();
-        (conv.id, surf.id)
+        test_setup_surface(db)
     }
 
     #[test]
@@ -661,5 +687,87 @@ mod tests {
         assert!(reg.unregister("main", &sid, Some("canvas")));
         assert_eq!(reg.instance_count(&sid), 1);
         assert!(reg.is_mounted(&sid));
+    }
+
+    #[test]
+    fn fresh_mount_ttl_stale_fails_closed() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("m-stale.db")).unwrap();
+        let (_conv, sid) = setup_surface(&mut db);
+        let mut reg = MountRegistry::new();
+        reg.register(&db, "main", &sid, "rend-1", None, None, 1, 0)
+            .unwrap();
+        assert!(reg.fresh_mount("main", &sid).is_some());
+        reg.test_expire_mount(&sid, "rend-1");
+        assert!(
+            reg.fresh_mount("main", &sid).is_none(),
+            "expired mount must not authorize flush"
+        );
+    }
+
+    #[test]
+    fn register_rejects_disabled_application() {
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use std::collections::HashMap;
+
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("m-disabled.db")).unwrap();
+        let (_conv, sid) = setup_surface(&mut db);
+
+        upsert_manifest(
+            &mut db,
+            ApplicationManifest {
+                schema_version: "1".into(),
+                application_id: "app-off".into(),
+                instance_id: "inst-off".into(),
+                name: "Off".into(),
+                description: String::new(),
+                version: 1,
+                surfaces: vec![],
+                routes: vec![],
+                data_models: vec![],
+                settings: vec![],
+                capabilities: vec!["coreside.core".into()],
+                permissions: vec![],
+                events: vec![],
+                tests: vec![],
+                search_keywords: vec![],
+                tags: vec![],
+                agent_description: String::new(),
+                project_id: None,
+                conversation_id: None,
+                organization_id: None,
+                ownership: None,
+                application_action_access: vec![],
+                surface_action_access: HashMap::new(),
+                component_action_access: HashMap::new(),
+                action_descriptor_hashes: HashMap::new(),
+            },
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES ('app-off', ?1, 'Off', '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                [DEFAULT_WORKSPACE_ID],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE application_manifests SET disabled = 1, lifecycle_state = 'disabled' WHERE application_id = 'app-off'",
+                [],
+            )
+            .unwrap();
+        crate::runtime_v2::surfaces::bind_surface_tool_id(&mut db, &sid, "app-off").unwrap();
+
+        let mut reg = MountRegistry::new();
+        let err = reg
+            .register(&db, "main", &sid, "rend-1", Some("app-off"), None, 1, 0)
+            .expect_err("disabled application");
+        assert!(
+            err.to_string().contains("disabled or suspended"),
+            "expected disabled denial, got {err}"
+        );
+        assert!(!reg.is_mounted(&sid));
     }
 }

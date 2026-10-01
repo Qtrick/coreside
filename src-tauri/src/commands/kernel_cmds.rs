@@ -5,7 +5,7 @@ use serde_json::Value;
 use tauri::State;
 
 use crate::application_kernel::application_plan::{
-    compile_plan, ApplicationPlan, ValidatedApplicationPlan,
+    compile_plan_against_db, ApplicationPlan, ValidatedApplicationPlan,
 };
 use crate::application_kernel::compiler::{compile, ChangeIntent, CompiledChange};
 use crate::application_kernel::context::{
@@ -17,6 +17,7 @@ use crate::application_kernel::lifecycle::{
     list_build_failures, list_versions, record_build_failure, set_application_enabled,
     ApplicationVersion, BuildFailure, JobRecord,
 };
+use crate::application_kernel::lineage::LineageScope;
 use crate::application_kernel::manifest::{
     ensure_manifest_for_tool, get_manifest, list_manifests, mark_last_known_good,
     restore_last_known_good, ManifestRecord,
@@ -153,10 +154,17 @@ pub fn kernel_compile_application_plan(
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     plan: ApplicationPlan,
+    conversation_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<ValidatedApplicationPlan, CommandError> {
     state.require_profile()?;
     require_main_for_sensitive_kernel(&window)?;
-    compile_plan(&plan).map_err(map_kernel)
+    let db = state.db.lock();
+    let scope = LineageScope {
+        conversation_id,
+        project_id,
+    };
+    compile_plan_against_db(&db, &plan, &scope).map_err(map_kernel)
 }
 
 #[tauri::command]

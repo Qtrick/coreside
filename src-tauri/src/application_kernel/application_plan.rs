@@ -5,14 +5,19 @@
 //! Providers (mock, recorded, live) all emit this same contract.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::db::Database;
 use crate::runtime_v2::operations::AppOperation;
 use crate::runtime_v2::packs::validate_component_type_allowed;
 
 use super::compiler::{compile, compile_all, ChangeIntent, CompiledChange};
 use super::errors::KernelError;
+use super::lineage::{
+    resolve_application_identity, resolve_application_surface, resolve_surface_for_application,
+    LineageScope,
+};
 use super::testing::DeclarativeTest;
 
 pub const APPLICATION_PLAN_SCHEMA_VERSION: &str = "1";
@@ -63,7 +68,7 @@ pub struct ApplicationPlan {
     /// Required for evolve; optional for create (derived from CreateSurface tool id).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub application_id: Option<String>,
-    /// Optimistic concurrency base for evolve plans.
+    /// Optimistic concurrency base for evolve plans. Required for evolve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_revision: Option<i64>,
     /// Inspectable human-readable steps (not trusted for execution).
@@ -91,6 +96,68 @@ pub struct ValidatedApplicationPlan {
     pub plan: ApplicationPlan,
     pub compiled: CompiledChange,
     pub diagnostics: Vec<String>,
+}
+
+/// Canonical ApplicationPlan JSON-schema fragment for OpenAI-family providers.
+/// Nested intent details stay loosely typed; Rust validation is authoritative.
+pub fn application_plan_json_schema_openai() -> Value {
+    json!({
+        "type": ["object", "null"],
+        "description": "Provider-neutral untrusted application proposal. Rust validates and compiles; never trust as authority.",
+        "additionalProperties": true,
+        "properties": {
+            "schemaVersion": { "type": "string" },
+            "planId": { "type": "string" },
+            "kind": { "type": "string", "enum": ["create", "evolve"] },
+            "summary": { "type": "string" },
+            "applicationId": { "type": ["string", "null"] },
+            "baseRevision": { "type": ["integer", "null"] },
+            "steps": {
+                "type": "array",
+                "items": { "type": "object" }
+            },
+            "intents": {
+                "type": "array",
+                "items": { "type": "object" }
+            },
+            "tests": {
+                "type": ["array", "null"],
+                "items": { "type": "object" }
+            },
+            "diagnostics": { "type": ["object", "null"] }
+        },
+        "required": ["kind", "summary", "intents"]
+    })
+}
+
+/// Gemini-safe ApplicationPlan fragment: no nullable unions, shallow nesting.
+pub fn application_plan_json_schema_gemini() -> Value {
+    json!({
+        "type": "object",
+        "description": "Provider-neutral untrusted application proposal. Rust validates and compiles; never trust as authority.",
+        "properties": {
+            "schemaVersion": { "type": "string" },
+            "planId": { "type": "string" },
+            "kind": { "type": "string", "enum": ["create", "evolve"] },
+            "summary": { "type": "string" },
+            "applicationId": { "type": "string" },
+            "baseRevision": { "type": "integer" },
+            "steps": {
+                "type": "array",
+                "items": { "type": "object" }
+            },
+            "intents": {
+                "type": "array",
+                "items": { "type": "object" }
+            },
+            "tests": {
+                "type": "array",
+                "items": { "type": "object" }
+            },
+            "diagnostics": { "type": "object" }
+        },
+        "required": ["kind", "summary", "intents"]
+    })
 }
 
 pub fn validate_plan(plan: &ApplicationPlan) -> Result<(), KernelError> {
@@ -143,6 +210,22 @@ pub fn validate_plan(plan: &ApplicationPlan) -> Result<(), KernelError> {
             )));
         }
     }
+    if plan.kind == ApplicationPlanKind::Evolve {
+        match plan.base_revision {
+            Some(rev) if rev >= 0 => {}
+            Some(rev) => {
+                return Err(KernelError::Validation(format!(
+                    "evolve applicationPlan.baseRevision must be non-negative, got {rev}"
+                )));
+            }
+            None => {
+                return Err(KernelError::Validation(
+                    "evolve applicationPlan requires baseRevision observed from authoritative application context"
+                        .into(),
+                ));
+            }
+        }
+    }
     let mut seen_intent_keys = std::collections::HashSet::new();
     for intent in &plan.intents {
         validate_intent_refs(intent)?;
@@ -161,13 +244,64 @@ pub fn validate_plan(plan: &ApplicationPlan) -> Result<(), KernelError> {
     Ok(())
 }
 
-/// One Apply must not silently mutate multiple applications.
-fn bind_intents_to_plan_application(plan: &ApplicationPlan) -> Result<(), KernelError> {
+/// Database-authoritative lineage checks for apply/proposal admission.
+///
+/// Structural `validate_plan` is not enough for evolve: surface IDs must resolve
+/// through SQLite lineage, not string formatting.
+pub fn validate_plan_against_db(
+    db: &Database,
+    plan: &ApplicationPlan,
+    scope: &LineageScope,
+) -> Result<(), KernelError> {
+    validate_plan(plan)?;
+    let bound = plan_bound_application_id(plan)?;
+    let allow_missing = plan.kind == ApplicationPlanKind::Create;
+    resolve_application_identity(db, bound, allow_missing)?;
+
+    if plan.kind == ApplicationPlanKind::Evolve {
+        let expected = plan.base_revision.expect("checked in validate_plan");
+        // Authoritative application surface OCC (covers data-only evolves without component intents).
+        let primary =
+            resolve_application_surface(db, bound, None, scope.conversation_id.as_deref())?;
+        scope.enforce(&primary)?;
+        if primary.definition_revision != expected {
+            return Err(KernelError::RevisionConflict(format!(
+                "stale evolve baseRevision {expected}; surface '{}' is at revision {}",
+                primary.surface_id, primary.definition_revision
+            )));
+        }
+        for surface_id in intent_surface_ids(plan) {
+            if surface_id == primary.surface_id {
+                continue;
+            }
+            let lineage = resolve_surface_for_application(db, &surface_id, bound)?;
+            scope.enforce(&lineage)?;
+            if lineage.definition_revision != expected {
+                return Err(KernelError::RevisionConflict(format!(
+                    "stale evolve baseRevision {expected}; surface '{surface_id}' is at revision {}",
+                    lineage.definition_revision
+                )));
+            }
+        }
+    } else {
+        for surface_id in intent_surface_ids(plan) {
+            match resolve_surface_for_application(db, &surface_id, bound) {
+                Ok(lineage) => scope.enforce(&lineage)?,
+                Err(KernelError::Validation(ref msg))
+                    if msg.contains("does not exist") || msg.contains("no bound application") => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn plan_bound_application_id(plan: &ApplicationPlan) -> Result<&str, KernelError> {
     let create_tool_id = plan.intents.iter().find_map(|i| match i {
         ChangeIntent::CreateSurface { tool, .. } => Some(tool.id.as_str()),
         _ => None,
     });
-    let bound = match plan.kind {
+    match plan.kind {
         ApplicationPlanKind::Evolve => plan
             .application_id
             .as_deref()
@@ -175,7 +309,7 @@ fn bind_intents_to_plan_application(plan: &ApplicationPlan) -> Result<(), Kernel
             .filter(|s| !s.is_empty())
             .ok_or_else(|| {
                 KernelError::Validation("applicationId required for evolve applicationPlan".into())
-            })?,
+            }),
         ApplicationPlanKind::Create => {
             if let Some(app) = plan
                 .application_id
@@ -183,16 +317,40 @@ fn bind_intents_to_plan_application(plan: &ApplicationPlan) -> Result<(), Kernel
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
             {
-                app
+                Ok(app)
             } else {
                 create_tool_id.ok_or_else(|| {
                     KernelError::Validation(
                         "create applicationPlan requires CreateSurface or applicationId".into(),
                     )
-                })?
+                })
             }
         }
-    };
+    }
+}
+
+fn intent_surface_ids(plan: &ApplicationPlan) -> Vec<String> {
+    let mut out = Vec::new();
+    for intent in &plan.intents {
+        match intent {
+            ChangeIntent::InsertComponent { surface_id, .. }
+            | ChangeIntent::UpdateComponent { surface_id, .. }
+            | ChangeIntent::RemoveComponent { surface_id, .. } => {
+                if !surface_id.trim().is_empty() {
+                    out.push(surface_id.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// One Apply must not silently mutate multiple applications.
+fn bind_intents_to_plan_application(plan: &ApplicationPlan) -> Result<(), KernelError> {
+    let bound = plan_bound_application_id(plan)?;
     crate::security::assert_not_protected(bound).map_err(KernelError::Protected)?;
 
     for intent in &plan.intents {
@@ -207,19 +365,18 @@ fn bind_intents_to_plan_application(plan: &ApplicationPlan) -> Result<(), Kernel
     Ok(())
 }
 
+/// Explicit application identity from an intent. Component intents do **not**
+/// derive identity from `surf-*` formatting — that requires DB lineage.
 fn intent_application_id(intent: &ChangeIntent) -> Option<&str> {
     match intent {
         ChangeIntent::CreateSurface { tool, .. } => Some(tool.id.as_str()),
         ChangeIntent::UpdateSurface { tool_id, .. } => Some(tool_id.as_str()),
         ChangeIntent::UpsertDataModel { application_id, .. }
         | ChangeIntent::MigrateDataModel { application_id, .. } => Some(application_id.as_str()),
-        ChangeIntent::InsertComponent { surface_id, .. }
-        | ChangeIntent::UpdateComponent { surface_id, .. }
-        | ChangeIntent::RemoveComponent { surface_id, .. } => {
-            surface_id.strip_prefix("surf-").or(Some(surface_id.as_str()))
-        }
-        // Exhaustiveness: these intents are rejected in validate_intent_refs.
-        ChangeIntent::AddSetting { .. }
+        ChangeIntent::InsertComponent { .. }
+        | ChangeIntent::UpdateComponent { .. }
+        | ChangeIntent::RemoveComponent { .. }
+        | ChangeIntent::AddSetting { .. }
         | ChangeIntent::UpsertManifest { .. }
         | ChangeIntent::NavigateRoute { .. } => None,
     }
@@ -294,6 +451,11 @@ fn validate_intent_refs(intent: &ChangeIntent) -> Result<(), KernelError> {
             ..
         } => {
             crate::security::assert_not_protected(surface_id).map_err(KernelError::Protected)?;
+            if surface_id.trim().is_empty() {
+                return Err(KernelError::Validation(
+                    "InsertComponent requires surfaceId".into(),
+                ));
+            }
             if let Some(id) = component_id {
                 if id.trim().is_empty() {
                     return Err(KernelError::Validation(
@@ -310,6 +472,11 @@ fn validate_intent_refs(intent: &ChangeIntent) -> Result<(), KernelError> {
             ..
         } => {
             crate::security::assert_not_protected(surface_id).map_err(KernelError::Protected)?;
+            if surface_id.trim().is_empty() {
+                return Err(KernelError::Validation(
+                    "UpdateComponent requires surfaceId".into(),
+                ));
+            }
             if let Some(component_type) = component_type {
                 validate_component_type_allowed(component_type)
                     .map_err(KernelError::CapabilityUnavailable)?;
@@ -317,6 +484,11 @@ fn validate_intent_refs(intent: &ChangeIntent) -> Result<(), KernelError> {
         }
         ChangeIntent::RemoveComponent { surface_id, .. } => {
             crate::security::assert_not_protected(surface_id).map_err(KernelError::Protected)?;
+            if surface_id.trim().is_empty() {
+                return Err(KernelError::Validation(
+                    "RemoveComponent requires surfaceId".into(),
+                ));
+            }
         }
         ChangeIntent::AddSetting { .. }
         | ChangeIntent::UpsertManifest { .. }
@@ -400,21 +572,43 @@ fn intent_dedupe_key(intent: &ChangeIntent) -> String {
     }
 }
 
+/// Stamp plan-level baseRevision onto compiled ops that lack their own.
+fn apply_plan_base_revision(plan: &ApplicationPlan, compiled: &mut CompiledChange) {
+    let Some(plan_rev) = plan.base_revision else {
+        return;
+    };
+    for op in &mut compiled.operations {
+        if op.base_revision.is_none() {
+            op.base_revision = Some(plan_rev);
+        }
+    }
+}
+
 /// Validate + compile an ApplicationPlan into kernel-ready operations.
 pub fn compile_plan(plan: &ApplicationPlan) -> Result<ValidatedApplicationPlan, KernelError> {
     validate_plan(plan)?;
-    let compiled = compile_all(&plan.intents)?;
-    let mut diagnostics = Vec::new();
-    if plan.kind == ApplicationPlanKind::Evolve && plan.base_revision.is_none() {
-        diagnostics.push(
-            "evolve plan has no baseRevision; OCC will rely on per-operation baseRevision"
-                .into(),
-        );
-    }
+    let mut compiled = compile_all(&plan.intents)?;
+    apply_plan_base_revision(plan, &mut compiled);
     Ok(ValidatedApplicationPlan {
         plan: plan.clone(),
         compiled,
-        diagnostics,
+        diagnostics: Vec::new(),
+    })
+}
+
+/// Validate (including DB lineage) + compile. Prefer this at proposal/apply time.
+pub fn compile_plan_against_db(
+    db: &Database,
+    plan: &ApplicationPlan,
+    scope: &LineageScope,
+) -> Result<ValidatedApplicationPlan, KernelError> {
+    validate_plan_against_db(db, plan, scope)?;
+    let mut compiled = compile_all(&plan.intents)?;
+    apply_plan_base_revision(plan, &mut compiled);
+    Ok(ValidatedApplicationPlan {
+        plan: plan.clone(),
+        compiled,
+        diagnostics: Vec::new(),
     })
 }
 
@@ -512,6 +706,32 @@ mod tests {
         let mut plan = sample_create_plan();
         plan.kind = ApplicationPlanKind::Evolve;
         plan.application_id = None;
+        plan.base_revision = Some(1);
+        assert!(matches!(
+            validate_plan(&plan),
+            Err(KernelError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_evolve_without_base_revision() {
+        let mut plan = sample_create_plan();
+        plan.kind = ApplicationPlanKind::Evolve;
+        plan.application_id = Some("tool-task-tracker".into());
+        plan.base_revision = None;
+        let err = validate_plan(&plan).expect_err("missing baseRevision must fail");
+        assert!(
+            matches!(err, KernelError::Validation(ref m) if m.contains("baseRevision")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_evolve_with_negative_base_revision() {
+        let mut plan = sample_create_plan();
+        plan.kind = ApplicationPlanKind::Evolve;
+        plan.application_id = Some("tool-task-tracker".into());
+        plan.base_revision = Some(-1);
         assert!(matches!(
             validate_plan(&plan),
             Err(KernelError::Validation(_))
@@ -711,6 +931,7 @@ mod tests {
         let mut evolve = sample_create_plan();
         evolve.kind = ApplicationPlanKind::Evolve;
         evolve.application_id = Some("core.settings".into());
+        evolve.base_revision = Some(1);
         assert!(matches!(
             validate_plan(&evolve),
             Err(KernelError::Protected(_))
@@ -741,7 +962,10 @@ mod tests {
             "create plans must follow with UpsertDataModel"
         );
         let ops = plan_to_operations(&plan).unwrap();
-        let create_idx = ops.iter().position(|o| o.op_type == "surface.create").unwrap();
+        let create_idx = ops
+            .iter()
+            .position(|o| o.op_type == "surface.create")
+            .unwrap();
         let model_idx = ops
             .iter()
             .position(|o| o.op_type == "data.model_upsert")
@@ -752,10 +976,7 @@ mod tests {
     #[test]
     fn rejects_cross_application_upsert_in_plan() {
         let mut plan = sample_create_plan();
-        if let ChangeIntent::UpsertDataModel {
-            application_id, ..
-        } = &mut plan.intents[1]
-        {
+        if let ChangeIntent::UpsertDataModel { application_id, .. } = &mut plan.intents[1] {
             *application_id = "tool-other-app".into();
         }
         let err = validate_plan(&plan).expect_err("cross-app upsert must fail");
@@ -837,5 +1058,208 @@ mod tests {
             matches!(err, KernelError::Validation(ref m) if m.contains("does not allow")),
             "got {err:?}"
         );
+    }
+
+    mod db_lineage {
+        use super::*;
+        use crate::application_kernel::lineage::LineageScope;
+        use crate::db::{create_conversation, Database, DEFAULT_WORKSPACE_ID};
+        use crate::runtime_v2::surfaces::{bind_surface_tool_id, get_surface};
+        use serde_json::json;
+        use tempfile::tempdir;
+
+        const APP_ID: &str = "tool-task-tracker";
+
+        fn insert_tool(db: &Database, id: &str) {
+            db.conn()
+                .execute(
+                    "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                     VALUES (?1, ?2, ?1, '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                    rusqlite::params![id, DEFAULT_WORKSPACE_ID],
+                )
+                .unwrap();
+        }
+
+        /// Real inline surface bound to Task Tracker tool (revision 1).
+        fn setup_bound_task_tracker_surface() -> (Database, String, String) {
+            let dir = tempdir().unwrap();
+            let mut db = Database::open_path(&dir.path().join("plan-lineage.db")).unwrap();
+            let conv =
+                create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Plan lineage", None).unwrap();
+            insert_tool(&db, APP_ID);
+            let surf = crate::runtime_v2::surfaces::create_inline_surface(
+                &mut db,
+                &conv.id,
+                None,
+                None,
+                "Task Tracker",
+                &json!({
+                    "id": "doc-tt",
+                    "name": "Task Tracker",
+                    "layout": "stack",
+                    "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+                }),
+                &[],
+            )
+            .unwrap();
+            bind_surface_tool_id(&mut db, &surf.id, APP_ID).unwrap();
+            assert_eq!(get_surface(&db, &surf.id).unwrap().current_revision, 1);
+            (db, conv.id, surf.id)
+        }
+
+        fn scope_for(conv_id: &str) -> LineageScope {
+            LineageScope {
+                conversation_id: Some(conv_id.to_string()),
+                project_id: None,
+            }
+        }
+
+        #[test]
+        fn matching_revision_evolve_compiles_against_db() {
+            let (db, conv_id, _) = setup_bound_task_tracker_surface();
+            let plan = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(Some(1));
+            let validated =
+                compile_plan_against_db(&db, &plan, &scope_for(&conv_id)).expect("must compile");
+            assert!(!validated.compiled.operations.is_empty());
+            assert!(
+                validated
+                    .compiled
+                    .operations
+                    .iter()
+                    .any(|op| op.op_type == "data.model_upsert"),
+                "evolve fixture must emit data.model_upsert"
+            );
+            assert!(
+                validated
+                    .compiled
+                    .operations
+                    .iter()
+                    .any(|op| op.op_type == "tool.full_replace"),
+                "evolve fixture must emit tool.full_replace"
+            );
+            assert!(
+                validated
+                    .compiled
+                    .operations
+                    .iter()
+                    .all(|op| op.base_revision == Some(1)),
+                "plan baseRevision must stamp compiled ops"
+            );
+        }
+
+        #[test]
+        fn stale_surface_revision_returns_revision_conflict() {
+            let (db, conv_id, surface_id) = setup_bound_task_tracker_surface();
+            db.conn()
+                .execute(
+                    "UPDATE surfaces SET current_revision = 2 WHERE id = ?1",
+                    [&surface_id],
+                )
+                .unwrap();
+            let plan = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(Some(1));
+            let err = compile_plan_against_db(&db, &plan, &scope_for(&conv_id))
+                .expect_err("stale baseRevision must fail");
+            assert!(
+                matches!(err, KernelError::RevisionConflict(ref m) if m.contains("stale evolve baseRevision")),
+                "got {err:?}"
+            );
+        }
+
+        #[test]
+        fn omitted_base_revision_fails_validation_before_db() {
+            let (db, conv_id, _) = setup_bound_task_tracker_surface();
+            let plan = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(None);
+            let err = validate_plan_against_db(&db, &plan, &scope_for(&conv_id))
+                .expect_err("missing baseRevision");
+            assert!(
+                matches!(err, KernelError::Validation(ref m) if m.contains("baseRevision")),
+                "got {err:?}"
+            );
+        }
+
+        #[test]
+        fn base_revision_ahead_of_surface_returns_revision_conflict() {
+            let (db, conv_id, _) = setup_bound_task_tracker_surface();
+            let plan = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(Some(99));
+            let err = compile_plan_against_db(&db, &plan, &scope_for(&conv_id))
+                .expect_err("future baseRevision must fail");
+            assert!(
+                matches!(err, KernelError::RevisionConflict(ref m) if m.contains("stale evolve baseRevision")),
+                "got {err:?}"
+            );
+        }
+
+        #[test]
+        fn cross_application_surface_intent_fails_closed() {
+            let (mut db, conv_id, surface_id) = setup_bound_task_tracker_surface();
+            insert_tool(&db, "tool-other-app");
+            bind_surface_tool_id(&mut db, &surface_id, "tool-other-app").unwrap();
+
+            let mut plan = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(Some(1));
+            plan.intents.push(ChangeIntent::InsertComponent {
+                surface_id: surface_id.clone(),
+                parent_id: None,
+                component_type: "text".into(),
+                props: json!({"text": "orphan"}),
+                base_revision: None,
+                component_id: Some("tm-cross-test".into()),
+            });
+            let err = validate_plan_against_db(&db, &plan, &scope_for(&conv_id))
+                .expect_err("surface owned by other app");
+            assert!(
+                matches!(
+                    err,
+                    KernelError::Validation(ref m)
+                        if m.contains("belongs to") || m.contains("does not exist")
+                ),
+                "got {err:?}"
+            );
+        }
+
+        #[test]
+        fn missing_surface_intent_fails_closed() {
+            let (db, conv_id, _) = setup_bound_task_tracker_surface();
+            let mut plan = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(Some(1));
+            plan.intents.push(ChangeIntent::InsertComponent {
+                surface_id: "surf-does-not-exist".into(),
+                parent_id: None,
+                component_type: "text".into(),
+                props: json!({"text": "ghost"}),
+                base_revision: None,
+                component_id: Some("tm-missing".into()),
+            });
+            let err = validate_plan_against_db(&db, &plan, &scope_for(&conv_id))
+                .expect_err("missing surface");
+            assert!(
+                matches!(err, KernelError::Validation(ref m) if m.contains("does not exist")),
+                "got {err:?}"
+            );
+        }
+
+        #[test]
+        fn spoofed_surf_prefix_without_db_row_fails() {
+            let (db, conv_id, real_surface_id) = setup_bound_task_tracker_surface();
+            let spoof = format!("surf-{APP_ID}");
+            assert_ne!(
+                spoof, real_surface_id,
+                "canonical id must not match inline uuid"
+            );
+
+            let mut plan = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(Some(1));
+            plan.intents.push(ChangeIntent::InsertComponent {
+                surface_id: spoof,
+                parent_id: None,
+                component_type: "text".into(),
+                props: json!({"text": "spoof"}),
+                base_revision: None,
+                component_id: Some("tm-spoof".into()),
+            });
+            let err = validate_plan_against_db(&db, &plan, &scope_for(&conv_id))
+                .expect_err("spoofed surf-* must fail");
+            assert!(
+                matches!(err, KernelError::Validation(ref m) if m.contains("does not exist")),
+                "got {err:?}"
+            );
+        }
     }
 }
