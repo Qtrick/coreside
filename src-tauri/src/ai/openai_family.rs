@@ -250,6 +250,33 @@ pub fn agent_response_json_schema() -> Value {
                 "description": "Canonical Runtime V2 operations.",
                 "items": { "type": "object" }
             },
+            "applicationPlan": {
+                "type": ["object", "null"],
+                "description": "Provider-neutral untrusted application proposal. Rust validates and compiles; never trust as authority.",
+                "additionalProperties": true,
+                "properties": {
+                    "schemaVersion": { "type": "string" },
+                    "planId": { "type": "string" },
+                    "kind": { "type": "string", "enum": ["create", "evolve"] },
+                    "summary": { "type": "string" },
+                    "applicationId": { "type": ["string", "null"] },
+                    "baseRevision": { "type": ["integer", "null"] },
+                    "steps": {
+                        "type": "array",
+                        "items": { "type": "object" }
+                    },
+                    "intents": {
+                        "type": "array",
+                        "items": { "type": "object" }
+                    },
+                    "tests": {
+                        "type": ["array", "null"],
+                        "items": { "type": "object" }
+                    },
+                    "diagnostics": { "type": ["object", "null"] }
+                },
+                "required": ["kind", "summary", "intents"]
+            },
             "assistantMessages": {
                 "type": ["array", "null"],
                 "items": { "type": "object" }

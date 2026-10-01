@@ -54,14 +54,27 @@ pub struct ApprovalRequest {
     pub project_id: Option<String>,
 }
 
-/// Identity of one concrete call: application + action + authority + input.
+/// Version of the canonical approval call hash.
 ///
-/// Includes conversation, venue, and presence so an approval cannot be reused
-/// across conversations or present/away contexts (confused-deputy defense).
+/// v2 binds surfaceId/componentId so the same action+input cannot be replayed
+/// from a different surface or component in the same application. Pending
+/// approvals created before this version remain unused until they expire —
+/// they are not reinterpreted under v2 (fail-closed).
+pub const CALL_HASH_VERSION: u32 = 2;
+
+/// Identity of one concrete call: application + surface + component + action + authority + input.
+///
+/// Includes conversation, venue, presence, surface, and component so an approval
+/// cannot be reused across conversations, present/away contexts, or UI loci
+/// (confused-deputy defense).
 pub fn call_hash(ctx: &ActionRunContext, descriptor: &ActionDescriptor, input: &Value) -> String {
     hash_value(&serde_json::json!({
+        "hashVersion": CALL_HASH_VERSION,
         "applicationId": ctx.application_id,
+        "projectId": ctx.project_id,
         "conversationId": ctx.conversation_id,
+        "surfaceId": ctx.surface_id,
+        "componentId": ctx.component_id,
         "venue": ctx.venue.as_str(),
         "presence": ctx.presence.as_str(),
         "action": descriptor.name,
@@ -559,6 +572,111 @@ mod tests {
             call_hash(&chat, d, &input),
             "approvals must not transfer across venue"
         );
+        let mut proj_a = ctx();
+        proj_a.project_id = Some("proj-a".into());
+        let mut proj_b = ctx();
+        proj_b.project_id = Some("proj-b".into());
+        assert_ne!(
+            call_hash(&proj_a, d, &input),
+            call_hash(&proj_b, d, &input),
+            "approvals must not transfer across projects"
+        );
+    }
+
+    #[test]
+    fn call_hash_binds_surface_and_component() {
+        let d = find_action("local_data.write").unwrap();
+        let input = json!({"modelId": "m", "data": {"a": 1}});
+        let mut surf_a = ctx();
+        surf_a.surface_id = Some("surf-a".into());
+        surf_a.component_id = Some("btn-add".into());
+        let mut surf_b = ctx();
+        surf_b.surface_id = Some("surf-b".into());
+        surf_b.component_id = Some("btn-add".into());
+        assert_ne!(
+            call_hash(&surf_a, d, &input),
+            call_hash(&surf_b, d, &input),
+            "same action+input must not reuse approval across surfaces"
+        );
+        let mut comp_b = surf_a.clone();
+        comp_b.component_id = Some("btn-delete".into());
+        assert_ne!(
+            call_hash(&surf_a, d, &input),
+            call_hash(&comp_b, d, &input),
+            "same action+input must not reuse approval across components"
+        );
+        assert_eq!(
+            call_hash(&surf_a, d, &input),
+            call_hash(&surf_a, d, &input),
+            "identical locus must produce identical hash"
+        );
+    }
+
+    #[test]
+    fn pending_approval_not_reused_across_surfaces_or_components() {
+        let (mut db, _dir) = test_db();
+        let d = find_action("local_data.write").unwrap();
+        let input = json!({"modelId": "m", "data": {"a": 1}});
+        let mut surf_a = ctx();
+        surf_a.surface_id = Some("surf-a".into());
+        surf_a.component_id = Some("btn-add".into());
+        let mut surf_b = surf_a.clone();
+        surf_b.surface_id = Some("surf-b".into());
+        let a = create_pending(&mut db, &surf_a, d, &input, None).unwrap();
+        let b = create_pending(&mut db, &surf_b, d, &input, None).unwrap();
+        assert_ne!(a.id, b.id, "different surfaces must mint distinct pendings");
+        assert_ne!(a.call_hash, b.call_hash);
+        let mut comp_b = surf_a.clone();
+        comp_b.component_id = Some("btn-delete".into());
+        let c = create_pending(&mut db, &comp_b, d, &input, None).unwrap();
+        assert_ne!(a.id, c.id, "different components must mint distinct pendings");
+        assert_eq!(list_pending(&mut db).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn consume_rejects_same_action_input_from_different_surface() {
+        let (mut db, _dir) = test_db();
+        let d = find_action("local_data.write").unwrap();
+        let input = json!({"modelId": "m", "data": {"title": "x"}});
+        let mut surf_a = ctx();
+        surf_a.surface_id = Some("surf-a".into());
+        surf_a.component_id = Some("btn-add".into());
+        let a = create_pending(&mut db, &surf_a, d, &input, None).unwrap();
+        decide(&mut db, &a.id, true, None, "user").unwrap();
+
+        let mut surf_b = surf_a.clone();
+        surf_b.surface_id = Some("surf-b".into());
+        let foreign_hash = call_hash(&surf_b, d, &input);
+        assert_ne!(a.call_hash, foreign_hash);
+        assert!(
+            !consume(&mut db, &a.id, &foreign_hash).unwrap(),
+            "foreign surface call_hash must not consume approval"
+        );
+        assert!(
+            consume(&mut db, &a.id, &a.call_hash).unwrap(),
+            "matching surface call_hash must still consume once"
+        );
+    }
+
+    #[test]
+    fn consume_rejects_same_action_input_from_different_component() {
+        let (mut db, _dir) = test_db();
+        let d = find_action("local_data.write").unwrap();
+        let input = json!({"modelId": "m", "data": {"title": "y"}});
+        let mut add = ctx();
+        add.surface_id = Some("surf-1".into());
+        add.component_id = Some("btn-add".into());
+        let a = create_pending(&mut db, &add, d, &input, None).unwrap();
+        decide(&mut db, &a.id, true, None, "user").unwrap();
+
+        let mut delete = add.clone();
+        delete.component_id = Some("btn-delete".into());
+        let foreign_hash = call_hash(&delete, d, &input);
+        assert!(
+            !consume(&mut db, &a.id, &foreign_hash).unwrap(),
+            "foreign component call_hash must not consume approval"
+        );
+        assert!(consume(&mut db, &a.id, &a.call_hash).unwrap());
     }
 
     #[test]

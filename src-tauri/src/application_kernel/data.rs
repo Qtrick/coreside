@@ -738,6 +738,106 @@ pub fn apply_migration(
     }
 }
 
+fn model_record_count(db: &Database, application_id: &str, model_id: &str) -> DbResult<i64> {
+    db.conn()
+        .query_row(
+            "SELECT COUNT(*) FROM generated_data_records
+             WHERE application_id = ?1 AND model_id = ?2",
+            params![application_id, model_id],
+            |row| row.get(0),
+        )
+        .map_err(DbError::Sqlite)
+}
+
+/// True only for explicit destructive intent — not `requires_approval` (that means ask, not confirmed).
+fn destructive_confirmed(op: &AppOperation) -> bool {
+    op.destructive == Some(true)
+        || op
+            .payload
+            .get("confirmDestructive")
+            .and_then(|v| v.as_bool())
+            == Some(true)
+}
+
+fn require_destructive_confirmation(op: &AppOperation, strategy: &str) -> DbResult<()> {
+    if destructive_confirmed(op) {
+        Ok(())
+    } else {
+        Err(DbError::Invalid(format!(
+            "destructive migrationStrategy '{strategy}' requires confirmation"
+        )))
+    }
+}
+
+/// Field drops / required-without-default that additive strategies must reject.
+fn first_additive_violation(
+    existing: &DataModelDefinition,
+    def: &DataModelDefinition,
+) -> Option<String> {
+    for f in &existing.fields {
+        if !def.fields.iter().any(|n| n.field_id == f.field_id) {
+            return Some(format!("forbids removing field '{}'", f.field_id));
+        }
+    }
+    for n in &def.fields {
+        let was = existing.fields.iter().find(|e| e.field_id == n.field_id);
+        let newly_required_without_default = match was {
+            None => n.required && n.default.is_none(),
+            Some(was) => !was.required && n.required && n.default.is_none(),
+        };
+        if newly_required_without_default {
+            return Some(format!(
+                "forbids required field '{}' without default",
+                n.field_id
+            ));
+        }
+    }
+    None
+}
+
+/// Enforce migrationStrategy on model upsert so additive claims cannot drop fields.
+fn enforce_model_upsert_strategy(
+    db: &Database,
+    application_id: &str,
+    def: &DataModelDefinition,
+    strategy: &str,
+    op: &AppOperation,
+) -> DbResult<()> {
+    let existing = match get_model(db, application_id, &def.model_id) {
+        Ok(m) => m,
+        Err(DbError::NotFound(_)) => return Ok(()),
+        Err(e) => return Err(e),
+    };
+
+    match strategy {
+        "add_optional_fields" | "add_fields" => {
+            if let Some(violation) = first_additive_violation(&existing, def) {
+                return Err(DbError::Invalid(format!(
+                    "migrationStrategy '{strategy}' {violation}"
+                )));
+            }
+            Ok(())
+        }
+        "drop_fields" | "rewrite_required" | "destructive" => {
+            require_destructive_confirmation(op, strategy)
+        }
+        "replace" => {
+            // Create-time seed overwrite (no rows) may reshape freely. With records,
+            // field loss / required-without-default needs the same confirmation as destructive.
+            if model_record_count(db, application_id, &def.model_id)? == 0 {
+                return Ok(());
+            }
+            if first_additive_violation(&existing, def).is_none() {
+                return Ok(());
+            }
+            require_destructive_confirmation(op, "replace")
+        }
+        other => Err(DbError::Invalid(format!(
+            "unsupported migrationStrategy: {other}"
+        ))),
+    }
+}
+
 pub fn apply_kernel_operations(db: &mut Database, ops: &[AppOperation]) -> DbResult<()> {
     for op in ops {
         match op.op_type.as_str() {
@@ -756,6 +856,12 @@ pub fn apply_kernel_operations(db: &mut Database, ops: &[AppOperation]) -> DbRes
                         .unwrap_or_else(|| op.payload.clone()),
                 )
                 .map_err(|e| DbError::Invalid(e.to_string()))?;
+                let strategy = op
+                    .payload
+                    .get("migrationStrategy")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("replace");
+                enforce_model_upsert_strategy(db, app, &def, strategy, op)?;
                 upsert_model(db, app, def)?;
             }
             "data.record_create" => {
@@ -1243,6 +1349,141 @@ mod tests {
             .is_empty());
     }
 
+    /// Journey B data path: tasks model v1 → v2 with optional dueDate preserves records.
+    #[test]
+    fn migrate_tasks_v1_to_v2_due_date_preserves_existing_records() {
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use std::collections::HashMap;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("tasks-due.db")).unwrap();
+        let app = "tool-task-tracker";
+
+        upsert_manifest(
+            &mut db,
+            ApplicationManifest {
+                schema_version: "1".into(),
+                application_id: app.into(),
+                instance_id: "inst-tasks-due".into(),
+                name: "Task Tracker".into(),
+                description: String::new(),
+                version: 1,
+                surfaces: vec![],
+                routes: vec![],
+                data_models: vec![],
+                settings: vec![],
+                capabilities: vec!["coreside.core".into()],
+                permissions: vec!["local_data.write".into(), "local_data.read".into()],
+                events: vec![],
+                tests: vec![],
+                search_keywords: vec![],
+                tags: vec![],
+                agent_description: String::new(),
+                project_id: None,
+                conversation_id: None,
+                organization_id: None,
+                ownership: None,
+                application_action_access: vec!["local_data.write".into()],
+                surface_action_access: HashMap::new(),
+                component_action_access: HashMap::new(),
+                action_descriptor_hashes: HashMap::new(),
+            },
+        )
+        .unwrap();
+        crate::application_kernel::permissions::grant_permission(
+            &mut db,
+            app,
+            "local_data.write",
+            json!({}),
+            "test",
+        )
+        .unwrap();
+
+        let v1 = DataModelDefinition {
+            model_id: "tasks".into(),
+            display_name: "Tasks".into(),
+            schema_version: 1,
+            fields: vec![
+                DataField {
+                    field_id: "title".into(),
+                    field_type: "text".into(),
+                    required: true,
+                    default: None,
+                    enum_values: None,
+                },
+                DataField {
+                    field_id: "priority".into(),
+                    field_type: "enum".into(),
+                    required: false,
+                    default: Some(json!("medium")),
+                    enum_values: Some(vec!["high".into(), "medium".into(), "low".into()]),
+                },
+                DataField {
+                    field_id: "status".into(),
+                    field_type: "enum".into(),
+                    required: false,
+                    default: Some(json!("todo")),
+                    enum_values: Some(vec![
+                        "todo".into(),
+                        "in_progress".into(),
+                        "done".into(),
+                    ]),
+                },
+            ],
+        };
+        upsert_model(&mut db, app, v1).unwrap();
+
+        let id = create_record(
+            &mut db,
+            app,
+            "tasks",
+            json!({
+                "title": "Preserve me across evolution",
+                "priority": "high",
+                "status": "todo"
+            }),
+        )
+        .unwrap();
+
+        let mut v2 = get_model(&db, app, "tasks").unwrap();
+        assert_eq!(v2.schema_version, 1);
+        v2.schema_version = 2;
+        v2.fields.push(DataField {
+            field_id: "dueDate".into(),
+            field_type: "date".into(),
+            required: false,
+            default: None,
+            enum_values: None,
+        });
+        upsert_model(&mut db, app, v2).unwrap();
+
+        let listed = query_records(&db, app, "tasks", 20).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["_id"], id);
+        assert_eq!(listed[0]["title"], "Preserve me across evolution");
+        assert_eq!(listed[0]["priority"], "high");
+        assert_eq!(listed[0]["status"], "todo");
+        // Optional dueDate absent on pre-migration rows — not wiped / not required.
+        assert!(listed[0].get("dueDate").is_none() || listed[0]["dueDate"].is_null());
+
+        update_record(
+            &mut db,
+            app,
+            &id,
+            json!({
+                "title": "Preserve me across evolution",
+                "priority": "high",
+                "status": "todo",
+                "dueDate": "2026-10-01"
+            }),
+            None,
+        )
+        .unwrap();
+        let after = query_records(&db, app, "tasks", 20).unwrap();
+        assert_eq!(after[0]["dueDate"], "2026-10-01");
+        assert_eq!(after[0]["title"], "Preserve me across evolution");
+    }
+
     #[test]
     fn validate_record_rejects_unknown_fields() {
         let m = habit_model();
@@ -1724,5 +1965,371 @@ mod tests {
         assert!(query_records(&db, &forked, "habit", 20)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn additive_migration_strategy_rejects_field_drop() {
+        use crate::runtime_v2::operations::{AppOperation, OperationTarget};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("mig.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-mig");
+
+        let mut shrunk = habit_model();
+        shrunk.fields.retain(|f| f.field_id == "name");
+        shrunk.schema_version = 2;
+
+        let op = AppOperation {
+            id: "op-drop".into(),
+            op_type: "data.model_upsert".into(),
+            target: OperationTarget {
+                application_id: Some("app-mig".into()),
+                model_id: Some("habit".into()),
+                ..Default::default()
+            },
+            payload: json!({
+                "applicationId": "app-mig",
+                "model": shrunk,
+                "migrationStrategy": "add_optional_fields",
+            }),
+            requires_approval: None,
+            destructive: None,
+            ..Default::default()
+        };
+        let err = apply_kernel_operations(&mut db, &[op]).expect_err("field drop must fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("forbids removing field"),
+            "expected additive forbid message, got {msg}"
+        );
+
+        // Existing model unchanged.
+        let kept = get_model(&db, "app-mig", "habit").unwrap();
+        assert!(kept.fields.iter().any(|f| f.field_id == "frequency"));
+    }
+
+    #[test]
+    fn destructive_migration_strategy_requires_confirmation() {
+        use crate::runtime_v2::operations::{AppOperation, OperationTarget};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("destr.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-destr");
+
+        let mut shrunk = habit_model();
+        shrunk.fields.retain(|f| f.field_id == "name");
+        shrunk.schema_version = 2;
+
+        let op = AppOperation {
+            id: "op-destr".into(),
+            op_type: "data.model_upsert".into(),
+            target: OperationTarget {
+                application_id: Some("app-destr".into()),
+                model_id: Some("habit".into()),
+                ..Default::default()
+            },
+            payload: json!({
+                "applicationId": "app-destr",
+                "model": shrunk,
+                "migrationStrategy": "drop_fields",
+            }),
+            requires_approval: None,
+            destructive: None,
+            ..Default::default()
+        };
+        let err = apply_kernel_operations(&mut db, &[op]).expect_err("unconfirmed drop must fail");
+        assert!(
+            err.to_string().contains("requires confirmation"),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn additive_migration_strategy_allows_optional_field() {
+        use crate::runtime_v2::operations::{AppOperation, OperationTarget};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("add-opt.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-add");
+
+        let mut expanded = habit_model();
+        expanded.schema_version = 2;
+        expanded.fields.push(DataField {
+            field_id: "archived".into(),
+            field_type: "boolean".into(),
+            required: false,
+            default: Some(json!(false)),
+            enum_values: None,
+        });
+
+        let op = AppOperation {
+            id: "op-add".into(),
+            op_type: "data.model_upsert".into(),
+            target: OperationTarget {
+                application_id: Some("app-add".into()),
+                model_id: Some("habit".into()),
+                ..Default::default()
+            },
+            payload: json!({
+                "applicationId": "app-add",
+                "model": expanded,
+                "migrationStrategy": "add_optional_fields",
+            }),
+            requires_approval: None,
+            destructive: None,
+            ..Default::default()
+        };
+        apply_kernel_operations(&mut db, &[op]).expect("additive optional field must succeed");
+
+        let kept = get_model(&db, "app-add", "habit").unwrap();
+        assert_eq!(kept.schema_version, 2);
+        assert!(kept.fields.iter().any(|f| f.field_id == "archived"));
+        assert!(kept.fields.iter().any(|f| f.field_id == "frequency"));
+    }
+
+    #[test]
+    fn additive_migration_strategy_rejects_required_without_default() {
+        use crate::runtime_v2::operations::{AppOperation, OperationTarget};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("req-no-def.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-req");
+
+        let mut expanded = habit_model();
+        expanded.schema_version = 2;
+        expanded.fields.push(DataField {
+            field_id: "owner".into(),
+            field_type: "text".into(),
+            required: true,
+            default: None,
+            enum_values: None,
+        });
+
+        let op = AppOperation {
+            id: "op-req".into(),
+            op_type: "data.model_upsert".into(),
+            target: OperationTarget {
+                application_id: Some("app-req".into()),
+                model_id: Some("habit".into()),
+                ..Default::default()
+            },
+            payload: json!({
+                "applicationId": "app-req",
+                "model": expanded,
+                "migrationStrategy": "add_optional_fields",
+            }),
+            requires_approval: None,
+            destructive: None,
+            ..Default::default()
+        };
+        let err = apply_kernel_operations(&mut db, &[op])
+            .expect_err("required without default must fail under additive strategy");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("forbids required field") && msg.contains("without default"),
+            "expected required-without-default forbid, got {msg}"
+        );
+
+        let kept = get_model(&db, "app-req", "habit").unwrap();
+        assert_eq!(kept.schema_version, 1);
+        assert!(!kept.fields.iter().any(|f| f.field_id == "owner"));
+    }
+
+    #[test]
+    fn destructive_migration_strategy_succeeds_with_confirmation() {
+        use crate::runtime_v2::operations::{AppOperation, OperationTarget};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("destr-ok.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-destr-ok");
+
+        let mut shrunk = habit_model();
+        shrunk.fields.retain(|f| f.field_id == "name");
+        shrunk.schema_version = 2;
+
+        let op = AppOperation {
+            id: "op-destr-ok".into(),
+            op_type: "data.model_upsert".into(),
+            target: OperationTarget {
+                application_id: Some("app-destr-ok".into()),
+                model_id: Some("habit".into()),
+                ..Default::default()
+            },
+            payload: json!({
+                "applicationId": "app-destr-ok",
+                "model": shrunk,
+                "migrationStrategy": "drop_fields",
+            }),
+            requires_approval: None,
+            destructive: Some(true),
+            ..Default::default()
+        };
+        apply_kernel_operations(&mut db, &[op])
+            .expect("confirmed destructive drop must succeed");
+
+        let kept = get_model(&db, "app-destr-ok", "habit").unwrap();
+        assert_eq!(kept.schema_version, 2);
+        assert_eq!(kept.fields.len(), 1);
+        assert_eq!(kept.fields[0].field_id, "name");
+    }
+
+    #[test]
+    fn requires_approval_alone_does_not_confirm_destructive() {
+        use crate::runtime_v2::operations::{AppOperation, OperationTarget};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("req-only.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-req-only");
+
+        let mut shrunk = habit_model();
+        shrunk.fields.retain(|f| f.field_id == "name");
+        shrunk.schema_version = 2;
+
+        let op = AppOperation {
+            id: "op-req-only".into(),
+            op_type: "data.model_upsert".into(),
+            target: OperationTarget {
+                application_id: Some("app-req-only".into()),
+                model_id: Some("habit".into()),
+                ..Default::default()
+            },
+            payload: json!({
+                "applicationId": "app-req-only",
+                "model": shrunk,
+                "migrationStrategy": "drop_fields",
+            }),
+            requires_approval: Some(true),
+            destructive: None,
+            ..Default::default()
+        };
+        let err = apply_kernel_operations(&mut db, &[op])
+            .expect_err("requires_approval is not confirmation");
+        assert!(
+            err.to_string().contains("requires confirmation"),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn replace_with_records_rejects_unconfirmed_field_drop() {
+        use crate::runtime_v2::operations::{AppOperation, OperationTarget};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("repl-drop.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-repl");
+
+        create_record(
+            &mut db,
+            "app-repl",
+            "habit",
+            json!({"name": "keep", "frequency": "daily"}),
+        )
+        .unwrap();
+
+        let mut shrunk = habit_model();
+        shrunk.fields.retain(|f| f.field_id == "name");
+        shrunk.schema_version = 2;
+
+        let op = AppOperation {
+            id: "op-repl-drop".into(),
+            op_type: "data.model_upsert".into(),
+            target: OperationTarget {
+                application_id: Some("app-repl".into()),
+                model_id: Some("habit".into()),
+                ..Default::default()
+            },
+            payload: json!({
+                "applicationId": "app-repl",
+                "model": shrunk,
+                "migrationStrategy": "replace",
+            }),
+            requires_approval: None,
+            destructive: None,
+            ..Default::default()
+        };
+        let err = apply_kernel_operations(&mut db, &[op])
+            .expect_err("replace drop with records must fail");
+        assert!(
+            err.to_string().contains("requires confirmation"),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn replace_without_records_allows_field_reshape() {
+        use crate::runtime_v2::operations::{AppOperation, OperationTarget};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("repl-empty.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-repl-empty");
+
+        let mut shrunk = habit_model();
+        shrunk.fields.retain(|f| f.field_id == "name");
+        shrunk.schema_version = 2;
+
+        let op = AppOperation {
+            id: "op-repl-empty".into(),
+            op_type: "data.model_upsert".into(),
+            target: OperationTarget {
+                application_id: Some("app-repl-empty".into()),
+                model_id: Some("habit".into()),
+                ..Default::default()
+            },
+            payload: json!({
+                "applicationId": "app-repl-empty",
+                "model": shrunk,
+            }),
+            requires_approval: None,
+            destructive: None,
+            ..Default::default()
+        };
+        apply_kernel_operations(&mut db, &[op]).expect("empty replace must succeed");
+        let kept = get_model(&db, "app-repl-empty", "habit").unwrap();
+        assert_eq!(kept.fields.len(), 1);
+        assert_eq!(kept.fields[0].field_id, "name");
+    }
+
+    #[test]
+    fn additive_rejects_promoting_optional_to_required_without_default() {
+        use crate::runtime_v2::operations::{AppOperation, OperationTarget};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("promote-req.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-promote");
+
+        let mut tightened = habit_model();
+        tightened.schema_version = 2;
+        if let Some(f) = tightened
+            .fields
+            .iter_mut()
+            .find(|f| f.field_id == "completionDate")
+        {
+            f.required = true;
+            f.default = None;
+        }
+
+        let op = AppOperation {
+            id: "op-promote".into(),
+            op_type: "data.model_upsert".into(),
+            target: OperationTarget {
+                application_id: Some("app-promote".into()),
+                model_id: Some("habit".into()),
+                ..Default::default()
+            },
+            payload: json!({
+                "applicationId": "app-promote",
+                "model": tightened,
+                "migrationStrategy": "add_optional_fields",
+            }),
+            requires_approval: None,
+            destructive: None,
+            ..Default::default()
+        };
+        let err = apply_kernel_operations(&mut db, &[op])
+            .expect_err("optional→required without default must fail");
+        assert!(
+            err.to_string().contains("forbids required field"),
+            "got {err}"
+        );
     }
 }

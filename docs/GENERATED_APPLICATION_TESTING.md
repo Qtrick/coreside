@@ -35,6 +35,14 @@ LKG (`mark_last_known_good`) is marked only when status is `verified`. Failure d
 
 Exposed via `kernel_visual_checks`.
 
-## Renderer verification channel (planned / partial)
+## Renderer verification channel
 
-A secure renderer-side verification channel must identify application + surface + mount + window, refuse cross-app/conversation access, bound execution, reject arbitrary JS/FS/shell from generated test payloads, and distinguish `not_verified` from `passed`. Until that channel is wired, Rust must not claim UI assertions passed.
+`authorize_renderer_verify` + `accept_renderer_fact` in `testing.rs`:
+
+1. Request must name `applicationId`, `surfaceId`, `mountInstanceId`, and a closed-vocabulary `assertion`.
+2. Rust checks surface ownership, conversation scope, and `MountRegistry.has_fresh_instance`.
+3. Without a fresh mount → `not_verified` (never a fake pass).
+4. Only after `status: authorized` may a renderer fact be accepted; unknown assertions fail closed.
+5. No eval, Function(), arbitrary selectors, FS, shell, or Tauri from generated tests.
+
+UI assertions in `run_test` still return `not_verified` until a live authorized fact is supplied for that assertion.

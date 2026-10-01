@@ -327,6 +327,17 @@ impl MountRegistry {
             RendererReadiness::Ready { .. }
         )
     }
+
+    /// True when a specific renderer instance is freshly mounted for the surface.
+    pub fn has_fresh_instance(&self, surface_id: &str, renderer_instance_id: &str) -> bool {
+        let Some(instances) = self.by_surface.get(surface_id) else {
+            return false;
+        };
+        let Some(reg) = instances.get(renderer_instance_id) else {
+            return false;
+        };
+        mount_is_fresh(reg, Instant::now(), None)
+    }
 }
 
 fn normalize_window_label(label: &str) -> String {

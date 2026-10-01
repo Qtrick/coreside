@@ -5,11 +5,15 @@ import type { ToolState } from "@/types/tool";
 
 export function ToolChangePreview() {
   const pending = useAppStore((s) => s.pendingToolChange);
+  const kernelPending = useAppStore((s) => s.pendingKernelProposal);
   const applyPendingToolChange = useAppStore((s) => s.applyPendingToolChange);
   const discardPendingToolChange = useAppStore((s) => s.discardPendingToolChange);
   const [previewState, setPreviewState] = useState<ToolState>({});
 
-  if (!pending) return null;
+  // Kernel proposal is authoritative when present for the same turn.
+  if (!pending || (kernelPending && kernelPending.messageId === pending.messageId)) {
+    return null;
+  }
 
   const { toolChange } = pending;
   const actionLabel =

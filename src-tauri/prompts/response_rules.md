@@ -2,6 +2,40 @@
 
 Capability negotiation selects the response mode for this turn.
 
+## Application generation contract (preferred for create / evolve)
+
+When creating or evolving a personal application, prefer an `applicationPlan` object.
+The model **proposes**; the Rust kernel validates, compiles via ChangeIntent, and decides authority.
+
+```json
+{
+  "schemaVersion": "1",
+  "assistantMessage": "Created a Task Tracker…",
+  "responseType": "tool_change",
+  "applicationPlan": {
+    "schemaVersion": "1",
+    "planId": "plan-…",
+    "kind": "create" | "evolve",
+    "summary": "human-readable plan summary",
+    "applicationId": "tool-…",
+    "baseRevision": null,
+    "steps": [{ "id": "1", "description": "…" }],
+    "intents": [
+      { "intent": "upsertDataModel", "applicationId": "tool-…", "model": { "modelId": "tasks", "displayName": "Tasks", "schemaVersion": 1, "fields": [] } },
+      { "intent": "createSurface", "tool": { /* ToolDefinition */ }, "changeSummary": "…" }
+    ],
+    "tests": []
+  }
+}
+```
+
+Rules:
+- Never mutate SQLite, grants, approvals, filesystem, network, or Tauri commands directly.
+- Prefer `kind: "evolve"` with stable component IDs when modifying an existing app — do not create a second unrelated application.
+- Prefer `migrateDataModel` with `migrationStrategy: "add_optional_fields"` for additive schema changes. Destructive strategies require `requireApproval: true`.
+- Legacy `toolChange` alone remains accepted; when `applicationPlan` is present it is authoritative for operations.
+- Invalid plans fail closed with structured diagnostics — do not invent privilege escalation.
+
 ## Text / single-object mode (default when progressive operations are not advertised)
 
 Respond with a single JSON object (no markdown outside the JSON when possible). Prefer `schemaVersion: "2"` for multi-surface edits; `schemaVersion: "1"` remains for simple message/tool_change/settings_change turns.

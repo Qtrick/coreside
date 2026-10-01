@@ -1213,7 +1213,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         set({
           messages,
           messagesLoading: false,
-          pendingToolChange: pending,
+          pendingToolChange: kernelProposal ? null : pending,
           pendingKernelProposal: kernelProposal,
         });
       } catch (error) {
@@ -2476,7 +2476,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
         messages,
         sending: false,
         sendingConversationId: null,
-        pendingToolChange: pending,
+        // When ApplicationPlan produced a kernel proposal, that path is
+        // authoritative — do not also stage legacy toolChange Apply (dual Apply
+        // lets legacy create the surface first and mark the proposal stale).
+        pendingToolChange: kernelProposal ? null : pending,
         pendingSettingsChange: pendingSettings ?? state.pendingSettingsChange,
         pendingKernelProposal: kernelProposal,
         agentActions: [],

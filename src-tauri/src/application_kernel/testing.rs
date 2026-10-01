@@ -8,7 +8,7 @@ use crate::db::{now_rfc3339, Database, DbError, DbResult};
 use crate::runtime_v2::operations::AppOperation;
 use rusqlite::{params, OptionalExtension};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeclarativeTest {
     pub test_id: String,
@@ -27,7 +27,7 @@ fn default_timeout() -> u64 {
     5_000
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TestAction {
     pub action: String,
@@ -37,7 +37,7 @@ pub struct TestAction {
     pub value: Option<Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TestAssertion {
     pub assertion: String,
@@ -53,6 +53,19 @@ pub struct VerificationResult {
     pub status: String,
     pub message: String,
     pub test_results: Vec<Value>,
+}
+
+impl VerificationResult {
+    /// True when post-change verify is acceptable for continue / mark-LKG / stop-repair.
+    ///
+    /// `verify_after_change` emits `verified` / `verified_with_warnings` / `failed`.
+    /// `passed` is accepted for renderer-fact and provenance-aligned callers.
+    pub fn is_acceptable(&self) -> bool {
+        matches!(
+            self.status.as_str(),
+            "verified" | "verified_with_warnings" | "passed"
+        )
+    }
 }
 
 pub fn upsert_test(db: &mut Database, application_id: &str, test: DeclarativeTest) -> DbResult<()> {
@@ -379,6 +392,168 @@ pub fn visual_checks_summary(width: u32) -> Value {
     })
 }
 
+/// Bounded renderer verification vocabulary — no arbitrary JS/selectors/eval.
+pub const RENDERER_ASSERTIONS: &[&str] = &[
+    "render_ok",
+    "visible_text",
+    "element_exists",
+    "element_visible",
+    "value_equals",
+    "state_equals",
+    "record_exists",
+    "route_equals",
+    "no_overflow",
+    "has_accessible_label",
+    "focus_is",
+    "scroll_position",
+    "count",
+    "no_console_error",
+];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RendererVerifyRequest {
+    pub application_id: String,
+    pub surface_id: String,
+    pub mount_instance_id: String,
+    pub assertion: String,
+    #[serde(default)]
+    pub expected: Option<Value>,
+    #[serde(default)]
+    pub target: Option<String>,
+    /// Optional conversation scope — must match mount when provided.
+    #[serde(default)]
+    pub conversation_id: Option<String>,
+}
+
+/// Trusted facts reported by the live renderer after Rust has validated the mount.
+/// The renderer may only answer with this closed vocabulary — never execute
+/// generated JS or accept arbitrary selectors from the model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RendererVerifyFact {
+    pub assertion: String,
+    pub ok: bool,
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RendererVerifyResult {
+    pub status: String,
+    pub verified: bool,
+    pub message: String,
+    #[serde(default)]
+    pub fact: Option<RendererVerifyFact>,
+    /// Assertion bound at authorize time — accept must match (confused-deputy guard).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorized_assertion: Option<String>,
+}
+
+/// Authorize a renderer verification request against the mount registry.
+///
+/// Returns `not_verified` when no fresh mount exists — never fabricates a pass.
+pub fn authorize_renderer_verify(
+    db: &Database,
+    mounts: &crate::runtime_v2::mount_registry::MountRegistry,
+    req: &RendererVerifyRequest,
+) -> Result<RendererVerifyResult, String> {
+    if !RENDERER_ASSERTIONS.contains(&req.assertion.as_str()) {
+        return Err(format!("untrusted renderer assertion: {}", req.assertion));
+    }
+    crate::security::assert_not_protected(&req.application_id)?;
+    crate::security::assert_not_protected(&req.surface_id)?;
+
+    let surface = crate::runtime_v2::surfaces::get_surface(db, &req.surface_id)
+        .map_err(|e| e.to_string())?;
+    let app_matches = surface.tool_id.as_deref() == Some(req.application_id.as_str())
+        || surface.id == req.application_id;
+    if !app_matches {
+        return Err("application/surface identity mismatch".into());
+    }
+    if let Some(wanted) = req.conversation_id.as_ref() {
+        match surface.conversation_id.as_ref() {
+            Some(actual) if actual == wanted => {}
+            Some(_) => return Err("conversation scope mismatch".into()),
+            // Fail closed: conversation-scoped verify requires a bound surface conversation.
+            None => return Err("conversation scope mismatch".into()),
+        }
+    }
+
+    let readiness = mounts.evaluate_renderer_readiness(&req.surface_id, None, None);
+    match readiness {
+        crate::runtime_v2::mount_registry::RendererReadiness::Ready { .. } => {
+            if !mounts.has_fresh_instance(&req.surface_id, &req.mount_instance_id) {
+                return Ok(RendererVerifyResult {
+                    status: "not_verified".into(),
+                    verified: false,
+                    message: "mount instance not registered for surface".into(),
+                    fact: None,
+                    authorized_assertion: None,
+                });
+            }
+            Ok(RendererVerifyResult {
+                status: "authorized".into(),
+                verified: false,
+                message: "mount authorized; await renderer fact".into(),
+                fact: None,
+                authorized_assertion: Some(req.assertion.clone()),
+            })
+        }
+        crate::runtime_v2::mount_registry::RendererReadiness::NotMounted => {
+            Ok(RendererVerifyResult {
+                status: "not_verified".into(),
+                verified: false,
+                message: "no live renderer mount".into(),
+                fact: None,
+                authorized_assertion: None,
+            })
+        }
+        crate::runtime_v2::mount_registry::RendererReadiness::Stale { reason } => {
+            Ok(RendererVerifyResult {
+                status: "not_verified".into(),
+                verified: false,
+                message: format!("stale renderer mount: {reason}"),
+                fact: None,
+                authorized_assertion: None,
+            })
+        }
+    }
+}
+
+/// Accept a renderer fact only after authorize_renderer_verify returned authorized.
+pub fn accept_renderer_fact(
+    authorized: &RendererVerifyResult,
+    fact: RendererVerifyFact,
+) -> Result<RendererVerifyResult, String> {
+    if authorized.status != "authorized" {
+        return Err("cannot accept renderer fact without prior authorization".into());
+    }
+    let Some(expected) = authorized.authorized_assertion.as_deref() else {
+        return Err("authorized result missing bound assertion".into());
+    };
+    if fact.assertion != expected {
+        return Err(format!(
+            "renderer fact assertion '{}' does not match authorized '{}'",
+            fact.assertion, expected
+        ));
+    }
+    if !RENDERER_ASSERTIONS.contains(&fact.assertion.as_str()) {
+        return Err(format!("untrusted renderer fact assertion: {}", fact.assertion));
+    }
+    Ok(RendererVerifyResult {
+        status: if fact.ok { "passed".into() } else { "failed".into() },
+        verified: true,
+        message: fact
+            .detail
+            .clone()
+            .unwrap_or_else(|| "renderer fact accepted".into()),
+        fact: Some(fact),
+        authorized_assertion: Some(expected.to_string()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -701,5 +876,178 @@ mod tests {
             "must execute tests, not only queue: {:?}",
             v.test_results
         );
+    }
+
+    #[test]
+    fn authorize_renderer_verify_without_mount_is_not_verified() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("rend-auth.db")).unwrap();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "Rend Conv",
+            None,
+        )
+        .unwrap();
+        let surf = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Rend Surface",
+            &json!({
+                "id": "doc-rend",
+                "name": "Rend Surface",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        let mounts = crate::runtime_v2::mount_registry::MountRegistry::new();
+        let req = RendererVerifyRequest {
+            application_id: surf.id.clone(),
+            surface_id: surf.id.clone(),
+            mount_instance_id: "missing-instance".into(),
+            assertion: "render_ok".into(),
+            expected: None,
+            target: None,
+            conversation_id: None,
+        };
+        let result = authorize_renderer_verify(&db, &mounts, &req).unwrap();
+        assert_eq!(result.status, "not_verified");
+        assert!(!result.verified);
+        assert!(result.message.contains("no live renderer mount"));
+    }
+
+    #[test]
+    fn authorize_renderer_verify_rejects_unknown_assertion() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("rend-unknown.db")).unwrap();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "Rend Conv",
+            None,
+        )
+        .unwrap();
+        let surf = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Rend Surface",
+            &json!({
+                "id": "doc-rend",
+                "name": "Rend Surface",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        let mounts = crate::runtime_v2::mount_registry::MountRegistry::new();
+        let req = RendererVerifyRequest {
+            application_id: surf.id.clone(),
+            surface_id: surf.id.clone(),
+            mount_instance_id: "any".into(),
+            assertion: "eval_javascript".into(),
+            expected: None,
+            target: None,
+            conversation_id: None,
+        };
+        let err = authorize_renderer_verify(&db, &mounts, &req).unwrap_err();
+        assert!(
+            err.contains("untrusted renderer assertion"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn accept_renderer_fact_without_authorize_fails() {
+        let unauthorized = RendererVerifyResult {
+            status: "not_verified".into(),
+            verified: false,
+            message: "no live renderer mount".into(),
+            fact: None,
+            authorized_assertion: None,
+        };
+        let err = accept_renderer_fact(
+            &unauthorized,
+            RendererVerifyFact {
+                assertion: "render_ok".into(),
+                ok: true,
+                detail: None,
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("without prior authorization"));
+    }
+
+    #[test]
+    fn accept_renderer_fact_rejects_unknown_assertion() {
+        let authorized = RendererVerifyResult {
+            status: "authorized".into(),
+            verified: false,
+            message: "mount authorized; await renderer fact".into(),
+            fact: None,
+            authorized_assertion: Some("run_arbitrary_script".into()),
+        };
+        let err = accept_renderer_fact(
+            &authorized,
+            RendererVerifyFact {
+                assertion: "run_arbitrary_script".into(),
+                ok: true,
+                detail: None,
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("untrusted renderer fact assertion"));
+    }
+
+    #[test]
+    fn accept_renderer_fact_rejects_assertion_mismatch() {
+        let authorized = RendererVerifyResult {
+            status: "authorized".into(),
+            verified: false,
+            message: "mount authorized; await renderer fact".into(),
+            fact: None,
+            authorized_assertion: Some("render_ok".into()),
+        };
+        let err = accept_renderer_fact(
+            &authorized,
+            RendererVerifyFact {
+                assertion: "visible_text".into(),
+                ok: true,
+                detail: None,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("does not match authorized"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn accept_renderer_fact_after_authorize_passes() {
+        let authorized = RendererVerifyResult {
+            status: "authorized".into(),
+            verified: false,
+            message: "mount authorized; await renderer fact".into(),
+            fact: None,
+            authorized_assertion: Some("render_ok".into()),
+        };
+        let accepted = accept_renderer_fact(
+            &authorized,
+            RendererVerifyFact {
+                assertion: "render_ok".into(),
+                ok: true,
+                detail: Some("ok".into()),
+            },
+        )
+        .unwrap();
+        assert_eq!(accepted.status, "passed");
+        assert!(accepted.verified);
     }
 }

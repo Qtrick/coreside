@@ -38,6 +38,7 @@ Statuses: `pending` → `approved` / `denied` / `expired` → `consumed`
 - `consume` sweeps stale rows first, then CAS-updates only while still `approved` and within `expires_at`
 - Frozen `input_json` is stored for trusted re-execution after approve
 - Frozen `conversation_id` / `project_id` are stored on the approval row (migration `036_approval_call_context`) so Approve-once replay reconstructs the same `call_hash` even when the target personal-tool surface has a null conversation
+- `call_hash` **v2** binds: `hashVersion`, applicationId, projectId, conversationId, **surfaceId**, **componentId**, venue, presence, action, descriptorHash, input. Same action+input from a different surface or component cannot reuse an approval. Pre-v2 pending approvals are not reinterpreted (fail-closed until TTL expiry).
 - `kernel_decide_approval` rebuilds context via `replay_context_from_approval` and re-runs the frozen call exactly once through the gateway
 - `call_hash` binds application, action, input, conversation, venue, and presence (cross-conversation replay is rejected)
 

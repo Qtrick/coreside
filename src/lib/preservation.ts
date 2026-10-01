@@ -445,8 +445,6 @@ export async function runRendererMountPatchFlush(
     surfaceId: string;
     conversationId: string | null;
     sourceType: "renderer_mount";
-    /** Mount lifecycle must not grant strong-risk approval. */
-    approvalGranted: false;
   }) => Promise<unknown>,
   activeConversationId: string | null,
   registerMount?: (args: {
@@ -480,7 +478,6 @@ export async function runRendererMountPatchFlush(
         surfaceId: canonicalSurfaceId,
         conversationId: activeConversationId,
         sourceType: "renderer_mount",
-        approvalGranted: false,
       });
     } catch {
       // keep registered instance id for cleanup
@@ -491,7 +488,6 @@ export async function runRendererMountPatchFlush(
     surfaceId: canonicalSurfaceId,
     conversationId: activeConversationId,
     sourceType: "renderer_mount",
-    approvalGranted: false,
   });
   return rendererInstanceId;
 }
@@ -520,7 +516,6 @@ export function startRendererMountLifecycle(args: {
     surfaceId: string;
     conversationId: string | null;
     sourceType: "renderer_mount";
-    approvalGranted: false;
   }) => Promise<unknown>;
 }): () => void {
   let cancelled = false;

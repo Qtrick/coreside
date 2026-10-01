@@ -9,10 +9,12 @@ import {
 } from "../helpers.js";
 
 /**
- * Journey 21 — generate Task Tracker via production mock agent path.
+ * Journey 21 — generate Task Tracker via ApplicationPlan mock provider contract.
  *
- * Does NOT seed the final application. Uses AI_PROVIDER=mock keyword matching
- * for "task tracker" → toolChange → user Apply → open → CRUD via local_data.
+ * Does NOT seed the final application. Uses AI_PROVIDER=mock deterministic
+ * ApplicationPlan fixture for "task tracker" → validate/compile → proposal →
+ * user Apply → open → CRUD via local_data. (Legacy toolChange is derived for
+ * preview; ApplicationPlan is authoritative for operations.)
  *
  * Run alone:
  *   CORESIDE_E2E=1 AI_PROVIDER=mock CORESIDE_E2E_SEED=empty \
@@ -45,18 +47,12 @@ describe("Journey 21 — generated Task Tracker vertical slice", () => {
     await send.waitForClickable({ timeout: 10_000 });
     await send.click();
 
-    // Prefer the in-message kernel proposal Apply (toolChange also stages a composer
-    // preview Apply — same turn often has both until one commits).
-    const proposalApply = await $(".change-proposal button.btn-primary");
-    const previewApply = await $(".tool-change-preview button.btn-primary");
-    let applyBtn = proposalApply;
-    if (!(await proposalApply.isExisting())) {
-      applyBtn = previewApply;
-    }
+    // ApplicationPlan stages a kernel proposal; legacy toolChange Apply is suppressed.
+    const applyBtn = await $(".change-proposal[aria-label='Proposed change'] button.btn-primary");
     await applyBtn.waitForExist({
       timeout: 45_000,
       timeoutMsg:
-        "Task Tracker Apply never appeared (mock fixture / chat path)",
+        "Task Tracker kernel Apply never appeared (ApplicationPlan mock path)",
     });
     await applyBtn.waitForClickable({ timeout: 10_000 });
     await applyBtn.click();

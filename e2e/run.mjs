@@ -92,6 +92,12 @@ const JOURNEYS = [
     coverage: "full",
   },
   {
+    id: 22,
+    name: "application-evolution",
+    suite: "application-evolution",
+    coverage: "full",
+  },
+  {
     id: 15,
     name: "first-run-welcome",
     suite: "first-run-welcome",
@@ -278,8 +284,10 @@ runSuite("existing-eavesdrop", { seed: "existing" });
 runSuite("progressive-surface-preview", { seed: "existing" });
 runSuite("progressive-preview-cancel", { seed: "existing" });
 
-// Generated Task Tracker: clean profile, mock agent path, no seeded final app.
+// Generated Task Tracker: clean profile, ApplicationPlan mock path, no seeded final app.
 runSuite("generated-task-tracker");
+// Application evolution: create → add due dates via ApplicationPlan kind=evolve.
+runSuite("application-evolution");
 
 // Seeded local AI privacy disclosure profile.
 runSuite("local-ai-privacy", { seed: "local" });

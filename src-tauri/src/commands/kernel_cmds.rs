@@ -4,6 +4,9 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::State;
 
+use crate::application_kernel::application_plan::{
+    compile_plan, ApplicationPlan, ValidatedApplicationPlan,
+};
 use crate::application_kernel::compiler::{compile, ChangeIntent, CompiledChange};
 use crate::application_kernel::context::{
     application_summary, data_model_summary, recent_transactions_summary,
@@ -143,6 +146,17 @@ pub fn kernel_apply_change(
 #[tauri::command]
 pub fn kernel_compile_intent(intent: ChangeIntent) -> Result<CompiledChange, CommandError> {
     compile(intent).map_err(map_kernel)
+}
+
+#[tauri::command]
+pub fn kernel_compile_application_plan(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    plan: ApplicationPlan,
+) -> Result<ValidatedApplicationPlan, CommandError> {
+    state.require_profile()?;
+    require_main_for_sensitive_kernel(&window)?;
+    compile_plan(&plan).map_err(map_kernel)
 }
 
 #[tauri::command]

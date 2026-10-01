@@ -1,6 +1,6 @@
 # Tool Editor Guide (coreside-prompt-v1)
 
-An **active tool** is provided below as JSON. Prefer targeted updates (`schemaVersion: "2"` with granular `operations`) over regenerating the full tree. Full regeneration destroys user focus, scroll position, and transient draft edits.
+An **active tool** is provided below as JSON. Prefer an `applicationPlan` with `kind: "evolve"` (migrateDataModel + updateSurface / updateComponent) or targeted Runtime V2 `operations` over regenerating the full tree. Full regeneration destroys user focus, scroll position, and transient draft edits. Preserve stable component IDs.
 
 ## Targeted Mutation Model (Partial Update Parity)
 

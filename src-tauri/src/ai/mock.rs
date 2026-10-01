@@ -125,53 +125,35 @@ impl MockAiProvider {
             .to_string();
         }
 
+        // Evolve fixtures must not steal create prompts that mention due dates
+        // (e.g. "build a task tracker with due dates").
+        let create_ish = lower.contains("build")
+            || lower.contains("create")
+            || lower.contains("make me")
+            || lower.contains("generate")
+            || lower.contains("new task tracker");
+        if (lower.contains("due date")
+            || lower.contains("due dates")
+            || lower.contains("add due"))
+            && !create_ish
+        {
+            let plan = super::plan_fixtures::task_tracker_add_due_dates_plan(None);
+            return super::plan_fixtures::plan_response_json(
+                "I updated your Task Tracker to support optional due dates. Existing tasks are preserved; stable component IDs were kept so dirty form state survives.",
+                &plan,
+            );
+        }
+
         if lower.contains("task manager")
             || lower.contains("task-manager")
             || lower.contains("task tracker")
             || lower.contains("task-tracker")
         {
-            return json!({
-                "schemaVersion": SCHEMA_VERSION,
-                "assistantMessage": "I generated a Task Tracker with a typed tasks data model, durable local_data CRUD, priority/status filtering, and an empty state.",
-                "responseType": "tool_change",
-                "toolChange": {
-                    "action": "create",
-                    "targetToolId": null,
-                    "changeSummary": "Create Task Tracker with local_data model and CRUD actions",
-                    "tool": {
-                        "id": "tool-task-tracker",
-                        "name": "Task Tracker",
-                        "description": "Track tasks with title, priority, status, and durable local records.",
-                        "layout": { "type": "dashboard", "columns": 2, "density": "normal" },
-                        "components": [
-                            { "id": "tm-heading", "type": "heading", "props": { "text": "Task Tracker", "level": 1 } },
-                            { "id": "tm-empty", "type": "text", "props": { "text": "No tasks yet. Add one below.", "tone": "muted" } },
-                            { "id": "tm-search", "type": "textInput", "props": { "label": "Search Tasks", "placeholder": "Search..." }, "valueKey": "searchQuery" },
-                            { "id": "tm-priority-filter", "type": "select", "props": { "label": "Priority Filter", "options": [{ "label": "All", "value": "" }, { "label": "High", "value": "high" }, { "label": "Medium", "value": "medium" }, { "label": "Low", "value": "low" }] }, "valueKey": "priorityFilter" },
-                            { "id": "tm-status-filter", "type": "select", "props": { "label": "Status Filter", "options": [{ "label": "All", "value": "" }, { "label": "To Do", "value": "todo" }, { "label": "In Progress", "value": "in_progress" }, { "label": "Done", "value": "done" }] }, "valueKey": "statusFilter" },
-                            { "id": "tm-list", "type": "dataTable", "props": { "columns": [{ "id": "title", "accessor": "title", "header": "Task" }, { "id": "priority", "accessor": "priority", "header": "Priority" }, { "id": "status", "accessor": "status", "header": "Status" }], "rowsKey": "tasksResult", "selectionKey": "selectedTaskId", "searchKey": "searchQuery", "filtersFromState": { "priority": "priorityFilter", "status": "statusFilter" }, "dataSource": { "actionName": "local_data.query", "input": { "modelId": "tasks", "limit": 100 }, "resultKey": "tasksResult" } } },
-                            { "id": "tm-new-title", "type": "textInput", "props": { "label": "New Task Title", "placeholder": "Finish biology homework" }, "valueKey": "newTaskTitle" },
-                            { "id": "tm-new-priority", "type": "select", "props": { "label": "Task Priority", "options": [{ "label": "High", "value": "high" }, { "label": "Medium", "value": "medium" }, { "label": "Low", "value": "low" }] }, "valueKey": "newTaskPriority" },
-                            { "id": "tm-new-status", "type": "select", "props": { "label": "Task Status", "options": [{ "label": "To Do", "value": "todo" }, { "label": "In Progress", "value": "in_progress" }, { "label": "Done", "value": "done" }] }, "valueKey": "newTaskStatus" },
-                            { "id": "tm-add-btn", "type": "button", "props": { "label": "Add Task" }, "actions": [
-                                { "type": "invokeRegisteredAction", "actionName": "local_data.write", "input": { "modelId": "tasks", "data": {} }, "inputFromState": { "data.title": "newTaskTitle", "data.priority": "newTaskPriority", "data.status": "newTaskStatus" }, "resultKey": "lastTask" },
-                                { "type": "invokeRegisteredAction", "actionName": "local_data.query", "input": { "modelId": "tasks", "limit": 100 }, "resultKey": "tasksResult" },
-                                { "type": "setValue", "target": "newTaskTitle", "value": "" }
-                            ] },
-                            { "id": "tm-delete-btn", "type": "button", "props": { "label": "Delete Task" }, "actions": [
-                                { "type": "invokeRegisteredAction", "actionName": "local_data.delete", "input": {}, "inputFromState": { "recordId": "selectedTaskId" } },
-                                { "type": "invokeRegisteredAction", "actionName": "local_data.query", "input": { "modelId": "tasks", "limit": 100 }, "resultKey": "tasksResult" }
-                            ] },
-                            { "id": "tm-done-btn", "type": "button", "props": { "label": "Mark Done" }, "actions": [
-                                { "type": "invokeRegisteredAction", "actionName": "local_data.write", "input": { "modelId": "tasks", "data": { "status": "done", "completed": true } }, "inputFromState": { "recordId": "selectedTaskId" } },
-                                { "type": "invokeRegisteredAction", "actionName": "local_data.query", "input": { "modelId": "tasks", "limit": 100 }, "resultKey": "tasksResult" }
-                            ] }
-                        ]
-                    }
-                },
-                "diagnostics": { "fixture": "task_tracker" }
-            })
-            .to_string();
+            let plan = super::plan_fixtures::task_tracker_create_plan();
+            return super::plan_fixtures::plan_response_json(
+                "I generated a Task Tracker with a typed tasks data model, durable local_data CRUD, priority/status filtering, and an empty state.",
+                &plan,
+            );
         }
 
         if lower.contains("expense") || lower.contains("budget") || lower.contains("spending") {
@@ -1625,6 +1607,24 @@ mod tests {
             .await
             .unwrap();
         let parsed = parse_agent_response(&response.raw_text).unwrap();
+        assert!(
+            parsed.payload.application_plan.is_some(),
+            "task tracker fixture must emit ApplicationPlan"
+        );
+        let plan = parsed.payload.application_plan.as_ref().unwrap();
+        assert_eq!(
+            plan.kind,
+            crate::application_kernel::application_plan::ApplicationPlanKind::Create
+        );
+        let ops = parsed.payload.normalized_operations().unwrap();
+        assert!(
+            ops.iter().any(|o| o.op_type == "surface.create"),
+            "plan must compile to surface.create"
+        );
+        assert!(
+            ops.iter().any(|o| o.op_type == "data.model_upsert"),
+            "plan must compile to data.model_upsert"
+        );
         let tc = parsed.payload.tool_change.as_ref().unwrap();
         let tool = tc.tool.as_ref().unwrap();
         assert_eq!(tool.id, "tool-task-tracker");
@@ -1659,6 +1659,66 @@ mod tests {
                     if action_name == "local_data.query"
             )
         }));
+    }
+
+    #[tokio::test]
+    async fn due_dates_evolution_fixture_emits_evolve_plan() {
+        let provider = MockAiProvider::new();
+        let response = provider
+            .chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Add due dates to my task tracker",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            })
+            .await
+            .unwrap();
+        let parsed = parse_agent_response(&response.raw_text).unwrap();
+        let plan = parsed
+            .payload
+            .application_plan
+            .as_ref()
+            .expect("evolve fixture must emit ApplicationPlan");
+        assert_eq!(
+            plan.kind,
+            crate::application_kernel::application_plan::ApplicationPlanKind::Evolve
+        );
+        let ops = parsed.payload.normalized_operations().unwrap();
+        assert!(ops.iter().any(|o| o.op_type == "data.model_upsert"));
+        assert!(ops
+            .iter()
+            .any(|o| o.payload.get("action") == Some(&serde_json::json!("update"))));
+    }
+
+    #[tokio::test]
+    async fn create_prompt_with_due_dates_still_emits_create_plan() {
+        let provider = MockAiProvider::new();
+        let response = provider
+            .chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Build me a task tracker with due dates",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            })
+            .await
+            .unwrap();
+        let parsed = parse_agent_response(&response.raw_text).unwrap();
+        let plan = parsed
+            .payload
+            .application_plan
+            .as_ref()
+            .expect("create+due-dates prompt must still emit ApplicationPlan");
+        assert_eq!(
+            plan.kind,
+            crate::application_kernel::application_plan::ApplicationPlanKind::Create,
+            "create-ish prompts must not be stolen by the evolve due-dates fixture"
+        );
     }
 
     #[tokio::test]

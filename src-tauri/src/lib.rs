@@ -333,6 +333,7 @@ pub fn run() {
             commands::kernel_list_pending_proposals,
             commands::kernel_decide_proposal,
             commands::kernel_compile_intent,
+            commands::kernel_compile_application_plan,
             commands::kernel_list_manifests,
             commands::kernel_get_manifest,
             commands::kernel_ensure_tool_manifest,

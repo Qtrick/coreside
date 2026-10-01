@@ -5,6 +5,7 @@
 //! operations continue to use `runtime_v2::transactions`, but agent-facing
 //! apply paths should prefer `kernel::apply_change`.
 
+pub mod application_plan;
 pub mod compiler;
 pub mod context;
 pub mod data;
@@ -18,6 +19,7 @@ pub mod policy;
 pub mod provenance;
 pub mod recovery;
 pub mod registered_actions;
+pub mod repair;
 pub mod testing;
 
 use std::collections::HashMap;
@@ -507,7 +509,10 @@ pub fn apply_change(
         )
         .map_err(KernelError::Db)?;
 
-        data::apply_kernel_operations(db, &req.operations).map_err(KernelError::Db)?;
+        // Manifest upserts are not applied inside apply_transaction_deferred.
+        // Data ops (model_upsert/migrate/records) MUST NOT run here: they need
+        // surface.create to register the application first when both appear in
+        // one transaction. apply_transaction_deferred applies data ops in order.
         manifest::apply_manifest_operations(db, &req.operations).map_err(KernelError::Db)?;
 
         let apply =
@@ -534,7 +539,7 @@ pub fn apply_change(
         let verification = testing::verify_after_change(db, &req.operations).ok();
 
         if let Some(ref v) = verification {
-            if v.status == "verified" {
+            if v.is_acceptable() {
                 for op in &req.operations {
                     if let Some(app_id) = op
                         .target
@@ -915,17 +920,9 @@ pub fn decide_proposal(
         }
     };
 
-    if let Err(e) = data::apply_kernel_operations(db, &ops) {
-        if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
-            tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during data operations");
-        }
-        let _ = db.conn().execute(
-            "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
-            rusqlite::params![e.to_string(), proposal_id],
-        );
-        return Err(KernelError::Db(e));
-    }
-
+    // Manifest-only ops (not handled in apply_transaction_deferred). Do NOT
+    // pre-apply data.* here — surface.create must register the application
+    // before data.model_upsert/migrate in the same proposal.
     if let Err(e) = manifest::apply_manifest_operations(db, &ops) {
         if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
             tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during manifest operations");
@@ -1864,7 +1861,6 @@ mod tests {
             ActionRunContext, Presence, Venue,
         };
         use crate::application_kernel::registered_actions::gateway::execute_registered_action;
-        use crate::runtime_v2::operations::tool_change_to_operations;
         use tokio_util::sync::CancellationToken;
 
         let mut db = test_db();
@@ -1885,11 +1881,18 @@ mod tests {
             }))
             .unwrap();
         let parsed = parse_agent_response(&response.raw_text).unwrap();
-        let tc = parsed.payload.tool_change.expect("toolChange fixture");
-        assert_eq!(tc.tool.as_ref().unwrap().id, "tool-task-tracker");
+        assert!(
+            parsed.payload.application_plan.is_some(),
+            "mock must emit ApplicationPlan"
+        );
+        let ops = parsed
+            .payload
+            .normalized_operations()
+            .expect("ApplicationPlan must compile");
+        assert!(ops.iter().any(|o| o.op_type == "surface.create"));
+        assert!(ops.iter().any(|o| o.op_type == "data.model_upsert"));
 
         // Production agent path: propose → user approve → commit (not seeded DB rows).
-        let ops = tool_change_to_operations(&tc);
         let change_res = apply_change(
             &mut db,
             None,
@@ -2008,6 +2011,374 @@ mod tests {
             }
             other => panic!("expected query ok, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn task_tracker_evolve_due_dates_preserves_records_and_adds_field() {
+        use crate::ai::{
+            parse_agent_response, AgentMessage, AgentRequest, AiProvider, MockAiProvider,
+        };
+        use crate::application_kernel::registered_actions::context::{
+            ActionRunContext, Presence, Venue,
+        };
+        use crate::application_kernel::registered_actions::gateway::execute_registered_action;
+        use tokio_util::sync::CancellationToken;
+
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Task Tracker Evolve", None).unwrap();
+
+        let provider = MockAiProvider::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let create = rt
+            .block_on(provider.chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Build me a simple task tracker",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            }))
+            .unwrap();
+        let create_ops = parse_agent_response(&create.raw_text)
+            .unwrap()
+            .payload
+            .normalized_operations()
+            .unwrap();
+        let create_prop = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Create".into(),
+                operations: create_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .proposal_id
+        .unwrap();
+        assert!(decide_proposal(&mut db, None, &create_prop, true)
+            .unwrap()
+            .is_committed());
+
+        let app_id = "tool-task-tracker";
+        let ctx = ActionRunContext {
+            actor: "user".into(),
+            venue: Venue::Application,
+            presence: Presence::Present,
+            application_id: Some(app_id.into()),
+            project_id: None,
+            conversation_id: Some(conv.id.clone()),
+            session_id: "sess-ev".into(),
+            run_id: "run-ev-1".into(),
+            trigger: None,
+            surface_id: Some(format!("surf-{app_id}")),
+            component_id: Some("tm-add-btn".into()),
+            depth: 0,
+        };
+        let write = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &serde_json::json!({
+                "modelId": "tasks",
+                "data": { "title": "Preserve me", "priority": "medium", "status": "todo" }
+            }),
+            None,
+        );
+        let approval_id = match write {
+            crate::application_kernel::registered_actions::ActionOutcome::PendingApproval {
+                approval_id,
+                ..
+            } => approval_id,
+            other => panic!("expected pending approval, got {other:?}"),
+        };
+        crate::application_kernel::registered_actions::approvals::decide(
+            &mut db,
+            &approval_id,
+            true,
+            None,
+            "user",
+        )
+        .unwrap();
+        let _ = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &serde_json::json!({
+                "modelId": "tasks",
+                "data": { "title": "Preserve me", "priority": "medium", "status": "todo" }
+            }),
+            Some(&approval_id),
+        );
+
+        let evolve = rt
+            .block_on(provider.chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Add due dates to my task tracker",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            }))
+            .unwrap();
+        let evolve_parsed = parse_agent_response(&evolve.raw_text).unwrap();
+        assert_eq!(
+            evolve_parsed
+                .payload
+                .application_plan
+                .as_ref()
+                .unwrap()
+                .kind,
+            crate::application_kernel::application_plan::ApplicationPlanKind::Evolve
+        );
+        let evolve_ops = evolve_parsed.payload.normalized_operations().unwrap();
+        assert!(
+            evolve_ops
+                .iter()
+                .any(|o| o.op_type == "tool.full_replace" || o.op_type == "surface.create"),
+            "evolve must include surface update op, got {:?}",
+            evolve_ops
+                .iter()
+                .map(|o| o.op_type.as_str())
+                .collect::<Vec<_>>()
+        );
+        let evolve_prop = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Add due dates".into(),
+                operations: evolve_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .proposal_id
+        .unwrap();
+        let evolve_result = decide_proposal(&mut db, None, &evolve_prop, true).unwrap();
+        assert!(
+            evolve_result.is_committed(),
+            "evolve conflicts: {:?}",
+            evolve_result.conflicts
+        );
+
+        let model = crate::application_kernel::data::get_model(&db, app_id, "tasks").unwrap();
+        assert!(
+            model.fields.iter().any(|f| f.field_id == "dueDate"),
+            "dueDate field must exist after migrate"
+        );
+        assert_eq!(model.schema_version, 2);
+
+        let records =
+            crate::application_kernel::data::query_records(&db, app_id, "tasks", 20).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["title"], "Preserve me");
+
+        let tool = crate::db::get_tool(&db, app_id).expect("tool after evolve");
+        let def = tool.definition;
+        assert!(
+            def.components.iter().any(|c| c.id == "tm-new-due"),
+            "tm-new-due must be in persisted tool definition; ids={:?}",
+            def.components.iter().map(|c| c.id.as_str()).collect::<Vec<_>>()
+        );
+        assert!(
+            def.components.iter().any(|c| c.id == "tm-new-title"),
+            "stable tm-new-title must survive evolution"
+        );
+
+        let surface_id = format!("surf-{app_id}");
+        let surface = get_surface(&db, &surface_id).expect("surface after evolve");
+        let doc = crate::runtime_v2::SoftwareDocument::from_value(&surface.definition).unwrap();
+        assert!(
+            doc.state_contracts
+                .iter()
+                .any(|sc| sc.key == "newTaskDueDate"),
+            "evolve UpdateSurface must merge newTaskDueDate into state contracts; keys={:?}",
+            doc.state_contracts
+                .iter()
+                .map(|sc| sc.key.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            doc.state_contracts
+                .iter()
+                .any(|sc| sc.key == "newTaskTitle"),
+            "prior newTaskTitle state contract must survive evolve"
+        );
+    }
+
+    /// Regression: decide_proposal must apply surface.create before data.model_upsert
+    /// in-order via apply_transaction_deferred — never pre-apply data.* first.
+    #[test]
+    fn decide_proposal_applies_surface_create_before_data_model_upsert() {
+        let mut db = test_db();
+        let conv = create_conversation(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            "Create Order Regression",
+            None,
+        )
+        .unwrap();
+        let plan = crate::ai::plan_fixtures::task_tracker_create_plan();
+        let validated = crate::application_kernel::application_plan::compile_plan(&plan).unwrap();
+        let ops = validated.compiled.operations;
+        let create_idx = ops
+            .iter()
+            .position(|o| o.op_type == "surface.create")
+            .expect("surface.create required");
+        let model_idx = ops
+            .iter()
+            .position(|o| o.op_type == "data.model_upsert")
+            .expect("data.model_upsert required");
+        assert!(
+            create_idx < model_idx,
+            "CreateSurface must compile before UpsertDataModel (create={create_idx}, model={model_idx})"
+        );
+
+        let change_res = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                turn_id: Some("turn-order-1".into()),
+                summary: plan.summary.clone(),
+                operations: ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .expect("agent create must propose");
+        let proposal_id = change_res.proposal_id.expect("proposal required");
+        // Pre-condition: model must not exist until decide applies ordered ops.
+        assert!(
+            crate::application_kernel::data::get_model(&db, "tool-task-tracker", "tasks").is_err(),
+            "tasks model must not exist before proposal approval"
+        );
+        let result = decide_proposal(&mut db, None, &proposal_id, true)
+            .expect("decide_proposal must succeed when surface.create precedes data.model_upsert");
+        assert!(
+            result.is_committed(),
+            "conflicts: {:?}",
+            result.conflicts
+        );
+        assert!(
+            crate::application_kernel::data::get_model(&db, "tool-task-tracker", "tasks").is_ok(),
+            "tasks model must exist after ordered decide_proposal apply"
+        );
+        assert!(crate::application_kernel::manifest::get_manifest(&db, "tool-task-tracker").is_ok());
+    }
+
+    /// Dirty form draft state must survive agent evolve (stable value_keys).
+    #[test]
+    fn evolve_preserves_dirty_surface_state_for_stable_value_keys() {
+        use crate::ai::{
+            parse_agent_response, AgentMessage, AgentRequest, AiProvider, MockAiProvider,
+        };
+        use tokio_util::sync::CancellationToken;
+
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Dirty Evolve", None).unwrap();
+        let provider = MockAiProvider::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let create = rt
+            .block_on(provider.chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Build me a simple task tracker",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            }))
+            .unwrap();
+        let create_ops = parse_agent_response(&create.raw_text)
+            .unwrap()
+            .payload
+            .normalized_operations()
+            .unwrap();
+        let create_prop = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Create".into(),
+                operations: create_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .proposal_id
+        .unwrap();
+        assert!(decide_proposal(&mut db, None, &create_prop, true)
+            .unwrap()
+            .is_committed());
+
+        let surface_id = "surf-tool-task-tracker";
+        crate::runtime_v2::surfaces::save_surface_state_occ(
+            &mut db,
+            surface_id,
+            &json!({
+                "newTaskTitle": "Unsaved draft title",
+                "newTaskPriority": "high"
+            }),
+            1,
+        )
+        .expect("seed dirty draft state");
+
+        let evolve = rt
+            .block_on(provider.chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Add due dates to my task tracker",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            }))
+            .unwrap();
+        let evolve_ops = parse_agent_response(&evolve.raw_text)
+            .unwrap()
+            .payload
+            .normalized_operations()
+            .unwrap();
+        let evolve_prop = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Add due dates".into(),
+                operations: evolve_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .proposal_id
+        .unwrap();
+        assert!(decide_proposal(&mut db, None, &evolve_prop, true)
+            .unwrap()
+            .is_committed());
+
+        let (state, _) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, surface_id).unwrap();
+        assert_eq!(
+            state.get("newTaskTitle"),
+            Some(&json!("Unsaved draft title")),
+            "dirty newTaskTitle must survive agent evolve, got {state}"
+        );
+        assert_eq!(
+            state.get("newTaskPriority"),
+            Some(&json!("high")),
+            "dirty newTaskPriority must survive agent evolve, got {state}"
+        );
     }
 
     #[test]

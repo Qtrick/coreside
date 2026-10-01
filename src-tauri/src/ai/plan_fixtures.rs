@@ -1,0 +1,541 @@
+//! Deterministic ApplicationPlan fixtures shared by mock provider and contract tests.
+//!
+//! These exercise the same production ApplicationPlan → validate → compile path
+//! that live providers must emit. They are not production intelligence.
+
+use serde_json::json;
+
+use crate::application_kernel::application_plan::{
+    ApplicationPlan, ApplicationPlanKind, PlanStep, APPLICATION_PLAN_SCHEMA_VERSION,
+};
+use crate::application_kernel::compiler::ChangeIntent;
+use crate::application_kernel::data::{DataField, DataModelDefinition};
+use crate::ai::response_schema::{ActionDefinition, ToolComponent, ToolDefinition};
+
+fn tasks_model_v1() -> DataModelDefinition {
+    DataModelDefinition {
+        model_id: "tasks".into(),
+        display_name: "Tasks".into(),
+        schema_version: 1,
+        fields: vec![
+            DataField {
+                field_id: "title".into(),
+                field_type: "text".into(),
+                required: true,
+                default: None,
+                enum_values: None,
+            },
+            DataField {
+                field_id: "priority".into(),
+                field_type: "enum".into(),
+                required: false,
+                default: Some(json!("medium")),
+                enum_values: Some(vec!["high".into(), "medium".into(), "low".into()]),
+            },
+            DataField {
+                field_id: "status".into(),
+                field_type: "enum".into(),
+                required: false,
+                default: Some(json!("todo")),
+                enum_values: Some(vec![
+                    "todo".into(),
+                    "in_progress".into(),
+                    "done".into(),
+                ]),
+            },
+            DataField {
+                field_id: "completed".into(),
+                field_type: "boolean".into(),
+                required: false,
+                default: Some(json!(false)),
+                enum_values: None,
+            },
+        ],
+    }
+}
+
+fn tasks_model_v2_with_due_date() -> DataModelDefinition {
+    let mut model = tasks_model_v1();
+    model.schema_version = 2;
+    model.fields.push(DataField {
+        field_id: "dueDate".into(),
+        field_type: "date".into(),
+        required: false,
+        default: None,
+        enum_values: None,
+    });
+    model
+}
+
+fn task_tracker_tool_v1() -> ToolDefinition {
+    ToolDefinition {
+        id: "tool-task-tracker".into(),
+        name: "Task Tracker".into(),
+        description: "Track tasks with title, priority, status, and durable local records."
+            .into(),
+        layout: json!({ "type": "dashboard", "columns": 2, "density": "normal" }),
+        components: vec![
+            ToolComponent {
+                id: "tm-heading".into(),
+                component_type: "heading".into(),
+                props: Some(json!({ "text": "Task Tracker", "level": 1 })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "tm-empty".into(),
+                component_type: "text".into(),
+                props: Some(json!({ "text": "No tasks yet. Add one below.", "tone": "muted" })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "tm-search".into(),
+                component_type: "textInput".into(),
+                value_key: Some("searchQuery".into()),
+                props: Some(json!({ "label": "Search Tasks", "placeholder": "Search..." })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "tm-priority-filter".into(),
+                component_type: "select".into(),
+                value_key: Some("priorityFilter".into()),
+                props: Some(json!({
+                    "label": "Priority Filter",
+                    "options": [
+                        { "label": "All", "value": "" },
+                        { "label": "High", "value": "high" },
+                        { "label": "Medium", "value": "medium" },
+                        { "label": "Low", "value": "low" }
+                    ]
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "tm-status-filter".into(),
+                component_type: "select".into(),
+                value_key: Some("statusFilter".into()),
+                props: Some(json!({
+                    "label": "Status Filter",
+                    "options": [
+                        { "label": "All", "value": "" },
+                        { "label": "To Do", "value": "todo" },
+                        { "label": "In Progress", "value": "in_progress" },
+                        { "label": "Done", "value": "done" }
+                    ]
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "tm-list".into(),
+                component_type: "dataTable".into(),
+                props: Some(json!({
+                    "columns": [
+                        { "id": "title", "accessor": "title", "header": "Task" },
+                        { "id": "priority", "accessor": "priority", "header": "Priority" },
+                        { "id": "status", "accessor": "status", "header": "Status" }
+                    ],
+                    "rowsKey": "tasksResult",
+                    "selectionKey": "selectedTaskId",
+                    "searchKey": "searchQuery",
+                    "filtersFromState": { "priority": "priorityFilter", "status": "statusFilter" },
+                    "dataSource": {
+                        "actionName": "local_data.query",
+                        "input": { "modelId": "tasks", "limit": 100 },
+                        "resultKey": "tasksResult"
+                    }
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "tm-new-title".into(),
+                component_type: "textInput".into(),
+                value_key: Some("newTaskTitle".into()),
+                props: Some(json!({
+                    "label": "New Task Title",
+                    "placeholder": "Finish biology homework"
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "tm-new-priority".into(),
+                component_type: "select".into(),
+                value_key: Some("newTaskPriority".into()),
+                props: Some(json!({
+                    "label": "Task Priority",
+                    "options": [
+                        { "label": "High", "value": "high" },
+                        { "label": "Medium", "value": "medium" },
+                        { "label": "Low", "value": "low" }
+                    ]
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "tm-new-status".into(),
+                component_type: "select".into(),
+                value_key: Some("newTaskStatus".into()),
+                props: Some(json!({
+                    "label": "Task Status",
+                    "options": [
+                        { "label": "To Do", "value": "todo" },
+                        { "label": "In Progress", "value": "in_progress" },
+                        { "label": "Done", "value": "done" }
+                    ]
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "tm-add-btn".into(),
+                component_type: "button".into(),
+                props: Some(json!({ "label": "Add Task" })),
+                actions: Some(vec![
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.write".into(),
+                        input: Some(json!({ "modelId": "tasks", "data": {} })),
+                        input_from_state: Some(
+                            [
+                                ("data.title".into(), "newTaskTitle".into()),
+                                ("data.priority".into(), "newTaskPriority".into()),
+                                ("data.status".into(), "newTaskStatus".into()),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        ),
+                        component_id: None,
+                        result_key: Some("lastTask".into()),
+                    },
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.query".into(),
+                        input: Some(json!({ "modelId": "tasks", "limit": 100 })),
+                        input_from_state: None,
+                        component_id: None,
+                        result_key: Some("tasksResult".into()),
+                    },
+                    ActionDefinition::SetValue {
+                        target: "newTaskTitle".into(),
+                        value: json!(""),
+                    },
+                ]),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "tm-delete-btn".into(),
+                component_type: "button".into(),
+                props: Some(json!({ "label": "Delete Task" })),
+                actions: Some(vec![
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.delete".into(),
+                        input: Some(json!({})),
+                        input_from_state: Some(
+                            [("recordId".into(), "selectedTaskId".into())]
+                                .into_iter()
+                                .collect(),
+                        ),
+                        component_id: None,
+                        result_key: None,
+                    },
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.query".into(),
+                        input: Some(json!({ "modelId": "tasks", "limit": 100 })),
+                        input_from_state: None,
+                        component_id: None,
+                        result_key: Some("tasksResult".into()),
+                    },
+                ]),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "tm-done-btn".into(),
+                component_type: "button".into(),
+                props: Some(json!({ "label": "Mark Done" })),
+                actions: Some(vec![
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.write".into(),
+                        input: Some(json!({
+                            "modelId": "tasks",
+                            "data": { "status": "done", "completed": true }
+                        })),
+                        input_from_state: Some(
+                            [("recordId".into(), "selectedTaskId".into())]
+                                .into_iter()
+                                .collect(),
+                        ),
+                        component_id: None,
+                        result_key: None,
+                    },
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.query".into(),
+                        input: Some(json!({ "modelId": "tasks", "limit": 100 })),
+                        input_from_state: None,
+                        component_id: None,
+                        result_key: Some("tasksResult".into()),
+                    },
+                ]),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    }
+}
+
+fn task_tracker_tool_v2_due_dates() -> ToolDefinition {
+    let mut tool = task_tracker_tool_v1();
+    // Preserve stable component IDs; add due-date column + input.
+    if let Some(list) = tool.components.iter_mut().find(|c| c.id == "tm-list") {
+        if let Some(props) = list.props.as_mut() {
+            if let Some(cols) = props.get_mut("columns").and_then(|c| c.as_array_mut()) {
+                cols.push(json!({
+                    "id": "dueDate",
+                    "accessor": "dueDate",
+                    "header": "Due"
+                }));
+            }
+        }
+    }
+    let due_input = ToolComponent {
+        id: "tm-new-due".into(),
+        component_type: "textInput".into(),
+        value_key: Some("newTaskDueDate".into()),
+        props: Some(json!({
+            "label": "Due Date",
+            "placeholder": "YYYY-MM-DD"
+        })),
+        ..Default::default()
+    };
+    // Insert before add button.
+    if let Some(idx) = tool.components.iter().position(|c| c.id == "tm-add-btn") {
+        tool.components.insert(idx, due_input);
+    } else {
+        tool.components.push(due_input);
+    }
+    if let Some(add) = tool.components.iter_mut().find(|c| c.id == "tm-add-btn") {
+        if let Some(actions) = add.actions.as_mut() {
+            if let Some(ActionDefinition::InvokeRegisteredAction {
+                input_from_state, ..
+            }) = actions.iter_mut().find(|a| {
+                matches!(
+                    a,
+                    ActionDefinition::InvokeRegisteredAction { action_name, .. }
+                        if action_name == "local_data.write"
+                )
+            }) {
+                if let Some(map) = input_from_state.as_mut() {
+                    map.insert("data.dueDate".into(), "newTaskDueDate".into());
+                }
+            }
+        }
+    }
+    tool
+}
+
+/// Canonical create plan for Task Tracker (provider-contract fixture).
+pub fn task_tracker_create_plan() -> ApplicationPlan {
+    ApplicationPlan {
+        schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+        plan_id: "plan-task-tracker-create".into(),
+        kind: ApplicationPlanKind::Create,
+        summary: "Create Task Tracker with local_data model and CRUD actions".into(),
+        application_id: Some("tool-task-tracker".into()),
+        base_revision: None,
+        steps: vec![
+            PlanStep {
+                id: "1".into(),
+                description: "Upsert tasks data model (title, priority, status)".into(),
+            },
+            PlanStep {
+                id: "2".into(),
+                description: "Create Task Tracker surface with list and add form".into(),
+            },
+        ],
+        intents: vec![
+            // Surface/manifest must exist before data.model_upsert accepts mutations.
+            ChangeIntent::CreateSurface {
+                tool: task_tracker_tool_v1(),
+                change_summary: Some(
+                    "Create Task Tracker with local_data model and CRUD actions".into(),
+                ),
+            },
+            ChangeIntent::UpsertDataModel {
+                application_id: "tool-task-tracker".into(),
+                model: tasks_model_v1(),
+            },
+        ],
+        tests: vec![],
+        diagnostics: Some(json!({ "fixture": "task_tracker_plan" })),
+    }
+}
+
+/// Evolve plan: add optional dueDate field + UI without destroying stable IDs.
+pub fn task_tracker_add_due_dates_plan(base_revision: Option<i64>) -> ApplicationPlan {
+    ApplicationPlan {
+        schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+        plan_id: "plan-task-tracker-due-dates".into(),
+        kind: ApplicationPlanKind::Evolve,
+        summary: "Add due dates to Task Tracker".into(),
+        application_id: Some("tool-task-tracker".into()),
+        base_revision,
+        steps: vec![
+            PlanStep {
+                id: "1".into(),
+                description: "Migrate tasks model to schemaVersion 2 with optional dueDate".into(),
+            },
+            PlanStep {
+                id: "2".into(),
+                description: "Add due date column and input; preserve existing component IDs"
+                    .into(),
+            },
+            PlanStep {
+                id: "3".into(),
+                description: "Wire dueDate into create action inputFromState".into(),
+            },
+        ],
+        intents: vec![
+            ChangeIntent::MigrateDataModel {
+                application_id: "tool-task-tracker".into(),
+                model: tasks_model_v2_with_due_date(),
+                migration_strategy: Some("add_optional_fields".into()),
+                require_approval: None,
+            },
+            ChangeIntent::UpdateSurface {
+                tool_id: "tool-task-tracker".into(),
+                tool: task_tracker_tool_v2_due_dates(),
+                change_summary: Some("Add due dates to Task Tracker".into()),
+                base_revision,
+            },
+        ],
+        tests: vec![],
+        diagnostics: Some(json!({ "fixture": "task_tracker_due_dates_plan" })),
+    }
+}
+
+/// Serialize a plan as a full agent response JSON string (schema v1 + applicationPlan).
+pub fn plan_response_json(assistant_message: &str, plan: &ApplicationPlan) -> String {
+    let tool_change = crate::application_kernel::application_plan::derive_tool_change(plan);
+    json!({
+        "schemaVersion": crate::ai::response_schema::SCHEMA_VERSION,
+        "assistantMessage": assistant_message,
+        "responseType": "tool_change",
+        "applicationPlan": plan,
+        "toolChange": tool_change,
+        "diagnostics": plan.diagnostics.clone().unwrap_or(json!({ "fixture": "application_plan" })),
+    })
+    .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::parse_agent_response;
+    use crate::application_kernel::application_plan::compile_plan;
+
+    #[test]
+    fn create_plan_compiles() {
+        let plan = task_tracker_create_plan();
+        let v = compile_plan(&plan).unwrap();
+        assert!(v
+            .compiled
+            .operations
+            .iter()
+            .any(|o| o.op_type == "data.model_upsert"));
+        assert!(v
+            .compiled
+            .operations
+            .iter()
+            .any(|o| o.op_type == "surface.create"));
+    }
+
+    #[test]
+    fn evolve_plan_preserves_stable_ids() {
+        let plan = task_tracker_add_due_dates_plan(Some(1));
+        let v = compile_plan(&plan).unwrap();
+        let update = v
+            .compiled
+            .operations
+            .iter()
+            .find(|o| o.payload.get("action") == Some(&json!("update")))
+            .expect("update surface op");
+        let comps = update.payload["tool"]["components"].as_array().unwrap();
+        assert!(comps.iter().any(|c| c["id"] == "tm-new-title"));
+        assert!(comps.iter().any(|c| c["id"] == "tm-new-due"));
+        assert!(comps.iter().any(|c| c["id"] == "tm-add-btn"));
+    }
+
+    /// Provider-contract: recorded JSON → parse → ApplicationPlan → compile → ops.
+    #[test]
+    fn recorded_create_json_parses_compiles_to_operations() {
+        let plan = task_tracker_create_plan();
+        let raw = plan_response_json("Creating Task Tracker.", &plan);
+        let parsed = parse_agent_response(&raw).expect("recorded fixture must parse");
+        let recovered = parsed
+            .payload
+            .application_plan
+            .as_ref()
+            .expect("applicationPlan required");
+        assert_eq!(recovered.kind, ApplicationPlanKind::Create);
+        let ops = parsed
+            .payload
+            .normalized_operations()
+            .expect("plan must compile to operations");
+        assert!(ops.iter().any(|o| o.op_type == "data.model_upsert"));
+        assert!(ops.iter().any(|o| o.op_type == "surface.create"));
+        assert_eq!(
+            ops.len(),
+            compile_plan(&plan).unwrap().compiled.operations.len()
+        );
+    }
+
+    #[test]
+    fn recorded_evolve_json_parses_compiles_to_operations() {
+        let plan = task_tracker_add_due_dates_plan(Some(2));
+        let raw = plan_response_json("Adding due dates.", &plan);
+        let parsed = parse_agent_response(&raw).expect("recorded evolve fixture must parse");
+        let recovered = parsed
+            .payload
+            .application_plan
+            .as_ref()
+            .expect("applicationPlan required");
+        assert_eq!(recovered.kind, ApplicationPlanKind::Evolve);
+        let ops = parsed
+            .payload
+            .normalized_operations()
+            .expect("evolve plan must compile");
+        assert!(ops.iter().any(|o| o.op_type == "data.model_upsert"));
+        assert!(ops
+            .iter()
+            .any(|o| o.payload.get("action") == Some(&json!("update"))));
+        let migrate = ops
+            .iter()
+            .find(|o| o.op_type == "data.model_upsert")
+            .expect("migrate model op");
+        assert_eq!(migrate.payload["model"]["schemaVersion"], 2);
+        assert!(migrate.payload["model"]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["fieldId"] == "dueDate"));
+    }
+
+    #[test]
+    fn malformed_application_plan_in_response_is_rejected() {
+        let raw = json!({
+            "schemaVersion": crate::ai::response_schema::SCHEMA_VERSION,
+            "assistantMessage": "bad plan",
+            "responseType": "tool_change",
+            "applicationPlan": {
+                "schemaVersion": "1",
+                "kind": "create",
+                "summary": "broken",
+                "intents": []
+            }
+        })
+        .to_string();
+        let parsed = parse_agent_response(&raw).expect("payload shape parses");
+        let err = parsed
+            .payload
+            .normalized_operations()
+            .expect_err("empty intents must fail compile");
+        assert!(
+            err.contains("applicationPlan rejected"),
+            "unexpected err: {err}"
+        );
+    }
+}

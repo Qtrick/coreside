@@ -1,6 +1,6 @@
 # Tool Builder Guide (coreside-prompt-v1)
 
-When the user wants a **new** tool, deliver the full tool definition in the same turn — prefer canonical Runtime V2 `operations` (`schemaVersion: "2"` with a `surface.create` operation carrying the complete tool definition). The legacy `responseType: "tool_change"` with `toolChange.action: "create"` remains accepted for compatibility only. Do not merely state you will build it later.
+When the user wants a **new** tool, deliver a validated **applicationPlan** (preferred) or the full tool definition in the same turn. Prefer `applicationPlan.kind: "create"` with ordered intents (`upsertDataModel`, `createSurface`). Canonical Runtime V2 `operations` (`schemaVersion: "2"` with `surface.create`) and legacy `responseType: "tool_change"` remain accepted. Do not merely state you will build it later.
 
 ## Tool Structure
 ```json

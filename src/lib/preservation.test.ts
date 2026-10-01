@@ -189,7 +189,6 @@ describe("runRendererMountPatchFlush", () => {
       surfaceId: "surf-1",
       conversationId: "conv-9",
       sourceType: "renderer_mount",
-      approvalGranted: false,
     });
     expect(id).toMatch(/^rend-surf-1-/);
   });
@@ -268,7 +267,6 @@ describe("startRendererMountLifecycle", () => {
       surfaceId: "surf-life",
       conversationId: "conv-life",
       sourceType: "renderer_mount",
-      approvalGranted: false,
     });
     expect(register).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -213,9 +213,47 @@ pub fn upsert_surface_from_tool(
         if let Ok(existing_doc) = super::software_document::SoftwareDocument::from_value(
             &serde_json::from_str(existing_definition_json)?,
         ) {
-            // Preserve trusted contracts, capability packs, design tokens, and custom section metadata from existing_doc
-            doc.state_contracts = existing_doc.state_contracts.clone();
-            doc.action_contracts = existing_doc.action_contracts.clone();
+            // Preserve existing trusted contracts, but MERGE newly inferred keys from
+            // the incoming tool so evolution can add bindings (e.g. newTaskDueDate)
+            // without dropping prior contracts or inventing restricted ones.
+            let mut merged_state = existing_doc.state_contracts.clone();
+            for sc in doc.state_contracts.drain(..) {
+                if !merged_state.iter().any(|e| e.key == sc.key) {
+                    merged_state.push(sc);
+                }
+            }
+            doc.state_contracts = merged_state;
+
+            // Match by action_id only (unique). Requiring component_id equality
+            // duplicates contracts when legacy rows have component_id: None.
+            let mut merged_actions = existing_doc.action_contracts.clone();
+            for ac in doc.action_contracts.drain(..) {
+                if let Some(existing) = merged_actions
+                    .iter_mut()
+                    .find(|e| e.action_id == ac.action_id)
+                {
+                    // Evolution extends input_from_state; never drop prior bindings.
+                    match (&mut existing.input_from_state, ac.input_from_state) {
+                        (Some(dst), Some(src)) => {
+                            for (k, v) in src {
+                                dst.insert(k, v);
+                            }
+                        }
+                        (dst @ None, Some(src)) => *dst = Some(src),
+                        _ => {}
+                    }
+                    if ac.result_key.is_some() {
+                        existing.result_key = ac.result_key;
+                    }
+                    if existing.component_id.is_none() {
+                        existing.component_id = ac.component_id;
+                    }
+                } else {
+                    merged_actions.push(ac);
+                }
+            }
+            doc.action_contracts = merged_actions;
+
             doc.design_tokens = existing_doc.design_tokens.clone();
             doc.capability_packs = existing_doc.capability_packs.clone();
 
@@ -1677,6 +1715,192 @@ mod tests {
             ],
             ..Default::default()
         }
+    }
+
+    /// Regression: evolve must MERGE newly inferred state/action contracts
+    /// (e.g. newTaskDueDate) instead of freezing only the prior contract set.
+    #[test]
+    fn upsert_surface_from_tool_evolve_merges_new_value_key_state_contract() {
+        use crate::application_kernel::compiler::ChangeIntent;
+        use crate::runtime_v2::software_document::SoftwareDocument;
+
+        let mut db = test_db();
+        let v1 = crate::ai::plan_fixtures::task_tracker_create_plan();
+        let tool_v1 = match &v1.intents[0] {
+            ChangeIntent::CreateSurface { tool, .. } => tool.clone(),
+            other => panic!("expected CreateSurface, got {other:?}"),
+        };
+        let applied =
+            apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool_v1, "create", None, "v1")
+                .unwrap();
+        let surface =
+            upsert_surface_from_tool(&mut db, &applied.definition, DEFAULT_WORKSPACE_ID, 1)
+                .unwrap();
+        let before = SoftwareDocument::from_value(&surface.definition).unwrap();
+        assert!(
+            before
+                .state_contracts
+                .iter()
+                .any(|sc| sc.key == "newTaskTitle"),
+            "v1 must admit newTaskTitle"
+        );
+        assert!(
+            !before
+                .state_contracts
+                .iter()
+                .any(|sc| sc.key == "newTaskDueDate"),
+            "v1 must not yet have newTaskDueDate"
+        );
+
+        let evolve = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(Some(1));
+        let tool_v2 = match evolve.intents.iter().find(|i| {
+            matches!(i, ChangeIntent::UpdateSurface { .. })
+        }) {
+            Some(ChangeIntent::UpdateSurface { tool, .. }) => tool.clone(),
+            _ => panic!("evolve plan missing UpdateSurface"),
+        };
+        assert!(
+            tool_v2
+                .components
+                .iter()
+                .any(|c| c.value_key.as_deref() == Some("newTaskDueDate")),
+            "v2 tool must declare newTaskDueDate value_key"
+        );
+        let applied_v2 = apply_tool_change(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            &tool_v2,
+            "update",
+            Some("tool-task-tracker"),
+            "add due dates",
+        )
+        .unwrap();
+        let after_surface =
+            upsert_surface_from_tool(&mut db, &applied_v2.definition, DEFAULT_WORKSPACE_ID, 2)
+                .unwrap();
+        let after = SoftwareDocument::from_value(&after_surface.definition).unwrap();
+        assert!(
+            after
+                .state_contracts
+                .iter()
+                .any(|sc| sc.key == "newTaskTitle"),
+            "prior newTaskTitle contract must survive evolve merge"
+        );
+        assert!(
+            after
+                .state_contracts
+                .iter()
+                .any(|sc| sc.key == "newTaskDueDate"),
+            "newTaskDueDate must be merged into state contracts on evolve; keys={:?}",
+            after
+                .state_contracts
+                .iter()
+                .map(|sc| sc.key.as_str())
+                .collect::<Vec<_>>()
+        );
+        let write_ac = after
+            .action_contracts
+            .iter()
+            .find(|ac| {
+                ac.action_name == "local_data.write"
+                    && ac.component_id.as_deref() == Some("tm-add-btn")
+            })
+            .expect("write action contract");
+        let from_state = write_ac.input_from_state.as_ref().expect("input_from_state");
+        assert_eq!(
+            from_state.get("data.dueDate").map(String::as_str),
+            Some("newTaskDueDate"),
+            "evolve must extend action input_from_state with dueDate binding"
+        );
+        assert_eq!(
+            from_state.get("data.title").map(String::as_str),
+            Some("newTaskTitle"),
+            "evolve merge must keep prior title binding"
+        );
+    }
+
+    #[test]
+    fn upsert_evolve_merges_action_when_legacy_component_id_missing() {
+        use crate::ai::ActionDefinition;
+        use crate::runtime_v2::software_document::{ActionContract, SoftwareDocument};
+
+        let mut db = test_db();
+        let tool = task_tracker_shaped_tool("tool-legacy-ac");
+        let applied =
+            apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "v1").unwrap();
+        let surface =
+            upsert_surface_from_tool(&mut db, &applied.definition, DEFAULT_WORKSPACE_ID, 1)
+                .unwrap();
+        // Simulate legacy persisted contracts without component_id.
+        let mut doc = SoftwareDocument::from_value(&surface.definition).unwrap();
+        for ac in &mut doc.action_contracts {
+            ac.component_id = None;
+        }
+        let patched = serde_json::to_value(&doc).unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET definition_json = ?1 WHERE id = ?2",
+                rusqlite::params![patched.to_string(), surface.id],
+            )
+            .unwrap();
+
+        let mut evolved = tool.clone();
+        if let Some(add) = evolved.components.iter_mut().find(|c| c.id == "tm-add-btn") {
+            if let Some(actions) = add.actions.as_mut() {
+                if let Some(ActionDefinition::InvokeRegisteredAction {
+                    input_from_state, ..
+                }) = actions.iter_mut().find(|a| {
+                    matches!(
+                        a,
+                        ActionDefinition::InvokeRegisteredAction { action_name, .. }
+                            if action_name == "local_data.write"
+                    )
+                }) {
+                    if let Some(map) = input_from_state.as_mut() {
+                        map.insert("data.dueDate".into(), "newTaskDueDate".into());
+                    }
+                }
+            }
+        }
+        evolved.components.push(crate::ai::ToolComponent {
+            id: "tm-new-due".into(),
+            component_type: "textInput".into(),
+            value_key: Some("newTaskDueDate".into()),
+            props: Some(json!({"label": "Due Date"})),
+            ..Default::default()
+        });
+        let applied_v2 = apply_tool_change(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            &evolved,
+            "update",
+            Some("tool-legacy-ac"),
+            "legacy merge",
+        )
+        .unwrap();
+        let after =
+            upsert_surface_from_tool(&mut db, &applied_v2.definition, DEFAULT_WORKSPACE_ID, 2)
+                .unwrap();
+        let after_doc = SoftwareDocument::from_value(&after.definition).unwrap();
+        let write_ids: Vec<&ActionContract> = after_doc
+            .action_contracts
+            .iter()
+            .filter(|ac| ac.action_name == "local_data.write")
+            .collect();
+        assert_eq!(
+            write_ids.len(),
+            1,
+            "legacy component_id:None must not duplicate action contracts"
+        );
+        assert_eq!(write_ids[0].component_id.as_deref(), Some("tm-add-btn"));
+        assert_eq!(
+            write_ids[0]
+                .input_from_state
+                .as_ref()
+                .and_then(|m| m.get("data.dueDate"))
+                .map(String::as_str),
+            Some("newTaskDueDate")
+        );
     }
 
     #[test]

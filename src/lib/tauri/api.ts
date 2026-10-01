@@ -782,7 +782,6 @@ export const api = {
     sourceType: string;
     fromAgent?: boolean;
     applyImmediately?: boolean;
-    approvalGranted?: boolean;
   }) =>
     invoke<import("@/types/runtime-v2").ScheduledPatch[]>("schedule_patches_cmd", {
       args,
@@ -791,15 +790,12 @@ export const api = {
     surfaceId?: string | null;
     conversationId?: string | null;
     sourceType?: string;
-    approvalGranted?: boolean;
   }) =>
     invoke<Record<string, unknown>[]>("flush_patch_scheduler_cmd", {
       surfaceId: args?.surfaceId ?? "",
       // Ignored by Rust. Conversation scope is the mounted surface row.
       conversationId: args?.conversationId ?? null,
       sourceType: args?.sourceType ?? "user",
-      // Ignored by Rust. Mount flush cannot grant strong-risk approval.
-      approvalGranted: args?.approvalGranted ?? false,
     }),
   registerSurfaceMount: (args: {
     surfaceId: string;
@@ -1085,6 +1081,8 @@ export const api = {
     invoke<Record<string, unknown>>("kernel_apply_change", { request }),
   kernelCompileIntent: (intent: Record<string, unknown>) =>
     invoke<Record<string, unknown>>("kernel_compile_intent", { intent }),
+  kernelCompileApplicationPlan: (plan: Record<string, unknown>) =>
+    invoke<Record<string, unknown>>("kernel_compile_application_plan", { plan }),
   kernelListManifests: () =>
     invoke<import("@/types/application-kernel").ManifestRecord[]>("kernel_list_manifests"),
   kernelGetManifest: (applicationId: string) =>

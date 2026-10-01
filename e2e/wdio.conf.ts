@@ -191,6 +191,7 @@ export const config: Options.Testrunner = {
       "./specs/20-progressive-preview-cancel.spec.ts",
     ],
     "generated-task-tracker": ["./specs/21-generated-task-tracker.spec.ts"],
+    "application-evolution": ["./specs/22-application-evolution.spec.ts"],
     "wallpaper-targeted": ["./specs/13-wallpaper-targeted-update.spec.ts"],
     "first-run-welcome": ["./specs/15-first-run-welcome.spec.ts"],
     "core-tutorial": ["./specs/16-core-tutorial.spec.ts"],

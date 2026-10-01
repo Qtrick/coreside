@@ -707,6 +707,10 @@ pub struct AgentResponsePayload {
     pub response_type: ResponseType,
     #[serde(default)]
     pub tool_change: Option<ToolChangePayload>,
+    /// Provider-neutral application generation contract. When present and valid,
+    /// it is the authoritative source of operations (compiled via ChangeIntent).
+    #[serde(default)]
+    pub application_plan: Option<crate::application_kernel::application_plan::ApplicationPlan>,
     #[serde(default)]
     pub settings_change: Option<SettingsChangePayload>,
     #[serde(default)]
@@ -872,6 +876,17 @@ impl AgentResponsePayload {
         if let Some(tc) = self.tool_change.as_mut() {
             tc.normalize_for_frontend();
         }
+        // When the plan is present but toolChange is missing, derive a preview payload.
+        if self.tool_change.is_none() {
+            if let Some(plan) = self.application_plan.as_ref() {
+                if let Some(mut tc) =
+                    crate::application_kernel::application_plan::derive_tool_change(plan)
+                {
+                    tc.normalize_for_frontend();
+                    self.tool_change = Some(tc);
+                }
+            }
+        }
         if let Some(ops) = self.operations.as_mut() {
             for (idx, op) in ops.iter_mut().enumerate() {
                 *op = normalize_raw_operation(op, idx);
@@ -880,6 +895,17 @@ impl AgentResponsePayload {
     }
 
     pub fn normalized_operations(&self) -> Result<Vec<crate::runtime_v2::AppOperation>, String> {
+        // ApplicationPlan is authoritative when present.
+        if let Some(plan) = &self.application_plan {
+            let validated =
+                crate::application_kernel::application_plan::compile_plan(plan).map_err(|e| {
+                    format!("applicationPlan rejected: {e}")
+                })?;
+            let ops =
+                crate::runtime_v2::normalize_operations_for_validation(&validated.compiled.operations);
+            return Ok(ops);
+        }
+
         let mut ops: Vec<crate::runtime_v2::AppOperation> = if let Some(ops_raw) = &self.operations
         {
             ops_raw
@@ -917,6 +943,7 @@ impl AgentResponsePayload {
             .map(|o| !o.is_empty())
             .unwrap_or(false);
         let has_tool_change = self.tool_change.is_some();
+        let has_application_plan = self.application_plan.is_some();
         let silent = self.silent.unwrap_or(false);
         let has_v2_visible = self
             .assistant_messages
@@ -936,7 +963,7 @@ impl AgentResponsePayload {
             })
             .unwrap_or(false);
 
-        if has_ops || has_tool_change {
+        if has_ops || has_tool_change || has_application_plan {
             // Try normalized operations first. If normalization fails (e.g.
             // stringified components), fall back to raw ops for validation
             // so callers get a meaningful error rather than a schema panic.
@@ -983,6 +1010,7 @@ impl AgentResponsePayload {
             )
             && !has_ops
             && !has_tool_change
+            && !has_application_plan
             && !silent
             && !has_v2_visible
         {
@@ -1010,41 +1038,54 @@ impl AgentResponsePayload {
                 }
             }
             ResponseType::ToolChange => {
-                let tc = self.tool_change.as_ref().ok_or_else(|| {
-                    "toolChange required for responseType tool_change".to_string()
-                })?;
-                let tool = tc
-                    .tool
-                    .as_ref()
-                    .ok_or_else(|| "toolChange.tool required".to_string())?;
-                if tool.id.trim().is_empty() {
-                    return Err("tool.id must be non-empty".into());
-                }
-                if tool.name.trim().is_empty() {
-                    return Err("tool.name must be non-empty".into());
-                }
-                crate::security::assert_not_protected(&tool.id)?;
-                if let Some(target) = tc.target_tool_id.as_ref() {
-                    if !target.trim().is_empty() {
-                        crate::security::assert_not_protected(target)?;
+                // applicationPlan alone is enough when it derives a surface change.
+                if has_application_plan && !has_tool_change {
+                    let plan = self.application_plan.as_ref().unwrap();
+                    if crate::application_kernel::application_plan::derive_tool_change(plan)
+                        .is_none()
+                    {
+                        return Err(
+                            "applicationPlan for tool_change must include a CreateSurface or UpdateSurface intent"
+                                .into(),
+                        );
                     }
-                }
-                if matches!(tc.action, ToolAction::Update | ToolAction::Replace)
-                    && tc
-                        .target_tool_id
+                } else {
+                    let tc = self.tool_change.as_ref().ok_or_else(|| {
+                        "toolChange required for responseType tool_change".to_string()
+                    })?;
+                    let tool = tc
+                        .tool
                         .as_ref()
-                        .map(|s| s.trim().is_empty())
-                        .unwrap_or(true)
-                {
-                    return Err("targetToolId required for update/replace".into());
+                        .ok_or_else(|| "toolChange.tool required".to_string())?;
+                    if tool.id.trim().is_empty() {
+                        return Err("tool.id must be non-empty".into());
+                    }
+                    if tool.name.trim().is_empty() {
+                        return Err("tool.name must be non-empty".into());
+                    }
+                    crate::security::assert_not_protected(&tool.id)?;
+                    if let Some(target) = tc.target_tool_id.as_ref() {
+                        if !target.trim().is_empty() {
+                            crate::security::assert_not_protected(target)?;
+                        }
+                    }
+                    if matches!(tc.action, ToolAction::Update | ToolAction::Replace)
+                        && tc
+                            .target_tool_id
+                            .as_ref()
+                            .map(|s| s.trim().is_empty())
+                            .unwrap_or(true)
+                    {
+                        return Err("targetToolId required for update/replace".into());
+                    }
+                    if matches!(tc.action, ToolAction::Create) && tool.components.is_empty() {
+                        return Err("tool.components must not be empty when creating a tool".into());
+                    }
+                    if !tool.components.is_empty() {
+                        crate::runtime_v2::packs::validate_tool_components(&tool.components)?;
+                    }
+                    validate_layout(&tool.layout)?;
                 }
-                if matches!(tc.action, ToolAction::Create) && tool.components.is_empty() {
-                    return Err("tool.components must not be empty when creating a tool".into());
-                }
-                if !tool.components.is_empty() {
-                    crate::runtime_v2::packs::validate_tool_components(&tool.components)?;
-                }
-                validate_layout(&tool.layout)?;
             }
             ResponseType::SettingsChange => {
                 let sc = self.settings_change.as_ref().ok_or_else(|| {
@@ -1075,6 +1116,7 @@ mod tests {
             assistant_message: "Searching…".into(),
             response_type: ResponseType::ToolUse,
             tool_change: None,
+            application_plan: None,
             settings_change: None,
             tool_calls: None,
             citations: None,

@@ -8,8 +8,14 @@ use rusqlite::{params, OptionalExtension};
 
 pub const LIFECYCLE_STATES: &[&str] = &[
     "draft",
+    "generating",
     "preview",
+    "applying",
+    "verifying",
+    "ready",
     "active",
+    "degraded",
+    "repair_required",
     "suspended",
     "archived",
     "deleted_pending_cleanup",

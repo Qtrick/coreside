@@ -138,7 +138,6 @@ export async function applyDirectManipulationOps(args: {
     sourceType: "direct_manipulation",
     fromAgent: false,
     applyImmediately: true,
-    approvalGranted: true,
   });
 }
 

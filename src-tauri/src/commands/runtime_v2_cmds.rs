@@ -373,7 +373,9 @@ pub struct SchedulePatchesArgs {
     pub source_type: String,
     pub from_agent: Option<bool>,
     pub apply_immediately: Option<bool>,
-    pub approval_granted: Option<bool>,
+    /// Intentionally omitted: renderer must never supply approval. Strong ops
+    /// require trusted proposal/decide paths; lightweight apply uses
+    /// apply_immediately + risk classification only.
     pub model: Option<String>,
     pub provider: Option<String>,
 }
@@ -469,7 +471,6 @@ pub fn flush_patch_scheduler_cmd(
     surface_id: String,
     _conversation_id: Option<String>,
     _source_type: Option<String>,
-    _approval_granted: Option<bool>,
 ) -> Result<Vec<crate::application_kernel::ChangeResult>, CommandError> {
     state.require_profile()?;
     state
