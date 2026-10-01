@@ -50,7 +50,8 @@ fn surface_def(interactive: Value) -> Value {
         "components": [{ "id": "title", "type": "heading", "props": { "text": "App" } }],
         "stateContracts": [
             { "key": "board", "type": "array", "initialValue": [], "writePolicy": "user" },
-            { "key": "note", "type": "string", "initialValue": "", "writePolicy": "user" }
+            // Agent/model-writable scratch pad (not interactive-engine-owned).
+            { "key": "note", "type": "string", "initialValue": "", "writePolicy": "model" }
         ],
         "interactive": interactive
     })

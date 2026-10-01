@@ -43,6 +43,13 @@ pub enum ChangeIntent {
         application_id: String,
         route_id: String,
     },
+    /// High-level surface creation — compiles to `surface.create`.
+    #[serde(rename_all = "camelCase")]
+    CreateSurface {
+        tool: crate::ai::ToolDefinition,
+        #[serde(default)]
+        change_summary: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -200,6 +207,38 @@ pub fn compile(intent: ChangeIntent) -> Result<CompiledChange, KernelError> {
                 rollback_hint: "route.navigate previous".into(),
             })
         }
+        ChangeIntent::CreateSurface {
+            tool,
+            change_summary,
+        } => {
+            crate::security::assert_not_protected(&tool.id).map_err(KernelError::Protected)?;
+            for c in &tool.components {
+                validate_component_type_allowed(&c.component_type)
+                    .map_err(KernelError::CapabilityUnavailable)?;
+            }
+            let name = tool.name.clone();
+            let op = new_op(
+                "surface.create",
+                OperationTarget {
+                    surface_id: Some(format!("surf-{}", tool.id)),
+                    tool_id: Some(tool.id.clone()),
+                    surface_type: Some("tool".into()),
+                    placement: Some("tool_canvas".into()),
+                    ..Default::default()
+                },
+                json!({
+                    "action": "create",
+                    "tool": tool,
+                    "changeSummary": change_summary.unwrap_or_else(|| format!("Create {name}")),
+                }),
+            );
+            Ok(CompiledChange {
+                compiler_version: COMPILER_VERSION.into(),
+                operations: vec![op],
+                summary: format!("Create surface {name}"),
+                rollback_hint: "surface.delete".into(),
+            })
+        }
     }
 }
 
@@ -229,6 +268,109 @@ mod tests {
             component_type: "iframe".into(),
             props: json!({}),
             base_revision: None,
+        })
+        .unwrap_err();
+        assert!(matches!(err, KernelError::CapabilityUnavailable(_)));
+    }
+
+    #[test]
+    fn create_surface_compiles_to_surface_create() {
+        let tool = crate::ai::ToolDefinition {
+            id: "tool-task-tracker".into(),
+            name: "Task Tracker".into(),
+            description: "Track tasks".into(),
+            layout: json!({"type": "dashboard"}),
+            components: vec![crate::ai::ToolComponent {
+                id: "heading".into(),
+                component_type: "heading".into(),
+                value_key: None,
+                props: Some(json!({"text": "Task Tracker", "level": 1})),
+                children: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let c = compile(ChangeIntent::CreateSurface {
+            tool: tool.clone(),
+            change_summary: Some("Create Task Tracker".into()),
+        })
+        .unwrap();
+        assert_eq!(c.operations.len(), 1);
+        assert_eq!(c.operations[0].op_type, "surface.create");
+        assert_eq!(
+            c.operations[0].target.surface_id.as_deref(),
+            Some("surf-tool-task-tracker")
+        );
+        assert_eq!(
+            c.operations[0].target.tool_id.as_deref(),
+            Some("tool-task-tracker")
+        );
+        assert_eq!(c.operations[0].payload["action"], "create");
+        assert_eq!(c.operations[0].payload["tool"]["id"], "tool-task-tracker");
+        assert_eq!(
+            c.operations[0].payload["changeSummary"],
+            "Create Task Tracker"
+        );
+    }
+
+    #[test]
+    fn create_surface_defaults_change_summary_from_tool_name() {
+        let tool = crate::ai::ToolDefinition {
+            id: "tool-notes".into(),
+            name: "Notes".into(),
+            description: "".into(),
+            layout: json!({"type": "stack"}),
+            components: vec![],
+            ..Default::default()
+        };
+        let c = compile(ChangeIntent::CreateSurface {
+            tool,
+            change_summary: None,
+        })
+        .unwrap();
+        assert_eq!(c.operations[0].payload["changeSummary"], "Create Notes");
+        assert_eq!(c.summary, "Create surface Notes");
+        assert_eq!(c.rollback_hint, "surface.delete");
+    }
+
+    #[test]
+    fn create_surface_rejects_protected_tool_id() {
+        let tool = crate::ai::ToolDefinition {
+            id: "core.settings".into(),
+            name: "Settings".into(),
+            description: "".into(),
+            layout: json!({"type": "stack"}),
+            components: vec![],
+            ..Default::default()
+        };
+        let err = compile(ChangeIntent::CreateSurface {
+            tool,
+            change_summary: None,
+        })
+        .unwrap_err();
+        assert!(matches!(err, KernelError::Protected(_)));
+    }
+
+    #[test]
+    fn create_surface_rejects_disallowed_component() {
+        let tool = crate::ai::ToolDefinition {
+            id: "tool-bad".into(),
+            name: "Bad".into(),
+            description: "".into(),
+            layout: json!({"type": "stack"}),
+            components: vec![crate::ai::ToolComponent {
+                id: "evil".into(),
+                component_type: "iframe".into(),
+                value_key: None,
+                props: Some(json!({})),
+                children: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let err = compile(ChangeIntent::CreateSurface {
+            tool,
+            change_summary: None,
         })
         .unwrap_err();
         assert!(matches!(err, KernelError::CapabilityUnavailable(_)));

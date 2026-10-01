@@ -110,10 +110,16 @@ pub fn run_test(db: &mut Database, application_id: &str, test_id: &str) -> DbRes
     let test: DeclarativeTest = serde_json::from_str(&def_json)?;
     let mut passed = true;
     let mut details = Vec::new();
+    let mut unverified = Vec::new();
     for a in &test.assertions {
+        let mut verified = true;
         let ok = match a.assertion.as_str() {
-            "render_ok" | "no_console_error" | "no_overflow" => true,
-            "has_accessible_label" => true, // schema-level enforcement elsewhere
+            // UI assertions require a renderer verification channel — do not lie.
+            "render_ok" | "no_console_error" | "no_overflow" | "has_accessible_label" => {
+                unverified.push(a.assertion.clone());
+                verified = false;
+                false
+            }
             "record_exists" => {
                 let model = a.target.as_deref().unwrap_or("");
                 let count: i64 = db
@@ -233,11 +239,29 @@ pub fn run_test(db: &mut Database, application_id: &str, test_id: &str) -> DbRes
         if !ok {
             passed = false;
         }
-        details.push(json!({ "assertion": a.assertion, "ok": ok }));
+        details.push(json!({
+            "assertion": a.assertion,
+            "ok": ok,
+            "verified": verified,
+        }));
     }
-    let status = if passed { "passed" } else { "failed" };
+    // Distinguish structural failure from UI asserts that Rust cannot verify yet.
+    let has_failed_verified = details.iter().any(|d| {
+        d.get("verified") == Some(&json!(true)) && d.get("ok") == Some(&json!(false))
+    });
+    let status = if passed {
+        "passed"
+    } else if !unverified.is_empty() && !has_failed_verified {
+        "not_verified"
+    } else {
+        "failed"
+    };
     let run_id = format!("trun-{}", Uuid::new_v4());
-    let result = json!({ "status": status, "details": details });
+    let result = json!({
+        "status": status,
+        "details": details,
+        "unverifiedAssertions": unverified,
+    });
     db.conn().execute(
         "INSERT INTO generated_test_runs (id, application_id, test_id, status, result_json, created_at)
          VALUES (?1,?2,?3,?4,?5,?6)",
@@ -258,8 +282,11 @@ pub fn run_test(db: &mut Database, application_id: &str, test_id: &str) -> DbRes
     Ok(result)
 }
 
+/// Maximum enabled declarative tests executed per application during post-change verify.
+const MAX_VERIFY_TESTS_PER_APP: usize = 32;
+
 pub fn verify_after_change(
-    db: &Database,
+    db: &mut Database,
     operations: &[AppOperation],
 ) -> Result<VerificationResult, DbError> {
     let mut apps = std::collections::HashSet::new();
@@ -270,38 +297,63 @@ pub fn verify_after_change(
         if let Some(a) = op.payload.get("applicationId").and_then(|v| v.as_str()) {
             apps.insert(a.to_string());
         }
+        // surface.create / tool payloads often identify the app as tool.id
+        if let Some(tool) = op.payload.get("tool") {
+            if let Some(id) = tool.get("id").and_then(|v| v.as_str()) {
+                apps.insert(id.to_string());
+            }
+        }
     }
     let mut results = Vec::new();
-    let mut all_ok = true;
+    let mut failed = false;
+    let mut unverified = false;
     for app in apps {
-        let mut stmt = db.conn().prepare(
-            "SELECT test_id FROM generated_tests WHERE application_id = ?1 AND enabled = 1",
-        )?;
-        let ids: Vec<String> = stmt
-            .query_map([&app], |row| row.get(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-        // Structural validation: manifest must parse if present
         if let Ok(m) = super::manifest::get_manifest(db, &app) {
             if let Err(e) = super::manifest::validate_manifest(&m.manifest) {
-                all_ok = false;
+                failed = true;
                 results.push(json!({ "applicationId": app, "error": e }));
             }
         }
+        let mut stmt = db.conn().prepare(
+            "SELECT test_id FROM generated_tests WHERE application_id = ?1 AND enabled = 1 ORDER BY test_id LIMIT ?2",
+        )?;
+        let ids: Vec<String> = stmt
+            .query_map(params![app, MAX_VERIFY_TESTS_PER_APP as i64], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
         for tid in ids {
-            // read-only: use last result if any; do not mutate in &Database path
-            results.push(json!({ "applicationId": app, "testId": tid, "queued": true }));
+            match run_test(db, &app, &tid) {
+                Ok(run) => {
+                    let status = run.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                    if status == "failed" {
+                        failed = true;
+                    } else if status == "not_verified" {
+                        unverified = true;
+                    }
+                    results.push(json!({
+                        "applicationId": app,
+                        "testId": tid,
+                        "run": run,
+                    }));
+                }
+                Err(e) => {
+                    failed = true;
+                    results.push(json!({
+                        "applicationId": app,
+                        "testId": tid,
+                        "error": e.to_string(),
+                    }));
+                }
+            }
         }
     }
-    let status = if all_ok {
-        if results.is_empty() {
-            "verified"
-        } else {
-            "verified_with_warnings"
-        }
-    } else {
-        // Verification failed; callers decide whether to roll back — do not claim rollback.
+    let status = if failed {
         "failed"
+    } else if unverified {
+        "verified_with_warnings"
+    } else {
+        "verified"
     };
     Ok(VerificationResult {
         status: status.into(),
@@ -457,11 +509,197 @@ mod tests {
         upsert_test(&mut db, app_id, test).unwrap();
         let result = run_test(&mut db, app_id, "decl-1").unwrap();
 
-        assert_eq!(result["status"], "passed");
+        // Structural asserts pass; render_ok is not verified without a renderer channel.
+        assert_eq!(result["status"], "not_verified");
         let details = result["details"].as_array().unwrap();
         assert_eq!(details.len(), 4);
-        for item in details {
-            assert_eq!(item["ok"], true);
-        }
+        assert_eq!(details[0]["assertion"], "render_ok");
+        assert_eq!(details[0]["ok"], false);
+        assert_eq!(details[0]["verified"], false);
+        assert_eq!(details[1]["ok"], true);
+        assert_eq!(details[2]["ok"], true);
+        assert_eq!(details[3]["ok"], true);
+        assert!(result["unverifiedAssertions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "render_ok"));
+    }
+
+    #[test]
+    fn structural_only_test_can_pass_without_ui_placeholders() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("test-struct.db")).unwrap();
+        let app_id = "app-struct-1";
+        db.conn()
+            .execute(
+                "INSERT INTO workspaces (id, name) VALUES ('ws-1', 'Default Workspace')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES (?1, 'ws-1', 'Notes', '', 'single-column', '{\"components\":[]}', 1, datetime('now'), datetime('now'))",
+                params![app_id],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tool_state (tool_id, state_json, updated_at)
+                 VALUES (?1, '{\"ready\":true}', datetime('now'))",
+                params![app_id],
+            )
+            .unwrap();
+        upsert_test(
+            &mut db,
+            app_id,
+            DeclarativeTest {
+                test_id: "struct-1".into(),
+                name: "structural".into(),
+                test_type: "smoke".into(),
+                actions: vec![],
+                assertions: vec![TestAssertion {
+                    assertion: "state_equals".into(),
+                    expected: Some(json!(true)),
+                    target: Some("ready".into()),
+                }],
+                timeout_ms: 1000,
+            },
+        )
+        .unwrap();
+        let result = run_test(&mut db, app_id, "struct-1").unwrap();
+        assert_eq!(result["status"], "passed");
+    }
+
+    #[test]
+    fn structural_failure_reports_failed_even_when_ui_assertions_unverified() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("test-failed.db")).unwrap();
+        let app_id = "app-failed-1";
+        db.conn()
+            .execute(
+                "INSERT INTO workspaces (id, name) VALUES ('ws-1', 'Default Workspace')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES (?1, 'ws-1', 'Notes', '', 'single-column', '{\"components\":[]}', 1, datetime('now'), datetime('now'))",
+                params![app_id],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tool_state (tool_id, state_json, updated_at)
+                 VALUES (?1, '{\"ready\":false}', datetime('now'))",
+                params![app_id],
+            )
+            .unwrap();
+        upsert_test(
+            &mut db,
+            app_id,
+            DeclarativeTest {
+                test_id: "mixed-1".into(),
+                name: "mixed".into(),
+                test_type: "smoke".into(),
+                actions: vec![],
+                assertions: vec![
+                    TestAssertion {
+                        assertion: "state_equals".into(),
+                        expected: Some(json!(true)),
+                        target: Some("ready".into()),
+                    },
+                    TestAssertion {
+                        assertion: "render_ok".into(),
+                        expected: None,
+                        target: None,
+                    },
+                    TestAssertion {
+                        assertion: "no_overflow".into(),
+                        expected: None,
+                        target: None,
+                    },
+                ],
+                timeout_ms: 1000,
+            },
+        )
+        .unwrap();
+        let result = run_test(&mut db, app_id, "mixed-1").unwrap();
+        // Must not mask a failed structural check as merely not_verified.
+        assert_eq!(result["status"], "failed");
+        let details = result["details"].as_array().unwrap();
+        assert_eq!(details[0]["assertion"], "state_equals");
+        assert_eq!(details[0]["ok"], false);
+        assert_eq!(details[0]["verified"], true);
+        assert_eq!(details[1]["verified"], false);
+        assert_eq!(details[2]["verified"], false);
+        assert!(result["unverifiedAssertions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "render_ok"));
+    }
+
+    #[test]
+    fn verify_after_change_runs_enabled_tests_not_just_queues() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("test-verify.db")).unwrap();
+        let app_id = "app-verify-1";
+        db.conn()
+            .execute(
+                "INSERT INTO workspaces (id, name) VALUES ('ws-1', 'Default Workspace')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES (?1, 'ws-1', 'Verify App', '', 'single-column', '{\"components\":[]}', 1, datetime('now'), datetime('now'))",
+                params![app_id],
+            )
+            .unwrap();
+        crate::application_kernel::manifest::ensure_manifest_for_tool(
+            &mut db,
+            app_id,
+            "Verify App",
+            &format!("surf-{app_id}"),
+        )
+        .unwrap();
+        upsert_test(
+            &mut db,
+            app_id,
+            DeclarativeTest {
+                test_id: "v1".into(),
+                name: "ui-placeholder".into(),
+                test_type: "smoke".into(),
+                actions: vec![],
+                assertions: vec![TestAssertion {
+                    assertion: "render_ok".into(),
+                    expected: None,
+                    target: None,
+                }],
+                timeout_ms: 1000,
+            },
+        )
+        .unwrap();
+        let ops: Vec<crate::runtime_v2::operations::AppOperation> = serde_json::from_value(json!([{
+            "id": "op-1",
+            "type": "surface.create",
+            "target": { "applicationId": app_id },
+            "payload": { "applicationId": app_id }
+        }]))
+        .unwrap();
+        let v = verify_after_change(&mut db, &ops).unwrap();
+        assert_eq!(
+            v.status, "verified_with_warnings",
+            "UI-only assertions must not mint verified / LKG"
+        );
+        assert!(
+            v.test_results.iter().any(|r| r.get("run").is_some()),
+            "must execute tests, not only queue: {:?}",
+            v.test_results
+        );
     }
 }

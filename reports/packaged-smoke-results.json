@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-30T03:39:52.435Z",
-  "commit": "44e1bb256caeed86bc62ffbc045edcaeef6744a9",
+  "generatedAt": "2026-10-01T00:45:15.469Z",
+  "commit": "8a09bda63ec7a14c8c63f118dd31c578721d3f8b",
   "dirty": true,
   "command": "test:packaged-smoke",
   "launchedApp": true,
@@ -14,21 +14,28 @@
     "settleMs": 4000,
     "quitStatus": 0,
     "matchedPids": [
-      "79257"
+      "2586"
     ],
     "signing": {
       "signed": true,
       "action": "already_signed"
     },
-    "appPath": "src-tauri/target/debug/bundle/macos/Coreside.app"
+    "appPath": "src-tauri/target/release/bundle/macos/Coreside.app"
   },
   "rootsPresent": [
+    "src-tauri/target/release/bundle",
     "src-tauri/target/debug/bundle"
   ],
   "artifacts": [
+    "src-tauri/target/release/bundle/macos/Coreside.app",
     "src-tauri/target/debug/bundle/macos/Coreside.app"
   ],
   "artifactHashes": [
+    {
+      "path": "src-tauri/target/release/bundle/macos/Coreside.app",
+      "kind": "directory_bundle",
+      "note": "Directory bundle (.app) — no single-file hash."
+    },
     {
       "path": "src-tauri/target/debug/bundle/macos/Coreside.app",
       "kind": "directory_bundle",
@@ -38,8 +45,8 @@
   "packageScanExitCode": 0,
   "packagingResults": {
     "status": "passed",
-    "rootsFound": 1,
-    "filesScanned": 8,
+    "rootsFound": 2,
+    "filesScanned": 15,
     "findingsCount": 0
   },
   "sourceIndependence": null,

@@ -1853,6 +1853,163 @@ mod tests {
         assert_eq!(surface.name, "Task Manager");
     }
 
+    /// Canonical Task Tracker path: mock fixture → apply toolChange as user →
+    /// manifest + tasks model + local_data.write/query without seeded records.
+    #[test]
+    fn task_tracker_vertical_slice_local_data_crud() {
+        use crate::ai::{
+            parse_agent_response, AgentMessage, AgentRequest, AiProvider, MockAiProvider,
+        };
+        use crate::application_kernel::registered_actions::context::{
+            ActionRunContext, Presence, Venue,
+        };
+        use crate::application_kernel::registered_actions::gateway::execute_registered_action;
+        use crate::runtime_v2::operations::tool_change_to_operations;
+        use tokio_util::sync::CancellationToken;
+
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Task Tracker Slice", None).unwrap();
+
+        let provider = MockAiProvider::new();
+        let response = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(provider.chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Build me a simple task tracker",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            }))
+            .unwrap();
+        let parsed = parse_agent_response(&response.raw_text).unwrap();
+        let tc = parsed.payload.tool_change.expect("toolChange fixture");
+        assert_eq!(tc.tool.as_ref().unwrap().id, "tool-task-tracker");
+
+        // Production agent path: propose → user approve → commit (not seeded DB rows).
+        let ops = tool_change_to_operations(&tc);
+        let change_res = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                turn_id: Some("turn-tt-1".into()),
+                summary: "Create Task Tracker".into(),
+                operations: ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .expect("agent apply must create proposal");
+        let proposal_id = change_res
+            .proposal_id
+            .expect("agent surface.create must produce proposal");
+        let result = decide_proposal(&mut db, None, &proposal_id, true)
+            .expect("user approve proposal");
+        assert!(
+            result.is_committed(),
+            "conflicts: {:?}",
+            result.conflicts
+        );
+
+        let app_id = "tool-task-tracker";
+        assert!(crate::application_kernel::manifest::get_manifest(&db, app_id).is_ok());
+        assert!(crate::application_kernel::permissions::has_permission(
+            &db,
+            app_id,
+            "local_data.write"
+        )
+        .unwrap());
+        assert!(
+            crate::application_kernel::data::get_model(&db, app_id, "tasks").is_ok(),
+            "tasks model must be seeded on create"
+        );
+
+        let ctx = ActionRunContext {
+            actor: "user".into(),
+            venue: Venue::Application,
+            presence: Presence::Present,
+            application_id: Some(app_id.into()),
+            project_id: None,
+            conversation_id: Some(conv.id.clone()),
+            session_id: "sess-tt".into(),
+            run_id: "run-tt-1".into(),
+            trigger: None,
+            surface_id: Some(format!("surf-{app_id}")),
+            component_id: Some("tm-add-btn".into()),
+            depth: 0,
+        };
+        let write = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &serde_json::json!({
+                "modelId": "tasks",
+                "data": {
+                    "title": "Finish biology homework",
+                    "priority": "high",
+                    "status": "todo"
+                }
+            }),
+            None,
+        );
+        // First write requires approval under default policy.
+        let approval_id = match write {
+            crate::application_kernel::registered_actions::ActionOutcome::PendingApproval {
+                approval_id,
+                ..
+            } => approval_id,
+            other => panic!("expected pending approval, got {other:?}"),
+        };
+        crate::application_kernel::registered_actions::approvals::decide(
+            &mut db,
+            &approval_id,
+            true,
+            None,
+            "user",
+        )
+        .unwrap();
+        let write2 = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &serde_json::json!({
+                "modelId": "tasks",
+                "data": {
+                    "title": "Finish biology homework",
+                    "priority": "high",
+                    "status": "todo"
+                }
+            }),
+            Some(&approval_id),
+        );
+        assert!(
+            matches!(
+                write2,
+                crate::application_kernel::registered_actions::ActionOutcome::Ok { .. }
+            ),
+            "{write2:?}"
+        );
+
+        let query = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.query",
+            &serde_json::json!({ "modelId": "tasks", "limit": 50 }),
+            None,
+        );
+        match query {
+            crate::application_kernel::registered_actions::ActionOutcome::Ok { data, .. } => {
+                let records = data.get("records").and_then(|v| v.as_array()).unwrap();
+                assert_eq!(records.len(), 1);
+                assert_eq!(records[0]["title"], "Finish biology homework");
+            }
+            other => panic!("expected query ok, got {other:?}"),
+        }
+    }
+
     #[test]
     fn apply_change_rejects_deleted_conversation_under_immediate_transaction() {
         let mut db = test_db();

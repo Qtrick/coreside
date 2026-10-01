@@ -149,9 +149,24 @@ pub fn validate_record(def: &DataModelDefinition, data: &Value) -> Result<(), St
 pub fn upsert_model(
     db: &mut Database,
     application_id: &str,
-    mut def: DataModelDefinition,
+    def: DataModelDefinition,
 ) -> DbResult<()> {
     assert_can_write_data(db, application_id)?;
+    upsert_model_trusted(db, application_id, def)
+}
+
+/// Trusted kernel bootstrap (e.g. surface_create model seed). Skips the app
+/// write-permission check so schema can exist before first user write grant races.
+pub(crate) fn upsert_model_trusted(
+    db: &mut Database,
+    application_id: &str,
+    mut def: DataModelDefinition,
+) -> DbResult<()> {
+    if !crate::application_kernel::manifest::application_accepts_mutations(db, application_id) {
+        return Err(DbError::Invalid(format!(
+            "application '{application_id}' is disabled or suspended and cannot receive mutations"
+        )));
+    }
     validate_model(&def).map_err(DbError::Invalid)?;
     if def.schema_version <= 0 {
         def.schema_version = 1;
@@ -260,13 +275,13 @@ pub fn update_record(
     base_version: Option<i64>,
 ) -> DbResult<()> {
     assert_can_write_data(db, application_id)?;
-    let (model_id, version): (String, i64) = db
+    let (model_id, version, existing_json): (String, i64, String) = db
         .conn()
         .query_row(
-            "SELECT model_id, record_version FROM generated_data_records
+            "SELECT model_id, record_version, data_json FROM generated_data_records
          WHERE id = ?1 AND application_id = ?2",
             params![record_id, application_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
@@ -282,12 +297,45 @@ pub fn update_record(
         }
     }
     let def = get_model(db, application_id, &model_id)?;
-    validate_record(&def, &data).map_err(DbError::Invalid)?;
-    db.conn().execute(
+    // Merge patch into existing so partial writes (e.g. Mark Done status-only)
+    // keep required fields and do not wipe sibling columns.
+    let mut merged: Value = serde_json::from_str(&existing_json).unwrap_or_else(|_| json!({}));
+    match (merged.as_object_mut(), data.as_object()) {
+        (Some(base), Some(patch)) => {
+            for (k, v) in patch {
+                // Skip nulls so partial patches cannot clear required siblings.
+                if !v.is_null() {
+                    base.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        (_, Some(_)) => merged = data,
+        _ => {
+            return Err(DbError::Invalid("data must be an object".into()));
+        }
+    }
+    let known = known_field_ids(&def);
+    sanitize_record_payload(&mut merged, &known);
+    validate_record(&def, &merged).map_err(DbError::Invalid)?;
+    // Atomic CAS on the version we merged against so concurrent patches cannot
+    // silently lose sibling fields under the merge path.
+    let expected_version = base_version.unwrap_or(version);
+    let rows = db.conn().execute(
         "UPDATE generated_data_records SET data_json = ?3, record_version = record_version + 1, updated_at = ?4
-         WHERE id = ?1 AND application_id = ?2",
-        params![record_id, application_id, data.to_string(), now_rfc3339()],
+         WHERE id = ?1 AND application_id = ?2 AND record_version = ?5",
+        params![
+            record_id,
+            application_id,
+            merged.to_string(),
+            now_rfc3339(),
+            expected_version
+        ],
     )?;
+    if rows == 0 {
+        return Err(DbError::Invalid(format!(
+            "revision_conflict: expected {expected_version}, found concurrent update"
+        )));
+    }
     Ok(())
 }
 
@@ -1285,6 +1333,65 @@ mod tests {
         assert!(br.iter().any(|r| r["name"] == "Water"));
     }
 
+    #[test]
+    fn branch_fork_does_not_copy_runtime_action_grants() {
+        use crate::application_kernel::registered_actions::context::{
+            ActionRunContext, Presence, Venue,
+        };
+        use crate::application_kernel::registered_actions::descriptor::find_action;
+        use crate::application_kernel::registered_actions::grants::{
+            list_grants, mint_grant, GrantDuration, GrantScope,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("fork-grants.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-src");
+        upsert_model(&mut db, "app-src", habit_model()).unwrap();
+
+        let desc = find_action("local_data.write").unwrap();
+        let ctx = ActionRunContext {
+            actor: "user".into(),
+            venue: Venue::Application,
+            presence: Presence::Present,
+            application_id: Some("app-src".into()),
+            project_id: None,
+            conversation_id: Some("conv-src".into()),
+            session_id: "sess".into(),
+            run_id: "run".into(),
+            trigger: None,
+            surface_id: None,
+            component_id: None,
+            depth: 0,
+        };
+        mint_grant(
+            &mut db,
+            &ctx,
+            desc,
+            GrantScope::ApplicationAction,
+            GrantDuration::Standing,
+            None,
+            "test",
+        )
+        .unwrap();
+        let src_grants = list_grants(&db, Some("app-src")).unwrap();
+        assert!(
+            src_grants.iter().any(|g| g.status == "active"),
+            "source must have an active runtime grant"
+        );
+
+        let forked = fork_application_for_branch(&mut db, "app-src", "conv-branch").unwrap();
+        let forked_grants = list_grants(&db, Some(&forked)).unwrap();
+        assert!(
+            forked_grants.iter().all(|g| g.status != "active"),
+            "branch must not inherit active runtime action grants"
+        );
+        // Category permissions still copy by design.
+        assert!(crate::application_kernel::permissions::has_permission(
+            &db, &forked, "local_data.write"
+        )
+        .unwrap());
+    }
+
     fn seed_writable_habit_app(db: &mut crate::db::Database, app_id: &str) {
         use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
         use std::collections::HashMap;
@@ -1409,6 +1516,173 @@ mod tests {
         assert!(query_records(&db, "app-unk", "habit", 10)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn update_record_merges_partial_patch() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("merge.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-merge");
+        let id = create_record(
+            &mut db,
+            "app-merge",
+            "habit",
+            json!({"name": "Water", "frequency": "daily"}),
+        )
+        .unwrap();
+        update_record(
+            &mut db,
+            "app-merge",
+            &id,
+            json!({"frequency": "weekly"}),
+            None,
+        )
+        .unwrap();
+        let rows = query_records(&db, "app-merge", "habit", 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["name"], "Water");
+        assert_eq!(rows[0]["frequency"], "weekly");
+    }
+
+    #[test]
+    fn partial_update_stale_base_version_rejects_without_mutating() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("occ-stale.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-occ");
+        let id = create_record(
+            &mut db,
+            "app-occ",
+            "habit",
+            json!({"name": "Water", "frequency": "daily"}),
+        )
+        .unwrap();
+        // Advance version so a stale baseVersion must lose.
+        update_record(
+            &mut db,
+            "app-occ",
+            &id,
+            json!({"frequency": "weekly"}),
+            Some(1),
+        )
+        .unwrap();
+        let after_ok = query_records(&db, "app-occ", "habit", 10).unwrap();
+        assert_eq!(after_ok[0]["_version"], 2);
+        assert_eq!(after_ok[0]["name"], "Water");
+        assert_eq!(after_ok[0]["frequency"], "weekly");
+
+        let err = update_record(
+            &mut db,
+            "app-occ",
+            &id,
+            json!({"name": "Hacked", "frequency": "monthly"}),
+            Some(1),
+        )
+        .expect_err("stale OCC must fail");
+        assert!(
+            err.to_string().contains("revision_conflict"),
+            "expected revision_conflict, got {err}"
+        );
+
+        let after_conflict = query_records(&db, "app-occ", "habit", 10).unwrap();
+        assert_eq!(after_conflict.len(), 1);
+        assert_eq!(after_conflict[0]["_version"], 2);
+        assert_eq!(after_conflict[0]["name"], "Water");
+        assert_eq!(after_conflict[0]["frequency"], "weekly");
+    }
+
+    #[test]
+    fn partial_update_matching_base_version_merges_and_bumps() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("occ-ok.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-occ-ok");
+        let id = create_record(
+            &mut db,
+            "app-occ-ok",
+            "habit",
+            json!({"name": "Water", "frequency": "daily"}),
+        )
+        .unwrap();
+        update_record(
+            &mut db,
+            "app-occ-ok",
+            &id,
+            json!({"frequency": "weekly"}),
+            Some(1),
+        )
+        .unwrap();
+        let rows = query_records(&db, "app-occ-ok", "habit", 10).unwrap();
+        assert_eq!(rows[0]["_version"], 2);
+        assert_eq!(rows[0]["name"], "Water", "partial OCC update must preserve siblings");
+        assert_eq!(rows[0]["frequency"], "weekly");
+    }
+
+    #[test]
+    fn forked_branch_write_still_requires_approval_without_inherited_grant() {
+        use crate::application_kernel::registered_actions::context::{
+            ActionRunContext, Presence, Venue,
+        };
+        use crate::application_kernel::registered_actions::descriptor::find_action;
+        use crate::application_kernel::registered_actions::gateway::{
+            execute_registered_action, ActionOutcome,
+        };
+        use crate::application_kernel::registered_actions::grants::{
+            mint_grant, GrantDuration, GrantScope,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("fork-auth.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-src");
+
+        let desc = find_action("local_data.write").unwrap();
+        let src_ctx = ActionRunContext {
+            actor: "user".into(),
+            venue: Venue::Application,
+            presence: Presence::Present,
+            application_id: Some("app-src".into()),
+            project_id: None,
+            conversation_id: Some("conv-src".into()),
+            session_id: "sess".into(),
+            run_id: "run".into(),
+            trigger: None,
+            surface_id: None,
+            component_id: None,
+            depth: 0,
+        };
+        mint_grant(
+            &mut db,
+            &src_ctx,
+            desc,
+            GrantScope::ApplicationAction,
+            GrantDuration::Standing,
+            None,
+            "test",
+        )
+        .unwrap();
+
+        let forked = fork_application_for_branch(&mut db, "app-src", "conv-branch").unwrap();
+        let branch_ctx = ActionRunContext {
+            application_id: Some(forked.clone()),
+            conversation_id: Some("conv-branch".into()),
+            ..src_ctx
+        };
+        let outcome = execute_registered_action(
+            &mut db,
+            &branch_ctx,
+            "local_data.write",
+            &json!({"modelId": "habit", "data": {"name": "Branch", "frequency": "daily"}}),
+            None,
+        );
+        assert!(
+            matches!(outcome, ActionOutcome::PendingApproval { .. }),
+            "branch must not silently inherit source standing grant, got {outcome:?}"
+        );
+        assert!(
+            query_records(&db, &forked, "habit", 10)
+                .unwrap()
+                .iter()
+                .all(|r| r["name"] != "Branch"),
+            "unapproved branch write must not persist"
+        );
     }
 
     #[test]

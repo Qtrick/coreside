@@ -52,6 +52,142 @@ pub fn surface_id_for_tool(tool_id: &str) -> String {
     format!("surf-{tool_id}")
 }
 
+/// Upsert empty typed models for every `modelId` referenced by local_data actions.
+/// Uses a conservative Task-shaped default when the model id is `tasks`; otherwise
+/// a single required `title` text field so writes are not an open JSON bag.
+fn ensure_models_from_tool_actions(
+    db: &mut Database,
+    application_id: &str,
+    tool: &ToolDefinition,
+) -> DbResult<()> {
+    use crate::ai::ActionDefinition;
+    use crate::application_kernel::data::{
+        upsert_model_trusted, DataField, DataModelDefinition,
+    };
+    use std::collections::BTreeSet;
+
+    let mut model_ids: BTreeSet<String> = BTreeSet::new();
+
+    fn collect_model_id(model_ids: &mut BTreeSet<String>, input: Option<&serde_json::Value>) {
+        if let Some(mid) = input
+            .and_then(|v| v.get("modelId").or_else(|| v.get("model")))
+            .and_then(|v| v.as_str())
+        {
+            if !mid.trim().is_empty() {
+                model_ids.insert(mid.to_string());
+            }
+        }
+    }
+
+    fn walk(comp: &crate::ai::ToolComponent, model_ids: &mut BTreeSet<String>) {
+        if let Some(actions) = comp.actions.as_ref() {
+            for action in actions {
+                if let ActionDefinition::InvokeRegisteredAction {
+                    action_name, input, ..
+                } = action
+                {
+                    if action_name.starts_with("local_data.") {
+                        collect_model_id(model_ids, input.as_ref());
+                    }
+                }
+            }
+        }
+        if let Some(serde_json::Value::Object(props)) = &comp.props {
+            if let Some(ds) = props.get("dataSource") {
+                let action_name = ds.get("actionName").and_then(|v| v.as_str()).unwrap_or("");
+                // dataSource is read-only hydration; ignore write names for model seed.
+                if action_name == "local_data.query"
+                    || (action_name.starts_with("local_data.") && action_name.ends_with(".query"))
+                {
+                    collect_model_id(model_ids, ds.get("input"));
+                }
+            }
+        }
+        if let Some(children) = comp.children.as_ref() {
+            for child in children {
+                walk(child, model_ids);
+            }
+        }
+    }
+
+    for comp in &tool.components {
+        walk(comp, &mut model_ids);
+    }
+    for model_id in model_ids {
+        if crate::application_kernel::data::get_model(db, application_id, &model_id).is_ok() {
+            continue;
+        }
+        let def = if model_id == "tasks" {
+            DataModelDefinition {
+                model_id: model_id.clone(),
+                display_name: "Tasks".into(),
+                schema_version: 1,
+                fields: vec![
+                    DataField {
+                        field_id: "title".into(),
+                        field_type: "text".into(),
+                        required: true,
+                        default: None,
+                        enum_values: None,
+                    },
+                    DataField {
+                        field_id: "description".into(),
+                        field_type: "long_text".into(),
+                        required: false,
+                        default: Some(json!("")),
+                        enum_values: None,
+                    },
+                    DataField {
+                        field_id: "completed".into(),
+                        field_type: "boolean".into(),
+                        required: false,
+                        default: Some(json!(false)),
+                        enum_values: None,
+                    },
+                    DataField {
+                        field_id: "priority".into(),
+                        field_type: "enum".into(),
+                        required: false,
+                        default: Some(json!("medium")),
+                        enum_values: Some(vec![
+                            "high".into(),
+                            "medium".into(),
+                            "low".into(),
+                        ]),
+                    },
+                    DataField {
+                        field_id: "status".into(),
+                        field_type: "enum".into(),
+                        required: false,
+                        default: Some(json!("todo")),
+                        enum_values: Some(vec![
+                            "todo".into(),
+                            "in_progress".into(),
+                            "done".into(),
+                        ]),
+                    },
+                ],
+            }
+        } else {
+            DataModelDefinition {
+                model_id: model_id.clone(),
+                display_name: model_id.clone(),
+                schema_version: 1,
+                fields: vec![DataField {
+                    field_id: "title".into(),
+                    field_type: "text".into(),
+                    required: true,
+                    default: None,
+                    enum_values: None,
+                }],
+            }
+        };
+        // Trusted seed: do not require local_data.write (query-only tools still need schema).
+        upsert_model_trusted(db, application_id, def)?;
+    }
+    Ok(())
+}
+
 pub fn upsert_surface_from_tool(
     db: &mut Database,
     tool: &ToolDefinition,
@@ -183,6 +319,18 @@ pub fn upsert_surface_from_tool(
                 relationship_type: "hosts".into(),
             },
         )?;
+        // First create: register application identity + grant declared permissions.
+        // Without this, invokeRegisteredAction fails closed (unknown_application).
+        let perms = crate::application_kernel::manifest::permissions_from_tool(&def);
+        let _ = crate::application_kernel::manifest::ensure_manifest_for_tool_with_permissions(
+            db,
+            &tool.id,
+            &def.name,
+            &id,
+            Some(perms),
+        )?;
+        // Seed data models referenced by registered actions so CRUD works immediately.
+        ensure_models_from_tool_actions(db, &tool.id, &def)?;
     }
 
     let version_id = format!("sv-{}", Uuid::new_v4());
@@ -1469,6 +1617,231 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count2, 1);
+    }
+
+    fn task_tracker_shaped_tool(id: &str) -> ToolDefinition {
+        use crate::ai::ActionDefinition;
+        ToolDefinition {
+            id: id.into(),
+            name: "Task Tracker".into(),
+            description: "Track tasks with durable local records.".into(),
+            layout: json!({"type": "dashboard", "columns": 2}),
+            components: vec![
+                crate::ai::ToolComponent {
+                    id: "tm-heading".into(),
+                    component_type: "heading".into(),
+                    value_key: None,
+                    props: Some(json!({"text": "Task Tracker", "level": 1})),
+                    children: None,
+                    ..Default::default()
+                },
+                crate::ai::ToolComponent {
+                    id: "tm-new-title".into(),
+                    component_type: "textInput".into(),
+                    value_key: Some("newTaskTitle".into()),
+                    props: Some(json!({"label": "New Task Title"})),
+                    children: None,
+                    ..Default::default()
+                },
+                crate::ai::ToolComponent {
+                    id: "tm-add-btn".into(),
+                    component_type: "button".into(),
+                    value_key: None,
+                    props: Some(json!({"label": "Add Task"})),
+                    children: None,
+                    actions: Some(vec![
+                        ActionDefinition::InvokeRegisteredAction {
+                            action_name: "local_data.write".into(),
+                            input: Some(json!({"modelId": "tasks", "data": {}})),
+                            input_from_state: Some(
+                                [
+                                    ("data.title".into(), "newTaskTitle".into()),
+                                    ("data.priority".into(), "newTaskPriority".into()),
+                                    ("data.status".into(), "newTaskStatus".into()),
+                                ]
+                                .into(),
+                            ),
+                            component_id: None,
+                            result_key: Some("lastTask".into()),
+                        },
+                        ActionDefinition::InvokeRegisteredAction {
+                            action_name: "local_data.query".into(),
+                            input: Some(json!({"modelId": "tasks", "limit": 100})),
+                            input_from_state: None,
+                            component_id: None,
+                            result_key: Some("tasksResult".into()),
+                        },
+                    ]),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn first_create_grants_local_data_write_and_upserts_tasks_model() {
+        let mut db = test_db();
+        let tool = task_tracker_shaped_tool("tool-task-tracker-seed");
+        let applied =
+            apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "test")
+                .unwrap();
+        let _surface =
+            upsert_surface_from_tool(&mut db, &applied.definition, DEFAULT_WORKSPACE_ID, 1)
+                .unwrap();
+
+        let manifest =
+            crate::application_kernel::manifest::get_manifest(&db, "tool-task-tracker-seed")
+                .expect("manifest must exist after first surface create");
+        assert!(
+            manifest
+                .manifest
+                .permissions
+                .iter()
+                .any(|p| p == "local_data.write"),
+            "declared local_data.write must appear on manifest permissions, got {:?}",
+            manifest.manifest.permissions
+        );
+        assert!(
+            crate::application_kernel::permissions::has_permission(
+                &db,
+                "tool-task-tracker-seed",
+                "local_data.write",
+            )
+            .unwrap(),
+            "local_data.write must be granted on first create"
+        );
+
+        let model = crate::application_kernel::data::get_model(
+            &db,
+            "tool-task-tracker-seed",
+            "tasks",
+        )
+        .expect("tasks model must be upserted for Task Tracker–shaped tools");
+        assert_eq!(model.model_id, "tasks");
+        assert!(
+            model.fields.iter().any(|f| f.field_id == "title" && f.required),
+            "tasks model must require title, got {:?}",
+            model.fields
+        );
+        assert!(
+            model.fields.iter().any(|f| f.field_id == "priority"),
+            "tasks model must include priority"
+        );
+        assert!(
+            model.fields.iter().any(|f| f.field_id == "status"),
+            "tasks model must include status"
+        );
+    }
+
+    #[test]
+    fn first_create_preserves_preexisting_tasks_model_schema() {
+        use crate::application_kernel::data::{upsert_model, DataField, DataModelDefinition};
+        use crate::application_kernel::manifest::ensure_manifest_for_tool_with_permissions;
+
+        let mut db = test_db();
+        let tool = task_tracker_shaped_tool("tool-task-tracker-preseeding");
+        let applied =
+            apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "test")
+                .unwrap();
+
+        // Pre-seed an enriched schema before surface first-create model bootstrap.
+        ensure_manifest_for_tool_with_permissions(
+            &mut db,
+            "tool-task-tracker-preseeding",
+            "Task Tracker",
+            "surf-tool-task-tracker-preseeding",
+            Some(vec![
+                "local_data.read".into(),
+                "local_data.write".into(),
+            ]),
+        )
+        .unwrap();
+        upsert_model(
+            &mut db,
+            "tool-task-tracker-preseeding",
+            DataModelDefinition {
+                model_id: "tasks".into(),
+                display_name: "Tasks".into(),
+                schema_version: 2,
+                fields: vec![
+                    DataField {
+                        field_id: "title".into(),
+                        field_type: "text".into(),
+                        required: true,
+                        default: None,
+                        enum_values: None,
+                    },
+                    DataField {
+                        field_id: "assignee".into(),
+                        field_type: "text".into(),
+                        required: false,
+                        default: None,
+                        enum_values: None,
+                    },
+                ],
+            },
+        )
+        .unwrap();
+
+        let _ = upsert_surface_from_tool(&mut db, &applied.definition, DEFAULT_WORKSPACE_ID, 1)
+            .unwrap();
+        let model = crate::application_kernel::data::get_model(
+            &db,
+            "tool-task-tracker-preseeding",
+            "tasks",
+        )
+        .unwrap();
+        assert_eq!(model.schema_version, 2);
+        assert!(
+            model.fields.iter().any(|f| f.field_id == "assignee"),
+            "first-create seed must skip when tasks model already exists, got {:?}",
+            model.fields
+        );
+        assert!(
+            !model.fields.iter().any(|f| f.field_id == "priority"),
+            "default tasks seed must not replace pre-existing schema"
+        );
+    }
+
+    #[test]
+    fn non_tasks_model_id_seeds_required_title_only() {
+        use crate::ai::ActionDefinition;
+
+        let mut db = test_db();
+        let tool = ToolDefinition {
+            id: "tool-notes-seed".into(),
+            name: "Notes".into(),
+            description: "Simple notes".into(),
+            layout: json!({"type": "stack"}),
+            components: vec![crate::ai::ToolComponent {
+                id: "add".into(),
+                component_type: "button".into(),
+                value_key: None,
+                props: Some(json!({"label": "Add"})),
+                children: None,
+                actions: Some(vec![ActionDefinition::InvokeRegisteredAction {
+                    action_name: "local_data.write".into(),
+                    input: Some(json!({"modelId": "notes", "data": {}})),
+                    input_from_state: Some([("data.title".into(), "draftTitle".into())].into()),
+                    component_id: None,
+                    result_key: Some("lastNote".into()),
+                }]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let applied =
+            apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "test")
+                .unwrap();
+        let _ = upsert_surface_from_tool(&mut db, &applied.definition, DEFAULT_WORKSPACE_ID, 1)
+            .unwrap();
+
+        let model =
+            crate::application_kernel::data::get_model(&db, "tool-notes-seed", "notes").unwrap();
+        assert_eq!(model.fields.len(), 1);
+        assert_eq!(model.fields[0].field_id, "title");
+        assert!(model.fields[0].required);
     }
 
     #[test]

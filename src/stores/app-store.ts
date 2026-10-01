@@ -324,6 +324,7 @@ const conversationCatchUpInFlight = new Map<string, Promise<void>>();
 
 type SyncListenerGet = () => {
   reloadActiveSurfaces: (resetKeys?: string[]) => Promise<void>;
+  refreshTools: () => Promise<void>;
   activeConversationId: string | null;
   activeToolId: string | null;
   previewSurfacesByKey: Record<string, PreviewSurfaceOverlay>;
@@ -417,6 +418,10 @@ function applySyncOrConflictEvent(
       return;
     }
     void get().reloadActiveSurfaces(event.resetStateKeys ?? []);
+    // New/updated personal apps arrive via Sync with toolIds — refresh Apps sidebar.
+    if ((event.toolIds?.length ?? 0) > 0) {
+      void get().refreshTools();
+    }
   }
 }
 
@@ -2770,8 +2775,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       } catch {
         // best-effort status stamp
       }
+      // Same turn often also stages a legacy toolChange preview. Clear it so the
+      // user is not left with a second Apply after the proposal already committed.
+      const clearToolPreview =
+        get().pendingToolChange?.messageId === pending.messageId;
       set({
         pendingKernelProposal: null,
+        ...(clearToolPreview ? { pendingToolChange: null } : {}),
         messages: get().messages.map((m) =>
           m.id === pending.messageId
             ? {
@@ -2779,6 +2789,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
                 metadata: {
                   ...(m.metadata ?? {}),
                   kernelProposalStatus: "applied",
+                  pending: false,
+                  toolChangeStatus: "applied",
                   runtimeV2: {
                     ...((m.metadata as { runtimeV2?: Record<string, unknown> } | null)
                       ?.runtimeV2 ?? {}),
@@ -2791,7 +2803,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
       const messages = await api.getMessages(pending.conversationId);
       set({ messages });
-      await get().reloadActiveSurfaces();
+      // surface.create / tool.full_replace land in `tools` — sidebar Apps must refresh.
+      await Promise.all([get().reloadActiveSurfaces(), get().refreshTools()]);
     } catch (error) {
       set({
         sendError:
@@ -2819,8 +2832,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // best-effort
       }
     }
+    // Same turn often stages a legacy toolChange preview alongside the proposal.
+    const clearToolPreview =
+      get().pendingToolChange?.messageId === pending.messageId;
     set({
       pendingKernelProposal: null,
+      ...(clearToolPreview ? { pendingToolChange: null } : {}),
       messages: get().messages.map((m) =>
         m.id === pending.messageId
           ? {
@@ -2828,6 +2845,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
               metadata: {
                 ...(m.metadata ?? {}),
                 kernelProposalStatus: "discarded",
+                ...(clearToolPreview
+                  ? { pending: false, toolChangeStatus: "discarded" }
+                  : {}),
                 runtimeV2: {
                   ...((m.metadata as { runtimeV2?: Record<string, unknown> } | null)
                     ?.runtimeV2 ?? {}),

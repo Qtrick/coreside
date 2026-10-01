@@ -47,12 +47,23 @@ pub struct ApprovalRequest {
     pub explanation: Option<String>,
     pub surface_id: Option<String>,
     pub component_id: Option<String>,
+    /// Frozen into call_hash; required for Approve-once replay identity.
+    #[serde(default)]
+    pub conversation_id: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
 }
 
 /// Identity of one concrete call: application + action + authority + input.
+///
+/// Includes conversation, venue, and presence so an approval cannot be reused
+/// across conversations or present/away contexts (confused-deputy defense).
 pub fn call_hash(ctx: &ActionRunContext, descriptor: &ActionDescriptor, input: &Value) -> String {
     hash_value(&serde_json::json!({
         "applicationId": ctx.application_id,
+        "conversationId": ctx.conversation_id,
+        "venue": ctx.venue.as_str(),
+        "presence": ctx.presence.as_str(),
         "action": descriptor.name,
         "descriptorHash": descriptor.descriptor_hash(),
         "input": input,
@@ -88,8 +99,9 @@ pub fn create_pending(
         "INSERT INTO runtime_approvals (
             id, application_id, action_name, action_title, risk, critical, input_preview,
             input_json, call_hash, descriptor_hash, venue, presence, session_id, run_id, status,
-            created_at, expires_at, explanation, surface_id, component_id
-         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,'pending',?15,?16,?17,?18,?19)",
+            created_at, expires_at, explanation, surface_id, component_id,
+            conversation_id, project_id
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,'pending',?15,?16,?17,?18,?19,?20,?21)",
         params![
             id,
             ctx.application_id,
@@ -109,7 +121,9 @@ pub fn create_pending(
             expires.to_rfc3339(),
             explanation,
             ctx.surface_id,
-            ctx.component_id
+            ctx.component_id,
+            ctx.conversation_id,
+            ctx.project_id,
         ],
     )?;
     get_approval(db, &id)
@@ -117,7 +131,8 @@ pub fn create_pending(
 
 const APPROVAL_COLS: &str = "id, application_id, action_name, action_title, risk, critical,
     input_preview, call_hash, descriptor_hash, venue, presence, session_id, run_id, status,
-    created_at, expires_at, decided_at, consumed_at, explanation, surface_id, component_id";
+    created_at, expires_at, decided_at, consumed_at, explanation, surface_id, component_id,
+    conversation_id, project_id";
 
 fn map_approval(row: &rusqlite::Row<'_>) -> rusqlite::Result<ApprovalRequest> {
     Ok(ApprovalRequest {
@@ -142,6 +157,8 @@ fn map_approval(row: &rusqlite::Row<'_>) -> rusqlite::Result<ApprovalRequest> {
         explanation: row.get(18)?,
         surface_id: row.get(19)?,
         component_id: row.get(20)?,
+        conversation_id: row.get(21)?,
+        project_id: row.get(22)?,
     })
 }
 
@@ -250,6 +267,12 @@ pub fn decide(
             approval.status
         )));
     }
+    // Refuse decide when frozen venue/presence cannot be restored. Remapping to
+    // Chat/Away invents wrong authority and can break Present Approve-once via
+    // call_hash mismatch — fail closed to blocked, not a substitute venue.
+    if approve {
+        let _ = replay_context_from_approval(&approval)?;
+    }
 
     // Validate remember/mint inputs *before* claiming the decision so a failed
     // grant does not leave the approval approved-but-unusable.
@@ -324,7 +347,7 @@ pub fn decide(
 
         let mut grant = None;
         if let Some((descriptor, scope, duration, input_hash)) = prepared_grant {
-            let ctx = approval_context(&approval);
+            let ctx = approval_context(&approval)?;
             grant = Some(mint_grant(
                 db,
                 &ctx,
@@ -355,25 +378,58 @@ pub fn decide(
     }
 }
 
-fn approval_context(approval: &ApprovalRequest) -> ActionRunContext {
-    use super::context::{Presence, Venue};
-    ActionRunContext {
+fn frozen_venue(approval: &ApprovalRequest) -> DbResult<super::context::Venue> {
+    use super::context::Venue;
+    // Fail closed to blocked: never invent Chat/Application — wrong venue weakens
+    // or breaks Approve-once (call_hash binds venue).
+    Venue::parse(&approval.venue).ok_or_else(|| {
+        DbError::Corrupted(format!(
+            "approval venue is corrupt and cannot be restored: {}",
+            approval.venue
+        ))
+    })
+}
+
+fn frozen_presence(approval: &ApprovalRequest) -> DbResult<super::context::Presence> {
+    use super::context::Presence;
+    // Fail closed to blocked: unknown must not become Away (breaks Present
+    // Approve-once via call_hash) or Present (weaker away policy).
+    Presence::parse(&approval.presence).ok_or_else(|| {
+        DbError::Corrupted(format!(
+            "approval presence is corrupt and cannot be restored: {}",
+            approval.presence
+        ))
+    })
+}
+
+/// Grant minting keeps the frozen session/run so session-scoped remember stays coherent.
+fn approval_context(approval: &ApprovalRequest) -> DbResult<ActionRunContext> {
+    let mut ctx = replay_context_from_approval(approval)?;
+    ctx.session_id = approval
+        .session_id
+        .clone()
+        .unwrap_or_else(|| super::context::session_id().to_string());
+    ctx.run_id = approval.run_id.clone().unwrap_or_default();
+    Ok(ctx)
+}
+
+/// Rebuild the trusted run context for Approve-once replay from frozen approval
+/// fields (not surface/manifest lookup). call_hash binds conversationId.
+pub fn replay_context_from_approval(approval: &ApprovalRequest) -> DbResult<ActionRunContext> {
+    Ok(ActionRunContext {
         actor: "user".into(),
-        venue: Venue::parse(&approval.venue).unwrap_or(Venue::Application),
-        presence: Presence::Present,
+        venue: frozen_venue(approval)?,
+        presence: frozen_presence(approval)?,
         application_id: approval.application_id.clone(),
-        project_id: None,
-        conversation_id: None,
-        session_id: approval
-            .session_id
-            .clone()
-            .unwrap_or_else(|| super::context::session_id().to_string()),
-        run_id: approval.run_id.clone().unwrap_or_default(),
+        project_id: approval.project_id.clone(),
+        conversation_id: approval.conversation_id.clone(),
+        session_id: super::context::session_id().to_string(),
+        run_id: format!("run-{}", Uuid::new_v4()),
         trigger: None,
         surface_id: approval.surface_id.clone(),
         component_id: approval.component_id.clone(),
         depth: 0,
-    }
+    })
 }
 
 /// Consume an approved approval for a specific call. Returns `Ok(true)` for the
@@ -474,6 +530,68 @@ mod tests {
             component_id: None,
             depth: 0,
         }
+    }
+
+    #[test]
+    fn call_hash_binds_conversation_venue_and_presence() {
+        let d = find_action("local_data.write").unwrap();
+        let input = json!({"modelId": "m", "data": {"a": 1}});
+        let mut a = ctx();
+        a.conversation_id = Some("conv-a".into());
+        let mut b = ctx();
+        b.conversation_id = Some("conv-b".into());
+        assert_ne!(
+            call_hash(&a, d, &input),
+            call_hash(&b, d, &input),
+            "approvals must not transfer across conversations"
+        );
+        let mut away = ctx();
+        away.presence = Presence::Away;
+        assert_ne!(
+            call_hash(&ctx(), d, &input),
+            call_hash(&away, d, &input),
+            "approvals must not transfer across presence"
+        );
+        let mut chat = ctx();
+        chat.venue = Venue::Chat;
+        assert_ne!(
+            call_hash(&ctx(), d, &input),
+            call_hash(&chat, d, &input),
+            "approvals must not transfer across venue"
+        );
+    }
+
+    #[test]
+    fn replay_context_fails_closed_on_corrupt_venue_and_presence() {
+        let (mut db, _dir) = test_db();
+        let d = find_action("local_data.write").unwrap();
+        let input = json!({"modelId": "m", "data": {"a": 1}});
+        let pending = create_pending(&mut db, &ctx(), d, &input, None).unwrap();
+
+        let mut bogus_venue = pending.clone();
+        bogus_venue.venue = "not-a-venue".into();
+        assert!(
+            matches!(
+                replay_context_from_approval(&bogus_venue),
+                Err(DbError::Corrupted(_))
+            ),
+            "unknown venue must block, not become Chat or Application"
+        );
+
+        let mut bogus_presence = pending.clone();
+        bogus_presence.presence = "not-a-presence".into();
+        assert!(
+            matches!(
+                replay_context_from_approval(&bogus_presence),
+                Err(DbError::Corrupted(_))
+            ),
+            "unknown presence must block, not become Away or Present"
+        );
+
+        // Intact Present + Application freeze must still restore for Approve-once.
+        let ok = replay_context_from_approval(&pending).unwrap();
+        assert_eq!(ok.venue, Venue::Application);
+        assert_eq!(ok.presence, Presence::Present);
     }
 
     #[test]

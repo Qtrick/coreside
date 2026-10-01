@@ -655,7 +655,9 @@ pub fn pending_approval_count(db: &Database) -> DbResult<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application_kernel::data::{upsert_model, DataField, DataModelDefinition};
+    use crate::application_kernel::data::{
+        upsert_model, upsert_model_trusted, DataField, DataModelDefinition,
+    };
     use crate::application_kernel::registered_actions::approvals::RememberChoice;
     use crate::application_kernel::registered_actions::grants::{GrantDuration, GrantScope};
     use crate::application_kernel::registered_actions::testing::{
@@ -753,6 +755,176 @@ mod tests {
             Some(&approval_id),
         );
         assert_eq!(outcome_code(&third), "blocked:approval_invalid");
+    }
+
+    #[test]
+    fn approve_once_replay_keeps_conversation_bound_call_hash() {
+        // Personal tools often have NULL surface.conversation_id while the
+        // original invoke hashed the active chat. Replay must use frozen
+        // approval.conversation_id — not a surface lookup.
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        let mut ctx = app_ctx(APP);
+        ctx.conversation_id = Some("conv-active-chat".into());
+        ctx.surface_id = Some("surf-tool-orphan".into());
+        let input = json!({ "modelId": "note", "data": { "title": "Biology" } });
+
+        let first = execute_registered_action(&mut db, &ctx, "local_data.write", &input, None);
+        let approval_id = match &first {
+            ActionOutcome::PendingApproval { approval_id, .. } => approval_id.clone(),
+            other => panic!("expected approval, got {}", outcome_code(other)),
+        };
+        let stored = approvals::get_approval(&db, &approval_id).unwrap();
+        assert_eq!(
+            stored.conversation_id.as_deref(),
+            Some("conv-active-chat"),
+            "pending approval must freeze conversation_id"
+        );
+
+        approvals::decide(&mut db, &approval_id, true, None, "user").unwrap();
+        let approved = approvals::get_approval(&db, &approval_id).unwrap();
+        let replay_ctx = approvals::replay_context_from_approval(&approved).unwrap();
+        assert_eq!(
+            replay_ctx.conversation_id.as_deref(),
+            Some("conv-active-chat")
+        );
+        let frozen = approvals::frozen_input(&db, &approval_id).unwrap();
+        let second = execute_registered_action(
+            &mut db,
+            &replay_ctx,
+            "local_data.write",
+            &frozen,
+            Some(&approval_id),
+        );
+        assert!(second.is_ok(), "{}", outcome_code(&second));
+    }
+
+    #[test]
+    fn approve_once_replay_keeps_project_bound_on_frozen_context() {
+        // project_id is frozen on the approval row (migration 036) so replay
+        // rebuilds handler context without surface/manifest lookup. call_hash
+        // still binds conversationId (not projectId); this covers freeze restore.
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        let mut ctx = app_ctx(APP);
+        ctx.conversation_id = Some("conv-active-chat".into());
+        ctx.project_id = Some("proj-biology".into());
+        ctx.surface_id = Some("surf-tool-orphan".into());
+        let input = json!({ "modelId": "note", "data": { "title": "Lab notes" } });
+
+        let first = execute_registered_action(&mut db, &ctx, "local_data.write", &input, None);
+        let approval_id = match &first {
+            ActionOutcome::PendingApproval { approval_id, .. } => approval_id.clone(),
+            other => panic!("expected approval, got {}", outcome_code(other)),
+        };
+        let stored = approvals::get_approval(&db, &approval_id).unwrap();
+        assert_eq!(
+            stored.project_id.as_deref(),
+            Some("proj-biology"),
+            "pending approval must freeze project_id"
+        );
+
+        approvals::decide(&mut db, &approval_id, true, None, "user").unwrap();
+        let approved = approvals::get_approval(&db, &approval_id).unwrap();
+        let replay_ctx = approvals::replay_context_from_approval(&approved).unwrap();
+        assert_eq!(replay_ctx.project_id.as_deref(), Some("proj-biology"));
+        assert_eq!(
+            replay_ctx.conversation_id.as_deref(),
+            Some("conv-active-chat")
+        );
+        let frozen = approvals::frozen_input(&db, &approval_id).unwrap();
+        let second = execute_registered_action(
+            &mut db,
+            &replay_ctx,
+            "local_data.write",
+            &frozen,
+            Some(&approval_id),
+        );
+        assert!(second.is_ok(), "{}", outcome_code(&second));
+    }
+
+    #[test]
+    fn approval_rejects_when_replay_input_call_hash_mismatches() {
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        let ctx = app_ctx(APP);
+        let approved_input = json!({ "modelId": "note", "data": { "title": "Approved" } });
+        let tampered_input = json!({ "modelId": "note", "data": { "title": "Tampered" } });
+
+        let first =
+            execute_registered_action(&mut db, &ctx, "local_data.write", &approved_input, None);
+        let approval_id = match &first {
+            ActionOutcome::PendingApproval { approval_id, .. } => approval_id.clone(),
+            other => panic!("expected approval, got {}", outcome_code(other)),
+        };
+        approvals::decide(&mut db, &approval_id, true, None, "user").unwrap();
+
+        let mismatched = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &tampered_input,
+            Some(&approval_id),
+        );
+        assert_eq!(outcome_code(&mismatched), "blocked:approval_invalid");
+        let titles: Vec<_> = crate::application_kernel::data::query_records(&db, APP, "note", 20)
+            .unwrap()
+            .into_iter()
+            .map(|r| r["title"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert!(
+            !titles.iter().any(|t| t == "Tampered"),
+            "mismatched call_hash must not persist tampered write"
+        );
+
+        // Mismatch must not consume the approval — matching replay still works.
+        let matched = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &approved_input,
+            Some(&approval_id),
+        );
+        assert!(matched.is_ok(), "{}", outcome_code(&matched));
+        let after = crate::application_kernel::data::query_records(&db, APP, "note", 20).unwrap();
+        assert!(after.iter().any(|r| r["title"] == "Approved"));
+    }
+
+    #[test]
+    fn approval_rejects_when_conversation_call_hash_mismatches() {
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        let mut ctx_a = app_ctx(APP);
+        ctx_a.conversation_id = Some("conv-a".into());
+        let mut ctx_b = app_ctx(APP);
+        ctx_b.conversation_id = Some("conv-b".into());
+        let input = json!({ "modelId": "note", "data": { "title": "Cross" } });
+
+        let first = execute_registered_action(&mut db, &ctx_a, "local_data.write", &input, None);
+        let approval_id = match &first {
+            ActionOutcome::PendingApproval { approval_id, .. } => approval_id.clone(),
+            other => panic!("expected approval, got {}", outcome_code(other)),
+        };
+        approvals::decide(&mut db, &approval_id, true, None, "user").unwrap();
+
+        let cross = execute_registered_action(
+            &mut db,
+            &ctx_b,
+            "local_data.write",
+            &input,
+            Some(&approval_id),
+        );
+        assert_eq!(
+            outcome_code(&cross),
+            "blocked:approval_invalid",
+            "approval must not transfer across conversations"
+        );
+        assert!(
+            crate::application_kernel::data::query_records(&db, APP, "note", 20)
+                .unwrap()
+                .is_empty(),
+            "cross-conversation replay must not write"
+        );
     }
 
     #[test]
@@ -922,7 +1094,7 @@ mod tests {
             "user",
         )
         .unwrap();
-        upsert_model(
+        upsert_model_trusted(
             &mut db,
             "app-legacy",
             DataModelDefinition {

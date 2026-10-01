@@ -82,6 +82,8 @@ export interface ApprovalRequest {
   explanation: string | null;
   surfaceId: string | null;
   componentId: string | null;
+  conversationId?: string | null;
+  projectId?: string | null;
 }
 
 export interface RuntimeGrant {

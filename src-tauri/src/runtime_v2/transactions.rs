@@ -1497,6 +1497,96 @@ fn apply_one(
             .map_err(|e| format!("interactive.action rejected: {e}"))?;
             Ok(Some(get_surface(db, &sid).map_err(|e| e.to_string())?))
         }
+        // Compiler emits these; they are durable metadata / renderer-scoped nav.
+        "setting.create" => {
+            let app_id = op
+                .target
+                .application_id
+                .as_deref()
+                .or_else(|| op.payload.get("applicationId").and_then(Value::as_str))
+                .ok_or_else(|| "setting.create requires applicationId".to_string())?;
+            crate::security::assert_not_protected(app_id)?;
+            let setting_id = op
+                .payload
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "setting.create requires id".to_string())?;
+            if setting_id.trim().is_empty() {
+                return Err("setting.create id must not be empty".into());
+            }
+            crate::security::assert_not_protected(setting_id)?;
+            // Bind identity without treating tool_id as an existing surface id.
+            // Explicit surface_id (or payload surfaceId) must host this application;
+            // otherwise tool_id must equal applicationId.
+            let explicit_surface_id = op
+                .target
+                .surface_id
+                .clone()
+                .or_else(|| {
+                    op.payload
+                        .get("surfaceId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                });
+            if let Some(sid) = explicit_surface_id {
+                let surface = get_surface(db, &sid).map_err(|e| e.to_string())?;
+                let surface_app =
+                    crate::application_kernel::manifest::authoritative_application_id(
+                        db,
+                        surface.tool_id.as_deref(),
+                    )
+                    .or_else(|| surface.tool_id.clone());
+                if surface_app.as_deref() != Some(app_id) {
+                    return Err(format!(
+                        "setting.create applicationId '{app_id}' does not match target surface application"
+                    ));
+                }
+            } else if let Some(tid) = op.target.tool_id.as_deref().filter(|t| !t.is_empty()) {
+                if tid != app_id {
+                    return Err(format!(
+                        "setting.create applicationId '{app_id}' does not match target toolId '{tid}'"
+                    ));
+                }
+            } else {
+                return Err(
+                    "setting.create requires a surface or tool target binding applicationId"
+                        .into(),
+                );
+            }
+            let mut rec = crate::application_kernel::manifest::get_manifest(db, app_id)
+                .map_err(|e| format!("setting.create: unknown application: {e}"))?;
+            if !rec.manifest.settings.iter().any(|s| s == setting_id) {
+                rec.manifest.settings.push(setting_id.to_string());
+                crate::application_kernel::manifest::upsert_manifest(db, rec.manifest)
+                    .map_err(|e| e.to_string())?;
+            }
+            Ok(None)
+        }
+        "route.navigate" => {
+            let route_id = op
+                .payload
+                .get("routeId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "route.navigate requires routeId".to_string())?;
+            if route_id == "settings" || route_id == "recovery" {
+                return Err("cannot navigate to protected routes via generated apps".into());
+            }
+            // Renderer-scoped: store intended route on surface state when a surface is targeted.
+            if let Some(sid) = resolve_effective_surface_id(op) {
+                let (mut state, rev) =
+                    super::surfaces::get_surface_state_with_revision(db, &sid)
+                        .map_err(|e| e.to_string())?;
+                if let Some(obj) = state.as_object_mut() {
+                    obj.insert("activeRoute".into(), json!(route_id));
+                } else {
+                    state = json!({ "activeRoute": route_id });
+                }
+                super::surfaces::save_surface_state_occ(db, &sid, &state, rev)
+                    .map_err(|e| e.to_string())?;
+                return Ok(Some(get_surface(db, &sid).map_err(|e| e.to_string())?));
+            }
+            Ok(None)
+        }
         other => Err(format!("unsupported operation in apply: {other}")),
     }
 }
@@ -3278,15 +3368,15 @@ mod tests {
         assert_eq!(state.get("unrelated"), Some(&json!(true)));
     }
 
-    /// event.dispatch must not equate tool_id with application_id without a manifest.
+    /// event.dispatch sets application_id when surface create auto-registers a manifest.
     #[test]
-    fn event_dispatch_omits_application_id_when_tool_has_no_manifest() {
+    fn event_dispatch_sets_application_id_when_surface_create_registers_manifest() {
         let mut db = test_db();
         let conv =
             create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "EvtNoApp", None).unwrap();
         let tool = ToolDefinition {
-            id: "tool-no-manifest".into(),
-            name: "No Manifest Tool".into(),
+            id: "tool-auto-manifest".into(),
+            name: "Auto Manifest Tool".into(),
             description: String::new(),
             layout: json!("stack"),
             components: vec![ToolComponent {
@@ -3315,7 +3405,10 @@ mod tests {
             saved.current_version,
         )
         .unwrap();
-        // Bind conversation so event origin can resolve conversation_id.
+        // First create always registers an application manifest.
+        assert!(
+            crate::application_kernel::manifest::get_manifest(&db, "tool-auto-manifest").is_ok()
+        );
         db.conn()
             .execute(
                 "UPDATE surfaces SET conversation_id = ?1 WHERE id = ?2",
@@ -3359,8 +3452,80 @@ mod tests {
         let source: serde_json::Value = serde_json::from_str(&source_json).unwrap();
         assert_eq!(
             source.get("toolId").and_then(|v| v.as_str()),
-            Some("tool-no-manifest"),
-            "source must carry authoritative tool_id"
+            Some("tool-auto-manifest"),
+        );
+        assert_eq!(
+            source.get("applicationId").and_then(|v| v.as_str()),
+            Some("tool-auto-manifest"),
+            "application_id must come from the auto-registered manifest, got {source}"
+        );
+    }
+
+    /// Surfaces inserted without a manifest must not invent application_id from tool_id.
+    #[test]
+    fn event_dispatch_omits_application_id_when_tool_has_no_manifest() {
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "EvtLegacyNoApp", None).unwrap();
+        // Bypass upsert_surface_from_tool so no auto-manifest is created.
+        let surface_id = "surf-tool-legacy-no-manifest";
+        let now = crate::db::now_rfc3339();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES ('tool-legacy-no-manifest', ?1, 'Legacy', '', 'stack', '{}', 1, ?2, ?2)",
+                rusqlite::params![DEFAULT_WORKSPACE_ID, now],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO surfaces (
+                    id, instance_id, surface_type, placement, owner_type, owner_id,
+                    conversation_id, tool_id, name, definition_json, current_revision,
+                    lifecycle_state, archived, capability_packs_json, created_at, updated_at
+                 ) VALUES (?1, 'inst-legacy', 'tool', 'tool_canvas', 'workspace', ?2, ?3,
+                    'tool-legacy-no-manifest', 'Legacy', '{\"components\":[]}', 1, 'active', 0, '[]', ?4, ?4)",
+                rusqlite::params![surface_id, DEFAULT_WORKSPACE_ID, conv.id, now],
+            )
+            .unwrap();
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "dispatch",
+            &[op(
+                "event.dispatch",
+                Some(surface_id),
+                json!({
+                    "eventType": "custom.ping",
+                    "scope": "surface",
+                    "payload": { "ok": true }
+                }),
+            )],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
+
+        let source_json: String = db
+            .conn()
+            .query_row(
+                "SELECT source_json FROM surface_events ORDER BY created_at DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let source: serde_json::Value = serde_json::from_str(&source_json).unwrap();
+        assert_eq!(
+            source.get("toolId").and_then(|v| v.as_str()),
+            Some("tool-legacy-no-manifest"),
         );
         assert!(
             source.get("applicationId").is_none()
@@ -3640,6 +3805,150 @@ mod tests {
             Some(&json!("Buy milk")),
             "definition props.value must overlay live state, got {:?}",
             comp.props
+        );
+    }
+
+    #[test]
+    fn setting_create_and_route_navigate_apply_without_unsupported_operation() {
+        use crate::application_kernel::manifest::{
+            ensure_manifest_for_tool, get_manifest,
+        };
+
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "SettingRoute", None).unwrap();
+        let def = json!({
+            "id": "d",
+            "name": "Nav Surface",
+            "layout": "stack",
+            "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+        });
+        let surface =
+            create_inline_surface(&mut db, &conv.id, None, None, "Nav Surface", &def, &[])
+                .unwrap();
+        ensure_manifest_for_tool(&mut db, "app-setting-route", "Setting Route App", &surface.id)
+            .unwrap();
+
+        let mut setting_op = op(
+            "setting.create",
+            None,
+            json!({
+                "id": "setting.daily-goal",
+                "label": "Daily goal",
+                "valueType": "integer",
+                "default": 3,
+                "applicationId": "app-setting-route",
+            }),
+        );
+        setting_op.target.application_id = Some("app-setting-route".into());
+        // Identity binding: tool_id must match applicationId (no cross-app spoof).
+        setting_op.target.tool_id = Some("app-setting-route".into());
+
+        let navigate_op = op(
+            "route.navigate",
+            Some(&surface.id),
+            json!({ "routeId": "overview" }),
+        );
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "setting+navigate",
+            &[setting_op, navigate_op],
+            false,
+        )
+        .unwrap();
+        let result = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            result.transaction.status, "applied",
+            "expected applied, conflicts={:?}",
+            result.conflicts
+        );
+        assert!(
+            result
+                .conflicts
+                .iter()
+                .all(|c| !c.contains("unsupported operation")),
+            "setting.create / route.navigate must not hit unsupported operation, got {:?}",
+            result.conflicts
+        );
+
+        let manifest = get_manifest(&db, "app-setting-route").unwrap();
+        assert!(
+            manifest
+                .manifest
+                .settings
+                .iter()
+                .any(|s| s == "setting.daily-goal"),
+            "setting.create must append setting id to manifest, got {:?}",
+            manifest.manifest.settings
+        );
+        let (state, _) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
+        assert_eq!(
+            state.get("activeRoute"),
+            Some(&json!("overview")),
+            "route.navigate must store activeRoute on surface state"
+        );
+    }
+
+    #[test]
+    fn setting_create_rejects_unbound_application_id_spoof() {
+        use crate::application_kernel::manifest::ensure_manifest_for_tool;
+
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "SettingSpoof", None).unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Victim",
+            &json!({
+                "id": "d",
+                "name": "Victim",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        ensure_manifest_for_tool(&mut db, "app-victim", "Victim", &surface.id).unwrap();
+        ensure_manifest_for_tool(&mut db, "app-attacker", "Attacker", "surf-unrelated").unwrap();
+
+        let mut setting_op = op(
+            "setting.create",
+            None,
+            json!({
+                "id": "setting.pwned",
+                "applicationId": "app-victim",
+            }),
+        );
+        setting_op.target.application_id = Some("app-victim".into());
+        // No surface/tool binding — must fail closed.
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "spoof-setting",
+            &[setting_op],
+            false,
+        )
+        .unwrap();
+        let result = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_ne!(
+            result.transaction.status, "applied",
+            "unbound setting.create must fail, conflicts={:?}",
+            result.conflicts
+        );
+        assert!(
+            result.conflicts.iter().any(|c| c.contains("requires a surface or tool target")),
+            "expected binding denial, got {:?}",
+            result.conflicts
         );
     }
 

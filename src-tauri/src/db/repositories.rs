@@ -237,9 +237,10 @@ pub fn delete_conversation(db: &mut Database, id: &str) -> DbResult<()> {
         conn.execute("DELETE FROM surfaces WHERE conversation_id = ?1", [id])?;
         // Clean conversation-owned tables without FK constraints (orphan rows).
         // These tables reference conversation_id but have no ON DELETE CASCADE.
-        // (runtime_action_grants / runtime_approvals carry no conversation_id —
-        // they are application/session-scoped; only runtime_audit_events is
-        // conversation-scoped. application_route_state and provider_conformance
+        // (runtime_action_grants are application/session-scoped; runtime_approvals
+        // freeze conversation_id for call_hash replay but are not cascade-deleted
+        // with chats. Only runtime_audit_events is conversation-scoped for cleanup.
+        // application_route_state and provider_conformance
         // are application/provider-scoped and intentionally survive.)
         for table in [
             "turn_journal",

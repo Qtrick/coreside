@@ -688,55 +688,17 @@ pub fn kernel_decide_approval(
     // the gateway so the action is not left hanging until a second click.
     if approve {
         let input = approvals::frozen_input(&db, &approval_id).map_err(CommandError::from)?;
-        let venue = if result.approval.application_id.is_some() {
-            Venue::Application
-        } else {
-            Venue::Chat
-        };
-        let (conv_id, proj_id) = if let Some(ref sid) = result.approval.surface_id {
-            db.conn()
-                .query_row(
-                    "SELECT conversation_id, project_id FROM surfaces WHERE id = ?1",
-                    [sid],
-                    |r| {
-                        Ok((
-                            r.get::<_, Option<String>>(0)?,
-                            r.get::<_, Option<String>>(1)?,
-                        ))
-                    },
-                )
-                .unwrap_or((None, None))
-        } else if let Some(ref app_id) = result.approval.application_id {
-            let pid: Option<String> = db
-                .conn()
-                .query_row(
-                    "SELECT project_id FROM application_manifests WHERE id = ?1",
-                    [app_id],
-                    |r| r.get(0),
-                )
-                .ok();
-            (None, pid)
-        } else {
-            (None, None)
-        };
-
-        let req = ClientActionRequest {
-            action_name: result.approval.action_name.clone(),
-            input,
-            application_id: result.approval.application_id.clone(),
-            surface_id: result.approval.surface_id.clone(),
-            component_id: result.approval.component_id.clone(),
-            conversation_id: conv_id,
-            project_id: proj_id,
-            approval_id: Some(approval_id),
-        };
-        let ctx = ActionRunContext::from_client(&req, venue);
+        // Reconstruct call identity from frozen approval fields. Do not re-derive
+        // conversation_id from surfaces — personal tools often have NULL there
+        // while the original invoke hashed the active chat conversation.
+        let ctx = approvals::replay_context_from_approval(&result.approval)
+            .map_err(CommandError::from)?;
         result.outcome = Some(execute_registered_action(
             &mut db,
             &ctx,
-            &req.action_name,
-            &req.input,
-            req.approval_id.as_deref(),
+            &result.approval.action_name,
+            &input,
+            Some(&approval_id),
         ));
         if result.approval.presence == "away" {
             if let Some(app_id) = result.approval.application_id.as_deref() {

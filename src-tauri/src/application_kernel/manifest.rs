@@ -575,17 +575,101 @@ pub fn apply_manifest_operations(db: &mut Database, ops: &[AppOperation]) -> DbR
     Ok(())
 }
 
+/// Infer allowed permission categories from a tool's declared registered actions.
+/// Always includes `local_data.read`. Never invents forbidden permissions.
+pub fn permissions_from_tool(tool: &crate::ai::ToolDefinition) -> Vec<String> {
+    use crate::ai::{ActionDefinition, ToolComponent};
+    use crate::application_kernel::registered_actions::descriptor::find_action;
+    use std::collections::BTreeSet;
+
+    let mut perms: BTreeSet<String> = BTreeSet::new();
+    perms.insert("local_data.read".into());
+
+    let mut consider_action = |action_name: &str| {
+        if let Some(desc) = find_action(action_name) {
+            if super::permissions::validate_declared_permissions(&[desc
+                .permission_category
+                .clone()])
+            .is_ok()
+            {
+                perms.insert(desc.permission_category.clone());
+            }
+        }
+    };
+
+    fn walk(comp: &ToolComponent, consider: &mut dyn FnMut(&str)) {
+        use crate::application_kernel::registered_actions::descriptor::{
+            find_action, ActionRisk,
+        };
+        if let Some(actions) = comp.actions.as_ref() {
+            for action in actions {
+                if let ActionDefinition::InvokeRegisteredAction { action_name, .. } = action {
+                    consider(action_name);
+                }
+            }
+        }
+        // dataSource is read-only hydration — never let a write/destructive name
+        // inflate declared permissions (surface_create auto-grants local_data.*).
+        if let Some(serde_json::Value::Object(props)) = &comp.props {
+            if let Some(action_name) = props
+                .get("dataSource")
+                .and_then(|ds| ds.get("actionName"))
+                .and_then(|v| v.as_str())
+            {
+                if find_action(action_name)
+                    .is_some_and(|d| d.risk == ActionRisk::Read)
+                {
+                    consider(action_name);
+                }
+            }
+        }
+        if let Some(children) = comp.children.as_ref() {
+            for child in children {
+                walk(child, consider);
+            }
+        }
+    }
+
+    for comp in &tool.components {
+        walk(comp, &mut consider_action);
+    }
+    for contract in &tool.action_contracts {
+        consider_action(&contract.action_name);
+    }
+    perms.into_iter().collect()
+}
+
 /// Wrap an existing tool as a minimal application manifest (idempotent).
+///
+/// When `permissions` is `None`, defaults to `local_data.read` only.
+/// On first create, auto-grants only `local_data.*` declared permissions
+/// (`grant_source: "surface_create"`). Higher-risk categories stay declared
+/// on the manifest but ungranted until a separate consent path.
 pub fn ensure_manifest_for_tool(
     db: &mut Database,
     tool_id: &str,
     tool_name: &str,
     surface_id: &str,
 ) -> DbResult<ManifestRecord> {
+    ensure_manifest_for_tool_with_permissions(db, tool_id, tool_name, surface_id, None)
+}
+
+/// Like [`ensure_manifest_for_tool`], but accepts explicit declared permissions.
+pub fn ensure_manifest_for_tool_with_permissions(
+    db: &mut Database,
+    tool_id: &str,
+    tool_name: &str,
+    surface_id: &str,
+    permissions: Option<Vec<String>>,
+) -> DbResult<ManifestRecord> {
     if get_manifest(db, tool_id).is_ok() {
         return get_manifest(db, tool_id);
     }
-    let permissions = vec!["local_data.read".into()];
+    let mut permissions = permissions.unwrap_or_else(|| vec!["local_data.read".into()]);
+    if !permissions.iter().any(|p| p == "local_data.read") {
+        permissions.insert(0, "local_data.read".into());
+    }
+    validate_declared_permissions(&permissions).map_err(DbError::Invalid)?;
     let application_action_access =
         super::registered_actions::descriptor::default_action_access_for_permissions(&permissions);
     let m = ApplicationManifest {
@@ -604,7 +688,7 @@ pub fn ensure_manifest_for_tool(
         data_models: vec![],
         settings: vec![],
         capabilities: vec!["coreside.core".into()],
-        permissions,
+        permissions: permissions.clone(),
         events: vec![],
         tests: vec![],
         search_keywords: vec![tool_name.into()],
@@ -619,7 +703,22 @@ pub fn ensure_manifest_for_tool(
         component_action_access: HashMap::new(),
         action_descriptor_hashes: HashMap::new(),
     };
-    upsert_manifest(db, m)
+    let record = upsert_manifest(db, m)?;
+    // User Apply of surface create consents to local_data for declared models.
+    // Do not auto-grant microphone/clipboard/web_search/etc. here (over-grant).
+    for perm in &permissions {
+        if !perm.starts_with("local_data.") {
+            continue;
+        }
+        let _ = super::permissions::grant_permission(
+            db,
+            tool_id,
+            perm,
+            serde_json::json!({}),
+            "surface_create",
+        )?;
+    }
+    Ok(record)
 }
 
 #[cfg(test)]
@@ -719,6 +818,105 @@ mod tests {
             .application_action_access
             .contains(&"local_data.query".to_string()));
         assert!(!record.manifest.application_action_access.is_empty());
+    }
+
+    #[test]
+    fn surface_create_auto_grants_only_local_data() {
+        use crate::application_kernel::permissions::has_permission;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("grant.db")).unwrap();
+        let perms = vec![
+            "local_data.read".into(),
+            "local_data.write".into(),
+            "web_search.request".into(),
+            "clipboard.write".into(),
+        ];
+        ensure_manifest_for_tool_with_permissions(
+            &mut db,
+            "tool-grant",
+            "Grant Probe",
+            "surface-grant",
+            Some(perms.clone()),
+        )
+        .unwrap();
+        let rec = get_manifest(&db, "tool-grant").unwrap();
+        for p in &perms {
+            assert!(
+                rec.manifest.permissions.iter().any(|x| x == p),
+                "manifest must declare {p}"
+            );
+        }
+        assert!(has_permission(&db, "tool-grant", "local_data.read").unwrap());
+        assert!(has_permission(&db, "tool-grant", "local_data.write").unwrap());
+        assert!(!has_permission(&db, "tool-grant", "web_search.request").unwrap());
+        assert!(!has_permission(&db, "tool-grant", "clipboard.write").unwrap());
+    }
+
+    #[test]
+    fn permissions_from_tool_ignores_write_smuggled_in_data_source() {
+        use crate::ai::{ToolComponent, ToolDefinition};
+        use serde_json::json;
+
+        let tool = ToolDefinition {
+            id: "tool-ds".into(),
+            name: "DS".into(),
+            description: String::new(),
+            layout: json!("stack"),
+            components: vec![ToolComponent {
+                id: "table".into(),
+                component_type: "dataTable".into(),
+                props: Some(json!({
+                    "dataSource": {
+                        "actionName": "local_data.write",
+                        "input": { "modelId": "tasks", "data": {} },
+                        "resultKey": "tasksResult"
+                    }
+                })),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let perms = permissions_from_tool(&tool);
+        assert!(
+            perms.iter().any(|p| p == "local_data.read"),
+            "read always declared, got {perms:?}"
+        );
+        assert!(
+            !perms.iter().any(|p| p == "local_data.write"),
+            "write must not come from dataSource alone, got {perms:?}"
+        );
+    }
+
+    #[test]
+    fn permissions_from_tool_declares_write_from_component_actions() {
+        use crate::ai::{ActionDefinition, ToolComponent, ToolDefinition};
+        use serde_json::json;
+
+        let tool = ToolDefinition {
+            id: "tool-btn".into(),
+            name: "Btn".into(),
+            description: String::new(),
+            layout: json!("stack"),
+            components: vec![ToolComponent {
+                id: "add".into(),
+                component_type: "button".into(),
+                actions: Some(vec![ActionDefinition::InvokeRegisteredAction {
+                    action_name: "local_data.write".into(),
+                    input: Some(json!({"modelId": "tasks", "data": {}})),
+                    input_from_state: None,
+                    component_id: None,
+                    result_key: None,
+                }]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let perms = permissions_from_tool(&tool);
+        assert!(
+            perms.iter().any(|p| p == "local_data.write"),
+            "explicit button write must declare write, got {perms:?}"
+        );
     }
 
     #[test]

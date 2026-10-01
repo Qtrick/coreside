@@ -240,7 +240,19 @@ mod tests {
             None,
             None,
             "Task Board",
-            &json!({"type":"container","id":"root","title":"Task Board"}),
+            &json!({
+                "type": "container",
+                "id": "root",
+                "title": "Task Board",
+                "stateContracts": [
+                    {
+                        "key": "count",
+                        "type": "integer",
+                        "initialValue": 0,
+                        "writePolicy": "model"
+                    }
+                ]
+            }),
             &[],
         )
         .unwrap();

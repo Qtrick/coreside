@@ -86,6 +86,12 @@ const JOURNEYS = [
     coverage: "full",
   },
   {
+    id: 21,
+    name: "generated-task-tracker",
+    suite: "generated-task-tracker",
+    coverage: "full",
+  },
+  {
     id: 15,
     name: "first-run-welcome",
     suite: "first-run-welcome",
@@ -271,6 +277,9 @@ runSuite("existing-eavesdrop", { seed: "existing" });
 // Progressive surface preview needs seeded E2E Notes tool + mock paint fixture.
 runSuite("progressive-surface-preview", { seed: "existing" });
 runSuite("progressive-preview-cancel", { seed: "existing" });
+
+// Generated Task Tracker: clean profile, mock agent path, no seeded final app.
+runSuite("generated-task-tracker");
 
 // Seeded local AI privacy disclosure profile.
 runSuite("local-ai-privacy", { seed: "local" });

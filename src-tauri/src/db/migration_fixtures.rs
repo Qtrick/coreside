@@ -503,7 +503,7 @@ mod tests {
             .iter()
             .map(|(n, _)| *n)
             .collect::<Vec<_>>();
-        assert_eq!(names.len(), 35);
+        assert_eq!(names.len(), 36);
         for (i, name) in names.iter().enumerate() {
             let expected = format!("{:03}_", i + 1);
             assert!(
@@ -511,8 +511,8 @@ mod tests {
                 "migration {i} should start with {expected}, got {name}"
             );
         }
-        assert_eq!(names[34], LATEST_MIGRATION);
-        assert_eq!(LATEST_MIGRATION, "035_apply_idempotency_request_hash");
+        assert_eq!(names[35], LATEST_MIGRATION);
+        assert_eq!(LATEST_MIGRATION, "036_approval_call_context");
     }
 
     #[test]

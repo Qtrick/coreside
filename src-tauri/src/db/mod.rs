@@ -166,10 +166,14 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         "035_apply_idempotency_request_hash",
         include_str!("../../migrations/035_apply_idempotency_request_hash.sql"),
     ),
+    (
+        "036_approval_call_context",
+        include_str!("../../migrations/036_approval_call_context.sql"),
+    ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "035_apply_idempotency_request_hash";
+pub const LATEST_MIGRATION: &str = "036_approval_call_context";
 
 #[derive(Debug, Error)]
 pub enum DbError {

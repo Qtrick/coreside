@@ -15,7 +15,7 @@ import {
   setDottedPath,
   type InteractiveDispatchOutcome,
 } from "@/lib/actions";
-import { api } from "@/lib/tauri";
+import { api, listenApprovalsChanged } from "@/lib/tauri";
 import type { ActionOutcome } from "@/types/application-kernel";
 import type { ActionDefinition, DataSource, ToolComponent, ToolDefinition, ToolState } from "@/types/tool";
 import { ToolRuntimeProvider } from "./context";
@@ -243,6 +243,26 @@ export function ToolRenderer({
   }, [tool.dataSource, tool.dataSources, tool.components]);
 
   const hydrationRef = useRef<Record<string, { lastRun: number; depSignature: string }>>({});
+  // Approve-once auto-replays writes on the backend; the interrupted action
+  // chain never reaches the follow-up local_data.query. Rehydrate read
+  // dataSources when approvals change so tables reflect the frozen write.
+  const [approvalRefreshEpoch, setApprovalRefreshEpoch] = useState(0);
+
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    let disposed = false;
+    void listenApprovalsChanged(() => {
+      hydrationRef.current = {};
+      setApprovalRefreshEpoch((n) => n + 1);
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else stop = unlisten;
+    });
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (isPreviewMode || isCustomizingMode) return;
@@ -317,6 +337,7 @@ export function ToolRenderer({
     tool.id,
     onStateChange,
     state,
+    approvalRefreshEpoch,
   ]);
 
   // Interaction failures are shown in the surface itself: a button that cannot

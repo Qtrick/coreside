@@ -92,6 +92,7 @@ impl From<crate::db::DbError> for CommandError {
                 };
                 Self::new(code, msg.clone())
             }
+            crate::db::DbError::Corrupted(msg) => Self::new("invalid", msg.clone()),
             other => {
                 tracing::error!(error = %other, "database error surfaced to IPC");
                 Self::new("storage_error", "Local storage could not complete that.")

@@ -52,6 +52,14 @@ impl Presence {
             Self::Away => "away",
         }
     }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "present" => Some(Self::Present),
+            "away" => Some(Self::Away),
+            _ => None,
+        }
+    }
 }
 
 /// Untrusted request shape accepted over IPC. Contains no authority fields.

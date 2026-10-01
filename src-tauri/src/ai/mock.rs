@@ -125,36 +125,51 @@ impl MockAiProvider {
             .to_string();
         }
 
-        if lower.contains("task manager") || lower.contains("task-manager") {
+        if lower.contains("task manager")
+            || lower.contains("task-manager")
+            || lower.contains("task tracker")
+            || lower.contains("task-tracker")
+        {
             return json!({
                 "schemaVersion": SCHEMA_VERSION,
-                "assistantMessage": "I generated a Task Manager application with a dashboard layout, task data table, priority/status filtering, and full create/update/delete capabilities.",
+                "assistantMessage": "I generated a Task Tracker with a typed tasks data model, durable local_data CRUD, priority/status filtering, and an empty state.",
                 "responseType": "tool_change",
                 "toolChange": {
                     "action": "create",
                     "targetToolId": null,
-                    "changeSummary": "Create Task Manager with data table and state CRUD",
+                    "changeSummary": "Create Task Tracker with local_data model and CRUD actions",
                     "tool": {
-                        "id": "tool-task-manager",
-                        "name": "Task Manager",
-                        "description": "Manage tasks with priority, status, and local data persistence.",
+                        "id": "tool-task-tracker",
+                        "name": "Task Tracker",
+                        "description": "Track tasks with title, priority, status, and durable local records.",
                         "layout": { "type": "dashboard", "columns": 2, "density": "normal" },
                         "components": [
-                            { "id": "tm-heading", "type": "heading", "props": { "text": "Task Manager", "level": 1 } },
+                            { "id": "tm-heading", "type": "heading", "props": { "text": "Task Tracker", "level": 1 } },
+                            { "id": "tm-empty", "type": "text", "props": { "text": "No tasks yet. Add one below.", "tone": "muted" } },
                             { "id": "tm-search", "type": "textInput", "props": { "label": "Search Tasks", "placeholder": "Search..." }, "valueKey": "searchQuery" },
                             { "id": "tm-priority-filter", "type": "select", "props": { "label": "Priority Filter", "options": [{ "label": "All", "value": "" }, { "label": "High", "value": "high" }, { "label": "Medium", "value": "medium" }, { "label": "Low", "value": "low" }] }, "valueKey": "priorityFilter" },
                             { "id": "tm-status-filter", "type": "select", "props": { "label": "Status Filter", "options": [{ "label": "All", "value": "" }, { "label": "To Do", "value": "todo" }, { "label": "In Progress", "value": "in_progress" }, { "label": "Done", "value": "done" }] }, "valueKey": "statusFilter" },
-                            { "id": "tm-list", "type": "dataTable", "props": { "columns": [{ "id": "title", "accessor": "title", "header": "Task" }, { "id": "priority", "accessor": "priority", "header": "Priority" }, { "id": "status", "accessor": "status", "header": "Status" }], "rowsKey": "tasks", "dataKey": "tasks", "selectionKey": "selectedTaskId", "searchKey": "searchQuery", "filtersFromState": { "priority": "priorityFilter", "status": "statusFilter" } } },
-                            { "id": "tm-new-title", "type": "textInput", "props": { "label": "New Task Title", "placeholder": "Task name..." }, "valueKey": "newTaskTitle" },
+                            { "id": "tm-list", "type": "dataTable", "props": { "columns": [{ "id": "title", "accessor": "title", "header": "Task" }, { "id": "priority", "accessor": "priority", "header": "Priority" }, { "id": "status", "accessor": "status", "header": "Status" }], "rowsKey": "tasksResult", "selectionKey": "selectedTaskId", "searchKey": "searchQuery", "filtersFromState": { "priority": "priorityFilter", "status": "statusFilter" }, "dataSource": { "actionName": "local_data.query", "input": { "modelId": "tasks", "limit": 100 }, "resultKey": "tasksResult" } } },
+                            { "id": "tm-new-title", "type": "textInput", "props": { "label": "New Task Title", "placeholder": "Finish biology homework" }, "valueKey": "newTaskTitle" },
                             { "id": "tm-new-priority", "type": "select", "props": { "label": "Task Priority", "options": [{ "label": "High", "value": "high" }, { "label": "Medium", "value": "medium" }, { "label": "Low", "value": "low" }] }, "valueKey": "newTaskPriority" },
                             { "id": "tm-new-status", "type": "select", "props": { "label": "Task Status", "options": [{ "label": "To Do", "value": "todo" }, { "label": "In Progress", "value": "in_progress" }, { "label": "Done", "value": "done" }] }, "valueKey": "newTaskStatus" },
-                            { "id": "tm-add-btn", "type": "button", "props": { "label": "Add Task" }, "actions": [{ "type": "appendItem", "target": "tasks", "itemFromState": { "title": "newTaskTitle", "priority": "newTaskPriority", "status": "newTaskStatus" } }, { "type": "setValue", "target": "newTaskTitle", "value": "" }] },
-                            { "id": "tm-delete-btn", "type": "button", "props": { "label": "Delete Task" }, "actions": [{ "type": "removeItem", "target": "tasks", "idFromState": "selectedTaskId" }] },
-                            { "id": "tm-done-btn", "type": "button", "props": { "label": "Mark Done" }, "actions": [{ "type": "updateItem", "target": "tasks", "idFromState": "selectedTaskId", "patch": { "status": "done" } }] }
+                            { "id": "tm-add-btn", "type": "button", "props": { "label": "Add Task" }, "actions": [
+                                { "type": "invokeRegisteredAction", "actionName": "local_data.write", "input": { "modelId": "tasks", "data": {} }, "inputFromState": { "data.title": "newTaskTitle", "data.priority": "newTaskPriority", "data.status": "newTaskStatus" }, "resultKey": "lastTask" },
+                                { "type": "invokeRegisteredAction", "actionName": "local_data.query", "input": { "modelId": "tasks", "limit": 100 }, "resultKey": "tasksResult" },
+                                { "type": "setValue", "target": "newTaskTitle", "value": "" }
+                            ] },
+                            { "id": "tm-delete-btn", "type": "button", "props": { "label": "Delete Task" }, "actions": [
+                                { "type": "invokeRegisteredAction", "actionName": "local_data.delete", "input": {}, "inputFromState": { "recordId": "selectedTaskId" } },
+                                { "type": "invokeRegisteredAction", "actionName": "local_data.query", "input": { "modelId": "tasks", "limit": 100 }, "resultKey": "tasksResult" }
+                            ] },
+                            { "id": "tm-done-btn", "type": "button", "props": { "label": "Mark Done" }, "actions": [
+                                { "type": "invokeRegisteredAction", "actionName": "local_data.write", "input": { "modelId": "tasks", "data": { "status": "done", "completed": true } }, "inputFromState": { "recordId": "selectedTaskId" } },
+                                { "type": "invokeRegisteredAction", "actionName": "local_data.query", "input": { "modelId": "tasks", "limit": 100 }, "resultKey": "tasksResult" }
+                            ] }
                         ]
                     }
                 },
-                "diagnostics": { "fixture": "task_manager" }
+                "diagnostics": { "fixture": "task_tracker" }
             })
             .to_string();
         }
@@ -1595,14 +1610,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_manager_fixture_generates_valid_crud_tool() {
+    async fn task_tracker_fixture_generates_local_data_crud_tool() {
         let provider = MockAiProvider::new();
         let response = provider
             .chat(AgentRequest {
                 system_prompt: "test".into(),
                 messages: vec![AgentMessage::text(
                     crate::ai::AgentRole::User,
-                    "Please build me a Task Manager app",
+                    "Build me a simple task tracker",
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
@@ -1612,25 +1627,38 @@ mod tests {
         let parsed = parse_agent_response(&response.raw_text).unwrap();
         let tc = parsed.payload.tool_change.as_ref().unwrap();
         let tool = tc.tool.as_ref().unwrap();
-        assert_eq!(tool.id, "tool-task-manager");
-        assert_eq!(tool.name, "Task Manager");
-        // Verify dataTable component exists with rowsKey and filtering
+        assert_eq!(tool.id, "tool-task-tracker");
+        assert_eq!(tool.name, "Task Tracker");
         let table = tool
             .components
             .iter()
             .find(|c| c.component_type == "dataTable")
             .expect("dataTable component");
-        assert_eq!(table.props.as_ref().unwrap()["rowsKey"], "tasks");
-        // Verify add button has appendItem action
+        assert_eq!(table.props.as_ref().unwrap()["rowsKey"], "tasksResult");
+        assert_eq!(
+            table.props.as_ref().unwrap()["dataSource"]["actionName"],
+            "local_data.query"
+        );
         let add_btn = tool
             .components
             .iter()
             .find(|c| c.id == "tm-add-btn")
             .expect("tm-add-btn");
         let actions = add_btn.actions.as_ref().unwrap();
-        assert!(actions.iter().any(
-            |a| matches!(a, ActionDefinition::AppendItem { target, .. } if target == "tasks")
-        ));
+        assert!(actions.iter().any(|a| {
+            matches!(
+                a,
+                ActionDefinition::InvokeRegisteredAction { action_name, .. }
+                    if action_name == "local_data.write"
+            )
+        }));
+        assert!(actions.iter().any(|a| {
+            matches!(
+                a,
+                ActionDefinition::InvokeRegisteredAction { action_name, .. }
+                    if action_name == "local_data.query"
+            )
+        }));
     }
 
     #[tokio::test]

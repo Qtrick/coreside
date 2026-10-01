@@ -365,9 +365,47 @@ impl SoftwareDocument {
                         }
                     }
                 }
+                // dataSource.resultKey holds action payloads (often {records:[...]}) — object, not array.
+                if let Some(ds) = p.get("dataSource") {
+                    if let Some(Value::String(ref rk)) = ds.get("resultKey") {
+                        if !rk.is_empty() {
+                            map.entry(rk.clone())
+                                .or_insert_with(|| ("object".to_string(), json!({})));
+                        }
+                    }
+                }
+            }
+            // Registered-action result keys first so rowsKey cannot force array on query payloads.
+            if let Some(ref actions) = c.actions {
+                for action in actions {
+                    if let ActionDefinition::InvokeRegisteredAction {
+                        result_key,
+                        input_from_state,
+                        ..
+                    } = action
+                    {
+                        if let Some(rk) = result_key {
+                            if !rk.is_empty() {
+                                map.entry(rk.clone())
+                                    .or_insert_with(|| ("object".to_string(), json!({})));
+                            }
+                        }
+                        if let Some(inputs) = input_from_state {
+                            for skey in inputs.values() {
+                                if !skey.is_empty() {
+                                    map.entry(skey.clone())
+                                        .or_insert_with(|| ("string".to_string(), json!("")));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(Value::Object(ref p)) = c.props {
                 for prop_name in &["rowsKey", "dataKey"] {
                     if let Some(Value::String(ref s)) = p.get(*prop_name) {
                         if !s.is_empty() {
+                            // Prefer object when already typed from resultKey/dataSource.
                             map.entry(s.clone())
                                 .or_insert_with(|| ("array".to_string(), json!([])));
                         }
@@ -428,6 +466,65 @@ impl SoftwareDocument {
         self.state_contracts = inferred;
     }
 
+    /// When the tool declares `invokeRegisteredAction` on components but omitted
+    /// `actionContracts`, synthesize matching contracts so admission can succeed.
+    /// Does nothing when action_contracts are already present (explicit wins).
+    pub fn infer_missing_action_contracts_if_empty(&mut self) {
+        if !self.action_contracts.is_empty() {
+            return;
+        }
+        let mut inferred: Vec<ActionContract> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+
+        fn walk(comp: &ToolComponent, inferred: &mut Vec<ActionContract>, seen: &mut HashSet<String>) {
+            if let Some(ref actions) = comp.actions {
+                for action in actions {
+                    if let ActionDefinition::InvokeRegisteredAction {
+                        action_name,
+                        result_key,
+                        input_from_state,
+                        ..
+                    } = action
+                    {
+                        let act_id =
+                            format!("{}-{}", comp.id, action_name.replace('.', "-"));
+                        if !seen.insert(act_id.clone()) {
+                            continue;
+                        }
+                        inferred.push(ActionContract {
+                            action_id: act_id,
+                            action_name: action_name.clone(),
+                            component_id: Some(comp.id.clone()),
+                            descriptor_hash: None,
+                            description: Some(format!(
+                                "Inferred from component '{}'",
+                                comp.id
+                            )),
+                            result_key: result_key.clone(),
+                            input_from_state: input_from_state.clone(),
+                        });
+                    }
+                }
+            }
+            if let Some(ref children) = comp.children {
+                for child in children {
+                    walk(child, inferred, seen);
+                }
+            }
+        }
+
+        for sec in &self.sections {
+            for comp in &sec.components {
+                walk(comp, &mut inferred, &mut seen);
+            }
+        }
+        for comp in &self.components {
+            walk(comp, &mut inferred, &mut seen);
+        }
+        inferred.sort_by(|a, b| a.action_id.cmp(&b.action_id));
+        self.action_contracts = inferred;
+    }
+
     /// Load or convert a JSON Value into a SoftwareDocument without losing contracts.
     pub fn from_value(val: &Value) -> Result<Self, String> {
         if val.get("sections").is_some() {
@@ -453,6 +550,7 @@ impl SoftwareDocument {
                     }
                 }
             }
+            doc.infer_missing_action_contracts_if_empty();
             if doc.state_contracts.is_empty() {
                 doc.infer_missing_contracts_if_empty();
             }
@@ -480,6 +578,7 @@ impl SoftwareDocument {
                     .map_err(|e| format!("invalid action contracts: {e}"))?;
                 doc.action_contracts = contracts;
             }
+            doc.infer_missing_action_contracts_if_empty();
             if doc.state_contracts.is_empty() {
                 doc.infer_missing_contracts_if_empty();
             }
@@ -618,6 +717,7 @@ impl SoftwareDocument {
             }
 
             doc.sync_components();
+            doc.infer_missing_action_contracts_if_empty();
             if doc.state_contracts.is_empty() {
                 doc.infer_missing_contracts_if_empty();
             }
@@ -679,6 +779,7 @@ impl SoftwareDocument {
         }
 
         doc.sync_components();
+        doc.infer_missing_action_contracts_if_empty();
         if doc.state_contracts.is_empty() {
             doc.infer_missing_contracts_if_empty();
         }
@@ -3408,5 +3509,109 @@ mod tests {
         assert!(err
             .unwrap_err()
             .contains("state value for key 'round' does not match contract type 'integer'"));
+    }
+
+    #[test]
+    fn from_tool_definition_infers_action_and_state_contracts_for_registered_actions() {
+        let tool = ToolDefinition {
+            id: "tool-task-tracker".into(),
+            name: "Task Tracker".into(),
+            description: "d".into(),
+            layout: json!({"type": "dashboard"}),
+            components: vec![
+                ToolComponent {
+                    id: "tm-new-title".into(),
+                    component_type: "textInput".into(),
+                    value_key: Some("newTaskTitle".into()),
+                    props: Some(json!({"label": "Title"})),
+                    ..Default::default()
+                },
+                ToolComponent {
+                    id: "tm-add-btn".into(),
+                    component_type: "button".into(),
+                    value_key: None,
+                    props: Some(json!({"label": "Add"})),
+                    actions: Some(vec![ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.write".into(),
+                        input: Some(json!({"modelId": "tasks", "data": {}})),
+                        input_from_state: Some(
+                            [("data.title".into(), "newTaskTitle".into())].into(),
+                        ),
+                        component_id: None,
+                        result_key: Some("lastTask".into()),
+                    }]),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let doc = SoftwareDocument::from_tool_definition(&tool);
+        assert!(
+            doc.action_contracts
+                .iter()
+                .any(|ac| ac.action_name == "local_data.write"
+                    && ac.component_id.as_deref() == Some("tm-add-btn")),
+            "expected inferred action contract, got {:?}",
+            doc.action_contracts
+        );
+        assert!(
+            doc.state_contracts.iter().any(|sc| sc.key == "newTaskTitle"),
+            "expected newTaskTitle state contract"
+        );
+        assert!(
+            doc.state_contracts.iter().any(|sc| sc.key == "lastTask"),
+            "expected lastTask resultKey state contract"
+        );
+        admit_software_document(None, &doc, &["coreside.core".into()]).expect("admit");
+    }
+
+    #[test]
+    fn rows_key_shared_with_query_result_infers_object_not_array() {
+        let tool = ToolDefinition {
+            id: "tool-tt".into(),
+            name: "TT".into(),
+            description: "d".into(),
+            layout: json!({"type": "dashboard"}),
+            components: vec![
+                ToolComponent {
+                    id: "tm-list".into(),
+                    component_type: "dataTable".into(),
+                    value_key: None,
+                    props: Some(json!({
+                        "rowsKey": "tasksResult",
+                        "dataSource": {
+                            "actionName": "local_data.query",
+                            "input": { "modelId": "tasks", "limit": 100 },
+                            "resultKey": "tasksResult"
+                        }
+                    })),
+                    actions: Some(vec![ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.query".into(),
+                        input: Some(json!({"modelId": "tasks", "limit": 100})),
+                        input_from_state: None,
+                        component_id: None,
+                        result_key: Some("tasksResult".into()),
+                    }]),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let doc = SoftwareDocument::from_tool_definition(&tool);
+        let sc = doc
+            .state_contracts
+            .iter()
+            .find(|s| s.key == "tasksResult")
+            .expect("tasksResult contract");
+        assert_eq!(
+            sc.type_name, "object",
+            "query payload {{records}} must not be typed as array, got {sc:?}"
+        );
+        admit_software_document(
+            None,
+            &doc,
+            &["coreside.core".into(), "coreside.data".into()],
+        )
+        .expect("admit");
     }
 }
