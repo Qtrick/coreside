@@ -2166,10 +2166,8 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert!(
-            evolve_ops
-                .iter()
-                .any(|o| o.op_type == "component.insert"
-                    && o.target.component_id.as_deref() == Some("tm-new-due"))
+            evolve_ops.iter().any(|o| o.op_type == "component.insert"
+                && o.target.component_id.as_deref() == Some("tm-new-due"))
                 || evolve_ops.iter().any(|o| o.op_type == "tool.full_replace"),
             "due-date field must appear via granular insert or full replace fallback"
         );
@@ -2209,11 +2207,8 @@ mod tests {
         let surface_id = format!("surf-{app_id}");
         let surface = get_surface(&db, &surface_id).expect("surface after evolve");
         let doc = crate::runtime_v2::SoftwareDocument::from_value(&surface.definition).unwrap();
-        let component_ids: Vec<String> = doc
-            .flatten_components()
-            .into_iter()
-            .map(|c| c.id)
-            .collect();
+        let component_ids: Vec<String> =
+            doc.flatten_components().into_iter().map(|c| c.id).collect();
         assert!(
             component_ids.iter().any(|id| id == "tm-new-due"),
             "tm-new-due must be in persisted surface; ids={component_ids:?}"

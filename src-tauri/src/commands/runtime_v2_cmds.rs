@@ -509,7 +509,9 @@ pub fn flush_patch_scheduler_cmd(
     if let Some(conv) = surface.conversation_id.as_deref() {
         windows::enforce_caller_conversation_scope(&window, &db, conv)?;
     }
-    let mounts = state.mount_registry.lock();
+    let mut mounts = state.mount_registry.lock();
+    // Alive IPC for this surface refreshes its mount TTL (crash recovery still expires).
+    let _ = mounts.touch_surface(window.label(), &surface_id);
     // `_conversation_id` is ignored; see `flush_conversation_from_fresh_mount`.
     let conversation_id = flush_conversation_from_fresh_mount(
         &mounts,

@@ -21,10 +21,11 @@ use crate::ai::response_schema::{ToolComponent, ToolDefinition};
 use crate::db::Database;
 use crate::runtime_v2::operations::{AppOperation, OperationTarget};
 use crate::runtime_v2::software_document::SoftwareDocument;
-use crate::runtime_v2::surfaces::{get_surface, surface_id_for_tool};
+use crate::runtime_v2::surfaces::get_surface;
 
 use super::compiler::CompiledChange;
 use super::errors::KernelError;
+use super::lineage::resolve_application_surface;
 use super::COMPILER_VERSION;
 
 /// Compiler-visible snapshot of one application surface (no secrets / approvals).
@@ -38,15 +39,29 @@ pub struct ApplicationSpec {
 }
 
 /// Load the trusted current ApplicationSpec for a tool/application id from SQLite.
+///
+/// Surface identity comes from DB lineage (`resolve_application_surface`), not
+/// from inventing `surf-{application_id}`.
 pub fn load_application_spec(
     db: &Database,
     application_id: &str,
 ) -> Result<ApplicationSpec, KernelError> {
-    let surface_id = surface_id_for_tool(application_id);
-    let surface = get_surface(db, &surface_id).map_err(|e| {
-        KernelError::Validation(format!(
-            "cannot load ApplicationSpec for '{application_id}': {e}"
-        ))
+    // Preserve Protected / Db categories — do not collapse into Validation.
+    let lineage = match resolve_application_surface(db, application_id, None, None) {
+        Ok(lineage) => lineage,
+        Err(KernelError::Validation(msg)) => {
+            return Err(KernelError::Validation(format!(
+                "cannot load ApplicationSpec for '{application_id}': {msg}"
+            )));
+        }
+        Err(other) => return Err(other),
+    };
+    let surface_id = lineage.surface_id;
+    let surface = get_surface(db, &surface_id).map_err(|e| match e {
+        crate::db::DbError::NotFound(_) => KernelError::Validation(format!(
+            "cannot load ApplicationSpec for '{application_id}': surface '{surface_id}' not found"
+        )),
+        other => KernelError::Db(other),
     })?;
     let doc = SoftwareDocument::from_value(&surface.definition).map_err(|e| {
         KernelError::Validation(format!(
@@ -135,7 +150,8 @@ fn top_level_metadata_equal(current: &ToolDefinition, proposed: &ToolDefinition)
     if !proposed.state_contracts.is_empty() && current.state_contracts != proposed.state_contracts {
         return false;
     }
-    if !proposed.action_contracts.is_empty() && current.action_contracts != proposed.action_contracts
+    if !proposed.action_contracts.is_empty()
+        && current.action_contracts != proposed.action_contracts
     {
         return false;
     }
@@ -288,10 +304,7 @@ pub fn diff_surface_update(
         }
     }
 
-    let mut insert_order: Vec<&str> = prop_ids
-        .difference(&cur_ids)
-        .map(|s| s.as_str())
-        .collect();
+    let mut insert_order: Vec<&str> = prop_ids.difference(&cur_ids).map(|s| s.as_str()).collect();
     insert_order.sort_by_key(|id| {
         prop_idx
             .get(*id)
@@ -492,10 +505,12 @@ mod tests {
                 && o.target.component_id.as_deref() == Some("tm-add-btn")));
         // Stable siblings must not be removed/reinserted.
         assert!(!compiled.operations.iter().any(|o| {
-            o.op_type == "component.remove" && o.target.component_id.as_deref() == Some("tm-heading")
+            o.op_type == "component.remove"
+                && o.target.component_id.as_deref() == Some("tm-heading")
         }));
         assert!(!compiled.operations.iter().any(|o| {
-            o.op_type == "component.insert" && o.target.component_id.as_deref() == Some("tm-heading")
+            o.op_type == "component.insert"
+                && o.target.component_id.as_deref() == Some("tm-heading")
         }));
     }
 
@@ -518,6 +533,103 @@ mod tests {
         let db = Database::open_path(&dir.path().join("spec.db")).unwrap();
         let err = load_application_spec(&db, "tool-does-not-exist").unwrap_err();
         assert!(matches!(err, KernelError::Validation(_)));
+    }
+
+    #[test]
+    fn load_application_spec_preserves_protected_category() {
+        use crate::db::{create_conversation, DEFAULT_WORKSPACE_ID};
+
+        const PROTECTED_APP: &str = "core.settings.ai";
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("spec-protected.db")).unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Protected spec", None).unwrap();
+        // Bypass bind_surface_tool_id (it rejects protected ids) so we can prove
+        // load_application_spec preserves KernelError::Protected rather than collapsing
+        // it into Validation.
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES (?1, ?2, ?1, '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                rusqlite::params![PROTECTED_APP, DEFAULT_WORKSPACE_ID],
+            )
+            .unwrap();
+        let surf = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Protected",
+            &json!({
+                "id": "doc-p",
+                "name": "Protected",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "x"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET tool_id = ?1 WHERE id = ?2",
+                rusqlite::params![PROTECTED_APP, surf.id],
+            )
+            .unwrap();
+
+        let err = load_application_spec(&db, PROTECTED_APP).unwrap_err();
+        assert!(
+            matches!(err, KernelError::Protected(_)),
+            "protected ids must not collapse to Validation; got {err:?}"
+        );
+    }
+
+    #[test]
+    fn load_application_spec_resolves_bound_uuid_not_canonical_surf_prefix() {
+        use crate::db::{create_conversation, DEFAULT_WORKSPACE_ID};
+        use crate::runtime_v2::surfaces::{bind_surface_tool_id, get_surface};
+
+        const APP_ID: &str = "tool-task-tracker";
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("spec-lineage.db")).unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Spec lineage", None).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES (?1, ?2, ?1, '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                rusqlite::params![APP_ID, DEFAULT_WORKSPACE_ID],
+            )
+            .unwrap();
+        let surf = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Task Tracker",
+            &json!({
+                "id": "doc-tt",
+                "name": "Task Tracker",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        bind_surface_tool_id(&mut db, &surf.id, APP_ID).unwrap();
+
+        let canonical = format!("surf-{APP_ID}");
+        assert_ne!(surf.id, canonical);
+        assert!(get_surface(&db, &canonical).is_err());
+
+        let spec = load_application_spec(&db, APP_ID).expect("bound inline surface");
+        assert_eq!(spec.surface_id, surf.id);
+        assert_eq!(spec.application_id, APP_ID);
+        assert_eq!(
+            spec.revision,
+            get_surface(&db, &surf.id).unwrap().current_revision
+        );
     }
 
     #[test]

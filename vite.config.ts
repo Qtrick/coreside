@@ -43,6 +43,8 @@ export default defineConfig({
       "**/.reference/**",
       "**/src-tauri/**",
       "**/e2e/**",
+      // Extracted research archives must never enter the product Vitest graph.
+      "**/reports/.artifacts/**",
       // Node built-in test runner (npm run test:dev-dispatcher), not Vitest.
       "**/scripts/**/*.test.mjs",
     ],

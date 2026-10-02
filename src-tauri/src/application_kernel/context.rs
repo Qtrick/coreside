@@ -41,46 +41,52 @@ pub fn application_summary(db: &Database, application_id: &str) -> DbResult<Valu
 /// Formal bounded application context for evolution (model-visible, no secrets).
 pub fn evolution_context(db: &Database, application_id: &str) -> DbResult<Value> {
     let summary = application_summary(db, application_id)?;
-    let surface_id = crate::runtime_v2::surfaces::surface_id_for_tool(application_id);
-    let (surface_revision, components, state_contracts, action_contracts) =
-        match crate::runtime_v2::surfaces::get_surface(db, &surface_id) {
-            Ok(surface) => {
-                let doc = crate::runtime_v2::SoftwareDocument::from_value(&surface.definition)
-                    .unwrap_or_else(|_| {
-                        crate::runtime_v2::SoftwareDocument::new(
-                            application_id,
-                            summary
-                                .get("name")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or(application_id),
-                        )
-                    });
-                let comps: Vec<Value> = doc
-                    .flatten_components()
-                    .into_iter()
-                    .map(|c| {
-                        json!({
-                            "id": c.id,
-                            "type": c.component_type,
-                            "valueKey": c.value_key,
-                        })
+    // Read-only DB binding — never invent surf-*, never gate on mutation lifecycle
+    // (suspended apps still need accurate surfaceId / revision for OCC guidance).
+    let surface_id =
+        super::lineage::lookup_bound_application_surface_id(db, application_id).unwrap_or_default();
+    let (surface_revision, components, state_contracts, action_contracts) = match (!surface_id
+        .is_empty())
+    .then(|| crate::runtime_v2::surfaces::get_surface(db, &surface_id).ok())
+    .flatten()
+    {
+        Some(surface) => {
+            let doc = crate::runtime_v2::SoftwareDocument::from_value(&surface.definition)
+                .unwrap_or_else(|_| {
+                    crate::runtime_v2::SoftwareDocument::new(
+                        application_id,
+                        summary
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(application_id),
+                    )
+                });
+            let comps: Vec<Value> = doc
+                .flatten_components()
+                .into_iter()
+                .map(|c| {
+                    json!({
+                        "id": c.id,
+                        "type": c.component_type,
+                        "valueKey": c.value_key,
                     })
-                    .collect();
-                (
-                    surface.current_revision,
-                    comps,
-                    doc.state_contracts
-                        .iter()
-                        .map(|sc| serde_json::to_value(sc).unwrap_or(json!({})))
-                        .collect::<Vec<_>>(),
-                    doc.action_contracts
-                        .iter()
-                        .map(|ac| serde_json::to_value(ac).unwrap_or(json!({})))
-                        .collect::<Vec<_>>(),
-                )
-            }
-            Err(_) => (0, Vec::new(), Vec::new(), Vec::new()),
-        };
+                })
+                .collect();
+            (
+                surface.current_revision,
+                comps,
+                doc.state_contracts
+                    .iter()
+                    .map(|sc| serde_json::to_value(sc).unwrap_or(json!({})))
+                    .collect::<Vec<_>>(),
+                doc.action_contracts
+                    .iter()
+                    .map(|ac| serde_json::to_value(ac).unwrap_or(json!({})))
+                    .collect::<Vec<_>>(),
+            )
+        }
+        None => (0, Vec::new(), Vec::new(), Vec::new()),
+    };
 
     Ok(json!({
         "applicationId": application_id,
@@ -201,6 +207,142 @@ mod tests {
             .get("components")
             .and_then(|v| v.as_array())
             .expect("components");
-        assert!(components.iter().any(|c| c.get("id") == Some(&json!("tm-list"))));
+        assert!(components
+            .iter()
+            .any(|c| c.get("id") == Some(&json!("tm-list"))));
+    }
+
+    #[test]
+    fn evolution_context_surface_id_from_lineage_when_canonical_surf_row_absent() {
+        use crate::runtime_v2::surfaces::{bind_surface_tool_id, get_surface};
+
+        const APP_ID: &str = "tool-task-tracker";
+
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("evo-ctx-lineage.db")).unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Evolution ctx lineage", None)
+                .unwrap();
+
+        let manifest = r#"{"schemaVersion":"1","applicationId":"tool-task-tracker","instanceId":"inst-tt","name":"Task Tracker","description":"","version":1,"surfaces":[{"surfaceId":"surf-tool-task-tracker","placement":"tool_canvas"}],"routes":[],"dataModels":[],"settings":[],"capabilities":["coreside.core"],"permissions":["local_data.read"],"events":[],"tests":[],"searchKeywords":[],"tags":[],"agentDescription":"","applicationActionAccess":["local_data.query"],"surfaceActionAccess":{},"componentActionAccess":{}}"#;
+        db.conn()
+            .execute(
+                "INSERT INTO application_manifests (
+                    id, application_id, instance_id, schema_version, current_version,
+                    manifest_json, health_state, lifecycle_state, created_at, updated_at
+                 ) VALUES ('man-tt', ?1, 'inst-tt', '1', 1, ?2, 'healthy', 'active', datetime('now'), datetime('now'))",
+                rusqlite::params![APP_ID, manifest],
+            )
+            .unwrap();
+
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES (?1, ?2, ?1, '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                rusqlite::params![APP_ID, DEFAULT_WORKSPACE_ID],
+            )
+            .unwrap();
+
+        let surf = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Task Tracker",
+            &json!({
+                "id": "doc-tt",
+                "name": "Task Tracker",
+                "layout": "stack",
+                "components": [{"id": "tm-list", "type": "text", "props": {"text": "Tasks"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        bind_surface_tool_id(&mut db, &surf.id, APP_ID).unwrap();
+
+        let canonical = format!("surf-{APP_ID}");
+        assert_ne!(surf.id, canonical);
+        assert!(get_surface(&db, &canonical).is_err());
+
+        let ctx = evolution_context(&db, APP_ID).expect("context");
+        assert_eq!(
+            ctx.get("surfaceId").and_then(|v| v.as_str()),
+            Some(surf.id.as_str()),
+            "surfaceId must come from DB lineage, not manifest/canonical surf-* naming"
+        );
+        assert_eq!(
+            ctx.get("surfaceRevision").and_then(|v| v.as_i64()),
+            Some(get_surface(&db, &surf.id).unwrap().current_revision)
+        );
+    }
+
+    #[test]
+    fn evolution_context_keeps_surface_id_when_application_suspended() {
+        use crate::runtime_v2::surfaces::{bind_surface_tool_id, get_surface};
+
+        const APP_ID: &str = "tool-task-tracker";
+
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("evo-ctx-suspended.db")).unwrap();
+        let conv = create_conversation(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            "Evolution ctx suspended",
+            None,
+        )
+        .unwrap();
+
+        let manifest = r#"{"schemaVersion":"1","applicationId":"tool-task-tracker","instanceId":"inst-tt","name":"Task Tracker","description":"","version":1,"surfaces":[{"surfaceId":"surf-tool-task-tracker","placement":"tool_canvas"}],"routes":[],"dataModels":[],"settings":[],"capabilities":["coreside.core"],"permissions":["local_data.read"],"events":[],"tests":[],"searchKeywords":[],"tags":[],"agentDescription":"","applicationActionAccess":["local_data.query"],"surfaceActionAccess":{},"componentActionAccess":{}}"#;
+        db.conn()
+            .execute(
+                "INSERT INTO application_manifests (
+                    id, application_id, instance_id, schema_version, current_version,
+                    manifest_json, health_state, lifecycle_state, created_at, updated_at
+                 ) VALUES ('man-tt', ?1, 'inst-tt', '1', 1, ?2, 'healthy', 'suspended', datetime('now'), datetime('now'))",
+                rusqlite::params![APP_ID, manifest],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES (?1, ?2, ?1, '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                rusqlite::params![APP_ID, DEFAULT_WORKSPACE_ID],
+            )
+            .unwrap();
+        let surf = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Task Tracker",
+            &json!({
+                "id": "doc-tt",
+                "name": "Task Tracker",
+                "layout": "stack",
+                "components": [{"id": "tm-list", "type": "text", "props": {"text": "Tasks"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        bind_surface_tool_id(&mut db, &surf.id, APP_ID).unwrap();
+
+        // Mutate-path resolve must fail closed for suspended apps.
+        assert!(
+            crate::application_kernel::lineage::resolve_application_surface(
+                &db, APP_ID, None, None
+            )
+            .is_err()
+        );
+
+        let ctx = evolution_context(&db, APP_ID).expect("read context still available");
+        assert_eq!(
+            ctx.get("surfaceId").and_then(|v| v.as_str()),
+            Some(surf.id.as_str()),
+            "suspended apps must still expose DB-bound surfaceId for OCC guidance"
+        );
+        assert_eq!(
+            ctx.get("surfaceRevision").and_then(|v| v.as_i64()),
+            Some(get_surface(&db, &surf.id).unwrap().current_revision)
+        );
     }
 }

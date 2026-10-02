@@ -120,6 +120,31 @@ pub fn resolve_surface_for_application(
     Ok(lineage)
 }
 
+/// Prefer bound tool_canvas / latest live surface, else canonical `surf-*` when present.
+///
+/// Read-only: no mutation or lifecycle gates. Mutating callers must use
+/// [`resolve_application_surface`].
+pub fn lookup_bound_application_surface_id(db: &Database, application_id: &str) -> Option<String> {
+    let bound_id: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT id FROM surfaces WHERE tool_id = ?1 AND archived = 0
+             ORDER BY CASE WHEN placement = 'tool_canvas' THEN 0 ELSE 1 END, updated_at DESC
+             LIMIT 1",
+            [application_id],
+            |row| row.get(0),
+        )
+        .ok();
+    if bound_id.is_some() {
+        return bound_id;
+    }
+    let canonical = crate::runtime_v2::surfaces::surface_id_for_tool(application_id);
+    match get_surface(db, &canonical) {
+        Ok(_) => Some(canonical),
+        Err(_) => None,
+    }
+}
+
 /// Resolve the live surface that belongs to an application for evolve OCC.
 /// Prefers an explicit surface id, then conversation-scoped binding, then canonical id.
 pub fn resolve_application_surface(
@@ -143,23 +168,12 @@ pub fn resolve_application_surface(
         }
     }
 
-    // Any non-archived surface bound to this application.
-    let bound_id: Option<String> = db
-        .conn()
-        .query_row(
-            "SELECT id FROM surfaces WHERE tool_id = ?1 AND archived = 0
-             ORDER BY CASE WHEN placement = 'tool_canvas' THEN 0 ELSE 1 END, updated_at DESC
-             LIMIT 1",
-            [application_id],
-            |row| row.get(0),
-        )
-        .ok();
-    if let Some(sid) = bound_id {
-        return resolve_surface_for_application(db, &sid, application_id);
-    }
-
-    let canonical = crate::runtime_v2::surfaces::surface_id_for_tool(application_id);
-    resolve_surface_for_application(db, &canonical, application_id)
+    let sid = lookup_bound_application_surface_id(db, application_id).ok_or_else(|| {
+        KernelError::Validation(format!(
+            "surface for application '{application_id}' does not exist"
+        ))
+    })?;
+    resolve_surface_for_application(db, &sid, application_id)
 }
 
 /// Optional conversation/project scope checks for evolve/apply.
@@ -298,6 +312,43 @@ mod tests {
         insert_tool(&db, "app-other");
         let err = resolve_surface_for_application(&db, &surf.id, "app-other")
             .expect_err("cross-app claim must fail");
+        assert!(matches!(err, KernelError::Validation(_)));
+    }
+
+    #[test]
+    fn resolve_application_surface_prefers_bound_uuid_when_canonical_missing() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("lineage-resolve.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Resolve", None).unwrap();
+        insert_tool(&db, "app-real");
+        let surf = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Inline",
+            &json!({
+                "id": "doc-inline",
+                "name": "Inline",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        bind_surface_tool_id(&mut db, &surf.id, "app-real").unwrap();
+
+        let canonical = "surf-app-real";
+        assert_ne!(surf.id.as_str(), canonical);
+        assert!(crate::runtime_v2::surfaces::get_surface(&db, canonical).is_err());
+
+        let lineage =
+            resolve_application_surface(&db, "app-real", None, None).expect("bound surface");
+        assert_eq!(lineage.surface_id, surf.id);
+
+        let hostile = format!("surf-app-real-hostile");
+        let err = resolve_application_surface(&db, "app-real", Some(&hostile), None)
+            .expect_err("preferred hostile surf-* must fail");
         assert!(matches!(err, KernelError::Validation(_)));
     }
 

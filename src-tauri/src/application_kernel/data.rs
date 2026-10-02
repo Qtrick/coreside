@@ -1865,7 +1865,10 @@ mod tests {
             .iter()
             .filter_map(|r| r.get("_id").and_then(|v| v.as_str()))
             .collect();
-        assert_eq!(ids, BTreeSet::from([id1.as_str(), id2.as_str(), id3.as_str()]));
+        assert_eq!(
+            ids,
+            BTreeSet::from([id1.as_str(), id2.as_str(), id3.as_str()])
+        );
 
         let by_id: BTreeMap<_, _> = rows
             .iter()

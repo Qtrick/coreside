@@ -1383,9 +1383,6 @@ mod tests {
         let err = payload
             .validate()
             .expect_err("plan + operations must fail closed");
-        assert!(
-            err.contains("cannot be combined"),
-            "got {err}"
-        );
+        assert!(err.contains("cannot be combined"), "got {err}");
     }
 }

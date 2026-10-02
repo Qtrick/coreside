@@ -17,7 +17,7 @@ Status legend: **Equivalent** · **Partial** · **Implemented differently** · *
 | Reconnect | WS backoff reconnect | Channel re-subscribe + catch-up | Partial | conversation-catch-up | Surface rehydrate desktop proof |
 | Replay | paced DOM history | `ReplayPlayer` + turn timeline | Partial | read-only | No provider re-execution |
 | Hard undo | delete N turns | `undo_transaction` OCC | Partial | transactions.rs | Multi-turn consumer undo UI |
-| Fork snapshot | DO clone + fork index | `runtime_v2/branch.rs` | Partial | branch.rs forks generated data | Branch UI journey |
+| Fork snapshot | DO clone + fork index | `runtime_v2/branch.rs` + `branchConversation` UI | Partial | branch.rs forks generated data; no read-only fork pages | Packaged/desktop branch E2E (UI wired, no e2e spec) |
 | Form submission | iframe POST + secret | `StructuredUserInput` sealed | Implemented differently (secure) | structured_user_input.rs | Rich-form desktop E2E |
 | Client-specific updates | SERVER_PROPS include/exclude | Audience on operations | Partial | operations.rs | Multiuser deferred |
 | Broadcast routing | filtered WS broadcast | conversation-scoped Channel | Partial | message_cmds | Multi-window proof |
@@ -26,8 +26,8 @@ Status legend: **Equivalent** · **Partial** · **Implemented differently** · *
 | Collection incremental update | marker/stream item updates | `data.record_*` + stable record ids | Partial | data.rs preservation tests | Typed collection.* ops deferred |
 | App instances | `ttt/1`, `ttt/2` | `instance_id` + mounts | Equivalent | surfaces / mount_registry | UX clarity |
 | Progressive rendering | complete-unit HTML stream | NDJSON progressive ops + preview txn | Partial | progressive_ops.rs + e2e seed contracts | Multi-surface progressive durable |
-| Application evolution | full HTML rewrite units | ApplicationPlan → surface_diff granular `component.*` | Implemented differently (secure) | surface_diff.rs + compile_plan_against_db | Live provider evidence |
-| Layout-shift | sized outer container guidance | preservation helpers | Partial | preservation.ts | Streaming placeholders |
+| Application evolution | full HTML rewrite units | ApplicationPlan → surface_diff granular `component.*` | Implemented differently (secure) | surface_diff.rs + compile_plan_against_db; lineage-resolved ApplicationSpec (no surf-* authority); fail-closed when spec unloadable | Live provider evidence |
+| Layout-shift | sized outer container guidance | preservation helpers | Partial | preservation.ts; Journey 5 shell overflow (splitter margin + header density) | Streaming placeholders |
 | Script cleanup | MutationObserver scripts | No model JS | Rejected (security) | intentional | Capability packs only |
 | Auth / roles | Better Auth roles | Keyring + Kernel grants | Implemented differently | intentional | Enterprise RBAC deferred |
 | Prompt injection | identity sanitize | research sanitize + pack validation | Implemented differently (stricter) | intentional | Broader boundary tags |

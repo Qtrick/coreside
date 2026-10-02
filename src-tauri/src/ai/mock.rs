@@ -1531,12 +1531,12 @@ mod tests {
                     );
                     if events.iter().any(|e| e.paint.is_some()) {
                         saw_paint = true;
-                    } else if events.iter().any(|e| e.status == "rejected" || e.status == "fatal")
+                    } else if events
+                        .iter()
+                        .any(|e| e.status == "rejected" || e.status == "fatal")
                     {
-                        let reasons: Vec<_> = events
-                            .iter()
-                            .filter_map(|e| e.reason.as_deref())
-                            .collect();
+                        let reasons: Vec<_> =
+                            events.iter().filter_map(|e| e.reason.as_deref()).collect();
                         panic!(
                             "progressive surface preview rejected before paint: {}",
                             reasons.join("; ")

@@ -669,23 +669,17 @@ fn compile_all_against_db(
                 base_revision,
             } => {
                 // Prefer granular diff against trusted ApplicationSpec.
-                // Only fall back to structural compile when the surface row is missing
-                // (rare after lineage checks). Invalid definitions must fail closed.
-                match super::surface_diff::load_application_spec(db, tool_id) {
-                    Ok(spec) => super::surface_diff::diff_surface_update(
-                        &spec,
-                        tool,
-                        tool_id,
-                        change_summary.as_deref(),
-                        *base_revision,
-                    )?,
-                    Err(KernelError::Validation(msg))
-                        if msg.starts_with("cannot load ApplicationSpec for") =>
-                    {
-                        compile(intent.clone())?
-                    }
-                    Err(e) => return Err(e),
-                }
+                // After lineage/OCC validation the surface must load; never fall
+                // back to DB-less structural compile (that would reintroduce
+                // synthetic surf-* targeting as authority).
+                let spec = super::surface_diff::load_application_spec(db, tool_id)?;
+                super::surface_diff::diff_surface_update(
+                    &spec,
+                    tool,
+                    tool_id,
+                    change_summary.as_deref(),
+                    *base_revision,
+                )?
             }
             _ => compile(intent.clone())?,
         };
@@ -1324,6 +1318,167 @@ mod tests {
         }
 
         #[test]
+        fn evolve_update_surface_other_application_tool_id_rejected() {
+            let (mut db, conv_id, _) = setup_bound_task_tracker_surface();
+            insert_tool(&db, "tool-other-app");
+            let mut plan = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(Some(1));
+            for intent in &mut plan.intents {
+                if let ChangeIntent::UpdateSurface { tool_id, tool, .. } = intent {
+                    *tool_id = "tool-other-app".into();
+                    tool.id = "tool-other-app".into();
+                }
+            }
+            let err = validate_plan_against_db(&db, &plan, &scope_for(&conv_id))
+                .expect_err("UpdateSurface toolId must match plan application");
+            assert!(
+                matches!(err, KernelError::Validation(ref m) if m.contains("does not match")),
+                "got {err:?}"
+            );
+        }
+
+        #[test]
+        fn foreign_bound_surface_uuid_cannot_redirect_evolve() {
+            let (mut db, conv_id, _) = setup_bound_task_tracker_surface();
+            insert_tool(&db, "tool-other-app");
+            let other = crate::runtime_v2::surfaces::create_inline_surface(
+                &mut db,
+                &conv_id,
+                None,
+                None,
+                "Other app",
+                &json!({
+                    "id": "doc-other",
+                    "name": "Other",
+                    "layout": "stack",
+                    "components": [{"id": "x", "type": "text", "props": {"text": "other"}}]
+                }),
+                &[],
+            )
+            .unwrap();
+            bind_surface_tool_id(&mut db, &other.id, "tool-other-app").unwrap();
+
+            let mut plan = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(Some(1));
+            plan.intents.push(ChangeIntent::InsertComponent {
+                surface_id: other.id.clone(),
+                parent_id: None,
+                component_type: "text".into(),
+                props: json!({"text": "hostile redirect"}),
+                base_revision: None,
+                component_id: Some("tm-hostile".into()),
+            });
+            let err = validate_plan_against_db(&db, &plan, &scope_for(&conv_id))
+                .expect_err("other app's surface must not accept intents");
+            assert!(
+                matches!(err, KernelError::Validation(ref m) if m.contains("belongs to")),
+                "got {err:?}"
+            );
+        }
+
+        #[test]
+        fn evolve_compile_fails_closed_when_application_spec_unloadable() {
+            use crate::application_kernel::compiler::compile;
+
+            let (db, conv_id, surface_id) = setup_bound_task_tracker_surface();
+            db.conn()
+                .execute(
+                    "UPDATE surfaces SET definition_json = ?1 WHERE id = ?2",
+                    rusqlite::params!["{}", surface_id],
+                )
+                .unwrap();
+
+            let plan = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(Some(1));
+            let err = compile_plan_against_db(&db, &plan, &scope_for(&conv_id))
+                .expect_err("invalid surface definition must fail closed");
+            assert!(
+                matches!(err, KernelError::Validation(ref m) if m.contains("ApplicationSpec")),
+                "got {err:?}"
+            );
+
+            let update_only: Vec<ChangeIntent> = plan
+                .intents
+                .into_iter()
+                .filter(|i| matches!(i, ChangeIntent::UpdateSurface { .. }))
+                .collect();
+            let compile_err = compile_all_against_db(&db, &update_only)
+                .expect_err("compile_all_against_db must not fall back");
+            assert!(
+                matches!(compile_err, KernelError::Validation(ref m) if m.contains("ApplicationSpec")),
+                "got {compile_err:?}"
+            );
+
+            let legacy = compile(update_only[0].clone()).expect("DB-less inspection compile");
+            assert!(
+                legacy
+                    .operations
+                    .iter()
+                    .any(|o| o.op_type == "tool.full_replace"),
+                "DB-less path still full_replaces; DB path must not reach this"
+            );
+        }
+
+        #[test]
+        fn evolve_surface_ops_target_lineage_surface_not_synthetic_prefix() {
+            let (db, conv_id, real_surface_id) = setup_bound_task_tracker_surface();
+            let synthetic = format!("surf-{APP_ID}");
+            assert_ne!(real_surface_id, synthetic);
+            assert!(get_surface(&db, &synthetic).is_err());
+
+            let plan = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(Some(1));
+            let validated =
+                compile_plan_against_db(&db, &plan, &scope_for(&conv_id)).expect("compile");
+            let surface_ops: Vec<_> = validated
+                .compiled
+                .operations
+                .iter()
+                .filter(|o| o.target.surface_id.is_some())
+                .collect();
+            assert!(
+                !surface_ops.is_empty(),
+                "expected surface-targeted ops, got {:?}",
+                validated
+                    .compiled
+                    .operations
+                    .iter()
+                    .map(|o| o.op_type.as_str())
+                    .collect::<Vec<_>>()
+            );
+            for op in &surface_ops {
+                assert_eq!(
+                    op.target.surface_id.as_deref(),
+                    Some(real_surface_id.as_str()),
+                    "op {} must target lineage surface, not synthetic id",
+                    op.op_type
+                );
+                assert_ne!(
+                    op.target.surface_id.as_deref(),
+                    Some(synthetic.as_str()),
+                    "must not redirect via surf-{{applicationId}} prefix"
+                );
+            }
+        }
+
+        #[test]
+        fn application_plan_with_companion_operations_rejected_at_validate() {
+            use crate::ai::response_schema::{AgentResponsePayload, ResponseType};
+
+            let mut payload = AgentResponsePayload {
+                application_plan: Some(crate::ai::plan_fixtures::task_tracker_create_plan()),
+                assistant_message: "create".into(),
+                response_type: ResponseType::ToolChange,
+                ..Default::default()
+            };
+            payload.operations = Some(vec![json!({
+                "type": "component.remove",
+                "target": { "surfaceId": "surf-x", "componentId": "c1" },
+                "payload": {}
+            })]);
+            let err = payload
+                .validate()
+                .expect_err("companion operations must fail closed");
+            assert!(err.contains("cannot be combined"), "got {err}");
+        }
+
+        #[test]
         fn spoofed_surf_prefix_without_db_row_fails() {
             let (db, conv_id, real_surface_id) = setup_bound_task_tracker_surface();
             let spoof = format!("surf-{APP_ID}");
@@ -1396,13 +1551,9 @@ mod tests {
 
             let dir = tempdir().unwrap();
             let mut db = Database::open_path(&dir.path().join("study-evolve.db")).unwrap();
-            let conv = create_conversation(
-                &mut db,
-                DEFAULT_WORKSPACE_ID,
-                "Study planner evolve",
-                None,
-            )
-            .unwrap();
+            let conv =
+                create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Study planner evolve", None)
+                    .unwrap();
             let create = multi_surface_planner_create_plan();
             let create_ops = crate::application_kernel::application_plan::compile_plan(&create)
                 .unwrap()
@@ -1437,9 +1588,8 @@ mod tests {
                 ops.iter().map(|o| o.op_type.as_str()).collect::<Vec<_>>()
             );
             assert!(
-                ops.iter()
-                    .any(|o| o.op_type == "component.update_props"
-                        && o.target.component_id.as_deref() == Some("sp-tasks-table")),
+                ops.iter().any(|o| o.op_type == "component.update_props"
+                    && o.target.component_id.as_deref() == Some("sp-tasks-table")),
                 "expected tasks table props update"
             );
             assert!(
@@ -1453,6 +1603,5 @@ mod tests {
                 "dashboard section must not be remounted"
             );
         }
-
     }
 }

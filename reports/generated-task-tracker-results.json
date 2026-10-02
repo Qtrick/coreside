@@ -2,17 +2,17 @@
   "journey": 21,
   "name": "generated-task-tracker",
   "status": "passed",
-  "startedAt": "2026-10-01T22:58:08.479Z",
-  "finishedAt": "2026-10-01T22:58:18.001Z",
-  "durationMs": 9522,
+  "startedAt": "2026-10-02T06:32:05.734Z",
+  "finishedAt": "2026-10-02T06:32:15.642Z",
+  "durationMs": 9908,
   "taskTitle": "Finish biology homework",
   "toolId": "tool-task-tracker",
   "providerFixture": "mock task tracker (local_data)",
   "seededFinalApplication": false,
-  "commit": "11cb9d440d5a2834d3477e4c775712bcbbb8a3a4",
+  "commit": "local",
   "dirty": true,
   "platform": "darwin",
   "arch": "arm64",
   "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
-  "binarySha256": "678ad47cf8d590f7d8d912b6d70e2ab16922a39240ac894cfcbd9df1537d4de6"
+  "binarySha256": "b59cf290b0e8e12f42b89f38ca11542564006460f7abef0d20bd2d272cd6a274"
 }

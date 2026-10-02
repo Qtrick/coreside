@@ -245,6 +245,32 @@ impl MountRegistry {
         }
     }
 
+    /// Refresh TTL for live mounts of one surface on a window that proved alive via IPC.
+    /// Sibling surfaces are not extended so an unmounted peer cannot ride heartbeat.
+    /// Expired mounts stay untouched so crash recovery still fails closed.
+    pub fn touch_surface(&mut self, window_label: &str, surface_id: &str) -> usize {
+        let window_label = normalize_window_label(window_label);
+        let now = Instant::now();
+        let mut touched = 0usize;
+        let Some(instances) = self.by_surface.get_mut(surface_id) else {
+            return 0;
+        };
+        for reg in instances.values_mut() {
+            if reg.window_label != window_label {
+                continue;
+            }
+            let Some(ready_at) = reg.ready_at else {
+                continue;
+            };
+            if now.duration_since(ready_at) > MOUNT_STALE_TTL {
+                continue;
+            }
+            reg.ready_at = Some(now);
+            touched += 1;
+        }
+        touched
+    }
+
     pub fn instance_count(&self, surface_id: &str) -> usize {
         self.by_surface
             .get(surface_id)
@@ -628,6 +654,45 @@ mod tests {
         reg.clear_window("tool-app");
         assert!(reg.fresh_mount("main", &sid).is_some());
         assert!(reg.fresh_mount("tool-app", &sid).is_none());
+    }
+
+    #[test]
+    fn touch_surface_refreshes_live_ttl_but_not_expired_or_siblings() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("m-touch.db")).unwrap();
+        let (_conv, sid) = setup_surface(&mut db);
+        let (_conv2, sid_peer) = setup_surface(&mut db);
+        let mut reg = MountRegistry::new();
+        reg.register(&db, "main", &sid, "rend-live", None, None, 1, 0)
+            .unwrap();
+        reg.register(&db, "main", &sid, "rend-stale", None, None, 1, 0)
+            .unwrap();
+        reg.register(&db, "main", &sid_peer, "rend-peer", None, None, 1, 0)
+            .unwrap();
+        reg.test_expire_mount(&sid, "rend-stale");
+        // Snapshot peer ready_at so we can prove sibling surfaces are not touched.
+        let peer_ready_before = reg
+            .by_surface
+            .get(&sid_peer)
+            .and_then(|m| m.get("rend-peer"))
+            .and_then(|r| r.ready_at);
+        assert_eq!(reg.touch_surface("main", &sid), 1);
+        assert!(reg.has_fresh_instance(&sid, "rend-live"));
+        assert!(!reg.has_fresh_instance(&sid, "rend-stale"));
+        let peer_ready_after = reg
+            .by_surface
+            .get(&sid_peer)
+            .and_then(|m| m.get("rend-peer"))
+            .and_then(|r| r.ready_at);
+        assert_eq!(
+            peer_ready_before, peer_ready_after,
+            "flush heartbeat must not extend sibling surface mounts"
+        );
+        // Peer window mounts on the same surface stay independent.
+        reg.register(&db, "tool-app", &sid, "rend-tool", None, None, 1, 0)
+            .unwrap();
+        assert_eq!(reg.touch_surface("main", &sid), 1);
+        assert!(reg.has_fresh_instance(&sid, "rend-tool"));
     }
 
     #[test]

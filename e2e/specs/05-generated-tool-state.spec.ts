@@ -30,6 +30,39 @@ describe("Journey 5 — generated tool open + state persist", () => {
       const close = document.querySelector<HTMLElement>(
         '[aria-label="Close tool canvas"], [aria-label="Back to chat"]',
       );
+
+      const offenders: Array<Record<string, unknown>> = [];
+      if (main && main.scrollWidth > main.clientWidth + 2) {
+        const mainRect = main.getBoundingClientRect();
+        for (const node of Array.from(main.querySelectorAll<HTMLElement>("*"))) {
+          const rect = node.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) continue;
+          const pastRight = rect.right - (mainRect.right + 1);
+          const pastLeft = mainRect.left - 1 - rect.left;
+          if (pastRight <= 0 && pastLeft <= 0) continue;
+          const style = getComputedStyle(node);
+          offenders.push({
+            tag: node.tagName.toLowerCase(),
+            className: String(node.className || "").slice(0, 120),
+            id: node.id || null,
+            pastRight: Math.round(pastRight),
+            pastLeft: Math.round(pastLeft),
+            width: Math.round(rect.width),
+            scrollWidth: node.scrollWidth,
+            clientWidth: node.clientWidth,
+            minWidth: style.minWidth,
+            overflowX: style.overflowX,
+            position: style.position,
+          });
+        }
+        offenders.sort(
+          (a, b) =>
+            Number(b.pastRight) +
+            Number(b.pastLeft) -
+            (Number(a.pastRight) + Number(a.pastLeft)),
+        );
+      }
+
       return {
         rootOverflow: root.scrollWidth > root.clientWidth + 2,
         mainOverflow: Boolean(main && main.scrollWidth > main.clientWidth + 2),
@@ -42,6 +75,10 @@ describe("Journey 5 — generated tool open + state persist", () => {
             close.getBoundingClientRect().left >= 0 &&
             close.getBoundingClientRect().right <= window.innerWidth + 1,
         ),
+        mainClientWidth: main?.clientWidth ?? null,
+        mainScrollWidth: main?.scrollWidth ?? null,
+        windowInnerWidth: window.innerWidth,
+        offenders: offenders.slice(0, 8),
       };
     });
     expect(layout).toMatchObject({
