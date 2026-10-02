@@ -64,7 +64,12 @@ export function AutomationsPanel({ onBack }: { onBack: () => void }) {
             up at most once.
           </p>
         </div>
-        <button type="button" className="btn btn-secondary" onClick={onBack}>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          aria-label="Back to chat"
+          onClick={onBack}
+        >
           Back to chat
         </button>
       </header>

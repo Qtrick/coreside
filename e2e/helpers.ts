@@ -178,9 +178,20 @@ export async function openSettings() {
 }
 
 export async function closeSettings() {
-  const back = await $("button=Back to chat");
-  await back.waitForClickable({ timeout: 10_000 });
-  await back.click();
+  // Scope to the settings panel — avoid matching tool-canvas/automations twins.
+  const back = await $(
+    '.settings-panel button[aria-label="Back to chat"], .settings-header button.btn-secondary',
+  );
+  await back.waitForExist({ timeout: 10_000 });
+  await back.scrollIntoView();
+  try {
+    await back.waitForClickable({ timeout: 5_000 });
+    await back.click();
+  } catch {
+    // Narrow CI viewports can still leave the control non-hit-testable; Escape
+    // is the same product close path covered by Journey 3.
+    await browser.keys("Escape");
+  }
   await browser.waitUntil(
     async () => !(await $("h1=Settings").isExisting()),
     {

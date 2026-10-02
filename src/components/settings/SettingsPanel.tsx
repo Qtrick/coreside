@@ -338,6 +338,7 @@ export function SettingsPanel() {
         <button
           type="button"
           className="btn btn-secondary"
+          aria-label="Back to chat"
           onClick={closeSettings}
         >
           Back to chat

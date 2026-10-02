@@ -1499,10 +1499,26 @@ mod tests {
                                     tool_id: Some("tool-e2e-notes".into()),
                                     application_id: Some("tool-e2e-notes".into()),
                                     capability_packs: vec!["coreside.core".into()],
+                                    // Match seeded E2E Notes: opaque keys with prior state
+                                    // require a declared model-writable contract to paint.
                                     definition: json!({
                                         "id": "tool-e2e-notes",
                                         "name": "E2E Notes",
-                                        "components": []
+                                        "stateContracts": [{
+                                            "key": "note",
+                                            "type": "string",
+                                            "initialValue": "",
+                                            "writePolicy": "model"
+                                        }],
+                                        "components": [{
+                                            "id": "e2e-note-input",
+                                            "type": "textInput",
+                                            "valueKey": "note",
+                                            "props": {
+                                                "label": "Note",
+                                                "placeholder": "Type a note"
+                                            }
+                                        }]
                                     }),
                                     state: json!({ "note": "" }),
                                     base_revision: 1,
@@ -1515,6 +1531,16 @@ mod tests {
                     );
                     if events.iter().any(|e| e.paint.is_some()) {
                         saw_paint = true;
+                    } else if events.iter().any(|e| e.status == "rejected" || e.status == "fatal")
+                    {
+                        let reasons: Vec<_> = events
+                            .iter()
+                            .filter_map(|e| e.reason.as_deref())
+                            .collect();
+                        panic!(
+                            "progressive surface preview rejected before paint: {}",
+                            reasons.join("; ")
+                        );
                     }
                 }
                 ProviderStreamEvent::ResponseCompleted { .. } => {
