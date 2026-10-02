@@ -1703,7 +1703,7 @@ mod tests {
             plan.kind,
             crate::application_kernel::application_plan::ApplicationPlanKind::Create
         );
-        let ops = parsed.payload.normalized_operations().unwrap();
+        let ops = parsed.payload.inspection_operations().unwrap();
         assert!(
             ops.iter().any(|o| o.op_type == "surface.create"),
             "plan must compile to surface.create"
@@ -1773,7 +1773,7 @@ mod tests {
             plan.kind,
             crate::application_kernel::application_plan::ApplicationPlanKind::Evolve
         );
-        let ops = parsed.payload.normalized_operations().unwrap();
+        let ops = parsed.payload.inspection_operations().unwrap();
         assert!(ops.iter().any(|o| o.op_type == "data.model_upsert"));
         assert!(ops
             .iter()

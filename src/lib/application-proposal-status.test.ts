@@ -19,7 +19,7 @@ describe("sanitizeConsumerError", () => {
 
 describe("proposalStatusPresentation", () => {
   it("never maps failure to ready", () => {
-    expect(proposalStatusPresentation("failed").label).toBe("Failed");
+    expect(proposalStatusPresentation("failed").label).toBe("Needs attention");
     expect(proposalStatusPresentation("applied").label).toBe("Ready");
   });
 
@@ -39,6 +39,28 @@ describe("computeLiveApplicationGenerationIndex", () => {
       computeLiveApplicationGenerationIndex(["Applying patch"], true),
     ).toBe(3);
   });
+
+  it("maps verification activity to Testing (index 4)", () => {
+    expect(
+      computeLiveApplicationGenerationIndex(["Running declarative tests"], true),
+    ).toBe(4);
+    expect(computeLiveApplicationGenerationIndex(["Verifying surface"], false)).toBe(
+      4,
+    );
+  });
+
+  it("maps finished generation to Ready (index 5)", () => {
+    expect(
+      computeLiveApplicationGenerationIndex(["Generation complete"], false),
+    ).toBe(5);
+    expect(computeLiveApplicationGenerationIndex(["Test pass"], false)).toBe(5);
+  });
+
+  it("does not treat Generating as Applying while streaming", () => {
+    expect(
+      computeLiveApplicationGenerationIndex(["Generating application"], true),
+    ).toBe(1);
+  });
 });
 
 describe("deriveEvolutionCopy", () => {
@@ -51,5 +73,42 @@ describe("deriveEvolutionCopy", () => {
     expect(evolution.isEvolution).toBe(true);
     expect(evolution.headline).toBe("Proposed changes");
     expect(evolution.whatWillChange).toContain("due dates");
+  });
+
+  it("recognizes granular component ops and default preservation copy", () => {
+    const evolution = deriveEvolutionCopy(
+      [
+        { opType: "component.insert" },
+        { type: "component.update_actions" },
+        { type: "state.patch" },
+      ],
+      "",
+      "Extend tasks panel",
+    );
+    expect(evolution.isEvolution).toBe(true);
+    expect(evolution.headline).toBe("Proposed changes");
+    expect(evolution.whatWillBePreserved).toContain("Existing records");
+  });
+
+  it("uses explicit preservation summary when provided", () => {
+    const evolution = deriveEvolutionCopy(
+      [{ type: "component.update_props" }],
+      "Adds priority column.",
+      "Evolve planner",
+      "Dashboard cards and saved study tasks stay intact.",
+    );
+    expect(evolution.whatWillBePreserved).toBe(
+      "Dashboard cards and saved study tasks stay intact.",
+    );
+  });
+
+  it("treats full replace as create preview headline", () => {
+    const created = deriveEvolutionCopy(
+      [{ type: "tool.full_replace" }],
+      "Rebuild layout.",
+      "Redesign",
+    );
+    expect(created.isEvolution).toBe(false);
+    expect(created.headline).toBe("New application preview");
   });
 });

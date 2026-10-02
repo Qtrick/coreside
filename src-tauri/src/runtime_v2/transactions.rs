@@ -638,6 +638,7 @@ fn apply_one(
                 } else {
                     doc.apply_operation(op)?;
                 }
+                doc.merge_inferred_state_contracts_from_bindings();
                 let _notes = doc.validate_and_repair();
                 super::software_document::admit_software_document_with_state(
                     original_doc.as_ref(),

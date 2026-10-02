@@ -1753,6 +1753,138 @@ mod tests {
     }
 
     #[test]
+    fn partial_update_one_of_three_tasks_preserves_sibling_record_ids() {
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("tasks-triple.db")).unwrap();
+        let app = "tool-task-tracker";
+
+        upsert_manifest(
+            &mut db,
+            ApplicationManifest {
+                schema_version: "1".into(),
+                application_id: app.into(),
+                instance_id: "inst-tasks-triple".into(),
+                name: "Task Tracker".into(),
+                description: String::new(),
+                version: 1,
+                surfaces: vec![],
+                routes: vec![],
+                data_models: vec![],
+                settings: vec![],
+                capabilities: vec!["coreside.core".into()],
+                permissions: vec!["local_data.write".into(), "local_data.read".into()],
+                events: vec![],
+                tests: vec![],
+                search_keywords: vec![],
+                tags: vec![],
+                agent_description: String::new(),
+                project_id: None,
+                conversation_id: None,
+                organization_id: None,
+                ownership: None,
+                application_action_access: vec!["local_data.write".into()],
+                surface_action_access: HashMap::new(),
+                component_action_access: HashMap::new(),
+                action_descriptor_hashes: HashMap::new(),
+            },
+        )
+        .unwrap();
+        crate::application_kernel::permissions::grant_permission(
+            &mut db,
+            app,
+            "local_data.write",
+            json!({}),
+            "test",
+        )
+        .unwrap();
+
+        upsert_model(
+            &mut db,
+            app,
+            DataModelDefinition {
+                model_id: "tasks".into(),
+                display_name: "Tasks".into(),
+                schema_version: 1,
+                fields: vec![
+                    DataField {
+                        field_id: "title".into(),
+                        field_type: "text".into(),
+                        required: true,
+                        default: None,
+                        enum_values: None,
+                    },
+                    DataField {
+                        field_id: "status".into(),
+                        field_type: "enum".into(),
+                        required: false,
+                        default: Some(json!("todo")),
+                        enum_values: Some(vec!["todo".into(), "done".into()]),
+                    },
+                ],
+            },
+        )
+        .unwrap();
+
+        let id1 = create_record(
+            &mut db,
+            app,
+            "tasks",
+            json!({ "title": "Task 1", "status": "todo" }),
+        )
+        .unwrap();
+        let id2 = create_record(
+            &mut db,
+            app,
+            "tasks",
+            json!({ "title": "Task 2", "status": "todo" }),
+        )
+        .unwrap();
+        let id3 = create_record(
+            &mut db,
+            app,
+            "tasks",
+            json!({ "title": "Task 3", "status": "todo" }),
+        )
+        .unwrap();
+
+        update_record(
+            &mut db,
+            app,
+            &id2,
+            json!({ "title": "Task 2 updated", "status": "done" }),
+            None,
+        )
+        .unwrap();
+
+        let rows = query_records(&db, app, "tasks", 20).unwrap();
+        assert_eq!(rows.len(), 3);
+        let ids: BTreeSet<_> = rows
+            .iter()
+            .filter_map(|r| r.get("_id").and_then(|v| v.as_str()))
+            .collect();
+        assert_eq!(ids, BTreeSet::from([id1.as_str(), id2.as_str(), id3.as_str()]));
+
+        let by_id: BTreeMap<_, _> = rows
+            .iter()
+            .filter_map(|r| {
+                Some((
+                    r.get("_id")?.as_str()?.to_string(),
+                    (
+                        r.get("title")?.as_str()?.to_string(),
+                        r.get("status")?.as_str()?.to_string(),
+                    ),
+                ))
+            })
+            .collect();
+        assert_eq!(by_id[&id1], ("Task 1".into(), "todo".into()));
+        assert_eq!(by_id[&id2], ("Task 2 updated".into(), "done".into()));
+        assert_eq!(by_id[&id3], ("Task 3".into(), "todo".into()));
+    }
+
+    #[test]
     fn update_record_merges_partial_patch() {
         let dir = tempfile::tempdir().unwrap();
         let mut db = crate::db::Database::open_path(&dir.path().join("merge.db")).unwrap();

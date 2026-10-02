@@ -19,6 +19,7 @@ use super::lineage::{
     LineageScope,
 };
 use super::testing::DeclarativeTest;
+use super::COMPILER_VERSION;
 
 pub const APPLICATION_PLAN_SCHEMA_VERSION: &str = "1";
 
@@ -584,7 +585,12 @@ fn apply_plan_base_revision(plan: &ApplicationPlan, compiled: &mut CompiledChang
     }
 }
 
-/// Validate + compile an ApplicationPlan into kernel-ready operations.
+/// Structural / inspection compile only.
+///
+/// Does **not** consult SQLite lineage or OCC. Must never be treated as the
+/// admission path for durable Apply. Prefer [`compile_plan_against_db`] for
+/// proposal/apply, or [`compile_for_inspection`] when the call site needs an
+/// explicitly non-authoritative result type.
 pub fn compile_plan(plan: &ApplicationPlan) -> Result<ValidatedApplicationPlan, KernelError> {
     validate_plan(plan)?;
     let mut compiled = compile_all(&plan.intents)?;
@@ -592,18 +598,47 @@ pub fn compile_plan(plan: &ApplicationPlan) -> Result<ValidatedApplicationPlan, 
     Ok(ValidatedApplicationPlan {
         plan: plan.clone(),
         compiled,
-        diagnostics: Vec::new(),
+        diagnostics: vec!["inspection-only: no SQLite lineage/OCC".into()],
     })
 }
 
-/// Validate (including DB lineage) + compile. Prefer this at proposal/apply time.
+/// Explicitly non-authoritative compile for schema tests, UI preview diagnostics,
+/// and provider-contract checks. The result must not be passed to Apply as the
+/// sole authority for ApplicationPlan mutations.
+#[derive(Debug, Clone)]
+pub struct InspectionCompiledPlan {
+    pub plan: ApplicationPlan,
+    pub compiled: CompiledChange,
+    pub diagnostics: Vec<String>,
+}
+
+impl InspectionCompiledPlan {
+    /// Inspection ops are intentionally not a durable admission ticket.
+    pub fn operations_for_inspection(&self) -> &[AppOperation] {
+        &self.compiled.operations
+    }
+}
+
+pub fn compile_for_inspection(
+    plan: &ApplicationPlan,
+) -> Result<InspectionCompiledPlan, KernelError> {
+    let validated = compile_plan(plan)?;
+    Ok(InspectionCompiledPlan {
+        plan: validated.plan,
+        compiled: validated.compiled,
+        diagnostics: validated.diagnostics,
+    })
+}
+
+/// Validate (including DB lineage + OCC) + compile with ApplicationSpec diffing.
+/// This is the only ApplicationPlan path that may produce durable Apply ops.
 pub fn compile_plan_against_db(
     db: &Database,
     plan: &ApplicationPlan,
     scope: &LineageScope,
 ) -> Result<ValidatedApplicationPlan, KernelError> {
     validate_plan_against_db(db, plan, scope)?;
-    let mut compiled = compile_all(&plan.intents)?;
+    let mut compiled = compile_all_against_db(db, &plan.intents)?;
     apply_plan_base_revision(plan, &mut compiled);
     Ok(ValidatedApplicationPlan {
         plan: plan.clone(),
@@ -612,9 +647,58 @@ pub fn compile_plan_against_db(
     })
 }
 
-/// Expand a validated plan into AppOperations (same path as ChangeIntent compile).
-pub fn plan_to_operations(plan: &ApplicationPlan) -> Result<Vec<AppOperation>, KernelError> {
-    Ok(compile_plan(plan)?.compiled.operations)
+/// Compile intents with DB-backed surface diff for UpdateSurface.
+fn compile_all_against_db(
+    db: &Database,
+    intents: &[ChangeIntent],
+) -> Result<CompiledChange, KernelError> {
+    if intents.is_empty() {
+        return Err(KernelError::Validation(
+            "compile_all requires at least one intent".into(),
+        ));
+    }
+    let mut operations = Vec::new();
+    let mut summaries = Vec::new();
+    let mut rollback_hints = Vec::new();
+    for intent in intents {
+        let compiled = match intent {
+            ChangeIntent::UpdateSurface {
+                tool_id,
+                tool,
+                change_summary,
+                base_revision,
+            } => {
+                // Prefer granular diff against trusted ApplicationSpec.
+                // Only fall back to structural compile when the surface row is missing
+                // (rare after lineage checks). Invalid definitions must fail closed.
+                match super::surface_diff::load_application_spec(db, tool_id) {
+                    Ok(spec) => super::surface_diff::diff_surface_update(
+                        &spec,
+                        tool,
+                        tool_id,
+                        change_summary.as_deref(),
+                        *base_revision,
+                    )?,
+                    Err(KernelError::Validation(msg))
+                        if msg.starts_with("cannot load ApplicationSpec for") =>
+                    {
+                        compile(intent.clone())?
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            _ => compile(intent.clone())?,
+        };
+        operations.extend(compiled.operations);
+        summaries.push(compiled.summary);
+        rollback_hints.push(compiled.rollback_hint);
+    }
+    Ok(CompiledChange {
+        compiler_version: COMPILER_VERSION.into(),
+        operations,
+        summary: summaries.join("; "),
+        rollback_hint: rollback_hints.join("; "),
+    })
 }
 
 /// Derive a legacy toolChange-compatible payload from the first Create/Update surface intent.
@@ -961,7 +1045,10 @@ mod tests {
             matches!(plan.intents[1], ChangeIntent::UpsertDataModel { .. }),
             "create plans must follow with UpsertDataModel"
         );
-        let ops = plan_to_operations(&plan).unwrap();
+        let ops = compile_for_inspection(&plan)
+            .unwrap()
+            .operations_for_inspection()
+            .to_vec();
         let create_idx = ops
             .iter()
             .position(|o| o.op_type == "surface.create")
@@ -1261,5 +1348,111 @@ mod tests {
                 "got {err:?}"
             );
         }
+
+        #[test]
+        fn db_less_normalized_operations_cannot_admit_application_plan() {
+            use crate::ai::plan_fixtures::task_tracker_create_plan;
+            use crate::ai::response_schema::AgentResponsePayload;
+
+            let plan = task_tracker_create_plan();
+            let payload = AgentResponsePayload {
+                application_plan: Some(plan.clone()),
+                assistant_message: "create".into(),
+                response_type: crate::ai::response_schema::ResponseType::ToolChange,
+                ..Default::default()
+            };
+            let err = payload
+                .normalized_operations()
+                .expect_err("ApplicationPlan must not compile via DB-less path");
+            assert!(
+                err.contains("compile_plan_against_db"),
+                "error must name authoritative API, got {err}"
+            );
+
+            // Inspection remains available for structural checks.
+            let inspected = payload
+                .inspection_operations()
+                .expect("inspection compile must work");
+            assert!(!inspected.is_empty());
+
+            let inspection =
+                crate::application_kernel::application_plan::compile_for_inspection(&plan)
+                    .expect("inspection");
+            assert!(inspection
+                .diagnostics
+                .iter()
+                .any(|d| d.contains("inspection-only")));
+        }
+
+        #[test]
+        fn study_planner_evolve_preserves_dashboard_when_tasks_gain_priority() {
+            use crate::ai::plan_fixtures::{
+                multi_surface_planner_add_priority_plan, multi_surface_planner_create_plan,
+            };
+            use crate::application_kernel::application_plan::compile_plan_against_db;
+            use crate::application_kernel::{apply_change, decide_proposal, ChangeRequest};
+
+            const STUDY_APP: &str = "tool-study-planner";
+
+            let dir = tempdir().unwrap();
+            let mut db = Database::open_path(&dir.path().join("study-evolve.db")).unwrap();
+            let conv = create_conversation(
+                &mut db,
+                DEFAULT_WORKSPACE_ID,
+                "Study planner evolve",
+                None,
+            )
+            .unwrap();
+            let create = multi_surface_planner_create_plan();
+            let create_ops = crate::application_kernel::application_plan::compile_plan(&create)
+                .unwrap()
+                .compiled
+                .operations;
+            let prop = apply_change(
+                &mut db,
+                None,
+                ChangeRequest {
+                    conversation_id: Some(conv.id.clone()),
+                    summary: "Create Study Planner".into(),
+                    operations: create_ops,
+                    source_type: "agent".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .proposal_id
+            .unwrap();
+            assert!(decide_proposal(&mut db, None, &prop, true)
+                .unwrap()
+                .is_committed());
+
+            let surface = get_surface(&db, &format!("surf-{STUDY_APP}")).unwrap();
+            let evolve = multi_surface_planner_add_priority_plan(Some(surface.current_revision));
+            let validated = compile_plan_against_db(&db, &evolve, &scope_for(&conv.id))
+                .expect("study planner evolve");
+            let ops = &validated.compiled.operations;
+            assert!(
+                !ops.iter().any(|o| o.op_type == "tool.full_replace"),
+                "tasks-only evolve must stay granular, got {:?}",
+                ops.iter().map(|o| o.op_type.as_str()).collect::<Vec<_>>()
+            );
+            assert!(
+                ops.iter()
+                    .any(|o| o.op_type == "component.update_props"
+                        && o.target.component_id.as_deref() == Some("sp-tasks-table")),
+                "expected tasks table props update"
+            );
+            assert!(
+                !ops.iter().any(|o| {
+                    (o.op_type == "component.remove" || o.op_type == "component.insert")
+                        && matches!(
+                            o.target.component_id.as_deref(),
+                            Some("sp-dash-heading" | "sp-dash-summary")
+                        )
+                }),
+                "dashboard section must not be remounted"
+            );
+        }
+
     }
 }

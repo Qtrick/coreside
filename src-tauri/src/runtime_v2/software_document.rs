@@ -333,12 +333,7 @@ impl SoftwareDocument {
         self.components = self.flatten_components();
     }
 
-    /// Deterministically infer safe state contracts from component bindings and actions
-    /// if no state contracts were explicitly declared.
-    pub fn infer_missing_contracts_if_empty(&mut self) {
-        if !self.state_contracts.is_empty() {
-            return;
-        }
+    fn collect_inferred_state_keys(&self) -> HashMap<String, (String, Value)> {
         let mut keys_found: HashMap<String, (String, Value)> = HashMap::new();
         fn collect_from_comp(c: &ToolComponent, map: &mut HashMap<String, (String, Value)>) {
             let comp_type = c.component_type.as_str();
@@ -444,6 +439,45 @@ impl SoftwareDocument {
                 }
             }
         }
+        keys_found
+    }
+
+    /// Merge newly referenced bindings into existing state contracts (incremental evolve).
+    pub fn merge_inferred_state_contracts_from_bindings(&mut self) {
+        if self.state_contracts.is_empty() {
+            self.infer_missing_contracts_if_empty();
+            return;
+        }
+        let keys_found = self.collect_inferred_state_keys();
+        for (k, (t, init)) in keys_found {
+            if self.state_contracts.iter().any(|sc| sc.key == k) {
+                continue;
+            }
+            let is_null = init.is_null();
+            self.state_contracts.push(StateContract {
+                key: k,
+                type_name: t,
+                initial_value: init,
+                nullable: is_null,
+                scope: StateScope::Persistent,
+                description: Some("Inferred state contract".into()),
+                preservation_policy: Some("preserve".into()),
+                read_policy: "public".into(),
+                write_policy: "model".into(),
+                sensitivity: None,
+                origin: "model".into(),
+            });
+        }
+        self.state_contracts.sort_by(|a, b| a.key.cmp(&b.key));
+    }
+
+    /// Deterministically infer safe state contracts from component bindings and actions
+    /// if no state contracts were explicitly declared.
+    pub fn infer_missing_contracts_if_empty(&mut self) {
+        if !self.state_contracts.is_empty() {
+            return;
+        }
+        let keys_found = self.collect_inferred_state_keys();
 
         let mut inferred = Vec::new();
         for (k, (t, init)) in keys_found {

@@ -21,6 +21,7 @@ pub mod provenance;
 pub mod recovery;
 pub mod registered_actions;
 pub mod repair;
+pub mod surface_diff;
 pub mod testing;
 
 use std::collections::HashMap;
@@ -1886,7 +1887,7 @@ mod tests {
         );
         let ops = parsed
             .payload
-            .normalized_operations()
+            .inspection_operations()
             .expect("ApplicationPlan must compile");
         assert!(ops.iter().any(|o| o.op_type == "surface.create"));
         assert!(ops.iter().any(|o| o.op_type == "data.model_upsert"));
@@ -2039,7 +2040,7 @@ mod tests {
         let create_ops = parse_agent_response(&create.raw_text)
             .unwrap()
             .payload
-            .normalized_operations()
+            .inspection_operations()
             .unwrap();
         let create_prop = apply_change(
             &mut db,
@@ -2131,16 +2132,46 @@ mod tests {
                 .kind,
             crate::application_kernel::application_plan::ApplicationPlanKind::Evolve
         );
-        let evolve_ops = evolve_parsed.payload.normalized_operations().unwrap();
+        let evolve_plan = evolve_parsed
+            .payload
+            .application_plan
+            .as_ref()
+            .expect("evolve plan");
+        let scope = crate::application_kernel::lineage::LineageScope {
+            conversation_id: Some(conv.id.clone()),
+            project_id: None,
+        };
+        let evolve_ops = crate::application_kernel::application_plan::compile_plan_against_db(
+            &db,
+            evolve_plan,
+            &scope,
+        )
+        .expect("authoritative evolve compile")
+        .compiled
+        .operations;
         assert!(
-            evolve_ops
-                .iter()
-                .any(|o| o.op_type == "tool.full_replace" || o.op_type == "surface.create"),
-            "evolve must include surface update op, got {:?}",
+            evolve_ops.iter().any(|o| {
+                matches!(
+                    o.op_type.as_str(),
+                    "component.insert"
+                        | "component.update_props"
+                        | "component.update_actions"
+                        | "tool.full_replace"
+                )
+            }),
+            "evolve must include surface update ops, got {:?}",
             evolve_ops
                 .iter()
                 .map(|o| o.op_type.as_str())
                 .collect::<Vec<_>>()
+        );
+        assert!(
+            evolve_ops
+                .iter()
+                .any(|o| o.op_type == "component.insert"
+                    && o.target.component_id.as_deref() == Some("tm-new-due"))
+                || evolve_ops.iter().any(|o| o.op_type == "tool.full_replace"),
+            "due-date field must appear via granular insert or full replace fallback"
         );
         let evolve_prop = apply_change(
             &mut db,
@@ -2175,24 +2206,22 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0]["title"], "Preserve me");
 
-        let tool = crate::db::get_tool(&db, app_id).expect("tool after evolve");
-        let def = tool.definition;
-        assert!(
-            def.components.iter().any(|c| c.id == "tm-new-due"),
-            "tm-new-due must be in persisted tool definition; ids={:?}",
-            def.components
-                .iter()
-                .map(|c| c.id.as_str())
-                .collect::<Vec<_>>()
-        );
-        assert!(
-            def.components.iter().any(|c| c.id == "tm-new-title"),
-            "stable tm-new-title must survive evolution"
-        );
-
         let surface_id = format!("surf-{app_id}");
         let surface = get_surface(&db, &surface_id).expect("surface after evolve");
         let doc = crate::runtime_v2::SoftwareDocument::from_value(&surface.definition).unwrap();
+        let component_ids: Vec<String> = doc
+            .flatten_components()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert!(
+            component_ids.iter().any(|id| id == "tm-new-due"),
+            "tm-new-due must be in persisted surface; ids={component_ids:?}"
+        );
+        assert!(
+            component_ids.iter().any(|id| id == "tm-new-title"),
+            "stable tm-new-title must survive evolution"
+        );
         assert!(
             doc.state_contracts
                 .iter()
@@ -2297,7 +2326,7 @@ mod tests {
         let create_ops = parse_agent_response(&create.raw_text)
             .unwrap()
             .payload
-            .normalized_operations()
+            .inspection_operations()
             .unwrap();
         let create_prop = apply_change(
             &mut db,
@@ -2340,11 +2369,24 @@ mod tests {
                 idempotency_key: None,
             }))
             .unwrap();
-        let evolve_ops = parse_agent_response(&evolve.raw_text)
-            .unwrap()
+        let evolve_parsed = parse_agent_response(&evolve.raw_text).unwrap();
+        let evolve_plan = evolve_parsed
             .payload
-            .normalized_operations()
-            .unwrap();
+            .application_plan
+            .as_ref()
+            .expect("evolve plan");
+        let scope = crate::application_kernel::lineage::LineageScope {
+            conversation_id: Some(conv.id.clone()),
+            project_id: None,
+        };
+        let evolve_ops = crate::application_kernel::application_plan::compile_plan_against_db(
+            &db,
+            evolve_plan,
+            &scope,
+        )
+        .expect("authoritative evolve compile for dirty-state test")
+        .compiled
+        .operations;
         let evolve_prop = apply_change(
             &mut db,
             None,
@@ -2359,9 +2401,12 @@ mod tests {
         .unwrap()
         .proposal_id
         .unwrap();
-        assert!(decide_proposal(&mut db, None, &evolve_prop, true)
-            .unwrap()
-            .is_committed());
+        let evolve_result = decide_proposal(&mut db, None, &evolve_prop, true).unwrap();
+        assert!(
+            evolve_result.is_committed(),
+            "evolve conflicts: {:?}",
+            evolve_result.conflicts
+        );
 
         let (state, _) =
             crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, surface_id).unwrap();

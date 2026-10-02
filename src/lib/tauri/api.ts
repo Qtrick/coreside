@@ -1148,6 +1148,8 @@ export const api = {
     }),
   kernelApplicationSummary: (applicationId: string) =>
     invoke<Record<string, unknown>>("kernel_application_summary", { applicationId }),
+  kernelEvolutionContext: (applicationId: string) =>
+    invoke<Record<string, unknown>>("kernel_evolution_context", { applicationId }),
   kernelGrantPermission: (applicationId: string, permission: string) =>
     invoke<Record<string, unknown>>("kernel_grant_permission", {
       applicationId,

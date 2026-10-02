@@ -38,6 +38,67 @@ pub fn application_summary(db: &Database, application_id: &str) -> DbResult<Valu
     }))
 }
 
+/// Formal bounded application context for evolution (model-visible, no secrets).
+pub fn evolution_context(db: &Database, application_id: &str) -> DbResult<Value> {
+    let summary = application_summary(db, application_id)?;
+    let surface_id = crate::runtime_v2::surfaces::surface_id_for_tool(application_id);
+    let (surface_revision, components, state_contracts, action_contracts) =
+        match crate::runtime_v2::surfaces::get_surface(db, &surface_id) {
+            Ok(surface) => {
+                let doc = crate::runtime_v2::SoftwareDocument::from_value(&surface.definition)
+                    .unwrap_or_else(|_| {
+                        crate::runtime_v2::SoftwareDocument::new(
+                            application_id,
+                            summary
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(application_id),
+                        )
+                    });
+                let comps: Vec<Value> = doc
+                    .flatten_components()
+                    .into_iter()
+                    .map(|c| {
+                        json!({
+                            "id": c.id,
+                            "type": c.component_type,
+                            "valueKey": c.value_key,
+                        })
+                    })
+                    .collect();
+                (
+                    surface.current_revision,
+                    comps,
+                    doc.state_contracts
+                        .iter()
+                        .map(|sc| serde_json::to_value(sc).unwrap_or(json!({})))
+                        .collect::<Vec<_>>(),
+                    doc.action_contracts
+                        .iter()
+                        .map(|ac| serde_json::to_value(ac).unwrap_or(json!({})))
+                        .collect::<Vec<_>>(),
+                )
+            }
+            Err(_) => (0, Vec::new(), Vec::new(), Vec::new()),
+        };
+
+    Ok(json!({
+        "applicationId": application_id,
+        "applicationRevision": summary.get("version").cloned().unwrap_or(json!(0)),
+        "surfaceId": surface_id,
+        "surfaceRevision": surface_revision,
+        "baseRevisionRequired": surface_revision,
+        "components": components,
+        "stateContracts": state_contracts,
+        "actionContracts": action_contracts,
+        "routes": summary.get("surfaces").cloned().unwrap_or(json!([])),
+        "dataModels": summary.get("dataModels").cloned().unwrap_or(json!([])),
+        "lifecycle": summary.get("lifecycle").cloned().unwrap_or(json!("unknown")),
+        "recordCount": summary.get("recordCount").cloned().unwrap_or(json!(0)),
+        "note": "Fresh DB snapshot for this turn. Do not reuse across turns. Evolve plans must set baseRevision to surfaceRevision.",
+    }))
+}
+
 pub fn data_model_summary(db: &Database, application_id: &str, model_id: &str) -> DbResult<Value> {
     let def = get_model(db, application_id, model_id)?;
     let sample = query_records(db, application_id, model_id, 5)?;
@@ -83,4 +144,63 @@ fn simple_hash(s: &str) -> String {
     let mut h = DefaultHasher::new();
     s.hash(&mut h);
     format!("{:x}", h.finish())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::plan_fixtures::task_tracker_create_plan;
+    use crate::application_kernel::{apply_change, decide_proposal, ChangeRequest};
+    use crate::db::{create_conversation, Database, DEFAULT_WORKSPACE_ID};
+    use tempfile::tempdir;
+
+    #[test]
+    fn evolution_context_includes_surface_revision_and_component_ids() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("evo-ctx.db")).unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Evolution ctx", None).unwrap();
+        let plan = task_tracker_create_plan();
+        let ops = crate::application_kernel::application_plan::compile_plan(&plan)
+            .unwrap()
+            .compiled
+            .operations;
+        let prop = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id),
+                summary: "Create".into(),
+                operations: ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .proposal_id
+        .unwrap();
+        assert!(decide_proposal(&mut db, None, &prop, true)
+            .unwrap()
+            .is_committed());
+
+        let ctx = evolution_context(&db, "tool-task-tracker").expect("context");
+        assert_eq!(
+            ctx.get("applicationId").and_then(|v| v.as_str()),
+            Some("tool-task-tracker")
+        );
+        let surface_revision = ctx
+            .get("surfaceRevision")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        assert!(surface_revision >= 1);
+        assert_eq!(
+            ctx.get("baseRevisionRequired").and_then(|v| v.as_i64()),
+            Some(surface_revision)
+        );
+        let components = ctx
+            .get("components")
+            .and_then(|v| v.as_array())
+            .expect("components");
+        assert!(components.iter().any(|c| c.get("id") == Some(&json!("tm-list"))));
+    }
 }

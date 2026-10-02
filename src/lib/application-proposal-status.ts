@@ -2,13 +2,31 @@
 
 export const LIVE_APPLICATION_GENERATION_STEPS = [
   "Generating",
-  "Drafting application",
-  "Preview ready",
-  "Building",
+  "Draft ready",
+  "Review changes",
+  "Applying",
+  "Testing",
   "Ready",
 ] as const;
 
-export type LiveApplicationGenerationIndex = 0 | 1 | 2 | 3 | 4;
+export type LiveApplicationGenerationIndex = 0 | 1 | 2 | 3 | 4 | 5;
+
+export const LIVE_APPLICATION_EVOLUTION_STEPS = [
+  "Understanding your app",
+  "Preparing changes",
+  "Review changes",
+  "Preserving your data",
+  "Applying",
+  "Testing",
+  "Ready",
+] as const;
+
+export const LIVE_APPLICATION_REPAIR_STEPS = [
+  "Checking",
+  "Repairing",
+  "Rechecking",
+  "Ready",
+] as const;
 
 const SQL_OR_STACK =
   /(\bSELECT\b|\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bFROM\b|\bsqlite\b|\.rs:\d+|stack trace|at \/|KernelError|rusqlite)/i;
@@ -39,18 +57,27 @@ export function computeLiveApplicationGenerationIndex(
     actions.length > 0 &&
     (combined.includes("ready") ||
       combined.includes("finished") ||
-      combined.includes("complete"))
+      combined.includes("complete") ||
+      combined.includes("verified") ||
+      combined.includes("test pass"))
+  ) {
+    return 5;
+  }
+
+  if (
+    combined.includes("test") ||
+    combined.includes("verif") ||
+    combined.includes("declarative")
   ) {
     return 4;
   }
 
   if (
     streaming &&
-    (combined.includes("apply") ||
+    (/\bapplying\b/.test(combined) ||
       combined.includes("commit") ||
-      combined.includes("patch") ||
-      combined.includes("build") ||
-      combined.includes("generat"))
+      (combined.includes("patch") && !combined.includes("dispatch")) ||
+      /\bbuilding\b/.test(combined))
   ) {
     return 3;
   }
@@ -58,6 +85,7 @@ export function computeLiveApplicationGenerationIndex(
   if (
     combined.includes("preview") ||
     combined.includes("proposal") ||
+    combined.includes("review") ||
     combined.includes("component") ||
     combined.includes("surface") ||
     combined.includes("layout")
@@ -85,22 +113,27 @@ export function proposalStatusPresentation(status: string): {
     case "pending":
       return { label: "Review changes", tone: "active", resolved: false };
     case "applying":
-      return { label: "Building", tone: "active", resolved: false };
+      return { label: "Applying", tone: "active", resolved: false };
+    case "testing":
+    case "verifying":
+      return { label: "Testing", tone: "active", resolved: false };
     case "applied":
       return { label: "Ready", tone: "success", resolved: true };
     case "discarded":
     case "rejected":
       return { label: "Discarded", tone: "neutral", resolved: true };
     case "failed":
-      return { label: "Failed", tone: "error", resolved: true };
+      return { label: "Needs attention", tone: "error", resolved: true };
     case "stale":
     case "expired":
       return { label: "Needs attention", tone: "warning", resolved: true };
     case "repairing":
       return { label: "Repairing", tone: "active", resolved: false };
+    case "repair_exhausted":
+      return { label: "Needs attention", tone: "error", resolved: true };
     default:
       if (normalized.includes("fail")) {
-        return { label: "Failed", tone: "error", resolved: true };
+        return { label: "Needs attention", tone: "error", resolved: true };
       }
       if (normalized.includes("repair")) {
         return { label: "Repairing", tone: "active", resolved: false };

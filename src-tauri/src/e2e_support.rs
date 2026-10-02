@@ -116,6 +116,12 @@ fn seed_existing_profile(db: &mut Database) -> db::DbResult<()> {
         "name": EXISTING_TOOL_NAME,
         "description": "Seeded personal tool for desktop E2E",
         "layout": "single-column",
+        "stateContracts": [{
+            "key": E2E_STATE_KEY,
+            "type": "string",
+            "initialValue": "",
+            "writePolicy": "model"
+        }],
         "components": [{
             "id": E2E_INPUT_COMPONENT_ID,
             "type": "textInput",

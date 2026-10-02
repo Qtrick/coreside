@@ -353,6 +353,7 @@ pub fn run() {
             commands::kernel_preview_package,
             commands::kernel_import_package,
             commands::kernel_application_summary,
+            commands::kernel_evolution_context,
             commands::kernel_data_model_summary,
             commands::kernel_recent_transactions,
             commands::kernel_upsert_test,

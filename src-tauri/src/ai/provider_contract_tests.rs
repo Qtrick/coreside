@@ -23,7 +23,7 @@ fn recorded_create_plan_roundtrips_through_parser() {
     assert_eq!(plan.kind, ApplicationPlanKind::Create);
     let ops = parsed
         .payload
-        .normalized_operations()
+        .inspection_operations()
         .expect("compile via normalized_operations");
     assert!(ops.iter().any(|o| o.op_type == "data.model_upsert"));
     assert!(ops.iter().any(|o| o.op_type == "surface.create"));
@@ -44,7 +44,7 @@ fn assert_recorded_create_fixture_roundtrips(
     assert_eq!(recovered.kind, ApplicationPlanKind::Create);
     let ops = parsed
         .payload
-        .normalized_operations()
+        .inspection_operations()
         .expect("compile via normalized_operations");
     assert!(ops.iter().any(|o| o.op_type == "data.model_upsert"));
     assert!(ops.iter().any(|o| o.op_type == "surface.create"));
@@ -174,7 +174,7 @@ fn malicious_plan_with_iframe_fails_closed() {
     match parsed {
         Ok(p) => {
             assert!(
-                p.payload.validate().is_err() || p.payload.normalized_operations().is_err(),
+                p.payload.validate().is_err() || p.payload.inspection_operations().is_err(),
                 "malicious iframe plan must fail closed"
             );
         }

@@ -925,6 +925,78 @@ fn study_tasks_model_v1() -> DataModelDefinition {
     }
 }
 
+fn study_tasks_model_v2_with_priority() -> DataModelDefinition {
+    let mut model = study_tasks_model_v1();
+    model.schema_version = 2;
+    model.fields.push(DataField {
+        field_id: "priority".into(),
+        field_type: "enum".into(),
+        required: false,
+        default: Some(json!("medium")),
+        enum_values: Some(vec!["high".into(), "medium".into(), "low".into()]),
+    });
+    model
+}
+
+fn study_planner_tool_v2_priority() -> ToolDefinition {
+    let mut tool = study_planner_tool_v1();
+    if let Some(table) = tool
+        .components
+        .iter_mut()
+        .find(|c| c.id == "sp-tasks-table")
+    {
+        if let Some(props) = table.props.as_mut() {
+            if let Some(cols) = props.get_mut("columns").and_then(|c| c.as_array_mut()) {
+                cols.push(json!({
+                    "id": "priority",
+                    "accessor": "priority",
+                    "header": "Priority"
+                }));
+            }
+        }
+    }
+    tool
+}
+
+/// Evolve Study Planner: add optional priority on tasks while dashboard section stays intact.
+pub fn multi_surface_planner_add_priority_plan(base_revision: Option<i64>) -> ApplicationPlan {
+    ApplicationPlan {
+        schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+        plan_id: "plan-study-planner-priority".into(),
+        kind: ApplicationPlanKind::Evolve,
+        summary: "Add priority column to Study Planner tasks".into(),
+        application_id: Some("tool-study-planner".into()),
+        base_revision,
+        steps: vec![
+            PlanStep {
+                id: "1".into(),
+                description: "Migrate studyTasks model to schemaVersion 2 with optional priority"
+                    .into(),
+            },
+            PlanStep {
+                id: "2".into(),
+                description: "Extend tasks table; preserve dashboard section component IDs".into(),
+            },
+        ],
+        intents: vec![
+            ChangeIntent::MigrateDataModel {
+                application_id: "tool-study-planner".into(),
+                model: study_tasks_model_v2_with_priority(),
+                migration_strategy: Some("add_optional_fields".into()),
+                require_approval: None,
+            },
+            ChangeIntent::UpdateSurface {
+                tool_id: "tool-study-planner".into(),
+                tool: study_planner_tool_v2_priority(),
+                change_summary: Some("Add priority to study tasks".into()),
+                base_revision,
+            },
+        ],
+        tests: vec![],
+        diagnostics: Some(json!({ "fixture": "multi_surface_planner_priority_plan" })),
+    }
+}
+
 /// Study planner fixture: one CreateSurface with Dashboard + Tasks sections until multi-surface plans are supported.
 pub fn multi_surface_planner_create_plan() -> ApplicationPlan {
     ApplicationPlan {
@@ -1134,7 +1206,7 @@ mod tests {
         assert_eq!(recovered.kind, ApplicationPlanKind::Create);
         let ops = parsed
             .payload
-            .normalized_operations()
+            .inspection_operations()
             .expect("plan must compile to operations");
         assert!(ops.iter().any(|o| o.op_type == "data.model_upsert"));
         assert!(ops.iter().any(|o| o.op_type == "surface.create"));
@@ -1157,7 +1229,7 @@ mod tests {
         assert_eq!(recovered.kind, ApplicationPlanKind::Evolve);
         let ops = parsed
             .payload
-            .normalized_operations()
+            .inspection_operations()
             .expect("evolve plan must compile");
         assert!(ops.iter().any(|o| o.op_type == "data.model_upsert"));
         assert!(ops
@@ -1192,7 +1264,7 @@ mod tests {
         let parsed = parse_agent_response(&raw).expect("payload shape parses");
         let err = parsed
             .payload
-            .normalized_operations()
+            .inspection_operations()
             .expect_err("empty intents must fail compile");
         assert!(
             err.contains("applicationPlan rejected"),

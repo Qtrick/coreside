@@ -284,7 +284,7 @@ export function ChangeProposalCard({
           onClick={() => void apply()}
           aria-busy={busy}
         >
-          {busy ? "Building…" : "Apply"}
+          {busy ? "Applying…" : "Apply"}
         </button>
         <button
           type="button"

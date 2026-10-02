@@ -2927,7 +2927,7 @@ async fn send_message_inner(
     let mut interactive_repair_exhausted = false;
     let mut interactive_repair_error: Option<String> = None;
     if let Some(ref sid) = interactive_ai_surface {
-        let mut candidate_ops = parsed.payload.normalized_operations().unwrap_or_default();
+        let mut candidate_ops = parsed.payload.inspection_operations().unwrap_or_default();
         if candidate_ops
             .iter()
             .any(|o| o.op_type == "interactive.action")
@@ -3038,7 +3038,7 @@ async fn send_message_inner(
                                         parsed.payload.normalize_for_frontend();
                                         candidate_ops = parsed
                                             .payload
-                                            .normalized_operations()
+                                            .inspection_operations()
                                             .unwrap_or_default();
                                         if !candidate_ops
                                             .iter()
@@ -3396,9 +3396,9 @@ async fn send_message_inner(
                     let ops = crate::runtime_v2::normalize_operations_for_validation(
                         &validated.compiled.operations,
                     );
-                    if !ops.is_empty() {
-                        operations_from_payload = Some(ops);
-                    }
+                    // Always Some — even empty — so legacy harvest cannot smuggle
+                    // a parallel operations[] past ApplicationPlan authority.
+                    operations_from_payload = Some(ops);
                 }
                 Err(e) => {
                     state.take_request(&request_key);
@@ -3495,9 +3495,11 @@ async fn send_message_inner(
             operations_from_payload = Some(preview_txn.accepted_operations().to_vec());
         }
 
-        // Post-hoc legacy harvest is isolated from the authoritative progressive path.
+        // Post-hoc legacy harvest is isolated from the authoritative progressive path
+        // and from ApplicationPlan (plan is an exclusive mutation channel).
         if !interactive_ops_locked
             && !progressive_ops_enabled
+            && parsed.payload.application_plan.is_none()
             && operations_from_payload
                 .as_ref()
                 .map(|o| o.is_empty())

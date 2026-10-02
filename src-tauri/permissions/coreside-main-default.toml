@@ -93,6 +93,7 @@ permissions = [
   "allow-image-search-cmd",
   "allow-import-media-asset-cmd",
   "allow-kernel-application-summary",
+  "allow-kernel-evolution-context",
   "allow-kernel-apply-change",
   "allow-kernel-capability-catalog",
   "allow-kernel-clear-audit-events",

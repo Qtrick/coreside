@@ -1,25 +1,27 @@
 # Vendo ↔ Coreside Adoption Matrix
 
-Vendo is a secondary reference (archive inspected under analysis extract). Coreside remains local-first and declarative; do not clone hosted SaaS assumptions.
+Vendo is a secondary reference (archive sha256 `c667ff74…`). Coreside remains local-first and declarative; do not clone hosted SaaS assumptions.
 
-| Vendo mechanism | Why it exists | Coreside analogue | Adopt | Adapt | Reject | Why |
+| Vendo mechanism | Why it exists | Coreside analogue | Adopt | Adapt | Reject | Why / Evidence |
 |---|---|---|---|---|---|---|
 | One guard choke point | Privileged actions must not bypass a single gateway | `registered_actions` + `ActionRunContext` + Tauri commands | Yes | Keep Kernel as choke point | — | Matches Rust-authoritative model |
 | Descriptors + hashing | Bind approvals to exact action identity | Descriptor registry + `call_hash` v2 | Yes | Already includes conversation/venue/presence/project/surface/component | — | Continue deepening turn/agent binding |
 | Approvals / grants | Human gate for privileged work | approvals.rs / grants.rs | Yes | Lifetime/revocation semantics | Persistent destructive grants | Safe consumer defaults |
-| Exact approval replay | Resume frozen call after restart | Durable approval rows | Yes (in progress) | SQLite resume without renderer stack | — | Parked interruption support |
+| Exact approval replay | Resume frozen call after restart | Durable approval rows | Yes | SQLite resume without renderer stack | — | Parked interruption; desktop restart journey still open |
 | Interrupted turns | Human delay outlives process | Turn journal + pending approvals | Yes | Adapt to desktop restart | Hosted turn parking SaaS | Local SQLite |
-| Stream resume | Identical result after disconnect | Progressive ops + catch-up | Adapt | Prove real transport/store path | Fake resume-only-reload tests as proof | Vendo test principle is good |
+| Stream resume | Identical result after disconnect | Progressive ops + catch-up | Adapt | Prove real transport/store path | Fake resume-only-reload tests as proof | Unit progressive paint verified; desktop Cases A–E open |
+| Forming preview | Safe geometry while building | Progressive typed ops + preview txn | Adapt | Speculative ≠ durable; discard on interrupt | Value-leaking HTML forming | channel-preview-interrupt.test.ts |
 | Idempotency ledger | Safe retries | outbox / idempotency tables | Yes | Bounded retention cleanup | Unbounded growth | Systematize keys |
 | Turn envelopes | Correlate provider work | turn_id + journal | Yes | Keep local | Multi-tenant envelopes | Consumer local-first |
-| App ownership | Isolate app data | project/conversation/application lineage | Yes | DB lineage authority | Hosted org tenancy as default | Enterprise later |
-| Build → validate → repair → success | Do not claim done early | ApplicationPlan → compile → apply → declarative tests → repair.rs | Yes | Bounded repair, no privilege escalation | Unbounded repair loops | Already started |
+| App ownership | Isolate app data | project/conversation/application lineage | Yes | DB lineage + ApplicationPlan exclusive channel | Hosted org tenancy as default | compile_plan_against_db; reject companion operations[] |
+| Build → validate → repair → success | Do not claim done early | ApplicationPlan → compile → apply → declarative tests → repair.rs | Yes | Bounded repair, no privilege escalation | Unbounded repair loops | Lifecycle UX: Testing before Ready |
 | Surface placement | Where apps live | placements / ToolCanvas / InlineSurface | Yes | Keep | Marketplace placement | Consumer personal tools |
-| App version/history | Evolve safely | revisions + transactions + proposals | Yes | OCC-real evolve | — | baseRevision now required |
+| App version/history | Evolve safely | revisions + transactions + proposals + surface_diff | Yes | OCC-real granular evolve | — | baseRevision required; ApplicationSpec diff |
 | App SQL isolation | Per-app data safety | generated_data_* scoped by application_id | Yes | Keep | Arbitrary app SQL | Declarative models only |
 | Hosted/local store split | Cloud control plane | Hosted gateway secrets vs local SQLite | Adapt | Keep hosted keys off device | Hosted control-plane as product core | Local-first Coreside |
 | MCP marketplace / arbitrary JS | Extensibility | Capability packs | — | — | Reject | Unsafe for protected webview |
 | Multi-tenant hosted persistence | SaaS scale | — | — | — | Reject for consumer core | Conflicts with local-first |
+| In-memory SSE resume registries | Dev-server hot reload | — | — | — | Reject | Use SQLite catch-up |
 
 ## Explicit rejects
 
@@ -28,3 +30,5 @@ Vendo is a secondary reference (archive inspected under analysis extract). Cores
 - Arbitrary generated JS
 - Unrestricted app code execution
 - Multi-tenant architecture that replaces local SQLite authority
+- DB-less privileged ApplicationPlan compilation as Apply authority
+- Client-secret form/WebSocket authority

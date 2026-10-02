@@ -707,8 +707,9 @@ pub struct AgentResponsePayload {
     pub response_type: ResponseType,
     #[serde(default)]
     pub tool_change: Option<ToolChangePayload>,
-    /// Provider-neutral application generation contract. When present and valid,
-    /// it is the authoritative source of operations (compiled via ChangeIntent).
+    /// Provider-neutral application generation contract. When present, durable
+    /// operations must be compiled via `compile_plan_against_db` (SQLite lineage + OCC).
+    /// DB-less helpers are inspection-only and cannot admit Apply.
     #[serde(default)]
     pub application_plan: Option<crate::application_kernel::application_plan::ApplicationPlan>,
     #[serde(default)]
@@ -894,15 +895,17 @@ impl AgentResponsePayload {
         }
     }
 
+    /// Normalize legacy `operations` / `toolChange` into AppOperations.
+    ///
+    /// ApplicationPlan is intentionally refused here: a DB-less compile must never
+    /// become the durable mutation set. Callers that need plan ops must use
+    /// `compile_plan_against_db`. Structural checks use `compile_for_inspection`.
     pub fn normalized_operations(&self) -> Result<Vec<crate::runtime_v2::AppOperation>, String> {
-        // ApplicationPlan is authoritative when present.
-        if let Some(plan) = &self.application_plan {
-            let validated = crate::application_kernel::application_plan::compile_plan(plan)
-                .map_err(|e| format!("applicationPlan rejected: {e}"))?;
-            let ops = crate::runtime_v2::normalize_operations_for_validation(
-                &validated.compiled.operations,
+        if self.application_plan.is_some() {
+            return Err(
+                "applicationPlan requires compile_plan_against_db; DB-less normalized_operations cannot admit durable mutations"
+                    .into(),
             );
-            return Ok(ops);
         }
 
         let mut ops: Vec<crate::runtime_v2::AppOperation> = if let Some(ops_raw) = &self.operations
@@ -935,6 +938,20 @@ impl AgentResponsePayload {
         Ok(ops)
     }
 
+    /// Inspection-only ops for tests/diagnostics. Prefer `compile_plan_against_db`
+    /// whenever results will be applied.
+    pub fn inspection_operations(&self) -> Result<Vec<crate::runtime_v2::AppOperation>, String> {
+        if let Some(plan) = &self.application_plan {
+            let inspected =
+                crate::application_kernel::application_plan::compile_for_inspection(plan)
+                    .map_err(|e| format!("applicationPlan rejected: {e}"))?;
+            return Ok(crate::runtime_v2::normalize_operations_for_validation(
+                inspected.operations_for_inspection(),
+            ));
+        }
+        self.normalized_operations()
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         let has_ops = self
             .operations
@@ -962,10 +979,21 @@ impl AgentResponsePayload {
             })
             .unwrap_or(false);
 
-        if has_ops || has_tool_change || has_application_plan {
-            // Try normalized operations first. If normalization fails (e.g.
-            // stringified components), fall back to raw ops for validation
-            // so callers get a meaningful error rather than a schema panic.
+        if has_application_plan {
+            // ApplicationPlan is an exclusive mutation channel — companion raw
+            // operations[] must not smuggle a second authority path.
+            if has_ops {
+                return Err(
+                    "applicationPlan cannot be combined with top-level operations; use plan intents only"
+                        .into(),
+                );
+            }
+            let ops = self.inspection_operations()?;
+            if !ops.is_empty() {
+                crate::runtime_v2::validate_model_operations(&ops)?;
+            }
+        } else if has_ops || has_tool_change {
+            // Legacy operations / toolChange path only (ApplicationPlan refused here).
             match self.normalized_operations() {
                 Ok(ops) => {
                     if !ops.is_empty() {
@@ -973,9 +1001,6 @@ impl AgentResponsePayload {
                     }
                 }
                 Err(norm_err) => {
-                    // Normalization failed — still try to validate the raw
-                    // operations so the error message is about the actual
-                    // malformed content, not about normalization internals.
                     if has_ops {
                         let raw_ops: Vec<crate::runtime_v2::AppOperation> = self
                             .operations
@@ -996,7 +1021,6 @@ impl AgentResponsePayload {
                             }
                         }
                     }
-                    // If we can't recover, surface the normalization error
                     return Err(norm_err);
                 }
             }
@@ -1324,5 +1348,44 @@ mod tests {
         assert_eq!(op.op_type, "component.update_props");
         assert_eq!(op.target.surface_id.as_deref(), Some("surf-100"));
         assert_eq!(op.target.component_id.as_deref(), Some("btn-search"));
+    }
+
+    #[test]
+    fn validate_accepts_application_plan_with_derived_tool_change() {
+        use crate::ai::parse_agent_response;
+        use crate::ai::plan_fixtures::{plan_response_json, task_tracker_create_plan};
+
+        let raw = plan_response_json("Creating Task Tracker", &task_tracker_create_plan());
+        let parsed = parse_agent_response(&raw).expect("fixture plan + toolChange must validate");
+        assert!(parsed.payload.application_plan.is_some());
+        assert!(parsed.payload.tool_change.is_some());
+        let ops = parsed
+            .payload
+            .inspection_operations()
+            .expect("inspection compile");
+        assert!(ops.iter().any(|o| o.op_type == "surface.create"));
+    }
+
+    #[test]
+    fn validate_rejects_application_plan_with_companion_operations() {
+        use crate::ai::plan_fixtures::task_tracker_create_plan;
+        let mut payload = AgentResponsePayload {
+            application_plan: Some(task_tracker_create_plan()),
+            assistant_message: "create".into(),
+            response_type: ResponseType::ToolChange,
+            ..Default::default()
+        };
+        payload.operations = Some(vec![json!({
+            "type": "component.remove",
+            "target": { "surfaceId": "surf-x", "componentId": "c1" },
+            "payload": {}
+        })]);
+        let err = payload
+            .validate()
+            .expect_err("plan + operations must fail closed");
+        assert!(
+            err.contains("cannot be combined"),
+            "got {err}"
+        );
     }
 }

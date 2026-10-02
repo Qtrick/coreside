@@ -9,7 +9,7 @@ use crate::application_kernel::application_plan::{
 };
 use crate::application_kernel::compiler::{compile, ChangeIntent, CompiledChange};
 use crate::application_kernel::context::{
-    application_summary, data_model_summary, recent_transactions_summary,
+    application_summary, data_model_summary, evolution_context, recent_transactions_summary,
 };
 use crate::application_kernel::data::{upsert_model, DataModelDefinition};
 use crate::application_kernel::lifecycle::{
@@ -403,6 +403,16 @@ pub fn kernel_application_summary(
     state.require_profile()?;
     let db = state.db.lock();
     application_summary(&db, &application_id).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn kernel_evolution_context(
+    state: State<'_, AppState>,
+    application_id: String,
+) -> Result<Value, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    evolution_context(&db, &application_id).map_err(CommandError::from)
 }
 
 #[tauri::command]
