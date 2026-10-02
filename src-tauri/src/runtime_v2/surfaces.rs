@@ -555,7 +555,11 @@ pub fn get_surface(db: &Database, id: &str) -> DbResult<SurfaceRecord> {
 ///
 /// Prefer an active conversation-local surface bound to `tool_id` (inline first)
 /// so personal/canvas state is not leaked into a chat that is editing a distinct
-/// inline instance of the same tool id. Fall back to the canonical `surf-{toolId}`.
+/// inline instance of the same tool id.
+///
+/// Fall back to the canonical `surf-{toolId}` **row when it exists in SQLite**.
+/// That string is a legacy naming convention / compatibility lookup — never proof
+/// that a surface belongs to the application. Ownership is the `tool_id` column.
 pub fn resolve_prompt_surface_for_tool(
     db: &Database,
     conversation_id: &str,
@@ -595,20 +599,33 @@ pub fn resolve_and_authorize_surface_scope(
     expected_project_id: Option<&str>,
 ) -> DbResult<SurfaceRecord> {
     let surface = get_surface(db, surface_id)?;
+    // Fail closed: expected scope requires positive ownership proof on the row.
     if let Some(expected_cid) = expected_conversation_id {
-        if let Some(ref actual_cid) = surface.conversation_id {
-            if actual_cid != expected_cid {
+        match surface.conversation_id.as_deref() {
+            Some(actual_cid) if actual_cid == expected_cid => {}
+            Some(actual_cid) => {
                 return Err(DbError::Invalid(format!(
                     "surface scope mismatch: surface {surface_id} belongs to conversation {actual_cid}, not {expected_cid}"
+                )));
+            }
+            None => {
+                return Err(DbError::Invalid(format!(
+                    "surface scope mismatch: surface {surface_id} has no conversation binding; expected {expected_cid}"
                 )));
             }
         }
     }
     if let Some(expected_pid) = expected_project_id {
-        if let Some(ref actual_pid) = surface.project_id {
-            if actual_pid != expected_pid {
+        match surface.project_id.as_deref() {
+            Some(actual_pid) if actual_pid == expected_pid => {}
+            Some(actual_pid) => {
                 return Err(DbError::Invalid(format!(
                     "surface scope mismatch: surface {surface_id} belongs to project {actual_pid}, not {expected_pid}"
+                )));
+            }
+            None => {
+                return Err(DbError::Invalid(format!(
+                    "surface scope mismatch: surface {surface_id} has no project binding; expected {expected_pid}"
                 )));
             }
         }
@@ -2090,5 +2107,174 @@ mod tests {
             )
             .unwrap();
         assert_eq!(remaining, 0);
+    }
+
+    fn tool_surface_without_scope_bindings(db: &mut Database, tool_id: &str) -> SurfaceRecord {
+        let tool = ToolDefinition {
+            id: tool_id.into(),
+            name: "Scope Tool".into(),
+            description: "d".into(),
+            layout: json!("stack"),
+            components: vec![crate::ai::ToolComponent {
+                id: "h".into(),
+                component_type: "heading".into(),
+                value_key: None,
+                props: Some(json!({"text": "Hi"})),
+                children: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let applied =
+            apply_tool_change(db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "test").unwrap();
+        upsert_surface_from_tool(db, &applied.definition, DEFAULT_WORKSPACE_ID, 1).unwrap()
+    }
+
+    #[test]
+    fn resolve_and_authorize_surface_scope_conversation_match_passes() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Scoped",
+            &minimal_def("Scoped"),
+            &[],
+        )
+        .unwrap();
+        let authorized =
+            resolve_and_authorize_surface_scope(&db, &surface.id, Some(&conv.id), None)
+                .expect("matching conversation must pass");
+        assert_eq!(authorized.id, surface.id);
+    }
+
+    #[test]
+    fn resolve_and_authorize_surface_scope_conversation_mismatch_rejects() {
+        let mut db = test_db();
+        let conv_a = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "A", None).unwrap();
+        let conv_b = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "B", None).unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv_a.id,
+            None,
+            None,
+            "Scoped",
+            &minimal_def("Scoped"),
+            &[],
+        )
+        .unwrap();
+        let err =
+            resolve_and_authorize_surface_scope(&db, &surface.id, Some(&conv_b.id), None)
+                .expect_err("foreign conversation must reject");
+        assert!(
+            err.to_string().contains("belongs to conversation"),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_and_authorize_surface_scope_conversation_missing_rejects() {
+        let mut db = test_db();
+        let surface = tool_surface_without_scope_bindings(&mut db, "tool-scope-conv-missing");
+        assert!(surface.conversation_id.is_none());
+        let err = resolve_and_authorize_surface_scope(&db, &surface.id, Some("conv-expected"), None)
+            .expect_err("missing conversation binding must reject");
+        assert!(
+            err.to_string().contains("no conversation binding"),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_and_authorize_surface_scope_project_match_passes() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            Some("proj-a"),
+            "Project scoped",
+            &minimal_def("Project scoped"),
+            &[],
+        )
+        .unwrap();
+        let authorized =
+            resolve_and_authorize_surface_scope(&db, &surface.id, None, Some("proj-a"))
+                .expect("matching project must pass");
+        assert_eq!(authorized.project_id.as_deref(), Some("proj-a"));
+    }
+
+    #[test]
+    fn resolve_and_authorize_surface_scope_project_mismatch_rejects() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            Some("proj-a"),
+            "Project scoped",
+            &minimal_def("Project scoped"),
+            &[],
+        )
+        .unwrap();
+        let err = resolve_and_authorize_surface_scope(&db, &surface.id, None, Some("proj-b"))
+            .expect_err("foreign project must reject");
+        assert!(
+            err.to_string().contains("belongs to project"),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_and_authorize_surface_scope_project_missing_rejects() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "No project",
+            &minimal_def("No project"),
+            &[],
+        )
+        .unwrap();
+        assert!(surface.project_id.is_none());
+        let err = resolve_and_authorize_surface_scope(&db, &surface.id, None, Some("proj-a"))
+            .expect_err("missing project binding must reject");
+        assert!(
+            err.to_string().contains("no project binding"),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_and_authorize_surface_scope_no_scope_passes() {
+        let mut db = test_db();
+        let unbound = tool_surface_without_scope_bindings(&mut db, "tool-scope-none");
+        let authorized =
+            resolve_and_authorize_surface_scope(&db, &unbound.id, None, None)
+                .expect("no expected scope must pass for unbound surface");
+        assert_eq!(authorized.id, unbound.id);
+
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        let bound = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            Some("proj-a"),
+            "Bound",
+            &minimal_def("Bound"),
+            &[],
+        )
+        .unwrap();
+        let authorized_bound =
+            resolve_and_authorize_surface_scope(&db, &bound.id, None, None)
+                .expect("no expected scope must pass even with bindings");
+        assert_eq!(authorized_bound.id, bound.id);
     }
 }

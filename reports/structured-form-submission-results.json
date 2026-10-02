@@ -1,0 +1,17 @@
+{
+  "status": "passed",
+  "journey": "structured-form-submission",
+  "toolId": "tool-tictactoe",
+  "eventName": "game.move",
+  "startedAt": "2026-10-02T19:42:14.302Z",
+  "finishedAt": "2026-10-02T19:42:23.459Z",
+  "durationMs": 9157,
+  "identity": {
+    "commit": "38f08068c6993f4529d8799ac79dd2e7ed7589e0",
+    "dirty": true,
+    "platform": "darwin",
+    "arch": "arm64",
+    "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee"
+  },
+  "binaryHash": "5174d946b75b50851a2743012551a18c325276861f87c81b955f12f95043c3d7"
+}

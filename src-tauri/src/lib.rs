@@ -267,6 +267,7 @@ pub fn run() {
             commands::list_capability_packs,
             commands::list_conversation_surfaces,
             commands::get_surface_cmd,
+            commands::resolve_bound_surface_for_tool_cmd,
             commands::create_inline_surface_cmd,
             commands::update_surface_cmd,
             commands::promote_surface_cmd,

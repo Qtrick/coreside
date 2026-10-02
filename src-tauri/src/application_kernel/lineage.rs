@@ -30,15 +30,13 @@ pub struct SurfaceLineage {
 impl SurfaceLineage {
     pub fn from_surface(db: &Database, surface: &SurfaceRecord) -> Self {
         let tool_id = surface.tool_id.clone();
+        // Manifest presence is recorded separately; application identity is the
+        // bound tool_id when present (create-before-manifest and full apps alike).
         let has_manifest = tool_id
             .as_deref()
             .and_then(|tid| authoritative_application_id(db, Some(tid)))
             .is_some();
-        let application_id = if has_manifest {
-            tool_id.clone()
-        } else {
-            tool_id.clone()
-        };
+        let application_id = tool_id.clone();
         Self {
             surface_id: surface.id.clone(),
             tool_id,
@@ -184,22 +182,39 @@ pub struct LineageScope {
 }
 
 impl LineageScope {
+    /// Fail closed: when the caller supplies an expected conversation/project,
+    /// the resolved surface must positively prove that binding.
+    /// Missing actual ownership is a reject, not a pass.
     pub fn enforce(&self, lineage: &SurfaceLineage) -> Result<(), KernelError> {
         if let Some(ref expected) = self.conversation_id {
-            if let Some(ref actual) = lineage.conversation_id {
-                if actual != expected {
+            match lineage.conversation_id.as_deref() {
+                Some(actual) if actual == expected => {}
+                Some(actual) => {
                     return Err(KernelError::Validation(format!(
                         "surface '{}' belongs to conversation '{actual}', not '{expected}'",
+                        lineage.surface_id
+                    )));
+                }
+                None => {
+                    return Err(KernelError::Validation(format!(
+                        "surface '{}' has no conversation binding; expected '{expected}'",
                         lineage.surface_id
                     )));
                 }
             }
         }
         if let Some(ref expected) = self.project_id {
-            if let Some(ref actual) = lineage.project_id {
-                if actual != expected {
+            match lineage.project_id.as_deref() {
+                Some(actual) if actual == expected => {}
+                Some(actual) => {
                     return Err(KernelError::Validation(format!(
                         "surface '{}' belongs to project '{actual}', not '{expected}'",
+                        lineage.surface_id
+                    )));
+                }
+                None => {
+                    return Err(KernelError::Validation(format!(
+                        "surface '{}' has no project binding; expected '{expected}'",
                         lineage.surface_id
                     )));
                 }
@@ -382,5 +397,124 @@ mod tests {
             matches!(err, KernelError::Validation(ref m) if m.contains("belongs to")),
             "got {err:?}"
         );
+    }
+
+    fn lineage_with(
+        conversation_id: Option<&str>,
+        project_id: Option<&str>,
+    ) -> SurfaceLineage {
+        SurfaceLineage {
+            surface_id: "surf-test".into(),
+            tool_id: Some("app-test".into()),
+            application_id: Some("app-test".into()),
+            conversation_id: conversation_id.map(str::to_string),
+            project_id: project_id.map(str::to_string),
+            definition_revision: 1,
+            lifecycle_state: "active".into(),
+            archived: false,
+            has_manifest: false,
+        }
+    }
+
+    #[test]
+    fn lineage_scope_conversation_match_passes() {
+        let scope = LineageScope {
+            conversation_id: Some("conv-a".into()),
+            project_id: None,
+        };
+        scope
+            .enforce(&lineage_with(Some("conv-a"), None))
+            .expect("matching conversation must pass");
+    }
+
+    #[test]
+    fn lineage_scope_conversation_mismatch_rejects() {
+        let scope = LineageScope {
+            conversation_id: Some("conv-a".into()),
+            project_id: None,
+        };
+        let err = scope
+            .enforce(&lineage_with(Some("conv-b"), None))
+            .expect_err("foreign conversation must reject");
+        assert!(matches!(err, KernelError::Validation(ref m) if m.contains("belongs to")));
+    }
+
+    #[test]
+    fn lineage_scope_conversation_missing_rejects() {
+        let scope = LineageScope {
+            conversation_id: Some("conv-a".into()),
+            project_id: None,
+        };
+        let err = scope
+            .enforce(&lineage_with(None, None))
+            .expect_err("missing conversation binding must reject");
+        assert!(matches!(
+            err,
+            KernelError::Validation(ref m) if m.contains("no conversation binding")
+        ));
+    }
+
+    #[test]
+    fn lineage_scope_project_match_passes() {
+        let scope = LineageScope {
+            conversation_id: None,
+            project_id: Some("proj-a".into()),
+        };
+        scope
+            .enforce(&lineage_with(None, Some("proj-a")))
+            .expect("matching project must pass");
+    }
+
+    #[test]
+    fn lineage_scope_project_mismatch_rejects() {
+        let scope = LineageScope {
+            conversation_id: None,
+            project_id: Some("proj-a".into()),
+        };
+        let err = scope
+            .enforce(&lineage_with(None, Some("proj-b")))
+            .expect_err("foreign project must reject");
+        assert!(matches!(err, KernelError::Validation(ref m) if m.contains("belongs to")));
+    }
+
+    #[test]
+    fn lineage_scope_project_missing_rejects() {
+        let scope = LineageScope {
+            conversation_id: None,
+            project_id: Some("proj-a".into()),
+        };
+        let err = scope
+            .enforce(&lineage_with(None, None))
+            .expect_err("missing project binding must reject");
+        assert!(matches!(
+            err,
+            KernelError::Validation(ref m) if m.contains("no project binding")
+        ));
+    }
+
+    #[test]
+    fn lineage_scope_both_supplied_one_missing_rejects() {
+        let scope = LineageScope {
+            conversation_id: Some("conv-a".into()),
+            project_id: Some("proj-a".into()),
+        };
+        let err = scope
+            .enforce(&lineage_with(Some("conv-a"), None))
+            .expect_err("missing project when both expected must reject");
+        assert!(matches!(
+            err,
+            KernelError::Validation(ref m) if m.contains("no project binding")
+        ));
+    }
+
+    #[test]
+    fn lineage_scope_none_supplied_preserves_pass() {
+        let scope = LineageScope::default();
+        scope
+            .enforce(&lineage_with(None, None))
+            .expect("no expected scope must pass");
+        scope
+            .enforce(&lineage_with(Some("conv-a"), Some("proj-a")))
+            .expect("no expected scope must pass even with bindings");
     }
 }

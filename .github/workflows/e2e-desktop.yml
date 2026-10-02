@@ -46,3 +46,31 @@ jobs:
         run: npm run e2e
         # Real fail preferred. continue-on-error is intentionally NOT set.
         # macOS runners provide a GUI session for the embedded WebDriver provider.
+
+      - name: Publish E2E results to step summary
+        if: failure()
+        run: |
+          if [ -f reports/e2e-results.json ]; then
+            {
+              echo "## Desktop E2E results (reports/e2e-results.json)"
+              echo ""
+              echo '```json'
+              cat reports/e2e-results.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "reports/e2e-results.json was not produced" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload E2E diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-e2e-diagnostics
+          path: |
+            reports/e2e-results.json
+            reports/*-results.json
+            logs/
+            e2e/.artifacts/
+          if-no-files-found: warn
+          retention-days: 14

@@ -314,6 +314,7 @@ type AppStore = {
 };
 
 let agentTurnSyncAttached = false;
+let conversationSyncReconcileAttached = false;
 /** Active conversation-scoped Sync Channel unlisten (main / tool window). */
 let conversationSyncUnlisten: (() => void) | null = null;
 let conversationSyncConversationId: string | null = null;
@@ -321,6 +322,8 @@ let conversationSyncConversationId: string | null = null;
 const conversationEventCursor = new Map<string, number>();
 /** ponytail: one in-flight catch-up per conversation; ceiling = process-local. */
 const conversationCatchUpInFlight = new Map<string, Promise<void>>();
+/** Debounce visibility/focus force-resubscribe so focus thrash cannot tear Channels. */
+let conversationSyncReconcileTimer: ReturnType<typeof setTimeout> | null = null;
 
 type SyncListenerGet = () => {
   reloadActiveSurfaces: (resetKeys?: string[]) => Promise<void>;
@@ -428,14 +431,22 @@ function applySyncOrConflictEvent(
 /**
  * Keep a conversation-scoped Sync Channel alive while a chat (or tool surface
  * bound to that conversation) is open. Primary Sync path.
+ *
+ * `force` re-subscribes even when the conversation id is unchanged — needed
+ * when a dead Channel was dropped from the Rust registry while the webview
+ * stayed on the same chat (renderer remount / hide / return).
  */
 function ensureConversationSyncSubscription(
   conversationId: string | null,
   get: SyncListenerGet,
   set: SyncListenerSet,
+  opts?: { force?: boolean },
 ) {
   const trimmed = (conversationId ?? "").trim();
-  if (trimmed === (conversationSyncConversationId ?? "")) {
+  if (
+    !opts?.force &&
+    trimmed === (conversationSyncConversationId ?? "")
+  ) {
     return;
   }
   conversationSyncUnlisten?.();
@@ -463,6 +474,35 @@ function ensureConversationSyncSubscription(
       // Best-effort; residual global listenAgentTurn remains.
       void catchUpConversationEvents(trimmed, get);
     });
+}
+
+/**
+ * Re-subscribe + catch-up when the renderer becomes visible again so durable
+ * surface.transaction_applied rows are not missed while the Channel was dead.
+ */
+function attachConversationSyncReconcile(
+  get: SyncListenerGet,
+  set: SyncListenerSet,
+) {
+  if (conversationSyncReconcileAttached) return;
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  conversationSyncReconcileAttached = true;
+  const schedule = () => {
+    if (conversationSyncReconcileTimer != null) {
+      clearTimeout(conversationSyncReconcileTimer);
+    }
+    conversationSyncReconcileTimer = setTimeout(() => {
+      conversationSyncReconcileTimer = null;
+      const cid = (get().activeConversationId ?? "").trim();
+      if (!cid) return;
+      ensureConversationSyncSubscription(cid, get, set, { force: true });
+    }, 250);
+  };
+  const onVisible = () => {
+    if (document.visibilityState === "visible") schedule();
+  };
+  document.addEventListener("visibilitychange", onVisible);
+  window.addEventListener("focus", schedule);
 }
 
 /** Mark a conversation's active turn terminal; no-op if none. */
@@ -993,6 +1033,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
 
       attachAgentTurnSyncListener(get, set);
+      attachConversationSyncReconcile(get, set);
 
       // Phase 2 — secondary hydration: provider status, catalog, tools,
       // projects. Independent calls settle without blocking each other.
@@ -1964,7 +2005,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         branchName,
       })) as [{ newConversationId?: string } | null, unknown];
       const newConvId = res?.[0]?.newConversationId;
-      await get().refreshConversations();
+      await Promise.all([get().refreshConversations(), get().refreshTools()]);
       if (newConvId) {
         await get().navigateToChat(newConvId);
       }
@@ -2006,6 +2047,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const conversationId = get().activeConversationId;
     if (conversationId) {
       get().setChatActiveToolId(conversationId, id);
+    }
+    // Canvas reopen / tool switch remounts the renderer — re-subscribe + catch-up
+    // so durable applies missed while unmounted are not skipped. Same-tool Sync
+    // reloads (preserveDirty) must not tear the Channel or they loop.
+    if (
+      conversationId &&
+      (!preserveDirty || prevToolId !== id)
+    ) {
+      ensureConversationSyncSubscription(conversationId, get, set, {
+        force: true,
+      });
     }
     set({
       view: { kind: "chat", conversationId: conversationId ?? null },
@@ -3012,6 +3064,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         sidebarCollapsed: true,
       });
       attachAgentTurnSyncListener(get, set);
+      attachConversationSyncReconcile(get, set);
       // Resolve conversation for Sync Channel (surf-{toolId} when promoted).
       void api
         .getSurface(`surf-${toolId}`)
@@ -3021,7 +3074,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
               ? surface.conversationId.trim()
               : "";
           if (cid) {
-            ensureConversationSyncSubscription(cid, get, set);
+            ensureConversationSyncSubscription(cid, get, set, { force: true });
           }
         })
         .catch(() => {

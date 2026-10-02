@@ -425,3 +425,72 @@ export async function expectInvokeDenied(
   }
   return outcome;
 }
+
+/** Prefer kernel ApplicationPlan Apply — never the legacy tool-change Apply. */
+export async function latestVisibleKernelApplyButton() {
+  const nodes = await $$(
+    '.change-proposal[aria-label="Proposed change"] button.btn-primary',
+  );
+  const found = [];
+  for (const node of nodes) {
+    if ((await node.isExisting()) && (await node.isDisplayed())) {
+      found.push(node);
+    }
+  }
+  return found.length > 0 ? found[found.length - 1] : null;
+}
+
+/**
+ * Re-subscribe path used when the renderer becomes visible again
+ * (visibilitychange + focus). Exercises catch-up without killing the process.
+ */
+export async function simulateConversationReconnect() {
+  await browser.execute(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("focus"));
+  });
+  // Match app-store reconcile debounce (250ms) plus a small buffer.
+  await browser.pause(400);
+}
+
+export async function activeConversationIdFromStore(): Promise<string | null> {
+  const listed = await invokeFromCurrentWindow("list_conversations");
+  if (!listed.ok || !Array.isArray(listed.result) || listed.result.length === 0) {
+    return null;
+  }
+  // Most recent conversation is first in Coreside list ordering.
+  const first = listed.result[0] as { id?: string };
+  return typeof first?.id === "string" ? first.id : null;
+}
+
+export async function listAppliedTransactions(
+  conversationId: string,
+): Promise<Array<{ id: string; status: string; summary: string }>> {
+  const outcome = await invokeFromCurrentWindow("list_transactions_cmd", {
+    conversationId,
+    limit: 50,
+  });
+  if (!outcome.ok) {
+    throw new Error(`list_transactions_cmd failed: ${outcome.error}`);
+  }
+  const rows = Array.isArray(outcome.result) ? outcome.result : [];
+  return rows
+    .map((row) => {
+      const r = row as { id?: string; status?: string; summary?: string };
+      return {
+        id: String(r.id ?? ""),
+        status: String(r.status ?? ""),
+        summary: String(r.summary ?? ""),
+      };
+    })
+    .filter((r) => r.id.length > 0);
+}

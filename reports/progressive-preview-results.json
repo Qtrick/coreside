@@ -3,13 +3,13 @@
   "journey": 19,
   "name": "progressive-surface-preview",
   "evidenceLevel": "Desktop Verified",
-  "startedAt": "2026-10-02T06:31:54.600Z",
-  "endedAt": "2026-10-02T06:31:59.387Z",
-  "generatedAt": "2026-10-02T06:31:59.387Z",
-  "commit": "local",
+  "startedAt": "2026-10-02T18:36:57.420Z",
+  "endedAt": "2026-10-02T18:37:02.188Z",
+  "generatedAt": "2026-10-02T18:37:02.188Z",
+  "commit": "38f08068c6993f4529d8799ac79dd2e7ed7589e0",
   "dirty": true,
   "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
-  "binaryHash": "b59cf290b0e8e12f42b89f38ca11542564006460f7abef0d20bd2d272cd6a274",
+  "binaryHash": "83ac3ef20aa89d5e53e0745422355600bda5baf111190818e748d3090b1c569b",
   "e2eSpec": "e2e/specs/19-progressive-surface-preview.spec.ts",
   "providerFixture": "mock progressive surface preview",
   "assertions": [
@@ -20,10 +20,10 @@
     "final note value remains progressive preview note"
   ],
   "metrics": {
-    "turnStartToFirstBadgeMs": 20,
-    "turnStartToFirstPaintMs": 46,
-    "turnStartToCompletionMs": 4564,
-    "totalWallMs": 4826,
+    "turnStartToFirstBadgeMs": 22,
+    "turnStartToFirstPaintMs": 41,
+    "turnStartToCompletionMs": 4560,
+    "totalWallMs": 4812,
     "note": "Timing is observational (not a CI gate). SQLite write absence during speculation is Unit Verified separately — do not elevate that claim from this Desktop run."
   },
   "intentionallyRejected": [

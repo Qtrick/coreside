@@ -135,6 +135,39 @@ pub fn get_surface_cmd(
     Ok(surface)
 }
 
+/// Resolve the durable surface bound to a tool/application id via SQLite lineage.
+///
+/// `surf-{toolId}` is only a compatibility lookup name — the returned row (if any)
+/// is the authority. Callers must not treat string formatting as ownership proof.
+#[tauri::command]
+pub fn resolve_bound_surface_for_tool_cmd(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    tool_id: String,
+) -> Result<Option<SurfaceRecord>, CommandError> {
+    state.require_profile()?;
+    crate::security::assert_not_protected(&tool_id)
+        .map_err(|m| CommandError::new("forbidden", m))?;
+    // Fail closed before lookup so tool windows cannot probe foreign tool existence.
+    windows::enforce_caller_tool_scope(&window, &tool_id)?;
+    let db = state.db.lock();
+    let Some(sid) =
+        crate::application_kernel::lineage::lookup_bound_application_surface_id(&db, &tool_id)
+    else {
+        return Ok(None);
+    };
+    let mut surface = get_surface(&db, &sid)?;
+    if surface.tool_id.as_deref() != Some(tool_id.as_str()) {
+        return Err(CommandError::new(
+            "forbidden",
+            "Resolved surface is not bound to that tool.",
+        ));
+    }
+    windows::enforce_caller_surface_scope(&window, surface.tool_id.as_deref(), &surface.id)?;
+    surface = project_surface_for_renderer(surface);
+    Ok(Some(surface))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateInlineSurfaceArgs {

@@ -297,7 +297,7 @@ pub fn validate_plan_against_db(
     Ok(())
 }
 
-fn plan_bound_application_id(plan: &ApplicationPlan) -> Result<&str, KernelError> {
+pub(crate) fn plan_bound_application_id(plan: &ApplicationPlan) -> Result<&str, KernelError> {
     let create_tool_id = plan.intents.iter().find_map(|i| match i {
         ChangeIntent::CreateSurface { tool, .. } => Some(tool.id.as_str()),
         _ => None,
@@ -630,6 +630,73 @@ pub fn compile_for_inspection(
     })
 }
 
+/// Build ownership scope for ApplicationPlan admission.
+///
+/// Workspace-hosted tool surfaces are globals (no conversation/project binding).
+/// Callers must omit those dimensions or [`LineageScope::enforce`] fails closed.
+/// Conversation-bound / project-bound targets require a matching ownership claim
+/// in the request — omitting the claim is a reject, not a silent pass.
+/// Conversation id is still used as a lookup hint when resolving evolve targets
+/// that do carry a conversation binding.
+pub fn lineage_scope_for_plan(
+    db: &Database,
+    plan: &ApplicationPlan,
+    conversation_id: Option<&str>,
+    project_id: Option<&str>,
+) -> Result<LineageScope, KernelError> {
+    let request = LineageScope {
+        conversation_id: conversation_id
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        project_id: project_id
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+    };
+    if plan.kind != ApplicationPlanKind::Evolve {
+        // Create produces workspace tool canvases without conversation ownership.
+        return Ok(LineageScope::default());
+    }
+    let Ok(bound) = plan_bound_application_id(plan) else {
+        // Structural validate will reject; keep request claims fail-closed.
+        return Ok(request);
+    };
+    match resolve_application_surface(db, bound, None, request.conversation_id.as_deref()) {
+        Ok(lineage) => {
+            let conversation_id = match (
+                lineage.conversation_id.is_some(),
+                request.conversation_id,
+            ) {
+                (false, _) => None,
+                (true, Some(cid)) => Some(cid),
+                (true, None) => {
+                    return Err(KernelError::Validation(format!(
+                        "surface '{}' is conversation-bound; ownership proof required",
+                        lineage.surface_id
+                    )));
+                }
+            };
+            let project_id = match (lineage.project_id.is_some(), request.project_id) {
+                (false, _) => None,
+                (true, Some(pid)) => Some(pid),
+                (true, None) => {
+                    return Err(KernelError::Validation(format!(
+                        "surface '{}' is project-bound; ownership proof required",
+                        lineage.surface_id
+                    )));
+                }
+            };
+            Ok(LineageScope {
+                conversation_id,
+                project_id,
+            })
+        }
+        // Surface missing / unresolvable: preserve claims so validate fails closed.
+        Err(_) => Ok(request),
+    }
+}
+
 /// Validate (including DB lineage + OCC) + compile with ApplicationSpec diffing.
 /// This is the only ApplicationPlan path that may produce durable Apply ops.
 pub fn compile_plan_against_db(
@@ -777,6 +844,407 @@ mod tests {
             validate_plan(&plan),
             Err(KernelError::Validation(_))
         ));
+    }
+
+    /// Adversarial empty-plan / channel-boundary safety.
+    /// Distinguishes valid no-op responses from plan smuggling and empty mutate plans.
+    mod empty_plan_safety {
+        use super::*;
+        use crate::ai::response_schema::{AgentResponsePayload, ResponseType};
+
+        #[test]
+        fn valid_noop_response_without_plan_or_ops_is_accepted() {
+            let payload = AgentResponsePayload {
+                assistant_message: String::new(),
+                response_type: ResponseType::Noop,
+                application_plan: None,
+                operations: None,
+                tool_change: None,
+                ..Default::default()
+            };
+            payload
+                .validate()
+                .expect("pure noop must remain a valid non-mutating channel");
+        }
+
+        #[test]
+        fn empty_intents_application_plan_is_not_a_valid_noop() {
+            let mut plan = sample_create_plan();
+            plan.intents.clear();
+            let err = validate_plan(&plan).expect_err("empty intents must not admit as no-op");
+            assert!(
+                matches!(err, KernelError::Validation(ref m) if m.contains("must not be empty")),
+                "got {err:?}"
+            );
+        }
+
+        #[test]
+        fn companion_operations_cannot_smuggle_mutations_beside_plan() {
+            let mut payload = AgentResponsePayload {
+                application_plan: Some(sample_create_plan()),
+                assistant_message: "create".into(),
+                response_type: ResponseType::ToolChange,
+                ..Default::default()
+            };
+            payload.operations = Some(vec![json!({
+                "type": "component.remove",
+                "target": { "surfaceId": "surf-x", "componentId": "c1" },
+                "payload": {}
+            })]);
+            let err = payload
+                .validate()
+                .expect_err("companion operations must fail closed");
+            assert!(err.contains("cannot be combined"), "got {err}");
+        }
+
+        #[test]
+        fn invalid_lineage_scope_rejects_evolve_with_unbound_surface() {
+            use crate::application_kernel::lineage::LineageScope;
+            use crate::db::{create_conversation, Database, DEFAULT_WORKSPACE_ID};
+            use crate::runtime_v2::surfaces::upsert_surface_from_tool;
+            use tempfile::tempdir;
+
+            let dir = tempdir().unwrap();
+            let mut db = Database::open_path(&dir.path().join("empty-plan-lineage.db")).unwrap();
+            let conv =
+                create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Lineage adversarial", None)
+                    .unwrap();
+
+            // Workspace tool surface: no conversation/project binding on the row.
+            let tool = crate::ai::ToolDefinition {
+                id: "tool-task-tracker".into(),
+                name: "Task Tracker".into(),
+                description: "d".into(),
+                layout: json!("stack"),
+                components: vec![crate::ai::ToolComponent {
+                    id: "t".into(),
+                    component_type: "text".into(),
+                    props: Some(json!({"text": "hi"})),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            let applied = crate::db::apply_tool_change(
+                &mut db,
+                DEFAULT_WORKSPACE_ID,
+                &tool,
+                "create",
+                None,
+                "test",
+            )
+            .unwrap();
+            let surface =
+                upsert_surface_from_tool(&mut db, &applied.definition, DEFAULT_WORKSPACE_ID, 1)
+                    .unwrap();
+            assert!(
+                surface.conversation_id.is_none(),
+                "adversarial fixture must lack conversation binding"
+            );
+
+            let plan = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(Some(1));
+            let scope = LineageScope {
+                conversation_id: Some(conv.id.clone()),
+                project_id: None,
+            };
+            let err = validate_plan_against_db(&db, &plan, &scope)
+                .expect_err("expected conversation with unbound surface must reject");
+            assert!(
+                matches!(
+                    err,
+                    KernelError::Validation(ref m) if m.contains("no conversation binding")
+                ),
+                "got {err:?}"
+            );
+
+            // Product callers omit ownership claims for workspace globals via helper.
+            let adapted = lineage_scope_for_plan(&db, &plan, Some(&conv.id), None)
+                .expect("workspace global must adapt without error");
+            assert!(
+                adapted.conversation_id.is_none(),
+                "helper must omit conversation scope for unbound globals"
+            );
+            validate_plan_against_db(&db, &plan, &adapted)
+                .expect("omitted scope must admit workspace global evolve");
+        }
+    }
+
+    /// Unit coverage for [`lineage_scope_for_plan`] itself (not only via validate).
+    mod lineage_scope_for_plan_tests {
+        use super::*;
+        use crate::db::{create_conversation, Database, DEFAULT_WORKSPACE_ID};
+        use crate::runtime_v2::surfaces::{create_inline_surface, upsert_surface_from_tool};
+        use tempfile::tempdir;
+
+        fn open_db(name: &str) -> (tempfile::TempDir, Database) {
+            let dir = tempdir().unwrap();
+            let db = Database::open_path(&dir.path().join(name)).unwrap();
+            (dir, db)
+        }
+
+        fn insert_tool(db: &Database, tool_id: &str) {
+            db.conn()
+                .execute(
+                    "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                     VALUES (?1, ?2, ?1, 'd', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                    rusqlite::params![tool_id, DEFAULT_WORKSPACE_ID],
+                )
+                .unwrap();
+        }
+
+        fn bind_surface_tool_id(db: &mut Database, surface_id: &str, tool_id: &str) {
+            db.conn()
+                .execute(
+                    "UPDATE surfaces SET tool_id = ?1 WHERE id = ?2",
+                    rusqlite::params![tool_id, surface_id],
+                )
+                .unwrap();
+        }
+
+        fn workspace_tool_surface(db: &mut Database, tool_id: &str) -> crate::runtime_v2::surfaces::SurfaceRecord {
+            let tool = crate::ai::ToolDefinition {
+                id: tool_id.into(),
+                name: "Scope Tool".into(),
+                description: "d".into(),
+                layout: json!("stack"),
+                components: vec![crate::ai::ToolComponent {
+                    id: "t".into(),
+                    component_type: "text".into(),
+                    props: Some(json!({"text": "hi"})),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            let applied = crate::db::apply_tool_change(
+                db,
+                DEFAULT_WORKSPACE_ID,
+                &tool,
+                "create",
+                None,
+                "test",
+            )
+            .unwrap();
+            upsert_surface_from_tool(db, &applied.definition, DEFAULT_WORKSPACE_ID, 1).unwrap()
+        }
+
+        #[test]
+        fn create_plan_omits_ownership_claims() {
+            let (_dir, mut db) = open_db("scope-create.db");
+            let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "C", None).unwrap();
+            let plan = sample_create_plan();
+            let scope = lineage_scope_for_plan(&db, &plan, Some(&conv.id), Some("proj-a"))
+                .expect("create must succeed");
+            assert!(scope.conversation_id.is_none());
+            assert!(scope.project_id.is_none());
+        }
+
+        #[test]
+        fn evolve_workspace_global_omits_conversation_and_project() {
+            let (_dir, mut db) = open_db("scope-global.db");
+            let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "C", None).unwrap();
+            let surface = workspace_tool_surface(&mut db, "tool-task-tracker");
+            assert!(surface.conversation_id.is_none());
+            assert!(surface.project_id.is_none());
+            let plan = crate::ai::plan_fixtures::task_tracker_add_due_dates_plan(Some(1));
+            let scope = lineage_scope_for_plan(&db, &plan, Some(&conv.id), Some("proj-a"))
+                .expect("global evolve must adapt");
+            assert!(scope.conversation_id.is_none());
+            assert!(scope.project_id.is_none());
+        }
+
+        #[test]
+        fn evolve_conversation_bound_keeps_claim_for_enforce() {
+            let (_dir, mut db) = open_db("scope-bound.db");
+            let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "C", None).unwrap();
+            insert_tool(&db, "app-bound");
+            let surface = create_inline_surface(
+                &mut db,
+                &conv.id,
+                None,
+                None,
+                "Bound",
+                &json!({
+                    "id": "doc-bound",
+                    "name": "Bound",
+                    "layout": "stack",
+                    "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+                }),
+                &[],
+            )
+            .unwrap();
+            bind_surface_tool_id(&mut db, &surface.id, "app-bound");
+
+            let mut plan = sample_create_plan();
+            plan.kind = ApplicationPlanKind::Evolve;
+            plan.application_id = Some("app-bound".into());
+            plan.base_revision = Some(1);
+            plan.intents = vec![ChangeIntent::UpdateSurface {
+                tool_id: "app-bound".into(),
+                tool: crate::ai::ToolDefinition {
+                    id: "app-bound".into(),
+                    name: "Bound".into(),
+                    description: "d".into(),
+                    layout: json!("stack"),
+                    components: vec![crate::ai::ToolComponent {
+                        id: "t".into(),
+                        component_type: "text".into(),
+                        props: Some(json!({"text": "hi"})),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                change_summary: Some("touch".into()),
+                base_revision: Some(1),
+            }];
+
+            let scope = lineage_scope_for_plan(&db, &plan, Some(&conv.id), None)
+                .expect("bound evolve with claim must adapt");
+            assert_eq!(scope.conversation_id.as_deref(), Some(conv.id.as_str()));
+        }
+
+        #[test]
+        fn evolve_conversation_bound_without_claim_rejects() {
+            let (_dir, mut db) = open_db("scope-bound-missing.db");
+            let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "C", None).unwrap();
+            insert_tool(&db, "app-bound-miss");
+            let surface = create_inline_surface(
+                &mut db,
+                &conv.id,
+                None,
+                None,
+                "Bound",
+                &json!({
+                    "id": "doc-bound-miss",
+                    "name": "Bound",
+                    "layout": "stack",
+                    "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+                }),
+                &[],
+            )
+            .unwrap();
+            bind_surface_tool_id(&mut db, &surface.id, "app-bound-miss");
+
+            let mut plan = sample_create_plan();
+            plan.kind = ApplicationPlanKind::Evolve;
+            plan.application_id = Some("app-bound-miss".into());
+            plan.base_revision = Some(1);
+            plan.intents = vec![ChangeIntent::UpdateSurface {
+                tool_id: "app-bound-miss".into(),
+                tool: crate::ai::ToolDefinition {
+                    id: "app-bound-miss".into(),
+                    name: "Bound".into(),
+                    description: "d".into(),
+                    layout: json!("stack"),
+                    components: vec![crate::ai::ToolComponent {
+                        id: "t".into(),
+                        component_type: "text".into(),
+                        props: Some(json!({"text": "hi"})),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                change_summary: Some("touch".into()),
+                base_revision: Some(1),
+            }];
+
+            let err = lineage_scope_for_plan(&db, &plan, None, None)
+                .expect_err("missing conversation claim must reject");
+            assert!(
+                matches!(
+                    err,
+                    KernelError::Validation(ref m) if m.contains("ownership proof required")
+                ),
+                "got {err:?}"
+            );
+        }
+
+        #[test]
+        fn evolve_project_bound_without_claim_rejects() {
+            let (_dir, mut db) = open_db("scope-proj-miss.db");
+            let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "C", None).unwrap();
+            insert_tool(&db, "app-proj");
+            let surface = create_inline_surface(
+                &mut db,
+                &conv.id,
+                None,
+                Some("proj-a"),
+                "Proj",
+                &json!({
+                    "id": "doc-proj",
+                    "name": "Proj",
+                    "layout": "stack",
+                    "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+                }),
+                &[],
+            )
+            .unwrap();
+            bind_surface_tool_id(&mut db, &surface.id, "app-proj");
+
+            let mut plan = sample_create_plan();
+            plan.kind = ApplicationPlanKind::Evolve;
+            plan.application_id = Some("app-proj".into());
+            plan.base_revision = Some(1);
+            plan.intents = vec![ChangeIntent::UpdateSurface {
+                tool_id: "app-proj".into(),
+                tool: crate::ai::ToolDefinition {
+                    id: "app-proj".into(),
+                    name: "Proj".into(),
+                    description: "d".into(),
+                    layout: json!("stack"),
+                    components: vec![crate::ai::ToolComponent {
+                        id: "t".into(),
+                        component_type: "text".into(),
+                        props: Some(json!({"text": "hi"})),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                change_summary: Some("touch".into()),
+                base_revision: Some(1),
+            }];
+
+            let err = lineage_scope_for_plan(&db, &plan, Some(&conv.id), None)
+                .expect_err("missing project claim must reject");
+            assert!(
+                matches!(
+                    err,
+                    KernelError::Validation(ref m) if m.contains("project-bound")
+                ),
+                "got {err:?}"
+            );
+        }
+
+        #[test]
+        fn evolve_unresolvable_preserves_request_claims() {
+            let (_dir, mut db) = open_db("scope-miss-surface.db");
+            let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "C", None).unwrap();
+            let mut plan = sample_create_plan();
+            plan.kind = ApplicationPlanKind::Evolve;
+            plan.application_id = Some("app-does-not-exist".into());
+            plan.base_revision = Some(1);
+            plan.intents = vec![ChangeIntent::UpdateSurface {
+                tool_id: "app-does-not-exist".into(),
+                tool: crate::ai::ToolDefinition {
+                    id: "app-does-not-exist".into(),
+                    name: "Missing".into(),
+                    description: "d".into(),
+                    layout: json!("stack"),
+                    components: vec![crate::ai::ToolComponent {
+                        id: "t".into(),
+                        component_type: "text".into(),
+                        props: Some(json!({"text": "hi"})),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                change_summary: Some("touch".into()),
+                base_revision: Some(1),
+            }];
+
+            let scope = lineage_scope_for_plan(&db, &plan, Some(&conv.id), Some("proj-a"))
+                .expect("unresolvable must keep claims for later validate");
+            assert_eq!(scope.conversation_id.as_deref(), Some(conv.id.as_str()));
+            assert_eq!(scope.project_id.as_deref(), Some("proj-a"));
+        }
     }
 
     #[test]
@@ -1544,7 +2012,9 @@ mod tests {
             use crate::ai::plan_fixtures::{
                 multi_surface_planner_add_priority_plan, multi_surface_planner_create_plan,
             };
-            use crate::application_kernel::application_plan::compile_plan_against_db;
+            use crate::application_kernel::application_plan::{
+                compile_plan_against_db, lineage_scope_for_plan,
+            };
             use crate::application_kernel::{apply_change, decide_proposal, ChangeRequest};
 
             const STUDY_APP: &str = "tool-study-planner";
@@ -1579,7 +2049,13 @@ mod tests {
 
             let surface = get_surface(&db, &format!("surf-{STUDY_APP}")).unwrap();
             let evolve = multi_surface_planner_add_priority_plan(Some(surface.current_revision));
-            let validated = compile_plan_against_db(&db, &evolve, &scope_for(&conv.id))
+            // Workspace tool canvas has no conversation binding — omit ownership scope.
+            let validated = compile_plan_against_db(
+                &db,
+                &evolve,
+                &lineage_scope_for_plan(&db, &evolve, Some(&conv.id), None)
+                    .expect("workspace study planner must omit ownership claims"),
+            )
                 .expect("study planner evolve");
             let ops = &validated.compiled.operations;
             assert!(

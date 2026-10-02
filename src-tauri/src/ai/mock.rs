@@ -529,7 +529,7 @@ impl MockAiProvider {
 
         // 2. Tic-Tac-Toe generation prompt
         if lower.contains("tic-tac-toe") || lower.contains("tictactoe") {
-            return json!({
+            let mut v = json!({
                 "schemaVersion": "2",
                 "assistantMessage": "I built a Tic-Tac-Toe game where you play against me! Click any square to make your move.",
                 "responseType": "message",
@@ -678,7 +678,33 @@ impl MockAiProvider {
                     }
                 ],
                 "diagnostics": { "fixture": "tictactoe_create" }
-            }).to_string();
+            });
+            // Cell setValue targets lastMove (not a valueKey) — declare it so software-document
+            // admission does not reject the create with undeclared-state conflicts.
+            if let Some(payload) = v
+                .pointer_mut("/operations/0/payload")
+                .and_then(|p| p.as_object_mut())
+            {
+                payload.insert(
+                    "stateContracts".into(),
+                    json!([
+                        { "key": "c0", "type": "string", "initialValue": "", "writePolicy": "user" },
+                        { "key": "c1", "type": "string", "initialValue": "", "writePolicy": "user" },
+                        { "key": "c2", "type": "string", "initialValue": "", "writePolicy": "user" },
+                        { "key": "c3", "type": "string", "initialValue": "", "writePolicy": "user" },
+                        { "key": "c4", "type": "string", "initialValue": "", "writePolicy": "user" },
+                        { "key": "c5", "type": "string", "initialValue": "", "writePolicy": "user" },
+                        { "key": "c6", "type": "string", "initialValue": "", "writePolicy": "user" },
+                        { "key": "c7", "type": "string", "initialValue": "", "writePolicy": "user" },
+                        { "key": "c8", "type": "string", "initialValue": "", "writePolicy": "user" },
+                        { "key": "lastMove", "type": "integer", "initialValue": null, "nullable": true, "writePolicy": "user" },
+                        { "key": "turn", "type": "string", "initialValue": "X", "writePolicy": "model" },
+                        { "key": "status", "type": "string", "initialValue": "Your turn (X). Click any square to play!", "writePolicy": "model" },
+                        { "key": "winner", "type": "string", "initialValue": "", "writePolicy": "model" }
+                    ]),
+                );
+            }
+            return v.to_string();
         }
 
         if lower.contains("chess") {
@@ -1863,6 +1889,65 @@ mod tests {
             serde_json::from_value(ops[0]["payload"].clone()).expect("tool payload");
         assert_eq!(tool.id, "tool-tictactoe");
         assert_eq!(tool.name, "Tic-Tac-Toe vs AI");
+    }
+
+
+    #[tokio::test]
+    async fn tictactoe_create_ops_propose_and_commit_to_tools() {
+        use crate::application_kernel::{apply_change, decide_proposal, ChangeRequest};
+        use crate::db::{create_conversation, list_tools, Database, DEFAULT_WORKSPACE_ID};
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("ttt.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "TTT", None).unwrap();
+        let provider = MockAiProvider::new();
+        let response = provider
+            .chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Build me a Tic-Tac-Toe game where I play against you",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            })
+            .await
+            .unwrap();
+        let parsed = parse_agent_response(&response.raw_text).unwrap();
+        let ops = parsed
+            .payload
+            .normalized_operations()
+            .expect("normalized ops");
+        assert!(!ops.is_empty(), "expected surface.create ops");
+        let change = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                turn_id: Some("turn-ttt".into()),
+                summary: "Create Tic-Tac-Toe".into(),
+                operations: ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .expect("propose");
+        let pid = change.proposal_id.expect("proposal id");
+        let committed = decide_proposal(&mut db, None, &pid, true).expect("decide");
+        assert!(
+            committed.is_committed(),
+            "conflicts: {:?}",
+            committed.conflicts
+        );
+        let tools = list_tools(&db, Some(DEFAULT_WORKSPACE_ID)).unwrap();
+        assert!(
+            tools
+                .iter()
+                .any(|t| t.id == "tool-tictactoe" || t.name.to_lowercase().contains("tic")),
+            "tools after commit: {:?}",
+            tools.iter().map(|t| (t.id.clone(), t.name.clone())).collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]

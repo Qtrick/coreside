@@ -282,6 +282,21 @@ pub fn apply_transaction_deferred(
         });
     }
 
+    // Multi-op transactions advance revision more than once. Stamp the actual
+    // post-apply revision so LIFO undo OCC matches the tip (not pre+1).
+    if let Some(obj) = previous.as_object_mut() {
+        for (sid, snap) in obj.iter_mut() {
+            if sid == "created_surfaces" {
+                continue;
+            }
+            if let Ok(s) = get_surface(db, sid) {
+                if let Some(snap_obj) = snap.as_object_mut() {
+                    snap_obj.insert("expectedPostRevision".into(), json!(s.current_revision));
+                }
+            }
+        }
+    }
+
     let now = now_rfc3339();
     let result = json!({ "surfaces": surfaces.iter().map(|s| &s.id).collect::<Vec<_>>() });
     db.conn().execute(
@@ -1676,7 +1691,85 @@ pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<App
                 None => None,
             };
             if let Some(def) = snap.get("definition") {
-                update_surface_definition(db, sid, def, "undo transaction", None)?;
+                let prev_rev = snap
+                    .get("revision")
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| {
+                        DbError::Invalid(format!(
+                            "snapshot for surface '{sid}' missing revision for undo"
+                        ))
+                    })?;
+                if prev_rev < 0 {
+                    return Err(DbError::Invalid(format!(
+                        "invalid snapshot revision {prev_rev} for surface '{sid}'"
+                    )));
+                }
+                // Direct restore (do not call update_surface_definition): that would
+                // insert a new surface_versions row and bump revision, breaking LIFO
+                // multi-turn undo OCC and UNIQUE(surface_id, revision) on re-apply.
+                let def_json = serde_json::to_string(def)?;
+                let now = now_rfc3339();
+                db.conn().execute(
+                    "UPDATE surfaces SET definition_json = ?1, current_revision = ?2, updated_at = ?3,
+                     name = COALESCE(json_extract(?1, '$.name'), name) WHERE id = ?4",
+                    params![def_json, prev_rev, now, sid],
+                )?;
+                db.conn().execute(
+                    "DELETE FROM surface_versions WHERE surface_id = ?1 AND revision > ?2",
+                    params![sid, prev_rev],
+                )?;
+                if let Ok(current) = get_surface(db, sid) {
+                    if let Some(tool_id) = current.tool_id.as_ref() {
+                        let mut tool: crate::ai::ToolDefinition =
+                            if def.get("sections").is_some() {
+                                if let Ok(doc) =
+                                    crate::runtime_v2::SoftwareDocument::from_value(def)
+                                {
+                                    doc.to_tool_definition()
+                                } else {
+                                    serde_json::from_value(def.clone()).unwrap_or_else(|_| {
+                                        crate::ai::ToolDefinition {
+                                            id: tool_id.clone(),
+                                            name: current.name.clone(),
+                                            description: String::new(),
+                                            layout: json!({ "type": "single-column" }),
+                                            components: Vec::new(),
+                                            ..Default::default()
+                                        }
+                                    })
+                                }
+                            } else {
+                                serde_json::from_value(def.clone()).unwrap_or_else(|_| {
+                                    crate::ai::ToolDefinition {
+                                        id: tool_id.clone(),
+                                        name: current.name.clone(),
+                                        description: String::new(),
+                                        layout: json!({ "type": "single-column" }),
+                                        components: Vec::new(),
+                                        ..Default::default()
+                                    }
+                                })
+                            };
+                        // tools.id is authoritative; keep current_version coupled to
+                        // surface revision the same way update_surface_definition does.
+                        tool.id = tool_id.clone();
+                        let layout = crate::ai::layout_type_string(&tool.layout);
+                        let tool_def_json = serde_json::to_string(&tool)?;
+                        db.conn().execute(
+                            "UPDATE tools SET name = ?1, description = ?2, layout = ?3, definition_json = ?4,
+                             current_version = ?5, updated_at = ?6 WHERE id = ?7",
+                            params![
+                                tool.name,
+                                tool.description,
+                                layout,
+                                tool_def_json,
+                                prev_rev,
+                                now,
+                                tool_id
+                            ],
+                        )?;
+                    }
+                }
             }
             if let Some(st) = restored_state {
                 super::surfaces::save_surface_state(db, sid, &st)?;
@@ -4028,6 +4121,221 @@ mod tests {
                 .any(|c| c.contains("suspended") || c.contains("disabled")),
             "expected suspended/disabled conflict, got {:?}",
             res.conflicts
+        );
+    }
+
+    #[test]
+    fn undo_one_turn_and_two_turn_application_evolution() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "MultiUndo", None).unwrap();
+        let def = json!({
+            "id": "doc",
+            "name": "Tracker",
+            "layout": "stack",
+            "components": [
+                {"id": "title", "type": "heading", "props": {"text": "V0"}},
+                {"id": "body", "type": "text", "props": {"text": "base"}}
+            ]
+        });
+        let surface =
+            create_inline_surface(&mut db, &conv.id, None, None, "Tracker", &def, &[]).unwrap();
+        let rev0 = surface.current_revision;
+
+        let turn1 = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "evolve-v1",
+            &[op(
+                "component.update_props",
+                Some(&surface.id),
+                json!({ "componentId": "title", "props": { "text": "V1" } }),
+            )],
+            false,
+        )
+        .unwrap();
+        let r1 = apply_transaction(&mut db, &turn1.id).unwrap();
+        assert_eq!(r1.transaction.status, "applied", "{:?}", r1.conflicts);
+        let after1 = get_surface(&db, &surface.id).unwrap();
+        assert!(after1.current_revision > rev0);
+        let doc1 = crate::runtime_v2::SoftwareDocument::from_value(&after1.definition).unwrap();
+        assert_eq!(
+            doc1.find_component("title")
+                .and_then(|c| c.props.as_ref())
+                .and_then(|p| p.get("text")),
+            Some(&json!("V1"))
+        );
+
+        // One-turn undo restores V0.
+        let undone1 = undo_transaction(&mut db, &turn1.id).unwrap();
+        assert_eq!(undone1.status, "reverted");
+        let restored0 = get_surface(&db, &surface.id).unwrap();
+        let doc0 = crate::runtime_v2::SoftwareDocument::from_value(&restored0.definition).unwrap();
+        assert_eq!(
+            doc0.find_component("title")
+                .and_then(|c| c.props.as_ref())
+                .and_then(|p| p.get("text")),
+            Some(&json!("V0"))
+        );
+
+        // Re-apply turn1, then turn2, then undo both (LIFO).
+        let turn1b = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "evolve-v1-b",
+            &[op(
+                "component.update_props",
+                Some(&surface.id),
+                json!({ "componentId": "title", "props": { "text": "V1" } }),
+            )],
+            false,
+        )
+        .unwrap();
+        let r1b = apply_transaction(&mut db, &turn1b.id).unwrap();
+        assert_eq!(
+            r1b.transaction.status,
+            "applied",
+            "turn1b conflicts={:?} restored_rev={}",
+            r1b.conflicts,
+            get_surface(&db, &surface.id).unwrap().current_revision
+        );
+        let turn2 = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "evolve-v2",
+            &[op(
+                "component.update_props",
+                Some(&surface.id),
+                json!({ "componentId": "title", "props": { "text": "V2" } }),
+            )],
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            apply_transaction(&mut db, &turn2.id)
+                .unwrap()
+                .transaction
+                .status,
+            "applied"
+        );
+        let at_v2 = get_surface(&db, &surface.id).unwrap();
+        let doc_v2 = crate::runtime_v2::SoftwareDocument::from_value(&at_v2.definition).unwrap();
+        assert_eq!(
+            doc_v2
+                .find_component("title")
+                .and_then(|c| c.props.as_ref())
+                .and_then(|p| p.get("text")),
+            Some(&json!("V2"))
+        );
+
+        undo_transaction(&mut db, &turn2.id).unwrap();
+        let mid = get_surface(&db, &surface.id).unwrap();
+        let doc_mid = crate::runtime_v2::SoftwareDocument::from_value(&mid.definition).unwrap();
+        assert_eq!(
+            doc_mid
+                .find_component("title")
+                .and_then(|c| c.props.as_ref())
+                .and_then(|p| p.get("text")),
+            Some(&json!("V1")),
+            "undoing second turn must leave first turn applied"
+        );
+
+        undo_transaction(&mut db, &turn1b.id).unwrap();
+        let end = get_surface(&db, &surface.id).unwrap();
+        let doc_end = crate::runtime_v2::SoftwareDocument::from_value(&end.definition).unwrap();
+        assert_eq!(
+            doc_end
+                .find_component("title")
+                .and_then(|c| c.props.as_ref())
+                .and_then(|p| p.get("text")),
+            Some(&json!("V0")),
+            "two-turn undo must restore original definition"
+        );
+    }
+
+    #[test]
+    fn undo_restores_linked_tool_current_version() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "ToolUndo", None).unwrap();
+        let original = ToolDefinition {
+            id: "tool-undo-ver".into(),
+            name: "Undo Ver".into(),
+            description: String::new(),
+            layout: json!({"type": "single-column"}),
+            components: vec![ToolComponent {
+                id: "title".into(),
+                component_type: "heading".into(),
+                value_key: None,
+                props: Some(json!({"text": "V0"})),
+                children: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let saved = apply_tool_change(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            &original,
+            "create",
+            None,
+            "seed",
+        )
+        .unwrap();
+        let surface = upsert_surface_from_tool(
+            &mut db,
+            &saved.definition,
+            DEFAULT_WORKSPACE_ID,
+            saved.current_version,
+        )
+        .unwrap();
+        let before = get_tool(&db, &original.id).unwrap();
+        let rev0 = get_surface(&db, &surface.id).unwrap().current_revision;
+        assert_eq!(before.current_version, rev0);
+
+        let turn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "evolve-tool",
+            &[op(
+                "component.update_props",
+                Some(&surface.id),
+                json!({ "componentId": "title", "props": { "text": "V1" } }),
+            )],
+            false,
+        )
+        .unwrap();
+        let applied = apply_transaction(&mut db, &turn.id).unwrap();
+        assert_eq!(applied.transaction.status, "applied", "{:?}", applied.conflicts);
+        let mid_tool = get_tool(&db, &original.id).unwrap();
+        let mid_surf = get_surface(&db, &surface.id).unwrap();
+        assert!(mid_surf.current_revision > rev0);
+        assert_eq!(
+            mid_tool.current_version, mid_surf.current_revision,
+            "apply must keep tools.current_version coupled to surface revision"
+        );
+
+        undo_transaction(&mut db, &turn.id).unwrap();
+        let end_tool = get_tool(&db, &original.id).unwrap();
+        let end_surf = get_surface(&db, &surface.id).unwrap();
+        assert_eq!(end_surf.current_revision, rev0);
+        assert_eq!(
+            end_tool.current_version, rev0,
+            "undo must restore tools.current_version with surface revision"
+        );
+        assert_eq!(end_tool.id, original.id);
+        let doc = crate::runtime_v2::SoftwareDocument::from_value(&end_surf.definition).unwrap();
+        assert_eq!(
+            doc.find_component("title")
+                .and_then(|c| c.props.as_ref())
+                .and_then(|p| p.get("text")),
+            Some(&json!("V0"))
         );
     }
 }

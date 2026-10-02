@@ -1487,6 +1487,138 @@ fn contains_component_id(val: &serde_json::Value, target_id: &str) -> bool {
     }
 }
 
+/// Authorize structured form binding, revisions, and idempotency before seal.
+///
+/// Trust is never taken from the submission — only conversation ownership,
+/// authoritative application identity, component membership, OCC revisions,
+/// and duplicate idempotency keys are checked here.
+fn authorize_structured_submission(
+    db: &db::Database,
+    conversation_id: &str,
+    submission: &StructuredUserInputSubmission,
+) -> Result<(), CommandError> {
+    if submission.surface_id.is_none()
+        && (submission.surface_revision.is_some() || submission.state_revision.is_some())
+    {
+        return Err(CommandError::new(
+            "invalid",
+            "surfaceId is required when surfaceRevision or stateRevision is specified",
+        ));
+    }
+    if let Some(ref sid) = submission.surface_id {
+        let surf = crate::runtime_v2::surfaces::get_surface(db, sid).map_err(|e| {
+            CommandError::new("not_found", format!("Surface '{sid}' not found: {e}"))
+        })?;
+        if surf.conversation_id.as_deref() != Some(conversation_id) {
+            return Err(CommandError::new(
+                "forbidden",
+                format!("Surface '{sid}' does not belong to conversation '{conversation_id}'"),
+            ));
+        }
+        if let Ok(conv) = db::get_conversation(db, conversation_id) {
+            if let Some(ref surf_p_id) = surf.project_id {
+                if conv.project_id.as_ref() != Some(surf_p_id) {
+                    return Err(CommandError::new(
+                        "forbidden",
+                        format!(
+                            "Surface project '{surf_p_id}' does not match conversation project '{:?}'",
+                            conv.project_id
+                        ),
+                    ));
+                }
+            }
+        }
+        if let Some(ref app_id) = submission.application_id {
+            let auth_app = crate::application_kernel::manifest::authoritative_application_id(
+                db,
+                surf.tool_id.as_deref(),
+            );
+            // Fail closed: claimed applicationId must match a manifest-backed id.
+            // Never accept surface.id / tool_id / instance_id as application identity.
+            match auth_app {
+                Some(auth) if auth == *app_id => {}
+                Some(auth) => {
+                    return Err(CommandError::new(
+                        "invalid",
+                        format!(
+                            "Application ID mismatch for surface '{sid}': claimed '{app_id}', authoritative '{auth}'"
+                        ),
+                    ));
+                }
+                None => {
+                    return Err(CommandError::new(
+                        "invalid",
+                        format!(
+                            "applicationId '{app_id}' requires a manifest-backed application on surface '{sid}'"
+                        ),
+                    ));
+                }
+            }
+        }
+        if let Some(expected_rev) = submission.surface_revision {
+            if surf.current_revision != expected_rev {
+                return Err(CommandError::new(
+                    "conflict",
+                    format!(
+                        "Surface revision mismatch: expected {expected_rev}, current is {}",
+                        surf.current_revision
+                    ),
+                ));
+            }
+        }
+        if let Some(expected_state_rev) = submission.state_revision {
+            let (_, current_state_rev) =
+                crate::runtime_v2::surfaces::get_surface_state_with_revision(db, sid).map_err(
+                    |e| {
+                        CommandError::new(
+                            "not_found",
+                            format!("Surface state '{sid}' not found: {e}"),
+                        )
+                    },
+                )?;
+            if current_state_rev != expected_state_rev {
+                return Err(CommandError::new(
+                    "conflict",
+                    format!(
+                        "Surface state revision mismatch: expected {expected_state_rev}, current is {current_state_rev}"
+                    ),
+                ));
+            }
+        }
+        if let Some(ref comp_id) = submission.component_id {
+            let found = contains_component_id(&surf.definition, comp_id)
+                || surf.id == *comp_id
+                || surf.tool_id.as_deref() == Some(comp_id);
+            if !found {
+                return Err(CommandError::new(
+                    "invalid",
+                    format!("Component '{comp_id}' not found in surface '{sid}'"),
+                ));
+            }
+        }
+    }
+    if let Some(ref idem) = submission.idempotency_key {
+        let key = format!("sui-{idem}");
+        if let Ok(existing) =
+            crate::runtime_v2::get_turn_by_idempotency(db, conversation_id, &key)
+        {
+            if !matches!(
+                existing.state,
+                crate::runtime_v2::TurnState::Failed
+                    | crate::runtime_v2::TurnState::InterruptedRecoverable
+            ) {
+                return Err(CommandError::new(
+                    "conflict",
+                    format!(
+                        "Structured user input with idempotency key '{idem}' has already been processed"
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn send_message_inner(
     app: AppHandle,
     state: &AppState,
@@ -1546,105 +1678,9 @@ async fn send_message_inner(
     let sealed_structured: Option<StructuredUserInput> = if let Some(mut submission) =
         structured_user_input.clone()
     {
-        if submission.surface_id.is_none()
-            && (submission.surface_revision.is_some() || submission.state_revision.is_some())
         {
-            return Err(CommandError::new(
-                "invalid",
-                "surfaceId is required when surfaceRevision or stateRevision is specified",
-            ));
-        }
-        if let Some(ref sid) = submission.surface_id {
             let db_guard = state.db.lock();
-            let surf = crate::runtime_v2::surfaces::get_surface(&db_guard, sid).map_err(|e| {
-                CommandError::new("not_found", format!("Surface '{sid}' not found: {e}"))
-            })?;
-            if surf.conversation_id.as_deref() != Some(&conversation_id) {
-                return Err(CommandError::new(
-                    "forbidden",
-                    format!("Surface '{sid}' does not belong to conversation '{conversation_id}'"),
-                ));
-            }
-            if let Ok(conv) = db::get_conversation(&db_guard, &conversation_id) {
-                if let Some(ref surf_p_id) = surf.project_id {
-                    if conv.project_id.as_ref() != Some(surf_p_id) {
-                        return Err(CommandError::new(
-                            "forbidden",
-                            format!(
-                                "Surface project '{surf_p_id}' does not match conversation project '{:?}'",
-                                conv.project_id
-                            ),
-                        ));
-                    }
-                }
-            }
-            if let Some(ref app_id) = submission.application_id {
-                let auth_app = crate::application_kernel::manifest::authoritative_application_id(
-                    &db_guard,
-                    surf.tool_id.as_deref(),
-                );
-                // Fail closed: claimed applicationId must match a manifest-backed id.
-                // Never accept surface.id / tool_id / instance_id as application identity.
-                match auth_app {
-                    Some(auth) if auth == *app_id => {}
-                    Some(auth) => {
-                        return Err(CommandError::new(
-                            "invalid",
-                            format!(
-                                "Application ID mismatch for surface '{sid}': claimed '{app_id}', authoritative '{auth}'"
-                            ),
-                        ));
-                    }
-                    None => {
-                        return Err(CommandError::new(
-                            "invalid",
-                            format!(
-                                "applicationId '{app_id}' requires a manifest-backed application on surface '{sid}'"
-                            ),
-                        ));
-                    }
-                }
-            }
-            if let Some(expected_rev) = submission.surface_revision {
-                if surf.current_revision != expected_rev {
-                    return Err(CommandError::new(
-                        "conflict",
-                        format!(
-                            "Surface revision mismatch: expected {expected_rev}, current is {}",
-                            surf.current_revision
-                        ),
-                    ));
-                }
-            }
-            if let Some(expected_state_rev) = submission.state_revision {
-                let (_, current_state_rev) =
-                    crate::runtime_v2::surfaces::get_surface_state_with_revision(&db_guard, sid)
-                        .map_err(|e| {
-                            CommandError::new(
-                                "not_found",
-                                format!("Surface state '{sid}' not found: {e}"),
-                            )
-                        })?;
-                if current_state_rev != expected_state_rev {
-                    return Err(CommandError::new(
-                        "conflict",
-                        format!(
-                            "Surface state revision mismatch: expected {expected_state_rev}, current is {current_state_rev}"
-                        ),
-                    ));
-                }
-            }
-            if let Some(ref comp_id) = submission.component_id {
-                let found = contains_component_id(&surf.definition, comp_id)
-                    || surf.id == *comp_id
-                    || surf.tool_id.as_deref() == Some(comp_id);
-                if !found {
-                    return Err(CommandError::new(
-                        "invalid",
-                        format!("Component '{comp_id}' not found in surface '{sid}'"),
-                    ));
-                }
-            }
+            authorize_structured_submission(&db_guard, &conversation_id, &submission)?;
         }
         // interactive.ai_turn: drop frontend-supplied state/legalActions and inject
         // authoritative Rust public context before sealing.
@@ -1677,26 +1713,6 @@ async fn send_message_inner(
                     submission.state_revision = Some(rev);
                 }
                 submission.fields = fields;
-            }
-        }
-        if let Some(ref idem) = submission.idempotency_key {
-            let key = format!("sui-{idem}");
-            let db_guard = state.db.lock();
-            if let Ok(existing) =
-                crate::runtime_v2::get_turn_by_idempotency(&db_guard, &conversation_id, &key)
-            {
-                if !matches!(
-                    existing.state,
-                    crate::runtime_v2::TurnState::Failed
-                        | crate::runtime_v2::TurnState::InterruptedRecoverable
-                ) {
-                    return Err(CommandError::new(
-                        "conflict",
-                        format!(
-                            "Structured user input with idempotency key '{idem}' has already been processed"
-                        ),
-                    ));
-                }
             }
         }
         Some(
@@ -3381,15 +3397,20 @@ async fn send_message_inner(
             operations_from_payload = Some(repaired);
         } else if let Some(plan) = parsed.payload.application_plan.as_ref() {
             // ApplicationPlan must pass SQLite lineage + OCC before becoming durable ops.
-            let scope = crate::application_kernel::lineage::LineageScope {
-                conversation_id: Some(conversation_id.clone()),
-                project_id: project_id.clone(),
-            };
+            // Omit conversation/project ownership claims for workspace globals.
             let compiled = {
                 let db = state.db.lock();
-                crate::application_kernel::application_plan::compile_plan_against_db(
-                    &db, plan, &scope,
+                crate::application_kernel::application_plan::lineage_scope_for_plan(
+                    &db,
+                    plan,
+                    Some(&conversation_id),
+                    project_id.as_deref(),
                 )
+                .and_then(|scope| {
+                    crate::application_kernel::application_plan::compile_plan_against_db(
+                        &db, plan, &scope,
+                    )
+                })
             };
             match compiled {
                 Ok(validated) => {
@@ -4075,6 +4096,265 @@ mod provider_settlement_tests {
             assert_eq!(msg, err.code());
             assert_eq!(state, TurnState::Failed);
         }
+    }
+}
+
+#[cfg(test)]
+mod structured_submission_security_tests {
+    use super::{authorize_structured_submission, CommandError};
+    use crate::ai::StructuredUserInputSubmission;
+    use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+    use crate::db::{create_conversation, Database, DEFAULT_WORKSPACE_ID};
+    use crate::runtime_v2::surfaces::{create_inline_surface, save_surface_state};
+    use crate::runtime_v2::{create_turn, transition_turn, TurnPatch, TurnState};
+    use serde_json::{json, Map};
+    use std::collections::HashMap;
+    use tempfile::tempdir;
+
+    fn test_db() -> Database {
+        let dir = tempdir().unwrap();
+        Database::open_path(&dir.path().join("sui-sec.db")).unwrap()
+    }
+
+    fn seed_conv_surface(db: &mut Database) -> (String, String, i64) {
+        let conv = create_conversation(db, DEFAULT_WORKSPACE_ID, "SUI", None).unwrap();
+        let app_id = format!("app-sui-{}", uuid::Uuid::new_v4());
+        upsert_manifest(
+            db,
+            ApplicationManifest {
+                schema_version: "1".into(),
+                application_id: app_id.clone(),
+                instance_id: format!("inst-{}", &app_id),
+                name: "SUI App".into(),
+                description: String::new(),
+                version: 1,
+                surfaces: vec![],
+                routes: vec![],
+                data_models: vec![],
+                settings: vec![],
+                capabilities: vec!["coreside.core".into()],
+                permissions: vec![],
+                events: vec![],
+                tests: vec![],
+                search_keywords: vec![],
+                tags: vec![],
+                agent_description: String::new(),
+                project_id: None,
+                conversation_id: Some(conv.id.clone()),
+                organization_id: None,
+                ownership: None,
+                application_action_access: vec![],
+                surface_action_access: HashMap::new(),
+                component_action_access: HashMap::new(),
+                action_descriptor_hashes: HashMap::new(),
+            },
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES (?1, ?2, 'SUI App', '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                rusqlite::params![app_id, DEFAULT_WORKSPACE_ID],
+            )
+            .unwrap();
+        let surf = create_inline_surface(
+            db,
+            &conv.id,
+            None,
+            None,
+            "Form",
+            &json!({
+                "id": "form-root",
+                "name": "Form",
+                "layout": "stack",
+                "components": [
+                    {"id": "btn-submit", "type": "button", "props": {"label": "Go"}}
+                ]
+            }),
+            &[],
+        )
+        .unwrap();
+        crate::runtime_v2::surfaces::bind_surface_tool_id(db, &surf.id, &app_id).unwrap();
+        save_surface_state(db, &surf.id, &json!({"n": 1})).unwrap();
+        let surf = crate::runtime_v2::surfaces::get_surface(db, &surf.id).unwrap();
+        (conv.id, surf.id, surf.current_revision)
+    }
+
+    fn base_submission(surface_id: &str, rev: i64) -> StructuredUserInputSubmission {
+        StructuredUserInputSubmission {
+            form_id: "form-1".into(),
+            event_name: Some("form.submit".into()),
+            application_id: None,
+            surface_id: Some(surface_id.into()),
+            surface_revision: Some(rev),
+            state_revision: None,
+            component_id: Some("btn-submit".into()),
+            idempotency_key: None,
+            fields: Map::new(),
+        }
+    }
+
+    fn assert_code(err: &CommandError, code: &str) {
+        assert_eq!(err.code, code, "message={}", err.message);
+    }
+
+    #[test]
+    fn foreign_surface_is_forbidden() {
+        let mut db = test_db();
+        let (conv_a, surf_a, rev) = seed_conv_surface(&mut db);
+        let conv_b = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Other", None).unwrap();
+        let sub = base_submission(&surf_a, rev);
+        let err = authorize_structured_submission(&db, &conv_b.id, &sub).unwrap_err();
+        assert_code(&err, "forbidden");
+        assert!(authorize_structured_submission(&db, &conv_a, &sub).is_ok());
+    }
+
+    #[test]
+    fn foreign_app_id_is_rejected() {
+        let mut db = test_db();
+        let (conv, surf, rev) = seed_conv_surface(&mut db);
+        let mut sub = base_submission(&surf, rev);
+        sub.application_id = Some("app-foreign".into());
+        let err = authorize_structured_submission(&db, &conv, &sub).unwrap_err();
+        assert_code(&err, "invalid");
+        assert!(err.message.contains("Application ID mismatch"));
+    }
+
+    #[test]
+    fn foreign_conversation_cannot_use_other_chat_surface() {
+        let mut db = test_db();
+        let (_conv_a, surf_a, rev) = seed_conv_surface(&mut db);
+        let (conv_b, _surf_b, _) = seed_conv_surface(&mut db);
+        let sub = base_submission(&surf_a, rev);
+        let err = authorize_structured_submission(&db, &conv_b, &sub).unwrap_err();
+        assert_code(&err, "forbidden");
+        assert!(err.message.contains("does not belong to conversation"));
+    }
+
+    #[test]
+    fn wrong_component_type_is_rejected() {
+        let mut db = test_db();
+        let (conv, surf, rev) = seed_conv_surface(&mut db);
+        let mut sub = base_submission(&surf, rev);
+        sub.component_id = Some("btn-not-a-real-component".into());
+        let err = authorize_structured_submission(&db, &conv, &sub).unwrap_err();
+        assert_code(&err, "invalid");
+        assert!(err.message.contains("Component"));
+    }
+
+    #[test]
+    fn stale_surface_revision_conflicts() {
+        let mut db = test_db();
+        let (conv, surf, rev) = seed_conv_surface(&mut db);
+        let mut sub = base_submission(&surf, rev);
+        sub.surface_revision = Some(rev + 99);
+        let err = authorize_structured_submission(&db, &conv, &sub).unwrap_err();
+        assert_code(&err, "conflict");
+        assert!(err.message.contains("Surface revision mismatch"));
+    }
+
+    #[test]
+    fn stale_state_revision_conflicts() {
+        let mut db = test_db();
+        let (conv, surf, rev) = seed_conv_surface(&mut db);
+        let (_, state_rev) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surf).unwrap();
+        let mut sub = base_submission(&surf, rev);
+        sub.state_revision = Some(state_rev + 7);
+        let err = authorize_structured_submission(&db, &conv, &sub).unwrap_err();
+        assert_code(&err, "conflict");
+        assert!(err.message.contains("state revision mismatch"));
+    }
+
+    #[test]
+    fn duplicate_idempotency_key_conflicts() {
+        let mut db = test_db();
+        let (conv, surf, rev) = seed_conv_surface(&mut db);
+        let turn = create_turn(&db, &conv, None, "sui-idem-dup-1", None).unwrap();
+        // Advance out of Failed/InterruptedRecoverable so duplicate is blocked.
+        let _ = transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::ProviderStarted,
+            TurnPatch::default(),
+        );
+        let mut sub = base_submission(&surf, rev);
+        sub.idempotency_key = Some("idem-dup-1".into());
+        let err = authorize_structured_submission(&db, &conv, &sub).unwrap_err();
+        assert_code(&err, "conflict");
+        assert!(err.message.contains("idempotency key"));
+    }
+
+    #[test]
+    fn revision_without_surface_id_is_invalid() {
+        let db = test_db();
+        let sub = StructuredUserInputSubmission {
+            form_id: "form-1".into(),
+            surface_revision: Some(1),
+            ..Default::default()
+        };
+        let err = authorize_structured_submission(&db, "conv-x", &sub).unwrap_err();
+        assert_code(&err, "invalid");
+        assert!(err.message.contains("surfaceId is required"));
+    }
+
+    #[test]
+    fn missing_surface_is_not_found() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Missing", None).unwrap();
+        let mut sub = base_submission("surf-does-not-exist", 1);
+        sub.application_id = None;
+        let err = authorize_structured_submission(&db, &conv.id, &sub).unwrap_err();
+        assert_code(&err, "not_found");
+    }
+
+    #[test]
+    fn application_id_without_manifest_binding_is_rejected() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "NoManifest", None).unwrap();
+        let surf = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Loose",
+            &json!({
+                "id": "loose",
+                "name": "Loose",
+                "layout": "stack",
+                "components": [{"id": "btn", "type": "button", "props": {"label": "Go"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        let mut sub = base_submission(&surf.id, surf.current_revision);
+        sub.application_id = Some("app-claimed".into());
+        sub.component_id = Some("btn".into());
+        let err = authorize_structured_submission(&db, &conv.id, &sub).unwrap_err();
+        assert_code(&err, "invalid");
+        assert!(
+            err.message.contains("manifest-backed") || err.message.contains("applicationId"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn project_mismatch_between_surface_and_conversation_is_forbidden() {
+        let mut db = test_db();
+        let (conv, surf, rev) = seed_conv_surface(&mut db);
+        // Attach a fake project id on the surface row only.
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET project_id = 'proj-foreign' WHERE id = ?1",
+                [&surf],
+            )
+            .unwrap();
+        let sub = base_submission(&surf, rev);
+        let err = authorize_structured_submission(&db, &conv, &sub).unwrap_err();
+        assert_code(&err, "forbidden");
+        assert!(err.message.contains("project"), "{}", err.message);
     }
 }
 

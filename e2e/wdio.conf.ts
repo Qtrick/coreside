@@ -195,6 +195,17 @@ export const config: Options.Testrunner = {
     "habit-tracker-application": [
       "./specs/23-habit-tracker-application.spec.ts",
     ],
+    "reconnect-during-evolution": [
+      "./specs/24-reconnect-during-evolution.spec.ts",
+    ],
+    "reconnect-after-durable-commit": [
+      "./specs/25-reconnect-after-durable-commit.spec.ts",
+    ],
+    "branch-isolation": ["./specs/27-branch-isolation.spec.ts"],
+    "structured-form-submission": [
+      "./specs/28-structured-form-submission.spec.ts",
+    ],
+    "multi-turn-undo": ["./specs/30-multi-turn-undo.spec.ts"],
     "wallpaper-targeted": ["./specs/13-wallpaper-targeted-update.spec.ts"],
     "first-run-welcome": ["./specs/15-first-run-welcome.spec.ts"],
     "core-tutorial": ["./specs/16-core-tutorial.spec.ts"],

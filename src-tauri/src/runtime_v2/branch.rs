@@ -474,6 +474,53 @@ fn fork_conversation_applications(
             source_apps.insert(row?);
         }
     }
+    // ApplicationPlan Create tools are workspace-global (no conversation_id on the
+    // manifest), but they are still conversation-scoped work via app_transactions.
+    // Fork those too so branch data mutations stay isolated.
+    {
+        let mut stmt = db.conn().prepare(
+            "SELECT application_id, operations_json FROM app_transactions
+             WHERE conversation_id = ?1
+               AND status = 'applied'",
+        )?;
+        let rows = stmt.query_map([source_conversation_id], |row| {
+            Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (app_id, ops_json) = row?;
+            if let Some(app) = app_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                if let Some(resolved) = authoritative_application_id(db, Some(app)) {
+                    source_apps.insert(resolved);
+                } else {
+                    source_apps.insert(app.to_string());
+                }
+            }
+            if let Ok(ops) = serde_json::from_str::<Vec<Value>>(&ops_json) {
+                for op in ops {
+                    let op_type = op.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    if op_type != "surface.create" && op_type != "tool.full_replace" {
+                        continue;
+                    }
+                    let tool_id = op
+                        .pointer("/payload/id")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| op.pointer("/payload/tool/id").and_then(|v| v.as_str()))
+                        .or_else(|| op.pointer("/target/toolId").and_then(|v| v.as_str()));
+                    if let Some(tid) = tool_id.map(str::trim).filter(|s| !s.is_empty()) {
+                        if let Some(resolved) = authoritative_application_id(db, Some(tid)) {
+                            source_apps.insert(resolved);
+                        } else if crate::db::get_tool(db, tid).is_ok() {
+                            source_apps.insert(tid.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     let mut map = HashMap::new();
     for app_id in source_apps {
@@ -1373,5 +1420,188 @@ mod tests {
         assert!(!src.iter().any(|r| r["title"] == "Task 3 experimental"));
         assert!(br.iter().any(|r| r["title"] == "Task 3 experimental"));
         assert_eq!(branch.source_conversation_id, conv.id);
+    }
+
+    #[test]
+    fn branch_record_and_revision_isolation() {
+        use crate::application_kernel::data::{
+            create_record, query_records, upsert_model, DataField, DataModelDefinition,
+        };
+        use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
+        use crate::db::create_conversation;
+        use crate::runtime_v2::surfaces::{get_surface, update_surface_definition};
+        use std::collections::HashMap;
+
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("branch_rev.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Rev", None).unwrap();
+
+        upsert_manifest(
+            &mut db,
+            ApplicationManifest {
+                schema_version: "1".into(),
+                application_id: "app-rev".into(),
+                instance_id: "inst-rev".into(),
+                name: "Rev Tracker".into(),
+                description: String::new(),
+                version: 1,
+                surfaces: vec![],
+                routes: vec![],
+                data_models: vec![],
+                settings: vec![],
+                capabilities: vec!["coreside.core".into()],
+                permissions: vec!["local_data.write".into(), "local_data.read".into()],
+                events: vec![],
+                tests: vec![],
+                search_keywords: vec![],
+                tags: vec![],
+                agent_description: String::new(),
+                project_id: None,
+                conversation_id: Some(conv.id.clone()),
+                organization_id: None,
+                ownership: None,
+                application_action_access: vec!["local_data.write".into()],
+                surface_action_access: HashMap::new(),
+                component_action_access: HashMap::new(),
+                action_descriptor_hashes: HashMap::new(),
+            },
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES ('app-rev', ?1, 'Rev Tracker', '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                [DEFAULT_WORKSPACE_ID],
+            )
+            .unwrap();
+        crate::application_kernel::permissions::grant_permission(
+            &mut db,
+            "app-rev",
+            "local_data.write",
+            json!({}),
+            "test",
+        )
+        .unwrap();
+        upsert_model(
+            &mut db,
+            "app-rev",
+            DataModelDefinition {
+                model_id: "Task".into(),
+                display_name: "Task".into(),
+                schema_version: 1,
+                fields: vec![DataField {
+                    field_id: "title".into(),
+                    field_type: "text".into(),
+                    required: true,
+                    default: None,
+                    enum_values: None,
+                }],
+            },
+        )
+        .unwrap();
+        create_record(&mut db, "app-rev", "Task", json!({"title": "Shared seed"})).unwrap();
+
+        let m1 = crate::db::insert_message(&mut db, &conv.id, "user", "seed", None).unwrap();
+        let surf = super::super::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            Some(&m1.id),
+            None,
+            "Rev Tracker",
+            &json!({
+                "id": "tt",
+                "name": "Rev Tracker",
+                "layout": "stack",
+                "components": [{"id": "h", "type": "heading", "props": {"text": "V0"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        super::super::surfaces::bind_surface_tool_id(&mut db, &surf.id, "app-rev").unwrap();
+        let src_rev_before = get_surface(&db, &surf.id).unwrap().current_revision;
+
+        let (_branch, branch_surfs) = branch_from_message(
+            &mut db,
+            &conv.id,
+            &m1.id,
+            "Experiment",
+            DEFAULT_WORKSPACE_ID,
+        )
+        .unwrap();
+        let branch_surf = &branch_surfs[0];
+        let forked_app = branch_surf.tool_id.as_deref().expect("forked app");
+        assert_ne!(forked_app, "app-rev");
+        assert_ne!(branch_surf.id, surf.id);
+        let branch_rev_at_fork = get_surface(&db, &branch_surf.id).unwrap().current_revision;
+
+        // Mutate source definition + records after fork.
+        update_surface_definition(
+            &mut db,
+            &surf.id,
+            &json!({
+                "id": "tt",
+                "name": "Rev Tracker",
+                "layout": "stack",
+                "components": [{"id": "h", "type": "heading", "props": {"text": "Source only"}}]
+            }),
+            "source evolve",
+            None,
+        )
+        .unwrap();
+        create_record(
+            &mut db,
+            "app-rev",
+            "Task",
+            json!({"title": "Only on source"}),
+        )
+        .unwrap();
+        assert_eq!(
+            get_surface(&db, &branch_surf.id).unwrap().current_revision,
+            branch_rev_at_fork,
+            "source mutate must not bump forked surface revision"
+        );
+
+        // Mutate branch independently.
+        update_surface_definition(
+            &mut db,
+            &branch_surf.id,
+            &json!({
+                "id": "tt",
+                "name": "Rev Tracker",
+                "layout": "stack",
+                "components": [{"id": "h", "type": "heading", "props": {"text": "Branch only"}}]
+            }),
+            "branch evolve",
+            None,
+        )
+        .unwrap();
+        create_record(
+            &mut db,
+            forked_app,
+            "Task",
+            json!({"title": "Only on branch"}),
+        )
+        .unwrap();
+
+        let src = get_surface(&db, &surf.id).unwrap();
+        let br = get_surface(&db, &branch_surf.id).unwrap();
+        assert!(src.current_revision > src_rev_before);
+        assert!(br.current_revision > branch_rev_at_fork);
+        assert_ne!(
+            src.definition.to_string().contains("Source only"),
+            src.definition.to_string().contains("Branch only")
+        );
+        assert!(src.definition.to_string().contains("Source only"));
+        assert!(!src.definition.to_string().contains("Branch only"));
+        assert!(br.definition.to_string().contains("Branch only"));
+        assert!(!br.definition.to_string().contains("Source only"));
+
+        let src_rows = query_records(&db, "app-rev", "Task", 20).unwrap();
+        let br_rows = query_records(&db, forked_app, "Task", 20).unwrap();
+        assert!(src_rows.iter().any(|r| r["title"] == "Only on source"));
+        assert!(!src_rows.iter().any(|r| r["title"] == "Only on branch"));
+        assert!(br_rows.iter().any(|r| r["title"] == "Only on branch"));
+        assert!(!br_rows.iter().any(|r| r["title"] == "Only on source"));
+        assert!(br_rows.iter().any(|r| r["title"] == "Shared seed"));
     }
 }

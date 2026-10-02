@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-27T02:30:02.662Z",
-  "commit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
+  "generatedAt": "2026-10-02T18:36:46.217Z",
+  "commit": "38f08068c6993f4529d8799ac79dd2e7ed7589e0",
   "dirty": true,
   "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
   "platform": "darwin",
@@ -33,50 +33,23 @@
   },
   "transparency": {
     "ariaValueNow": "40",
-    "panelAlpha": 0.696
+    "panelAlpha": 0.6864
   },
   "canvas": {
     "width": 2240,
     "height": 1344,
     "sampleCount": 156,
-    "uniqueColors": 8,
+    "uniqueColors": 2,
     "lumSpan": 71.30519999999999,
     "samples": [
-      {
-        "a": 255,
-        "b": 31,
-        "g": 46,
-        "lum": 41.728,
-        "r": 31,
-        "x": 1306,
-        "y": 4
-      },
       {
         "a": 255,
         "b": 57,
         "g": 82,
         "lum": 75.30519999999999,
         "r": 59,
-        "x": 1306,
-        "y": 116
-      },
-      {
-        "a": 255,
-        "b": 15,
-        "g": 23,
-        "lum": 20.2964,
-        "r": 13,
-        "x": 4,
-        "y": 676
-      },
-      {
-        "a": 255,
-        "b": 16,
-        "g": 31,
-        "lum": 25.0272,
-        "r": 8,
         "x": 376,
-        "y": 1012
+        "y": 340
       },
       {
         "a": 255,
@@ -125,15 +98,15 @@
       },
       {
         "a": 255,
-        "b": 10,
-        "g": 18,
-        "lum": 14.446,
+        "b": 4,
+        "g": 4,
+        "lum": 4,
         "r": 4,
         "x": 934,
         "y": 4
       }
     ]
   },
-  "screenshotHash": "adf765108e1b67a4b1e7dd4a6cae0fbd62c3f3c1bcb5219032d6eef9a9745094",
+  "screenshotHash": "fcfdeae8f1892fb0dc310811ca878338efb12cffead691e0f50b002103817360",
   "publicBeta": "Not ready"
 }

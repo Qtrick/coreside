@@ -3,7 +3,8 @@ import { shouldPreserveComponent, type PreservationPolicy } from "@/lib/preserva
 import type { AppOperation } from "@/types/runtime-v2";
 import type { ActionDefinition, ToolComponent } from "@/types/tool";
 
-/** Matches Rust `runtime_v2::surfaces::surface_id_for_tool`. */
+/** Compatibility naming for legacy canonical tool canvases (`surf-{toolId}`).
+ * Never treat this string as ownership proof — resolve via DB / resolveBoundSurfaceForTool. */
 export function surfaceIdForTool(toolId: string): string {
   return `surf-${toolId}`;
 }

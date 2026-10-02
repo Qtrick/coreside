@@ -84,15 +84,17 @@ async function runCatchUpPages(options: CatchUpOptions): Promise<void> {
       }),
   } = options;
 
+  // Durable SQLite watermark is authoritative. An inflated in-memory cursor
+  // (HMR / remount / capped advance) must not skip unapplied log rows.
   let after = memoryCursor.get(conversationId) ?? 0;
   try {
     const durable = await api.getConversationSyncCursor(conversationId);
-    if (typeof durable === "number" && Number.isFinite(durable) && durable > after) {
+    if (typeof durable === "number" && Number.isFinite(durable)) {
       after = Math.max(0, Math.floor(durable));
       memoryCursor.set(conversationId, after);
     }
   } catch {
-    // Best-effort hydrate.
+    // Best-effort hydrate — keep memory only when the durable read fails.
   }
 
   for (;;) {
@@ -140,10 +142,13 @@ async function runCatchUpPages(options: CatchUpOptions): Promise<void> {
           conversationId,
           maxSeq,
         );
+        // Trust the stored watermark (Rust caps future / rejects regression).
+        // Never invent progress past what durable accepted — that skipped rows.
         const next =
           typeof stored === "number" && Number.isFinite(stored)
-            ? Math.max(maxSeq, Math.floor(stored))
+            ? Math.max(0, Math.floor(stored))
             : maxSeq;
+        if (next <= after) break;
         memoryCursor.set(conversationId, next);
         after = next;
       } catch {

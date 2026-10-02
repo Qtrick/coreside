@@ -1173,4 +1173,64 @@ mod tests {
         let err = advance_conversation_sync_cursor(&db, "c-bad-client", "bad id!", 1).unwrap_err();
         assert!(matches!(err, DbError::Invalid(_)));
     }
+
+    #[test]
+    fn stale_and_future_cursor_never_duplicate_or_skip_events() {
+        let mut db = db();
+        seed_conversation(&mut db, "c-stale-future");
+        seed_events(&db, "c-stale-future", 10);
+
+        // Stale advance (behind watermark) is a no-op.
+        assert_eq!(
+            advance_conversation_sync_cursor(&db, "c-stale-future", "main", 4).unwrap(),
+            4
+        );
+        assert_eq!(
+            advance_conversation_sync_cursor(&db, "c-stale-future", "main", 2).unwrap(),
+            4
+        );
+
+        // Future advance is capped to MAX(log); cannot permanently skip.
+        assert_eq!(
+            advance_conversation_sync_cursor(&db, "c-stale-future", "main", 99_999).unwrap(),
+            10
+        );
+
+        // After cursor, get_conversation_events must not redeliver applied rows.
+        let after = get_conversation_events(&db, "c-stale-future", Some(10), Some(200)).unwrap();
+        assert!(after.is_empty(), "cursor at max must not redeliver: {after:?}");
+
+        // Mid-watermark page is exclusive after_sequence — no duplicates of 1..=4.
+        let mid = get_conversation_events(&db, "c-stale-future", Some(4), Some(200)).unwrap();
+        assert_eq!(mid.len(), 6);
+        assert_eq!(mid.first().map(|e| e.sequence), Some(5));
+        assert_eq!(mid.last().map(|e| e.sequence), Some(10));
+        let seqs: Vec<i64> = mid.iter().map(|e| e.sequence).collect();
+        let mut unique = seqs.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(seqs, unique, "event page must not contain duplicate sequences");
+    }
+
+    #[test]
+    fn append_assigns_monotonic_unique_sequences() {
+        let mut db = db();
+        seed_conversation(&mut db, "c-mono");
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..20 {
+            let (_id, seq) = append_conversation_event(
+                &db,
+                "c-mono",
+                None,
+                None,
+                "action",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+            assert!(seen.insert(seq), "duplicate sequence {seq}");
+        }
+        assert_eq!(seen.len(), 20);
+        assert_eq!(*seen.iter().next().unwrap(), 1);
+        assert_eq!(*seen.iter().next_back().unwrap(), 20);
+    }
 }

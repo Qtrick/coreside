@@ -413,6 +413,16 @@ pub fn fork_application_for_branch(
         // Fresh INSERT gets lifecycle active / health testing (not source crash state).
         upsert_manifest(db, manifest)?;
         ensure_tools_row_for_forked_app(db, source_application_id, &new_app_id, &app_name)?;
+        // Personal tools need a canvas surface bound to the forked id so
+        // registered actions (local_data.*) resolve and writes stay isolated.
+        if let Ok(tool) = crate::db::get_tool(db, &new_app_id) {
+            let _ = crate::runtime_v2::surfaces::upsert_surface_from_tool(
+                db,
+                &tool.definition,
+                &tool.workspace_id,
+                tool.current_version,
+            )?;
+        }
 
         for grant in super::permissions::list_permissions(db, source_application_id)? {
             if grant.status == "granted" {
@@ -502,6 +512,14 @@ fn ensure_tools_row_for_forked_app(
         .map_err(DbError::Sqlite)?;
 
     if let Some((workspace_id, src_name, description, layout, definition_json)) = source_tool {
+        let remapped_definition = {
+            let mut def: Value = serde_json::from_str(&definition_json).unwrap_or(json!({}));
+            if let Some(obj) = def.as_object_mut() {
+                obj.insert("id".into(), json!(new_application_id));
+                obj.insert("name".into(), json!(format!("{src_name} (branch)")));
+            }
+            serde_json::to_string(&def).unwrap_or(definition_json)
+        };
         db.conn().execute(
             "INSERT INTO tools (
                 id, workspace_id, name, description, layout, definition_json,
@@ -513,7 +531,7 @@ fn ensure_tools_row_for_forked_app(
                 format!("{src_name} (branch)"),
                 description,
                 layout,
-                definition_json,
+                remapped_definition,
                 now
             ],
         )?;

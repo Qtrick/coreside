@@ -202,19 +202,38 @@ img {
   height: 100%;
 }
 
-/* Structural shell layers — explicit z-index contract (not a broad child rule). */
+/* Structural shell layers — explicit grid tracks + z-index.
+ * LiveWallpaper is DOM-first inside .app-shell. Without explicit placement,
+ * WebKit auto-placement still assigns it the first track; Sidebar then takes
+ * column 2 and .app-shell-main wraps into the 80px collapsed-sidebar track
+ * under @media (max-width: 1100px) — Journey 5 CI failure (1024x642). */
 .app-shell > .live-wallpaper {
   position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
+  grid-column: 1 / -1;
+  grid-row: 1;
 }
 
-.app-shell > .sidebar,
-.app-shell > .app-shell-main {
+.app-shell > .sidebar {
   position: relative;
   z-index: 1;
   min-width: 0;
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.app-shell > .app-shell-main,
+.app-shell > .settings-panel,
+.app-shell > .media-library-page,
+.app-shell > .project-page,
+.app-shell > .projects-list-page {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  grid-column: 2;
+  grid-row: 1;
 }
 
 /* Window-local overlay host — never a grid participant.

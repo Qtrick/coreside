@@ -86,6 +86,7 @@ permissions = [
   "allow-get-storage-summary",
   "allow-get-surface-cmd",
   "allow-get-surface-state-cmd",
+  "allow-resolve-bound-surface-for-tool-cmd",
   "allow-get-tool",
   "allow-get-tool-state",
   "allow-get-tool-versions",

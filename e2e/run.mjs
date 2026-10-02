@@ -104,6 +104,36 @@ const JOURNEYS = [
     coverage: "full",
   },
   {
+    id: 24,
+    name: "reconnect-during-evolution",
+    suite: "reconnect-during-evolution",
+    coverage: "full",
+  },
+  {
+    id: 25,
+    name: "reconnect-after-durable-commit",
+    suite: "reconnect-after-durable-commit",
+    coverage: "full",
+  },
+  {
+    id: 27,
+    name: "branch-isolation",
+    suite: "branch-isolation",
+    coverage: "full",
+  },
+  {
+    id: 28,
+    name: "structured-form-submission",
+    suite: "structured-form-submission",
+    coverage: "full",
+  },
+  {
+    id: 30,
+    name: "multi-turn-undo",
+    suite: "multi-turn-undo",
+    coverage: "full",
+  },
+  {
     id: 15,
     name: "first-run-welcome",
     suite: "first-run-welcome",
@@ -208,6 +238,31 @@ function writeResults(overallStatus) {
   fs.mkdirSync(path.dirname(resultsPath), { recursive: true });
   fs.writeFileSync(resultsPath, JSON.stringify(payload, null, 2) + "\n");
   console.log(`[e2e:run] wrote ${path.relative(root, resultsPath)} status=${status}`);
+  appendGithubStepSummary(payload);
+}
+
+/** Append journey table to GITHUB_STEP_SUMMARY so CI failures are visible without log download. */
+function appendGithubStepSummary(payload) {
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (!summaryPath) return;
+  const lines = [
+    `## Desktop E2E`,
+    ``,
+    `- **Overall status:** \`${payload.status}\``,
+    `- **Results file:** \`reports/e2e-results.json\``,
+    ``,
+    `| ID | Journey | Status |`,
+    `| --- | --- | --- |`,
+    ...payload.journeys.map(
+      (j) => `| ${j.id} | ${j.name} | ${j.status} |`,
+    ),
+    ``,
+  ];
+  try {
+    fs.appendFileSync(summaryPath, lines.join("\n"));
+  } catch (err) {
+    console.warn(`[e2e:run] GITHUB_STEP_SUMMARY append failed: ${err}`);
+  }
 }
 
 function runSuite(suite, { seed, env: envOverrides } = {}) {
@@ -248,6 +303,7 @@ function runSuite(suite, { seed, env: envOverrides } = {}) {
   if (result.status !== 0) {
     suiteOutcomes.set(suite, "failed");
     writeResults("failed");
+    console.error(`[e2e:run] FAIL suite=${suite}`);
     console.error(
       `[e2e:run] suite=${suite} failed; leaving isolated DB at ${dbDir} for inspection`,
     );
@@ -296,6 +352,16 @@ runSuite("generated-task-tracker");
 runSuite("application-evolution");
 // Habit Tracker: clean profile, ApplicationPlan mock path (Journey A general create).
 runSuite("habit-tracker-application");
+
+// Reconnect / catch-up during and after ApplicationPlan evolution.
+runSuite("reconnect-during-evolution");
+runSuite("reconnect-after-durable-commit");
+// Branch diverge isolation (fork APIs + UI).
+runSuite("branch-isolation");
+// StructuredUserInput form submission via Tic-Tac-Toe submitToAgent.
+runSuite("structured-form-submission");
+// Multi-turn undo_transaction for create + evolve.
+runSuite("multi-turn-undo");
 
 // Seeded local AI privacy disclosure profile.
 runSuite("local-ai-privacy", { seed: "local" });

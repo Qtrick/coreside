@@ -25,6 +25,10 @@ export function isToolRecord(value: unknown): value is ToolRecord {
 export function toToolDefinition(record: ToolRecord): ToolDefinition {
   return {
     ...record.definition,
+    // tools.id is authoritative (branch forks remapped to app-branch-*).
+    // Never let a copied definition_json.id override the row identity.
+    id: record.id,
+    name: record.name || record.definition.name,
     version: record.currentVersion,
   };
 }

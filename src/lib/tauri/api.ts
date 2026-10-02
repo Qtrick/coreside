@@ -661,6 +661,12 @@ export const api = {
     invoke<import("@/types/runtime-v2").SurfaceRecord>("get_surface_cmd", {
       surfaceId,
     }),
+  /** SQLite lineage lookup for a tool's bound surface. Not `surf-${toolId}` formatting. */
+  resolveBoundSurfaceForTool: (toolId: string) =>
+    invoke<import("@/types/runtime-v2").SurfaceRecord | null>(
+      "resolve_bound_surface_for_tool_cmd",
+      { toolId },
+    ),
   createInlineSurface: (args: {
     conversationId: string;
     messageId?: string | null;

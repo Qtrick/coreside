@@ -637,7 +637,52 @@ pub fn adopt_stored_structured_input(meta: &Value) -> Option<StructuredUserInput
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{json, Map};
+
+    #[test]
+    fn seal_rejects_too_many_fields_and_oversized_payload() {
+        let mut too_many = Map::new();
+        for i in 0..65 {
+            too_many.insert(format!("k{i}"), json!(i));
+        }
+        let err = seal_local_user_submission(
+            "conv",
+            StructuredUserInputSubmission {
+                form_id: "form".into(),
+                fields: too_many,
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("too many form fields"), "{err}");
+
+        let mut oversized = Map::new();
+        oversized.insert("blob".into(), json!("x".repeat(9_000)));
+        let err = seal_local_user_submission(
+            "conv",
+            StructuredUserInputSubmission {
+                form_id: "form".into(),
+                fields: oversized,
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("byte limit"), "{err}");
+    }
+
+    #[test]
+    fn seal_rejects_oversized_form_id() {
+        let err = seal_local_user_submission(
+            "conv",
+            StructuredUserInputSubmission {
+                form_id: "f".repeat(300),
+                fields: Map::new(),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("too long"), "{err}");
+    }
 
     #[test]
     fn spoofed_marker_in_plain_text_does_not_grant_structured_trust() {

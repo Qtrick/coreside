@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-bound-surface-for-tool-cmd"
+description = "Enables the resolve_bound_surface_for_tool_cmd command without any pre-configured scope."
+commands.allow = ["resolve_bound_surface_for_tool_cmd"]
+
+[[permission]]
+identifier = "deny-resolve-bound-surface-for-tool-cmd"
+description = "Denies the resolve_bound_surface_for_tool_cmd command without any pre-configured scope."
+commands.deny = ["resolve_bound_surface_for_tool_cmd"]

@@ -19,6 +19,24 @@ function rule(selectors: string): string {
  * future tool definition to know the host pane width.
  */
 describe("generated surface containment", () => {
+  it("pins sidebar and main to explicit grid tracks so wallpaper cannot steal column 1", () => {
+    // Regression: CI 1024px viewport + LiveWallpaper as first .app-shell child
+    // left .app-shell-main in the 80px collapsed-sidebar track (Journey 5).
+    const wallpaper = rule(".app-shell > .live-wallpaper");
+    expect(wallpaper).toMatch(/grid-column:\s*1\s*\/\s*-1/);
+    expect(wallpaper).toMatch(/position:\s*absolute/);
+
+    const sidebar = rule(".app-shell > .sidebar");
+    expect(sidebar).toMatch(/grid-column:\s*1/);
+    expect(sidebar).toMatch(/grid-row:\s*1/);
+
+    const main = rule(
+      ".app-shell > .app-shell-main,\n.app-shell > .settings-panel,\n.app-shell > .media-library-page,\n.app-shell > .project-page,\n.app-shell > .projects-list-page",
+    );
+    expect(main).toMatch(/grid-column:\s*2/);
+    expect(main).toMatch(/grid-row:\s*1/);
+  });
+
   it("keeps the canvas body as the explicit, bounded scroll owner", () => {
     const body = rule(".tool-canvas-body");
     expect(body).toMatch(/min-width:\s*0/);

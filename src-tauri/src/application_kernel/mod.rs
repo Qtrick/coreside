@@ -2137,10 +2137,13 @@ mod tests {
             .application_plan
             .as_ref()
             .expect("evolve plan");
-        let scope = crate::application_kernel::lineage::LineageScope {
-            conversation_id: Some(conv.id.clone()),
-            project_id: None,
-        };
+        let scope = crate::application_kernel::application_plan::lineage_scope_for_plan(
+            &db,
+            evolve_plan,
+            Some(&conv.id),
+            None,
+        )
+        .expect("workspace global evolve must omit ownership claims");
         let evolve_ops = crate::application_kernel::application_plan::compile_plan_against_db(
             &db,
             evolve_plan,
@@ -2370,10 +2373,13 @@ mod tests {
             .application_plan
             .as_ref()
             .expect("evolve plan");
-        let scope = crate::application_kernel::lineage::LineageScope {
-            conversation_id: Some(conv.id.clone()),
-            project_id: None,
-        };
+        let scope = crate::application_kernel::application_plan::lineage_scope_for_plan(
+            &db,
+            evolve_plan,
+            Some(&conv.id),
+            None,
+        )
+        .expect("workspace global evolve must omit ownership claims");
         let evolve_ops = crate::application_kernel::application_plan::compile_plan_against_db(
             &db,
             evolve_plan,

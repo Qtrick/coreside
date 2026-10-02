@@ -160,10 +160,18 @@ export function ToolCanvas() {
     return manifestRecord?.applicationId ?? activeTool.id;
   }, [activeTool, manifestRecord?.applicationId]);
 
-  const surfaceId = useMemo(
-    () => (activeTool ? surfaceIdForTool(activeTool.id) : null),
-    [activeTool],
-  );
+  const surfaceId = useMemo(() => {
+    if (!activeTool) return null;
+    // Authoritative DB id once loaded; surf-* is only a first-load compatibility hint.
+    // Never reuse a prior tool's surface across switches (hydration / OCC leak).
+    if (
+      canonicalSurface?.id &&
+      canonicalSurface.toolId === activeTool.id
+    ) {
+      return canonicalSurface.id;
+    }
+    return surfaceIdForTool(activeTool.id);
+  }, [activeTool, canonicalSurface?.id, canonicalSurface?.toolId]);
 
   const availability = useMemo(
     () => isApplicationUnavailable(manifestRecord, recovery),
@@ -172,35 +180,40 @@ export function ToolCanvas() {
 
   const activeToolId = activeTool?.id;
   const activeToolVersion = activeTool?.version ?? null;
+  const prevCanvasToolIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!activeToolId) {
+      prevCanvasToolIdRef.current = null;
       setCanonicalSurface(null);
       setCanonicalState(null);
       setStateRevision(0);
       return;
     }
-    const sid = surfaceIdForTool(activeToolId);
+    // Drop prior tool binding on identity change only (keep canvas during version Sync).
+    if (prevCanvasToolIdRef.current !== activeToolId) {
+      prevCanvasToolIdRef.current = activeToolId;
+      setCanonicalSurface(null);
+      setCanonicalState(null);
+      setStateRevision(0);
+    }
     let cancelled = false;
-    // Use getSurfaceStateWithRevision to atomically fetch state + stateRevision.
-    // Previously we called getSurface() + getSurfaceState() and used surf.currentRevision
-    // as the OCC guard — that was WRONG because currentRevision tracks the definition
-    // revision, not the state revision. They are separate monotonic counters.
-    // Also re-fetch when activeTool.version changes so agent Sync patches paint.
-    void Promise.all([
-      api.getSurface(sid).catch(() => null),
-      api.getSurfaceStateWithRevision(sid).catch(() => null),
-    ]).then(([surf, stWithRev]) => {
+    // Prefer SQLite lineage resolution over assuming surf-${toolId}.
+    void (async () => {
+      const bound = await api
+        .resolveBoundSurfaceForTool(activeToolId)
+        .catch(() => null);
+      const sid = bound?.id ?? surfaceIdForTool(activeToolId);
+      const [surf, stWithRev] = await Promise.all([
+        bound ?? api.getSurface(sid).catch(() => null),
+        api.getSurfaceStateWithRevision(sid).catch(() => null),
+      ]);
       if (cancelled) return;
-      if (surf) {
+      if (surf && (surf.toolId == null || surf.toolId === activeToolId)) {
         setCanonicalSurface(surf);
-        // Interactive: never seed from raw state — public view arrives via hydrate.
         if (hasInteractiveDefinition(surf.definition)) {
           setCanonicalState({});
         } else {
-          // Canonical = server state. Live typing wins via liveState merge
-          // ({ ...canonicalState, ...toolState }); selectTool already reconciled
-          // dirty overlays for Sync reloads with resetKeys awareness.
           setCanonicalState(stWithRev?.state ?? {});
         }
         setStateRevision(stWithRev?.stateRevision ?? 0);
@@ -209,7 +222,7 @@ export function ToolCanvas() {
         setCanonicalState(null);
         setStateRevision(0);
       }
-    });
+    })();
     return () => {
       cancelled = true;
     };

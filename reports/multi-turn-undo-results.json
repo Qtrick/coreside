@@ -1,0 +1,19 @@
+{
+  "status": "passed",
+  "journey": "multi-turn-undo",
+  "evolveTxnId": "txn-907f874a-72e4-4a30-98ee-6f135cf61d6e",
+  "createTxnId": "txn-5eb4ec5c-0c7d-453e-a5b8-bab0c013638f",
+  "preservedTaskAfterEvolveUndo": true,
+  "twoTurnUndo": true,
+  "startedAt": "2026-10-02T19:42:26.968Z",
+  "finishedAt": "2026-10-02T19:42:38.201Z",
+  "durationMs": 11233,
+  "identity": {
+    "commit": "38f08068c6993f4529d8799ac79dd2e7ed7589e0",
+    "dirty": true,
+    "platform": "darwin",
+    "arch": "arm64",
+    "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee"
+  },
+  "binaryHash": "5174d946b75b50851a2743012551a18c325276861f87c81b955f12f95043c3d7"
+}

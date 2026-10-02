@@ -2145,6 +2145,34 @@ export async function mockInvoke<T>(
       return (mockDb.surfaceState.get(surfaceId) ?? {}) as T;
     }
 
+    case "resolve_bound_surface_for_tool_cmd": {
+      // Fail closed: only resolve when the tool row exists (mirrors SQLite lineage).
+      const toolId = String(args?.toolId ?? "");
+      if (!toolId) return null as T;
+      const tool = mockDb.tools.find((t) => t.id === toolId);
+      if (!tool) return null as T;
+      return {
+        id: `surf-${toolId}`,
+        instanceId: `inst-${toolId}`,
+        surfaceType: "tool",
+        placement: "tool_canvas",
+        ownerType: "user",
+        ownerId: null,
+        conversationId: null,
+        projectId: null,
+        toolId,
+        messageId: null,
+        name: tool.name,
+        definition: { ...tool, id: toolId },
+        currentRevision: tool.version ?? 1,
+        lifecycleState: "active",
+        archived: false,
+        capabilityPacks: [],
+        createdAt: now(),
+        updatedAt: now(),
+      } as T;
+    }
+
     case "save_surface_state_cmd": {
       const surfaceId = String(args?.surfaceId ?? "");
       mockDb.surfaceState.set(

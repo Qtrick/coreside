@@ -72,7 +72,7 @@ describe("catchUpConversationEvents", () => {
       yieldBetweenPages: noYield,
     });
 
-    expect(memoryCursor.get("c-fresh")).toBeUndefined();
+    expect(memoryCursor.get("c-fresh")).toBe(0);
     expect(store.durable.get("c-fresh")).toBeUndefined();
     expect(advanceSpy).not.toHaveBeenCalled();
     expect(onTransactionApplied).not.toHaveBeenCalled();
@@ -191,6 +191,142 @@ describe("catchUpConversationEvents", () => {
     expect(memoryCursor.get("c-dup")).toBe(3);
   });
 
+  it("inflated memory cursor is corrected by durable so rows are not skipped", async () => {
+    const store: Store = {
+      events: new Map(),
+      durable: new Map([["c-stale-mem", 10]]),
+    };
+    // Durable is 10; memory wrongly claims 25. Events 11..30 must still apply.
+    const list: ConversationCatchUpEvent[] = [];
+    for (let i = 11; i <= 30; i++) {
+      list.push({
+        sequence: i,
+        eventType:
+          i === 25 || i === 30
+            ? "surface.transaction_applied"
+            : "message.created",
+      });
+    }
+    store.events.set("c-stale-mem", list);
+    const memoryCursor = new Map<string, number>([["c-stale-mem", 25]]);
+    const reloads = vi.fn();
+
+    await catchUpConversationEvents({
+      conversationId: "c-stale-mem",
+      memoryCursor,
+      api: makeApi(store),
+      isActive: () => true,
+      onTransactionApplied: reloads,
+      yieldBetweenPages: noYield,
+    });
+
+    expect(memoryCursor.get("c-stale-mem")).toBe(30);
+    expect(store.durable.get("c-stale-mem")).toBe(30);
+    expect(reloads).toHaveBeenCalled();
+  });
+
+  it("does not invent progress when durable caps a future cursor advance", async () => {
+    const store: Store = {
+      events: new Map([
+        [
+          "c-future",
+          [
+            { sequence: 1, eventType: "message.created" },
+            { sequence: 2, eventType: "message.created" },
+          ],
+        ],
+      ]),
+      durable: new Map([["c-future", 0]]),
+    };
+    const memoryCursor = new Map<string, number>();
+    let fetchCount = 0;
+    const api: ConversationCatchUpApi = {
+      async getConversationSyncCursor(conversationId) {
+        return store.durable.get(conversationId) ?? 0;
+      },
+      async getConversationEvents({ conversationId, afterSequence, limit }) {
+        fetchCount += 1;
+        const after = afterSequence ?? 0;
+        const pageLimit = limit ?? 200;
+        return (store.events.get(conversationId) ?? [])
+          .filter((e) => e.sequence > after)
+          .slice(0, pageLimit);
+      },
+      async advanceConversationSyncCursor(_conversationId, sequence) {
+        // Simulate Rust MAX(log) cap: client asked for more than exists.
+        const maxLogged = 2;
+        const current = store.durable.get("c-future") ?? 0;
+        const capped = Math.min(sequence, maxLogged);
+        const next = Math.max(current, capped);
+        store.durable.set("c-future", next);
+        return next;
+      },
+    };
+
+    await catchUpConversationEvents({
+      conversationId: "c-future",
+      memoryCursor,
+      api,
+      isActive: () => true,
+      onTransactionApplied: () => {},
+      yieldBetweenPages: noYield,
+    });
+
+    expect(memoryCursor.get("c-future")).toBe(2);
+    expect(store.durable.get("c-future")).toBe(2);
+    expect(fetchCount).toBeLessThanOrEqual(2);
+  });
+
+  it("stops without looping when durable rejects a stale advance", async () => {
+    const store: Store = {
+      events: new Map(),
+      durable: new Map([["c-stale-adv", 5]]),
+    };
+    // Full page of duplicates already at/behind durable watermark.
+    store.events.set(
+      "c-stale-adv",
+      Array.from({ length: 200 }, (_, i) => ({
+        sequence: i + 1,
+        eventType: "message.created",
+      })),
+    );
+    const memoryCursor = new Map<string, number>([["c-stale-adv", 5]]);
+    let fetchCount = 0;
+    let advanceCount = 0;
+    const api: ConversationCatchUpApi = {
+      async getConversationSyncCursor(conversationId) {
+        return store.durable.get(conversationId) ?? 0;
+      },
+      async getConversationEvents() {
+        fetchCount += 1;
+        // Always return the same full page of stale+new mix as if paging stuck.
+        return store.events.get("c-stale-adv")!;
+      },
+      async advanceConversationSyncCursor(conversationId, sequence) {
+        advanceCount += 1;
+        const current = store.durable.get(conversationId) ?? 0;
+        // Cap peculiarity: durable refuses to move (stale / conflict).
+        void sequence;
+        return current;
+      },
+    };
+
+    await catchUpConversationEvents({
+      conversationId: "c-stale-adv",
+      memoryCursor,
+      api,
+      isActive: () => true,
+      onTransactionApplied: () => {},
+      pageLimit: 200,
+      yieldBetweenPages: noYield,
+    });
+
+    expect(fetchCount).toBe(1);
+    expect(advanceCount).toBe(1);
+    expect(memoryCursor.get("c-stale-adv")).toBe(5);
+    expect(store.durable.get("c-stale-adv")).toBe(5);
+  });
+
   it("skips malformed events without advancing past good ones incorrectly", async () => {
     const store: Store = {
       events: new Map([
@@ -261,7 +397,7 @@ describe("catchUpConversationEvents", () => {
     });
 
     expect(fetchCount).toBe(1);
-    expect(memoryCursor.get("c-bad-page")).toBeUndefined();
+    expect(memoryCursor.get("c-bad-page")).toBe(0);
     expect(store.durable.get("c-bad-page")).toBe(0);
   });
 
@@ -279,7 +415,7 @@ describe("catchUpConversationEvents", () => {
       yieldBetweenPages: noYield,
     });
 
-    expect(memoryCursor.get("c-fail")).toBeUndefined();
+    expect(memoryCursor.get("c-fail")).toBe(0);
     expect(store.durable.get("c-fail")).toBe(0);
   });
 
@@ -371,7 +507,7 @@ describe("catchUpConversationEvents", () => {
     });
 
     expect(advances).toEqual([]);
-    expect(memoryCursor.get("c-apply-fail")).toBeUndefined();
+    expect(memoryCursor.get("c-apply-fail")).toBe(0);
     expect(store.durable.get("c-apply-fail")).toBe(0);
   });
 
@@ -415,7 +551,7 @@ describe("catchUpConversationEvents", () => {
     await vi.waitFor(() => {
       expect(firstEnteredReload).toBe(true);
     });
-    expect(memoryCursor.get("c-overlap-fail")).toBeUndefined();
+    expect(memoryCursor.get("c-overlap-fail")).toBe(0);
     expect(store.durable.get("c-overlap-fail")).toBe(0);
 
     // Overlapping catch-up while the first is still mid-reload also fails closed.
@@ -433,14 +569,14 @@ describe("catchUpConversationEvents", () => {
     });
 
     expect(advances).toEqual([]);
-    expect(memoryCursor.get("c-overlap-fail")).toBeUndefined();
+    expect(memoryCursor.get("c-overlap-fail")).toBe(0);
     expect(store.durable.get("c-overlap-fail")).toBe(0);
 
     releaseFirstReload!();
     await first;
 
     expect(advances).toEqual([]);
-    expect(memoryCursor.get("c-overlap-fail")).toBeUndefined();
+    expect(memoryCursor.get("c-overlap-fail")).toBe(0);
     expect(store.durable.get("c-overlap-fail")).toBe(0);
   });
 
@@ -665,5 +801,38 @@ describe("catchUpConversationEvents", () => {
     expect(reloadsA).toBeGreaterThan(0);
     // B's advance must not have skipped A's catch-up.
     expect(durableA.get("c-multi")).toBe(durableB.get("c-multi"));
+  });
+
+  it("does not re-apply transaction_applied when cursor already covers the page", async () => {
+    const store: Store = {
+      events: new Map([
+        [
+          "c-acked",
+          [
+            { sequence: 1, eventType: "message.created" },
+            { sequence: 2, eventType: "surface.transaction_applied" },
+            { sequence: 3, eventType: "message.created" },
+          ],
+        ],
+      ]),
+      durable: new Map([["c-acked", 3]]),
+    };
+    const memoryCursor = new Map<string, number>([["c-acked", 3]]);
+    const reloads = vi.fn();
+    const advances = vi.fn();
+
+    await catchUpConversationEvents({
+      conversationId: "c-acked",
+      memoryCursor,
+      api: makeApi(store, { onAdvance: advances }),
+      isActive: () => true,
+      onTransactionApplied: reloads,
+      yieldBetweenPages: noYield,
+    });
+
+    expect(reloads).not.toHaveBeenCalled();
+    expect(advances).not.toHaveBeenCalled();
+    expect(memoryCursor.get("c-acked")).toBe(3);
+    expect(store.durable.get("c-acked")).toBe(3);
   });
 });
