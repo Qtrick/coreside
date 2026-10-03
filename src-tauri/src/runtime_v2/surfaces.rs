@@ -185,7 +185,10 @@ pub fn upsert_surface_from_tool(
     revision: i64,
 ) -> DbResult<SurfaceRecord> {
     crate::security::assert_not_protected(&tool.id).map_err(DbError::Invalid)?;
-    let id = surface_id_for_tool(&tool.id);
+    // Canonical mint id for first create only. When a bound surface already exists
+    // (possibly a UUID inline row), SQLite lineage is authority — never retarget
+    // UPDATE/version inserts at a synthetic surf-{toolId} that may not exist.
+    let canonical_id = surface_id_for_tool(&tool.id);
     let now = now_rfc3339();
     let mut def = tool.clone();
     def.normalize_for_frontend();
@@ -193,10 +196,14 @@ pub fn upsert_surface_from_tool(
         .conn()
         .query_row(
             "SELECT instance_id, id, capability_packs_json, definition_json FROM surfaces WHERE tool_id = ?1 OR id = ?2",
-            params![tool.id, id],
+            params![tool.id, canonical_id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .optional_compat()?;
+    let id = existing
+        .as_ref()
+        .map(|(_, sid, _, _)| sid.clone())
+        .unwrap_or(canonical_id);
 
     let mut doc = super::software_document::SoftwareDocument::from_tool_definition(&def);
     if let Some((_, _, _, existing_definition_json)) = existing.as_ref() {
@@ -2165,9 +2172,8 @@ mod tests {
             &[],
         )
         .unwrap();
-        let err =
-            resolve_and_authorize_surface_scope(&db, &surface.id, Some(&conv_b.id), None)
-                .expect_err("foreign conversation must reject");
+        let err = resolve_and_authorize_surface_scope(&db, &surface.id, Some(&conv_b.id), None)
+            .expect_err("foreign conversation must reject");
         assert!(
             err.to_string().contains("belongs to conversation"),
             "got {err}"
@@ -2179,8 +2185,9 @@ mod tests {
         let mut db = test_db();
         let surface = tool_surface_without_scope_bindings(&mut db, "tool-scope-conv-missing");
         assert!(surface.conversation_id.is_none());
-        let err = resolve_and_authorize_surface_scope(&db, &surface.id, Some("conv-expected"), None)
-            .expect_err("missing conversation binding must reject");
+        let err =
+            resolve_and_authorize_surface_scope(&db, &surface.id, Some("conv-expected"), None)
+                .expect_err("missing conversation binding must reject");
         assert!(
             err.to_string().contains("no conversation binding"),
             "got {err}"
@@ -2223,10 +2230,7 @@ mod tests {
         .unwrap();
         let err = resolve_and_authorize_surface_scope(&db, &surface.id, None, Some("proj-b"))
             .expect_err("foreign project must reject");
-        assert!(
-            err.to_string().contains("belongs to project"),
-            "got {err}"
-        );
+        assert!(err.to_string().contains("belongs to project"), "got {err}");
     }
 
     #[test]
@@ -2246,19 +2250,15 @@ mod tests {
         assert!(surface.project_id.is_none());
         let err = resolve_and_authorize_surface_scope(&db, &surface.id, None, Some("proj-a"))
             .expect_err("missing project binding must reject");
-        assert!(
-            err.to_string().contains("no project binding"),
-            "got {err}"
-        );
+        assert!(err.to_string().contains("no project binding"), "got {err}");
     }
 
     #[test]
     fn resolve_and_authorize_surface_scope_no_scope_passes() {
         let mut db = test_db();
         let unbound = tool_surface_without_scope_bindings(&mut db, "tool-scope-none");
-        let authorized =
-            resolve_and_authorize_surface_scope(&db, &unbound.id, None, None)
-                .expect("no expected scope must pass for unbound surface");
+        let authorized = resolve_and_authorize_surface_scope(&db, &unbound.id, None, None)
+            .expect("no expected scope must pass for unbound surface");
         assert_eq!(authorized.id, unbound.id);
 
         let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
@@ -2272,9 +2272,8 @@ mod tests {
             &[],
         )
         .unwrap();
-        let authorized_bound =
-            resolve_and_authorize_surface_scope(&db, &bound.id, None, None)
-                .expect("no expected scope must pass even with bindings");
+        let authorized_bound = resolve_and_authorize_surface_scope(&db, &bound.id, None, None)
+            .expect("no expected scope must pass even with bindings");
         assert_eq!(authorized_bound.id, bound.id);
     }
 }

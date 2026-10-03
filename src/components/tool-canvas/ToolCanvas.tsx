@@ -285,7 +285,8 @@ export function ToolCanvas() {
     async (state: Record<string, unknown>) => {
       if (canonicalSurface && activeTool) {
         setCanonicalState(state);
-        const sid = surfaceIdForTool(activeTool.id);
+        // Persist against the authoritative SQLite surface id, not surf-* guess.
+        const sid = canonicalSurface.id;
         try {
           // Pass stateRevision (not definition revision) as the OCC guard.
           const newStateRev = await api.saveSurfaceState(sid, state, stateRevision);
@@ -586,6 +587,8 @@ export function ToolCanvas() {
         <div className="tool-canvas-header-actions">
           <ToolHeaderActions
             tool={activeTool}
+            // surfaceId is non-null once activeTool exists (canonical or first-load hint).
+            surfaceId={surfaceId as string}
             conversationId={activeConversationId}
             density={headerDensity}
             closeLabel={

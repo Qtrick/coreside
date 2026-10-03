@@ -20,11 +20,13 @@ function rule(selectors: string): string {
  */
 describe("generated surface containment", () => {
   it("pins sidebar and main to explicit grid tracks so wallpaper cannot steal column 1", () => {
-    // Regression: CI 1024px viewport + LiveWallpaper as first .app-shell child
-    // left .app-shell-main in the 80px collapsed-sidebar track (Journey 5).
-    const wallpaper = rule(".app-shell > .live-wallpaper");
-    expect(wallpaper).toMatch(/grid-column:\s*1\s*\/\s*-1/);
-    expect(wallpaper).toMatch(/position:\s*absolute/);
+    // LiveWallpaper is a fixed sibling of .app-shell (AppShell.tsx). Defense:
+    // nested wallpaper still spans all columns so it cannot steal track 1.
+    const wallpaperBase = rule(".live-wallpaper");
+    expect(wallpaperBase).toMatch(/position:\s*fixed/);
+
+    const wallpaperNested = rule(".app-shell > .live-wallpaper");
+    expect(wallpaperNested).toMatch(/grid-column:\s*1\s*\/\s*-1/);
 
     const sidebar = rule(".app-shell > .sidebar");
     expect(sidebar).toMatch(/grid-column:\s*1/);
@@ -35,6 +37,10 @@ describe("generated surface containment", () => {
     );
     expect(main).toMatch(/grid-column:\s*2/);
     expect(main).toMatch(/grid-row:\s*1/);
+
+    // Menu density chrome must stay fixed-size (no labeled More min-content).
+    const menuDensity = rule('.tool-header-actions[data-density="menu"]');
+    expect(menuDensity).toMatch(/flex-wrap:\s*nowrap/);
   });
 
   it("keeps the canvas body as the explicit, bounded scroll owner", () => {

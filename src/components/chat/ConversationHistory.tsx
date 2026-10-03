@@ -316,6 +316,8 @@ export function ConversationHistory({
     return conv?.projectId ?? null;
   });
   const refreshConversations = useAppStore((s) => s.refreshConversations);
+  const refreshTools = useAppStore((s) => s.refreshTools);
+  const selectTool = useAppStore((s) => s.selectTool);
   const navigateToChat = useAppStore((s) => s.navigateToChat);
 
   const [open, setOpen] = useState(false);
@@ -460,6 +462,44 @@ export function ConversationHistory({
       setDiffDetail(diff);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not compute branch diff");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // listTransactions is created_at DESC — first applied row is the OCC tip.
+  const tipAppliedTxn = transactions.find((t) => t.status === "applied") ?? null;
+
+  const undoLatestChange = async () => {
+    if (!tipAppliedTxn) {
+      setError("Nothing to undo — no applied application change yet.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.undoTransaction(tipAppliedTxn.id);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not undo — the world may have changed since this change.",
+      );
+      setBusy(false);
+      return;
+    }
+    try {
+      await loadTab("replay");
+      // Hard-reload tools + open canvas (no preserveDirty) so paint matches SQLite.
+      await refreshTools();
+      const openToolId = useAppStore.getState().activeToolId;
+      if (openToolId) {
+        await selectTool(openToolId);
+      }
+    } catch {
+      setError(
+        "Change was undone, but the open tool could not be refreshed. Close and reopen if it looks stale.",
+      );
     } finally {
       setBusy(false);
     }
@@ -789,6 +829,32 @@ export function ConversationHistory({
 
                 {tab === "replay" ? (
                   <section aria-label="Replay">
+                    <div className="conversation-history-create">
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-compact"
+                        disabled={busy || !tipAppliedTxn}
+                        aria-busy={busy || undefined}
+                        aria-label={
+                          busy
+                            ? "Undoing latest application change"
+                            : "Undo latest application change"
+                        }
+                        title={
+                          tipAppliedTxn
+                            ? `Undo: ${tipAppliedTxn.summary}`
+                            : "No applied application change to undo"
+                        }
+                        onClick={() => void undoLatestChange()}
+                      >
+                        {busy ? "Undoing…" : "Undo latest change"}
+                      </button>
+                      <p className="muted" style={{ margin: 0 }} aria-live="polite">
+                        {tipAppliedTxn
+                          ? `Tip: ${tipAppliedTxn.summary}`
+                          : "Undo reverts the latest durable application mutation. Chat history is kept."}
+                      </p>
+                    </div>
                     <ReplayPlayer
                       key={conversationId}
                       events={replayEvents}

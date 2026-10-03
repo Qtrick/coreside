@@ -1891,7 +1891,6 @@ mod tests {
         assert_eq!(tool.name, "Tic-Tac-Toe vs AI");
     }
 
-
     #[tokio::test]
     async fn tictactoe_create_ops_propose_and_commit_to_tools() {
         use crate::application_kernel::{apply_change, decide_proposal, ChangeRequest};
@@ -1946,7 +1945,10 @@ mod tests {
                 .iter()
                 .any(|t| t.id == "tool-tictactoe" || t.name.to_lowercase().contains("tic")),
             "tools after commit: {:?}",
-            tools.iter().map(|t| (t.id.clone(), t.name.clone())).collect::<Vec<_>>()
+            tools
+                .iter()
+                .map(|t| (t.id.clone(), t.name.clone()))
+                .collect::<Vec<_>>()
         );
     }
 

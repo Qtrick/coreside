@@ -399,10 +399,7 @@ mod tests {
         );
     }
 
-    fn lineage_with(
-        conversation_id: Option<&str>,
-        project_id: Option<&str>,
-    ) -> SurfaceLineage {
+    fn lineage_with(conversation_id: Option<&str>, project_id: Option<&str>) -> SurfaceLineage {
         SurfaceLineage {
             surface_id: "surf-test".into(),
             tool_id: Some("app-test".into()),

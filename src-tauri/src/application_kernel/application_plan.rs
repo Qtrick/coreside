@@ -664,10 +664,8 @@ pub fn lineage_scope_for_plan(
     };
     match resolve_application_surface(db, bound, None, request.conversation_id.as_deref()) {
         Ok(lineage) => {
-            let conversation_id = match (
-                lineage.conversation_id.is_some(),
-                request.conversation_id,
-            ) {
+            let conversation_id = match (lineage.conversation_id.is_some(), request.conversation_id)
+            {
                 (false, _) => None,
                 (true, Some(cid)) => Some(cid),
                 (true, None) => {
@@ -1000,7 +998,10 @@ mod tests {
                 .unwrap();
         }
 
-        fn workspace_tool_surface(db: &mut Database, tool_id: &str) -> crate::runtime_v2::surfaces::SurfaceRecord {
+        fn workspace_tool_surface(
+            db: &mut Database,
+            tool_id: &str,
+        ) -> crate::runtime_v2::surfaces::SurfaceRecord {
             let tool = crate::ai::ToolDefinition {
                 id: tool_id.into(),
                 name: "Scope Tool".into(),
@@ -2056,7 +2057,7 @@ mod tests {
                 &lineage_scope_for_plan(&db, &evolve, Some(&conv.id), None)
                     .expect("workspace study planner must omit ownership claims"),
             )
-                .expect("study planner evolve");
+            .expect("study planner evolve");
             let ops = &validated.compiled.operations;
             assert!(
                 !ops.iter().any(|o| o.op_type == "tool.full_replace"),

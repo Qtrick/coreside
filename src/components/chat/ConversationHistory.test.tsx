@@ -25,29 +25,46 @@ vi.mock("@/lib/tauri", () => ({
   },
 }));
 
-const mockMessages = [
-  { id: "msg-1", role: "user", content: "first question", createdAt: "2026-08-01T10:00:00Z" },
-  { id: "msg-2", role: "assistant", content: "second response", createdAt: "2026-08-01T10:01:00Z" },
-];
+const { mockMessages, storeFns } = vi.hoisted(() => {
+  const mockMessages = [
+    {
+      id: "msg-1",
+      role: "user",
+      content: "first question",
+      createdAt: "2026-08-01T10:00:00Z",
+    },
+    {
+      id: "msg-2",
+      role: "assistant",
+      content: "second response",
+      createdAt: "2026-08-01T10:01:00Z",
+    },
+  ];
+  const storeFns = {
+    refreshConversations: vi.fn(async () => undefined),
+    refreshTools: vi.fn(async () => undefined),
+    selectTool: vi.fn(async () => undefined),
+    navigateToChat: vi.fn(async () => undefined),
+    activeToolId: "tool-1" as string | null,
+  };
+  return { mockMessages, storeFns };
+});
 
-vi.mock("@/stores/app-store", () => ({
-  useAppStore: (
-    selector: (s: {
-      developerMode: boolean;
-      messages: { id: string; role?: string; content?: string; createdAt?: string }[];
-      conversations: { id: string; projectId: string | null }[];
-      refreshConversations: () => Promise<void>;
-      navigateToChat: (id: string) => Promise<void>;
-    }) => unknown,
-  ) =>
-    selector({
-      developerMode: true,
-      messages: mockMessages,
-      conversations: [{ id: "conv-1", projectId: null }],
-      refreshConversations: vi.fn(async () => undefined),
-      navigateToChat: vi.fn(async () => undefined),
-    }),
-}));
+vi.mock("@/stores/app-store", () => {
+  const store = {
+    developerMode: true,
+    messages: mockMessages,
+    conversations: [{ id: "conv-1", projectId: null }],
+    ...storeFns,
+  };
+  const useAppStore = Object.assign(
+    (
+      selector: (s: typeof store) => unknown,
+    ) => selector(store),
+    { getState: () => store },
+  );
+  return { useAppStore };
+});
 
 import { api } from "@/lib/tauri";
 
@@ -236,6 +253,11 @@ describe("ConversationHistory", () => {
     vi.mocked(api.listDiagnostics).mockReset().mockResolvedValue([]);
     vi.mocked(api.applyOperations).mockReset();
     vi.mocked(api.undoTransaction).mockReset();
+    storeFns.refreshConversations.mockReset().mockResolvedValue(undefined);
+    storeFns.refreshTools.mockReset().mockResolvedValue(undefined);
+    storeFns.selectTool.mockReset().mockResolvedValue(undefined);
+    storeFns.navigateToChat.mockReset().mockResolvedValue(undefined);
+    storeFns.activeToolId = "tool-1";
   });
 
   it("opens History dialog and loads branches", async () => {
@@ -438,6 +460,82 @@ describe("ConversationHistory", () => {
         branchName: "Historical Exploration",
       });
     });
+  });
+
+  it("undoes first applied tip from DESC list and hard-reloads open tool", async () => {
+    vi.mocked(api.listTransactions).mockResolvedValue([
+      {
+        id: "txn-reverted",
+        summary: "Already reverted",
+        status: "reverted",
+        createdAt: "2026-08-04T12:00:00Z",
+        operations: [{}],
+      },
+      {
+        id: "txn-tip",
+        summary: "Latest applied change",
+        status: "applied",
+        createdAt: "2026-08-04T11:00:00Z",
+        operations: [{}],
+      },
+      {
+        id: "txn-older",
+        summary: "Older applied",
+        status: "applied",
+        createdAt: "2026-08-04T10:00:00Z",
+        operations: [{}],
+      },
+    ]);
+    vi.mocked(api.undoTransaction).mockResolvedValue({
+      id: "txn-tip",
+      status: "reverted",
+    });
+
+    render(<ConversationHistory conversationId="conv-1" />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open conversation history" }),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Replay" }));
+
+    expect(
+      await screen.findByText("Tip: Latest applied change"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Undo latest application change" }),
+    );
+
+    await waitFor(() => {
+      expect(api.undoTransaction).toHaveBeenCalledWith("txn-tip");
+      expect(storeFns.refreshTools).toHaveBeenCalled();
+      expect(storeFns.selectTool).toHaveBeenCalledWith("tool-1");
+    });
+  });
+
+  it("disables undo and announces empty tip when nothing is applied", async () => {
+    vi.mocked(api.listTransactions).mockResolvedValue([
+      {
+        id: "txn-done",
+        summary: "Already gone",
+        status: "reverted",
+        createdAt: "2026-08-04T12:00:00Z",
+        operations: [],
+      },
+    ]);
+
+    render(<ConversationHistory conversationId="conv-1" />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open conversation history" }),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Replay" }));
+
+    const undo = await screen.findByRole("button", {
+      name: "Undo latest application change",
+    });
+    expect(undo).toBeDisabled();
+    expect(
+      screen.getByText(/Undo reverts the latest durable application mutation/),
+    ).toBeInTheDocument();
   });
 });
 

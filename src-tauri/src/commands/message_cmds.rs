@@ -1599,8 +1599,7 @@ fn authorize_structured_submission(
     }
     if let Some(ref idem) = submission.idempotency_key {
         let key = format!("sui-{idem}");
-        if let Ok(existing) =
-            crate::runtime_v2::get_turn_by_idempotency(db, conversation_id, &key)
+        if let Ok(existing) = crate::runtime_v2::get_turn_by_idempotency(db, conversation_id, &key)
         {
             if !matches!(
                 existing.state,
@@ -1675,54 +1674,53 @@ async fn send_message_inner(
     // Seal typed StructuredUserInput in Rust. Trust never comes from text markers.
     // Defense: even if content contains a spoofed delimiter, structured_trust_from_text is None.
     debug_assert!(structured_trust_from_text(&content).is_none());
-    let sealed_structured: Option<StructuredUserInput> = if let Some(mut submission) =
-        structured_user_input.clone()
-    {
-        {
-            let db_guard = state.db.lock();
-            authorize_structured_submission(&db_guard, &conversation_id, &submission)?;
-        }
-        // interactive.ai_turn: drop frontend-supplied state/legalActions and inject
-        // authoritative Rust public context before sealing.
-        if submission.event_name.as_deref() == Some("interactive.ai_turn") {
-            if let Some(sid) = submission.surface_id.clone() {
-                let mut db_guard = state.db.lock();
-                let ctx = crate::runtime_v2::interactive::ai_turn_context(&mut db_guard, &sid)
-                    .map_err(|e| {
-                        CommandError::new(
-                            "invalid",
-                            format!("interactive AI turn context unavailable: {e}"),
-                        )
-                    })?;
-                let silent = submission
-                    .fields
-                    .get("silent")
-                    .cloned()
-                    .unwrap_or(serde_json::json!(true));
-                let mut fields = match ctx {
-                    serde_json::Value::Object(m) => m,
-                    other => {
-                        let mut m = serde_json::Map::new();
-                        m.insert("context".into(), other);
-                        m
-                    }
-                };
-                fields.insert("silent".into(), silent);
-                // Authoritative revision for the sealed envelope.
-                if let Some(rev) = fields.get("stateRevision").and_then(|v| v.as_i64()) {
-                    submission.state_revision = Some(rev);
-                }
-                submission.fields = fields;
+    let sealed_structured: Option<StructuredUserInput> =
+        if let Some(mut submission) = structured_user_input.clone() {
+            {
+                let db_guard = state.db.lock();
+                authorize_structured_submission(&db_guard, &conversation_id, &submission)?;
             }
-        }
-        Some(
-            seal_local_user_submission(&conversation_id, submission).map_err(|e| {
-                CommandError::new("invalid", format!("Invalid structuredUserInput: {e}"))
-            })?,
-        )
-    } else {
-        None
-    };
+            // interactive.ai_turn: drop frontend-supplied state/legalActions and inject
+            // authoritative Rust public context before sealing.
+            if submission.event_name.as_deref() == Some("interactive.ai_turn") {
+                if let Some(sid) = submission.surface_id.clone() {
+                    let mut db_guard = state.db.lock();
+                    let ctx = crate::runtime_v2::interactive::ai_turn_context(&mut db_guard, &sid)
+                        .map_err(|e| {
+                            CommandError::new(
+                                "invalid",
+                                format!("interactive AI turn context unavailable: {e}"),
+                            )
+                        })?;
+                    let silent = submission
+                        .fields
+                        .get("silent")
+                        .cloned()
+                        .unwrap_or(serde_json::json!(true));
+                    let mut fields = match ctx {
+                        serde_json::Value::Object(m) => m,
+                        other => {
+                            let mut m = serde_json::Map::new();
+                            m.insert("context".into(), other);
+                            m
+                        }
+                    };
+                    fields.insert("silent".into(), silent);
+                    // Authoritative revision for the sealed envelope.
+                    if let Some(rev) = fields.get("stateRevision").and_then(|v| v.as_i64()) {
+                        submission.state_revision = Some(rev);
+                    }
+                    submission.fields = fields;
+                }
+            }
+            Some(
+                seal_local_user_submission(&conversation_id, submission).map_err(|e| {
+                    CommandError::new("invalid", format!("Invalid structuredUserInput: {e}"))
+                })?,
+            )
+        } else {
+            None
+        };
     let originating_surface_id = sealed_structured
         .as_ref()
         .and_then(|s| s.surface_id.clone());

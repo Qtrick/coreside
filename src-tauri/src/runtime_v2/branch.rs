@@ -488,11 +488,7 @@ fn fork_conversation_applications(
         })?;
         for row in rows {
             let (app_id, ops_json) = row?;
-            if let Some(app) = app_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-            {
+            if let Some(app) = app_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
                 if let Some(resolved) = authoritative_application_id(db, Some(app)) {
                     source_apps.insert(resolved);
                 } else {

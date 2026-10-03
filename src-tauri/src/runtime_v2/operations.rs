@@ -848,11 +848,13 @@ pub fn tool_change_to_operations(tc: &ToolChangePayload) -> Vec<AppOperation> {
     } else {
         &tool.id
     };
+    // Mutation authority comes from DB tool binding, not a synthetic surf-* id.
+    // Creation paths mint a canonical id inside upsert_surface_from_tool.
     let mut op = AppOperation {
         id: format!("op-v1-{}", tool.id),
         op_type: op_type.into(),
         target: OperationTarget {
-            surface_id: Some(format!("surf-{target_tool_id}")),
+            surface_id: None,
             tool_id: Some(target_tool_id.to_string()),
             surface_type: Some("tool".into()),
             placement: Some("tool_canvas".into()),
@@ -997,7 +999,8 @@ mod tests {
         let op = tool_change_to_operations(&tc).pop().unwrap();
         assert_eq!(op.op_type, "tool.full_replace");
         assert_eq!(op.target.tool_id.as_deref(), Some("existing-tool"));
-        assert_eq!(op.target.surface_id.as_deref(), Some("surf-existing-tool"));
+        // Synthetic surf-* must not be stamped as mutation authority.
+        assert_eq!(op.target.surface_id, None);
     }
 
     #[test]

@@ -203,10 +203,9 @@ img {
 }
 
 /* Structural shell layers — explicit grid tracks + z-index.
- * LiveWallpaper is DOM-first inside .app-shell. Without explicit placement,
- * WebKit auto-placement still assigns it the first track; Sidebar then takes
- * column 2 and .app-shell-main wraps into the 80px collapsed-sidebar track
- * under @media (max-width: 1100px) — Journey 5 CI failure (1024x642). */
+ * LiveWallpaper is a fixed sibling of .app-shell (not a grid child). Defense in
+ * depth: if a wallpaper node is ever nested again, pin it so it cannot steal
+ * column 1 and park .app-shell-main in the 80px track (Journey 5 / 1024px). */
 .app-shell > .live-wallpaper {
   position: absolute;
   inset: 0;
@@ -1319,8 +1318,22 @@ body > .window-overlay-root > *,
   padding-inline: 0.55rem;
 }
 
+/* Menu density: three fixed 36px controls (Open / More / Close). Do not let
+   labeled .btn min-content inflate the header past the canvas at ≤1024px. */
+.tool-header-actions[data-density="menu"] {
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+  max-width: none;
+}
+
+.tool-header-actions[data-density="menu"] .icon-btn,
+.tool-header-actions[data-density="menu"] .tool-header-close {
+  flex: 0 0 auto;
+}
+
 .tool-header-more {
   position: relative;
+  flex: 0 0 auto;
 }
 
 .tool-header-menu {

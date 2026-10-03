@@ -9,10 +9,11 @@ import {
 import { useEffect, useId, useRef, useState } from "react";
 import { CustomizeMode } from "@/components/tool-canvas/CustomizeMode";
 import type { ToolDefinition } from "@/types/tool";
-import { surfaceIdForTool } from "@/lib/surface-ops";
 
 type ToolHeaderActionsProps = {
   tool: ToolDefinition;
+  /** Authoritative SQLite surface id when known; never invent surf-* here. */
+  surfaceId: string;
   conversationId: string | null;
   density: "full" | "icons" | "menu";
   closeLabel?: string;
@@ -30,11 +31,13 @@ type ToolHeaderActionsProps = {
 };
 
 /**
- * Priority: Close always visible; Customize/Open/Undo when space allows;
- * Details/Export overflow-eligible.
+ * Priority: Close + Open-in-new-window always reachable; Customize/Undo when
+ * space allows; Details/Export overflow-eligible. Multi-window must not require
+ * opening the overflow menu (Journey 7 / compact 1024px).
  */
 export function ToolHeaderActions({
   tool,
+  surfaceId,
   conversationId,
   density,
   closeLabel = "Close tool canvas",
@@ -124,7 +127,7 @@ export function ToolHeaderActions({
       {!overflowOnly ? (
         <>
           <CustomizeMode
-            surfaceId={surfaceIdForTool(tool.id)}
+            surfaceId={surfaceId}
             conversationId={conversationId}
             tool={tool}
             baseRevision={tool.version ?? 1}
@@ -183,64 +186,66 @@ export function ToolHeaderActions({
           ) : null}
         </>
       ) : (
-        <div className="tool-header-more">
+        <>
+          {/* Compact 1024px: keep Open + Close as fixed-size icon-btn only.
+              A labeled More btn-secondary was ~80px and pastRight-overflowed
+              when main wrongly sat in the 80px sidebar track (Journey 5). */}
           <button
-            ref={menuButtonRef}
             type="button"
-            className="btn btn-secondary"
-            aria-label="More tool actions"
-            aria-expanded={menuOpen}
-            aria-controls={menuId}
-            onClick={() => setMenuOpen((v) => !v)}
+            className="icon-btn"
+            onClick={onOpen}
+            aria-label="Open tool in new window"
+            title="Open in new window"
           >
-            <MoreHorizontal size={16} aria-hidden />
-            More
+            <ExternalLink size={16} aria-hidden />
           </button>
-          {menuOpen ? (
-            <div
-              className="tool-header-menu"
-              role="group"
+          <div className="tool-header-more">
+            <button
+              ref={menuButtonRef}
+              type="button"
+              className="icon-btn"
               aria-label="More tool actions"
-              id={menuId}
+              aria-expanded={menuOpen}
+              aria-controls={menuId}
+              onClick={() => setMenuOpen((v) => !v)}
             >
-              <CustomizeMode
-                surfaceId={surfaceIdForTool(tool.id)}
-                conversationId={conversationId}
-                tool={tool}
-                baseRevision={tool.version ?? 1}
-                onApplied={() => {
-                  setMenuOpen(false);
-                  onCustomizeApplied();
-                }}
-              />
-              <button
-                type="button"
-                className="btn btn-secondary"
-                aria-label="Open tool in new window"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onOpen();
-                }}
+              <MoreHorizontal size={16} aria-hidden />
+              <span className="sr-only">More tool actions</span>
+            </button>
+            {menuOpen ? (
+              <div
+                className="tool-header-menu"
+                role="group"
+                aria-label="More tool actions"
+                id={menuId}
               >
-                <ExternalLink size={16} aria-hidden />
-                Open
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                aria-label="Undo last tool change"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onUndo();
-                }}
-              >
-                <History size={16} aria-hidden />
-                Undo
-              </button>
-              {renderSecondary()}
-            </div>
-          ) : null}
-        </div>
+                <CustomizeMode
+                  surfaceId={surfaceId}
+                  conversationId={conversationId}
+                  tool={tool}
+                  baseRevision={tool.version ?? 1}
+                  onApplied={() => {
+                    setMenuOpen(false);
+                    onCustomizeApplied();
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  aria-label="Undo last tool change"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onUndo();
+                  }}
+                >
+                  <History size={16} aria-hidden />
+                  Undo
+                </button>
+                {renderSecondary()}
+              </div>
+            ) : null}
+          </div>
+        </>
       )}
       <button
         type="button"

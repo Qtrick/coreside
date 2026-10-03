@@ -1198,7 +1198,10 @@ mod tests {
 
         // After cursor, get_conversation_events must not redeliver applied rows.
         let after = get_conversation_events(&db, "c-stale-future", Some(10), Some(200)).unwrap();
-        assert!(after.is_empty(), "cursor at max must not redeliver: {after:?}");
+        assert!(
+            after.is_empty(),
+            "cursor at max must not redeliver: {after:?}"
+        );
 
         // Mid-watermark page is exclusive after_sequence — no duplicates of 1..=4.
         let mid = get_conversation_events(&db, "c-stale-future", Some(4), Some(200)).unwrap();
@@ -1209,7 +1212,10 @@ mod tests {
         let mut unique = seqs.clone();
         unique.sort_unstable();
         unique.dedup();
-        assert_eq!(seqs, unique, "event page must not contain duplicate sequences");
+        assert_eq!(
+            seqs, unique,
+            "event page must not contain duplicate sequences"
+        );
     }
 
     #[test]

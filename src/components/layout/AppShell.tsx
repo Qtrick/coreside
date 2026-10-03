@@ -305,101 +305,109 @@ export function AppShell() {
     }
   })();
 
+  // Wallpaper is a fixed viewport overlay, not a CSS Grid child of .app-shell.
+  // Keeping it inside the grid lets WebKit auto-place it into column 1 and push
+  // .app-shell-main into the 80px collapsed-sidebar track at ≤1100px (Journey 5).
   return (
-    <div
-      className={classes}
-      data-wallpaper={wallpaperAttr}
-      data-layout-mode={layoutMode}
-    >
+    <>
       <LiveWallpaper wallpaper={resolvedWallpaper} />
-      <Sidebar />
-      {mainPanel}
-      <ProviderSetupDialog />
-      {exportDialog ? (
-        <ExportDialog
-          toolId={exportDialog.toolId}
-          toolName={exportDialog.toolName || activeTool?.name || "Tool"}
-          onClose={closeExportDialog}
+      <div
+        className={classes}
+        data-wallpaper={wallpaperAttr}
+        data-layout-mode={layoutMode}
+      >
+        <Sidebar />
+        {mainPanel}
+        <ProviderSetupDialog />
+        {exportDialog ? (
+          <ExportDialog
+            toolId={exportDialog.toolId}
+            toolName={exportDialog.toolName || activeTool?.name || "Tool"}
+            onClose={closeExportDialog}
+          />
+        ) : null}
+        <CreateProjectDialog
+          open={createProjectDialogOpen}
+          busy={projectActionBusy}
+          error={projectActionError}
+          onClose={() => setCreateProjectDialogOpen(false)}
+          onCreate={createProject}
         />
-      ) : null}
-      <CreateProjectDialog
-        open={createProjectDialogOpen}
-        busy={projectActionBusy}
-        error={projectActionError}
-        onClose={() => setCreateProjectDialogOpen(false)}
-        onCreate={createProject}
-      />
-      <EditProjectDialog
-        open={editProjectDialogOpen}
-        project={editProject}
-        busy={projectActionBusy}
-        error={projectActionError}
-        onClose={() => setEditProjectDialogOpen(null)}
-        onSave={updateProject}
-      />
-      <AddChatsToProjectDialog
-        open={addChatsDialogOpen}
-        projectName={addChatsProject?.name ?? "Project"}
-        conversations={conversations}
-        assignedIds={
-          new Set(
-            projectConversations
-              .filter((c) => c.projectId === addChatsProjectId)
-              .map((c) => c.id),
-          )
-        }
-        busy={projectActionBusy}
-        error={projectActionError}
-        onClose={() => setAddChatsDialogOpen(null)}
-        onAssign={(ids) =>
-          addChatsProjectId
-            ? assignChats(addChatsProjectId, ids)
-            : Promise.resolve()
-        }
-      />
-      {manageContextProject && (
-        <ProjectContextDialog
-          open={manageContextDialogOpen}
-          project={manageContextProject}
-          onClose={() => setManageContextDialogOpen(null)}
-          onOpenChat={(chatId) => {
-            setManageContextDialogOpen(null);
-            void navigateToChat(chatId);
-          }}
+        <EditProjectDialog
+          open={editProjectDialogOpen}
+          project={editProject}
+          busy={projectActionBusy}
+          error={projectActionError}
+          onClose={() => setEditProjectDialogOpen(null)}
+          onSave={updateProject}
         />
-      )}
-      <DeleteProjectDialog
-        open={deleteProjectDialogOpen}
-        projectName={deleteProjectTarget?.name ?? "Project"}
-        chatCount={
-          conversations.filter((c) => c.projectId === deleteProjectId).length
-        }
-        busy={projectActionBusy}
-        error={projectActionError}
-        onClose={() => setDeleteProjectDialogOpen(null)}
-        onDelete={(mode) =>
-          deleteProjectId
-            ? deleteProject(deleteProjectId, mode)
-            : Promise.resolve()
-        }
-      />
-      <RenameConversationDialog
-        open={renameConversationDialogOpen}
-        title={renameTarget?.title ?? ""}
-        busy={projectActionBusy}
-        error={projectActionError}
-        onClose={() => setRenameConversationDialogOpen(null)}
-        onRename={(title) =>
-          renameConversationId
-            ? renameConversation(renameConversationId, title)
-            : Promise.resolve()
-        }
-      />
-      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
-      <PendingApprovalsHost />
-      <WelcomeDialog />
-      <TutorialOverlay />
-      <ContextualEducationHost />
-    </div>
+        <AddChatsToProjectDialog
+          open={addChatsDialogOpen}
+          projectName={addChatsProject?.name ?? "Project"}
+          conversations={conversations}
+          assignedIds={
+            new Set(
+              projectConversations
+                .filter((c) => c.projectId === addChatsProjectId)
+                .map((c) => c.id),
+            )
+          }
+          busy={projectActionBusy}
+          error={projectActionError}
+          onClose={() => setAddChatsDialogOpen(null)}
+          onAssign={(ids) =>
+            addChatsProjectId
+              ? assignChats(addChatsProjectId, ids)
+              : Promise.resolve()
+          }
+        />
+        {manageContextProject && (
+          <ProjectContextDialog
+            open={manageContextDialogOpen}
+            project={manageContextProject}
+            onClose={() => setManageContextDialogOpen(null)}
+            onOpenChat={(chatId) => {
+              setManageContextDialogOpen(null);
+              void navigateToChat(chatId);
+            }}
+          />
+        )}
+        <DeleteProjectDialog
+          open={deleteProjectDialogOpen}
+          projectName={deleteProjectTarget?.name ?? "Project"}
+          chatCount={
+            conversations.filter((c) => c.projectId === deleteProjectId).length
+          }
+          busy={projectActionBusy}
+          error={projectActionError}
+          onClose={() => setDeleteProjectDialogOpen(null)}
+          onDelete={(mode) =>
+            deleteProjectId
+              ? deleteProject(deleteProjectId, mode)
+              : Promise.resolve()
+          }
+        />
+        <RenameConversationDialog
+          open={renameConversationDialogOpen}
+          title={renameTarget?.title ?? ""}
+          busy={projectActionBusy}
+          error={projectActionError}
+          onClose={() => setRenameConversationDialogOpen(null)}
+          onRename={(title) =>
+            renameConversationId
+              ? renameConversation(renameConversationId, title)
+              : Promise.resolve()
+          }
+        />
+        <CommandPalette
+          open={commandOpen}
+          onClose={() => setCommandOpen(false)}
+        />
+        <PendingApprovalsHost />
+        <WelcomeDialog />
+        <TutorialOverlay />
+        <ContextualEducationHost />
+      </div>
+    </>
   );
 }

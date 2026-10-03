@@ -16,7 +16,7 @@ Status legend: **Equivalent** · **Partial** · **Implemented differently** · *
 | Client session secrets | clientId+secret in forms | Conversation ownership / keyring | Rejected (security) | intentional | Never embed secrets in surfaces |
 | Reconnect | WS backoff reconnect | Channel re-subscribe + catch-up | Partial | conversation-catch-up + turn_journal cursors; Journey 24–25 desktop specs wired | Multi-window Cases H–I; packaged proof |
 | Replay | paced DOM history | `ReplayPlayer` + turn timeline | Partial | read-only | No provider re-execution |
-| Hard undo | delete N turns | `undo_transaction` OCC | Partial | transactions.rs one/two-turn undo unit; Journey 30 desktop via `undo_transaction_cmd` | Consumer History Undo button (still invoke/API-first) |
+| Hard undo | delete N turns | `undo_transaction` OCC | Partial | transactions.rs one/two-turn undo unit; History → Replay **Undo latest change** UI; Journey 30 desktop | Multi-turn tip undo OCC conflict UX polish |
 | Fork snapshot | DO clone + fork index | `runtime_v2/branch.rs` + `branchConversation` UI | Partial | branch.rs record/revision isolation unit; fork remaps ApplicationPlan tools from conversation transactions + tools.id; Journey 27 desktop (branch Task Tracker isolated) | Packaged fork pages / read-only fork UX |
 | Form submission | iframe POST + secret | `StructuredUserInput` sealed | Implemented differently (secure) | structured_user_input + authorize hostile unit; Journey 28 Tic-Tac-Toe submitToAgent (mock fixture stateContracts for lastMove) | Rich multi-field form desktop beyond game.move |
 | Client-specific updates | SERVER_PROPS include/exclude | Audience on operations | Partial | operations.rs | Multiuser deferred |
@@ -27,7 +27,7 @@ Status legend: **Equivalent** · **Partial** · **Implemented differently** · *
 | App instances | `ttt/1`, `ttt/2` | `instance_id` + mounts | Equivalent | surfaces / mount_registry | UX clarity |
 | Progressive rendering | complete-unit HTML stream | NDJSON progressive ops + preview txn | Partial | progressive_ops.rs + e2e seed contracts | Multi-surface progressive durable |
 | Application evolution | full HTML rewrite units | ApplicationPlan → surface_diff granular `component.*` | Implemented differently (secure) | surface_diff.rs + compile_plan_against_db; lineage-resolved ApplicationSpec; fail-closed LineageScope (missing binding rejects); lineage_scope_for_plan omits claims for workspace globals | Live provider evidence |
-| Layout-shift | sized outer container guidance | preservation helpers | Partial | preservation.ts; Journey 5 shell overflow locally green on HEAD; remote macOS E2E still failing (logs blocked without gh auth; artifacts now uploaded on failure) | Remote root-cause + streaming placeholders |
+| Layout-shift | sized outer container guidance | preservation helpers | Partial | LiveWallpaper is a fixed sibling of `.app-shell` (not a grid child); menu-density Open is always visible; Journey 5 asserts 1024–1440 + wallpaperOutsideShell | Packaged WebKit proof pending push |
 | Script cleanup | MutationObserver scripts | No model JS | Rejected (security) | intentional | Capability packs only |
 | Auth / roles | Better Auth roles | Keyring + Kernel grants | Implemented differently | intentional | Enterprise RBAC deferred |
 | Prompt injection | identity sanitize | research sanitize + pack validation | Implemented differently (stricter) | intentional | Broader boundary tags |
@@ -39,9 +39,9 @@ Status legend: **Equivalent** · **Partial** · **Implemented differently** · *
 
 1. Progressive durable apply completeness for multi-surface turns (desktop).
 2. Multi-window reconnect Cases H–I and packaged reconnect proof (Journeys 24–25 cover single-window evolution catch-up).
-3. Consumer History Undo control (Journey 30 proves `undo_transaction`; UI still API/invoke-first).
-4. Approval restart/recovery desktop (Journey 29) + richer structured forms beyond game.move.
-5. Packaged / live-provider verification for granular evolve.
+3. Approval restart/recovery desktop (Journey 29) + richer structured forms beyond game.move.
+4. Packaged / live-provider verification for granular evolve.
+5. Preview-seed path still may mint `surf-*` keys for non-durable paint (durable apply is DB-lineage only).
 
 ## Intentional non-goals
 

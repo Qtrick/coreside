@@ -238,7 +238,15 @@ export async function closeToolCanvas() {
 }
 
 export async function openToolInWindow() {
-  const open = await $('[aria-label="Open tool in new window"]');
+  // Compact/menu density may keep Open inside the overflow menu on older builds;
+  // current chrome keeps it always visible. Open More first when needed.
+  let open = await $('[aria-label="Open tool in new window"]');
+  if (!(await open.isExisting())) {
+    const more = await $('[aria-label="More tool actions"]');
+    await more.waitForClickable({ timeout: 10_000 });
+    await more.click();
+    open = await $('[aria-label="Open tool in new window"]');
+  }
   await open.waitForClickable({ timeout: 10_000 });
   await open.click();
 }
@@ -493,4 +501,157 @@ export async function listAppliedTransactions(
       };
     })
     .filter((r) => r.id.length > 0);
+}
+
+/** Compact shell/canvas overflow diagnostics (CI 1024px WebKit regressions). */
+export async function measureToolCanvasLayout() {
+  return browser.execute(() => {
+    const root = document.documentElement;
+    const shell = document.querySelector<HTMLElement>(".app-shell");
+    const main = document.querySelector<HTMLElement>(".app-shell-main");
+    const sidebar = document.querySelector<HTMLElement>(".sidebar");
+    const canvas = document.querySelector<HTMLElement>(".tool-canvas");
+    const body = document.querySelector<HTMLElement>(".tool-canvas-body");
+    const header = document.querySelector<HTMLElement>(".tool-canvas-header");
+    const headerActions = document.querySelector<HTMLElement>(
+      ".tool-header-actions",
+    );
+    const close = document.querySelector<HTMLElement>(
+      '[aria-label="Close tool canvas"], [aria-label="Back to chat"]',
+    );
+    const wallpaper = document.querySelector(".live-wallpaper");
+
+    const rect = (el: Element | null) => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return {
+        x: Math.round(r.x),
+        y: Math.round(r.y),
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+      };
+    };
+    const computed = (el: Element | null, props: string[]) => {
+      if (!el) return null;
+      const s = getComputedStyle(el);
+      const out: Record<string, string> = {};
+      for (const p of props) out[p] = s.getPropertyValue(p).trim();
+      return out;
+    };
+
+    const offenders: Array<Record<string, unknown>> = [];
+    if (main && main.scrollWidth > main.clientWidth + 2) {
+      const mainRect = main.getBoundingClientRect();
+      for (const node of Array.from(main.querySelectorAll<HTMLElement>("*"))) {
+        const nodeRect = node.getBoundingClientRect();
+        if (nodeRect.width <= 0 || nodeRect.height <= 0) continue;
+        const pastRight = nodeRect.right - (mainRect.right + 1);
+        const pastLeft = mainRect.left - 1 - nodeRect.left;
+        if (pastRight <= 0 && pastLeft <= 0) continue;
+        const style = getComputedStyle(node);
+        offenders.push({
+          tag: node.tagName.toLowerCase(),
+          className: String(node.className || "").slice(0, 120),
+          id: node.id || null,
+          pastRight: Math.round(pastRight),
+          pastLeft: Math.round(pastLeft),
+          width: Math.round(nodeRect.width),
+          scrollWidth: node.scrollWidth,
+          clientWidth: node.clientWidth,
+          minWidth: style.minWidth,
+          widthCss: style.width,
+          overflowX: style.overflowX,
+          position: style.position,
+          display: style.display,
+        });
+      }
+      offenders.sort(
+        (a, b) =>
+          Number(b.pastRight) +
+          Number(b.pastLeft) -
+          (Number(a.pastRight) + Number(a.pastLeft)),
+      );
+    }
+
+    return {
+      rootOverflow: root.scrollWidth > root.clientWidth + 2,
+      mainOverflow: Boolean(main && main.scrollWidth > main.clientWidth + 2),
+      canvasOverflow: Boolean(
+        canvas && canvas.scrollWidth > canvas.clientWidth + 2,
+      ),
+      bodyOverflow: Boolean(body && body.scrollWidth > body.clientWidth + 2),
+      closeVisible: Boolean(
+        close &&
+          close.getBoundingClientRect().left >= 0 &&
+          close.getBoundingClientRect().right <= window.innerWidth + 1,
+      ),
+      mainClientWidth: main?.clientWidth ?? null,
+      mainScrollWidth: main?.scrollWidth ?? null,
+      sidebarClientWidth: sidebar?.clientWidth ?? null,
+      windowInnerWidth: window.innerWidth,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      wallpaperInsideShell: Boolean(shell?.contains(wallpaper)),
+      shell: {
+        rect: rect(shell),
+        ...computed(shell, ["width", "grid-template-columns", "display"]),
+      },
+      main: {
+        rect: rect(main),
+        ...computed(main, [
+          "width",
+          "min-width",
+          "grid-column-start",
+          "grid-template-columns",
+          "overflow-x",
+        ]),
+      },
+      sidebar: {
+        rect: rect(sidebar),
+        ...computed(sidebar, ["width", "grid-column-start"]),
+      },
+      canvas: { rect: rect(canvas) },
+      body: { rect: rect(body) },
+      header: { rect: rect(header) },
+      headerActions: {
+        rect: rect(headerActions),
+        density: headerActions?.getAttribute("data-density") ?? null,
+      },
+      offenders: offenders.slice(0, 8),
+    };
+  });
+}
+
+export function assertNoLayoutOverflow(
+  layout: Awaited<ReturnType<typeof measureToolCanvasLayout>>,
+  label: string,
+) {
+  if (
+    layout.mainOverflow ||
+    layout.rootOverflow ||
+    layout.canvasOverflow ||
+    layout.bodyOverflow ||
+    !layout.closeVisible ||
+    (typeof layout.mainClientWidth === "number" &&
+      typeof layout.windowInnerWidth === "number" &&
+      layout.mainClientWidth < layout.windowInnerWidth * 0.4) ||
+    layout.wallpaperInsideShell
+  ) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[layout ${label}]`,
+      JSON.stringify(layout, null, 2),
+    );
+  }
+  expect(layout.wallpaperInsideShell).toBe(false);
+  expect(layout.mainClientWidth).toBeGreaterThan(
+    Math.max(200, (layout.windowInnerWidth ?? 0) * 0.4),
+  );
+  expect(layout.main?.["grid-column-start"]).toBe("2");
+  expect(layout).toMatchObject({
+    rootOverflow: false,
+    mainOverflow: false,
+    canvasOverflow: false,
+    bodyOverflow: false,
+    closeVisible: true,
+  });
 }
