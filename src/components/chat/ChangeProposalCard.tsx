@@ -24,6 +24,8 @@ export function ChangeProposalCard({
   conversationId,
   status: initialStatus,
   preservationSummary: initialPreservationSummary = "",
+  /** Composer sticky owns Apply when the same proposal is also inline in chat. */
+  placement = "inline",
 }: {
   proposalId: string;
   summary: string;
@@ -34,9 +36,11 @@ export function ChangeProposalCard({
   conversationId: string;
   status?: string;
   preservationSummary?: string;
+  placement?: "inline" | "composer";
 }) {
   const applyPending = useAppStore((s) => s.applyPendingKernelProposal);
   const discardPending = useAppStore((s) => s.discardPendingKernelProposal);
+  const pendingKernel = useAppStore((s) => s.pendingKernelProposal);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewState, setPreviewState] = useState<ToolState>({});
@@ -75,6 +79,14 @@ export function ChangeProposalCard({
 
   const currentStatus =
     busy ? "applying" : (proposalData?.status ?? initialStatus ?? "pending");
+  // Avoid two competing Apply buttons — sticky composer owns actions while the
+  // same conversation's proposal is staged. Mismatched conversation must keep
+  // inline actions so Apply is never orphaned.
+  const deferActionsToComposer =
+    placement === "inline" &&
+    pendingKernel?.proposalId === proposalId &&
+    pendingKernel.conversationId === conversationId &&
+    (currentStatus === "pending" || currentStatus === "applying");
   const summary = proposalData?.summary ?? initialSummary;
   const impactSummary = proposalData?.impactSummary ?? initialImpactSummary;
   const risk = proposalData?.risk ?? initialRisk;
@@ -276,25 +288,35 @@ export function ChangeProposalCard({
         </p>
       ) : null}
 
-      <div className="button-row" style={{ marginTop: "0.75rem" }}>
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={busy || operations.length === 0}
-          onClick={() => void apply()}
-          aria-busy={busy}
+      {deferActionsToComposer ? (
+        <p
+          className="muted"
+          role="status"
+          style={{ margin: "0.65rem 0 0", fontSize: "0.8rem" }}
         >
-          {busy ? "Applying…" : "Apply"}
-        </button>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          disabled={busy}
-          onClick={() => void cancel()}
-        >
-          Discard
-        </button>
-      </div>
+          Apply or discard above the message box.
+        </p>
+      ) : (
+        <div className="button-row" style={{ marginTop: "0.75rem" }}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy || operations.length === 0}
+            onClick={() => void apply()}
+            aria-busy={busy}
+          >
+            {busy ? "Applying…" : "Apply"}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={busy}
+            onClick={() => void cancel()}
+          >
+            Discard
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

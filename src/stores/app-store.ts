@@ -3065,9 +3065,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
       attachAgentTurnSyncListener(get, set);
       attachConversationSyncReconcile(get, set);
-      // Resolve conversation for Sync Channel (surf-{toolId} when promoted).
+      // Authoritatively resolve bound surface via SQLite lineage for Sync Channel.
       void api
-        .getSurface(`surf-${toolId}`)
+        .resolveBoundSurfaceForTool(toolId)
         .then((surface) => {
           const cid =
             typeof surface?.conversationId === "string"

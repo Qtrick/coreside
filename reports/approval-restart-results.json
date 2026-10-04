@@ -1,0 +1,18 @@
+{
+  "journey": 29,
+  "name": "approval-restart",
+  "status": "passed",
+  "startedAt": "2026-10-03T23:44:56.530Z",
+  "finishedAt": "2026-10-03T23:44:57.281Z",
+  "durationMs": 751,
+  "approvalId": "approval-e2e-1",
+  "processRelaunch": false,
+  "remountPath": "settings-open-close",
+  "secondDecideRejected": true,
+  "commit": "8f9984d66a7618cbf7ca57c1f7b6470855cf0a7e",
+  "dirty": true,
+  "platform": "darwin",
+  "arch": "arm64",
+  "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
+  "binarySha256": "7ce476ba0d18ab54e4dc82d74a679c45f598684091dbeff00ea64c46076948a5"
+}

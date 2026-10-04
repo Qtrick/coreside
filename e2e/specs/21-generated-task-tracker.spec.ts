@@ -5,6 +5,7 @@ import {
   denyPendingApprovalIfPresent,
   evidenceBinaryHash,
   evidenceIdentity,
+  latestVisibleKernelApplyButton,
   waitForAppReady,
 } from "../helpers.js";
 
@@ -47,13 +48,17 @@ describe("Journey 21 — generated Task Tracker vertical slice", () => {
     await send.waitForClickable({ timeout: 10_000 });
     await send.click();
 
-    // ApplicationPlan stages a kernel proposal; legacy toolChange Apply is suppressed.
-    const applyBtn = await $(".change-proposal[aria-label='Proposed change'] button.btn-primary");
-    await applyBtn.waitForExist({
-      timeout: 45_000,
-      timeoutMsg:
-        "Task Tracker kernel Apply never appeared (ApplicationPlan mock path)",
-    });
+    // Composer sticky owns Apply when the same proposal is also inline in chat.
+    await browser.waitUntil(
+      async () => (await latestVisibleKernelApplyButton()) !== null,
+      {
+        timeout: 45_000,
+        timeoutMsg:
+          "Task Tracker kernel Apply never appeared (ApplicationPlan mock path)",
+      },
+    );
+    const applyBtn = await latestVisibleKernelApplyButton();
+    if (!applyBtn) throw new Error("Task Tracker Apply missing after wait");
     await applyBtn.waitForClickable({ timeout: 10_000 });
     await applyBtn.click();
 

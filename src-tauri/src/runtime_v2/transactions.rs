@@ -12,8 +12,8 @@ use super::preservation::{
     upsert_preservation, PreservationPolicy,
 };
 use super::surfaces::{
-    archive_surface, create_inline_surface, delete_surface, get_surface, restore_surface,
-    update_surface_definition, DeleteSurfaceOptions, SurfaceRecord,
+    archive_surface, bind_surface_tool_id, create_inline_surface, delete_surface, get_surface,
+    restore_surface, update_surface_definition, DeleteSurfaceOptions, SurfaceRecord,
 };
 use crate::ai::{ToolComponent, ToolDefinition};
 use crate::db::{now_rfc3339, Database, DbError, DbResult};
@@ -197,6 +197,7 @@ pub fn apply_transaction_deferred(
     let mut initial_revisions: std::collections::HashMap<String, i64> =
         std::collections::HashMap::new();
     let mut created_surfaces_list: Vec<String> = Vec::new();
+    let mut created_in_txn: Vec<TransactionCreatedSurface> = Vec::new();
 
     for op in &txn.operations {
         // Soft collect: resolution errors are enforced in apply_one. Snapshot only
@@ -230,10 +231,22 @@ pub fn apply_transaction_deferred(
 
     let mut failed = false;
     for op in &txn.operations {
-        match apply_one(db, op, &txn, &initial_revisions, deferred) {
+        match apply_one(
+            db,
+            op,
+            &txn,
+            &initial_revisions,
+            &mut created_in_txn,
+            deferred,
+        ) {
             Ok(Some(s)) => {
-                if op.op_type == "chat.inline_surface_create" || op.op_type == "surface.create" {
+                // Track newly established identities (including tool.full_replace that
+                // creates a surface) so undo can delete them and OCC can see final revs.
+                if created_in_txn.iter().any(|c| c.surface_id == s.id)
+                    && !created_surfaces_list.contains(&s.id)
+                {
                     created_surfaces_list.push(s.id.clone());
+                    initial_revisions.entry(s.id.clone()).or_insert(0);
                 }
                 surfaces.push(s);
             }
@@ -256,6 +269,17 @@ pub fn apply_transaction_deferred(
             .as_object_mut()
             .unwrap()
             .insert("created_surfaces".into(), json!(created_surfaces_list));
+        // Authoritative post-txn revisions from SQLite (not the last Ok(Some) echo).
+        let mut created_revs = json!({});
+        for sid in &created_surfaces_list {
+            if let Ok(s) = get_surface(db, sid) {
+                created_revs[sid.as_str()] = json!(s.current_revision);
+            }
+        }
+        previous
+            .as_object_mut()
+            .unwrap()
+            .insert("created_surface_revisions".into(), created_revs);
     }
 
     if failed {
@@ -356,11 +380,14 @@ pub fn apply_transaction_deferred(
 
 /// Claimed surface ids on an operation (target + payload). Duplicates collapsed.
 fn claimed_surface_ids(op: &AppOperation) -> Vec<String> {
-    // ponytail: at most two claim sites; linear dedupe is enough.
-    let mut ids = Vec::with_capacity(2);
+    // ponytail: at most three claim sites; linear dedupe is enough.
+    let mut ids = Vec::with_capacity(3);
     for candidate in [
         op.target.surface_id.as_deref(),
         op.payload.get("surfaceId").and_then(|v| v.as_str()),
+        // subscription.create historically used payload.ownerSurfaceId; treat it as a
+        // first-class claim so it cannot bypass lineage resolution.
+        op.payload.get("ownerSurfaceId").and_then(|v| v.as_str()),
     ]
     .into_iter()
     .flatten()
@@ -461,18 +488,29 @@ fn bound_surfaces_for_tool(
     )
 }
 
-/// Resolve the surface an operation mutates from SQLite lineage.
+/// Transaction-local surface identity established by a creation operation within
+/// the current uncommitted transaction.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TransactionCreatedSurface {
+    pub surface_id: String,
+    pub tool_id: Option<String>,
+    pub conversation_id: Option<String>,
+    pub project_id: Option<String>,
+}
+
+/// Resolve the surface an operation mutates from SQLite lineage or transaction-local creation.
 ///
 /// Rules:
-/// - Explicit `surfaceId` must exist in SQLite (never trusted as authority alone).
-/// - `toolId` / `targetToolId` resolve via DB binding; string `surf-{toolId}` is
-///   never synthesized as mutation authority.
-/// - Zero matches → `Ok(None)` (create paths may mint a canonical id separately).
+/// - Explicit `surfaceId` must exist in SQLite or have been created earlier in this transaction.
+/// - `toolId` / `targetToolId` resolve via DB binding or transaction-local creation; string
+///   `surf-{toolId}` is never synthesized as mutation authority for external surfaces.
+/// - Zero matches → `Ok(None)`.
 /// - Two+ matches → structured ambiguity error (fail closed).
 /// - Disagreeing surfaceId + toolId lineage → error.
-pub(crate) fn resolve_effective_surface_id(
+pub(crate) fn resolve_mutation_target_surface_id(
     db: &Database,
     op: &AppOperation,
+    created_in_txn: &[TransactionCreatedSurface],
 ) -> Result<Option<String>, String> {
     let surface_ids = claimed_surface_ids(op);
     let tool_id = claimed_tool_id(op)?;
@@ -489,14 +527,34 @@ pub(crate) fn resolve_effective_surface_id(
             "operation '{}' claims disagreeing surfaceIds: {:?}",
             op.id, ids
         )),
-        ([sid], None) => match get_surface(db, sid) {
-            Ok(_) => Ok(Some(sid.clone())),
-            Err(DbError::NotFound(_)) => Err(format!(
-                "surface '{sid}' does not exist; mutation requires authoritative SQLite lineage"
-            )),
-            Err(e) => Err(e.to_string()),
-        },
+        ([sid], None) => {
+            if let Some(created) = created_in_txn.iter().find(|c| &c.surface_id == sid) {
+                return Ok(Some(created.surface_id.clone()));
+            }
+            match get_surface(db, sid) {
+                Ok(_) => Ok(Some(sid.clone())),
+                Err(DbError::NotFound(_)) => Err(format!(
+                    "surface '{sid}' does not exist; mutation requires authoritative SQLite lineage"
+                )),
+                Err(e) => Err(e.to_string()),
+            }
+        }
         ([sid], Some(tid)) => {
+            if let Some(created) = created_in_txn.iter().find(|c| &c.surface_id == sid) {
+                match created.tool_id.as_deref() {
+                    Some(bound) if bound == tid => return Ok(Some(sid.clone())),
+                    Some(bound) => {
+                        return Err(format!(
+                            "surface/tool disagree: surface '{sid}' belongs to tool '{bound}', not '{tid}'"
+                        ));
+                    }
+                    None => {
+                        return Err(format!(
+                            "surface/tool disagree: surface '{sid}' has no tool binding; claimed tool '{tid}'"
+                        ));
+                    }
+                }
+            }
             let surface = match get_surface(db, sid) {
                 Ok(s) => s,
                 Err(DbError::NotFound(_)) => {
@@ -517,7 +575,29 @@ pub(crate) fn resolve_effective_surface_id(
             }
         }
         ([], Some(tid)) => {
-            let matches = bound_surfaces_for_tool(db, tid, conversation_hint)?;
+            let mut matches: Vec<String> = created_in_txn
+                .iter()
+                .filter(|c| {
+                    if c.tool_id.as_deref() != Some(tid) {
+                        return false;
+                    }
+                    if let Some(hint) = conversation_hint {
+                        if let Some(conv) = c.conversation_id.as_deref() {
+                            return conv == hint;
+                        }
+                    }
+                    true
+                })
+                .map(|c| c.surface_id.clone())
+                .collect();
+
+            let db_matches = bound_surfaces_for_tool(db, tid, conversation_hint)?;
+            for db_sid in db_matches {
+                if !matches.contains(&db_sid) {
+                    matches.push(db_sid);
+                }
+            }
+
             match matches.as_slice() {
                 [] => Ok(None),
                 [only] => Ok(Some(only.clone())),
@@ -528,7 +608,6 @@ pub(crate) fn resolve_effective_surface_id(
                 )),
             }
         }
-        // Fail closed: never authorize mutations on an unexpected claim shape.
         _ => Err(format!(
             "operation '{}': unexpected surface/tool claim shape",
             op.id
@@ -536,19 +615,170 @@ pub(crate) fn resolve_effective_surface_id(
     }
 }
 
+/// Backward-compatible resolution for existing-surface mutations (no in-flight creations).
+pub(crate) fn resolve_effective_surface_id(
+    db: &Database,
+    op: &AppOperation,
+) -> Result<Option<String>, String> {
+    resolve_mutation_target_surface_id(db, op, &[])
+}
+
+/// Resolve and validate the target surface identity being established by a creation operation.
+///
+/// Rules:
+/// - Validates toolId/surfaceId agreement (e.g. `surf-{toolId}` matches tool ID).
+/// - Fails closed on duplicate or conflicting creation identity in the same transaction.
+/// - Fails closed if the surface ID or tool ID already exists in SQLite (cannot overwrite/retarget).
+/// - Enforces cross-conversation and cross-project isolation against transaction bounds.
+pub(crate) fn resolve_creation_target_surface_id(
+    db: &Database,
+    op: &AppOperation,
+    created_in_txn: &[TransactionCreatedSurface],
+    txn: &AppTransactionRecord,
+) -> Result<String, String> {
+    let surface_ids = claimed_surface_ids(op);
+    let tool_id = claimed_tool_id(op)?;
+    let conversation_hint = op
+        .target
+        .conversation_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    if surface_ids.len() > 1 {
+        return Err(format!(
+            "operation '{}' claims disagreeing surfaceIds: {:?}",
+            op.id, surface_ids
+        ));
+    }
+
+    let payload_tool_id = op
+        .payload
+        .get("tool")
+        .and_then(|t| t.get("id"))
+        .and_then(|id| id.as_str())
+        .or_else(|| op.payload.get("id").and_then(|id| id.as_str()))
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let effective_tool_id = match (tool_id.as_deref(), payload_tool_id) {
+        (Some(a), Some(b)) if a != b => {
+            return Err(format!(
+                "operation '{}': target toolId '{a}' disagrees with payload tool '{b}'",
+                op.id
+            ));
+        }
+        (Some(id), _) | (None, Some(id)) => Some(id.to_string()),
+        (None, None) => None,
+    };
+
+    if let Some(ref tid) = effective_tool_id {
+        crate::security::assert_not_protected(tid)?;
+    }
+
+    let target_sid = match (surface_ids.as_slice(), effective_tool_id.as_deref()) {
+        ([sid], Some(tid)) => {
+            let canonical = super::surfaces::surface_id_for_tool(tid);
+            // Tool-canvas creates/replaces always upsert at surf-{toolId}. Claims must match
+            // or validation and upsert diverge. Inline creates may use preferred non-surf ids.
+            if matches!(op.op_type.as_str(), "surface.create" | "tool.full_replace") {
+                if sid != &canonical {
+                    return Err(format!(
+                        "surface/tool disagree: surfaceId '{sid}' does not match tool '{tid}' (expected '{canonical}')"
+                    ));
+                }
+            } else if sid.starts_with("surf-") && sid != &canonical {
+                return Err(format!(
+                    "surface/tool disagree: synthetic surfaceId '{sid}' does not match tool '{tid}'"
+                ));
+            }
+            sid.clone()
+        }
+        ([sid], None) => sid.clone(),
+        // Creation may mint the canonical id; mutation authority never synthesizes surf-*.
+        ([], Some(tid)) => super::surfaces::surface_id_for_tool(tid),
+        ([], None) => op
+            .target
+            .surface_id
+            .clone()
+            .unwrap_or_else(|| format!("s-{}", Uuid::new_v4())),
+        _ => unreachable!(),
+    };
+
+    crate::security::assert_not_protected(&target_sid)?;
+
+    // 1. Duplicate / conflicting creation check in current transaction
+    if created_in_txn.iter().any(|c| c.surface_id == target_sid) {
+        return Err(format!(
+            "conflicting creation identity: surface '{target_sid}' already created in this transaction"
+        ));
+    }
+    if let Some(ref tid) = effective_tool_id {
+        if created_in_txn
+            .iter()
+            .any(|c| c.tool_id.as_deref() == Some(tid.as_str()))
+        {
+            return Err(format!(
+                "conflicting creation identity: tool '{tid}' already created in this transaction"
+            ));
+        }
+    }
+
+    // 2. Cannot target an existing surface in SQLite (refuse to overwrite or retarget)
+    if let Ok(existing) = get_surface(db, &target_sid) {
+        return Err(format!(
+            "cannot create surface '{target_sid}': surface already exists in SQLite (tool: {:?}); mutation requires authoritative SQLite lineage",
+            existing.tool_id
+        ));
+    }
+    if let Some(ref tid) = effective_tool_id {
+        let existing_surfaces = bound_surfaces_for_tool(db, tid, conversation_hint)?;
+        if !existing_surfaces.is_empty() {
+            return Err(format!(
+                "cannot create surface for tool '{tid}': tool is already bound to surface(s) {:?} in SQLite",
+                existing_surfaces
+            ));
+        }
+    }
+
+    // 3. Cross-conversation and cross-project check
+    if let (Some(txn_chat), Some(op_chat)) = (
+        txn.conversation_id.as_deref(),
+        op.target.conversation_id.as_deref(),
+    ) {
+        if !txn_chat.is_empty() && !op_chat.is_empty() && txn_chat != op_chat {
+            return Err(format!(
+                "cross-chat violation: creation operation '{}' targeting conversation '{}' does not match transaction conversation '{}'",
+                op.id, op_chat, txn_chat
+            ));
+        }
+    }
+    if let (Some(txn_proj), Some(op_proj)) =
+        (txn.project_id.as_deref(), op.target.project_id.as_deref())
+    {
+        if !txn_proj.is_empty() && !op_proj.is_empty() && txn_proj != op_proj {
+            return Err(format!(
+                "cross-project violation: creation operation '{}' targeting project '{}' does not match transaction project '{}'",
+                op.id, op_proj, txn_proj
+            ));
+        }
+    }
+
+    Ok(target_sid)
+}
+
 fn apply_one(
     db: &mut Database,
     op: &AppOperation,
     txn: &AppTransactionRecord,
     initial_revisions: &std::collections::HashMap<String, i64>,
+    created_in_txn: &mut Vec<TransactionCreatedSurface>,
     deferred: &mut Vec<super::outbox::DeferredBusEffect>,
 ) -> Result<Option<SurfaceRecord>, String> {
     // Audience routing enforcement
     if let Some(aud) = &op.audience {
         match aud {
             Audience::FutureParticipants => {
-                // Operations intended for future participants or template instantiation
-                // are preserved in transaction history without mutating live session surfaces.
                 return Ok(None);
             }
             Audience::CurrentSurface => {
@@ -588,64 +818,97 @@ fn apply_one(
         }
     }
 
-    // Cross-project and cross-chat isolation enforcement on surface/tool targets
-    let effective_surface_id = resolve_effective_surface_id(db, op)?;
-    if let Some(sid) = effective_surface_id.as_deref() {
-        if let Ok(target_surface) = get_surface(db, sid) {
-            if let (Some(txn_proj), Some(surf_proj)) = (
-                txn.project_id.as_deref(),
-                target_surface.project_id.as_deref(),
-            ) {
-                if !txn_proj.is_empty() && !surf_proj.is_empty() && txn_proj != surf_proj {
-                    return Err(format!(
-                        "cross-project violation: transaction in project '{}' cannot mutate surface '{}' belonging to project '{}'",
-                        txn_proj, sid, surf_proj
-                    ));
-                }
+    let is_create = matches!(
+        op.op_type.as_str(),
+        "surface.create" | "chat.inline_surface_create"
+    );
+
+    let effective_surface_id = if is_create {
+        if op.op_type == "surface.create" {
+            Some(resolve_creation_target_surface_id(
+                db,
+                op,
+                created_in_txn,
+                txn,
+            )?)
+        } else {
+            // chat.inline_surface_create: run creation authority for any surface/tool
+            // claim (target or payload). Unclaimed creates still mint a fresh id.
+            let has_surface_claim = !claimed_surface_ids(op).is_empty();
+            let has_tool_claim = claimed_tool_id(op)?.is_some();
+            if has_surface_claim || has_tool_claim {
+                Some(resolve_creation_target_surface_id(
+                    db,
+                    op,
+                    created_in_txn,
+                    txn,
+                )?)
+            } else {
+                None
             }
-            if let (Some(op_proj), Some(surf_proj)) = (
-                op.target.project_id.as_deref(),
-                target_surface.project_id.as_deref(),
-            ) {
-                if !op_proj.is_empty() && !surf_proj.is_empty() && op_proj != surf_proj {
-                    return Err(format!(
-                        "cross-project violation: operation '{}' targeting project '{}' cannot mutate surface '{}' belonging to project '{}'",
-                        op.id, op_proj, sid, surf_proj
-                    ));
+        }
+    } else {
+        resolve_mutation_target_surface_id(db, op, created_in_txn)?
+    };
+
+    if !is_create {
+        if let Some(sid) = effective_surface_id.as_deref() {
+            if let Ok(target_surface) = get_surface(db, sid) {
+                if let (Some(txn_proj), Some(surf_proj)) = (
+                    txn.project_id.as_deref(),
+                    target_surface.project_id.as_deref(),
+                ) {
+                    if !txn_proj.is_empty() && !surf_proj.is_empty() && txn_proj != surf_proj {
+                        return Err(format!(
+                            "cross-project violation: transaction in project '{}' cannot mutate surface '{}' belonging to project '{}'",
+                            txn_proj, sid, surf_proj
+                        ));
+                    }
                 }
-            }
-            if let (Some(txn_chat), Some(surf_chat)) = (
-                txn.conversation_id.as_deref(),
-                target_surface.conversation_id.as_deref(),
-            ) {
-                if !txn_chat.is_empty() && !surf_chat.is_empty() && txn_chat != surf_chat {
-                    return Err(format!(
-                        "cross-chat violation: operation '{}' in conversation '{}' cannot mutate surface '{}' belonging to conversation '{}'",
-                        op.id, txn_chat, sid, surf_chat
-                    ));
+                if let (Some(op_proj), Some(surf_proj)) = (
+                    op.target.project_id.as_deref(),
+                    target_surface.project_id.as_deref(),
+                ) {
+                    if !op_proj.is_empty() && !surf_proj.is_empty() && op_proj != surf_proj {
+                        return Err(format!(
+                            "cross-project violation: operation '{}' targeting project '{}' cannot mutate surface '{}' belonging to project '{}'",
+                            op.id, op_proj, sid, surf_proj
+                        ));
+                    }
                 }
-            }
-            if let (Some(op_chat), Some(surf_chat)) = (
-                op.target.conversation_id.as_deref(),
-                target_surface.conversation_id.as_deref(),
-            ) {
-                if !op_chat.is_empty() && !surf_chat.is_empty() && op_chat != surf_chat {
-                    return Err(format!(
-                        "cross-chat violation: operation '{}' targeting conversation '{}' cannot mutate surface '{}' belonging to conversation '{}'",
-                        op.id, op_chat, sid, surf_chat
-                    ));
+                if let (Some(txn_chat), Some(surf_chat)) = (
+                    txn.conversation_id.as_deref(),
+                    target_surface.conversation_id.as_deref(),
+                ) {
+                    if !txn_chat.is_empty() && !surf_chat.is_empty() && txn_chat != surf_chat {
+                        return Err(format!(
+                            "cross-chat violation: operation '{}' in conversation '{}' cannot mutate surface '{}' belonging to conversation '{}'",
+                            op.id, txn_chat, sid, surf_chat
+                        ));
+                    }
+                }
+                if let (Some(op_chat), Some(surf_chat)) = (
+                    op.target.conversation_id.as_deref(),
+                    target_surface.conversation_id.as_deref(),
+                ) {
+                    if !op_chat.is_empty() && !surf_chat.is_empty() && op_chat != surf_chat {
+                        return Err(format!(
+                            "cross-chat violation: operation '{}' targeting conversation '{}' cannot mutate surface '{}' belonging to conversation '{}'",
+                            op.id, op_chat, sid, surf_chat
+                        ));
+                    }
                 }
             }
         }
-    }
 
-    // Choke point: suspended/disabled manifest-backed apps cannot mutate via any arm.
-    if let Some(sid) = effective_surface_id.as_deref() {
-        if let Ok(target_surface) = get_surface(db, sid) {
-            crate::application_kernel::manifest::check_tool_application_accepts_mutations(
-                db,
-                target_surface.tool_id.as_deref(),
-            )?;
+        // Choke point: suspended/disabled manifest-backed apps cannot mutate via any arm.
+        if let Some(sid) = effective_surface_id.as_deref() {
+            if let Ok(target_surface) = get_surface(db, sid) {
+                crate::application_kernel::manifest::check_tool_application_accepts_mutations(
+                    db,
+                    target_surface.tool_id.as_deref(),
+                )?;
+            }
         }
     }
     if let Some(app) = op
@@ -690,7 +953,8 @@ fn apply_one(
                 })?,
                 None => Vec::new(),
             };
-            let s = create_inline_surface(
+            let preferred_id = effective_surface_id.as_deref();
+            let mut s = super::surfaces::create_inline_surface_with_preferred_id(
                 db,
                 conversation_id,
                 op.target.message_id.as_deref(),
@@ -701,8 +965,37 @@ fn apply_one(
                 name,
                 &definition,
                 &packs,
+                preferred_id,
             )
             .map_err(|e| e.to_string())?;
+            let claimed_tool = op
+                .target
+                .tool_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(|t| t.to_string());
+            if let Some(ref tid) = claimed_tool {
+                // Only bind when a tools row exists (FK). Still record claimed tool in created_in_txn.
+                let tool_row_exists = db
+                    .conn()
+                    .query_row("SELECT 1 FROM tools WHERE id = ?1", [tid.as_str()], |_| {
+                        Ok(())
+                    })
+                    .optional()
+                    .map_err(|e| e.to_string())?
+                    .is_some();
+                if tool_row_exists {
+                    bind_surface_tool_id(db, &s.id, tid).map_err(|e| e.to_string())?;
+                    s = get_surface(db, &s.id).map_err(|e| e.to_string())?;
+                }
+            }
+            created_in_txn.push(TransactionCreatedSurface {
+                surface_id: s.id.clone(),
+                tool_id: s.tool_id.clone().or(claimed_tool),
+                conversation_id: s.conversation_id.clone(),
+                project_id: s.project_id.clone(),
+            });
             // Surface row now exists — promote patches that were waiting on this target.
             let _ = super::patch_scheduler::promote_deferred_patches(db, Some(&s.id), None);
             Ok(Some(s))
@@ -716,7 +1009,7 @@ fn apply_one(
         | "component.update_children"
         | "component.update_visibility"
         | "component.update_actions" => {
-            let effective_sid = resolve_effective_surface_id(db, op)?
+            let effective_sid = resolve_mutation_target_surface_id(db, op, created_in_txn)?
                 .ok_or_else(|| "surfaceId or toolId required".to_string())?;
             let sid = &effective_sid;
             let surface = get_surface(db, sid).map_err(|e| e.to_string())?;
@@ -844,7 +1137,7 @@ fn apply_one(
         | "component.bind_state"
         | "component.bind_action"
         | "component.set_style_token" => {
-            let effective_sid = resolve_effective_surface_id(db, op)?
+            let effective_sid = resolve_mutation_target_surface_id(db, op, created_in_txn)?
                 .ok_or_else(|| "surfaceId or toolId required".to_string())?;
             let sid = &effective_sid;
             let surface = get_surface(db, sid).map_err(|e| e.to_string())?;
@@ -1035,25 +1328,47 @@ fn apply_one(
             crate::security::assert_not_protected(&tool.id)?;
             super::packs::validate_tool_components(&tool.components)?;
             // Existing surface for replace checks comes from SQLite lineage only.
-            // Creation may still mint surf-{toolId} inside upsert_surface_from_tool.
-            if let Some(existing_sid) = resolve_effective_surface_id(db, op)? {
-                let existing = get_surface(db, &existing_sid).map_err(|e| e.to_string())?;
-                if let (Some(txn_proj), Some(surf_proj)) =
-                    (txn.project_id.as_deref(), existing.project_id.as_deref())
-                {
-                    if !txn_proj.is_empty() && !surf_proj.is_empty() && txn_proj != surf_proj {
-                        return Err(format!(
-                            "cross-project violation: transaction in project '{}' cannot replace tool surface '{}' belonging to project '{}'",
-                            txn_proj, existing.id, surf_proj
-                        ));
+            // Creation establishes a new identity via resolve_creation_target_surface_id.
+            let mut full_replace_establishes_new = false;
+            let mut expected_creation_sid: Option<String> = None;
+            if op.op_type == "tool.full_replace" {
+                match resolve_mutation_target_surface_id(db, op, created_in_txn)? {
+                    Some(existing_sid) => {
+                        let existing = get_surface(db, &existing_sid).map_err(|e| e.to_string())?;
+                        if let (Some(txn_proj), Some(surf_proj)) =
+                            (txn.project_id.as_deref(), existing.project_id.as_deref())
+                        {
+                            if !txn_proj.is_empty()
+                                && !surf_proj.is_empty()
+                                && txn_proj != surf_proj
+                            {
+                                return Err(format!(
+                                    "cross-project violation: transaction in project '{}' cannot replace tool surface '{}' belonging to project '{}'",
+                                    txn_proj, existing.id, surf_proj
+                                ));
+                            }
+                        }
+                        let allowed = if existing.capability_packs.is_empty() {
+                            super::packs::required_packs_for_definition(&existing.definition)?
+                        } else {
+                            super::packs::normalize_capability_packs(&existing.capability_packs)?
+                        };
+                        validate_tool_components_for_packs(&tool.components, &allowed)?;
+                    }
+                    None => {
+                        // Establishing a new identity via full_replace must pass the
+                        // same creation authority gates as surface.create.
+                        expected_creation_sid = Some(resolve_creation_target_surface_id(
+                            db,
+                            op,
+                            created_in_txn,
+                            txn,
+                        )?);
+                        full_replace_establishes_new = true;
                     }
                 }
-                let allowed = if existing.capability_packs.is_empty() {
-                    super::packs::required_packs_for_definition(&existing.definition)?
-                } else {
-                    super::packs::normalize_capability_packs(&existing.capability_packs)?
-                };
-                validate_tool_components_for_packs(&tool.components, &allowed)?;
+            } else if op.op_type == "surface.create" {
+                expected_creation_sid = effective_surface_id.clone();
             }
             let workspace = "ws-personal-default";
             let action = op.payload.get("action").and_then(|v| v.as_str()).unwrap_or(
@@ -1085,6 +1400,27 @@ fn apply_one(
                 applied.current_version,
             )
             .map_err(|e| e.to_string())?;
+            if let Some(expected) = expected_creation_sid.as_deref() {
+                if s.id != expected {
+                    return Err(format!(
+                        "creation identity mismatch: resolved '{expected}' but upsert produced '{}'",
+                        s.id
+                    ));
+                }
+            }
+            if op.op_type == "surface.create" || full_replace_establishes_new {
+                // Tool-canvas upserts omit conversation/project columns; inherit txn
+                // bounds so same-txn toolId resolution cannot ignore chat/project hints.
+                created_in_txn.push(TransactionCreatedSurface {
+                    surface_id: s.id.clone(),
+                    tool_id: s.tool_id.clone(),
+                    conversation_id: s
+                        .conversation_id
+                        .clone()
+                        .or_else(|| txn.conversation_id.clone()),
+                    project_id: s.project_id.clone().or_else(|| txn.project_id.clone()),
+                });
+            }
             Ok(Some(s))
         }
         "surface.promote" => {
@@ -1150,14 +1486,14 @@ fn apply_one(
             Ok(Some(s))
         }
         "surface.restore" => {
-            let effective_sid = resolve_effective_surface_id(db, op)?
+            let effective_sid = resolve_mutation_target_surface_id(db, op, created_in_txn)?
                 .ok_or_else(|| "surfaceId or toolId required".to_string())?;
             let sid = &effective_sid;
             let s = restore_surface(db, sid).map_err(|e| e.to_string())?;
             Ok(Some(s))
         }
         "state.set" | "state.patch" => {
-            let effective_sid = resolve_effective_surface_id(db, op)?
+            let effective_sid = resolve_mutation_target_surface_id(db, op, created_in_txn)?
                 .ok_or_else(|| "surfaceId or toolId required".to_string())?;
             let sid = &effective_sid;
             let surface = get_surface(db, sid).map_err(|e| e.to_string())?;
@@ -1399,26 +1735,27 @@ fn apply_one(
         }
         "chat.status" | "chat.notification" => Ok(None),
         "subscription.create" => {
-            let owner = op
-                .target
-                .surface_id
-                .as_deref()
-                .or_else(|| op.payload.get("ownerSurfaceId").and_then(|v| v.as_str()))
-                .unwrap_or("");
-            if owner.is_empty() {
-                return Err("surfaceId required for subscription".to_string());
-            }
-            // Authorize subscription ownership against conversation/project
-            let surf = super::surfaces::get_surface(db, owner).map_err(|e| e.to_string())?;
+            // ownerSurfaceId is folded into claimed_surface_ids — no raw payload bypass.
+            let owner = resolve_mutation_target_surface_id(db, op, created_in_txn)?
+                .ok_or_else(|| "surfaceId required for subscription".to_string())?;
+            // Authorize against SQLite row or same-txn creation identity.
+            let (surf_conv, surf_proj) = if let Some(created) =
+                created_in_txn.iter().find(|c| c.surface_id == owner)
+            {
+                (created.conversation_id.clone(), created.project_id.clone())
+            } else {
+                let surf = super::surfaces::get_surface(db, &owner).map_err(|e| e.to_string())?;
+                (surf.conversation_id.clone(), surf.project_id.clone())
+            };
             if let Some(txn_conv) = txn.conversation_id.as_deref() {
-                if surf.conversation_id.as_deref() != Some(txn_conv) {
+                if surf_conv.as_deref() != Some(txn_conv) {
                     return Err(format!(
                         "subscription surface '{owner}' does not belong to conversation '{txn_conv}'"
                     ));
                 }
             }
             if let Some(txn_proj) = txn.project_id.as_deref() {
-                if surf.project_id.as_deref() != Some(txn_proj) {
+                if surf_proj.as_deref() != Some(txn_proj) {
                     return Err(format!(
                         "subscription surface '{owner}' does not belong to project '{txn_proj}'"
                     ));
@@ -1454,7 +1791,7 @@ fn apply_one(
             };
             let sub = super::events::Subscription {
                 id: sub_id.clone(),
-                owner_surface_id: owner.into(),
+                owner_surface_id: owner.clone(),
                 event_types: event_types.clone(),
                 source_filter: source_filter.clone(),
                 target: target.clone(),
@@ -1626,7 +1963,7 @@ fn apply_one(
             Ok(None)
         }
         "interactive.action" => {
-            let sid = resolve_effective_surface_id(db, op)?
+            let sid = resolve_mutation_target_surface_id(db, op, created_in_txn)?
                 .ok_or_else(|| "interactive.action requires surfaceId".to_string())?;
             let action_id = op
                 .payload
@@ -1730,7 +2067,7 @@ fn apply_one(
                 return Err("cannot navigate to protected routes via generated apps".into());
             }
             // Renderer-scoped: store intended route on surface state when a surface is targeted.
-            if let Some(sid) = resolve_effective_surface_id(db, op)? {
+            if let Some(sid) = resolve_mutation_target_surface_id(db, op, created_in_txn)? {
                 let (mut state, rev) = super::surfaces::get_surface_state_with_revision(db, &sid)
                     .map_err(|e| e.to_string())?;
                 if let Some(obj) = state.as_object_mut() {
@@ -1800,7 +2137,7 @@ pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<App
 
     // Pre-flight OCC check: verify resources haven't been mutated since this transaction
     for (sid, snap) in &map {
-        if sid == "created_surfaces" {
+        if sid == "created_surfaces" || sid == "created_surface_revisions" {
             continue;
         }
         if let Ok(current_s) = get_surface(db, sid) {
@@ -1810,6 +2147,23 @@ pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<App
                         "cannot undo transaction: surface '{sid}' was modified after transaction (expected revision {expected_rev}, current {})",
                         current_s.current_revision
                     )));
+                }
+            }
+        }
+    }
+    if let Some(created_revs) = map
+        .get("created_surface_revisions")
+        .and_then(|v| v.as_object())
+    {
+        for (sid, expected_val) in created_revs {
+            if let Some(expected_rev) = expected_val.as_i64() {
+                if let Ok(current_s) = get_surface(db, sid) {
+                    if current_s.current_revision != expected_rev {
+                        return Err(DbError::Conflict(format!(
+                            "cannot undo transaction: created surface '{sid}' was modified after transaction (expected revision {expected_rev}, current {})",
+                            current_s.current_revision
+                        )));
+                    }
                 }
             }
         }
@@ -1824,6 +2178,14 @@ pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<App
         if let Some(created) = map.get("created_surfaces").and_then(|v| v.as_array()) {
             for cid_val in created {
                 if let Some(cid) = cid_val.as_str() {
+                    if let Ok(s) = get_surface(db, cid) {
+                        if let Some(tid) = s.tool_id.as_deref() {
+                            let _ = db.conn().execute(
+                                "DELETE FROM application_manifests WHERE application_id = ?1",
+                                [tid],
+                            );
+                        }
+                    }
                     delete_surface(
                         db,
                         cid,
@@ -1837,7 +2199,7 @@ pub fn undo_transaction(db: &mut Database, transaction_id: &str) -> DbResult<App
 
         // 2. Restore modified surfaces
         for (sid, snap) in &map {
-            if sid == "created_surfaces" {
+            if sid == "created_surfaces" || sid == "created_surface_revisions" {
                 continue;
             }
             let restored_state = match snap.get("state") {
@@ -5281,5 +5643,1004 @@ mod tests {
             Some(&json!("Replaced")),
             "replace must land on the DB-bound surface"
         );
+    }
+
+    fn create_surface_op(
+        tool_id: &str,
+        name: &str,
+        components: Vec<ToolComponent>,
+    ) -> AppOperation {
+        let def = ToolDefinition {
+            id: tool_id.into(),
+            name: name.into(),
+            description: String::new(),
+            layout: json!({"type": "single-column"}),
+            components,
+            ..Default::default()
+        };
+        let mut o = op(
+            "surface.create",
+            Some(&crate::runtime_v2::surfaces::surface_id_for_tool(tool_id)),
+            json!({
+                "action": "create",
+                "tool": def,
+                "changeSummary": "create surface"
+            }),
+        );
+        o.target.tool_id = Some(tool_id.into());
+        o
+    }
+
+    #[test]
+    fn hostile_1_create_surface_then_update_same_surface_in_same_transaction() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H1", None).unwrap();
+        let c1 = ToolComponent {
+            id: "heading-1".into(),
+            component_type: "heading".into(),
+            props: Some(json!({"text": "Initial Text"})),
+            ..Default::default()
+        };
+        let op1 = create_surface_op("h1-tool", "H1 App", vec![c1]);
+        let mut op2 = op(
+            "component.update_props",
+            Some("surf-h1-tool"),
+            json!({
+                "props": {"text": "Updated Same Txn"}
+            }),
+        );
+        op2.target.tool_id = Some("h1-tool".into());
+        op2.target.component_id = Some("heading-1".into());
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h1-create-then-update",
+            &[op1, op2],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
+
+        let surf = get_surface(&db, "surf-h1-tool").unwrap();
+        let doc = crate::runtime_v2::SoftwareDocument::from_value(&surf.definition).unwrap();
+        assert_eq!(
+            doc.find_component("heading-1")
+                .and_then(|c| c.props.as_ref())
+                .and_then(|p| p.get("text")),
+            Some(&json!("Updated Same Txn"))
+        );
+    }
+
+    #[test]
+    fn hostile_2_create_surface_then_data_model_and_record() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H2", None).unwrap();
+        let write_btn = ToolComponent {
+            id: "add-contact-btn".into(),
+            component_type: "button".into(),
+            props: Some(json!({"label": "Add Contact"})),
+            actions: Some(vec![crate::ai::ActionDefinition::InvokeRegisteredAction {
+                action_name: "local_data.write".into(),
+                input: Some(json!({"modelId": "contacts", "data": {}})),
+                input_from_state: None,
+                component_id: None,
+                result_key: None,
+            }]),
+            ..Default::default()
+        };
+        let op1 = create_surface_op("crm-tool", "CRM App", vec![write_btn]);
+        let op2 = AppOperation {
+            id: format!("op-{}", Uuid::new_v4()),
+            op_type: "data.model_upsert".into(),
+            target: OperationTarget {
+                application_id: Some("crm-tool".into()),
+                model_id: Some("contacts".into()),
+                surface_id: Some("surf-crm-tool".into()),
+                tool_id: Some("crm-tool".into()),
+                ..Default::default()
+            },
+            payload: json!({
+                "applicationId": "crm-tool",
+                "model": {
+                    "modelId": "contacts",
+                    "displayName": "Contacts",
+                    "schemaVersion": 1,
+                    "fields": [
+                        {"fieldId": "name", "fieldType": "text", "required": true}
+                    ]
+                }
+            }),
+            ..Default::default()
+        };
+        let op3 = AppOperation {
+            id: format!("op-{}", Uuid::new_v4()),
+            op_type: "data.record_create".into(),
+            target: OperationTarget {
+                application_id: Some("crm-tool".into()),
+                model_id: Some("contacts".into()),
+                surface_id: Some("surf-crm-tool".into()),
+                tool_id: Some("crm-tool".into()),
+                ..Default::default()
+            },
+            payload: json!({
+                "applicationId": "crm-tool",
+                "modelId": "contacts",
+                "data": {
+                    "name": "Alice"
+                }
+            }),
+            ..Default::default()
+        };
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h2-create-model-record",
+            &[op1, op2, op3],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
+
+        let records =
+            crate::application_kernel::data::query_records(&db, "crm-tool", "contacts", 10)
+                .unwrap();
+        assert!(records
+            .iter()
+            .any(|r| r.get("name") == Some(&json!("Alice"))));
+    }
+
+    #[test]
+    fn hostile_3_create_surface_then_component_update() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H3", None).unwrap();
+        let c = ToolComponent {
+            id: "comp-title".into(),
+            component_type: "heading".into(),
+            props: Some(json!({"text": "Version 1"})),
+            ..Default::default()
+        };
+        let op1 = create_surface_op("h3-app", "H3 App", vec![c]);
+        let mut op2 = op(
+            "component.replace",
+            Some("surf-h3-app"),
+            json!({
+                "component": {
+                    "id": "comp-title",
+                    "type": "heading",
+                    "props": {"text": "Version 2"}
+                }
+            }),
+        );
+        op2.target.tool_id = Some("h3-app".into());
+        op2.target.component_id = Some("comp-title".into());
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h3-comp-update",
+            &[op1, op2],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
+
+        let surf = get_surface(&db, "surf-h3-app").unwrap();
+        let doc = crate::runtime_v2::SoftwareDocument::from_value(&surf.definition).unwrap();
+        assert_eq!(
+            doc.find_component("comp-title")
+                .and_then(|c| c.props.as_ref())
+                .and_then(|p| p.get("text")),
+            Some(&json!("Version 2"))
+        );
+    }
+
+    #[test]
+    fn hostile_4_create_surface_then_second_op_mismatched_tool_id_fails() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H4", None).unwrap();
+        let op1 = create_surface_op("app-legit", "Legit App", vec![]);
+        let op2 = insert_op(Some("surf-app-legit"), Some("app-fraud"));
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h4-mismatch-tool",
+            &[op1, op2],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "failed");
+        assert!(
+            res.conflicts
+                .iter()
+                .any(|c| c.contains("disagree") || c.contains("mismatch")),
+            "expected mismatch conflict, got: {:?}",
+            res.conflicts
+        );
+        assert!(
+            get_surface(&db, "surf-app-legit").is_err(),
+            "creation must roll back on failure"
+        );
+    }
+
+    #[test]
+    fn hostile_5_create_surface_then_operation_attempting_different_existing_surface_fails() {
+        let mut db = test_db();
+        let conv_mine = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "MyConv", None).unwrap();
+        let conv_victim =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "VictimConv", None).unwrap();
+        let victim_surf = inline_bound_to_tool(
+            &mut db,
+            &conv_victim.id,
+            None,
+            "victim-tool",
+            "Victim Surface",
+        );
+
+        let op1 = create_surface_op("my-tool", "My App", vec![]);
+        let op2 = insert_op(Some(&victim_surf.id), None);
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv_mine.id),
+            None,
+            None,
+            "h5-attack-existing",
+            &[op1, op2],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "failed");
+        assert!(
+            res.conflicts
+                .iter()
+                .any(|c| c.contains("cross-chat violation")),
+            "expected cross-chat violation, got: {:?}",
+            res.conflicts
+        );
+        assert!(
+            get_surface(&db, "surf-my-tool").is_err(),
+            "newly created surface must be rolled back"
+        );
+    }
+
+    #[test]
+    fn hostile_6_create_surface_then_subsequent_failure_rolls_back_surface() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H6", None).unwrap();
+        let op1 = create_surface_op("doomed-tool", "Doomed App", vec![]);
+        let mut op2 = op(
+            "component.update_props",
+            Some("surf-doomed-tool"),
+            json!({
+                "props": {"text": "ghost"}
+            }),
+        );
+        op2.target.tool_id = Some("doomed-tool".into());
+        op2.target.component_id = Some("ghost-component".into());
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h6-rollback",
+            &[op1, op2],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "failed");
+        assert!(
+            get_surface(&db, "surf-doomed-tool").is_err(),
+            "rolled-back surface must not exist in SQLite"
+        );
+    }
+
+    #[test]
+    fn hostile_7_two_create_operations_with_conflicting_identity_fails() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H7", None).unwrap();
+        let op1 = create_surface_op("duplicate-tool", "Dup 1", vec![]);
+        let op2 = create_surface_op("duplicate-tool", "Dup 2", vec![]);
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h7-dup-create",
+            &[op1, op2],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "failed");
+        assert!(
+            res.conflicts
+                .iter()
+                .any(|c| c.contains("conflicting creation identity")),
+            "expected conflicting creation identity conflict, got: {:?}",
+            res.conflicts
+        );
+        assert!(get_surface(&db, "surf-duplicate-tool").is_err());
+    }
+
+    #[test]
+    fn hostile_8_malicious_synthetic_surface_id_targeting_another_existing_surface_fails() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H8", None).unwrap();
+        let (_def, existing) = seed_tool_surface(&mut db, "already-existing-tool");
+        assert_eq!(existing.id, "surf-already-existing-tool");
+
+        let op1 = create_surface_op("already-existing-tool", "Overwrite Attempt", vec![]);
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h8-overwrite-existing",
+            &[op1],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "failed");
+        assert!(
+            res.conflicts
+                .iter()
+                .any(|c| c.contains("already exists in SQLite") || c.contains("already bound")),
+            "expected existing-surface rejection, got: {:?}",
+            res.conflicts
+        );
+    }
+
+    #[test]
+    fn hostile_8b_non_canonical_claimed_surface_id_on_create_fails() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H8b", None).unwrap();
+        let def = ToolDefinition {
+            id: "canon-tool".into(),
+            name: "Canon".into(),
+            description: String::new(),
+            layout: json!({"type": "single-column"}),
+            components: vec![],
+            ..Default::default()
+        };
+        let mut op1 = op(
+            "surface.create",
+            Some("not-the-canonical-id"),
+            json!({
+                "action": "create",
+                "tool": def,
+                "changeSummary": "spoof create"
+            }),
+        );
+        op1.target.tool_id = Some("canon-tool".into());
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h8b-non-canonical",
+            &[op1],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "failed");
+        assert!(
+            res.conflicts
+                .iter()
+                .any(|c| c.contains("does not match tool") || c.contains("expected 'surf-")),
+            "expected non-canonical creation rejection, got: {:?}",
+            res.conflicts
+        );
+        assert!(get_surface(&db, "surf-canon-tool").is_err());
+        assert!(get_surface(&db, "not-the-canonical-id").is_err());
+    }
+
+    #[test]
+    fn hostile_9_ambiguous_existing_tool_binding_fails() {
+        let mut db = test_db();
+        let conv1 = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "ConvA", None).unwrap();
+        let conv2 = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "ConvB", None).unwrap();
+        let _s1 = inline_bound_to_tool(&mut db, &conv1.id, None, "ambig-h9-tool", "Twin A");
+        let _s2 = inline_bound_to_tool(&mut db, &conv2.id, None, "ambig-h9-tool", "Twin B");
+
+        let op_unscoped = insert_op(None, Some("ambig-h9-tool"));
+        let err = resolve_effective_surface_id(&db, &op_unscoped)
+            .expect_err("ambiguous tool bindings without conversation hint must fail closed");
+        assert!(err.contains("ambiguous"), "got {err}");
+    }
+
+    #[test]
+    fn hostile_10_branch_created_surface_isolation() {
+        let mut db = test_db();
+        let conv_src = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "SrcConv", None).unwrap();
+        let msg = insert_message(&mut db, &conv_src.id, "user", "checkpoint", None).unwrap();
+        let (branch, _surfs) = branch_from_message(
+            &mut db,
+            &conv_src.id,
+            &msg.id,
+            "fork-branch",
+            DEFAULT_WORKSPACE_ID,
+        )
+        .unwrap();
+
+        // Create surface inside the branch bound to the branch's conversation
+        let branch_surf = inline_bound_to_tool(
+            &mut db,
+            &branch.new_conversation_id,
+            None,
+            "branch-app",
+            "Branch App",
+        );
+
+        // Attempt to mutate branch-created surface from the source conversation
+        let op_attack = insert_op(Some(&branch_surf.id), None);
+        let txn_attack = create_transaction(
+            &mut db,
+            Some(&conv_src.id),
+            None,
+            None,
+            "attack-branch-surface",
+            &[op_attack],
+            false,
+        )
+        .unwrap();
+        let res_attack = apply_transaction(&mut db, &txn_attack.id).unwrap();
+        assert_eq!(res_attack.transaction.status, "failed");
+        assert!(
+            res_attack
+                .conflicts
+                .iter()
+                .any(|c| c.contains("cross-chat violation")),
+            "expected cross-chat violation, got: {:?}",
+            res_attack.conflicts
+        );
+    }
+
+    #[test]
+    fn hostile_11_cross_conversation_create_and_mutate_fails() {
+        let mut db = test_db();
+        let conv1 = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Conv1", None).unwrap();
+        let conv2 = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Conv2", None).unwrap();
+
+        let mut op_cross = create_surface_op("h11-tool", "H11 App", vec![]);
+        op_cross.target.conversation_id = Some(conv2.id.clone());
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv1.id),
+            None,
+            None,
+            "h11-cross-conv",
+            &[op_cross],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "failed");
+        assert!(
+            res.conflicts
+                .iter()
+                .any(|c| c.contains("cross-chat violation")),
+            "expected cross-chat violation, got: {:?}",
+            res.conflicts
+        );
+        assert!(get_surface(&db, "surf-h11-tool").is_err());
+    }
+
+    #[test]
+    fn hostile_12_cross_project_create_and_mutate_fails() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "ConvProj", None).unwrap();
+
+        let mut op_cross = create_surface_op("h12-tool", "H12 App", vec![]);
+        op_cross.target.project_id = Some("project-foreign".into());
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            Some("project-local"),
+            None,
+            "h12-cross-proj",
+            &[op_cross],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "failed");
+        assert!(
+            res.conflicts
+                .iter()
+                .any(|c| c.contains("cross-project violation")),
+            "expected cross-project violation, got: {:?}",
+            res.conflicts
+        );
+        assert!(get_surface(&db, "surf-h12-tool").is_err());
+    }
+
+    #[test]
+    fn hostile_13_inline_create_then_component_update_same_txn() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H13", None).unwrap();
+        // Stable claimed id (not surf-{{toolId}}) so create + follow-up share created_in_txn identity.
+        let inline_sid = "s-h13-inline-stable";
+        let mut op1 = op(
+            "chat.inline_surface_create",
+            Some(inline_sid),
+            json!({
+                "name": "Inline H13",
+                "definition": {
+                    "id": "doc-h13",
+                    "name": "Inline H13",
+                    "layout": "stack",
+                    "components": [
+                        {"id": "title", "type": "heading", "props": {"text": "Before"}}
+                    ]
+                }
+            }),
+        );
+        op1.target.conversation_id = Some(conv.id.clone());
+
+        let mut op2 = op(
+            "component.update_props",
+            Some(inline_sid),
+            json!({ "props": { "text": "After Same Txn" } }),
+        );
+        op2.target.component_id = Some("title".into());
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h13-inline-create-mutate",
+            &[op1, op2],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
+
+        let surf = get_surface(&db, inline_sid).unwrap();
+        let doc = crate::runtime_v2::SoftwareDocument::from_value(&surf.definition).unwrap();
+        assert_eq!(
+            doc.find_component("title")
+                .and_then(|c| c.props.as_ref())
+                .and_then(|p| p.get("text")),
+            Some(&json!("After Same Txn"))
+        );
+    }
+
+    #[test]
+    fn hostile_13b_inline_create_tool_claim_without_surface_id_rejects_duplicate() {
+        // Creation authority must run even when only toolId is claimed (no target.surfaceId).
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H13b", None).unwrap();
+        let tool_id = "h13b-tool";
+        let def = json!({
+            "id": "doc-h13b",
+            "name": "Inline H13b",
+            "layout": "stack",
+            "components": []
+        });
+        let mut op1 = op(
+            "chat.inline_surface_create",
+            None,
+            json!({ "name": "Inline A", "definition": def }),
+        );
+        op1.target.conversation_id = Some(conv.id.clone());
+        op1.target.tool_id = Some(tool_id.into());
+        let mut op2 = op(
+            "chat.inline_surface_create",
+            None,
+            json!({
+                "name": "Inline B",
+                "definition": {
+                    "id": "doc-h13b-b",
+                    "name": "Inline B",
+                    "layout": "stack",
+                    "components": []
+                }
+            }),
+        );
+        op2.target.conversation_id = Some(conv.id.clone());
+        op2.target.tool_id = Some(tool_id.into());
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h13b-dup-tool-claim",
+            &[op1, op2],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "failed");
+        assert!(
+            res.conflicts
+                .iter()
+                .any(|c| c.contains("conflicting creation identity") || c.contains("already")),
+            "expected duplicate tool creation rejection, got: {:?}",
+            res.conflicts
+        );
+        assert!(
+            get_surface(
+                &db,
+                &crate::runtime_v2::surfaces::surface_id_for_tool(tool_id)
+            )
+            .is_err(),
+            "failed txn must roll back the first inline create"
+        );
+    }
+
+    #[test]
+    fn hostile_14_full_replace_new_surface_then_mutate_same_txn() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H14", None).unwrap();
+        let tool_id = "h14-new-tool";
+        let sid = crate::runtime_v2::surfaces::surface_id_for_tool(tool_id);
+        assert!(get_surface(&db, &sid).is_err());
+
+        let def = ToolDefinition {
+            id: tool_id.into(),
+            name: "H14 New".into(),
+            description: String::new(),
+            layout: json!({"type": "single-column"}),
+            components: vec![ToolComponent {
+                id: "heading-1".into(),
+                component_type: "heading".into(),
+                props: Some(json!({"text": "Created Via Replace"})),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut op1 = op(
+            "tool.full_replace",
+            None,
+            json!({
+                "action": "replace",
+                "tool": def,
+                "changeSummary": "establish new via full_replace"
+            }),
+        );
+        op1.target.tool_id = Some(tool_id.into());
+
+        let mut op2 = op(
+            "component.update_props",
+            Some(&sid),
+            json!({ "props": { "text": "Mutated Same Txn" } }),
+        );
+        op2.target.tool_id = Some(tool_id.into());
+        op2.target.component_id = Some("heading-1".into());
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h14-full-replace-new-mutate",
+            &[op1, op2],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
+
+        let surf = get_surface(&db, &sid).unwrap();
+        let doc = crate::runtime_v2::SoftwareDocument::from_value(&surf.definition).unwrap();
+        assert_eq!(
+            doc.find_component("heading-1")
+                .and_then(|c| c.props.as_ref())
+                .and_then(|p| p.get("text")),
+            Some(&json!("Mutated Same Txn"))
+        );
+    }
+
+    #[test]
+    fn hostile_15_create_then_route_navigate_same_txn() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H15", None).unwrap();
+        let op1 = create_surface_op(
+            "h15-nav-tool",
+            "H15 Nav",
+            vec![ToolComponent {
+                id: "title".into(),
+                component_type: "heading".into(),
+                props: Some(json!({"text": "Nav App"})),
+                ..Default::default()
+            }],
+        );
+        let mut op2 = op(
+            "route.navigate",
+            Some("surf-h15-nav-tool"),
+            json!({ "routeId": "details" }),
+        );
+        op2.target.tool_id = Some("h15-nav-tool".into());
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h15-create-navigate",
+            &[op1, op2],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
+
+        let (state, _) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, "surf-h15-nav-tool")
+                .unwrap();
+        assert_eq!(
+            state.get("activeRoute"),
+            Some(&json!("details")),
+            "route.navigate must land on same-txn created surface"
+        );
+    }
+
+    #[test]
+    fn hostile_16_undo_create_and_mutate_restores_cleanly() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H16", None).unwrap();
+        let c1 = ToolComponent {
+            id: "heading-1".into(),
+            component_type: "heading".into(),
+            props: Some(json!({"text": "Initial"})),
+            ..Default::default()
+        };
+        let op1 = create_surface_op("h16-tool", "H16 App", vec![c1]);
+        let mut op2 = op(
+            "component.update_props",
+            Some("surf-h16-tool"),
+            json!({ "props": { "text": "Mutated" } }),
+        );
+        op2.target.tool_id = Some("h16-tool".into());
+        op2.target.component_id = Some("heading-1".into());
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h16-create-mutate-undo",
+            &[op1, op2],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
+        assert!(get_surface(&db, "surf-h16-tool").is_ok());
+        assert!(get_tool(&db, "h16-tool").is_ok());
+
+        let undone = undo_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(undone.status, "reverted");
+        assert!(
+            get_surface(&db, "surf-h16-tool").is_err(),
+            "undo must delete the created+mutated surface"
+        );
+        assert!(
+            get_tool(&db, "h16-tool").is_err(),
+            "undo must delete the linked tool created by the transaction"
+        );
+    }
+
+    #[test]
+    fn hostile_17_malicious_owner_surface_id_rejected_after_create() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H17", None).unwrap();
+        let (_def, victim) = seed_tool_surface(&mut db, "h17-victim-tool");
+        assert_eq!(victim.id, "surf-h17-victim-tool");
+
+        // Claim newly created legit surface but disagreeing ownerSurfaceId of another tool.
+        let op1 = create_surface_op("h17-legit-tool", "Legit", vec![]);
+        let mut op_disagree = op(
+            "subscription.create",
+            Some("surf-h17-legit-tool"),
+            json!({
+                "ownerSurfaceId": victim.id,
+                "eventTypes": ["tick"],
+                "sourceFilter": {},
+                "target": {}
+            }),
+        );
+        op_disagree.target.tool_id = Some("h17-legit-tool".into());
+
+        let txn_b = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h17-disagree-owner",
+            &[op1, op_disagree],
+            false,
+        )
+        .unwrap();
+        let res_b = apply_transaction(&mut db, &txn_b.id).unwrap();
+        assert_eq!(res_b.transaction.status, "failed");
+        assert!(
+            res_b.conflicts.iter().any(|c| c.contains("disagree")),
+            "expected surfaceId/ownerSurfaceId disagreement, got: {:?}",
+            res_b.conflicts
+        );
+        assert!(
+            get_surface(&db, "surf-h17-legit-tool").is_err(),
+            "failed txn must roll back created surface"
+        );
+
+        // Synthetic surf-* for a never-created tool must still fail after creating a different tool.
+        let op1c = create_surface_op("h17-legit-tool", "Legit", vec![]);
+        let mut op_synth = op(
+            "component.insert",
+            Some("surf-h17-never-created"),
+            json!({
+                "component": {"id": "hostile-c", "type": "text", "props": {"text": "x"}}
+            }),
+        );
+        op_synth.target.tool_id = Some("h17-legit-tool".into());
+
+        let txn_c = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h17-synthetic-surf",
+            &[op1c, op_synth],
+            false,
+        )
+        .unwrap();
+        let res_c = apply_transaction(&mut db, &txn_c.id).unwrap();
+        assert_eq!(res_c.transaction.status, "failed");
+        assert!(
+            res_c.conflicts.iter().any(|c| {
+                c.contains("does not exist")
+                    || c.contains("disagree")
+                    || c.contains("not found")
+                    || c.contains("surface/tool")
+            }),
+            "expected synthetic surf-* rejection after create, got: {:?}",
+            res_c.conflicts
+        );
+        assert!(get_surface(&db, "surf-h17-legit-tool").is_err());
+
+        // Mutating the victim surface id while claiming the newly created tool must fail.
+        let op1d = create_surface_op("h17-legit-tool", "Legit", vec![]);
+        let op_hijack = insert_op(Some(&victim.id), Some("h17-legit-tool"));
+        let txn_d = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h17-hijack-victim",
+            &[op1d, op_hijack],
+            false,
+        )
+        .unwrap();
+        let res_d = apply_transaction(&mut db, &txn_d.id).unwrap();
+        assert_eq!(res_d.transaction.status, "failed");
+        assert!(
+            res_d
+                .conflicts
+                .iter()
+                .any(|c| c.contains("disagree") || c.contains("surface/tool")),
+            "expected victim surface + new tool disagreement, got: {:?}",
+            res_d.conflicts
+        );
+        assert!(get_surface(&db, "surf-h17-legit-tool").is_err());
+        // Victim must remain untouched.
+        let victim_after = get_surface(&db, &victim.id).unwrap();
+        assert_eq!(victim_after.tool_id.as_deref(), Some("h17-victim-tool"));
+    }
+
+    #[test]
+    fn hostile_18_undo_full_replace_new_create_and_mutate() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H18", None).unwrap();
+        let tool_id = "h18-fr-tool";
+        let sid = crate::runtime_v2::surfaces::surface_id_for_tool(tool_id);
+        let def = ToolDefinition {
+            id: tool_id.into(),
+            name: "H18".into(),
+            description: String::new(),
+            layout: json!({"type": "single-column"}),
+            components: vec![ToolComponent {
+                id: "t".into(),
+                component_type: "heading".into(),
+                props: Some(json!({"text": "A"})),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut op1 = op(
+            "tool.full_replace",
+            None,
+            json!({
+                "action": "replace",
+                "tool": def,
+                "changeSummary": "new via full_replace"
+            }),
+        );
+        op1.target.tool_id = Some(tool_id.into());
+        let mut op2 = op(
+            "component.update_props",
+            Some(&sid),
+            json!({ "props": { "text": "B" } }),
+        );
+        op2.target.tool_id = Some(tool_id.into());
+        op2.target.component_id = Some("t".into());
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h18-fr-undo",
+            &[op1, op2],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
+        undo_transaction(&mut db, &txn.id).unwrap();
+        assert!(
+            get_surface(&db, &sid).is_err(),
+            "undo must remove surface established by tool.full_replace"
+        );
+        assert!(get_tool(&db, tool_id).is_err());
     }
 }

@@ -17,6 +17,7 @@ export function KernelProposalPreview() {
       messageId={pending.messageId}
       conversationId={pending.conversationId}
       status="pending"
+      placement="composer"
     />
   );
 }

@@ -201,10 +201,12 @@ export const config: Options.Testrunner = {
     "reconnect-after-durable-commit": [
       "./specs/25-reconnect-after-durable-commit.spec.ts",
     ],
+    "multi-window-reconnect": ["./specs/26-multi-window-reconnect.spec.ts"],
     "branch-isolation": ["./specs/27-branch-isolation.spec.ts"],
     "structured-form-submission": [
       "./specs/28-structured-form-submission.spec.ts",
     ],
+    "approval-restart": ["./specs/29-approval-restart.spec.ts"],
     "multi-turn-undo": ["./specs/30-multi-turn-undo.spec.ts"],
     "wallpaper-targeted": ["./specs/13-wallpaper-targeted-update.spec.ts"],
     "first-run-welcome": ["./specs/15-first-run-welcome.spec.ts"],

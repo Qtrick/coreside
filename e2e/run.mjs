@@ -116,6 +116,13 @@ const JOURNEYS = [
     coverage: "full",
   },
   {
+    id: 26,
+    name: "multi-window-reconnect",
+    suite: "multi-window-reconnect",
+    coverage: "partial",
+    note: "Secondary mount isolation + main reconnect; not a full two-webview conversation catch-up matrix",
+  },
+  {
     id: 27,
     name: "branch-isolation",
     suite: "branch-isolation",
@@ -126,6 +133,13 @@ const JOURNEYS = [
     name: "structured-form-submission",
     suite: "structured-form-submission",
     coverage: "full",
+  },
+  {
+    id: 29,
+    name: "approval-restart",
+    suite: "approval-restart",
+    coverage: "partial",
+    note: "Settings remount + second-decide reject; full OS process relaunch not exercised in WDIO session",
   },
   {
     id: 30,
@@ -356,10 +370,14 @@ runSuite("habit-tracker-application");
 // Reconnect / catch-up during and after ApplicationPlan evolution.
 runSuite("reconnect-during-evolution");
 runSuite("reconnect-after-durable-commit");
+// Multi-window mount isolation across main reconnect (seeded tool).
+runSuite("multi-window-reconnect", { seed: "existing" });
 // Branch diverge isolation (fork APIs + UI).
 runSuite("branch-isolation");
 // StructuredUserInput form submission via Tic-Tac-Toe submitToAgent.
 runSuite("structured-form-submission");
+// Pending approval survives settings remount; second decide fails.
+runSuite("approval-restart", { seed: "existing" });
 // Multi-turn undo_transaction for create + evolve.
 runSuite("multi-turn-undo");
 

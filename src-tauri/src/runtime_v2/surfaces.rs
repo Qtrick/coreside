@@ -387,6 +387,30 @@ pub fn create_inline_surface(
     definition: &Value,
     packs: &[String],
 ) -> DbResult<SurfaceRecord> {
+    create_inline_surface_with_preferred_id(
+        db,
+        conversation_id,
+        message_id,
+        project_id,
+        name,
+        definition,
+        packs,
+        None,
+    )
+}
+
+/// Same as [`create_inline_surface`], but honors a pre-validated preferred surface id
+/// so same-transaction follow-up ops can target the identity established at create time.
+pub(crate) fn create_inline_surface_with_preferred_id(
+    db: &mut Database,
+    conversation_id: &str,
+    message_id: Option<&str>,
+    project_id: Option<&str>,
+    name: &str,
+    definition: &Value,
+    packs: &[String],
+    preferred_id: Option<&str>,
+) -> DbResult<SurfaceRecord> {
     // Normalize incoming definition to canonical SoftwareDocument
     let mut def_obj = definition.clone();
     if let Some(obj) = def_obj.as_object_mut() {
@@ -439,7 +463,17 @@ pub fn create_inline_surface(
             "surface limit reached: max {MAX_SURFACES_PER_CONVERSATION} per conversation"
         )));
     }
-    let id = format!("surf-{}", Uuid::new_v4());
+    let id = match preferred_id.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(sid) => {
+            if get_surface(db, sid).is_ok() {
+                return Err(DbError::Invalid(format!(
+                    "cannot create surface '{sid}': surface already exists in SQLite"
+                )));
+            }
+            sid.to_string()
+        }
+        None => format!("surf-{}", Uuid::new_v4()),
+    };
     let instance_id = new_instance_id();
     let now = now_rfc3339();
     let packs_json = serde_json::to_string(&effective_packs)?;
