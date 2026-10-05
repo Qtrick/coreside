@@ -997,6 +997,51 @@ pub fn multi_surface_planner_add_priority_plan(base_revision: Option<i64>) -> Ap
     }
 }
 
+/// Journey 32 success plan after intentional validation failure (minimal create).
+pub fn progressive_repair_recovery_success_plan() -> ApplicationPlan {
+    ApplicationPlan {
+        schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+        plan_id: "plan-progressive-repair-success".into(),
+        kind: ApplicationPlanKind::Create,
+        summary: "Create Repair Probe after bounded repair recovery".into(),
+        application_id: Some("tool-repair-probe".into()),
+        base_revision: None,
+        steps: vec![PlanStep {
+            id: "1".into(),
+            description: "Create Repair Probe surface after validation recovery".into(),
+        }],
+        intents: vec![ChangeIntent::CreateSurface {
+            tool: ToolDefinition {
+                id: "tool-repair-probe".into(),
+                name: "Repair Probe".into(),
+                description: "Minimal durable surface proving repair recovery apply".into(),
+                layout: json!({ "type": "single-column" }),
+                components: vec![
+                    ToolComponent {
+                        id: "rp-heading".into(),
+                        component_type: "heading".into(),
+                        props: Some(json!({ "text": "Repair Probe", "level": 1 })),
+                        ..Default::default()
+                    },
+                    ToolComponent {
+                        id: "rp-status".into(),
+                        component_type: "text".into(),
+                        props: Some(json!({
+                            "text": "Repair recovery complete — ready to use.",
+                            "tone": "muted"
+                        })),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            change_summary: Some("Create Repair Probe after repair recovery".into()),
+        }],
+        tests: vec![],
+        diagnostics: Some(json!({ "fixture": "progressive_repair_recovery_success" })),
+    }
+}
+
 /// Study planner fixture: one CreateSurface with Dashboard + Tasks sections until multi-surface plans are supported.
 pub fn multi_surface_planner_create_plan() -> ApplicationPlan {
     ApplicationPlan {
@@ -1174,6 +1219,16 @@ mod tests {
     #[test]
     fn multi_surface_planner_create_plan_compiles() {
         assert_create_plan_compiles(&multi_surface_planner_create_plan());
+    }
+
+    #[test]
+    fn progressive_repair_recovery_success_plan_compiles() {
+        let v = compile_plan(&progressive_repair_recovery_success_plan()).unwrap();
+        assert!(v
+            .compiled
+            .operations
+            .iter()
+            .any(|o| o.op_type == "surface.create"));
     }
 
     #[test]

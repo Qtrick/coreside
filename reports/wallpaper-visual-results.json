@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-10-02T18:36:46.217Z",
-  "commit": "38f08068c6993f4529d8799ac79dd2e7ed7589e0",
+  "generatedAt": "2026-10-04T22:31:28.755Z",
+  "commit": "d8a168ff6a0d52c56e246db5c814728e4e798b29",
   "dirty": true,
   "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
   "platform": "darwin",
@@ -39,17 +39,44 @@
     "width": 2240,
     "height": 1344,
     "sampleCount": 156,
-    "uniqueColors": 2,
-    "lumSpan": 71.30519999999999,
+    "uniqueColors": 5,
+    "lumSpan": 103.5976,
     "samples": [
       {
         "a": 255,
-        "b": 57,
-        "g": 82,
-        "lum": 75.30519999999999,
-        "r": 59,
+        "b": 48,
+        "g": 70,
+        "lum": 63.734399999999994,
+        "r": 48,
+        "x": 1306,
+        "y": 4
+      },
+      {
+        "a": 255,
+        "b": 66,
+        "g": 94,
+        "lum": 86.45079999999999,
+        "r": 68,
+        "x": 2236,
+        "y": 4
+      },
+      {
+        "a": 255,
+        "b": 44,
+        "g": 72,
+        "lum": 63.175200000000004,
+        "r": 40,
+        "x": 4,
+        "y": 564
+      },
+      {
+        "a": 255,
+        "b": 81,
+        "g": 117,
+        "lum": 107.5976,
+        "r": 85,
         "x": 376,
-        "y": 340
+        "y": 1124
       },
       {
         "a": 255,
@@ -107,6 +134,6 @@
       }
     ]
   },
-  "screenshotHash": "fcfdeae8f1892fb0dc310811ca878338efb12cffead691e0f50b002103817360",
+  "screenshotHash": "886ad22628cf50cb89bb0907d81bf773c5b80f016795a40c37ab794522790747",
   "publicBeta": "Not ready"
 }

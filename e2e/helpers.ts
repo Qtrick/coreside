@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { KERNEL_APPLY_SELECTOR } from "../src/lib/kernel-apply-selector.js";
 
 export const E2E_TOOL_ID = "tool-e2e-notes";
 export const E2E_TOOL_NAME = "E2E Notes";
@@ -434,11 +435,9 @@ export async function expectInvokeDenied(
   return outcome;
 }
 
-/** Prefer kernel ApplicationPlan Apply — never the legacy tool-change Apply. */
+/** Latest visible kernel ApplicationPlan Apply (see KERNEL_APPLY_SELECTOR). */
 export async function latestVisibleKernelApplyButton() {
-  const nodes = await $$(
-    '.change-proposal[aria-label="Proposed change"] button.btn-primary',
-  );
+  const nodes = await $$(KERNEL_APPLY_SELECTOR);
   const found = [];
   for (const node of nodes) {
     if ((await node.isExisting()) && (await node.isDisplayed())) {

@@ -23,11 +23,12 @@ impl MockAiProvider {
         Self::fixture_for_with_revision(user_text, None)
     }
 
-    /// Parse the highest `definitionRevision` advertised in authoritative prompt context.
-    fn observed_definition_revision(system_prompt: &str) -> Option<i64> {
+    /// Highest JSON integer for `"field": <digits>` in haystack (mock OCC helpers).
+    fn parse_json_i64_field(haystack: &str, field: &str) -> Option<i64> {
+        let needle = format!("\"{field}\"");
         let mut best: Option<i64> = None;
-        for (idx, _) in system_prompt.match_indices("\"definitionRevision\"") {
-            let rest = &system_prompt[idx..];
+        for (idx, _) in haystack.match_indices(&needle) {
+            let rest = &haystack[idx..];
             let Some(colon) = rest.find(':') else {
                 continue;
             };
@@ -38,6 +39,11 @@ impl MockAiProvider {
             }
         }
         best
+    }
+
+    /// Parse the highest `definitionRevision` advertised in authoritative prompt context.
+    fn observed_definition_revision(system_prompt: &str) -> Option<i64> {
+        Self::parse_json_i64_field(system_prompt, "definitionRevision")
     }
 
     fn fixture_for_with_revision(user_text: &str, observed_revision: Option<i64>) -> String {
@@ -152,7 +158,8 @@ impl MockAiProvider {
             || lower.contains("create")
             || lower.contains("make me")
             || lower.contains("generate")
-            || lower.contains("new task tracker");
+            || lower.contains("new task tracker")
+            || lower.contains("new study planner");
         if (lower.contains("due date") || lower.contains("due dates") || lower.contains("add due"))
             && !create_ish
         {
@@ -164,6 +171,48 @@ impl MockAiProvider {
                 "I updated your Task Tracker to support optional due dates. Existing tasks are preserved; stable component IDs were kept so dirty form state survives.",
                 &plan,
             );
+        }
+
+        // Study Planner priority evolve (Journey 31) — before create keyword match.
+        if (lower.contains("priority") || lower.contains("priorities"))
+            && !create_ish
+            && (lower.contains("study") || lower.contains("planner") || lower.contains("dashboard"))
+        {
+            let rev = observed_revision.unwrap_or(1);
+            let plan = super::plan_fixtures::multi_surface_planner_add_priority_plan(Some(rev));
+            return super::plan_fixtures::plan_response_json(
+                "I updated your Study Planner tasks with an optional priority column. The dashboard section and stable component IDs were preserved.",
+                &plan,
+            );
+        }
+
+        // Journey 32: intentional compile failure, then success after repair keyword.
+        if lower.contains("progressive repair recovery") {
+            if lower.contains("after repair") || lower.contains("ready after repair") {
+                let plan = super::plan_fixtures::progressive_repair_recovery_success_plan();
+                return super::plan_fixtures::plan_response_json(
+                    "Repair succeeded. I created a Repair Probe surface that is ready to apply.",
+                    &plan,
+                );
+            }
+            // Intentionally invalid ApplicationPlan — compile/validate must fail closed.
+            return json!({
+                "schemaVersion": SCHEMA_VERSION,
+                "assistantMessage": "Attempting progressive repair recovery (this draft will fail validation).",
+                "responseType": "message",
+                "applicationPlan": {
+                    "schemaVersion": "1",
+                    "planId": "plan-progressive-repair-fail",
+                    "kind": "create",
+                    "summary": "Broken repair probe (intentional)",
+                    "applicationId": "tool-repair-probe",
+                    "intents": [],
+                    "steps": [],
+                    "tests": [],
+                    "diagnostics": { "fixture": "progressive_repair_recovery_fail" }
+                }
+            })
+            .to_string();
         }
 
         if lower.contains("task manager")
@@ -376,10 +425,71 @@ impl MockAiProvider {
                     Some("game.reset")
                 } else if lower.contains("game.move") || lower.contains("eventname=game.move") {
                     Some("game.move")
+                } else if lower.contains("interactive.ai_turn")
+                    || lower.contains("[interactive.ai_turn.repair]")
+                {
+                    Some("interactive.ai_turn")
                 } else {
                     None
                 }
             });
+
+        // Bounded interactive.ai_turn repair: first proposal is illegal; repair is legal.
+        if event_name == Some("interactive.ai_turn")
+            || lower.contains("[interactive.ai_turn.repair]")
+        {
+            let surface_id = structured
+                .and_then(|s| s.surface_id.as_deref())
+                .unwrap_or("tool-repair-probe");
+            let is_repair = lower.contains("[interactive.ai_turn.repair]");
+            let state_revision = if is_repair {
+                Self::parse_json_i64_field(user_text, "stateRevision").unwrap_or(2)
+            } else {
+                structured
+                    .and_then(|s| s.fields.get("stateRevision"))
+                    .and_then(|v| v.as_i64())
+                    .or_else(|| structured.and_then(|s| s.state_revision))
+                    .unwrap_or(1)
+            };
+            if is_repair {
+                return json!({
+                    "schemaVersion": "2",
+                    "assistantMessage": "Repaired interactive action applied.",
+                    "responseType": "message",
+                    "silent": true,
+                    "operations": [{
+                        "id": "op-interactive-repair-ok",
+                        "type": "interactive.action",
+                        "target": { "surfaceId": surface_id },
+                        "payload": {
+                            "actionId": "move",
+                            "stateRevision": state_revision,
+                            "params": { "index": 0 }
+                        }
+                    }],
+                    "diagnostics": { "fixture": "interactive_ai_turn_repair_success" }
+                })
+                .to_string();
+            }
+            // Intentionally illegal — missing actionId forces probe rejection + repair loop.
+            return json!({
+                "schemaVersion": "2",
+                "assistantMessage": "Proposing an interactive action (will be repaired).",
+                "responseType": "message",
+                "silent": true,
+                "operations": [{
+                    "id": "op-interactive-repair-illegal",
+                    "type": "interactive.action",
+                    "target": { "surfaceId": surface_id },
+                    "payload": {
+                        "stateRevision": state_revision,
+                        "params": { "index": 4 }
+                    }
+                }],
+                "diagnostics": { "fixture": "interactive_ai_turn_illegal" }
+            })
+            .to_string();
+        }
 
         if let Some("game.reset") = event_name {
             let surface_id = structured
@@ -2088,5 +2198,119 @@ mod tests {
             assert_eq!(ops[0]["payload"]["id"], expected_id);
             assert!(ops[0]["payload"]["components"].as_array().unwrap().len() > 0);
         }
+    }
+
+    #[tokio::test]
+    async fn progressive_repair_recovery_fails_then_succeeds() {
+        use crate::application_kernel::application_plan::compile_plan;
+
+        let provider = MockAiProvider::new();
+        let fail = provider
+            .chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Please run progressive repair recovery now",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            })
+            .await
+            .unwrap();
+        let fail_err = parse_agent_response(&fail.raw_text)
+            .expect_err("empty-intents applicationPlan must fail parse/validate");
+        assert!(
+            fail_err.to_lowercase().contains("intent")
+                || fail_err.to_lowercase().contains("empty")
+                || fail_err.to_lowercase().contains("rejected"),
+            "unexpected fail err: {fail_err}"
+        );
+
+        let ok = provider
+            .chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "progressive repair recovery after repair",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            })
+            .await
+            .unwrap();
+        let ok_parsed = parse_agent_response(&ok.raw_text).unwrap();
+        let ok_plan = ok_parsed
+            .payload
+            .application_plan
+            .as_ref()
+            .expect("success fixture must emit applicationPlan");
+        assert!(
+            compile_plan(ok_plan).is_ok(),
+            "repair success plan must compile"
+        );
+    }
+
+    #[tokio::test]
+    async fn interactive_ai_turn_illegal_then_repair_proposes_action_id() {
+        let provider = MockAiProvider::new();
+        let illegal = provider
+            .chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "App interaction (interactive.ai_turn)",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            })
+            .await
+            .unwrap();
+        let illegal_ops = parse_agent_response(&illegal.raw_text)
+            .unwrap()
+            .payload
+            .inspection_operations()
+            .unwrap();
+        assert_eq!(illegal_ops[0].op_type, "interactive.action");
+        assert!(
+            illegal_ops[0]
+                .payload
+                .get("actionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .is_empty(),
+            "first interactive.ai_turn must omit actionId (illegal)"
+        );
+
+        let repaired = provider
+            .chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "[interactive.ai_turn.repair]\nreasonCode: missing_action\nFresh authoritative context (JSON):\n{\"stateRevision\":3}",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            })
+            .await
+            .unwrap();
+        let repair_ops = parse_agent_response(&repaired.raw_text)
+            .unwrap()
+            .payload
+            .inspection_operations()
+            .unwrap();
+        assert_eq!(
+            repair_ops[0]
+                .payload
+                .get("actionId")
+                .and_then(|v| v.as_str()),
+            Some("move")
+        );
+        assert_eq!(
+            repair_ops[0]
+                .payload
+                .get("stateRevision")
+                .and_then(|v| v.as_i64()),
+            Some(3)
+        );
     }
 }

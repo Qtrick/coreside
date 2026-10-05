@@ -105,7 +105,8 @@ img {
   min-height: 0;
   overflow: hidden;
   transition: grid-template-columns 220ms ease;
-  isolation: isolate;
+  /* ponytail: do not isolate — LiveWallpaper is a fixed sibling; isolation would
+     make backdrop-filter sample an empty backdrop root instead of the wallpaper. */
   container-type: inline-size;
   container-name: app-shell;
 }
@@ -267,7 +268,8 @@ body > .window-overlay-root > *,
 
 .app-shell[data-wallpaper] .sidebar {
   background: var(--core-sidebar-overlay);
-  backdrop-filter: blur(var(--core-backdrop-blur, 12px));
+  backdrop-filter: blur(var(--core-backdrop-blur, 0px));
+  -webkit-backdrop-filter: blur(var(--core-backdrop-blur, 0px));
 }
 
 .app-shell[data-wallpaper] .chat-panel,
@@ -277,7 +279,8 @@ body > .window-overlay-root > *,
 .app-shell[data-wallpaper] .project-page,
 .app-shell[data-wallpaper] .projects-list-page {
   background: var(--core-content-overlay);
-  backdrop-filter: blur(var(--core-backdrop-blur, 12px));
+  backdrop-filter: blur(var(--core-backdrop-blur, 0px));
+  -webkit-backdrop-filter: blur(var(--core-backdrop-blur, 0px));
 }
 
 .app-shell.sidebar-collapsed {
@@ -1149,7 +1152,7 @@ body > .window-overlay-root > *,
   padding: 0.28rem 1.65rem 0.28rem 0.65rem;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background-color: var(--surface-muted);
+  background-color: var(--core-control-overlay);
   background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%),
     linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%);
   background-position:
@@ -3949,7 +3952,7 @@ body > .window-overlay-root > *,
   margin-bottom: var(--space-4);
   border: 1px solid var(--core-border);
   border-radius: var(--radius-md);
-  background: var(--core-surface-primary);
+  background: var(--core-card-overlay);
 }
 
 .wallpaper-active-banner-info {
@@ -5745,7 +5748,7 @@ body > .window-overlay-root > *,
   gap: var(--space-2);
   border: 1px solid var(--core-border);
   border-radius: var(--radius-md);
-  background: var(--core-surface-primary);
+  background: var(--core-card-overlay);
   overflow: hidden;
   margin: var(--space-2) 0;
 }
@@ -5765,7 +5768,7 @@ body > .window-overlay-root > *,
   padding: 0.3rem 0.6rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--core-border);
-  background: var(--core-surface-primary);
+  background: var(--core-control-overlay);
   color: var(--core-text-primary);
   min-width: 140px;
   max-width: 260px;

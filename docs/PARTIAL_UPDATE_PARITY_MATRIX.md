@@ -25,9 +25,9 @@ Status legend: **Equivalent** · **Partial** · **Implemented differently** · *
 | Stable IDs | DOM marker paths | surface/component/instance ids | Equivalent (secure) | surfaces.rs + surface_diff.rs | — |
 | Collection incremental update | marker/stream item updates | `data.record_*` + stable record ids | Partial | data.rs preservation tests; transactions.rs hostile_2 (same-txn create surface → data model → record CRUD) | Typed collection.* ops deferred |
 | App instances | `ttt/1`, `ttt/2` | `instance_id` + mounts | Equivalent | surfaces / mount_registry | UX clarity |
-| Progressive rendering | complete-unit HTML stream | NDJSON progressive ops + preview txn | Partial | progressive_ops.rs + e2e seed contracts | Multi-surface progressive durable |
-| Application evolution | full HTML rewrite units | ApplicationPlan → surface_diff granular `component.*` | Implemented differently (secure) | surface_diff.rs + compile_plan_against_db; lineage-resolved ApplicationSpec; fail-closed LineageScope; transaction-local creation (`resolve_creation_target_surface_id` / `resolve_mutation_target_surface_id` + `created_in_txn`); hostile_1–18 same-txn create→mutate/undo; composer owns Apply when sticky (Journey 21 selector) | Live provider evidence |
-| Layout-shift | sized outer container guidance | preservation helpers | Partial | LiveWallpaper is a fixed sibling of `.app-shell` (not a grid child); menu-density Open is always visible; Journey 5 asserts 1024–1440 + wallpaperOutsideShell | Packaged WebKit proof pending push |
+| Progressive rendering | complete-unit HTML stream | NDJSON progressive ops + preview txn | Partial | progressive_ops.rs + Journey 19–20; Journey 31 Study Planner create→evolve durable sections; Journey 32 validate-fail→repair→Apply | True multi-surface atomic progressive durable mid-stream still open |
+| Application evolution | full HTML rewrite units | ApplicationPlan → surface_diff granular `component.*` | Implemented differently (secure) | surface_diff.rs + compile_plan_against_db; lineage-resolved ApplicationSpec; fail-closed LineageScope; transaction-local creation; hostile create→mutate; Journey 21 Apply via `[data-proposal-apply]` (not preview btn-primary) | Live provider evidence |
+| Layout-shift | sized outer container guidance | preservation helpers | Partial | LiveWallpaper fixed sibling of `.app-shell` (Journey 5 wallpaperInsideShell=false); shell no longer `isolation:isolate` so backdrop-filter can sample wallpaper; `-webkit-backdrop-filter` + overlay tokens | Packaged visual WebKit capture pending push |
 | Script cleanup | MutationObserver scripts | No model JS | Rejected (security) | intentional | Capability packs only |
 | Auth / roles | Better Auth roles | Keyring + Kernel grants | Implemented differently | intentional | Enterprise RBAC deferred |
 | Prompt injection | identity sanitize | research sanitize + pack validation | Implemented differently (stricter) | intentional | Broader boundary tags |
@@ -37,11 +37,12 @@ Status legend: **Equivalent** · **Partial** · **Implemented differently** · *
 
 ## Highest-priority remaining gaps
 
-1. Progressive durable apply completeness for multi-surface turns (desktop Journeys 31–32 still absent).
+1. True multi-surface atomic progressive durable mid-stream apply (Journey 31 covers single-surface multi-section evolve; not separate surface IDs in one txn mid-stream).
 2. Packaged process-relaunch reconnect proof (Journey 26 covers multi-window mount isolation in debug e2e).
 3. Full process-relaunch approval survival (Journey 29 covers settings remount + second-decide reject; not OS relaunch).
 4. Richer structured forms beyond game.move; packaged / live-provider evolve proof.
-5. Preview-seed path still may mint `surf-*` keys for non-durable paint (durable apply is DB-lineage only).
+5. Preview-seed path may mint `surf-*` keys for non-durable paint only (durable apply is DB-lineage + tool_id ownership).
+6. Remote GitHub Desktop E2E green requires push of local Journey 21 Apply selector fix (local Journeys 21/5/31/32 pass).
 
 ## Intentional non-goals
 

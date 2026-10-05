@@ -72,17 +72,65 @@ describe("Journey 13 — wallpaper targeted update", () => {
 
     const compositingVars = await browser.execute(() => {
       const style = getComputedStyle(document.documentElement);
+      const shell = document.querySelector(".app-shell");
+      const chat = document.querySelector(".chat-panel, .sidebar");
+      const chatStyle = chat ? getComputedStyle(chat) : null;
       return {
         transparency: style.getPropertyValue("--interface-transparency").trim(),
         panelAlpha: style.getPropertyValue("--core-panel-alpha").trim(),
         sidebarAlpha: style.getPropertyValue("--core-sidebar-alpha").trim(),
         contentOverlay: style.getPropertyValue("--core-content-overlay").trim(),
+        backdropBlur: style.getPropertyValue("--core-backdrop-blur").trim(),
+        wallpaperAttr: shell?.getAttribute("data-wallpaper") ?? null,
+        chatBackdrop: chatStyle?.backdropFilter ?? chatStyle?.webkitBackdropFilter ?? "",
       };
     });
     expect(compositingVars.transparency).toBe("40");
     expect(Number(compositingVars.panelAlpha)).toBeLessThan(1.0);
     expect(Number(compositingVars.panelAlpha)).toBeGreaterThan(0.0);
     expect(compositingVars.contentOverlay).toContain("color-mix");
+    expect(compositingVars.wallpaperAttr).toBeTruthy();
+    // At 40% transparency blur must still be present but below the solid default (12px).
+    expect(compositingVars.backdropBlur).toMatch(/px$/);
+    expect(Number.parseFloat(compositingVars.backdropBlur)).toBeLessThan(12);
+    expect(Number.parseFloat(compositingVars.backdropBlur)).toBeGreaterThan(0);
+
+    // Max transparency: blur collapses toward 0 so wallpaper can show through.
+    await browser.execute((el) => {
+      const input = el as HTMLInputElement;
+      input.value = "100";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    }, slider);
+    await browser.waitUntil(
+      async () => (await slider.getAttribute("aria-valuenow")) === "100",
+      { timeout: 8_000, timeoutMsg: "transparency did not commit to 100" },
+    );
+    const maxVars = await browser.execute(() => {
+      const style = getComputedStyle(document.documentElement);
+      return {
+        transparency: style.getPropertyValue("--interface-transparency").trim(),
+        panelAlpha: style.getPropertyValue("--core-panel-alpha").trim(),
+        backdropBlur: style.getPropertyValue("--core-backdrop-blur").trim(),
+      };
+    });
+    expect(maxVars.transparency).toBe("100");
+    expect(Number(maxVars.panelAlpha)).toBeLessThan(0.1);
+    expect(Number.parseFloat(maxVars.backdropBlur)).toBe(0);
+
+    // Restore a mid value so canvas sampling still has frosted context.
+    await browser.execute((el) => {
+      const input = el as HTMLInputElement;
+      input.value = "40";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    }, slider);
+    await browser.waitUntil(
+      async () => (await slider.getAttribute("aria-valuenow")) === "40",
+      { timeout: 8_000, timeoutMsg: "transparency did not restore to 40" },
+    );
 
     const live = await $(".live-wallpaper");
     await live.waitForExist({ timeout: 10_000 });

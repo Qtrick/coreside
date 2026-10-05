@@ -256,7 +256,8 @@ export function ChangeProposalCard({
         </p>
       ) : null}
 
-      {previewTool ? (
+      {/* Interactive preview is inline-only; sticky composer stays compact. */}
+      {previewTool && placement === "inline" ? (
         <div
           className="proposal-tool-visual-preview"
           style={{
@@ -301,6 +302,8 @@ export function ChangeProposalCard({
           <button
             type="button"
             className="btn btn-primary"
+            data-proposal-apply="true"
+            aria-label="Apply proposed change"
             disabled={busy || operations.length === 0}
             onClick={() => void apply()}
             aria-busy={busy}
@@ -310,6 +313,8 @@ export function ChangeProposalCard({
           <button
             type="button"
             className="btn btn-secondary"
+            data-proposal-discard="true"
+            aria-label="Discard proposed change"
             disabled={busy}
             onClick={() => void cancel()}
           >

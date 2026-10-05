@@ -208,6 +208,12 @@ export const config: Options.Testrunner = {
     ],
     "approval-restart": ["./specs/29-approval-restart.spec.ts"],
     "multi-turn-undo": ["./specs/30-multi-turn-undo.spec.ts"],
+    "multi-surface-progressive-evolution": [
+      "./specs/31-multi-surface-progressive-evolution.spec.ts",
+    ],
+    "progressive-repair-recovery": [
+      "./specs/32-progressive-repair-recovery.spec.ts",
+    ],
     "wallpaper-targeted": ["./specs/13-wallpaper-targeted-update.spec.ts"],
     "first-run-welcome": ["./specs/15-first-run-welcome.spec.ts"],
     "core-tutorial": ["./specs/16-core-tutorial.spec.ts"],

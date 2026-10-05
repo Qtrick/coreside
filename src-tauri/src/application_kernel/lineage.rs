@@ -118,7 +118,8 @@ pub fn resolve_surface_for_application(
     Ok(lineage)
 }
 
-/// Prefer bound tool_canvas / latest live surface, else canonical `surf-*` when present.
+/// Prefer bound tool_canvas / latest live surface, else canonical `surf-*`
+/// only when its persisted `tool_id` matches (naming alone is never ownership).
 ///
 /// Read-only: no mutation or lifecycle gates. Mutating callers must use
 /// [`resolve_application_surface`].
@@ -138,8 +139,8 @@ pub fn lookup_bound_application_surface_id(db: &Database, application_id: &str) 
     }
     let canonical = crate::runtime_v2::surfaces::surface_id_for_tool(application_id);
     match get_surface(db, &canonical) {
-        Ok(_) => Some(canonical),
-        Err(_) => None,
+        Ok(surf) if surf.tool_id.as_deref() == Some(application_id) => Some(canonical),
+        _ => None,
     }
 }
 
@@ -328,6 +329,48 @@ mod tests {
         let err = resolve_surface_for_application(&db, &surf.id, "app-other")
             .expect_err("cross-app claim must fail");
         assert!(matches!(err, KernelError::Validation(_)));
+    }
+
+    #[test]
+    fn lookup_bound_fails_closed_when_canonical_tool_id_mismatches() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("lineage-canonical.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "L", None).unwrap();
+        // Canonical id present but tool_id unset — must not bind.
+        let unset = crate::runtime_v2::surfaces::create_inline_surface_with_preferred_id(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Unset",
+            &json!({
+                "id": "doc-unset",
+                "name": "Unset",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+            }),
+            &[],
+            Some("surf-app-orphan"),
+        )
+        .unwrap();
+        assert!(unset.tool_id.is_none());
+        assert!(
+            lookup_bound_application_surface_id(&db, "app-orphan").is_none(),
+            "surf-* with unset tool_id must not bind"
+        );
+
+        // Canonical id present with wrong tool_id — must not bind.
+        insert_tool(&db, "app-other");
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET tool_id = ?1 WHERE id = ?2",
+                rusqlite::params!["app-other", "surf-app-orphan"],
+            )
+            .unwrap();
+        assert!(
+            lookup_bound_application_surface_id(&db, "app-orphan").is_none(),
+            "surf-* with mismatched tool_id must not bind"
+        );
     }
 
     #[test]

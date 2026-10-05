@@ -148,6 +148,18 @@ const JOURNEYS = [
     coverage: "full",
   },
   {
+    id: 31,
+    name: "multi-surface-progressive-evolution",
+    suite: "multi-surface-progressive-evolution",
+    coverage: "full",
+  },
+  {
+    id: 32,
+    name: "progressive-repair-recovery",
+    suite: "progressive-repair-recovery",
+    coverage: "full",
+  },
+  {
     id: 15,
     name: "first-run-welcome",
     suite: "first-run-welcome",
@@ -380,6 +392,10 @@ runSuite("structured-form-submission");
 runSuite("approval-restart", { seed: "existing" });
 // Multi-turn undo_transaction for create + evolve.
 runSuite("multi-turn-undo");
+// Multi-surface Study Planner create → priority evolve (sections on one surface).
+runSuite("multi-surface-progressive-evolution");
+// Progressive repair: validate fail → repair keyword → durable Apply.
+runSuite("progressive-repair-recovery");
 
 // Seeded local AI privacy disclosure profile.
 runSuite("local-ai-privacy", { seed: "local" });

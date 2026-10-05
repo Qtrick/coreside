@@ -86,18 +86,15 @@ pub fn caller_bound_tool_id(window: &tauri::WebviewWindow) -> Option<String> {
 }
 
 /// Pure scope check used by [`enforce_caller_surface_scope`] (unit-testable).
-pub fn surface_allowed_for_bound_tool(
-    bound_tool_id: &str,
-    surface_tool_id: Option<&str>,
-    surface_id: &str,
-) -> bool {
+///
+/// Ownership is the persisted `tool_id` column only — never a synthetic `surf-*` id.
+pub fn surface_allowed_for_bound_tool(bound_tool_id: &str, surface_tool_id: Option<&str>) -> bool {
     if bound_tool_id.is_empty() || !is_safe_tool_window_id(bound_tool_id) {
         return false;
     }
     match surface_tool_id {
         Some(tid) => tid == bound_tool_id,
-        // Canonical personal-tool surface ids are `surf-{toolId}` when tool_id is unset.
-        None => surface_id == format!("surf-{bound_tool_id}"),
+        None => false,
     }
 }
 
@@ -123,12 +120,12 @@ pub fn enforce_caller_tool_scope(
 pub fn enforce_caller_surface_scope(
     window: &tauri::WebviewWindow,
     surface_tool_id: Option<&str>,
-    surface_id: &str,
+    _surface_id: &str,
 ) -> Result<(), CommandError> {
     let Some(bound) = caller_bound_tool_id(window) else {
         return Ok(());
     };
-    if surface_allowed_for_bound_tool(&bound, surface_tool_id, surface_id) {
+    if surface_allowed_for_bound_tool(&bound, surface_tool_id) {
         return Ok(());
     }
     Err(CommandError::new(
@@ -162,8 +159,9 @@ pub fn enforce_caller_conversation_scope(
         .query_row(
             "SELECT COUNT(*) FROM surfaces
              WHERE conversation_id = ?1
-               AND (tool_id = ?2 OR id = ?3)",
-            rusqlite::params![cid, bound, format!("surf-{bound}")],
+               AND tool_id = ?2
+               AND archived = 0",
+            rusqlite::params![cid, bound],
             |r| r.get(0),
         )
         .map_err(|e| CommandError::from(db::DbError::from(e)))?;
@@ -245,25 +243,13 @@ mod tests {
 
     #[test]
     fn surface_scope_requires_matching_tool_id() {
-        assert!(surface_allowed_for_bound_tool(
-            "notes",
-            Some("notes"),
-            "surf-other"
-        ));
-        assert!(!surface_allowed_for_bound_tool(
-            "notes",
-            Some("other"),
-            "surf-notes"
-        ));
-        assert!(surface_allowed_for_bound_tool("notes", None, "surf-notes"));
-        assert!(!surface_allowed_for_bound_tool("notes", None, "surf-other"));
-        assert!(!surface_allowed_for_bound_tool("", None, "surf-"));
-        assert!(!surface_allowed_for_bound_tool("../x", None, "surf-../x"));
-        assert!(!surface_allowed_for_bound_tool(
-            "bad/id",
-            Some("bad/id"),
-            "x"
-        ));
+        assert!(surface_allowed_for_bound_tool("notes", Some("notes")));
+        assert!(!surface_allowed_for_bound_tool("notes", Some("other")));
+        // Fail closed: unset tool_id is never ownership (surf-* naming is irrelevant).
+        assert!(!surface_allowed_for_bound_tool("notes", None));
+        assert!(!surface_allowed_for_bound_tool("", None));
+        assert!(!surface_allowed_for_bound_tool("../x", None));
+        assert!(!surface_allowed_for_bound_tool("bad/id", Some("bad/id")));
     }
 
     #[test]
@@ -311,13 +297,15 @@ mod tests {
                 [&surf.id],
             )
             .unwrap();
+        // Match enforce_caller_conversation_scope: tool_id ownership only (no surf-* OR).
         let owned: i64 = db
             .conn()
             .query_row(
                 "SELECT COUNT(*) FROM surfaces
                  WHERE conversation_id = ?1
-                   AND (tool_id = ?2 OR id = ?3)",
-                rusqlite::params![conv.id, "notes", "surf-notes"],
+                   AND tool_id = ?2
+                   AND archived = 0",
+                rusqlite::params![conv.id, "notes"],
                 |r| r.get(0),
             )
             .unwrap();
@@ -327,11 +315,25 @@ mod tests {
             .query_row(
                 "SELECT COUNT(*) FROM surfaces
                  WHERE conversation_id = ?1
-                   AND (tool_id = ?2 OR id = ?3)",
-                rusqlite::params![other.id, "notes", "surf-notes"],
+                   AND tool_id = ?2
+                   AND archived = 0",
+                rusqlite::params![other.id, "notes"],
                 |r| r.get(0),
             )
             .unwrap();
         assert_eq!(foreign, 0);
+        // Canonical surf-* id alone must not satisfy conversation ownership.
+        let by_synth: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM surfaces
+                 WHERE conversation_id = ?1
+                   AND tool_id = ?2
+                   AND archived = 0",
+                rusqlite::params![conv.id, "surf-notes"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(by_synth, 0);
     }
 }

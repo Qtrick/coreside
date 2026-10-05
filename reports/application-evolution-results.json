@@ -5,15 +5,15 @@
   "seededFinalApplication": false,
   "preservedTaskTitle": "Preserve me across evolution",
   "dueDateFieldPresent": true,
-  "startedAt": "2026-10-02T18:37:21.466Z",
-  "finishedAt": "2026-10-02T18:37:32.387Z",
-  "durationMs": 10921,
+  "startedAt": "2026-10-04T22:32:03.985Z",
+  "finishedAt": "2026-10-04T22:32:14.967Z",
+  "durationMs": 10982,
   "identity": {
-    "commit": "38f08068c6993f4529d8799ac79dd2e7ed7589e0",
+    "commit": "d8a168ff6a0d52c56e246db5c814728e4e798b29",
     "dirty": true,
     "platform": "darwin",
     "arch": "arm64",
     "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee"
   },
-  "binaryHash": "83ac3ef20aa89d5e53e0745422355600bda5baf111190818e748d3090b1c569b"
+  "binaryHash": "683ec60304bf0dd7938dfe075e083ed806ed043eb9e80bc6cd7b087f203fc295"
 }

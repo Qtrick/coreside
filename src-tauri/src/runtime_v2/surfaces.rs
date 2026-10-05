@@ -598,9 +598,8 @@ pub fn get_surface(db: &Database, id: &str) -> DbResult<SurfaceRecord> {
 /// so personal/canvas state is not leaked into a chat that is editing a distinct
 /// inline instance of the same tool id.
 ///
-/// Fall back to the canonical `surf-{toolId}` **row when it exists in SQLite**.
-/// That string is a legacy naming convention / compatibility lookup — never proof
-/// that a surface belongs to the application. Ownership is the `tool_id` column.
+/// Fall back to the canonical `surf-{toolId}` **row when it exists in SQLite**
+/// AND its persisted `tool_id` matches. Naming alone is never ownership proof.
 pub fn resolve_prompt_surface_for_tool(
     db: &Database,
     conversation_id: &str,
@@ -623,7 +622,8 @@ pub fn resolve_prompt_surface_for_tool(
     }
     let canonical = surface_id_for_tool(tool_id);
     match get_surface(db, &canonical) {
-        Ok(surf) => Ok(Some(surf)),
+        Ok(surf) if surf.tool_id.as_deref() == Some(tool_id) => Ok(Some(surf)),
+        Ok(_) => Ok(None),
         Err(DbError::NotFound(_)) => Ok(None),
         Err(e) => Err(e),
     }
@@ -1650,6 +1650,69 @@ mod tests {
             .unwrap()
             .expect("canonical fallback");
         assert_eq!(fallback.id, canvas.id);
+    }
+
+    #[test]
+    fn resolve_prompt_surface_fails_closed_when_canonical_tool_id_unset_or_wrong() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Owner", None).unwrap();
+        let other = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Other", None).unwrap();
+        // Row at surf-tracker with no tool_id — naming alone must not authorize fallback.
+        let spoof = create_inline_surface_with_preferred_id(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Spoof Tracker",
+            &minimal_def("Spoof Tracker"),
+            &[],
+            Some("surf-tracker"),
+        )
+        .unwrap();
+        assert!(spoof.tool_id.is_none());
+        assert!(
+            resolve_prompt_surface_for_tool(&db, &other.id, "tracker")
+                .unwrap()
+                .is_none(),
+            "canonical surf-* with unset tool_id must not resolve"
+        );
+
+        // tool_id is FK-backed — insert a real tool, then bind the wrong one.
+        apply_tool_change(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            &ToolDefinition {
+                id: "other-tool".into(),
+                name: "Other".into(),
+                description: "d".into(),
+                layout: json!("stack"),
+                components: vec![crate::ai::ToolComponent {
+                    id: "h".into(),
+                    component_type: "heading".into(),
+                    value_key: None,
+                    props: Some(json!({"text": "Hi"})),
+                    children: None,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            "create",
+            None,
+            "test",
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET tool_id = ?1 WHERE id = ?2",
+                params!["other-tool", "surf-tracker"],
+            )
+            .unwrap();
+        assert!(
+            resolve_prompt_surface_for_tool(&db, &other.id, "tracker")
+                .unwrap()
+                .is_none(),
+            "canonical surf-* with wrong tool_id must not resolve"
+        );
     }
 
     #[test]
