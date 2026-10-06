@@ -1,10 +1,15 @@
 /**
- * Journey 29 — Pending approval survives durable UI restart path.
+ * Journey 29 — Pending approval survives durable restart paths.
  *
- * Seeded pending approval must remain listed by the kernel after a settings
- * navigation remount (durable SQLite authority). Approve once consumes it;
- * a second decide fails. This is not a full process relaunch — that remains
- * Blocked in the single WDIO session — but proves reload/remount survival.
+ * Desktop: seeded pending approval must remain listed by the kernel after a
+ * settings navigation remount (durable SQLite authority). Approve once consumes
+ * it; a second decide fails.
+ *
+ * Authority-layer process restart (close + reopen SQLite file, exact call_hash,
+ * single-use consume, tampered-input rejection) is covered by
+ * `pending_approval_survives_database_reopen_with_exact_call_hash` in
+ * `approvals.rs`. Full OS process relaunch inside one WDIO embedded-WebDriver
+ * session still kills the driver port; that path remains an environmental limit.
  *
  * Run alone:
  *   CORESIDE_E2E=1 CORESIDE_E2E_SEED=existing \

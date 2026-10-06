@@ -734,6 +734,61 @@ mod tests {
         assert!(!consume(&mut db, &a.id, &a.call_hash).unwrap());
     }
 
+    /// Process-restart of authority: pending approval + exact call_hash must
+    /// survive closing and reopening the SQLite file (stronger than UI remount).
+    #[test]
+    fn pending_approval_survives_database_reopen_with_exact_call_hash() {
+        use crate::db::Database;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("approval-reopen.db");
+        let d = find_action("local_data.write").unwrap();
+        let input = json!({"modelId": "tasks", "data": {"title": "Persist across reopen"}});
+        let mut locus = ctx();
+        locus.surface_id = Some("surf-task-form".into());
+        locus.component_id = Some("btn-submit".into());
+        locus.conversation_id = Some("conv-reopen".into());
+
+        let (approval_id, call_hash_before, descriptor_hash_before) = {
+            let mut db = Database::open_path(&path).unwrap();
+            let pending = create_pending(&mut db, &locus, d, &input, None).unwrap();
+            (
+                pending.id.clone(),
+                pending.call_hash.clone(),
+                pending.descriptor_hash.clone(),
+            )
+        };
+
+        // Drop the first connection (process exit), then reopen the same file.
+        let mut db = Database::open_path(&path).unwrap();
+        let restored = get_approval(&db, &approval_id).unwrap();
+        assert_eq!(restored.status, "pending");
+        assert_eq!(restored.call_hash, call_hash_before);
+        assert_eq!(restored.descriptor_hash, descriptor_hash_before);
+        assert_eq!(
+            call_hash(&locus, d, &input),
+            call_hash_before,
+            "recomputed call_hash must match persisted hash after reopen"
+        );
+
+        decide(&mut db, &approval_id, true, None, "user").unwrap();
+        assert!(consume(&mut db, &approval_id, &call_hash_before).unwrap());
+        assert!(
+            !consume(&mut db, &approval_id, &call_hash_before).unwrap(),
+            "replay after reopen must still be rejected"
+        );
+
+        let mut mutated = input.clone();
+        mutated["data"]["title"] = json!("Tampered");
+        let tampered_hash = call_hash(&locus, d, &mutated);
+        assert_ne!(tampered_hash, call_hash_before);
+        // Fresh pending for the mutated call must not reuse the consumed approval.
+        let again = create_pending(&mut db, &locus, d, &mutated, None).unwrap();
+        assert_ne!(again.id, approval_id);
+        assert_ne!(again.call_hash, call_hash_before);
+    }
+
     #[test]
     fn approval_does_not_authorize_a_different_call() {
         let (mut db, _dir) = test_db();

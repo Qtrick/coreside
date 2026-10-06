@@ -1042,7 +1042,13 @@ pub fn progressive_repair_recovery_success_plan() -> ApplicationPlan {
     }
 }
 
-/// Study planner fixture: one CreateSurface with Dashboard + Tasks sections until multi-surface plans are supported.
+/// Study planner fixture used by Journey 31 ApplicationPlan Apply.
+///
+/// Desktop path still ships Dashboard + Tasks as stable sections on one tool
+/// surface (ApplicationPlan binds one applicationId per Apply). Kernel proof of
+/// true multi-surface atomic commit (tool canvas + bound inline) lives in
+/// `hostile_16_multi_surface_create_mutate_atomic_commit` /
+/// `hostile_16b_multi_surface_second_surface_failure_rolls_back_both`.
 pub fn multi_surface_planner_create_plan() -> ApplicationPlan {
     ApplicationPlan {
         schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
@@ -1058,8 +1064,9 @@ pub fn multi_surface_planner_create_plan() -> ApplicationPlan {
             },
             PlanStep {
                 id: "2".into(),
-                description: "Create single surface with Dashboard and Tasks sections (multi-surface deferred)"
-                    .into(),
+                description:
+                    "Create Study Planner tool surface with Dashboard + Tasks (stable component IDs)"
+                        .into(),
             },
         ],
         intents: vec![
@@ -1077,7 +1084,7 @@ pub fn multi_surface_planner_create_plan() -> ApplicationPlan {
         tests: vec![],
         diagnostics: Some(json!({
             "fixture": "multi_surface_planner_plan",
-            "multiSurfaceNote": "Dashboard and Tasks are separate sections on one surface; multiple CreateSurface intents per application are not used in this fixture."
+            "multiSurfaceNote": "Journey 31 Apply path uses one authoritative tool surface with Dashboard/Tasks sections. Cross-surface atomic create+mutate is covered by hostile_16 / hostile_16b transaction tests."
         })),
     }
 }

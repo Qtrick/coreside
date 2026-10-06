@@ -105,8 +105,10 @@ function CanvasWallpaper({
     let hidden = document.visibilityState === "hidden";
     let isWindowBlurred = false;
     const webDriver = webDriverSession();
-    /** Matrix-only: repaint after resize when WebDriver keeps visibilityState hidden. */
-    let repaintMatrixIfHidden: (() => void) | undefined;
+    /** Restore paint after canvas buffer clear (resize). */
+    let repaintAfterClear: (() => void) | undefined;
+    /** Optional geometry hook (Matrix column rebuild, particle spawn) run after resize. */
+    let afterGeometryChange: (() => void) | undefined;
 
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
@@ -114,22 +116,33 @@ function CanvasWallpaper({
       viewH = Math.max(1, canvas.clientHeight || window.innerHeight);
       const nextW = Math.floor(viewW * dpr);
       const nextH = Math.floor(viewH * dpr);
-      if (canvas.width !== nextW || canvas.height !== nextH) {
+      const bufferCleared =
+        canvas.width !== nextW || canvas.height !== nextH;
+      if (bufferCleared) {
         canvas.width = nextW;
         canvas.height = nextH;
       }
       canvas.style.width = "100%";
       canvas.style.height = "100%";
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      repaintMatrixIfHidden?.();
+      // Setting canvas.width/height clears pixels. Rebuild geometry then restore
+      // paint — not only when visibilityState===hidden (CI often keeps
+      // the page "visible" while blurred / reduced-motion, which previously
+      // left a solid clear).
+      if (bufferCleared) {
+        afterGeometryChange?.();
+        repaintAfterClear?.();
+      }
     };
     resize();
 
-    const scheduleResize = (after?: () => void) => {
+    const scheduleResize = () => {
       cancelAnimationFrame(resizeRaf);
       resizeRaf = requestAnimationFrame(() => {
         resize();
-        after?.();
+        if (reduced) {
+          repaintAfterClear?.();
+        }
       });
     };
 
@@ -142,11 +155,15 @@ function CanvasWallpaper({
     if (kind === "matrix") {
       const fontSize = Math.max(12, Math.round(16 - density * 4));
       let columns = Math.ceil(viewW / fontSize);
+      // ASCII-first glyphs: CI/WebKit may lack CJK font coverage for katakana.
+      const glyphs = webDriver
+        ? "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        : MATRIX_GLYPHS;
       // Seed drops across the visible height so glyphs appear immediately
       // (avoids many frames of uniform clear before rain enters the viewport).
       const seedDrops = (count: number) =>
         Array.from({ length: count }, (_, i) =>
-          i % 3 === 0
+          i % 2 === 0
             ? Math.random() * Math.max(8, viewH / fontSize)
             : Math.random() * -20,
         );
@@ -161,7 +178,7 @@ function CanvasWallpaper({
         );
       };
 
-      const onResize = () => scheduleResize(rebuild);
+      const onResize = () => scheduleResize();
       window.addEventListener("resize", onResize);
 
       const draw = (force = false) => {
@@ -177,8 +194,7 @@ function CanvasWallpaper({
         // Bright head + dim trail so pixel samples see measurable luminance span.
         const drawAlpha = Math.max(0.45, opacity);
         for (let i = 0; i < drops.length; i++) {
-          const ch =
-            MATRIX_GLYPHS[Math.floor(Math.random() * MATRIX_GLYPHS.length)]!;
+          const ch = glyphs[Math.floor(Math.random() * glyphs.length)]!;
           const x = i * fontSize;
           const y = drops[i]! * fontSize;
           ctx.globalAlpha = drawAlpha * 0.35;
@@ -196,17 +212,25 @@ function CanvasWallpaper({
         }
       };
 
-      repaintMatrixIfHidden = () => {
-        if (!hidden || !webDriver) return;
-        // WebDriver may not run RAF; stack forced frames for glyph variance.
-        for (let i = 0; i < 6; i++) draw(true);
+      repaintAfterClear = () => {
+        // After buffer clear, or when RAF cannot run (reduced / blur / WebDriver),
+        // stack forced frames so glyph vs clear variance is measurable.
+        const needsStatic =
+          reduced || webDriver || hidden || isWindowBlurred;
+        const frames = needsStatic ? 10 : 2;
+        for (let i = 0; i < frames; i++) draw(true);
+        if (!reduced && !hidden && !isWindowBlurred && running) {
+          cancelAnimationFrame(raf);
+          raf = requestAnimationFrame(() => draw());
+        }
       };
+      afterGeometryChange = rebuild;
 
       ctx.fillStyle = "#050805";
       ctx.fillRect(0, 0, viewW, viewH);
       // Immediate first paint when visible or WebDriver needs samples before RAF.
       draw(true);
-      repaintMatrixIfHidden();
+      repaintAfterClear();
 
       const onMatrixVisibility = () => {
         hidden = document.visibilityState === "hidden";
@@ -215,17 +239,22 @@ function CanvasWallpaper({
           raf = requestAnimationFrame(() => draw());
         } else if (hidden) {
           cancelAnimationFrame(raf);
+          if (webDriver) repaintAfterClear?.();
         }
       };
       const onMatrixBlur = () => {
         isWindowBlurred = true;
         cancelAnimationFrame(raf);
+        // Keep a sampleable static frame when RAF stops (CI/WebDriver blur).
+        if (webDriver || reduced) repaintAfterClear?.();
       };
       const onMatrixFocus = () => {
         isWindowBlurred = false;
         if (!hidden && !reduced && running) {
           cancelAnimationFrame(raf);
           raf = requestAnimationFrame(() => draw());
+        } else if (webDriver || reduced) {
+          repaintAfterClear?.();
         }
       };
       document.addEventListener("visibilitychange", onMatrixVisibility);
@@ -288,7 +317,7 @@ function CanvasWallpaper({
     };
     spawn();
 
-    const onResize = () => scheduleResize(spawn);
+    const onResize = () => scheduleResize();
     window.addEventListener("resize", onResize);
 
     const drawFrame = (now: number) => {
@@ -381,18 +410,30 @@ function CanvasWallpaper({
               p.y = -20;
               p.x = Math.random() * (w + 100) - 50;
             }
-            // Angled streak with motion gradient
+            // Angled streak with motion gradient: soft trailing fade into luminous leading head
+            // Zero heap allocations per particle (eliminates 9,600 createLinearGradient/sec).
             const streakLen = p.r * 12 * Math.max(0.6, speed);
             const slant = streakLen * 0.2;
-            const rg = ctx.createLinearGradient(p.x, p.y, p.x - slant, p.y + streakLen);
-            rg.addColorStop(0, "transparent");
-            rg.addColorStop(0.6, color);
-            rg.addColorStop(1, secondaryColor);
-            ctx.strokeStyle = rg;
+            const midX = p.x - slant * 0.45;
+            const midY = p.y + streakLen * 0.45;
+            const endX = p.x - slant;
+            const endY = p.y + streakLen;
+
             ctx.lineWidth = p.r * 0.8;
+            // Soft fading trail
+            ctx.globalAlpha = opacity * p.a * 0.35;
+            ctx.strokeStyle = color;
             ctx.beginPath();
             ctx.moveTo(p.x, p.y);
-            ctx.lineTo(p.x - slant, p.y + streakLen);
+            ctx.lineTo(midX, midY);
+            ctx.stroke();
+
+            // Luminous leading head
+            ctx.globalAlpha = opacity * p.a;
+            ctx.strokeStyle = secondaryColor;
+            ctx.beginPath();
+            ctx.moveTo(midX, midY);
+            ctx.lineTo(endX, endY);
             ctx.stroke();
           } else {
             if (p.x < -15) p.x = w + 15;
@@ -436,6 +477,16 @@ function CanvasWallpaper({
       }
     };
 
+    afterGeometryChange = spawn;
+    repaintAfterClear = () => {
+      drawFrame(performance.now());
+      if (!reduced && !hidden && !isWindowBlurred && running) {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(drawFrame);
+      }
+    };
+    repaintAfterClear();
+
     const onFrameVisibility = () => {
       hidden = document.visibilityState === "hidden";
       if (!hidden && !isWindowBlurred && !reduced && running) {
@@ -443,11 +494,13 @@ function CanvasWallpaper({
         raf = requestAnimationFrame(drawFrame);
       } else if (hidden) {
         cancelAnimationFrame(raf);
+        if (webDriver) repaintAfterClear?.();
       }
     };
     const onWindowBlur = () => {
       isWindowBlurred = true;
       cancelAnimationFrame(raf);
+      if (webDriver || reduced) repaintAfterClear?.();
     };
     const onWindowFocus = () => {
       isWindowBlurred = false;

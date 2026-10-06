@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-10-04T22:31:24.998Z",
-  "commit": "d8a168ff6a0d52c56e246db5c814728e4e798b29",
+  "generatedAt": "2026-10-06T06:07:40.677Z",
+  "commit": "1ecf1e34ef7c3c85e3fa1e65d19ec13a81f9ae75",
   "dirty": true,
   "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
   "platform": "darwin",
   "architecture": "arm64",
-  "binaryHash": "683ec60304bf0dd7938dfe075e083ed806ed043eb9e80bc6cd7b087f203fc295",
-  "fingerprint": "2a8f4eca2c780d212325060a6fd6e8db32310a76a0fc0c9bd0ee646e6adbc30a",
+  "binaryHash": "e863d8c27ea10c0b9f3944a934144c2f5a3d05d23d5510d499fcdb716506b60b",
+  "fingerprint": "87604c76f195754219bad57ac5a8b4d7594c836666aaa6565762c2b52ed61748",
   "command": "e2e:journey-12-true-streaming",
   "result": "passed",
   "evidenceLevel": "Desktop Verified",
@@ -25,12 +25,12 @@
     "no Auto/openrouter failure text"
   ],
   "stream": {
-    "turnId": "turn-d88d210c-9499-4c55-b11f-f7363b9f1142",
+    "turnId": "turn-b1675413-2889-4c3b-ad93-f12d8c559ce0",
     "sequence": 1,
     "earlyText": "Live stream",
     "finalText": "Live stream probe complete",
-    "firstDeltaAt": 1791153084303,
-    "completedAt": 1791153084951
+    "firstDeltaAt": 1791266859986,
+    "completedAt": 1791266860632
   },
   "publicBeta": "Not ready"
 }

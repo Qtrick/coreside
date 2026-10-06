@@ -714,13 +714,25 @@ pub(crate) fn resolve_creation_target_surface_id(
         ));
     }
     if let Some(ref tid) = effective_tool_id {
-        if created_in_txn
+        let canonical = super::surfaces::surface_id_for_tool(tid);
+        if let Some(existing) = created_in_txn
             .iter()
-            .any(|c| c.tool_id.as_deref() == Some(tid.as_str()))
+            .find(|c| c.tool_id.as_deref() == Some(tid.as_str()))
         {
-            return Err(format!(
-                "conflicting creation identity: tool '{tid}' already created in this transaction"
-            ));
+            // Multi-surface atomic commit: a tool-canvas surface (canonical `surf-{toolId}`)
+            // may legitimately coexist with exactly one additional, explicitly-identified
+            // inline instance bound to the same tool within one transaction (e.g. a chat
+            // panel alongside the tool's personal canvas) — see
+            // `resolve_prompt_surface_for_tool`'s documented canvas/inline distinction.
+            // Any other repeat claim on the same tool in this transaction stays rejected.
+            let is_canvas_plus_distinct_inline = existing.surface_id == canonical
+                && op.op_type == "chat.inline_surface_create"
+                && target_sid != canonical;
+            if !is_canvas_plus_distinct_inline {
+                return Err(format!(
+                    "conflicting creation identity: tool '{tid}' already created in this transaction"
+                ));
+            }
         }
     }
 
@@ -732,8 +744,16 @@ pub(crate) fn resolve_creation_target_surface_id(
         ));
     }
     if let Some(ref tid) = effective_tool_id {
+        let canonical = super::surfaces::surface_id_for_tool(tid);
         let existing_surfaces = bound_surfaces_for_tool(db, tid, conversation_hint)?;
-        if !existing_surfaces.is_empty() {
+        // Same canvas/inline exception as above, applied to durable SQLite lineage: a
+        // lone pre-existing canonical canvas row must not block a new, distinct inline
+        // surface from binding to the same tool.
+        let is_canvas_plus_distinct_inline = existing_surfaces.len() == 1
+            && existing_surfaces[0] == canonical
+            && op.op_type == "chat.inline_surface_create"
+            && target_sid != canonical;
+        if !existing_surfaces.is_empty() && !is_canvas_plus_distinct_inline {
             return Err(format!(
                 "cannot create surface for tool '{tid}': tool is already bound to surface(s) {:?} in SQLite",
                 existing_surfaces
@@ -6311,6 +6331,198 @@ mod tests {
         );
     }
 
+    /// True multi-surface: tool canvas + bound inline under one application, one txn.
+    /// Both surfaces must commit together (or neither, see hostile_16b).
+    #[test]
+    fn hostile_16_multi_surface_create_mutate_atomic_commit() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H16", None).unwrap();
+        let tool_id = "tool-study-planner-ms";
+        let canvas_sid = crate::runtime_v2::surfaces::surface_id_for_tool(tool_id);
+        // Stable claimed id (not surf-{toolId}) — "surf-" is reserved for the canonical
+        // tool-canvas row; see hostile_13's identical convention note above.
+        let inline_sid = "s-study-planner-tasks-panel";
+
+        let canvas_def = ToolDefinition {
+            id: tool_id.into(),
+            name: "Study Planner Dashboard".into(),
+            description: "Dashboard surface".into(),
+            layout: json!({"type": "single-column"}),
+            components: vec![ToolComponent {
+                id: "dash-heading".into(),
+                component_type: "heading".into(),
+                props: Some(json!({"text": "Dashboard", "level": 2})),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let op_canvas = op(
+            "surface.create",
+            Some(&canvas_sid),
+            json!({
+                "action": "create",
+                "tool": canvas_def,
+                "changeSummary": "Create dashboard surface"
+            }),
+        );
+
+        let mut op_inline = op(
+            "chat.inline_surface_create",
+            Some(inline_sid),
+            json!({
+                "name": "Tasks Panel",
+                "definition": {
+                    "id": "doc-tasks-panel",
+                    "name": "Tasks Panel",
+                    "layout": "stack",
+                    "components": [
+                        {"id": "tasks-heading", "type": "heading", "props": {"text": "Tasks"}}
+                    ]
+                }
+            }),
+        );
+        op_inline.target.conversation_id = Some(conv.id.clone());
+        op_inline.target.tool_id = Some(tool_id.into());
+
+        let mut op_dash_mutate = op(
+            "component.update_props",
+            Some(&canvas_sid),
+            json!({ "props": { "text": "Dashboard Live", "level": 2 } }),
+        );
+        op_dash_mutate.target.component_id = Some("dash-heading".into());
+        op_dash_mutate.target.tool_id = Some(tool_id.into());
+
+        let mut op_tasks_mutate = op(
+            "component.update_props",
+            Some(inline_sid),
+            json!({ "props": { "text": "Tasks Live" } }),
+        );
+        op_tasks_mutate.target.component_id = Some("tasks-heading".into());
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h16-multi-surface-atomic",
+            &[op_canvas, op_inline, op_dash_mutate, op_tasks_mutate],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            res.transaction.status, "applied",
+            "conflicts: {:?}",
+            res.conflicts
+        );
+
+        let dash = get_surface(&db, &canvas_sid).unwrap();
+        assert_eq!(dash.tool_id.as_deref(), Some(tool_id));
+        let dash_doc = crate::runtime_v2::SoftwareDocument::from_value(&dash.definition).unwrap();
+        assert_eq!(
+            dash_doc
+                .find_component("dash-heading")
+                .and_then(|c| c.props.as_ref())
+                .and_then(|p| p.get("text")),
+            Some(&json!("Dashboard Live"))
+        );
+
+        let tasks = get_surface(&db, inline_sid).unwrap();
+        assert_eq!(
+            tasks.tool_id.as_deref(),
+            Some(tool_id),
+            "inline tasks panel must bind to the same application"
+        );
+        let tasks_doc = crate::runtime_v2::SoftwareDocument::from_value(&tasks.definition).unwrap();
+        assert_eq!(
+            tasks_doc
+                .find_component("tasks-heading")
+                .and_then(|c| c.props.as_ref())
+                .and_then(|p| p.get("text")),
+            Some(&json!("Tasks Live"))
+        );
+    }
+
+    /// If the second surface mutation fails mid-txn, the first surface must not remain durable.
+    #[test]
+    fn hostile_16b_multi_surface_second_surface_failure_rolls_back_both() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H16b", None).unwrap();
+        let tool_id = "tool-study-planner-ms-fail";
+        let canvas_sid = crate::runtime_v2::surfaces::surface_id_for_tool(tool_id);
+        let inline_sid = "surf-study-planner-tasks-fail";
+
+        let canvas_def = ToolDefinition {
+            id: tool_id.into(),
+            name: "Study Planner Dashboard".into(),
+            description: "Dashboard surface".into(),
+            layout: json!({"type": "single-column"}),
+            components: vec![ToolComponent {
+                id: "dash-heading".into(),
+                component_type: "heading".into(),
+                props: Some(json!({"text": "Dashboard"})),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let op_canvas = op(
+            "surface.create",
+            Some(&canvas_sid),
+            json!({
+                "action": "create",
+                "tool": canvas_def,
+                "changeSummary": "Create dashboard"
+            }),
+        );
+        let mut op_inline = op(
+            "chat.inline_surface_create",
+            Some(inline_sid),
+            json!({
+                "name": "Tasks Panel",
+                "definition": {
+                    "id": "doc-tasks-fail",
+                    "name": "Tasks Panel",
+                    "layout": "stack",
+                    "components": [
+                        {"id": "tasks-heading", "type": "heading", "props": {"text": "Tasks"}}
+                    ]
+                }
+            }),
+        );
+        op_inline.target.conversation_id = Some(conv.id.clone());
+        op_inline.target.tool_id = Some(tool_id.into());
+
+        // Stale revision on the inline surface forces OCC failure after both creates.
+        let mut op_bad = op(
+            "component.update_props",
+            Some(inline_sid),
+            json!({ "props": { "text": "Should Not Persist" } }),
+        );
+        op_bad.target.component_id = Some("tasks-heading".into());
+        op_bad.base_revision = Some(999);
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h16b-multi-surface-rollback",
+            &[op_canvas, op_inline, op_bad],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "failed");
+        assert!(
+            get_surface(&db, &canvas_sid).is_err(),
+            "dashboard surface must not remain after multi-surface txn failure"
+        );
+        assert!(
+            get_surface(&db, inline_sid).is_err(),
+            "tasks surface must not remain after multi-surface txn failure"
+        );
+    }
+
     #[test]
     fn hostile_14_full_replace_new_surface_then_mutate_same_txn() {
         let mut db = test_db();
@@ -6642,5 +6854,86 @@ mod tests {
             "undo must remove surface established by tool.full_replace"
         );
         assert!(get_tool(&db, tool_id).is_err());
+    }
+
+    /// Progressive preview (`PreviewTransaction`) seeds speculative surfaces purely
+    /// in-memory and never writes SQLite (see `preview_transaction.rs`). An id that
+    /// only ever lived in that in-memory preview bag — never durably created via
+    /// `surface.create` / `chat.inline_surface_create` — must not gain mutation
+    /// authority just because it is shaped like a plausible surface id.
+    #[test]
+    fn hostile_19_preview_only_surface_id_does_not_authorize_durable_mutation() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H19", None).unwrap();
+
+        // Shape mirrors ids used by real PreviewTransaction::seed_surface fixtures
+        // (e.g. "s-quiz", "s-form") — plausible, but never committed to SQLite.
+        let preview_only_sid = "s-preview-quiz-draft";
+        let mut op_bare = op(
+            "component.update_props",
+            Some(preview_only_sid),
+            json!({ "props": { "text": "Hijacked" } }),
+        );
+        op_bare.target.component_id = Some("c1".into());
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h19-preview-only-bare",
+            &[op_bare],
+            false,
+        )
+        .unwrap();
+        let res = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(res.transaction.status, "failed");
+        assert!(
+            res.conflicts.iter().any(|c| c.contains("does not exist")),
+            "preview-only id must fail closed, got: {:?}",
+            res.conflicts
+        );
+        assert!(
+            get_surface(&db, preview_only_sid).is_err(),
+            "preview-only id must never be minted as a durable surface"
+        );
+
+        // Same attack, but the op also claims a toolId that was never durably
+        // created either. Zero SQLite bindings must resolve to `None`, never
+        // synthesize `surf-{toolId}` as mutation authority (see
+        // `resolve_mutation_target_surface_id` docs above).
+        let preview_tool_id = "tool-preview-only-never-created";
+        let mut op_tool_claim = op(
+            "component.update_props",
+            Some(preview_only_sid),
+            json!({ "props": { "text": "Hijacked Via ToolId" } }),
+        );
+        op_tool_claim.target.component_id = Some("c1".into());
+        op_tool_claim.target.tool_id = Some(preview_tool_id.into());
+
+        let txn_b = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "h19-preview-only-tool-claim",
+            &[op_tool_claim],
+            false,
+        )
+        .unwrap();
+        let res_b = apply_transaction(&mut db, &txn_b.id).unwrap();
+        assert_eq!(res_b.transaction.status, "failed");
+        assert!(
+            get_surface(&db, preview_only_sid).is_err(),
+            "preview-only id must stay un-minted even with a never-created toolId claim"
+        );
+        assert!(
+            get_surface(
+                &db,
+                &crate::runtime_v2::surfaces::surface_id_for_tool(preview_tool_id)
+            )
+            .is_err(),
+            "mutation authority must never synthesize surf-{{toolId}} for a never-created tool"
+        );
     }
 }

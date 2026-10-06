@@ -78,7 +78,16 @@ jobs:
         run: node scripts/assert-production-excludes-e2e.mjs
 
       - name: Build packaged app (unsigned / ad-hoc where required)
-        run: npm run build
+        # Linux: skip AppImage. Tauri's AppImage path downloads AppRun from
+        # tauri-apps/binary-releases (apprun-old), which has returned HTTP 500
+        # on CI and fails the whole Package job. deb (+ rpm) still prove Linux
+        # packaging without that external binary.
+        run: |
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            npx tauri build --bundles deb,rpm
+          else
+            npm run build
+          fi
         env:
           # Avoid requiring Apple Developer signing secrets on PR builds.
           TAURI_SIGNING_PRIVATE_KEY: ""

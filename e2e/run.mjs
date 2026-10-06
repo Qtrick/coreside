@@ -139,7 +139,7 @@ const JOURNEYS = [
     name: "approval-restart",
     suite: "approval-restart",
     coverage: "partial",
-    note: "Settings remount + second-decide reject; full OS process relaunch not exercised in WDIO session",
+    note: "Settings remount + second-decide reject; SQLite reopen/call_hash restart proven in approvals.rs unit test; full OS process relaunch blocked by embedded WebDriver in-process server",
   },
   {
     id: 30,

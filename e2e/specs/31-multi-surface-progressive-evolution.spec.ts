@@ -1,9 +1,13 @@
 /**
  * Journey 31 — Multi-surface progressive durable apply (Study Planner).
  *
- * Strongest path supported today: ApplicationPlan create with Dashboard + Tasks
- * sections on one surface → Apply → add a task → evolve with priority → remount
- * → dashboard section + priority column remain durable.
+ * Desktop Apply path: ApplicationPlan create with Dashboard + Tasks sections on
+ * one authoritative tool surface → Apply → add a task → evolve with priority →
+ * remount → dashboard section + priority column remain durable.
+ *
+ * Kernel true multi-surface atomicity (tool canvas + bound inline under one
+ * applicationId, commit-or-neither) is covered by hostile_16 / hostile_16b in
+ * transactions.rs — ApplicationPlan still binds one applicationId per Apply.
  *
  * Run alone:
  *   CORESIDE_E2E=1 AI_PROVIDER=mock CORESIDE_E2E_SEED=empty \
