@@ -16,7 +16,7 @@ import {
   evidenceBinaryHash,
   evidenceIdentity,
   invokeFromCurrentWindow,
-  latestVisibleKernelApplyButton,
+  clickKernelApplyButton,
   waitForAppReady,
 } from "../helpers.js";
 
@@ -48,14 +48,7 @@ describe("Journey 27 — branch and diverge", () => {
     await send.waitForClickable({ timeout: 10_000 });
     await send.click();
 
-    await browser.waitUntil(
-      async () => (await latestVisibleKernelApplyButton()) !== null,
-      { timeout: 45_000, timeoutMsg: "Create Apply never appeared" },
-    );
-    const createApply = await latestVisibleKernelApplyButton();
-    if (!createApply) throw new Error("Create Apply missing");
-    await createApply.waitForClickable({ timeout: 10_000 });
-    await createApply.click();
+    await clickKernelApplyButton();
 
     const appsSection = await $('section[aria-label="Personal apps"]');
     await appsSection.waitForExist({ timeout: 20_000 });

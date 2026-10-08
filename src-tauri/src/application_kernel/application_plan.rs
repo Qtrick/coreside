@@ -262,8 +262,11 @@ pub fn validate_plan_against_db(
     if plan.kind == ApplicationPlanKind::Evolve {
         let expected = plan.base_revision.expect("checked in validate_plan");
         // Authoritative application surface OCC (covers data-only evolves without component intents).
-        let primary =
-            resolve_application_surface(db, bound, None, scope.conversation_id.as_deref())?;
+        // Prefer durable tool_canvas binding — never conversation-scoped chat_inline
+        // preference from resolve_prompt_surface_for_tool. OCC must match
+        // load_application_spec / diff_surface_update (both use conversation_id=None).
+        // Explicit intent surface_ids are still OCC-checked below.
+        let primary = resolve_application_surface(db, bound, None, None)?;
         scope.enforce(&primary)?;
         if primary.definition_revision != expected {
             return Err(KernelError::RevisionConflict(format!(
@@ -662,7 +665,11 @@ pub fn lineage_scope_for_plan(
         // Structural validate will reject; keep request claims fail-closed.
         return Ok(request);
     };
-    match resolve_application_surface(db, bound, None, request.conversation_id.as_deref()) {
+    // ApplicationPlan evolve ownership follows the durable tool_canvas (or sole
+    // bound surface), not the chat_inline preferred by prompt resolve when a
+    // conversation_id claim is present. Otherwise OCC/scope can bind to inline
+    // while UpdateSurface diffs against tool_canvas.
+    match resolve_application_surface(db, bound, None, None) {
         Ok(lineage) => {
             let conversation_id = match (lineage.conversation_id.is_some(), request.conversation_id)
             {
@@ -1050,6 +1057,96 @@ mod tests {
                 .expect("global evolve must adapt");
             assert!(scope.conversation_id.is_none());
             assert!(scope.project_id.is_none());
+        }
+
+        #[test]
+        fn evolve_prefers_tool_canvas_over_conversation_inline_for_occ_and_scope() {
+            // Regression: with both tool_canvas and chat_inline for the same tool_id,
+            // ApplicationPlan must OCC/scope against canvas (matching load_application_spec),
+            // not the inline surface preferred by resolve_prompt_surface_for_tool.
+            let (_dir, mut db) = open_db("scope-canvas-vs-inline.db");
+            let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "C", None).unwrap();
+            let canvas = workspace_tool_surface(&mut db, "tool-dual-surface");
+            assert_eq!(canvas.placement, "tool_canvas");
+            assert_eq!(canvas.current_revision, 1);
+
+            let inline = create_inline_surface(
+                &mut db,
+                &conv.id,
+                None,
+                None,
+                "Inline dual",
+                &json!({
+                    "id": "doc-inline-dual",
+                    "name": "Inline dual",
+                    "layout": "stack",
+                    "components": [{"id": "t", "type": "text", "props": {"text": "inline"}}]
+                }),
+                &[],
+            )
+            .unwrap();
+            bind_surface_tool_id(&mut db, &inline.id, "tool-dual-surface");
+            // Advance inline revision so a mistaken inline OCC would conflict.
+            db.conn()
+                .execute(
+                    "UPDATE surfaces SET current_revision = 99 WHERE id = ?1",
+                    rusqlite::params![inline.id],
+                )
+                .unwrap();
+
+            let plan = {
+                let mut p = sample_create_plan();
+                p.kind = ApplicationPlanKind::Evolve;
+                p.application_id = Some("tool-dual-surface".into());
+                p.base_revision = Some(1);
+                p.intents = vec![ChangeIntent::UpdateSurface {
+                    tool_id: "tool-dual-surface".into(),
+                    tool: crate::ai::ToolDefinition {
+                        id: "tool-dual-surface".into(),
+                        name: "Dual".into(),
+                        description: "d".into(),
+                        layout: json!("stack"),
+                        components: vec![crate::ai::ToolComponent {
+                            id: "t".into(),
+                            component_type: "text".into(),
+                            props: Some(json!({"text": "evolved"})),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    },
+                    change_summary: Some("evolve canvas".into()),
+                    base_revision: Some(1),
+                }];
+                p
+            };
+
+            let scope = lineage_scope_for_plan(&db, &plan, Some(&conv.id), None)
+                .expect("canvas primary must omit conversation ownership");
+            assert!(
+                scope.conversation_id.is_none(),
+                "must not bind evolve scope to chat_inline when tool_canvas exists"
+            );
+
+            validate_plan_against_db(&db, &plan, &scope)
+                .expect("OCC must use canvas revision 1, not inline 99");
+
+            let validated = compile_plan_against_db(&db, &plan, &scope).expect("compile");
+            let targets: Vec<_> = validated
+                .compiled
+                .operations
+                .iter()
+                .filter_map(|o| o.target.surface_id.as_deref())
+                .collect();
+            assert!(
+                targets.iter().any(|sid| *sid == canvas.id.as_str()),
+                "diff must target tool_canvas {}, got {targets:?}",
+                canvas.id
+            );
+            assert!(
+                !targets.iter().any(|sid| *sid == inline.id.as_str()),
+                "diff must not target chat_inline {}",
+                inline.id
+            );
         }
 
         #[test]

@@ -238,20 +238,40 @@ img {
 
 /* Window-local overlay host — never a grid participant.
  * OverlayPortal mounts to document.body (#coreside-window-overlay-root).
- * ModalPortal portals .provider-modal-root under body (via display:contents). */
+ * ModalPortal portals .provider-modal-root under body (via display:contents).
+ *
+ * Do NOT cover the viewport while empty. An empty fixed inset:0 host sits at
+ * z-index 100; WebKit WebDriver hit-testing (elementFromPoint / isClickable)
+ * can still treat it as covering composer Apply even with pointer-events:none
+ * (Journey 21 CI: Apply displayed but "still not clickable"). Expand only when
+ * an overlay child is present. */
 .app-shell > .window-overlay-root,
 .app-shell > .provider-modal-root,
 body > .window-overlay-root,
 #coreside-window-overlay-root {
   position: fixed;
-  inset: 0;
+  /* Defeat cascaded inset:0 (e.g. .provider-modal-root) so width/height 0
+   * actually collapses — otherwise over-constrained fixed + inset still fills
+   * the viewport and WebKit WDIO can treat the host as covering Apply. */
+  inset: auto;
   z-index: 100;
   grid-column: 1 / -1;
   grid-row: 1 / -1;
+  width: 0;
+  height: 0;
+  margin: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.app-shell > .window-overlay-root:has(> *),
+.app-shell > .provider-modal-root:has(> *),
+body > .window-overlay-root:has(> *),
+#coreside-window-overlay-root:has(> *) {
+  inset: 0;
   width: auto;
   height: auto;
-  margin: 0;
-  pointer-events: none;
+  overflow: visible;
 }
 
 .app-shell > .window-overlay-root > *,
@@ -951,6 +971,9 @@ body > .window-overlay-root > *,
 }
 
 .composer {
+  position: relative;
+  z-index: 3;
+  flex-shrink: 0;
   padding: var(--space-2) var(--space-5) var(--space-2);
   border-top: 1px solid var(--border);
   background: var(--core-header-overlay);

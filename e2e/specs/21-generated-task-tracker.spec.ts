@@ -2,10 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   E2E_REPO_ROOT,
+  clickKernelApplyButton,
   denyPendingApprovalIfPresent,
   evidenceBinaryHash,
   evidenceIdentity,
-  latestVisibleKernelApplyButton,
   waitForAppReady,
 } from "../helpers.js";
 
@@ -49,18 +49,7 @@ describe("Journey 21 — generated Task Tracker vertical slice", () => {
     await send.click();
 
     // Composer sticky owns Apply when the same proposal is also inline in chat.
-    await browser.waitUntil(
-      async () => (await latestVisibleKernelApplyButton()) !== null,
-      {
-        timeout: 45_000,
-        timeoutMsg:
-          "Task Tracker kernel Apply never appeared (ApplicationPlan mock path)",
-      },
-    );
-    const applyBtn = await latestVisibleKernelApplyButton();
-    if (!applyBtn) throw new Error("Task Tracker Apply missing after wait");
-    await applyBtn.waitForClickable({ timeout: 10_000 });
-    await applyBtn.click();
+    await clickKernelApplyButton();
 
     // Open from Personal apps sidebar (must appear after proposal/tool apply refresh).
     // Prefer exact aria-label — WebKit WDIO throws on section…button*= partial-text CSS.

@@ -78,6 +78,10 @@ jobs:
         run: node scripts/assert-production-excludes-e2e.mjs
 
       - name: Build packaged app (unsigned / ad-hoc where required)
+        # Force bash: the Linux AppImage workaround uses POSIX if/fi. GitHub's
+        # default shell on windows-latest is PowerShell, which rejects that
+        # syntax (ParserError: Missing '(' after 'if') and fails in ~1s.
+        shell: bash
         # Linux: skip AppImage. Tauri's AppImage path downloads AppRun from
         # tauri-apps/binary-releases (apprun-old), which has returned HTTP 500
         # on CI and fails the whole Package job. deb (+ rpm) still prove Linux

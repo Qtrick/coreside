@@ -16,6 +16,7 @@ import {
   denyPendingApprovalIfPresent,
   evidenceBinaryHash,
   evidenceIdentity,
+  clickKernelApplyButton,
   latestVisibleKernelApplyButton,
   waitForAppReady,
 } from "../helpers.js";
@@ -47,19 +48,7 @@ describe("Journey 22 — ApplicationPlan evolution (due dates)", () => {
     await send.waitForClickable({ timeout: 10_000 });
     await send.click();
 
-    await browser.waitUntil(
-      async () => (await latestVisibleKernelApplyButton()) !== null,
-      {
-        timeout: 45_000,
-        timeoutMsg: "Create Apply never appeared (ApplicationPlan / mock path)",
-      },
-    );
-    const createApply = await latestVisibleKernelApplyButton();
-    if (!createApply) {
-      throw new Error("Create Apply missing after wait");
-    }
-    await createApply.waitForClickable({ timeout: 10_000 });
-    await createApply.click();
+    await clickKernelApplyButton();
 
     const appsSection = await $('section[aria-label="Personal apps"]');
     await appsSection.waitForExist({ timeout: 20_000 });
@@ -142,19 +131,7 @@ describe("Journey 22 — ApplicationPlan evolution (due dates)", () => {
       },
     );
 
-    await browser.waitUntil(
-      async () => (await latestVisibleKernelApplyButton()) !== null,
-      {
-        timeout: 20_000,
-        timeoutMsg: "Evolve Apply never appeared (due dates ApplicationPlan)",
-      },
-    );
-    const evolveBtn = await latestVisibleKernelApplyButton();
-    if (!evolveBtn) {
-      throw new Error("Evolve Apply missing after wait");
-    }
-    await evolveBtn.waitForClickable({ timeout: 10_000 });
-    await evolveBtn.click();
+    await clickKernelApplyButton(20_000);
 
     // Wait for kernel proposal to leave pending before remounting.
     await browser.waitUntil(

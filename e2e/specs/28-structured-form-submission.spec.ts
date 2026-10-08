@@ -16,6 +16,7 @@ import {
   evidenceBinaryHash,
   evidenceIdentity,
   invokeFromCurrentWindow,
+  clickKernelApplyButton,
   latestVisibleKernelApplyButton,
   waitForAppReady,
 } from "../helpers.js";
@@ -47,17 +48,7 @@ describe("Journey 28 — structured form submission", () => {
     await send.waitForClickable({ timeout: 10_000 });
     await send.click();
 
-    await browser.waitUntil(
-      async () => (await latestVisibleKernelApplyButton()) !== null,
-      {
-        timeout: 45_000,
-        timeoutMsg: "Tic-Tac-Toe kernel Apply never appeared",
-      },
-    );
-    const apply = await latestVisibleKernelApplyButton();
-    if (!apply) throw new Error("Tic-Tac-Toe Apply missing");
-    await apply.waitForClickable({ timeout: 10_000 });
-    await apply.click();
+    await clickKernelApplyButton();
     await browser.waitUntil(
       async () => (await latestVisibleKernelApplyButton()) === null,
       {

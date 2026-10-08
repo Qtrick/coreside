@@ -5,7 +5,7 @@ import {
   denyPendingApprovalIfPresent,
   evidenceBinaryHash,
   evidenceIdentity,
-  latestVisibleKernelApplyButton,
+  clickKernelApplyButton,
   waitForAppReady,
 } from "../helpers.js";
 
@@ -47,18 +47,7 @@ describe("Journey 23 — generated Habit Tracker vertical slice", () => {
     await send.waitForClickable({ timeout: 10_000 });
     await send.click();
 
-    await browser.waitUntil(
-      async () => (await latestVisibleKernelApplyButton()) !== null,
-      {
-        timeout: 45_000,
-        timeoutMsg:
-          "Habit Tracker kernel Apply never appeared (ApplicationPlan mock path)",
-      },
-    );
-    const applyBtn = await latestVisibleKernelApplyButton();
-    if (!applyBtn) throw new Error("Habit Tracker Apply missing after wait");
-    await applyBtn.waitForClickable({ timeout: 10_000 });
-    await applyBtn.click();
+    await clickKernelApplyButton();
 
     const appsSection = await $('section[aria-label="Personal apps"]');
     await appsSection.waitForExist({ timeout: 20_000 });

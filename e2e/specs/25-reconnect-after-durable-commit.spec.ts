@@ -16,6 +16,7 @@ import {
   denyPendingApprovalIfPresent,
   evidenceBinaryHash,
   evidenceIdentity,
+  clickKernelApplyButton,
   latestVisibleKernelApplyButton,
   simulateConversationReconnect,
   waitForAppReady,
@@ -48,14 +49,7 @@ describe("Journey 25 — reconnect after durable commit before renderer ack", ()
     await send.waitForClickable({ timeout: 10_000 });
     await send.click();
 
-    await browser.waitUntil(
-      async () => (await latestVisibleKernelApplyButton()) !== null,
-      { timeout: 45_000, timeoutMsg: "Create Apply never appeared" },
-    );
-    const createApply = await latestVisibleKernelApplyButton();
-    if (!createApply) throw new Error("Create Apply missing");
-    await createApply.waitForClickable({ timeout: 10_000 });
-    await createApply.click();
+    await clickKernelApplyButton();
 
     const appsSection = await $('section[aria-label="Personal apps"]');
     await appsSection.waitForExist({ timeout: 20_000 });
@@ -106,14 +100,7 @@ describe("Journey 25 — reconnect after durable commit before renderer ack", ()
     await send.waitForClickable({ timeout: 10_000 });
     await send.click();
 
-    await browser.waitUntil(
-      async () => (await latestVisibleKernelApplyButton()) !== null,
-      { timeout: 45_000, timeoutMsg: "Evolve Apply never appeared while unmounted" },
-    );
-    const evolveBtn = await latestVisibleKernelApplyButton();
-    if (!evolveBtn) throw new Error("Evolve Apply missing");
-    await evolveBtn.waitForClickable({ timeout: 10_000 });
-    await evolveBtn.click();
+    await clickKernelApplyButton();
     await browser.waitUntil(
       async () => (await latestVisibleKernelApplyButton()) === null,
       {

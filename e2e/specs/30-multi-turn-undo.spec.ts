@@ -18,6 +18,7 @@ import {
   evidenceBinaryHash,
   evidenceIdentity,
   invokeFromCurrentWindow,
+  clickKernelApplyButton,
   latestVisibleKernelApplyButton,
   listAppliedTransactions,
   waitForAppReady,
@@ -50,14 +51,7 @@ describe("Journey 30 — multi-turn application undo", () => {
     await send.waitForClickable({ timeout: 10_000 });
     await send.click();
 
-    await browser.waitUntil(
-      async () => (await latestVisibleKernelApplyButton()) !== null,
-      { timeout: 45_000, timeoutMsg: "Create Apply never appeared" },
-    );
-    const createApply = await latestVisibleKernelApplyButton();
-    if (!createApply) throw new Error("Create Apply missing");
-    await createApply.waitForClickable({ timeout: 10_000 });
-    await createApply.click();
+    await clickKernelApplyButton();
     await browser.waitUntil(
       async () => (await latestVisibleKernelApplyButton()) === null,
       { timeout: 20_000, timeoutMsg: "Create Apply still visible" },
@@ -109,14 +103,7 @@ describe("Journey 30 — multi-turn application undo", () => {
     await send.waitForClickable({ timeout: 10_000 });
     await send.click();
 
-    await browser.waitUntil(
-      async () => (await latestVisibleKernelApplyButton()) !== null,
-      { timeout: 45_000, timeoutMsg: "Evolve Apply never appeared" },
-    );
-    const evolveBtn = await latestVisibleKernelApplyButton();
-    if (!evolveBtn) throw new Error("Evolve Apply missing");
-    await evolveBtn.waitForClickable({ timeout: 10_000 });
-    await evolveBtn.click();
+    await clickKernelApplyButton();
     await browser.waitUntil(
       async () => (await latestVisibleKernelApplyButton()) === null,
       { timeout: 20_000, timeoutMsg: "Evolve Apply still visible" },

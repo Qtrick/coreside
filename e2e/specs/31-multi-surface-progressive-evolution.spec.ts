@@ -20,6 +20,7 @@ import {
   denyPendingApprovalIfPresent,
   evidenceBinaryHash,
   evidenceIdentity,
+  clickKernelApplyButton,
   latestVisibleKernelApplyButton,
   waitForAppReady,
 } from "../helpers.js";
@@ -51,19 +52,7 @@ describe("Journey 31 — multi-surface progressive evolution", () => {
     await send.waitForClickable({ timeout: 10_000 });
     await send.click();
 
-    await browser.waitUntil(
-      async () => (await latestVisibleKernelApplyButton()) !== null,
-      {
-        timeout: 45_000,
-        timeoutMsg: "Create Apply never appeared (Study Planner ApplicationPlan)",
-      },
-    );
-    const createApply = await latestVisibleKernelApplyButton();
-    if (!createApply) {
-      throw new Error("Create Apply missing after wait");
-    }
-    await createApply.waitForClickable({ timeout: 10_000 });
-    await createApply.click();
+    await clickKernelApplyButton();
 
     const appsSection = await $('section[aria-label="Personal apps"]');
     await appsSection.waitForExist({ timeout: 20_000 });
@@ -153,19 +142,7 @@ describe("Journey 31 — multi-surface progressive evolution", () => {
       },
     );
 
-    await browser.waitUntil(
-      async () => (await latestVisibleKernelApplyButton()) !== null,
-      {
-        timeout: 20_000,
-        timeoutMsg: "Evolve Apply never appeared (Study Planner priority plan)",
-      },
-    );
-    const evolveBtn = await latestVisibleKernelApplyButton();
-    if (!evolveBtn) {
-      throw new Error("Evolve Apply missing after wait");
-    }
-    await evolveBtn.waitForClickable({ timeout: 10_000 });
-    await evolveBtn.click();
+    await clickKernelApplyButton(20_000);
 
     await browser.waitUntil(
       async () => (await latestVisibleKernelApplyButton()) === null,

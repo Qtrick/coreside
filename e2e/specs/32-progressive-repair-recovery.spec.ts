@@ -19,6 +19,7 @@ import {
   denyPendingApprovalIfPresent,
   evidenceBinaryHash,
   evidenceIdentity,
+  clickKernelApplyButton,
   latestVisibleKernelApplyButton,
   waitForAppReady,
 } from "../helpers.js";
@@ -92,20 +93,7 @@ describe("Journey 32 — progressive repair recovery", () => {
     await send.waitForClickable({ timeout: 10_000 });
     await send.click();
 
-    await browser.waitUntil(
-      async () => (await latestVisibleKernelApplyButton()) !== null,
-      {
-        timeout: 45_000,
-        timeoutMsg:
-          "Repair success Apply never appeared (progressive_repair_recovery_success)",
-      },
-    );
-    const applyBtn = await latestVisibleKernelApplyButton();
-    if (!applyBtn) {
-      throw new Error("Repair success Apply missing after wait");
-    }
-    await applyBtn.waitForClickable({ timeout: 10_000 });
-    await applyBtn.click();
+    await clickKernelApplyButton();
 
     await browser.waitUntil(
       async () => (await latestVisibleKernelApplyButton()) === null,

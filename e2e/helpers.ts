@@ -448,6 +448,83 @@ export async function latestVisibleKernelApplyButton() {
 }
 
 /**
+ * Click an already-visible kernel Apply.
+ *
+ * Prefer a real WebDriver click. On WebKit CI, an empty fixed overlay host or
+ * backdrop-filter compositing can make isClickable false while the button is
+ * displayed and enabled — fall back to HTMLElement.click() only then.
+ *
+ * Fallback must target the same "latest visible" button as
+ * latestVisibleKernelApplyButton — never document.querySelector (first match),
+ * which can be a hidden inline duplicate while the composer sticky owns Apply.
+ */
+export async function clickVisibleKernelApplyButton() {
+  const applyBtn = await latestVisibleKernelApplyButton();
+  if (!applyBtn) throw new Error("Kernel Apply missing");
+  await applyBtn.scrollIntoView({ block: "center" });
+
+  try {
+    await applyBtn.waitForClickable({ timeout: 8_000 });
+    await applyBtn.click();
+    return;
+  } catch (clickErr) {
+    // Single execute: pick latest visible Apply, allow DOM click only when the
+    // page hit target is the button or an inert overlay — never through a modal.
+    const outcome = await browser.execute((sel: string) => {
+      const nodes = Array.from(
+        document.querySelectorAll(sel),
+      ) as HTMLButtonElement[];
+      let el: HTMLButtonElement | null = null;
+      for (const node of nodes) {
+        if (node.disabled) continue;
+        const style = window.getComputedStyle(node);
+        if (style.display === "none" || style.visibility === "hidden") continue;
+        const box = node.getBoundingClientRect();
+        if (box.width <= 0 || box.height <= 0) continue;
+        el = node;
+      }
+      if (!el) {
+        return { ok: false as const, reason: "missing" as const };
+      }
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(
+        r.left + r.width / 2,
+        r.top + r.height / 2,
+      ) as HTMLElement | null;
+      const topPe = top ? window.getComputedStyle(top).pointerEvents : "";
+      const isSelfOrChild = Boolean(top && (top === el || el.contains(top)));
+      const inertTop =
+        !top ||
+        topPe === "none" ||
+        top.id === "coreside-window-overlay-root" ||
+        top.classList.contains("window-overlay-root");
+      if (!(isSelfOrChild || inertTop)) {
+        return { ok: false as const, reason: "obstructed" as const };
+      }
+      el.click();
+      return { ok: true as const };
+    }, KERNEL_APPLY_SELECTOR);
+
+    if (!outcome.ok) {
+      throw clickErr;
+    }
+  }
+}
+
+/** Wait for kernel Apply to appear, then click it. */
+export async function clickKernelApplyButton(timeout = 45_000) {
+  await browser.waitUntil(
+    async () => (await latestVisibleKernelApplyButton()) !== null,
+    {
+      timeout,
+      timeoutMsg:
+        "Kernel Apply never appeared (ApplicationPlan mock / proposal path)",
+    },
+  );
+  await clickVisibleKernelApplyButton();
+}
+
+/**
  * Re-subscribe path used when the renderer becomes visible again
  * (visibilitychange + focus). Exercises catch-up without killing the process.
  */
