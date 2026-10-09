@@ -113,8 +113,8 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
       className={`${isUser ? "message-bubble user" : "message-row assistant"}${isError ? " error" : ""}`}
       aria-label={isUser ? "Your message" : "Agent message"}
     >
-      <div className="message-meta">
-        <span>{isUser ? "You" : "Coreside agent"}</span>
+      <div className={`message-meta${isUser ? "" : " message-meta-assistant"}`}>
+        {isUser ? <span>You</span> : null}
         <div className="message-meta-right">
           <time dateTime={message.createdAt}>
             {new Date(message.createdAt).toLocaleTimeString([], {

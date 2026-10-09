@@ -296,10 +296,6 @@ const STARTER_PROMPTS = [
         ))}
       {showLiveRow ? (
         <div className="message-row assistant agent-live" aria-label="Agent is responding">
-          <div className="message-meta">
-            <span>Coreside agent</span>
-          </div>
-
           {/* Human-Readable Generation Lifecycle Indicator */}
           {liveHere ? (
             <div className="generation-lifecycle" aria-label="Application progress">

@@ -745,14 +745,15 @@ body > .window-overlay-root > *,
 .message-list {
   flex: 1;
   overflow: auto;
-  padding: var(--space-5);
+  /* Full chat pane with modest inset — matches ChatGPT/Claude content gutters. */
+  padding: var(--space-4) clamp(0.85rem, 2.2vw, 1.75rem);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
 }
 
 .message-bubble {
-  max-width: min(720px, 92%);
+  max-width: min(36rem, 100%);
   padding: 0.9rem 1rem;
   border-radius: var(--radius);
   border: 1px solid var(--border);
@@ -766,12 +767,12 @@ body > .window-overlay-root > *,
   border-color: color-mix(in srgb, var(--accent-primary) 22%, var(--border));
 }
 
-/* Agent replies are flush like ChatGPT/Claude — no card/bubble chrome. */
+/* Agent replies are flush like ChatGPT/Claude — no card/bubble chrome; full column width. */
 .message-row.assistant {
-  align-self: flex-start;
-  max-width: min(720px, 92%);
+  align-self: stretch;
+  max-width: 100%;
   width: 100%;
-  padding: 0.2rem 0;
+  padding: 0.15rem 0;
   border: none;
   background: transparent;
   box-shadow: none;
@@ -790,7 +791,7 @@ body > .window-overlay-root > *,
 }
 
 .agent-live {
-  min-width: min(420px, 92%);
+  width: 100%;
 }
 
 .agent-action-log {
@@ -871,6 +872,23 @@ body > .window-overlay-root > *,
   margin-bottom: var(--space-2);
   font-size: 0.75rem;
   color: var(--text-secondary);
+}
+
+/* Agent rows: no name label — time/actions sit end-aligned like ChatGPT/Claude. */
+.message-meta-assistant {
+  justify-content: flex-end;
+  margin-bottom: 0.2rem;
+  min-height: 1.4rem;
+}
+
+.message-meta-assistant time {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.message-row:hover .message-meta-assistant time,
+.message-row:focus-within .message-meta-assistant time {
+  opacity: 1;
 }
 
 .message-meta-right {
@@ -999,7 +1017,7 @@ body > .window-overlay-root > *,
   position: relative;
   z-index: 3;
   flex-shrink: 0;
-  padding: var(--space-2) var(--space-5) var(--space-2);
+  padding: var(--space-2) clamp(0.85rem, 2.2vw, 1.75rem) var(--space-2);
   border-top: 1px solid var(--border);
   background: var(--core-header-overlay);
 }

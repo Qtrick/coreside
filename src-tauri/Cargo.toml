@@ -92,3 +92,9 @@ debug = false
 codegen-units = 16
 lto = false
 strip = "debuginfo"
+
+# Pub APIs reserved for future surfaces trip hundreds of dead_code warnings on every
+# `tauri dev` rebuild (multi-second terminal I/O). Clippy CI still runs separately.
+[lints.rust]
+dead_code = "allow"
+unused = "allow"

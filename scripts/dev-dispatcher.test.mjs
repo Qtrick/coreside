@@ -140,7 +140,11 @@ describe("platform dispatcher source", () => {
       src,
       /else\s*\{\s*console\.log\(`dev: \$\{process\.platform\} uses raw tauri dev/,
     );
-    const elseBlock = src.slice(src.indexOf("} else {"));
+    const platformElse = src.indexOf(
+      "uses raw tauri dev (no adaptive .app)",
+    );
+    assert.ok(platformElse > 0);
+    const elseBlock = src.slice(platformElse);
     assert.ok(elseBlock.includes('[tauriJs, "dev", ...extraArgs]'));
     assert.ok(!elseBlock.includes("--runner"));
   });
@@ -153,6 +157,19 @@ describe("platform dispatcher source", () => {
     assert.ok(packageJson.scripts["check:rust"].includes("env -u CARGO_TARGET_DIR"));
     assert.ok(packageJson.scripts.build.includes("env -u CARGO_TARGET_DIR"));
     assert.equal(packageJson.scripts["build:web"], "vite build");
+  });
+
+  it("prepare overlaps cargo build with ensureDevAppBundle", () => {
+    const prepare = readScript("scripts/macos-packaged-dev-prepare.mjs");
+    assert.ok(prepare.includes("cargoBuild"));
+    assert.ok(prepare.includes("ensureDevAppBundle()"));
+    assert.ok(prepare.includes("await cargoPromise"));
+    assert.ok(prepare.indexOf("ensureDevAppBundle()") < prepare.indexOf("await cargoPromise"));
+  });
+
+  it("dev offers CORESIDE_DEV_RAW escape hatch for non-adaptive launches", () => {
+    const dev = readScript("scripts/dev.mjs");
+    assert.ok(dev.includes('CORESIDE_DEV_RAW === "1"'));
   });
 });
 
