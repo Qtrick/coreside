@@ -110,7 +110,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
 
   return (
     <article
-      className={`message-bubble ${isUser ? "user" : "assistant"}${isError ? " error" : ""}`}
+      className={`${isUser ? "message-bubble user" : "message-row assistant"}${isError ? " error" : ""}`}
       aria-label={isUser ? "Your message" : "Agent message"}
     >
       <div className="message-meta">

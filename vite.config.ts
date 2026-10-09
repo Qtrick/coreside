@@ -12,6 +12,23 @@ export default defineConfig({
     },
   },
   clearScreen: false,
+  // Pre-bundle the chat shell deps so `tauri dev` / `dev:web` cold starts skip discovery.
+  optimizeDeps: {
+    include: [
+      "react",
+      "react-dom",
+      "react/jsx-runtime",
+      "zustand",
+      "zod",
+      "lucide-react",
+      "@tauri-apps/api",
+      "@tauri-apps/api/core",
+      "@tauri-apps/api/event",
+      "@tauri-apps/plugin-shell",
+      "react-markdown",
+      "remark-gfm",
+    ],
+  },
   server: {
     port: 1422,
     strictPort: true,
@@ -26,12 +43,17 @@ export default defineConfig({
     watch: {
       ignored: ["**/src-tauri/**", "**/.reference/**"],
     },
+    warmup: {
+      clientFiles: ["./src/main.tsx", "./src/app/App.tsx"],
+    },
   },
   envPrefix: ["VITE_", "TAURI_"],
   build: {
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
     minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    // Report timing in CI logs without changing emit.
+    reportCompressedSize: false,
   },
   test: {
     environment: "jsdom",

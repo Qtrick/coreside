@@ -144,6 +144,16 @@ describe("platform dispatcher source", () => {
     assert.ok(elseBlock.includes('[tauriJs, "dev", ...extraArgs]'));
     assert.ok(!elseBlock.includes("--runner"));
   });
+
+  it("dev and prepare drop CARGO_TARGET_DIR so incremental caches stay in-tree", () => {
+    const dev = readScript("scripts/dev.mjs");
+    const prepare = readScript("scripts/macos-packaged-dev-prepare.mjs");
+    assert.ok(dev.includes("delete env.CARGO_TARGET_DIR"));
+    assert.ok(prepare.includes("delete cargoEnv.CARGO_TARGET_DIR"));
+    assert.ok(packageJson.scripts["check:rust"].includes("env -u CARGO_TARGET_DIR"));
+    assert.ok(packageJson.scripts.build.includes("env -u CARGO_TARGET_DIR"));
+    assert.equal(packageJson.scripts["build:web"], "vite build");
+  });
 });
 
 describe("release vs debug identity", () => {

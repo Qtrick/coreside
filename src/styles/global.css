@@ -766,14 +766,27 @@ body > .window-overlay-root > *,
   border-color: color-mix(in srgb, var(--accent-primary) 22%, var(--border));
 }
 
-.message-bubble.assistant {
+/* Agent replies are flush like ChatGPT/Claude — no card/bubble chrome. */
+.message-row.assistant {
   align-self: flex-start;
-  border-color: color-mix(in srgb, var(--accent-primary) 18%, var(--border));
+  max-width: min(720px, 92%);
+  width: 100%;
+  padding: 0.2rem 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 
-.message-bubble.error {
+.message-bubble.error,
+.message-row.assistant.error {
   border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
   background: var(--danger-muted);
+}
+
+.message-row.assistant.error {
+  padding: 0.75rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  border-radius: var(--radius);
 }
 
 .agent-live {
@@ -806,8 +819,27 @@ body > .window-overlay-root > *,
   font-size: 0.78rem;
 }
 
-.agent-stream-text {
-  animation: agent-fade-in 180ms ease;
+.animated-reveal-text {
+  display: inline;
+}
+
+.stream-char {
+  display: inline;
+  animation: stream-char-in 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: opacity, transform, filter;
+}
+
+@keyframes stream-char-in {
+  from {
+    opacity: 0;
+    filter: blur(3.5px);
+    transform: translateY(0.28em);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
 }
 
 .stream-caret {
@@ -828,15 +860,6 @@ body > .window-overlay-root > *,
   50%,
   100% {
     opacity: 0;
-  }
-}
-
-@keyframes agent-fade-in {
-  from {
-    opacity: 0.35;
-  }
-  to {
-    opacity: 1;
   }
 }
 
@@ -865,7 +888,9 @@ body > .window-overlay-root > *,
 }
 
 .message-bubble:hover .message-actions,
-.message-bubble:focus-within .message-actions {
+.message-bubble:focus-within .message-actions,
+.message-row:hover .message-actions,
+.message-row:focus-within .message-actions {
   opacity: 1;
 }
 

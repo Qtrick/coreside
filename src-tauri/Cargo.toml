@@ -75,3 +75,20 @@ optional = true
 [dependencies.tauri-plugin-wdio-webdriver]
 version = "1.2.0"
 optional = true
+
+# Compile-time profiles (product behavior unchanged).
+# Dev: line tables for our crate; deps omit debuginfo so incremental links stay lean.
+# One-time cost: first `cargo build` after this change recompiles dependencies.
+# Release: parallel codegen; no LTO (fat/thin LTO slows packaging turnaround).
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+incremental = true
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+codegen-units = 16
+lto = false
+strip = "debuginfo"

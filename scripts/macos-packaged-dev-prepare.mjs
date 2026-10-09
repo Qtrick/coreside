@@ -56,10 +56,13 @@ if (conflicts.length > 0) {
   }
 }
 
+const cargoEnv = { ...process.env };
+// Keep incremental artifacts in src-tauri/target (not IDE sandbox caches).
+delete cargoEnv.CARGO_TARGET_DIR;
 const build = spawnSync("cargo", ["build", ...cargoArgs], {
   cwd: TAURI_DIR,
   stdio: "inherit",
-  env: process.env,
+  env: cargoEnv,
   shell: false,
 });
 if (build.error) fail(`cargo spawn failed: ${build.error.message}`);

@@ -26,10 +26,15 @@ function resolveTauriCli() {
 }
 
 function run(command, args) {
+  // Cursor/agent sandboxes often redirect CARGO_TARGET_DIR to a cold cache,
+  // forcing full Rust rebuilds on every `npm run dev`. Prefer the in-tree
+  // incremental target (e2e/storage-audit keep their own overrides).
+  const env = { ...process.env };
+  delete env.CARGO_TARGET_DIR;
   const child = spawn(command, args, {
     cwd: ROOT,
     stdio: "inherit",
-    env: process.env,
+    env,
   });
   const signals = ["SIGINT", "SIGTERM", "SIGHUP"];
   const forward = (sig) => {

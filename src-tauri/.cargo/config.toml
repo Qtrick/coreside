@@ -1,0 +1,7 @@
+# Shared cargo defaults for the Coreside Tauri crate.
+# Profile knobs (debuginfo, LTO, codegen-units) live in Cargo.toml.
+#
+# Note: IDE sandboxes sometimes set CARGO_TARGET_DIR to a cold external cache.
+# Dev/build entrypoints (scripts/dev.mjs, macos-packaged-dev-prepare.mjs, and
+# npm cargo scripts) unset that override so incremental artifacts stay in
+# src-tauri/target/.

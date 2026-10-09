@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { shouldShowActionLog } from "@/lib/action-log";
 import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
+import { AnimatedRevealText } from "./AnimatedRevealText";
 import { MessageBubble } from "./MessageBubble";
 import {
   computeLiveApplicationGenerationIndex,
@@ -39,11 +40,39 @@ export function MessageList() {
   const stickToBottom = useRef(true);
   const restoredFor = useRef<string | null>(null);
   const [showNewUpdates, setShowNewUpdates] = useState(false);
+  /** Keep the live row mounted until letter reveal finishes after the turn ends. */
+  const [holdStreamText, setHoldStreamText] = useState("");
+  const [holdingReveal, setHoldingReveal] = useState(false);
   const prevMessageCount = useRef(messages.length);
   const liveHere =
     sending &&
     Boolean(activeConversationId) &&
     sendingConversationId === activeConversationId;
+
+  useEffect(() => {
+    if (streamingText) {
+      setHoldStreamText(streamingText);
+      setHoldingReveal(true);
+    }
+  }, [streamingText]);
+
+  useEffect(() => {
+    if (liveHere) setHoldingReveal(true);
+  }, [liveHere]);
+
+  useEffect(() => {
+    setHoldingReveal(false);
+    setHoldStreamText("");
+  }, [activeConversationId]);
+
+  const showLiveRow = liveHere || holdingReveal;
+  const revealText = streamingText || holdStreamText;
+
+  const finishRevealHold = () => {
+    if (liveHere) return;
+    setHoldingReveal(false);
+    setHoldStreamText("");
+  };
 
   useEffect(() => {
     const el = listRef.current;
@@ -242,7 +271,7 @@ const STARTER_PROMPTS = [
         </button>
       ) : null}
       {messages
-        .filter((message) => {
+        .filter((message, index, list) => {
           const isSilent = Boolean(
             message.metadata &&
               typeof message.metadata === "object" &&
@@ -250,38 +279,50 @@ const STARTER_PROMPTS = [
           );
           // Silent app interactions (e.g. game moves) remain persisted and auditable,
           // but hide ordinary chat bubbles unless Action Log mode is always on.
-          return !isSilent || actionLogMode === "always";
+          if (isSilent && actionLogMode !== "always") return false;
+          // Avoid duplicating the trailing assistant message while letter-reveal finishes.
+          if (
+            holdingReveal &&
+            !liveHere &&
+            message.role === "assistant" &&
+            index === list.length - 1
+          ) {
+            return false;
+          }
+          return true;
         })
         .map((message) => (
           <MessageBubble key={message.id} message={message} />
         ))}
-      {liveHere ? (
-        <div className="message-bubble assistant agent-live" aria-label="Agent is responding">
+      {showLiveRow ? (
+        <div className="message-row assistant agent-live" aria-label="Agent is responding">
           <div className="message-meta">
             <span>Coreside agent</span>
           </div>
 
           {/* Human-Readable Generation Lifecycle Indicator */}
-          <div className="generation-lifecycle" aria-label="Application progress">
-            {LIVE_APPLICATION_GENERATION_STEPS.map((label, index) => (
-              <span key={label} style={{ display: "contents" }}>
-                {index > 0 ? <span className="lifecycle-arrow">→</span> : null}
-                <div
-                  className={`lifecycle-step ${
-                    lifecycleIndex === index
-                      ? "active"
-                      : lifecycleIndex > index
-                        ? "complete"
-                        : ""
-                  }`}
-                >
-                  <span className="step-dot" /> {label}
-                </div>
-              </span>
-            ))}
-          </div>
+          {liveHere ? (
+            <div className="generation-lifecycle" aria-label="Application progress">
+              {LIVE_APPLICATION_GENERATION_STEPS.map((label, index) => (
+                <span key={label} style={{ display: "contents" }}>
+                  {index > 0 ? <span className="lifecycle-arrow">→</span> : null}
+                  <div
+                    className={`lifecycle-step ${
+                      lifecycleIndex === index
+                        ? "active"
+                        : lifecycleIndex > index
+                          ? "complete"
+                          : ""
+                    }`}
+                  >
+                    <span className="step-dot" /> {label}
+                  </div>
+                </span>
+              ))}
+            </div>
+          ) : null}
 
-          {showLiveActionLog && visibleActions.length > 0 ? (
+          {liveHere && showLiveActionLog && visibleActions.length > 0 ? (
             <ul className="agent-action-log" aria-label="Action log">
               {visibleActions.map((label, index) => (
                 <li
@@ -292,7 +333,7 @@ const STARTER_PROMPTS = [
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : liveHere ? (
             <p className="muted agent-action-pending">
               {showLiveActionLog &&
               latestAction &&
@@ -301,8 +342,8 @@ const STARTER_PROMPTS = [
                 ? humanizeAgentActionLabel(latestAction)
                 : "Working…"}
             </p>
-          )}
-          {streamingText ? (
+          ) : null}
+          {revealText ? (
             <div
               className="message-content agent-stream-text"
               role="status"
@@ -319,8 +360,8 @@ const STARTER_PROMPTS = [
               }
             >
               <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-                {streamingText}
-                <span className="stream-caret" aria-hidden />
+                <AnimatedRevealText text={revealText} onCaughtUp={finishRevealHold} />
+                {liveHere ? <span className="stream-caret" aria-hidden /> : null}
               </p>
             </div>
           ) : (
