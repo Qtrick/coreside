@@ -46,10 +46,28 @@ export function sanitizeConsumerError(raw: string | null | undefined): string {
   return trimmed;
 }
 
+export type LiveGenerationHints = {
+  /** Kernel proposal awaiting Apply — real Review step. */
+  hasPendingProposal?: boolean;
+  /** User/kernel apply in flight. */
+  applying?: boolean;
+  /** Declarative/test verification in flight. */
+  testing?: boolean;
+  /** Proposal applied successfully this turn. */
+  ready?: boolean;
+};
+
 export function computeLiveApplicationGenerationIndex(
   actions: string[],
   streaming: boolean,
+  hints: LiveGenerationHints = {},
 ): LiveApplicationGenerationIndex {
+  // Authoritative proposal/apply state wins over action-log heuristics.
+  if (hints.ready) return 5;
+  if (hints.testing) return 4;
+  if (hints.applying) return 3;
+  if (hints.hasPendingProposal) return 2;
+
   const combined = actions.join(" ").toLowerCase();
 
   if (

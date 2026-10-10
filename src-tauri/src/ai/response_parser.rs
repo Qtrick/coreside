@@ -56,7 +56,25 @@ pub fn parse_agent_response(raw: &str) -> Result<ParsedAgentResponse, String> {
                                     .settings_change
                                     .as_ref()
                                     .is_some_and(|sc| sc.is_empty()));
-                    if incomplete_tool || incomplete_settings {
+                    // Keep applicationPlan: drop a broken companion tool_change and re-validate.
+                    if incomplete_tool && payload.application_plan.is_some() {
+                        warnings.push(format!(
+                            "Cleared incomplete tool_change; keeping applicationPlan: {verr}"
+                        ));
+                        payload.tool_change = None;
+                        if payload.validate().is_ok() {
+                            return Ok(ParsedAgentResponse {
+                                payload,
+                                recovered: true,
+                                parse_warnings: warnings,
+                            });
+                        }
+                    }
+                    // Prefer keeping applicationPlan — soft-downgrade would drop the
+                    // create/evolve path and leave false "Created…" prose with no proposal.
+                    if (incomplete_tool || incomplete_settings)
+                        && payload.application_plan.is_none()
+                    {
                         let label = if incomplete_settings {
                             "settings_change"
                         } else {
@@ -118,7 +136,15 @@ pub fn parse_agent_response(raw: &str) -> Result<ParsedAgentResponse, String> {
                 }
             }
 
-            // Last resort: treat entire text as assistant message.
+            // Never dump agent JSON envelopes (applicationPlan / toolChange / …)
+            // into the chat as plain text — fail closed so the turn can retry.
+            if looks_like_agent_envelope(trimmed) || looks_like_agent_envelope(json_str) {
+                return Err(format!(
+                    "Could not parse the application response ({primary_err}). Ask Coreside to try again."
+                ));
+            }
+
+            // Last resort: treat entire text as assistant message (prose only).
             let recovered = ParsedAgentResponse {
                 payload: AgentResponsePayload {
                     schema_version: SCHEMA_VERSION.to_string(),
@@ -146,6 +172,21 @@ pub fn parse_agent_response(raw: &str) -> Result<ParsedAgentResponse, String> {
             Ok(recovered)
         }
     }
+}
+
+fn looks_like_agent_envelope(s: &str) -> bool {
+    let t = s.trim_start();
+    if !t.starts_with('{') {
+        return false;
+    }
+    // Structural keys that must never appear as user-facing prose.
+    t.contains("\"applicationPlan\"")
+        || t.contains("\"application_plan\"")
+        || t.contains("\"toolChange\"")
+        || t.contains("\"tool_change\"")
+        || t.contains("\"schemaVersion\"")
+        || t.contains("\"operations\"")
+        || t.contains("\"settingsChange\"")
 }
 
 fn strip_code_fence(s: &str) -> &str {
@@ -202,7 +243,7 @@ fn try_recover_from_value(value: &Value) -> Option<ParsedAgentResponse> {
                     .tool_change
                     .as_ref()
                     .is_some_and(|tc| tc.tool.is_none()));
-        if incomplete {
+        if incomplete && payload.application_plan.is_none() {
             payload.response_type = ResponseType::Message;
             payload.tool_change = None;
             return Some(ParsedAgentResponse {
@@ -213,9 +254,43 @@ fn try_recover_from_value(value: &Value) -> Option<ParsedAgentResponse> {
                 ],
             });
         }
+        // Keep a deserializable applicationPlan even when other fields failed validate.
+        if payload.application_plan.is_some() {
+            let mut warnings = vec![
+                "Recovered applicationPlan via lenient JSON value parse".into(),
+            ];
+            if incomplete {
+                payload.tool_change = None;
+                warnings.push(
+                    "Cleared incomplete tool_change while preserving applicationPlan".into(),
+                );
+            }
+            if payload.response_type == ResponseType::Message
+                || matches!(payload.response_type, ResponseType::ToolChange)
+            {
+                payload.response_type = ResponseType::ToolChange;
+            }
+            return Some(ParsedAgentResponse {
+                payload,
+                recovered: true,
+                parse_warnings: warnings,
+            });
+        }
     }
 
-    let safe_type = if matches!(response_type, ResponseType::ToolChange) {
+    let recovered_plan = obj
+        .get("applicationPlan")
+        .or_else(|| obj.get("application_plan"))
+        .and_then(|v| {
+            serde_json::from_value::<crate::application_kernel::application_plan::ApplicationPlan>(
+                v.clone(),
+            )
+            .ok()
+        });
+
+    let safe_type = if recovered_plan.is_some() {
+        ResponseType::ToolChange
+    } else if matches!(response_type, ResponseType::ToolChange) {
         ResponseType::Message
     } else {
         response_type
@@ -227,7 +302,7 @@ fn try_recover_from_value(value: &Value) -> Option<ParsedAgentResponse> {
             assistant_message: msg,
             response_type: safe_type,
             tool_change: None,
-            application_plan: None,
+            application_plan: recovered_plan,
             settings_change: None,
             tool_calls: None,
             citations: None,
@@ -330,6 +405,60 @@ mod tests {
     }
 
     #[test]
+    fn keeps_application_plan_when_companion_tool_change_is_incomplete() {
+        use crate::ai::plan_fixtures::{plan_response_json, task_tracker_create_plan};
+        use serde_json::Value;
+
+        let plan = task_tracker_create_plan();
+        let mut envelope: Value =
+            serde_json::from_str(&plan_response_json("Proposed Task Tracker.", &plan)).unwrap();
+        // Incomplete companion: responseType tool_change but tool is missing.
+        envelope["toolChange"] = serde_json::json!({
+            "action": "create",
+            "changeSummary": "broken companion"
+        });
+        let raw = envelope.to_string();
+        let parsed = parse_agent_response(&raw).expect("plan must survive incomplete toolChange");
+        assert!(
+            parsed.payload.application_plan.is_some(),
+            "applicationPlan must not be dropped when companion toolChange is incomplete"
+        );
+        assert!(
+            parsed.payload.tool_change.is_none(),
+            "incomplete toolChange should be cleared"
+        );
+        assert_eq!(parsed.payload.response_type, ResponseType::ToolChange);
+        let ops = parsed
+            .payload
+            .inspection_operations()
+            .expect("plan must still compile");
+        assert!(
+            ops.iter().any(|o| o.op_type == "surface.create"),
+            "recovered plan must still compile to surface.create"
+        );
+    }
+
+    #[test]
+    fn accepts_application_plan_without_companion_tool_change() {
+        use crate::ai::plan_fixtures::task_tracker_create_plan;
+        use serde_json::json;
+
+        let plan = task_tracker_create_plan();
+        let raw = json!({
+            "schemaVersion": "1",
+            "assistantMessage": "Proposed Task Tracker.",
+            "responseType": "tool_change",
+            "applicationPlan": plan,
+        })
+        .to_string();
+        let parsed = parse_agent_response(&raw).expect("plan-only tool_change must validate");
+        assert!(parsed.payload.application_plan.is_some());
+        assert!(parsed.payload.tool_change.is_none());
+        let ops = parsed.payload.inspection_operations().unwrap();
+        assert!(ops.iter().any(|o| o.op_type == "surface.create"));
+    }
+
+    #[test]
     fn recovers_assistant_message_on_bad_json() {
         let raw = "Sure, I can help with that.";
         let parsed = parse_agent_response(raw).unwrap();
@@ -339,6 +468,18 @@ mod tests {
             "Sure, I can help with that."
         );
         assert_eq!(parsed.payload.response_type, ResponseType::Message);
+    }
+
+    #[test]
+    fn rejects_dumping_application_plan_envelope_as_chat() {
+        // Malformed envelope (not AgentResponsePayload) must not become visible prose.
+        let raw = r#"{"applicationPlan":{"schemaVersion":"1","planId":"x","kind":"create","summary":"Task manager","steps":[],"intents":[]}}"#;
+        let err = parse_agent_response(raw).unwrap_err();
+        assert!(
+            err.contains("Could not parse") || err.to_lowercase().contains("application"),
+            "unexpected err: {err}"
+        );
+        assert!(!err.contains("\"applicationPlan\""));
     }
 
     #[test]

@@ -96,9 +96,36 @@ describe("applyPendingKernelProposal", () => {
     expect(listTools).toHaveBeenCalledTimes(1);
     expect(useAppStore.getState().pendingKernelProposal).toBeNull();
     expect(useAppStore.getState().pendingToolChange).toBeNull();
+    expect(useAppStore.getState().kernelProposalApplying).toBe(false);
     expect(useAppStore.getState().tools).toEqual([
       { id: "tool-1", name: "Task Tracker", createdAt: "", updatedAt: "" },
     ]);
+  });
+
+  it("sets kernelProposalApplying while decide is in flight", async () => {
+    let resolveDecide: (value: unknown) => void = () => undefined;
+    kernelDecideProposal.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDecide = resolve;
+        }),
+    );
+    const { useAppStore } = await import("@/stores/app-store");
+    useAppStore.setState({
+      pendingKernelProposal: pendingProposal,
+      pendingToolChange: null,
+      messages: [],
+      tools: [],
+      kernelProposalApplying: false,
+      activeConversationId: "conv-1",
+      sendError: null,
+    });
+
+    const applyPromise = useAppStore.getState().applyPendingKernelProposal();
+    expect(useAppStore.getState().kernelProposalApplying).toBe(true);
+    resolveDecide({ apply: {} });
+    await applyPromise;
+    expect(useAppStore.getState().kernelProposalApplying).toBe(false);
   });
 
   it("leaves unrelated pendingToolChange when message ids differ", async () => {

@@ -141,6 +141,8 @@ type AppStore = {
   deleteProjectId: string | null;
   renameConversationDialogOpen: boolean;
   renameConversationId: string | null;
+  deleteConversationDialogOpen: boolean;
+  deleteConversationId: string | null;
   projectActionBusy: boolean;
   projectActionError: string | null;
 
@@ -179,6 +181,8 @@ type AppStore = {
   pendingToolChange: PendingToolChange | null;
   pendingSettingsChange: PendingSettingsChange | null;
   pendingKernelProposal: PendingKernelProposal | null;
+  /** True while Apply/Discard IPC for the staged kernel proposal is in flight. */
+  kernelProposalApplying: boolean;
   appConflict: AppConflict | null;
   surfaceDraftConflict: SurfaceDraftConflict | null;
   sending: boolean;
@@ -226,6 +230,7 @@ type AppStore = {
   setAddChatsDialogOpen: (projectId: string | null) => void;
   setDeleteProjectDialogOpen: (projectId: string | null) => void;
   setRenameConversationDialogOpen: (conversationId: string | null) => void;
+  setDeleteConversationDialogOpen: (conversationId: string | null) => void;
   setProjectsExpanded: (expanded: boolean) => void;
 
   refreshProjects: () => Promise<void>;
@@ -910,6 +915,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   deleteProjectId: null,
   renameConversationDialogOpen: false,
   renameConversationId: null,
+  deleteConversationDialogOpen: false,
+  deleteConversationId: null,
   projectActionBusy: false,
   projectActionError: null,
 
@@ -946,6 +953,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   pendingToolChange: null,
   pendingSettingsChange: null,
   pendingKernelProposal: null,
+  kernelProposalApplying: false,
   appConflict: null,
   surfaceDraftConflict: null,
   sending: false,
@@ -1523,6 +1531,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       projectActionError: null,
     }),
 
+  setDeleteConversationDialogOpen: (conversationId) =>
+    set({
+      deleteConversationDialogOpen: Boolean(conversationId),
+      deleteConversationId: conversationId,
+      projectActionError: null,
+    }),
+
   setProjectsExpanded: (expanded) => set({ projectsExpanded: expanded }),
 
   refreshProjects: async () => {
@@ -1939,10 +1954,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Guard against double deletion (rapid clicks) racing the same IPC.
     if (get().deletingConversationIds.includes(id)) return;
     const prevConversations = get().conversations;
+    const prevProjectConversations = get().projectConversations;
     const remainingConversations = prevConversations.filter((c) => c.id !== id);
     set({
       conversations: remainingConversations,
+      projectConversations: prevProjectConversations.filter((c) => c.id !== id),
       deletingConversationIds: [...get().deletingConversationIds, id],
+      projectActionBusy: true,
+      projectActionError: null,
     });
     // Cancel in-flight provider work before deleting so the post-provider
     // commit path cannot resurrect rows after the delete lands.
@@ -1957,11 +1976,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       console.error("Failed to delete conversation:", error);
       set({
         conversations: prevConversations,
+        projectConversations: prevProjectConversations,
         deletingConversationIds: get().deletingConversationIds.filter(
           (c) => c !== id,
         ),
+        projectActionBusy: false,
+        projectActionError:
+          error instanceof Error ? error.message : "Failed to delete chat",
       });
-      throw error;
+      return;
     }
     const conversations = get().conversations.filter((c) => c.id !== id);
     const turnsById = { ...get().turnsById };
@@ -1971,6 +1994,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     delete activeTurnIdByConversation[id];
     set({
       conversations,
+      projectConversations: get().projectConversations.filter((c) => c.id !== id),
       turnsById,
       activeTurnIdByConversation,
       previewSurfacesByKey: clearPreviewOverlaysMatching(
@@ -1980,6 +2004,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       deletingConversationIds: get().deletingConversationIds.filter(
         (c) => c !== id,
       ),
+      deleteConversationDialogOpen: false,
+      deleteConversationId: null,
+      projectActionBusy: false,
+      projectActionError: null,
     });
     if (get().activeConversationId === id) {
       if (conversations[0]) {
@@ -2804,6 +2832,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   applyPendingKernelProposal: async () => {
     const pending = get().pendingKernelProposal;
     if (!pending) return;
+    set({ kernelProposalApplying: true, sendError: null });
     try {
       const result = await api.kernelDecideProposal(pending.proposalId, true);
       const apply = result.apply as { conflicts?: string[] } | undefined;
@@ -2867,52 +2896,59 @@ export const useAppStore = create<AppStore>((set, get) => ({
             ? error.message
             : "Failed to apply proposed change",
       });
+    } finally {
+      set({ kernelProposalApplying: false });
     }
   },
 
   discardPendingKernelProposal: async () => {
     const pending = get().pendingKernelProposal;
     if (!pending) return;
+    set({ kernelProposalApplying: true });
     try {
-      await api.kernelDecideProposal(pending.proposalId, false);
-    } catch {
-      // best-effort proposal rejection
-    }
-    try {
-      await api.setKernelProposalStatus(pending.messageId, "discarded");
-    } catch {
       try {
-        await api.discardKernelProposal(pending.messageId);
+        await api.kernelDecideProposal(pending.proposalId, false);
       } catch {
-        // best-effort
+        // best-effort proposal rejection
       }
-    }
-    // Same turn often stages a legacy toolChange preview alongside the proposal.
-    const clearToolPreview =
-      get().pendingToolChange?.messageId === pending.messageId;
-    set({
-      pendingKernelProposal: null,
-      ...(clearToolPreview ? { pendingToolChange: null } : {}),
-      messages: get().messages.map((m) =>
-        m.id === pending.messageId
-          ? {
-              ...m,
-              metadata: {
-                ...(m.metadata ?? {}),
-                kernelProposalStatus: "discarded",
-                ...(clearToolPreview
-                  ? { pending: false, toolChangeStatus: "discarded" }
-                  : {}),
-                runtimeV2: {
-                  ...((m.metadata as { runtimeV2?: Record<string, unknown> } | null)
-                    ?.runtimeV2 ?? {}),
-                  status: "discarded",
+      try {
+        await api.setKernelProposalStatus(pending.messageId, "discarded");
+      } catch {
+        try {
+          await api.discardKernelProposal(pending.messageId);
+        } catch {
+          // best-effort
+        }
+      }
+      // Same turn often stages a legacy toolChange preview alongside the proposal.
+      const clearToolPreview =
+        get().pendingToolChange?.messageId === pending.messageId;
+      set({
+        pendingKernelProposal: null,
+        ...(clearToolPreview ? { pendingToolChange: null } : {}),
+        messages: get().messages.map((m) =>
+          m.id === pending.messageId
+            ? {
+                ...m,
+                metadata: {
+                  ...(m.metadata ?? {}),
+                  kernelProposalStatus: "discarded",
+                  ...(clearToolPreview
+                    ? { pending: false, toolChangeStatus: "discarded" }
+                    : {}),
+                  runtimeV2: {
+                    ...((m.metadata as { runtimeV2?: Record<string, unknown> } | null)
+                      ?.runtimeV2 ?? {}),
+                    status: "discarded",
+                  },
                 },
-              },
-            }
-          : m,
-      ),
-    });
+              }
+            : m,
+        ),
+      });
+    } finally {
+      set({ kernelProposalApplying: false });
+    }
   },
 
   clearAppConflict: () => set({ appConflict: null }),

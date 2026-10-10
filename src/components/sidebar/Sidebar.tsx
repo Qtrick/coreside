@@ -58,11 +58,11 @@ export function Sidebar() {
     setManageContextDialogOpen,
     setDeleteProjectDialogOpen,
     setRenameConversationDialogOpen,
+    setDeleteConversationDialogOpen,
     createChatInProject,
     assignChats,
     removeChatFromProject,
     duplicateConversation,
-    deleteConversation,
     archiveProject,
     restoreProject,
     resolvedTheme,
@@ -93,11 +93,11 @@ export function Sidebar() {
       setManageContextDialogOpen: s.setManageContextDialogOpen,
       setDeleteProjectDialogOpen: s.setDeleteProjectDialogOpen,
       setRenameConversationDialogOpen: s.setRenameConversationDialogOpen,
+      setDeleteConversationDialogOpen: s.setDeleteConversationDialogOpen,
       createChatInProject: s.createChatInProject,
       assignChats: s.assignChats,
       removeChatFromProject: s.removeChatFromProject,
       duplicateConversation: s.duplicateConversation,
-      deleteConversation: s.deleteConversation,
       archiveProject: s.archiveProject,
       restoreProject: s.restoreProject,
       resolvedTheme: s.resolvedTheme,
@@ -305,7 +305,7 @@ export function Sidebar() {
         </div>
       </section>
 
-      <section className="sidebar-section grow" aria-label="Personal apps">
+      <section className="sidebar-section sidebar-section-apps" aria-label="Personal apps">
         <div className="sidebar-section-label">Apps</div>
         <div className="sidebar-nav">
           {tools.length === 0 ? (
@@ -422,11 +422,8 @@ export function Sidebar() {
           }}
           onDelete={() => {
             chatMenu.close();
-            if (window.confirm(`Delete "${menuChat.title}"?`)) {
-              deleteConversation(menuChat.id).catch((err) => {
-                console.error("Failed to delete conversation:", err);
-              });
-            }
+            // In-app dialog — window.confirm is unreliable in Tauri WKWebView.
+            setDeleteConversationDialogOpen(menuChat.id);
           }}
         />
       ) : null}

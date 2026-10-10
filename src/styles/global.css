@@ -327,6 +327,10 @@ body > .window-overlay-root > *,
   /* Fixed blur when no wallpaper. Wallpaper mode overrides via --core-backdrop-blur. */
   backdrop-filter: blur(10px);
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
 }
 
 .sidebar-brand {
@@ -469,20 +473,67 @@ body > .window-overlay-root > *,
   flex-direction: column;
   gap: var(--space-2);
   min-height: 0;
+  flex-shrink: 0;
 }
 
+/* Chats owns the remaining sidebar height; Apps stays compact below it. */
 .sidebar-section.grow {
-  flex: 1;
-  overflow: auto;
+  flex: 1 1 0;
+  min-height: 8rem;
+  overflow: hidden;
 }
 
+.sidebar-section.grow > .sidebar-nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 0.15rem;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-primary) 32%, transparent)
+    transparent;
+}
+
+.sidebar-section.grow > .sidebar-nav::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-section.grow > .sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-section.grow > .sidebar-nav::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-primary) 32%, transparent);
+  border-radius: 999px;
+}
+
+.sidebar-section.grow > .sidebar-nav::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-primary) 48%, transparent);
+}
+
+.sidebar-section-apps {
+  flex: 0 0 auto;
+  max-height: 28vh;
+  overflow: hidden;
+}
+
+.sidebar-section-apps > .sidebar-nav {
+  overflow-y: auto;
+  max-height: calc(28vh - 1.75rem);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-primary) 32%, transparent)
+    transparent;
+}
+
+/* ChatGPT-style section headers: readable muted caps, not near-invisible. */
 .sidebar-section-label {
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-secondary);
+  color: color-mix(in srgb, var(--text-primary) 72%, var(--text-secondary));
   padding-inline: var(--space-2);
+  padding-block: 0.15rem 0.1rem;
 }
 
 .sidebar-nav {
@@ -826,7 +877,7 @@ body > .window-overlay-root > *,
 
 .stream-char {
   display: inline;
-  animation: stream-char-in 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: stream-char-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
   will-change: opacity, transform, filter;
 }
 
@@ -3313,11 +3364,15 @@ body > .window-overlay-root > *,
   padding: 0.35rem 0;
   border: 0;
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--text-primary) 72%, var(--text-secondary));
+  font-size: 0.8rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.sidebar-section-toggle:hover {
+  color: var(--text-primary);
 }
 
 .section-chevron {

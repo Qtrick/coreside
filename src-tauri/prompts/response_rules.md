@@ -10,7 +10,7 @@ The model **proposes**; the Rust kernel validates, compiles via ChangeIntent, an
 ```json
 {
   "schemaVersion": "1",
-  "assistantMessage": "Created a Task Tracker…",
+  "assistantMessage": "Proposed a Task Tracker for your review…",
   "responseType": "tool_change",
   "applicationPlan": {
     "schemaVersion": "1",

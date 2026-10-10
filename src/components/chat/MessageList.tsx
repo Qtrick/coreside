@@ -35,6 +35,8 @@ export function MessageList() {
   });
   const chatViewState = useAppStore((s) => s.chatViewState);
   const setChatScrollTop = useAppStore((s) => s.setChatScrollTop);
+  const pendingKernelProposal = useAppStore((s) => s.pendingKernelProposal);
+  const kernelProposalApplying = useAppStore((s) => s.kernelProposalApplying);
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -261,6 +263,10 @@ const STARTER_PROMPTS = [
   const lifecycleIndex = computeLiveApplicationGenerationIndex(
     visibleActions,
     Boolean(streamingText),
+    {
+      hasPendingProposal: Boolean(pendingKernelProposal),
+      applying: kernelProposalApplying && !streamingText,
+    },
   );
 
   return (

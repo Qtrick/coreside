@@ -61,6 +61,29 @@ describe("computeLiveApplicationGenerationIndex", () => {
       computeLiveApplicationGenerationIndex(["Generating application"], true),
     ).toBe(1);
   });
+
+  it("advances to Review when a pending proposal exists", () => {
+    expect(
+      computeLiveApplicationGenerationIndex(["Writing reply"], false, {
+        hasPendingProposal: true,
+      }),
+    ).toBe(2);
+  });
+
+  it("prefers applying/testing/ready hints over action heuristics", () => {
+    expect(
+      computeLiveApplicationGenerationIndex(["Writing reply"], false, {
+        hasPendingProposal: true,
+        applying: true,
+      }),
+    ).toBe(3);
+    expect(
+      computeLiveApplicationGenerationIndex([], false, { testing: true }),
+    ).toBe(4);
+    expect(
+      computeLiveApplicationGenerationIndex([], false, { ready: true }),
+    ).toBe(5);
+  });
 });
 
 describe("deriveEvolutionCopy", () => {

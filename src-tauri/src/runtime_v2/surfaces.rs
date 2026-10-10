@@ -1265,6 +1265,43 @@ mod tests {
     }
 
     #[test]
+    fn promote_inline_surface_creates_tool_and_moves_to_canvas() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Inline Clock",
+            &json!({
+                "id": "tool-inline-clock",
+                "name": "Inline Clock",
+                "description": "",
+                "layout": "stack",
+                "components": [{
+                    "id": "title",
+                    "type": "heading",
+                    "props": { "text": "Inline Clock" }
+                }]
+            }),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(surface.placement, "chat_inline");
+
+        let promoted =
+            promote_inline_to_tool(&mut db, &surface.id, DEFAULT_WORKSPACE_ID).unwrap();
+        assert_eq!(promoted.placement, "tool_canvas");
+        assert_eq!(promoted.lifecycle_state, "promoted");
+        assert_eq!(promoted.tool_id.as_deref(), Some("tool-inline-clock"));
+        assert!(crate::db::get_tool(&db, "tool-inline-clock").is_ok());
+
+        let err = promote_inline_to_tool(&mut db, &surface.id, DEFAULT_WORKSPACE_ID).unwrap_err();
+        assert!(matches!(err, DbError::Invalid(_)));
+    }
+
+    #[test]
     fn delete_tool_surface_keeps_tool_by_default() {
         let mut db = test_db();
         let tool = ToolDefinition {

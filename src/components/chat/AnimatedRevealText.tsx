@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
 /** Steady reveal rate so network chunks still look letter-by-letter. */
-const CHARS_PER_SEC = 52;
+const CHARS_PER_SEC = 90;
 /** Stagger within the live tail so glyphs cascade instead of popping together. */
-const CHAR_STAGGER_MS = 16;
+const CHAR_STAGGER_MS = 10;
 
 /**
  * Reveals `text` at a controlled pace with per-glyph fade/blur-in.

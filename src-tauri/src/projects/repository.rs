@@ -561,4 +561,41 @@ mod tests {
             .unwrap();
         assert_eq!(count, 0);
     }
+
+    #[test]
+    fn rename_conversation_updates_title_and_rejects_blank() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("rename.db")).unwrap();
+        let project = create_project(&mut db, &sample_input("Rename")).unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Old", Some(&project.id)).unwrap();
+        insert_message(&mut db, &conv.id, "user", "hi", None).unwrap();
+
+        let renamed = rename_conversation(&mut db, &conv.id, "  New title  ").unwrap();
+        assert_eq!(renamed.title, "New title");
+        assert_eq!(get_conversation(&db, &conv.id).unwrap().title, "New title");
+
+        let err = rename_conversation(&mut db, &conv.id, "   ").unwrap_err();
+        assert!(matches!(err, DbError::Invalid(_)));
+    }
+
+    #[test]
+    fn duplicate_conversation_copies_messages_with_new_id() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("dup.db")).unwrap();
+        let project = create_project(&mut db, &sample_input("Dup")).unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Source", Some(&project.id)).unwrap();
+        insert_message(&mut db, &conv.id, "user", "hello", None).unwrap();
+        insert_message(&mut db, &conv.id, "assistant", "world", None).unwrap();
+
+        let copy = duplicate_conversation(&mut db, &conv.id, None).unwrap();
+        assert_ne!(copy.id, conv.id);
+        assert!(copy.title.contains("copy") || copy.title.contains("Source"));
+        assert_eq!(copy.project_id.as_deref(), Some(project.id.as_str()));
+        let msgs = get_messages(&db, &copy.id).unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].content, "hello");
+        assert_eq!(msgs[1].content, "world");
+    }
 }

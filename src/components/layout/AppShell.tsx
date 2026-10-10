@@ -28,6 +28,7 @@ import { EditProjectDialog } from "@/components/projects/EditProjectDialog";
 import { AddChatsToProjectDialog } from "@/components/projects/AddChatsToProjectDialog";
 import { ProjectContextDialog } from "@/components/projects/ProjectContextDialog";
 import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
+import { DeleteConversationDialog } from "@/components/projects/DeleteConversationDialog";
 import { RenameConversationDialog } from "@/components/projects/RenameConversationDialog";
 import { CommandPalette } from "@/components/CommandPalette";
 import { PendingApprovalsHost } from "@/components/applications/PendingApprovalsHost";
@@ -113,6 +114,15 @@ export function AppShell() {
     (s) => s.setRenameConversationDialogOpen,
   );
   const renameConversation = useAppStore((s) => s.renameConversation);
+
+  const deleteConversationDialogOpen = useAppStore(
+    (s) => s.deleteConversationDialogOpen,
+  );
+  const deleteConversationId = useAppStore((s) => s.deleteConversationId);
+  const setDeleteConversationDialogOpen = useAppStore(
+    (s) => s.setDeleteConversationDialogOpen,
+  );
+  const deleteConversation = useAppStore((s) => s.deleteConversation);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -227,6 +237,7 @@ export function AppShell() {
   const deleteProjectTarget =
     projects.find((p) => p.id === deleteProjectId) ?? null;
   const renameTarget = conversations.find((c) => c.id === renameConversationId);
+  const deleteTarget = conversations.find((c) => c.id === deleteConversationId);
 
   const chatToolMain = (
     <div
@@ -396,6 +407,18 @@ export function AppShell() {
           onRename={(title) =>
             renameConversationId
               ? renameConversation(renameConversationId, title)
+              : Promise.resolve()
+          }
+        />
+        <DeleteConversationDialog
+          open={deleteConversationDialogOpen}
+          title={deleteTarget?.title ?? ""}
+          busy={projectActionBusy}
+          error={projectActionError}
+          onClose={() => setDeleteConversationDialogOpen(null)}
+          onDelete={() =>
+            deleteConversationId
+              ? deleteConversation(deleteConversationId)
               : Promise.resolve()
           }
         />

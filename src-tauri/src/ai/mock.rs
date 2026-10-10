@@ -2063,6 +2063,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn plan_only_task_tracker_propose_and_commit_without_companion_tool_change() {
+        use crate::application_kernel::{apply_change, decide_proposal, ChangeRequest};
+        use crate::db::{create_conversation, list_tools, Database, DEFAULT_WORKSPACE_ID};
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("plan-only.db")).unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "PlanOnly", None).unwrap();
+
+        // Simulate a provider that emits applicationPlan without toolChange.
+        let plan = crate::ai::plan_fixtures::task_tracker_create_plan();
+        let raw = serde_json::json!({
+            "schemaVersion": SCHEMA_VERSION,
+            "assistantMessage": "Proposed Task Tracker.",
+            "responseType": "tool_change",
+            "applicationPlan": plan,
+        })
+        .to_string();
+        let parsed = parse_agent_response(&raw).expect("plan-only envelope must parse");
+        assert!(parsed.payload.application_plan.is_some());
+        assert!(parsed.payload.tool_change.is_none());
+        let ops = parsed
+            .payload
+            .inspection_operations()
+            .expect("plan must compile without companion toolChange");
+        assert!(ops.iter().any(|o| o.op_type == "surface.create"));
+
+        let change = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                turn_id: Some("turn-plan-only".into()),
+                summary: "Create Task Tracker".into(),
+                operations: ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .expect("propose");
+        let pid = change.proposal_id.expect("proposal id");
+        let committed = decide_proposal(&mut db, None, &pid, true).expect("decide");
+        assert!(
+            committed.is_committed(),
+            "conflicts: {:?}",
+            committed.conflicts
+        );
+        let tools = list_tools(&db, Some(DEFAULT_WORKSPACE_ID)).unwrap();
+        assert!(
+            tools.iter().any(|t| t.id == "tool-task-tracker"),
+            "tools after commit: {:?}",
+            tools
+                .iter()
+                .map(|t| (t.id.clone(), t.name.clone()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
     async fn tictactoe_move_and_reset_turn_returns_targeted_state_patch() {
         use crate::ai::StructuredUserInput;
         use std::collections::HashMap;

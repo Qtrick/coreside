@@ -3365,8 +3365,11 @@ async fn send_message_inner(
         .as_ref()
         .map_or(false, |o| !o.is_empty());
     let has_tool_change = parsed.payload.tool_change.is_some();
+    // applicationPlan must enter this path even when derive_tool_change is None;
+    // otherwise create/evolve plans never compile and false "Created…" text sticks.
+    let has_application_plan = parsed.payload.application_plan.is_some();
 
-    if has_v2_schema || has_operations || has_tool_change {
+    if has_v2_schema || has_operations || has_tool_change || has_application_plan {
         // Finish progressive stream first — incomplete/missing terminal commits nothing.
         if progressive_ops_enabled {
             for ev in crate::runtime_v2::finish_progressive_ingest(
