@@ -31,7 +31,9 @@ body,
 body {
   margin: 0;
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: 14.5px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
   line-height: 1.5;
   color: var(--core-text-primary);
   background: var(--core-background);
@@ -52,11 +54,11 @@ body[data-wallpaper-active="true"] {
   background: transparent;
 }
 
-/* Subtle decorative wash only when no wallpaper is active. */
+/* Quiet ambient wash — keeps chrome calm when no wallpaper is active. */
 body:not([data-wallpaper-active="true"]) {
   background:
-    radial-gradient(1200px 500px at 10% -10%, color-mix(in srgb, var(--accent-primary) 12%, transparent), transparent 55%),
-    radial-gradient(900px 420px at 100% 0%, color-mix(in srgb, var(--accent-secondary) 10%, transparent), transparent 50%),
+    radial-gradient(1100px 480px at 8% -12%, color-mix(in srgb, var(--accent-primary) 7%, transparent), transparent 58%),
+    radial-gradient(820px 380px at 100% 0%, color-mix(in srgb, var(--accent-secondary) 5%, transparent), transparent 52%),
     var(--core-background);
 }
 
@@ -320,12 +322,13 @@ body > .window-overlay-root > *,
 .sidebar {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-4);
-  border-right: 1px solid var(--core-border);
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-4);
+  border-right: 1px solid var(--border-subtle, var(--core-border));
   background: var(--core-sidebar-overlay);
   /* Fixed blur when no wallpaper. Wallpaper mode overrides via --core-backdrop-blur. */
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(14px) saturate(1.05);
+  -webkit-backdrop-filter: blur(14px) saturate(1.05);
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -389,8 +392,8 @@ body > .window-overlay-root > *,
   gap: var(--space-2);
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 1.35rem;
-  letter-spacing: -0.02em;
+  font-size: 1.05rem;
+  letter-spacing: -0.025em;
   color: var(--text-primary);
   text-decoration: none;
   border: 0;
@@ -525,21 +528,22 @@ body > .window-overlay-root > *,
     transparent;
 }
 
-/* ChatGPT-style section headers: readable muted caps, not near-invisible. */
+/* Quiet section labels (Linear/Raycast density — sentence case, not shouty caps). */
 .sidebar-section-label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--text-primary) 72%, var(--text-secondary));
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  /* Mix toward primary so small labels keep readable contrast on overlays. */
+  color: color-mix(in srgb, var(--text-primary) 55%, var(--text-secondary));
   padding-inline: var(--space-2);
-  padding-block: 0.15rem 0.1rem;
+  padding-block: 0.2rem 0.05rem;
 }
 
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .sidebar-nav button,
@@ -550,19 +554,23 @@ body > .window-overlay-root > *,
   color: var(--text-primary);
   border-radius: var(--radius-sm);
   transition:
-    background-color var(--transition),
-    border-color var(--transition),
-    color var(--transition),
-    transform var(--transition);
+    background-color var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease),
+    border-color var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease),
+    color var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease),
+    box-shadow var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease),
+    transform var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease);
 }
 
 .sidebar-nav > button {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: 0.65rem;
   width: 100%;
   text-align: left;
-  padding: 0.65rem 0.75rem;
+  padding: 0.5rem 0.65rem;
+  min-height: 34px;
+  font-size: 0.9rem;
+  font-weight: 500;
 }
 
 .sidebar-nav button:hover,
@@ -571,8 +579,10 @@ body > .window-overlay-root > *,
 }
 
 .sidebar-nav button.active {
-  background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));
-  border-color: color-mix(in srgb, var(--accent-primary) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-control-overlay));
+  border-color: transparent;
+  box-shadow: inset 2.5px 0 0 var(--accent-primary);
+  font-weight: 600;
 }
 
 .nav-label {
@@ -585,20 +595,23 @@ body > .window-overlay-root > *,
 
 .nav-meta {
   color: var(--text-secondary);
-  font-size: 0.75rem;
+  font-size: 0.72rem;
 }
 
 .sidebar-settings-btn {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.65rem;
   width: 100%;
   text-align: left;
-  padding: 0.65rem 0.75rem;
+  padding: 0.5rem 0.65rem;
+  min-height: 34px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 500;
 }
 
 .sidebar-settings-btn:hover {
@@ -606,8 +619,10 @@ body > .window-overlay-root > *,
 }
 
 .sidebar-settings-btn.active {
-  background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-control-overlay));
-  border-color: color-mix(in srgb, var(--accent-primary) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-control-overlay));
+  border-color: transparent;
+  box-shadow: inset 2.5px 0 0 var(--accent-primary);
+  font-weight: 600;
 }
 
 .btn {
@@ -615,13 +630,22 @@ body > .window-overlay-root > *,
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  padding: 0.55rem 0.9rem;
-  min-height: 38px;
+  padding: 0.5rem 0.85rem;
+  min-height: 34px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.btn:active:not(:disabled),
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .btn-primary {
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-on-primary, #fff);
+  border-color: color-mix(in srgb, var(--accent-primary) 70%, transparent);
 }
 
 .btn-primary:hover {
@@ -630,7 +654,7 @@ body > .window-overlay-root > *,
 
 .btn-secondary {
   background: var(--core-control-overlay);
-  border-color: var(--border);
+  border-color: var(--border-subtle, var(--border));
 }
 
 .btn-secondary:hover {
@@ -695,8 +719,9 @@ body > .window-overlay-root > *,
   justify-content: space-between;
   flex-wrap: wrap;
   gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  border-bottom: 1px solid var(--border);
+  padding: 0.85rem var(--space-5);
+  border-bottom: 1px solid var(--border-subtle, var(--border));
+  background: var(--core-header-overlay);
   min-width: 0;
 }
 
@@ -715,13 +740,40 @@ body > .window-overlay-root > *,
   container-name: tool-header;
 }
 
-.panel-header h1,
+/* Conversation titles are real headings — not tool-preview badge chrome. */
+.panel-header h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.3;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: min(42rem, 100%);
+}
+
+.panel-header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.75rem;
+  margin-top: 0.2rem;
+}
+
+.panel-subtitle {
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
 .tool-preview-badge {
   display: inline-flex;
   align-items: center;
   margin-left: var(--space-2);
   padding: 0.1rem 0.45rem;
-  border-radius: 999px;
+  border-radius: var(--radius-pill, 999px);
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -797,33 +849,36 @@ body > .window-overlay-root > *,
   flex: 1;
   overflow: auto;
   /* Full chat pane with modest inset — matches ChatGPT/Claude content gutters. */
-  padding: var(--space-4) clamp(0.85rem, 2.2vw, 1.75rem);
+  padding: var(--space-5) clamp(1rem, 3vw, 2.25rem) var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: 1.15rem;
 }
 
 .message-bubble {
-  max-width: min(36rem, 100%);
-  padding: 0.9rem 1rem;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
+  max-width: min(38rem, 100%);
+  padding: 0.75rem 0.95rem;
+  border-radius: 1.1rem;
+  border: 1px solid transparent;
   background: var(--core-card-overlay);
-  box-shadow: var(--shadow-soft);
+  box-shadow: none;
 }
 
 .message-bubble.user {
   align-self: flex-end;
-  background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-card-overlay));
-  border-color: color-mix(in srgb, var(--accent-primary) 22%, var(--border));
+  max-width: min(34rem, 92%);
+  border-radius: 1.15rem 1.15rem 0.35rem 1.15rem;
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--core-card-overlay));
+  border-color: transparent;
 }
 
 /* Agent replies are flush like ChatGPT/Claude — no card/bubble chrome; full column width. */
 .message-row.assistant {
   align-self: stretch;
-  max-width: 100%;
+  max-width: min(48rem, 100%);
   width: 100%;
-  padding: 0.15rem 0;
+  margin-inline: auto;
+  padding: 0.1rem 0;
   border: none;
   background: transparent;
   box-shadow: none;
@@ -1068,34 +1123,54 @@ body > .window-overlay-root > *,
   position: relative;
   z-index: 3;
   flex-shrink: 0;
-  padding: var(--space-2) clamp(0.85rem, 2.2vw, 1.75rem) var(--space-2);
-  border-top: 1px solid var(--border);
-  background: var(--core-header-overlay);
+  /* Floating composer: no hard top rule (ChatGPT/Claude pattern). */
+  padding: 0.35rem clamp(1rem, 3vw, 2.25rem) 0.9rem;
+  border-top: none;
+  /* Use header overlay token so wallpaper transparency / readability JS still apply. */
+  background: linear-gradient(
+    to top,
+    var(--core-header-overlay) 55%,
+    transparent
+  );
 }
 
 .composer-box {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  padding: 0.55rem 0.7rem 0.45rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  max-width: min(48rem, 100%);
+  margin-inline: auto;
+  width: 100%;
+  padding: 0.65rem 0.8rem 0.5rem;
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: var(--radius-lg);
   background: var(--core-control-overlay);
-  box-shadow: var(--shadow-soft);
+  box-shadow: var(--shadow-composer, var(--shadow-soft));
+  transition:
+    border-color var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease),
+    box-shadow var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease);
+}
+
+.composer-box:focus-within {
+  border-color: color-mix(in srgb, var(--accent-primary) 42%, var(--border));
+  box-shadow:
+    var(--shadow-composer, var(--shadow-soft)),
+    0 0 0 3px color-mix(in srgb, var(--accent-primary) 16%, transparent);
 }
 
 .composer textarea {
   width: 100%;
   min-height: 1.5rem;
-  max-height: 140px;
+  max-height: 160px;
   height: 1.5rem;
   resize: none;
   overflow-y: auto;
   border: 0;
   background: transparent;
   outline: none;
-  padding: 0.1rem 0.1rem;
-  line-height: 1.4;
+  padding: 0.15rem 0.15rem;
+  line-height: 1.45;
+  font-size: 0.95rem;
 }
 
 .composer-footer {
@@ -1140,17 +1215,24 @@ body > .window-overlay-root > *,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.15rem;
-  height: 2.15rem;
+  width: 2rem;
+  height: 2rem;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill, 999px);
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--accent-on-primary, #fff);
+  transition:
+    background-color var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease),
+    transform var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease);
 }
 
 .composer-send-btn:hover:not(:disabled),
 .composer-send-btn:focus-visible:not(:disabled) {
-  filter: brightness(1.05);
+  background: var(--accent-primary-hover);
+}
+
+.composer-send-btn:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 .composer-send-btn:disabled {
@@ -1530,7 +1612,7 @@ body > .window-overlay-root > *,
 
 .empty-state {
   margin: auto;
-  max-width: 420px;
+  max-width: 26rem;
   text-align: center;
   padding: var(--space-8) var(--space-5);
   color: var(--text-secondary);
@@ -1541,11 +1623,16 @@ body > .window-overlay-root > *,
   margin: 0 0 var(--space-2);
   color: var(--text-primary);
   font-family: var(--font-display);
+  font-size: 1.15rem;
   font-weight: 600;
+  letter-spacing: -0.025em;
 }
 
 .empty-state p {
-  margin: 0 0 var(--space-3);
+  margin: 0 auto var(--space-3);
+  font-size: 0.92rem;
+  line-height: 1.5;
+  max-width: 36ch;
 }
 
 .empty-state-actions {
@@ -1749,14 +1836,15 @@ body > .window-overlay-root > *,
   align-items: flex-start;
   gap: 0.1rem;
   width: 100%;
-  padding: 0.55rem 0.7rem;
+  padding: 0.5rem 0.65rem;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-primary);
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: background-color var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease);
 }
 
 .settings-nav-item:hover {
@@ -1769,12 +1857,13 @@ body > .window-overlay-root > *,
 }
 
 .settings-nav-item[aria-current="page"] {
-  border-color: color-mix(in srgb, var(--accent-primary) 35%, var(--border));
+  border-color: transparent;
   background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+  box-shadow: inset 2.5px 0 0 var(--accent-primary);
 }
 
 .settings-nav-item-label {
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   font-weight: 600;
 }
 
@@ -2956,12 +3045,21 @@ body > .window-overlay-root > *,
 
 .field input {
   width: 100%;
-  padding: 0.65rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: var(--radius-sm);
   background: var(--core-control-overlay);
   color: var(--text-primary);
   font: inherit;
+  transition:
+    border-color var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease),
+    box-shadow var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease);
+}
+
+.field input:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 22%, transparent);
 }
 
 .field input::placeholder {
@@ -3659,12 +3757,6 @@ body > .window-overlay-root > *,
   background: var(--core-muted-overlay);
   color: var(--text-secondary);
   font-size: 0.82rem;
-}
-
-.panel-header-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
 }
 
 .text-btn {
@@ -4980,6 +5072,12 @@ body > .window-overlay-root > *,
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
+  .btn:active:not(:disabled),
+  .icon-btn:active:not(:disabled),
+  .composer-send-btn:active:not(:disabled) {
+    transform: none;
+  }
 }
 
 /* Runtime V2 — inline generative surfaces */
@@ -6112,4 +6210,99 @@ body > .window-overlay-root > *,
 .lifecycle-arrow {
   color: var(--core-border, rgba(255, 255, 255, 0.2));
   font-size: 0.7rem;
+}
+
+/* Command palette — Raycast-inspired floating panel */
+.command-palette-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14vh;
+  background: color-mix(in srgb, #0a0c0a 42%, transparent);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.command-palette {
+  width: min(34rem, 92vw);
+  padding: 0.55rem;
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: var(--radius-lg);
+  background: var(--core-modal-overlay, var(--surface));
+  box-shadow: var(--shadow-composer, var(--shadow-soft));
+  backdrop-filter: blur(18px) saturate(1.08);
+  -webkit-backdrop-filter: blur(18px) saturate(1.08);
+}
+
+.command-palette-input {
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--core-muted-overlay, var(--surface-muted));
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.95rem;
+  outline: none;
+}
+
+.command-palette-input:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-primary) 35%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 22%, transparent);
+}
+
+.command-palette-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.command-palette-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  max-height: 20rem;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.command-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  min-height: 2.15rem;
+  padding: 0.45rem 0.65rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.command-palette-item:hover {
+  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+}
+
+.command-palette-item:focus-visible {
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
+.command-palette-item-meta {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--text-primary) 40%, var(--text-secondary));
 }

@@ -121,66 +121,27 @@ export function CommandPalette({
 
   return (
     <div
+      className="command-palette-scrim"
       role="dialog"
       aria-modal="true"
       aria-label="Command palette"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.35)",
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "center",
-        paddingTop: "12vh",
-        zIndex: 1000,
-      }}
       onClick={onClose}
     >
-      <div
-        style={{
-          width: "min(520px, 92vw)",
-          background: "var(--core-modal-overlay, var(--surface))",
-          borderRadius: 12,
-          border: "1px solid var(--border)",
-          padding: "0.75rem",
-          backdropFilter: "blur(16px)",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="command-palette" onClick={(e) => e.stopPropagation()}>
         <input
+          className="command-palette-input"
           autoFocus
           aria-label="Search commands and applications"
           placeholder="Search chats, apps, applications, commands…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          style={{
-            width: "100%",
-            padding: "0.65rem 0.75rem",
-            borderRadius: 8,
-            border: "1px solid var(--border)",
-            background: "var(--core-control-overlay, var(--surface))",
-            color: "var(--fg)",
-          }}
         />
-        <ul
-          style={{
-            listStyle: "none",
-            margin: "0.5rem 0 0",
-            padding: 0,
-            maxHeight: 320,
-            overflow: "auto",
-          }}
-        >
+        <ul className="command-palette-list">
           {filteredCommands.map((c) => (
             <li key={c.id}>
               <button
                 type="button"
-                className="btn btn-secondary"
-                style={{
-                  width: "100%",
-                  justifyContent: "flex-start",
-                  marginBottom: 4,
-                }}
+                className="command-palette-item"
                 onClick={() => {
                   c.run();
                   onClose();
@@ -194,21 +155,14 @@ export function CommandPalette({
             <li key={`${h.resourceType}-${h.id}`}>
               <button
                 type="button"
-                className="btn btn-secondary"
-                style={{
-                  width: "100%",
-                  justifyContent: "flex-start",
-                  marginBottom: 4,
-                }}
+                className="command-palette-item"
                 onClick={() => {
                   if (h.resourceType === "chat") void navigateToChat(h.id);
                   else navigateToSettings();
                   onClose();
                 }}
               >
-                <span className="muted" style={{ marginRight: 8 }}>
-                  {h.resourceType}
-                </span>
+                <span className="command-palette-item-meta">{h.resourceType}</span>
                 {h.title}
               </button>
             </li>
