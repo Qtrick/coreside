@@ -1,6 +1,11 @@
-//! Tool export package builders (no secrets, user-chosen path).
+//! Tool export package builders (no secrets; writes confined to managed exports/).
+
+use std::path::{Component, Path, PathBuf};
 
 use serde_json::{json, Value};
+
+use crate::app_paths::AppPaths;
+use crate::security::contains_secret_patterns;
 
 pub fn sanitize_filename(name: &str) -> String {
     let mut out = String::new();
@@ -181,7 +186,63 @@ pub fn assert_no_secrets(blob: &str) -> Result<(), String> {
             ));
         }
     }
+    if contains_secret_patterns(blob) {
+        return Err("Export contains forbidden secret token pattern".into());
+    }
     Ok(())
+}
+
+/// Resolve an export destination under the managed `exports/` directory.
+/// Only a basename is accepted — absolute paths and `..` are rejected.
+pub fn resolve_managed_export_path(requested: &str, default_name: &str) -> Result<PathBuf, String> {
+    let trimmed = requested.trim();
+    let name = if trimmed.is_empty() {
+        default_name
+    } else {
+        trimmed
+    };
+    let path = Path::new(name);
+    if path.is_absolute() {
+        return Err("Export path must be a file name, not an absolute path".into());
+    }
+    if path.components().any(|c| {
+        matches!(c, Component::ParentDir | Component::RootDir | Component::Prefix(_))
+            || matches!(c, Component::Normal(s) if s.to_string_lossy().contains(".."))
+    }) {
+        return Err("Export path must be a file name without folders".into());
+    }
+    if path.components().count() != 1 {
+        return Err("Export path must be a single file name".into());
+    }
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty() && *s != "." && *s != "..")
+        .ok_or_else(|| "Invalid export filename".to_string())?;
+    if file_name.chars().any(|c| {
+        c.is_control() || c == '/' || c == '\\' || c == '\0' || c == ':'
+    }) {
+        return Err("Export filename contains forbidden characters".into());
+    }
+
+    let paths = AppPaths::resolve().map_err(|e| e.to_string())?;
+    let export_dir = paths.product_root.join("exports");
+    std::fs::create_dir_all(&export_dir)
+        .map_err(|e| format!("Could not create exports folder: {e}"))?;
+    let final_path = export_dir.join(file_name);
+    // Reject symlink escapes: require the resolved parent to remain the exports dir.
+    let canonical_dir = export_dir
+        .canonicalize()
+        .map_err(|e| format!("Could not resolve exports folder: {e}"))?;
+    let parent_canon = final_path
+        .parent()
+        .ok_or_else(|| "Invalid export filename".to_string())?
+        .canonicalize()
+        .map_err(|e| format!("Could not resolve export parent: {e}"))?;
+    if parent_canon != canonical_dir {
+        return Err("Export path escaped the managed exports folder".into());
+    }
+    Ok(final_path)
 }
 
 /// Assert only high-confidence credential token prefixes (safe for chat exports).
@@ -286,5 +347,25 @@ mod tests {
         assert!(!cleaned.contains("sk-ant-"));
         assert!(cleaned.contains("[REDACTED]"));
         assert!(cleaned.contains("rest"));
+    }
+
+    #[test]
+    fn assert_no_secrets_rejects_generic_sk_tokens() {
+        let blob = "note: sk-abcdefghijklmnopqrstuvwxyz123456";
+        assert!(assert_no_secrets(blob).is_err());
+    }
+
+    #[test]
+    fn resolve_managed_export_path_rejects_absolute_and_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::app_paths::with_test_data_dir(dir.path(), |_| {
+            assert!(resolve_managed_export_path("/tmp/evil.json", "ok.json").is_err());
+            assert!(resolve_managed_export_path("../evil.json", "ok.json").is_err());
+            assert!(resolve_managed_export_path("folder/evil.json", "ok.json").is_err());
+            assert!(resolve_managed_export_path("evil:name.json", "ok.json").is_err());
+            assert!(resolve_managed_export_path("evil\nname.json", "ok.json").is_err());
+            let ok = resolve_managed_export_path("clock.html", "tool.html").unwrap();
+            assert!(ok.ends_with("exports/clock.html"));
+        });
     }
 }

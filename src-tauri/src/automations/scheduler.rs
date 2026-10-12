@@ -112,10 +112,18 @@ pub fn spawn_scheduler(app: AppHandle, handle: Arc<SchedulerHandle>) {
                     }
                 }
             };
+            // Bound concurrent automation workers to avoid DB mutex stampedes
+            // when many schedules are overdue.
+            let mut started = 0usize;
+            const MAX_CONCURRENT_RUNS: usize = 2;
             for automation in due {
+                if started >= MAX_CONCURRENT_RUNS {
+                    break;
+                }
                 if !handle.try_begin(&automation.id) {
                     continue;
                 }
+                started += 1;
                 let app_clone = app.clone();
                 let handle_clone = handle.clone();
                 let id = automation.id.clone();
@@ -140,6 +148,9 @@ pub fn spawn_scheduler(app: AppHandle, handle: Arc<SchedulerHandle>) {
 }
 
 fn catch_up_missed(db: &mut Database, handle: &SchedulerHandle) -> Result<(), db::DbError> {
+    if handle.is_paused() {
+        return Ok(());
+    }
     let now = Utc::now();
     let overdue = db::list_due_automations(db, &now.to_rfc3339())?;
     for automation in overdue {
@@ -190,8 +201,29 @@ fn run_one_db(db: &mut Database, automation_id: &str) -> Result<(), db::DbError>
     if !automation.enabled {
         return Ok(());
     }
-    let started = Utc::now().to_rfc3339();
+    let started_dt = Utc::now();
+    let started = started_dt.to_rfc3339();
     let run_id = format!("run-{}", Uuid::new_v4());
+    // Claim the schedule slot BEFORE side effects so a crash mid-execute cannot
+    // leave next_run_at due and re-fire the same mutation indefinitely.
+    let next = compute_next_after(&automation.trigger, started_dt).map(|d| d.to_rfc3339());
+    let schedulable = next.is_some();
+    if !schedulable {
+        tracing::warn!(
+            automation_id,
+            "automation trigger has no next run; disabling"
+        );
+    }
+    db::update_automation_schedule(
+        db,
+        automation_id,
+        next.as_deref(),
+        Some(&started),
+        Some("running"),
+        automation.consecutive_failures,
+        schedulable && automation.enabled,
+    )?;
+
     let result = execute_automation(db, &automation);
     let (status, summary, err_cat, failures, enabled) = match result {
         Ok(summary) => ("success", Some(summary), None, 0_i64, true),
@@ -219,17 +251,6 @@ fn run_one_db(db: &mut Database, automation_id: &str) -> Result<(), db::DbError>
         summary.as_deref(),
         err_cat.as_deref(),
     )?;
-    // A trigger that cannot produce a next run (corrupt time string) would leave
-    // `next_run_at` NULL forever, silently orphaning the automation. Disable it
-    // instead so the user can see and repair it.
-    let next = compute_next_after(&automation.trigger, Utc::now()).map(|d| d.to_rfc3339());
-    let schedulable = next.is_some();
-    if !schedulable {
-        tracing::warn!(
-            automation_id,
-            "automation trigger has no next run; disabling"
-        );
-    }
     db::update_automation_schedule(
         db,
         automation_id,
@@ -239,6 +260,17 @@ fn run_one_db(db: &mut Database, automation_id: &str) -> Result<(), db::DbError>
         failures,
         schedulable && enabled && automation.enabled,
     )?;
+    // Bound automation_runs growth: keep the newest 100 rows per automation.
+    // Nested SELECT materializes the keep-set so SQLite allows same-table DELETE.
+    let _ = db.conn().execute(
+        "DELETE FROM automation_runs WHERE automation_id = ?1 AND id NOT IN (
+            SELECT id FROM (
+                SELECT id FROM automation_runs WHERE automation_id = ?1
+                ORDER BY created_at DESC LIMIT 100
+            )
+         )",
+        rusqlite::params![automation_id],
+    );
     Ok(())
 }
 

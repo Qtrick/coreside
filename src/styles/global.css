@@ -6306,3 +6306,26 @@ body > .window-overlay-root > *,
   text-transform: uppercase;
   color: color-mix(in srgb, var(--text-primary) 40%, var(--text-secondary));
 }
+
+.app-error-boundary {
+  display: grid;
+  gap: 1rem;
+  place-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-primary);
+  background: var(--surface-base, var(--bg-primary));
+}
+
+.app-error-boundary h1 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.app-error-boundary p {
+  margin: 0;
+  max-width: 28rem;
+  color: var(--text-secondary);
+  justify-self: center;
+}

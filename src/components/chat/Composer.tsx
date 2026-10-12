@@ -67,11 +67,16 @@ export function Composer() {
   const cancelRequest = useAppStore((s) => s.cancelRequest);
   const openProviderSetup = useAppStore((s) => s.openProviderSetup);
   const sending = useAppStore((s) => s.sending);
+  const sendingConversationId = useAppStore((s) => s.sendingConversationId);
   const aiStatus = useAppStore((s) => s.aiStatus);
   const sendError = useAppStore((s) => s.sendError);
   const tools = useAppStore((s) => s.tools);
   const activeConversationId = useAppStore((s) => s.activeConversationId);
   const setChatDraft = useAppStore((s) => s.setChatDraft);
+  const sendingHere =
+    sending &&
+    Boolean(activeConversationId) &&
+    sendingConversationId === activeConversationId;
   const [value, setValue] = useState("");
   const [caret, setCaret] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -86,7 +91,7 @@ export function Composer() {
 
   const needsSetup =
     aiStatus?.status === "missing_key" || aiStatus?.status === "unconfigured";
-  const busy = sending || staging;
+  const busy = sendingHere || staging;
   const canSend =
     !busy && (Boolean(value.trim()) || pendingFiles.length > 0 || needsSetup);
 
@@ -264,10 +269,11 @@ export function Composer() {
     const draftContent = content;
     const savedMentions = pendingMentions;
     const savedFiles = pendingFiles;
+    const sendConversationId = activeConversationId;
 
     setValue("");
-    if (activeConversationId) {
-      setChatDraft(activeConversationId, "");
+    if (sendConversationId) {
+      setChatDraft(sendConversationId, "");
     }
     setPendingMentions([]);
     setMentionSuppressed(false);
@@ -284,12 +290,24 @@ export function Composer() {
       staged,
     );
     if (!ok) {
-      setValue(draftContent);
-      if (activeConversationId) {
-        setChatDraft(activeConversationId, draftContent);
+      if (sendConversationId) {
+        setChatDraft(sendConversationId, draftContent);
       }
-      setPendingMentions(savedMentions);
-      setPendingFiles(savedFiles);
+      // Only restore the visible composer if the user is still on this chat.
+      const stillHere =
+        useAppStore.getState().activeConversationId === sendConversationId;
+      if (stillHere) {
+        setValue(draftContent);
+        setPendingMentions(savedMentions);
+        setPendingFiles(
+          savedFiles.map((item) => ({
+            ...item,
+            previewUrl: item.file.type.startsWith("image/")
+              ? URL.createObjectURL(item.file)
+              : undefined,
+          })),
+        );
+      }
       for (const saved of staged) {
         try {
           await api.cancelChatAttachment(saved.id);
@@ -451,7 +469,7 @@ export function Composer() {
               ? "Connect a provider to start chatting…"
               : "Message Coreside… Use @ to mention an app"
           }
-          disabled={sending}
+          disabled={sendingHere}
           aria-label="Message composer"
           aria-autocomplete="list"
           aria-expanded={mentionOpen}
@@ -482,7 +500,7 @@ export function Composer() {
             >
               <Paperclip size={18} aria-hidden />
             </button>
-            {sending ? (
+            {sendingHere ? (
               <button
                 type="button"
                 className="composer-send-btn composer-stop-btn"

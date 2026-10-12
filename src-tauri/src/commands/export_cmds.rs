@@ -9,8 +9,8 @@ use tauri::State;
 use super::CommandError;
 use crate::db;
 use crate::exports::{
-    assert_no_secrets, coreside_tool_package, sanitize_filename, standalone_html_for_clock,
-    strip_secrets_from_tool,
+    assert_no_secrets, coreside_tool_package, resolve_managed_export_path, sanitize_filename,
+    standalone_html_for_clock, strip_secrets_from_tool,
 };
 use crate::state::AppState;
 
@@ -52,17 +52,6 @@ pub fn export_tool(
 ) -> Result<ExportResult, CommandError> {
     state.require_profile()?;
     let format = input.format.trim().to_lowercase();
-    let dest = PathBuf::from(input.destination_path.trim());
-    if dest.as_os_str().is_empty() {
-        return Err(CommandError::new("invalid", "Choose a save location"));
-    }
-    if dest
-        .file_name()
-        .and_then(|s| s.to_str())
-        .is_some_and(|n| n.contains(".."))
-    {
-        return Err(CommandError::new("invalid", "Invalid export filename"));
-    }
 
     let (tool_json, tool_name, state_json) = {
         let db = state.db.lock();
@@ -79,30 +68,20 @@ pub fn export_tool(
     let cleaned_state = strip_secrets_from_tool(&state_json);
     let base = sanitize_filename(&tool_name);
 
-    let (bytes, final_path) = match format.as_str() {
+    let (bytes, default_name) = match format.as_str() {
         "coreside-tool" | "json" => {
             let package =
                 coreside_tool_package(&cleaned, Some(&cleaned_state), env!("CARGO_PKG_VERSION"));
             let text = serde_json::to_string_pretty(&package)
                 .map_err(|e| CommandError::new("serialize", e.to_string()))?;
             assert_no_secrets(&text).map_err(|e| CommandError::new("security", e))?;
-            let path = if dest.extension().is_some() {
-                dest
-            } else {
-                dest.with_extension("coreside-tool.json")
-            };
-            (text.into_bytes(), path)
+            (text.into_bytes(), format!("{base}.coreside-tool.json"))
         }
         "html" => {
             let props = clock_props(&cleaned);
             let html = standalone_html_for_clock(&tool_name, &props);
             assert_no_secrets(&html).map_err(|e| CommandError::new("security", e))?;
-            let path = if dest.extension().is_some() {
-                dest
-            } else {
-                dest.with_file_name(format!("{base}.html"))
-            };
-            (html.into_bytes(), path)
+            (html.into_bytes(), format!("{base}.html"))
         }
         "zip" => {
             let props = clock_props(&cleaned);
@@ -116,12 +95,7 @@ pub fn export_tool(
                 cleaned
             );
             assert_no_secrets(&bundle).map_err(|e| CommandError::new("security", e))?;
-            let path = if dest.extension().is_some() {
-                dest
-            } else {
-                dest.with_file_name(format!("{base}.zip.txt"))
-            };
-            (bundle.into_bytes(), path)
+            (bundle.into_bytes(), format!("{base}.zip.txt"))
         }
         other => {
             return Err(CommandError::new(
@@ -131,9 +105,26 @@ pub fn export_tool(
         }
     };
 
-    if let Some(parent) = final_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
+    let requested = input.destination_path.trim();
+    let dest_name = if requested.is_empty() {
+        default_name.clone()
+    } else {
+        let raw = PathBuf::from(requested);
+        let base = raw
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(requested);
+        if PathBuf::from(base).extension().is_some() {
+            base.to_string()
+        } else if let Some(ext) = PathBuf::from(&default_name).extension().and_then(|e| e.to_str()) {
+            format!("{base}.{ext}")
+        } else {
+            base.to_string()
+        }
+    };
+    let final_path = resolve_managed_export_path(&dest_name, &default_name)
+        .map_err(|e| CommandError::new("invalid", e))?;
+
     fs::write(&final_path, &bytes)
         .map_err(|e| CommandError::new("io", format!("Could not write export: {e}")))?;
     if !final_path.exists() {

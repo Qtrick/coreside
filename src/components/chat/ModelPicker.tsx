@@ -6,6 +6,12 @@ export function ModelPicker() {
   const setPreferredModel = useAppStore((s) => s.setPreferredModel);
   const aiStatus = useAppStore((s) => s.aiStatus);
   const sending = useAppStore((s) => s.sending);
+  const sendingConversationId = useAppStore((s) => s.sendingConversationId);
+  const activeConversationId = useAppStore((s) => s.activeConversationId);
+  const sendingHere =
+    sending &&
+    Boolean(activeConversationId) &&
+    sendingConversationId === activeConversationId;
 
   const needsSetup =
     aiStatus?.status === "missing_key" || aiStatus?.status === "unconfigured";
@@ -52,7 +58,7 @@ export function ModelPicker() {
         id="model-picker-select"
         className="model-picker-select"
         value={effectiveSelected}
-        disabled={sending || needsSetup}
+        disabled={sendingHere || needsSetup}
         onChange={(event) => void setPreferredModel(event.target.value)}
         aria-label="Select AI model"
         title={selectedLabel}

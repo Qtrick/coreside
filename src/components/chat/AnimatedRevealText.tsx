@@ -33,9 +33,11 @@ export function AnimatedRevealText({
   useEffect(() => {
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduced) {
-      displayedRef.current = text;
-      setDisplayed(text);
-      setFreshFrom(text.length);
+      // Mount-only: later text updates are handled by the reduced-motion effect below.
+      const initial = targetRef.current;
+      displayedRef.current = initial;
+      setDisplayed(initial);
+      setFreshFrom(initial.length);
       onCaughtUpRef.current?.();
       return;
     }

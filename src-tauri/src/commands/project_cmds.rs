@@ -271,16 +271,27 @@ pub fn export_project(
     state.require_profile()?;
     let db = state.db.lock();
     let payload = export_project_json(&db, input.project_id.trim())?;
-    let path = std::path::PathBuf::from(input.destination_path.trim());
-    if path.as_os_str().is_empty() {
-        return Err(CommandError::new("invalid", "Choose a save location"));
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| CommandError::new("io", format!("Could not create folder: {e}")))?;
-    }
     let text = serde_json::to_string_pretty(&payload)
         .map_err(|e| CommandError::new("export", e.to_string()))?;
+    crate::exports::assert_no_secrets(&text).map_err(|e| CommandError::new("security", e))?;
+    let default_name = format!(
+        "{}.coreside-project.json",
+        crate::exports::sanitize_filename(input.project_id.trim())
+    );
+    let requested = input.destination_path.trim();
+    let dest_name = if requested.is_empty() {
+        default_name.clone()
+    } else {
+        // Accept a pasted absolute path by keeping only the basename (same
+        // confinement contract as export_tool).
+        let raw = std::path::PathBuf::from(requested);
+        raw.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(requested)
+            .to_string()
+    };
+    let path = crate::exports::resolve_managed_export_path(&dest_name, &default_name)
+        .map_err(|e| CommandError::new("invalid", e))?;
     std::fs::write(&path, text)
         .map_err(|e| CommandError::new("io", format!("Could not write export: {e}")))?;
     Ok(ExportProjectResult {

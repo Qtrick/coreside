@@ -98,7 +98,7 @@ export function ExportDialog({
           ))}
         </ul>
         <label className="field" style={{ marginTop: "1rem" }}>
-          <span>Save as</span>
+          <span>File name</span>
           <input
             value={path}
             onChange={(e) => setPath(e.target.value)}
@@ -109,6 +109,9 @@ export function ExportDialog({
             }
             autoComplete="off"
           />
+          <span className="muted">
+            Saved into Coreside exports. Use a file name only — folders and absolute paths are blocked.
+          </span>
         </label>
         {message ? <p className="muted" role="status">{message}</p> : null}
         {error ? (

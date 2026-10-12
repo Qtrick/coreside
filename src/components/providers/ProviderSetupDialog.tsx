@@ -91,10 +91,13 @@ export function ProviderSetupDialog() {
       setEditId(null);
       const previouslyFocused = previouslyFocusedRef.current;
       previouslyFocusedRef.current = null;
+      let focusTimer = 0;
       if (previouslyFocused) {
-        window.setTimeout(() => previouslyFocused.focus?.(), 0);
+        focusTimer = window.setTimeout(() => previouslyFocused.focus?.(), 0);
       }
-      return;
+      return () => {
+        if (focusTimer) window.clearTimeout(focusTimer);
+      };
     }
 
     if (!previouslyFocusedRef.current) {

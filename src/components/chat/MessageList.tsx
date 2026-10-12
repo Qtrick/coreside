@@ -278,6 +278,12 @@ const STARTER_PROMPTS = [
       ) : null}
       {messages
         .filter((message, index, list) => {
+          if (
+            activeConversationId &&
+            message.conversationId !== activeConversationId
+          ) {
+            return false;
+          }
           const isSilent = Boolean(
             message.metadata &&
               typeof message.metadata === "object" &&

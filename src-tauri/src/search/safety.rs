@@ -100,22 +100,133 @@ pub fn validate_public_url_structure(raw: &str) -> Result<Url, SearchError> {
         )));
     }
 
-    if let Ok(ip) = IpAddr::from_str(host) {
+    if let Some(ip) = decode_host_ip_literal(host) {
         if is_private_or_reserved(ip) {
             return Err(SearchError::SsrfBlocked(format!("private IP: {ip}")));
         }
     }
 
+    Ok(url)
+}
+
+/// Decode standard and obfuscated IP host literals (decimal, hex, short dotted).
+/// Hostnames that are not IP-shaped return `None` so DNS pinning can resolve them.
+fn decode_host_ip_literal(host: &str) -> Option<IpAddr> {
+    let host = host.trim();
+    if host.is_empty() {
+        return None;
+    }
+
     if host.starts_with('[') && host.ends_with(']') {
         let inner = &host[1..host.len() - 1];
-        if let Ok(ip) = IpAddr::from_str(inner) {
-            if is_private_or_reserved(ip) {
-                return Err(SearchError::SsrfBlocked(format!("private IP: {ip}")));
+        return IpAddr::from_str(inner).ok();
+    }
+
+    if let Ok(ip) = IpAddr::from_str(host) {
+        return Some(ip);
+    }
+
+    decode_obfuscated_ipv4(host).map(IpAddr::V4)
+}
+
+fn decode_obfuscated_ipv4(host: &str) -> Option<Ipv4Addr> {
+    let lower = host.to_ascii_lowercase();
+
+    // Pure numeric host (decimal, or leading-zero octal like 017700000001 -> 127.0.0.1).
+    // Structure-only validation must decode these; some fetchers treat them as IPs
+    // even when local DNS would not resolve the token as a hostname.
+    if lower.bytes().all(|b| b.is_ascii_digit()) {
+        if lower.len() > 1 && lower.starts_with('0') {
+            if !lower.bytes().all(|b| matches!(b, b'0'..=b'7')) {
+                return None;
             }
+            let value = u32::from_str_radix(&lower, 8).ok()?;
+            return Some(Ipv4Addr::from(value));
+        }
+        let value: u32 = lower.parse().ok()?;
+        return Some(Ipv4Addr::from(value));
+    }
+
+    // Pure hex (e.g. 0x7f000001 -> 127.0.0.1)
+    if let Some(hex) = lower.strip_prefix("0x") {
+        if !hex.is_empty() && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            let value = u32::from_str_radix(hex, 16).ok()?;
+            return Some(Ipv4Addr::from(value));
         }
     }
 
-    Ok(url)
+    // Dotted forms with 1–4 parts (decimal / octal / hex), including short IPv4.
+    let parts: Vec<&str> = lower.split('.').collect();
+    if parts.is_empty() || parts.len() > 4 {
+        return None;
+    }
+    if !parts.iter().all(|p| !p.is_empty()) {
+        return None;
+    }
+
+    let mut nums = Vec::with_capacity(parts.len());
+    for part in &parts {
+        let n = parse_ipv4_component(part)?;
+        nums.push(n);
+    }
+
+    let octets = expand_short_ipv4(&nums)?;
+    Some(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]))
+}
+
+fn parse_ipv4_component(part: &str) -> Option<u32> {
+    if let Some(hex) = part.strip_prefix("0x") {
+        if hex.is_empty() || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        return u32::from_str_radix(hex, 16).ok();
+    }
+    // Leading-zero octal (e.g. 0177) — reject non-octal digits.
+    if part.len() > 1 && part.starts_with('0') && part.bytes().all(|b| matches!(b, b'0'..=b'7')) {
+        return u32::from_str_radix(part, 8).ok();
+    }
+    if part.bytes().all(|b| b.is_ascii_digit()) {
+        return part.parse().ok();
+    }
+    None
+}
+
+fn expand_short_ipv4(nums: &[u32]) -> Option<[u8; 4]> {
+    match nums {
+        [a] => {
+            let v = *a;
+            Some([
+                ((v >> 24) & 0xff) as u8,
+                ((v >> 16) & 0xff) as u8,
+                ((v >> 8) & 0xff) as u8,
+                (v & 0xff) as u8,
+            ])
+        }
+        [a, b] => {
+            if *a > 0xff || *b > 0xff_ffff {
+                return None;
+            }
+            Some([
+                *a as u8,
+                ((b >> 16) & 0xff) as u8,
+                ((b >> 8) & 0xff) as u8,
+                (b & 0xff) as u8,
+            ])
+        }
+        [a, b, c] => {
+            if *a > 0xff || *b > 0xff || *c > 0xffff {
+                return None;
+            }
+            Some([*a as u8, *b as u8, ((c >> 8) & 0xff) as u8, (c & 0xff) as u8])
+        }
+        [a, b, c, d] => {
+            if nums.iter().any(|n| *n > 0xff) {
+                return None;
+            }
+            Some([*a as u8, *b as u8, *c as u8, *d as u8])
+        }
+        _ => None,
+    }
 }
 
 /// Validate scheme/host policy and resolve DNS once for connection pinning.
@@ -124,21 +235,11 @@ pub fn validate_and_pin_public_http_url(raw: &str) -> Result<PinnedPublicUrl, Se
     let host = url.host_str().unwrap();
     let port = url.port_or_known_default().unwrap();
 
-    if let Ok(ip) = IpAddr::from_str(host) {
+    if let Some(ip) = decode_host_ip_literal(host) {
         return Ok(PinnedPublicUrl {
             url,
             addrs: vec![SocketAddr::new(ip, port)],
         });
-    }
-
-    if host.starts_with('[') && host.ends_with(']') {
-        let inner = &host[1..host.len() - 1];
-        if let Ok(ip) = IpAddr::from_str(inner) {
-            return Ok(PinnedPublicUrl {
-                url,
-                addrs: vec![SocketAddr::new(ip, port)],
-            });
-        }
     }
 
     let addrs = resolve_public_host_addrs(&host.to_lowercase(), port)?;
@@ -363,5 +464,23 @@ mod tests {
         assert!(validate_public_http_url("http://[2002:0a00:0001::]/").is_err());
         // 6to4 encapsulating 192.168.1.1 (c0a8:0101)
         assert!(validate_public_http_url("http://[2002:c0a8:0101::]/").is_err());
+    }
+
+    #[test]
+    fn rejects_obfuscated_private_ipv4_literals() {
+        // Decimal / hex encodings of 127.0.0.1 and cloud metadata.
+        assert!(validate_public_url_structure("http://2130706433/").is_err());
+        assert!(validate_public_url_structure("http://0x7f000001/").is_err());
+        assert!(validate_public_url_structure("http://0177.0.0.1/").is_err());
+        assert!(validate_public_url_structure("http://127.1/").is_err());
+        assert!(validate_public_url_structure("http://2852039166/").is_err()); // 169.254.169.254
+        // Whole-host octal (overflows u32 as decimal; curl/browsers still treat as IP).
+        assert!(validate_public_url_structure("http://017700000001/").is_err());
+        assert!(validate_public_url_structure("http://0x7f.0x0.0x0.0x1/").is_err());
+        assert!(authorize_structure_only_public("https://1.1.1.1/"));
+    }
+
+    fn authorize_structure_only_public(raw: &str) -> bool {
+        validate_public_url_structure(raw).is_ok()
     }
 }

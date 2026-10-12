@@ -343,13 +343,14 @@ pub fn apply_change(
         db.conn()
             .execute(
                 "INSERT INTO kernel_change_proposals (
-                id, conversation_id, turn_id, summary, risk, impact_summary,
+                id, conversation_id, project_id, turn_id, summary, risk, impact_summary,
                 exact_operations_json, exact_operations_hash, base_revisions_json, source_type,
                 model, provider, status, created_at, expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
                 rusqlite::params![
                     proposal_id,
                     req.conversation_id,
+                    req.project_id,
                     req.turn_id,
                     req.summary,
                     risk,
@@ -630,6 +631,7 @@ pub fn apply_change(
 pub struct KernelChangeProposalRecord {
     pub id: String,
     pub conversation_id: Option<String>,
+    pub project_id: Option<String>,
     pub turn_id: Option<String>,
     pub summary: String,
     pub risk: String,
@@ -697,6 +699,7 @@ fn parse_proposal_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<KernelChangePro
         decided_at: r.get(16)?,
         applied_at: r.get(17)?,
         transaction_id: r.get(18)?,
+        project_id: r.get(19)?,
     })
 }
 
@@ -709,7 +712,7 @@ pub fn get_proposal(
             "SELECT id, conversation_id, turn_id, summary, risk, impact_summary, \
                     exact_operations_json, exact_operations_hash, base_revisions_json, \
                     source_type, model, provider, status, error, created_at, expires_at, \
-                    decided_at, applied_at, transaction_id \
+                    decided_at, applied_at, transaction_id, project_id \
              FROM kernel_change_proposals WHERE id = ?",
             rusqlite::params![proposal_id],
             parse_proposal_row,
@@ -729,7 +732,7 @@ pub fn list_pending_proposals(
     let mut sql = "SELECT id, conversation_id, turn_id, summary, risk, impact_summary, \
                           exact_operations_json, exact_operations_hash, base_revisions_json, \
                           source_type, model, provider, status, error, created_at, expires_at, \
-                          decided_at, applied_at, transaction_id \
+                          decided_at, applied_at, transaction_id, project_id \
                    FROM kernel_change_proposals WHERE status = 'pending'"
         .to_string();
     if conversation_id.is_some() {
@@ -895,13 +898,13 @@ pub fn decide_proposal(
         ));
     }
 
-    // 4. Apply frozen operations
+    // 4. Apply frozen operations (retain project scope so isolation guards run)
     let ops = crate::runtime_v2::normalize_operations_for_validation(&proposal.exact_operations);
     let mut deferred = Vec::new();
     let txn_res = create_transaction(
         db,
         proposal.conversation_id.as_deref(),
-        None,
+        proposal.project_id.as_deref(),
         proposal.turn_id.as_deref(),
         &proposal.summary,
         &ops,

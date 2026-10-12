@@ -4,6 +4,7 @@ import type { UnifiedSearchHit } from "@/types/application-kernel";
 import { useAppStore } from "@/stores/app-store";
 import { useOnboardingStore } from "@/stores/onboarding-store";
 import { storeSettingsCategory } from "@/lib/settings-categories";
+import { ModalPortal } from "@/components/ui/ModalPortal";
 
 /**
  * Consumer command palette — protected actions + local discovery.
@@ -55,7 +56,10 @@ export function CommandPalette({
       {
         id: "recovery",
         title: "Open Recovery (in Settings)",
-        run: () => navigateToSettings(),
+        run: () => {
+          storeSettingsCategory("advanced");
+          navigateToSettings();
+        },
       },
       {
         id: "projects",
@@ -103,15 +107,6 @@ export function CommandPalette({
     };
   }, [open, query]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
   if (!open) return null;
 
   const qLower = query.trim().toLowerCase();
@@ -120,55 +115,57 @@ export function CommandPalette({
   );
 
   return (
-    <div
-      className="command-palette-scrim"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Command palette"
-      onClick={onClose}
-    >
-      <div className="command-palette" onClick={(e) => e.stopPropagation()}>
-        <input
-          className="command-palette-input"
-          autoFocus
-          aria-label="Search commands and applications"
-          placeholder="Search chats, apps, applications, commands…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <ul className="command-palette-list">
-          {filteredCommands.map((c) => (
-            <li key={c.id}>
-              <button
-                type="button"
-                className="command-palette-item"
-                onClick={() => {
-                  c.run();
-                  onClose();
-                }}
-              >
-                {c.title}
-              </button>
-            </li>
-          ))}
-          {hits.map((h) => (
-            <li key={`${h.resourceType}-${h.id}`}>
-              <button
-                type="button"
-                className="command-palette-item"
-                onClick={() => {
-                  if (h.resourceType === "chat") void navigateToChat(h.id);
-                  else navigateToSettings();
-                  onClose();
-                }}
-              >
-                <span className="command-palette-item-meta">{h.resourceType}</span>
-                {h.title}
-              </button>
-            </li>
-          ))}
-        </ul>
+    <ModalPortal onClose={onClose}>
+      <div
+        className="command-palette-scrim"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+        onClick={onClose}
+      >
+        <div className="command-palette" onClick={(e) => e.stopPropagation()}>
+          <input
+            className="command-palette-input"
+            autoFocus
+            aria-label="Search commands and applications"
+            placeholder="Search chats, apps, applications, commands…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <ul className="command-palette-list">
+            {filteredCommands.map((c) => (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  className="command-palette-item"
+                  onClick={() => {
+                    c.run();
+                    onClose();
+                  }}
+                >
+                  {c.title}
+                </button>
+              </li>
+            ))}
+            {hits.map((h) => (
+              <li key={`${h.resourceType}-${h.id}`}>
+                <button
+                  type="button"
+                  className="command-palette-item"
+                  onClick={() => {
+                    if (h.resourceType === "chat") void navigateToChat(h.id);
+                    else navigateToSettings();
+                    onClose();
+                  }}
+                >
+                  <span className="command-palette-item-meta">{h.resourceType}</span>
+                  {h.title}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 }

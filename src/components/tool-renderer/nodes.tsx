@@ -1265,6 +1265,30 @@ const SAFE_SVG_ATTRS = new Set([
   "clipPath", "clip-path", "offset", "stopColor", "stop-color", "stopOpacity",
 ]);
 
+function isSafeSvgAttrValue(value: string): boolean {
+  const lower = value.trim().toLowerCase();
+  // CSS/HTML escapes can reintroduce url()/javascript: after our string checks.
+  if (
+    lower.includes("\\") ||
+    lower.includes("`") ||
+    lower.startsWith("javascript:") ||
+    lower.startsWith("data:") ||
+    lower.includes("javascript:")
+  ) {
+    return false;
+  }
+  // Allow only fragment paint-server refs for url(...); reject remote/data URLs.
+  const urlMatch = lower.match(/url\s*\(\s*([^)]*)\s*\)/g);
+  if (urlMatch) {
+    for (const raw of urlMatch) {
+      const inner = raw.replace(/^url\s*\(\s*/i, "").replace(/\s*\)$/, "").replace(/['"]/g, "");
+      if (!inner.startsWith("#")) return false;
+      if (!/^#[A-Za-z][\w:-]*$/.test(inner)) return false;
+    }
+  }
+  return true;
+}
+
 function svgProps(component: ToolComponent): Record<string, string | number> {
   const out: Record<string, string | number> = {};
   const props = component.props ?? {};
@@ -1273,8 +1297,7 @@ function svgProps(component: ToolComponent): Record<string, string | number> {
     if (k === "href" || k === "xlinkHref" || k === "xlink:href") continue;
     if (!SAFE_SVG_ATTRS.has(k)) continue;
     if (typeof v === "string") {
-      const lower = v.trim().toLowerCase();
-      if (lower.startsWith("javascript:") || lower.startsWith("data:text/html")) continue;
+      if (!isSafeSvgAttrValue(v)) continue;
       out[k] = v;
     } else if (typeof v === "number" && Number.isFinite(v)) {
       out[k] = v;

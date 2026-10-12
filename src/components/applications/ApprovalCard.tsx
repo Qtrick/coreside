@@ -96,6 +96,7 @@ export function ApprovalCard({
       ref={dialogRef}
       className="approval-card settings-section"
       role="dialog"
+      aria-modal="true"
       tabIndex={-1}
       aria-labelledby={`approval-${approval.id}-title`}
       aria-describedby={`approval-${approval.id}-desc`}

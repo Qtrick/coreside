@@ -37,6 +37,9 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
   const editAndResendMessage = useAppStore((s) => s.editAndResendMessage);
   const branchConversation = useAppStore((s) => s.branchConversation);
   const sending = useAppStore((s) => s.sending);
+  const sendingConversationId = useAppStore((s) => s.sendingConversationId);
+  const sendingHere =
+    sending && sendingConversationId === message.conversationId;
   const showModelIdentity = Boolean(
     useAppStore((s) => s.aiStatus?.disclosure?.showModelIdentity),
   );
@@ -77,7 +80,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
 
   const saveEdit = async () => {
     const next = draft.trim();
-    if (!next || sending) return;
+    if (!next || sendingHere) return;
     setEditing(false);
     await editAndResendMessage(message.id, next);
   };
@@ -137,7 +140,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
                 type="button"
                 className="message-action-btn"
                 onClick={() => void branchConversation(message.id)}
-                disabled={sending}
+                disabled={sendingHere}
                 aria-label="Fork conversation here"
                 title="Fork conversation here"
               >
@@ -151,7 +154,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
                     setDraft(message.content);
                     setEditing(true);
                   }}
-                  disabled={sending}
+                  disabled={sendingHere}
                   aria-label="Edit message"
                   title="Edit"
                 >
@@ -199,7 +202,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={!draft.trim() || sending}
+                disabled={!draft.trim() || sendingHere}
                 onClick={() => void saveEdit()}
               >
                 Save & send

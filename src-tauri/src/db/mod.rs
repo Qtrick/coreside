@@ -170,10 +170,14 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         "036_approval_call_context",
         include_str!("../../migrations/036_approval_call_context.sql"),
     ),
+    (
+        "037_proposal_project_isolation",
+        include_str!("../../migrations/037_proposal_project_isolation.sql"),
+    ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "036_approval_call_context";
+pub const LATEST_MIGRATION: &str = "037_proposal_project_isolation";
 
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -325,9 +329,16 @@ impl Database {
                     Ok(result)
                 }
                 Err(e) => {
-                    let _ = self.conn.execute_batch(&format!(
+                    if let Err(rb_err) = self.conn.execute_batch(&format!(
                         "ROLLBACK TO SAVEPOINT {sp_name}; RELEASE SAVEPOINT {sp_name}"
-                    ));
+                    )) {
+                        tracing::error!(
+                            error = %rb_err,
+                            original_error = %e,
+                            "nested savepoint rollback failed; refusing to leave dirty connection"
+                        );
+                        return Err(DbError::Sqlite(rb_err));
+                    }
                     Err(e)
                 }
             }

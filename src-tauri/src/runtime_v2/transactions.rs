@@ -773,14 +773,20 @@ pub(crate) fn resolve_creation_target_surface_id(
             ));
         }
     }
-    if let (Some(txn_proj), Some(op_proj)) =
-        (txn.project_id.as_deref(), op.target.project_id.as_deref())
-    {
-        if !txn_proj.is_empty() && !op_proj.is_empty() && txn_proj != op_proj {
-            return Err(format!(
-                "cross-project violation: creation operation '{}' targeting project '{}' does not match transaction project '{}'",
-                op.id, op_proj, txn_proj
-            ));
+    if let Some(txn_proj) = txn.project_id.as_deref() {
+        if !txn_proj.is_empty() {
+            match op.target.project_id.as_deref() {
+                Some(op_proj) if !op_proj.is_empty() && op_proj == txn_proj => {}
+                Some(op_proj) if !op_proj.is_empty() => {
+                    return Err(format!(
+                        "cross-project violation: creation operation '{}' targeting project '{}' does not match transaction project '{}'",
+                        op.id, op_proj, txn_proj
+                    ));
+                }
+                // Creating into an unspecified project from a project-scoped txn is allowed
+                // (surface inherits txn project downstream); only explicit foreign targets fail.
+                _ => {}
+            }
         }
     }
 
@@ -874,15 +880,25 @@ fn apply_one(
     if !is_create {
         if let Some(sid) = effective_surface_id.as_deref() {
             if let Ok(target_surface) = get_surface(db, sid) {
-                if let (Some(txn_proj), Some(surf_proj)) = (
-                    txn.project_id.as_deref(),
-                    target_surface.project_id.as_deref(),
-                ) {
-                    if !txn_proj.is_empty() && !surf_proj.is_empty() && txn_proj != surf_proj {
-                        return Err(format!(
-                            "cross-project violation: transaction in project '{}' cannot mutate surface '{}' belonging to project '{}'",
-                            txn_proj, sid, surf_proj
-                        ));
+                // Fail closed: a project-scoped transaction may only mutate
+                // surfaces that belong to the same project (matches subscription policy).
+                if let Some(txn_proj) = txn.project_id.as_deref() {
+                    if !txn_proj.is_empty() {
+                        match target_surface.project_id.as_deref() {
+                            Some(surf_proj) if !surf_proj.is_empty() && surf_proj == txn_proj => {}
+                            Some(surf_proj) if !surf_proj.is_empty() => {
+                                return Err(format!(
+                                    "cross-project violation: transaction in project '{}' cannot mutate surface '{}' belonging to project '{}'",
+                                    txn_proj, sid, surf_proj
+                                ));
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "cross-project violation: transaction in project '{}' cannot mutate surface '{}' outside that project",
+                                    txn_proj, sid
+                                ));
+                            }
+                        }
                     }
                 }
                 if let (Some(op_proj), Some(surf_proj)) = (

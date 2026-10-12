@@ -443,8 +443,8 @@ export function Sidebar() {
           onManageContext={() => setManageContextDialogOpen(menuProject.id)}
           onExport={() => {
             const path = window.prompt(
-              "Save project export to path:",
-              `${menuProject.name}.json`,
+              "Export file name (saved under Coreside exports):",
+              `${menuProject.name}.coreside-project.json`,
             );
             if (path) {
               void import("@/lib/tauri").then(({ api }) =>

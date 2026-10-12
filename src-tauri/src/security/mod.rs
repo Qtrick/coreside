@@ -31,6 +31,11 @@ static KEY_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
     ]
 });
 
+/// True when text matches known credential token shapes (export fail-closed check).
+pub fn contains_secret_patterns(text: &str) -> bool {
+    KEY_PATTERNS.iter().any(|re| re.is_match(text))
+}
+
 /// Redact known API key shapes and an optional concrete key value from text.
 pub fn redact_secrets(text: &str, key: Option<&str>) -> String {
     let mut out = text.to_string();

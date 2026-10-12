@@ -1278,8 +1278,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
     }
 
+    // Tool canvas restore must not run for a stale navigation after awaits.
+    if (get().activeConversationId !== trimmed) return;
     if (savedToolId) {
       await get().selectTool(savedToolId);
+      if (get().activeConversationId !== trimmed) return;
     } else {
       get().closeToolCanvas();
     }
@@ -2284,13 +2287,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     set((state) => {
       const provisionalId = pendingTurnId(conversationId);
+      const stillViewing = state.activeConversationId === conversationId;
       return {
-        messages: [...state.messages, optimistic],
+        // Never append optimistic rows into another chat's visible message list.
+        messages: stillViewing
+          ? [...state.messages, optimistic]
+          : state.messages,
         sending: true,
         sendingConversationId: conversationId,
         sendError: null,
-        agentActions: [],
-        streamingText: null,
+        agentActions: stillViewing ? [] : state.agentActions,
+        streamingText: stillViewing ? null : state.streamingText,
         turnsById: {
           ...state.turnsById,
           [provisionalId]: createTurnLiveState(provisionalId, conversationId),
