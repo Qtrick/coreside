@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-10-13T19:54:43.764Z",
-  "commit": "0dda878245feece178f2f71cdd1463ce3a006be1",
+  "generatedAt": "2026-10-13T21:07:15.299Z",
+  "commit": "99010ac559085c96048c8ef59b0eed6baf308096",
   "dirty": true,
   "totalControls": 15,
   "classes": {

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import { useEffect, useState, type MouseEvent } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   AlertCircle,
@@ -20,18 +20,59 @@ import type { ChatMessage } from "@/types/messages";
 import { openExternalUrl } from "@/lib/open-url";
 import { useAppStore } from "@/stores/app-store";
 
-function safeMarkdownUrl(url: string): string {
-  const trimmed = url.trim();
-  if (
-    trimmed.startsWith("https:") ||
-    trimmed.startsWith("http:") ||
-    trimmed.startsWith("mailto:") ||
-    trimmed.startsWith("#")
-  ) {
-    return trimmed;
+/**
+ * Allowlist markdown link targets for chat. Protocol-relative (`//…`) is
+ * rejected even when `URL` would invent `http:` against `about:blank`.
+ */
+export function isAllowedMarkdownHref(href: string | undefined | null): boolean {
+  if (!href) return false;
+  const trimmed = href.trim();
+  if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("\\\\")) {
+    return false;
   }
-  return "";
+  try {
+    const parsed = new URL(trimmed, "about:blank");
+    const protocol = parsed.protocol.toLowerCase();
+    return (
+      protocol === "http:" || protocol === "https:" || protocol === "mailto:"
+    );
+  } catch {
+    return false;
+  }
 }
+
+function safeMarkdownUrl(url: string): string {
+  return isAllowedMarkdownHref(url) ? url.trim() : "";
+}
+
+const MarkdownExternalLink: NonNullable<Components["a"]> = ({
+  href,
+  children,
+  node: _node,
+  ...props
+}) => {
+  if (!isAllowedMarkdownHref(href)) {
+    return <span>{children}</span>;
+  }
+
+  const open = (e: MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    void openExternalUrl(href).catch(console.error);
+  };
+
+  return (
+    <a
+      {...props}
+      href={href}
+      onClick={open}
+      onAuxClick={open}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {children}
+    </a>
+  );
+};
 
 export function MessageBubble({ message }: { message: ChatMessage }) {
   const retryLastFailed = useAppStore((s) => s.retryLastFailed);
@@ -227,27 +268,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
               remarkPlugins={[remarkGfm]}
               urlTransform={safeMarkdownUrl}
               components={{
-                a: ({ href, children, ...props }) => (
-                  <a
-                    href={href}
-                    onClick={(e) => {
-                      if (
-                        href &&
-                        (href.startsWith("http://") ||
-                          href.startsWith("https://") ||
-                          href.startsWith("mailto:"))
-                      ) {
-                        e.preventDefault();
-                        void openExternalUrl(href);
-                      }
-                    }}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    {...props}
-                  >
-                    {children}
-                  </a>
-                ),
+                a: MarkdownExternalLink,
               }}
               skipHtml
             >

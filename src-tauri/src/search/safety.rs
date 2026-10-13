@@ -478,8 +478,9 @@ mod tests {
         assert!(validate_public_url_structure("http://0x7f000001/").is_err());
         assert!(validate_public_url_structure("http://0177.0.0.1/").is_err());
         assert!(validate_public_url_structure("http://127.1/").is_err());
-        assert!(validate_public_url_structure("http://2852039166/").is_err()); // 169.254.169.254
-                                                                               // Whole-host octal (overflows u32 as decimal; curl/browsers still treat as IP).
+        // 169.254.169.254 as a single decimal host.
+        assert!(validate_public_url_structure("http://2852039166/").is_err());
+        // Whole-host octal (overflows u32 as decimal; curl/browsers still treat as IP).
         assert!(validate_public_url_structure("http://017700000001/").is_err());
         assert!(validate_public_url_structure("http://0x7f.0x0.0x0.0x1/").is_err());
         assert!(authorize_structure_only_public("https://1.1.1.1/"));

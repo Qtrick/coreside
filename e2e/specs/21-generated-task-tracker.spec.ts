@@ -49,6 +49,17 @@ describe("Journey 21 — generated Task Tracker vertical slice", () => {
     await send.click();
 
     // Composer sticky owns Apply when the same proposal is also inline in chat.
+    // Ensure the sticky Apply is scrolled into view before the click helper runs
+    // (WebKit elementFromPoint otherwise reports an obstructing ancestor).
+    await browser.waitUntil(
+      async () => (await $(".change-proposal [data-proposal-apply='true']")).isExisting(),
+      {
+        timeout: 45_000,
+        timeoutMsg: "Kernel Apply never appeared before scrollIntoView",
+      },
+    );
+    const applyForScroll = await $(".change-proposal [data-proposal-apply='true']");
+    await applyForScroll.scrollIntoView({ block: "nearest", inline: "nearest" });
     await clickKernelApplyButton();
 
     // Open from Personal apps sidebar (must appear after proposal/tool apply refresh).

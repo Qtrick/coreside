@@ -1681,7 +1681,10 @@ fn apply_one(
                 }
             }
 
-            super::surfaces::save_surface_state_occ(db, sid, &current, current_rev)
+            // Honor model-supplied baseRevision against surface_state.state_revision when
+            // present (mock/agent game.move patches). Fall back to the live CAS tip.
+            let expected_state_rev = op.base_revision.unwrap_or(current_rev);
+            super::surfaces::save_surface_state_occ(db, sid, &current, expected_state_rev)
                 .map_err(|e| e.to_string())?;
 
             // COMPATIBILITY ADAPTER: Legacy (pre-V2) personal tools still read `tool_state`

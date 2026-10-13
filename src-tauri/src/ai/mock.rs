@@ -46,6 +46,19 @@ impl MockAiProvider {
         Self::parse_json_i64_field(system_prompt, "definitionRevision")
     }
 
+    /// OCC base revision for mock state mutations: prefer structured state
+    /// revision (state.patch CAS tip), then surface/definition revision, else
+    /// the highest definitionRevision in the prompt.
+    fn surface_base_revision(
+        structured: Option<&super::structured_user_input::StructuredUserInput>,
+        system_prompt: &str,
+    ) -> i64 {
+        structured
+            .and_then(|s| s.state_revision.or(s.surface_revision))
+            .or_else(|| Self::observed_definition_revision(system_prompt))
+            .unwrap_or(1)
+    }
+
     fn fixture_for_with_revision(user_text: &str, observed_revision: Option<i64>) -> String {
         let lower = user_text.to_lowercase();
 
@@ -495,6 +508,7 @@ impl MockAiProvider {
             let surface_id = structured
                 .and_then(|s| s.surface_id.as_deref())
                 .unwrap_or("tool-tictactoe");
+            let base_revision = Self::surface_base_revision(structured, &request.system_prompt);
             return json!({
                 "schemaVersion": "2",
                 "assistantMessage": "New game started! Your turn (X). Click any square to play.",
@@ -504,7 +518,7 @@ impl MockAiProvider {
                     {
                         "id": "op-tictactoe-reset",
                         "type": "state.patch",
-                        "baseRevision": 1,
+                        "baseRevision": base_revision,
                         "target": { "surfaceId": surface_id },
                         "payload": {
                             "c0": "", "c1": "", "c2": "",
@@ -525,6 +539,7 @@ impl MockAiProvider {
             let surface_id = structured
                 .and_then(|s| s.surface_id.as_deref())
                 .unwrap_or("tool-tictactoe");
+            let base_revision = Self::surface_base_revision(structured, &request.system_prompt);
 
             let mut board: Vec<String> = (0..9)
                 .map(|i| {
@@ -622,7 +637,7 @@ impl MockAiProvider {
                     {
                         "id": "op-tictactoe-ai-move",
                         "type": "state.patch",
-                        "baseRevision": 1,
+                        "baseRevision": base_revision,
                         "target": { "surfaceId": surface_id },
                         "payload": {
                             "c0": board[0], "c1": board[1], "c2": board[2],
@@ -797,19 +812,21 @@ impl MockAiProvider {
                 .pointer_mut("/operations/0/payload")
                 .and_then(|p| p.as_object_mut())
             {
+                // Board cells must be model-writable: game.move fixtures apply
+                // state.patch for both X and O. UI setValue may still target model keys.
                 payload.insert(
                     "stateContracts".into(),
                     json!([
-                        { "key": "c0", "type": "string", "initialValue": "", "writePolicy": "user" },
-                        { "key": "c1", "type": "string", "initialValue": "", "writePolicy": "user" },
-                        { "key": "c2", "type": "string", "initialValue": "", "writePolicy": "user" },
-                        { "key": "c3", "type": "string", "initialValue": "", "writePolicy": "user" },
-                        { "key": "c4", "type": "string", "initialValue": "", "writePolicy": "user" },
-                        { "key": "c5", "type": "string", "initialValue": "", "writePolicy": "user" },
-                        { "key": "c6", "type": "string", "initialValue": "", "writePolicy": "user" },
-                        { "key": "c7", "type": "string", "initialValue": "", "writePolicy": "user" },
-                        { "key": "c8", "type": "string", "initialValue": "", "writePolicy": "user" },
-                        { "key": "lastMove", "type": "integer", "initialValue": null, "nullable": true, "writePolicy": "user" },
+                        { "key": "c0", "type": "string", "initialValue": "", "writePolicy": "model" },
+                        { "key": "c1", "type": "string", "initialValue": "", "writePolicy": "model" },
+                        { "key": "c2", "type": "string", "initialValue": "", "writePolicy": "model" },
+                        { "key": "c3", "type": "string", "initialValue": "", "writePolicy": "model" },
+                        { "key": "c4", "type": "string", "initialValue": "", "writePolicy": "model" },
+                        { "key": "c5", "type": "string", "initialValue": "", "writePolicy": "model" },
+                        { "key": "c6", "type": "string", "initialValue": "", "writePolicy": "model" },
+                        { "key": "c7", "type": "string", "initialValue": "", "writePolicy": "model" },
+                        { "key": "c8", "type": "string", "initialValue": "", "writePolicy": "model" },
+                        { "key": "lastMove", "type": "integer", "initialValue": null, "nullable": true, "writePolicy": "model" },
                         { "key": "turn", "type": "string", "initialValue": "X", "writePolicy": "model" },
                         { "key": "status", "type": "string", "initialValue": "Your turn (X). Click any square to play!", "writePolicy": "model" },
                         { "key": "winner", "type": "string", "initialValue": "", "writePolicy": "model" }
@@ -1246,10 +1263,11 @@ impl MockAiProvider {
         request: AgentRequest,
         tx: ProviderStreamTx,
     ) -> Result<AgentResponse, AiError> {
+        let base_revision = Self::surface_base_revision(None, &request.system_prompt);
         let paint_op = json!({
             "id": "op-progressive-surface-preview",
             "type": "state.set",
-            "baseRevision": 1,
+            "baseRevision": base_revision,
             "target": {
                 "surfaceId": "surf-tool-e2e-notes",
                 "toolId": "tool-e2e-notes"
@@ -2125,9 +2143,161 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tictactoe_consecutive_moves_apply_without_occ_conflict() {
+        use crate::ai::StructuredUserInput;
+        use crate::application_kernel::{apply_change, decide_proposal, ChangeRequest};
+        use crate::db::{create_conversation, Database, DEFAULT_WORKSPACE_ID};
+        use crate::runtime_v2::surfaces::{get_surface, surface_id_for_tool};
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("ttt-occ.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "TTT-OCC", None).unwrap();
+        let provider = MockAiProvider::new();
+
+        // Create the board surface.
+        let create_resp = provider
+            .chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Build me a Tic-Tac-Toe game where I play against you",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+            })
+            .await
+            .unwrap();
+        let create_ops = parse_agent_response(&create_resp.raw_text)
+            .unwrap()
+            .payload
+            .normalized_operations()
+            .expect("create ops");
+        let create_change = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                turn_id: Some("turn-ttt-create".into()),
+                summary: "Create Tic-Tac-Toe".into(),
+                operations: create_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .expect("propose create");
+        let create_pid = create_change.proposal_id.expect("proposal id");
+        let create_committed = decide_proposal(&mut db, None, &create_pid, true).expect("commit");
+        assert!(
+            create_committed.is_committed(),
+            "create conflicts: {:?}",
+            create_committed.conflicts
+        );
+
+        let surface_id = surface_id_for_tool("tool-tictactoe");
+        let mut board = ["", "", "", "", "", "", "", "", ""].map(str::to_string);
+
+        for (turn_idx, cell) in [0usize, 1usize].into_iter().enumerate() {
+            let surface = get_surface(&db, &surface_id).expect("surface");
+            let (_, state_rev) =
+                crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface_id)
+                    .expect("state rev");
+            let def_rev = surface.current_revision;
+            let mut fields_map = serde_json::Map::new();
+            fields_map.insert("cell".to_string(), json!(cell));
+            fields_map.insert("lastMove".to_string(), json!(cell));
+            for i in 0..9 {
+                fields_map.insert(format!("c{i}"), json!(board[i].clone()));
+            }
+            let sui = StructuredUserInput {
+                submission_id: format!("sui-move-{turn_idx}"),
+                form_id: format!("ttt-c{cell}"),
+                event_name: Some("game.move".into()),
+                application_id: Some("tool-tictactoe".into()),
+                surface_id: Some(surface_id.clone()),
+                surface_revision: Some(def_rev),
+                state_revision: Some(state_rev),
+                component_id: None,
+                idempotency_key: None,
+                conversation_id: conv.id.clone(),
+                fields: fields_map,
+                content_hash: format!("hash-{turn_idx}"),
+                trust_class: crate::ai::structured_user_input::TrustClass::LocalUserGesture,
+                instruction_eligibility:
+                    crate::ai::structured_user_input::InstructionEligibility::LocalUserContent,
+            };
+
+            let move_resp = provider
+                .chat(AgentRequest {
+                    system_prompt: format!(r#"{{"definitionRevision":{def_rev}}}"#),
+                    messages: vec![AgentMessage::with_parts(
+                        crate::ai::AgentRole::User,
+                        "App interaction (game.move)",
+                        vec![AgentContentPart::StructuredUserInput(sui)],
+                    )],
+                    cancel: CancellationToken::new(),
+                    idempotency_key: None,
+                })
+                .await
+                .unwrap();
+            let parsed = parse_agent_response(&move_resp.raw_text).unwrap();
+            let mut ops = parsed.payload.normalized_operations().expect("move ops");
+            // Fixture op ids are stable; uniquify per turn for app_operations PK.
+            ops[0].id = format!("op-tictactoe-ai-move-{turn_idx}");
+            // Prefer state_revision for state.patch OCC (surface_revision falls back).
+            assert_eq!(ops[0].base_revision, Some(state_rev));
+            assert_eq!(
+                ops[0].target.surface_id.as_deref(),
+                Some(surface_id.as_str())
+            );
+
+            let change = apply_change(
+                &mut db,
+                None,
+                ChangeRequest {
+                    conversation_id: Some(conv.id.clone()),
+                    turn_id: Some(format!("turn-ttt-move-{turn_idx}")),
+                    summary: format!("Tic-Tac-Toe move {turn_idx}"),
+                    operations: ops.clone(),
+                    source_type: "agent".into(),
+                    ..Default::default()
+                },
+            )
+            .expect("apply move");
+            // Automatic-risk state.patch applies inline; lightweight/strong stages a proposal.
+            let committed = if let Some(pid) = change.proposal_id.as_deref() {
+                decide_proposal(&mut db, None, pid, true).expect("commit move proposal")
+            } else {
+                change
+            };
+            assert!(
+                committed.is_committed(),
+                "move {turn_idx} OCC/conflicts: {:?}",
+                committed.conflicts
+            );
+
+            // Mirror board from the applied patch so the next structured turn is coherent.
+            if let Some(payload) = ops[0].payload.as_object() {
+                for i in 0..9 {
+                    if let Some(v) = payload.get(&format!("c{i}")).and_then(|v| v.as_str()) {
+                        board[i] = v.to_string();
+                    }
+                }
+            }
+        }
+
+        let (_, final_state_rev) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface_id)
+                .expect("final state");
+        assert!(
+            final_state_rev > 1,
+            "expected state_revision to advance across consecutive moves, got {final_state_rev}"
+        );
+    }
+
+    #[tokio::test]
     async fn tictactoe_move_and_reset_turn_returns_targeted_state_patch() {
         use crate::ai::StructuredUserInput;
-        use std::collections::HashMap;
         let provider = MockAiProvider::new();
 
         // 1. Move turn with structured user input

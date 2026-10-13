@@ -461,7 +461,8 @@ export async function latestVisibleKernelApplyButton() {
 export async function clickVisibleKernelApplyButton() {
   const applyBtn = await latestVisibleKernelApplyButton();
   if (!applyBtn) throw new Error("Kernel Apply missing");
-  await applyBtn.scrollIntoView({ block: "center" });
+  // Prefer nearest — block:center can scroll the Apply under overlapping chrome.
+  await applyBtn.scrollIntoView({ block: "nearest", inline: "nearest" });
 
   try {
     await applyBtn.waitForClickable({ timeout: 8_000 });
