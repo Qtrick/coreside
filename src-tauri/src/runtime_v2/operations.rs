@@ -236,6 +236,38 @@ pub fn is_known_operation_type(op: &str) -> bool {
     is_supported_model_operation(op) || is_internal_operation(op) || is_reserved_operation(op)
 }
 
+/// Mutating definition/state ops that must carry OCC `baseRevision` from the model.
+/// Create-only and non-mutating signaling ops are exempt.
+pub fn requires_base_revision(op_type: &str) -> bool {
+    matches!(
+        op_type,
+        "component.insert"
+            | "component.remove"
+            | "component.move"
+            | "component.replace"
+            | "component.update_props"
+            | "component.update_actions"
+            | "component.update_children"
+            | "component.update_visibility"
+            | "component.bind_state"
+            | "component.bind_action"
+            | "component.set_style_token"
+            | "tool.full_replace"
+            | "surface.promote"
+            | "surface.archive"
+            | "surface.restore"
+            | "surface.delete"
+            | "surface.add_section"
+            | "surface.remove_section"
+            | "surface.update_section"
+            | "chat.inline_surface_update"
+            | "chat.inline_surface_remove"
+            | "state.set"
+            | "state.patch"
+            | "layout.update"
+    )
+}
+
 /// Shared validation core for operation lists.
 /// `require_model_ops` restricts to SUPPORTED_MODEL_OPERATIONS only (rejecting internal/reserved).
 fn validate_operations_inner(
@@ -283,6 +315,13 @@ fn validate_operations_inner(
         }
         if let Some(g) = &op.transaction_group {
             groups.insert(g.clone());
+        }
+        // Model-facing mutating ops must include OCC baseRevision (creates exempt).
+        if require_model_ops && requires_base_revision(&op.op_type) && op.base_revision.is_none() {
+            return Err(format!(
+                "operation '{}' of type '{}' requires baseRevision for optimistic concurrency",
+                op.id, op.op_type
+            ));
         }
         if let Some(sid) = op.target.surface_id.as_ref() {
             crate::security::assert_not_protected(sid)?;
@@ -1050,7 +1089,7 @@ mod tests {
                 surface_id: Some("surf-test".into()),
                 ..Default::default()
             },
-            base_revision: None,
+            base_revision: Some(1),
             transaction_group: None,
             idempotency_key: None,
             depends_on: None,
@@ -1060,6 +1099,58 @@ mod tests {
             audience: None,
         }];
         assert!(validate_model_operations(&ops).is_ok());
+    }
+
+    #[test]
+    fn rejects_mutating_model_ops_without_base_revision() {
+        let ops = vec![AppOperation {
+            id: "op1".into(),
+            op_type: "component.update_props".into(),
+            target: OperationTarget {
+                surface_id: Some("surf-test".into()),
+                ..Default::default()
+            },
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({"props": {"text": "hello"}}),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        let err = validate_model_operations(&ops).unwrap_err();
+        assert!(err.contains("baseRevision"), "{err}");
+    }
+
+    #[test]
+    fn create_ops_do_not_require_base_revision() {
+        let ops = vec![AppOperation {
+            id: "op-create".into(),
+            op_type: "surface.create".into(),
+            target: OperationTarget::default(),
+            base_revision: None,
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            payload: json!({
+                "surface": {
+                    "id": "surf-new",
+                    "kind": "tool",
+                    "definition": { "components": [] }
+                }
+            }),
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        }];
+        // May fail on payload shape details; must not fail on missing baseRevision.
+        if let Err(err) = validate_model_operations(&ops) {
+            assert!(
+                !err.contains("baseRevision"),
+                "create ops must not require baseRevision: {err}"
+            );
+        }
     }
 
     // P0 security regression tests: every internal/reserved operation must be
@@ -1348,7 +1439,7 @@ mod tests {
                     surface_id: Some("surf-test".into()),
                     ..Default::default()
                 },
-                base_revision: None,
+                base_revision: Some(1),
                 transaction_group: None,
                 idempotency_key: None,
                 depends_on: None,
@@ -1613,7 +1704,7 @@ mod tests {
                     surface_id: Some("surf-test".into()),
                     ..Default::default()
                 },
-                base_revision: None,
+                base_revision: Some(1),
                 transaction_group: None,
                 idempotency_key: None,
                 depends_on: None,

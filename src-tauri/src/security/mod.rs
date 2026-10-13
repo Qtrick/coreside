@@ -27,13 +27,30 @@ static KEY_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
         Regex::new(r"(?i)(sk-[A-Za-z0-9\-_]{20,})").expect("valid regex"),
         Regex::new(r"(?i)(Bearer\s+[A-Za-z0-9\-._~+/]+=*)").expect("valid regex"),
         Regex::new(r#"(?i)(api[_-]?key[=:]\s*)([^\s&"']+)"#).expect("valid regex"),
+        // Broad redaction helper for logs — not used for export fail-closed checks.
         Regex::new(r"(?i)(key[=:]\s*)([A-Za-z0-9\-_]{16,})").expect("valid regex"),
     ]
 });
 
-/// True when text matches known credential token shapes (export fail-closed check).
+/// High-confidence credential token shapes safe for export fail-closed scanning.
+/// Excludes the broad `key=` pattern that false-positives on ordinary UI copy.
+static EXPORT_SECRET_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    vec![
+        Regex::new(r"(?i)(AIza[0-9A-Za-z\-_]{20,})").expect("valid regex"),
+        Regex::new(r"(?i)(sk-[A-Za-z0-9\-_]{20,})").expect("valid regex"),
+        Regex::new(r"(?i)(Bearer\s+[A-Za-z0-9\-._~+/]+=*)").expect("valid regex"),
+        Regex::new(r#"(?i)(api[_-]?key[=:]\s*)([^\s&"']{8,})"#).expect("valid regex"),
+    ]
+});
+
+/// True when text matches known credential token shapes (log redaction).
 pub fn contains_secret_patterns(text: &str) -> bool {
     KEY_PATTERNS.iter().any(|re| re.is_match(text))
+}
+
+/// True when text contains high-confidence secret tokens (export fail-closed).
+pub fn contains_export_secret_tokens(text: &str) -> bool {
+    EXPORT_SECRET_PATTERNS.iter().any(|re| re.is_match(text))
 }
 
 /// Redact known API key shapes and an optional concrete key value from text.
@@ -96,6 +113,16 @@ mod tests {
     fn redacts_gemini_style_key() {
         let s = redact_secrets("AIzaSyA-test-key-value-1234567890abcd", None);
         assert_eq!(s, "[REDACTED]");
+    }
+
+    #[test]
+    fn export_token_scan_ignores_broad_key_equals() {
+        let ordinary = "key=press-the-enter-key-here";
+        assert!(contains_secret_patterns(ordinary));
+        assert!(!contains_export_secret_tokens(ordinary));
+        assert!(contains_export_secret_tokens(
+            "sk-abcdefghijklmnopqrstuvwxyz123456"
+        ));
     }
 
     #[test]

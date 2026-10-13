@@ -274,6 +274,59 @@ fn run_one_db(db: &mut Database, automation_id: &str) -> Result<(), db::DbError>
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::automations::models::{Automation, AutomationAction, AutomationTrigger, MissedRunPolicy};
+    use crate::db::Database;
+    use tempfile::tempdir;
+
+    #[test]
+    fn catch_up_missed_is_noop_when_paused() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("sched.db")).unwrap();
+        let now = Utc::now();
+        let past = (now - chrono::Duration::hours(2)).to_rfc3339();
+        db::ensure_default_workspace(&db).unwrap();
+        let auto = Automation {
+            id: "auto-paused".into(),
+            workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+            owner_tool_id: None,
+            application_id: None,
+            name: "paused catch-up".into(),
+            enabled: true,
+            trigger: AutomationTrigger::Interval {
+                interval_minutes: 60,
+                timezone: None,
+            },
+            action: AutomationAction::SetWorkspaceBackground {
+                workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+                preset_id: "missing-preset".into(),
+            },
+            requires_ai: false,
+            provider_connection_id: None,
+            missed_run_policy: MissedRunPolicy::RunOnce,
+            next_run_at: Some(past.clone()),
+            last_run_at: None,
+            last_status: None,
+            consecutive_failures: 0,
+            waiting_approval: false,
+            permission_ready: true,
+            created_at: past.clone(),
+            updated_at: past.clone(),
+        };
+        db::upsert_automation(&mut db, &auto).unwrap();
+        let handle = SchedulerHandle::default();
+        handle.pause();
+        catch_up_missed(&mut db, &handle).unwrap();
+        let after = db::get_automation(&db, "auto-paused").unwrap();
+        assert_eq!(after.next_run_at.as_deref(), Some(past.as_str()));
+        assert_eq!(after.last_status, None);
+        let runs = db::list_automation_runs(&db, "auto-paused", 10).unwrap();
+        assert!(runs.is_empty(), "paused catch-up must not execute automations");
+    }
+}
+
 pub fn run_now(
     state: &AppState,
     automation_id: &str,

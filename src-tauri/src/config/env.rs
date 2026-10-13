@@ -230,6 +230,11 @@ pub fn load_config() -> AppConfig {
 }
 
 fn resolve_api_key(provider: &str) -> Option<String> {
+    // Packaged/release builds must not silently use process-env secrets.
+    // Debug builds keep .env / shell-key convenience; release needs an explicit opt-in.
+    if !env_secrets_allowed() {
+        return None;
+    }
     if let Some(desc) = crate::ai::platform::descriptor_by_id(provider) {
         if !desc.default_auth_mode.requires_secret() {
             return None;
@@ -507,6 +512,17 @@ pub fn dotenv_loading_allowed() -> bool {
             .unwrap_or(false)
 }
 
+/// True when process-environment API keys may be used as a credential source.
+///
+/// Release/packaged builds refuse `AI_API_KEY` / provider env keys unless
+/// `CORESIDE_ALLOW_ENV_SECRETS=1` is set. Debug builds keep developer convenience.
+pub fn env_secrets_allowed() -> bool {
+    cfg!(debug_assertions)
+        || std::env::var("CORESIDE_ALLOW_ENV_SECRETS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -608,6 +624,18 @@ mod tests {
             allowed,
             cfg!(debug_assertions)
                 || std::env::var("CORESIDE_ALLOW_DOTENV")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false)
+        );
+    }
+
+    #[test]
+    fn env_secrets_policy_is_debug_or_explicit() {
+        let allowed = env_secrets_allowed();
+        assert_eq!(
+            allowed,
+            cfg!(debug_assertions)
+                || std::env::var("CORESIDE_ALLOW_ENV_SECRETS")
                     .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                     .unwrap_or(false)
         );

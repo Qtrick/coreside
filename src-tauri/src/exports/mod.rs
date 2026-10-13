@@ -5,7 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use serde_json::{json, Value};
 
 use crate::app_paths::AppPaths;
-use crate::security::contains_secret_patterns;
+use crate::security::contains_export_secret_tokens;
 
 pub fn sanitize_filename(name: &str) -> String {
     let mut out = String::new();
@@ -168,17 +168,17 @@ pub fn standalone_html_for_clock(tool_name: &str, props: &Value) -> String {
 }
 
 pub fn assert_no_secrets(blob: &str) -> Result<(), String> {
+    // High-confidence credential prefixes only — avoid substring needles like
+    // bare "apikey" that false-positive on ordinary tool copy.
     let lower = blob.to_lowercase();
     for needle in [
-        "apikey",
-        "api_key",
         "authorization: bearer",
         "sk-ant-",
         "sk-or-v1-",
         "sk-proj-",
         "aizasy",
-        "client_secret",
-        "private_key",
+        "-----begin private key-----",
+        "-----begin rsa private key-----",
     ] {
         if lower.contains(needle) {
             return Err(format!(
@@ -186,7 +186,7 @@ pub fn assert_no_secrets(blob: &str) -> Result<(), String> {
             ));
         }
     }
-    if contains_secret_patterns(blob) {
+    if contains_export_secret_tokens(blob) {
         return Err("Export contains forbidden secret token pattern".into());
     }
     Ok(())
@@ -353,6 +353,13 @@ mod tests {
     fn assert_no_secrets_rejects_generic_sk_tokens() {
         let blob = "note: sk-abcdefghijklmnopqrstuvwxyz123456";
         assert!(assert_no_secrets(blob).is_err());
+    }
+
+    #[test]
+    fn assert_no_secrets_allows_ordinary_key_labels() {
+        // Broad `key=` redaction must not fail-close ordinary tool JSON.
+        let blob = r#"{"label":"Primary key","shortcut":"cmd-k","keyHint":"press-the-enter-key"}"#;
+        assert!(assert_no_secrets(blob).is_ok());
     }
 
     #[test]

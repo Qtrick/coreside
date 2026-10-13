@@ -66,7 +66,13 @@ pub fn upsert_automation(
         application_id: input
             .application_id
             .filter(|s| !s.trim().is_empty())
-            .or_else(|| existing.as_ref().and_then(|e| e.application_id.clone())),
+            .or_else(|| existing.as_ref().and_then(|e| e.application_id.clone()))
+            .or_else(|| match &input.action {
+                // Bind tool-state automations to the target tool so the gateway
+                // always owns OCC / approval / isolation checks.
+                AutomationAction::SetToolStateValue { tool_id, .. } => Some(tool_id.clone()),
+                _ => None,
+            }),
         name: input.name.trim().to_string(),
         enabled: input.enabled.unwrap_or(true),
         trigger: input.trigger,

@@ -49,11 +49,17 @@ pub fn validate_automation(
                 return Err("AI prompt cannot be empty".into());
             }
         }
-        AutomationAction::SetToolStateValue { path, .. } => {
+        AutomationAction::SetToolStateValue { tool_id, path, .. } => {
+            if tool_id.trim().is_empty() {
+                return Err("Tool state automations require a tool id".into());
+            }
+            if crate::security::is_protected(tool_id) {
+                return Err("Protected resources cannot be automation targets".into());
+            }
             if path.trim().is_empty() || path.contains("..") {
                 return Err("Invalid tool state path".into());
             }
-            if path.starts_with("core.") {
+            if path.starts_with("core.") || crate::security::is_protected(path) {
                 return Err("Protected resources cannot be automation targets".into());
             }
         }
