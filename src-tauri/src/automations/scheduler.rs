@@ -274,10 +274,31 @@ fn run_one_db(db: &mut Database, automation_id: &str) -> Result<(), db::DbError>
     Ok(())
 }
 
+pub fn run_now(
+    state: &AppState,
+    automation_id: &str,
+    handle: &SchedulerHandle,
+) -> Result<String, String> {
+    if !state.profile_ready() {
+        return Err("Automations are unavailable until Recovery finishes.".into());
+    }
+    if !handle.try_begin(automation_id) {
+        return Err("Automation is already running".into());
+    }
+    let mut db = state.db.lock();
+    let result = run_one_db(&mut db, automation_id);
+    handle.end(automation_id);
+    result
+        .map(|_| "Automation run completed".into())
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::automations::models::{Automation, AutomationAction, AutomationTrigger, MissedRunPolicy};
+    use crate::automations::models::{
+        Automation, AutomationAction, AutomationTrigger, MissedRunPolicy,
+    };
     use crate::db::Database;
     use tempfile::tempdir;
 
@@ -323,25 +344,9 @@ mod tests {
         assert_eq!(after.next_run_at.as_deref(), Some(past.as_str()));
         assert_eq!(after.last_status, None);
         let runs = db::list_automation_runs(&db, "auto-paused", 10).unwrap();
-        assert!(runs.is_empty(), "paused catch-up must not execute automations");
+        assert!(
+            runs.is_empty(),
+            "paused catch-up must not execute automations"
+        );
     }
-}
-
-pub fn run_now(
-    state: &AppState,
-    automation_id: &str,
-    handle: &SchedulerHandle,
-) -> Result<String, String> {
-    if !state.profile_ready() {
-        return Err("Automations are unavailable until Recovery finishes.".into());
-    }
-    if !handle.try_begin(automation_id) {
-        return Err("Automation is already running".into());
-    }
-    let mut db = state.db.lock();
-    let result = run_one_db(&mut db, automation_id);
-    handle.end(automation_id);
-    result
-        .map(|_| "Automation run completed".into())
-        .map_err(|e| e.to_string())
 }

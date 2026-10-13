@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-27T02:26:13.943Z",
-  "commit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
-  "dirty": true,
+  "generatedAt": "2026-10-13T19:54:26.460Z",
+  "commit": "0dda878245feece178f2f71cdd1463ce3a006be1",
+  "dirty": false,
   "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
   "packageLockHash": "2b427ad1e95a93b212ca4763ebba64a778c976c59421514246b4b3c68300468d",
   "cargoLockHash": "b64ad87161713f19b77675d96b38081e050c78ec6b8e3d6b3e00f26b49bfbd67",
@@ -20,9 +20,9 @@
   "tracks": {
     "localFirst": {
       "track": "local-byok",
-      "ladder": "Development Build",
-      "dirty": true,
-      "candidateNote": "Dirty tree — remain Development Build. e2e-1-14=Integrated – Not Verified; packaged-smoke=Scaffolded (launch-only ≠ Packaged Verified).",
+      "ladder": "Internal Alpha Candidate",
+      "dirty": false,
+      "candidateNote": "Clean tree; desktop/packaged claims not on HEAD or intentionally partial — Internal Alpha Candidate pending fresh evidence. Public beta Not ready.",
       "publicBeta": "Not ready"
     },
     "hosted": {
@@ -37,7 +37,7 @@
       "id": "true-streaming",
       "name": "True streaming (chat_stream / TextDelta)",
       "state": "Integrated – Not Verified",
-      "notes": "True streaming desktop claim withheld. (prior evidence b16ef82) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "True streaming desktop claim withheld. (prior evidence 1ecf1e3) Re-run on HEAD to claim Desktop Verified.",
       "evidence": [
         "reports/true-streaming-results.json"
       ]
@@ -46,7 +46,7 @@
       "id": "channel-scoped-streaming",
       "name": "Channel-scoped turn streaming",
       "state": "Integrated – Not Verified",
-      "notes": "Channel-scoped streaming desktop claim withheld. (prior evidence b16ef82) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Channel-scoped streaming desktop claim withheld. (prior evidence 1ecf1e3) Re-run on HEAD to claim Desktop Verified.",
       "evidence": [
         "reports/scoped-streaming-results.json",
         "reports/stream-eavesdropping-results.json"
@@ -56,7 +56,7 @@
       "id": "wallpaper-atomic-settings",
       "name": "Wallpaper atomic appearance writes",
       "state": "Integrated – Not Verified",
-      "notes": "Wallpaper atomic settings desktop claim withheld. (prior evidence b16ef82) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Wallpaper atomic settings desktop claim withheld. (prior evidence 1ecf1e3) Re-run on HEAD to claim Desktop Verified.",
       "evidence": [
         "reports/wallpaper-settings-results.json",
         "reports/wallpaper-visual-results.json"
@@ -128,7 +128,7 @@
       "id": "e2e-1-14",
       "name": "Desktop E2E Journeys 1–14",
       "state": "Integrated – Not Verified",
-      "notes": "Journey 7 is passed_partial (evidence commit b16ef82); suite must not be treated as Desktop Verified.",
+      "notes": "Journey 7 is passed_partial (evidence commit 1ecf1e3); suite must not be treated as Desktop Verified.",
       "evidence": [
         "reports/e2e-results.json",
         "reports/true-streaming-results.json",
@@ -141,7 +141,7 @@
       "id": "e2e-12-13",
       "name": "Desktop E2E Journey 12 / 13",
       "state": "Integrated – Not Verified",
-      "notes": "Journey 12/13 evidence not on HEAD. (prior evidence b16ef82) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Journey 12/13 evidence not on HEAD. (prior evidence 1ecf1e3) Re-run on HEAD to claim Desktop Verified.",
       "evidence": [
         "reports/true-streaming-results.json",
         "reports/wallpaper-visual-results.json"
@@ -151,7 +151,7 @@
       "id": "e2e-14-eavesdrop",
       "name": "Tool-window stream eavesdropping denial",
       "state": "Integrated – Not Verified",
-      "notes": "Journey 14 eavesdrop desktop claim withheld. (prior evidence b16ef82) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Journey 14 eavesdrop desktop claim withheld. (prior evidence 1ecf1e3) Re-run on HEAD to claim Desktop Verified.",
       "evidence": [
         "reports/stream-eavesdropping-results.json"
       ]
@@ -160,7 +160,7 @@
       "id": "command-authority-j11",
       "name": "Tool-window raw-invoke ACL denial (Journey 11)",
       "state": "Integrated – Not Verified",
-      "notes": "Journey 11 command-authority desktop claim withheld. (prior evidence b16ef82) Re-run on HEAD to claim Desktop Verified.",
+      "notes": "Journey 11 command-authority desktop claim withheld. (prior evidence 1ecf1e3) Re-run on HEAD to claim Desktop Verified.",
       "evidence": [
         "reports/command-authority-results.json"
       ]
@@ -220,8 +220,8 @@
     {
       "id": "packaged-smoke",
       "name": "Normal package build + smoke launch",
-      "state": "Scaffolded",
-      "notes": "Packaged smoke status=unknown — not Packaged Verified.",
+      "state": "Integrated – Not Verified",
+      "notes": "Launch-only smoke recorded on 8a09bda (not HEAD). Not Packaged Verified.",
       "evidence": [
         "reports/packaged-smoke-results.json"
       ]
@@ -263,11 +263,11 @@
       "e2e-12-13",
       "e2e-14-eavesdrop",
       "command-authority-j11",
-      "local-ai-privacy"
+      "local-ai-privacy",
+      "packaged-smoke"
     ],
     "scaffolded": [
-      "hosted-ai-gateway",
-      "packaged-smoke"
+      "hosted-ai-gateway"
     ],
     "absent": [],
     "deferred": [
@@ -276,7 +276,7 @@
     "highestDesktopClaim": "none",
     "highestPackagedClaim": "none",
     "packagedVerified": [],
-    "overallLocalFirst": "Development Build",
+    "overallLocalFirst": "Internal Alpha Candidate",
     "overallHosted": "Development Build"
   }
 }

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-27T02:19:41.822Z",
-  "commit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
+  "generatedAt": "2026-10-13T19:55:09.146Z",
+  "commit": "0dda878245feece178f2f71cdd1463ce3a006be1",
   "dirty": true,
-  "fingerprint": "504f93850d247e4b221cd58a6677057f6e071aca422f00590e3e624d0ab50bc0",
+  "fingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
   "command": "audit:tutorial-targets",
   "declaredTargets": [
     "ai-connections-nav",
@@ -33,32 +33,32 @@
     {
       "id": "chat-composer",
       "file": "src/components/chat/Composer.tsx",
-      "line": 337
+      "line": 355
     },
     {
       "id": "chat-composer-send",
       "file": "src/components/chat/Composer.tsx",
-      "line": 464
+      "line": 482
     },
     {
       "id": "help-learning",
       "file": "src/components/settings/SettingsPanel.tsx",
-      "line": 447
+      "line": 448
     },
     {
       "id": "help-learning-nav",
       "file": "src/components/settings/SettingsPanel.tsx",
-      "line": 447
+      "line": 448
     },
     {
       "id": "ai-access",
       "file": "src/components/settings/SettingsPanel.tsx",
-      "line": 447
+      "line": 448
     },
     {
       "id": "ai-connections-nav",
       "file": "src/components/settings/SettingsPanel.tsx",
-      "line": 447
+      "line": 448
     },
     {
       "id": "sidebar-projects",
@@ -68,12 +68,12 @@
     {
       "id": "app-panel",
       "file": "src/components/tool-canvas/ToolCanvas.tsx",
-      "line": 405
+      "line": 530
     },
     {
       "id": "app-panel",
       "file": "src/components/tool-canvas/ToolCanvas.tsx",
-      "line": 437
+      "line": 562
     }
   ]
 }

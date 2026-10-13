@@ -17,6 +17,7 @@ import { InlineSurfacesForMessage } from "@/components/chat/InlineSurface";
 import { MessageAttachments } from "@/components/chat/MessageAttachments";
 import { SearchResults } from "@/components/search/SearchResults";
 import type { ChatMessage } from "@/types/messages";
+import { openExternalUrl } from "@/lib/open-url";
 import { useAppStore } from "@/stores/app-store";
 
 function safeMarkdownUrl(url: string): string {
@@ -225,6 +226,29 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               urlTransform={safeMarkdownUrl}
+              components={{
+                a: ({ href, children, ...props }) => (
+                  <a
+                    href={href}
+                    onClick={(e) => {
+                      if (
+                        href &&
+                        (href.startsWith("http://") ||
+                          href.startsWith("https://") ||
+                          href.startsWith("mailto:"))
+                      ) {
+                        e.preventDefault();
+                        void openExternalUrl(href);
+                      }
+                    }}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    {...props}
+                  >
+                    {children}
+                  </a>
+                ),
+              }}
               skipHtml
             >
               {message.content}

@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-28T15:46:56.928Z",
-  "commit": "47a4732c6567ee601f4e9497d2529f3272972975",
+  "generatedAt": "2026-10-13T19:54:38.609Z",
+  "commit": "0dda878245feece178f2f71cdd1463ce3a006be1",
   "dirty": true,
   "command": "audit:interactive-controls",
   "evidenceLevel": "Scaffolded",
   "note": "Static regex inventory only — not runtime interactivity proof.",
-  "filesScanned": 93,
-  "filesWithControls": 68,
-  "approximateTotalControls": 750,
+  "filesScanned": 100,
+  "filesWithControls": 70,
+  "approximateTotalControls": 764,
   "files": [
     {
       "file": "src/components/action-log/ActionLog.tsx",
@@ -97,10 +97,10 @@
     },
     {
       "file": "src/components/chat/ConversationHistory.tsx",
-      "approximateControlCount": 33,
+      "approximateControlCount": 35,
       "counts": {
-        "button": 16,
-        "onClick": 16,
+        "button": 17,
+        "onClick": 17,
         "select": 1
       },
       "flags": {
@@ -243,6 +243,15 @@
       "flags": {}
     },
     {
+      "file": "src/components/ErrorBoundary.tsx",
+      "approximateControlCount": 4,
+      "counts": {
+        "button": 2,
+        "onClick": 2
+      },
+      "flags": {}
+    },
+    {
       "file": "src/components/export/ExportDialog.tsx",
       "approximateControlCount": 10,
       "counts": {
@@ -356,6 +365,15 @@
       "flags": {
         "placeholder": true
       }
+    },
+    {
+      "file": "src/components/projects/DeleteConversationDialog.tsx",
+      "approximateControlCount": 8,
+      "counts": {
+        "button": 4,
+        "onClick": 4
+      },
+      "flags": {}
     },
     {
       "file": "src/components/projects/DeleteProjectDialog.tsx",

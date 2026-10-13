@@ -116,7 +116,10 @@ pub fn export_tool(
             .unwrap_or(requested);
         if PathBuf::from(base).extension().is_some() {
             base.to_string()
-        } else if let Some(ext) = PathBuf::from(&default_name).extension().and_then(|e| e.to_str()) {
+        } else if let Some(ext) = PathBuf::from(&default_name)
+            .extension()
+            .and_then(|e| e.to_str())
+        {
             format!("{base}.{ext}")
         } else {
             base.to_string()

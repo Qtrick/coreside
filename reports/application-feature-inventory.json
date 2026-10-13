@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-09-27T02:19:41.925Z",
-  "commit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
+  "generatedAt": "2026-10-13T19:55:12.545Z",
+  "commit": "0dda878245feece178f2f71cdd1463ce3a006be1",
   "dirty": true,
   "command": "audit:application-features",
   "evidenceLevel": "Scaffolded",
   "note": "Static catalog of known routes/panels with readiness guesses — not Desktop/Packaged Verified.",
   "readinessLadderPresent": true,
-  "readinessLadderCommit": "94a7aa3aec2d055981cb3a8f8c6776d065034f51",
+  "readinessLadderCommit": "0dda878245feece178f2f71cdd1463ce3a006be1",
   "settingsCategories": [
     "general",
     "appearance",

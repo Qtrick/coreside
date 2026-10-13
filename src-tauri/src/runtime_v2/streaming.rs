@@ -644,6 +644,7 @@ mod tests {
         let bare = json!({
             "id": "op-harvest",
             "type": "component.update_props",
+            "baseRevision": 1,
             "target": {"surfaceId": "s1", "componentId": "c1"},
             "payload": {"maximum": 10}
         })
@@ -721,12 +722,14 @@ mod tests {
                 {
                     "id": "op-new",
                     "type": "component.update_props",
+                    "baseRevision": 1,
                     "target": {"surfaceId": "s1", "componentId": "c1"},
                     "payload": {"maximum": 1}
                 },
                 {
                     "id": "op-keep",
                     "type": "component.update_props",
+                    "baseRevision": 1,
                     "target": {"surfaceId": "s1", "componentId": "c1"},
                     "payload": {"maximum": 2}
                 }
@@ -746,6 +749,7 @@ mod tests {
         let retry = json!({
             "id": "op-new",
             "type": "component.update_props",
+            "baseRevision": 1,
             "target": {"surfaceId": "s1", "componentId": "c1"},
             "payload": {"maximum": 3}
         })
@@ -898,6 +902,7 @@ mod tests {
         let good = json!({
             "id": "op-ok",
             "type": "component.update_props",
+            "baseRevision": 1,
             "target": {"surfaceId": "s1", "componentId": "c1"},
             "payload": {"props": {"label": "Save"}}
         })

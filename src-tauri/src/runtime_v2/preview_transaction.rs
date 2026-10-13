@@ -1073,6 +1073,7 @@ mod tests {
         serde_json::from_value(json!({
             "id": id,
             "type": "component.update_props",
+            "baseRevision": 3,
             "target": {"surfaceId": "s1", "componentId": "c1"},
             "payload": {"maximum": 10}
         }))
@@ -1111,6 +1112,7 @@ mod tests {
             "operation": {
                 "id": id,
                 "type": "component.update_props",
+                "baseRevision": 3,
                 "target": {"surfaceId": "s1", "componentId": "c1"},
                 "payload": {"maximum": 10}
             }
@@ -1220,7 +1222,7 @@ mod tests {
         assert!(ingest_live_chunk(&mut parser, &mut preview, partial).is_empty());
         assert!(preview.is_empty());
 
-        let rest = r#","type":"component.update_props","target":{"surfaceId":"s1","componentId":"c1"},"payload":{"maximum":10}}}"#;
+        let rest = r#","type":"component.update_props","baseRevision":3,"target":{"surfaceId":"s1","componentId":"c1"},"payload":{"maximum":10}}}"#;
         assert!(ingest_live_chunk(&mut parser, &mut preview, rest).is_empty());
 
         let events = ingest_live_chunk(&mut parser, &mut preview, "\n");
@@ -1481,7 +1483,7 @@ mod tests {
             "\n"
         );
         let op = format!(
-            r#"{{"v":"coreside.ops.v1","type":"op","frameId":1,"groupId":"g-inc","op":{{"id":"op-incomplete","type":"component.update_props","target":{{"surfaceId":"{sid}","componentId":"c1"}},"payload":{{"maximum":10}}}}}}"#
+            r#"{{"v":"coreside.ops.v1","type":"op","frameId":1,"groupId":"g-inc","op":{{"id":"op-incomplete","type":"component.update_props","baseRevision":3,"target":{{"surfaceId":"{sid}","componentId":"c1"}},"payload":{{"maximum":10}}}}}}"#
         ) + "\n";
 
         assert!(
@@ -1816,7 +1818,7 @@ mod tests {
             "\n"
         );
         let bad_op = concat!(
-            r#"{"v":"coreside.ops.v1","type":"op","frameId":1,"groupId":"g1","op":{"id":"op-missing","type":"component.update_props","target":{"surfaceId":"missing","componentId":"c1"},"payload":{"maximum":10}}}"#,
+            r#"{"v":"coreside.ops.v1","type":"op","frameId":1,"groupId":"g1","op":{"id":"op-missing","type":"component.update_props","baseRevision":1,"target":{"surfaceId":"missing","componentId":"c1"},"payload":{"maximum":10}}}"#,
             "\n"
         );
         assert!(
@@ -1850,6 +1852,7 @@ mod tests {
         let child_op: AppOperation = serde_json::from_value(json!({
             "id": "op-child",
             "type": "component.update_props",
+            "baseRevision": 1,
             "target": {"surfaceId": "surf-1", "componentId": "c1"},
             "depends_on": ["op-parent"],
             "payload": {"text": "Updated by child"}
@@ -1868,6 +1871,7 @@ mod tests {
         let parent_op: AppOperation = serde_json::from_value(json!({
             "id": "op-parent",
             "type": "component.update_props",
+            "baseRevision": 1,
             "target": {"surfaceId": "surf-1", "componentId": "c1"},
             "payload": {"text": "Updated by parent"}
         }))
@@ -1891,6 +1895,7 @@ mod tests {
         let op1: AppOperation = serde_json::from_value(json!({
             "id": "op-a",
             "type": "component.update_props",
+            "baseRevision": 1,
             "target": {"surfaceId": "surf-1", "componentId": "c1"},
             "depends_on": ["op-b"],
             "payload": {"text": "A"}
@@ -1903,6 +1908,7 @@ mod tests {
         let op2: AppOperation = serde_json::from_value(json!({
             "id": "op-b",
             "type": "component.update_props",
+            "baseRevision": 1,
             "target": {"surfaceId": "surf-1", "componentId": "c1"},
             "depends_on": ["op-a"],
             "payload": {"text": "B"}
@@ -1925,6 +1931,7 @@ mod tests {
         let op: AppOperation = serde_json::from_value(json!({
             "id": "op-orphan",
             "type": "component.update_props",
+            "baseRevision": 1,
             "target": {"surfaceId": "surf-1", "componentId": "c1"},
             "depends_on": ["op-never-arrives"],
             "payload": {"text": "Orphan"}
@@ -1945,6 +1952,7 @@ mod tests {
             "operation": {
                 "id": id,
                 "type": "component.update_props",
+                "baseRevision": 1,
                 "target": {"surfaceId": surface_id, "componentId": "c1"},
                 "payload": {"maximum": 10}
             }

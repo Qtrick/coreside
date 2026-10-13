@@ -584,8 +584,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut db = Database::open_path(&dir.path().join("dup.db")).unwrap();
         let project = create_project(&mut db, &sample_input("Dup")).unwrap();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Source", Some(&project.id)).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Source", Some(&project.id))
+            .unwrap();
         insert_message(&mut db, &conv.id, "user", "hello", None).unwrap();
         insert_message(&mut db, &conv.id, "assistant", "world", None).unwrap();
 

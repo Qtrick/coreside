@@ -1290,8 +1290,7 @@ mod tests {
         .unwrap();
         assert_eq!(surface.placement, "chat_inline");
 
-        let promoted =
-            promote_inline_to_tool(&mut db, &surface.id, DEFAULT_WORKSPACE_ID).unwrap();
+        let promoted = promote_inline_to_tool(&mut db, &surface.id, DEFAULT_WORKSPACE_ID).unwrap();
         assert_eq!(promoted.placement, "tool_canvas");
         assert_eq!(promoted.lifecycle_state, "promoted");
         assert_eq!(promoted.tool_id.as_deref(), Some("tool-inline-clock"));

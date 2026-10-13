@@ -504,6 +504,7 @@ impl MockAiProvider {
                     {
                         "id": "op-tictactoe-reset",
                         "type": "state.patch",
+                        "baseRevision": 1,
                         "target": { "surfaceId": surface_id },
                         "payload": {
                             "c0": "", "c1": "", "c2": "",
@@ -621,6 +622,7 @@ impl MockAiProvider {
                     {
                         "id": "op-tictactoe-ai-move",
                         "type": "state.patch",
+                        "baseRevision": 1,
                         "target": { "surfaceId": surface_id },
                         "payload": {
                             "c0": board[0], "c1": board[1], "c2": board[2],
@@ -1247,6 +1249,7 @@ impl MockAiProvider {
         let paint_op = json!({
             "id": "op-progressive-surface-preview",
             "type": "state.set",
+            "baseRevision": 1,
             "target": {
                 "surfaceId": "surf-tool-e2e-notes",
                 "toolId": "tool-e2e-notes"
@@ -2070,8 +2073,7 @@ mod tests {
 
         let dir = tempdir().unwrap();
         let mut db = Database::open_path(&dir.path().join("plan-only.db")).unwrap();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "PlanOnly", None).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "PlanOnly", None).unwrap();
 
         // Simulate a provider that emits applicationPlan without toolChange.
         let plan = crate::ai::plan_fixtures::task_tracker_create_plan();

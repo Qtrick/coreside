@@ -206,8 +206,10 @@ pub fn resolve_managed_export_path(requested: &str, default_name: &str) -> Resul
         return Err("Export path must be a file name, not an absolute path".into());
     }
     if path.components().any(|c| {
-        matches!(c, Component::ParentDir | Component::RootDir | Component::Prefix(_))
-            || matches!(c, Component::Normal(s) if s.to_string_lossy().contains(".."))
+        matches!(
+            c,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        ) || matches!(c, Component::Normal(s) if s.to_string_lossy().contains(".."))
     }) {
         return Err("Export path must be a file name without folders".into());
     }
@@ -219,9 +221,10 @@ pub fn resolve_managed_export_path(requested: &str, default_name: &str) -> Resul
         .and_then(|s| s.to_str())
         .filter(|s| !s.is_empty() && *s != "." && *s != "..")
         .ok_or_else(|| "Invalid export filename".to_string())?;
-    if file_name.chars().any(|c| {
-        c.is_control() || c == '/' || c == '\\' || c == '\0' || c == ':'
-    }) {
+    if file_name
+        .chars()
+        .any(|c| c.is_control() || c == '/' || c == '\\' || c == '\0' || c == ':')
+    {
         return Err("Export filename contains forbidden characters".into());
     }
 

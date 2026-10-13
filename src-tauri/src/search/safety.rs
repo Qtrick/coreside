@@ -217,7 +217,12 @@ fn expand_short_ipv4(nums: &[u32]) -> Option<[u8; 4]> {
             if *a > 0xff || *b > 0xff || *c > 0xffff {
                 return None;
             }
-            Some([*a as u8, *b as u8, ((c >> 8) & 0xff) as u8, (c & 0xff) as u8])
+            Some([
+                *a as u8,
+                *b as u8,
+                ((c >> 8) & 0xff) as u8,
+                (c & 0xff) as u8,
+            ])
         }
         [a, b, c, d] => {
             if nums.iter().any(|n| *n > 0xff) {
@@ -474,7 +479,7 @@ mod tests {
         assert!(validate_public_url_structure("http://0177.0.0.1/").is_err());
         assert!(validate_public_url_structure("http://127.1/").is_err());
         assert!(validate_public_url_structure("http://2852039166/").is_err()); // 169.254.169.254
-        // Whole-host octal (overflows u32 as decimal; curl/browsers still treat as IP).
+                                                                               // Whole-host octal (overflows u32 as decimal; curl/browsers still treat as IP).
         assert!(validate_public_url_structure("http://017700000001/").is_err());
         assert!(validate_public_url_structure("http://0x7f.0x0.0x0.0x1/").is_err());
         assert!(authorize_structure_only_public("https://1.1.1.1/"));

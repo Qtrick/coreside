@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 36 forward migrations (001–036; includes `036_approval_call_context.sql`)
+**Count:** 37 forward migrations (001–037; includes `037_proposal_project_isolation.sql`)
 
 ## Inventory
 
@@ -44,6 +44,7 @@
 | 034 | `034_conversation_sync_cursors_per_client.sql` | Per-client conversation sync cursors (multi-window catch-up) |
 | 035 | `035_apply_idempotency_request_hash.sql` | Apply idempotency request hash binding (same key + different body → conflict) |
 | 036 | `036_approval_call_context.sql` | Approval call context binding (conversation/venue/presence/project/surface/component) |
+| 037 | `037_proposal_project_isolation.sql` | Proposal project scope binding and cross-project mutation guards |
 
 ## What is verified
 

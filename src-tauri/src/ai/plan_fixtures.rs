@@ -1323,11 +1323,7 @@ mod tests {
             }
         })
         .to_string();
-        let parsed = parse_agent_response(&raw).expect("payload shape parses");
-        let err = parsed
-            .payload
-            .inspection_operations()
-            .expect_err("empty intents must fail compile");
+        let err = parse_agent_response(&raw).expect_err("empty intents must fail parse");
         assert!(
             err.contains("applicationPlan rejected"),
             "unexpected err: {err}"

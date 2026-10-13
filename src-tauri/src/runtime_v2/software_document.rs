@@ -3535,7 +3535,7 @@ mod tests {
         doc.state_contracts = vec![StateContract {
             key: "round".into(),
             type_name: "integer".into(),
-            initial_value: json!(3.1415), // float for integer must fail
+            initial_value: json!(3.5), // float for integer must fail
             ..Default::default()
         }];
         let err = admit_software_document(None, &doc, &[]);

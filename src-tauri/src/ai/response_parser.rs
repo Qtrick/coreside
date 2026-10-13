@@ -256,14 +256,12 @@ fn try_recover_from_value(value: &Value) -> Option<ParsedAgentResponse> {
         }
         // Keep a deserializable applicationPlan even when other fields failed validate.
         if payload.application_plan.is_some() {
-            let mut warnings = vec![
-                "Recovered applicationPlan via lenient JSON value parse".into(),
-            ];
+            let mut warnings =
+                vec!["Recovered applicationPlan via lenient JSON value parse".into()];
             if incomplete {
                 payload.tool_change = None;
-                warnings.push(
-                    "Cleared incomplete tool_change while preserving applicationPlan".into(),
-                );
+                warnings
+                    .push("Cleared incomplete tool_change while preserving applicationPlan".into());
             }
             if payload.response_type == ResponseType::Message
                 || matches!(payload.response_type, ResponseType::ToolChange)
