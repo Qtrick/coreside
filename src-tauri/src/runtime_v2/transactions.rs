@@ -2439,7 +2439,10 @@ fn op_base_state_revision(op: &AppOperation) -> Option<i64> {
         .or_else(|| {
             op.payload
                 .get("state")
-                .and_then(|s| s.get("baseStateRevision").or_else(|| s.get("stateRevision")))
+                .and_then(|s| {
+                    s.get("baseStateRevision")
+                        .or_else(|| s.get("stateRevision"))
+                })
                 .and_then(|v| v.as_i64())
         })
 }
@@ -3054,7 +3057,11 @@ mod tests {
         )
         .unwrap();
         let seed_res = apply_transaction(&mut db, &seed.id).unwrap();
-        assert_eq!(seed_res.transaction.status, "applied", "{:?}", seed_res.conflicts);
+        assert_eq!(
+            seed_res.transaction.status, "applied",
+            "{:?}",
+            seed_res.conflicts
+        );
         let (_, state_rev1) =
             crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
         assert!(state_rev1 > state_rev0);
@@ -3103,11 +3110,7 @@ mod tests {
         assert_eq!(final_state_rev, state_rev1 + 2);
 
         // Definition-only baseRevision still applies when state_revision has advanced.
-        let mut def_base_only = op(
-            "state.patch",
-            Some(&surface.id),
-            json!({ "a": 9 }),
-        );
+        let mut def_base_only = op("state.patch", Some(&surface.id), json!({ "a": 9 }));
         def_base_only.base_revision = Some(def_rev);
         let follow = create_transaction(
             &mut db,

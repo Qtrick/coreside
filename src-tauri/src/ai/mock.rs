@@ -1322,11 +1322,8 @@ impl MockAiProvider {
         tx: ProviderStreamTx,
     ) -> Result<AgentResponse, AiError> {
         // Target this surface only — never max definitionRevision across unrelated apps.
-        let base_revision = Self::surface_base_revision(
-            None,
-            &request.system_prompt,
-            Some("surf-tool-e2e-notes"),
-        );
+        let base_revision =
+            Self::surface_base_revision(None, &request.system_prompt, Some("surf-tool-e2e-notes"));
         let mut paint_payload = json!({
             "state": { "note": "progressive preview note" }
         });
@@ -2330,7 +2327,10 @@ mod tests {
             // baseRevision = definition tip; state tip rides in payload.baseStateRevision.
             assert_eq!(ops[0].base_revision, Some(def_rev));
             assert_eq!(
-                ops[0].payload.get("baseStateRevision").and_then(|v| v.as_i64()),
+                ops[0]
+                    .payload
+                    .get("baseStateRevision")
+                    .and_then(|v| v.as_i64()),
                 Some(state_rev)
             );
             assert_eq!(
