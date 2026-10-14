@@ -196,6 +196,8 @@ pub fn apply_transaction_deferred(
     let mut conflicts = Vec::new();
     let mut initial_revisions: std::collections::HashMap<String, i64> =
         std::collections::HashMap::new();
+    let mut initial_state_revisions: std::collections::HashMap<String, i64> =
+        std::collections::HashMap::new();
     let mut created_surfaces_list: Vec<String> = Vec::new();
     let mut created_in_txn: Vec<TransactionCreatedSurface> = Vec::new();
 
@@ -211,6 +213,9 @@ pub fn apply_transaction_deferred(
                 let (current_state, state_rev) =
                     super::surfaces::get_surface_state_with_revision(db, sid)
                         .map_err(DbError::from)?;
+                initial_state_revisions
+                    .entry(sid.clone())
+                    .or_insert(state_rev);
                 previous.as_object_mut().unwrap().insert(
                     sid.clone(),
                     json!({
@@ -236,6 +241,7 @@ pub fn apply_transaction_deferred(
             op,
             &txn,
             &initial_revisions,
+            &initial_state_revisions,
             &mut created_in_txn,
             deferred,
         ) {
@@ -247,6 +253,16 @@ pub fn apply_transaction_deferred(
                 {
                     created_surfaces_list.push(s.id.clone());
                     initial_revisions.entry(s.id.clone()).or_insert(0);
+                    // Mirror definition OCC: seed the post-create state tip so later
+                    // state.patch ops in this txn that share baseStateRevision advance
+                    // instead of CAS-conflicting after the first write.
+                    if let Ok((_, state_rev)) =
+                        super::surfaces::get_surface_state_with_revision(db, &s.id)
+                    {
+                        initial_state_revisions
+                            .entry(s.id.clone())
+                            .or_insert(state_rev);
+                    }
                 }
                 surfaces.push(s);
             }
@@ -798,6 +814,7 @@ fn apply_one(
     op: &AppOperation,
     txn: &AppTransactionRecord,
     initial_revisions: &std::collections::HashMap<String, i64>,
+    initial_state_revisions: &std::collections::HashMap<String, i64>,
     created_in_txn: &mut Vec<TransactionCreatedSurface>,
     deferred: &mut Vec<super::outbox::DeferredBusEffect>,
 ) -> Result<Option<SurfaceRecord>, String> {
@@ -1539,12 +1556,14 @@ fn apply_one(
                 super::software_document::SoftwareDocument::from_value(&surface.definition)
                     .map_err(|e| format!("invalid software document on surface '{sid}': {e}"))?;
 
-            let incoming = op
+            let mut incoming = op
                 .payload
                 .get("state")
                 .or_else(|| op.payload.get("values"))
                 .cloned()
                 .unwrap_or_else(|| op.payload.clone());
+            // OCC meta keys live beside flat state patches — never merge them into state.
+            strip_state_occ_meta_keys(&mut incoming);
 
             let key_mode = op.payload.get("key").and_then(|v| v.as_str());
             if key_mode.is_none() && !incoming.is_object() {
@@ -1558,7 +1577,10 @@ fn apply_one(
             let touched_keys: Vec<String> = if let Some(key) = key_mode {
                 vec![key.to_string()]
             } else if let Some(obj) = incoming.as_object() {
-                obj.keys().cloned().collect()
+                obj.keys()
+                    .filter(|k| !is_state_occ_meta_key(k))
+                    .cloned()
+                    .collect()
             } else {
                 vec![]
             };
@@ -1681,9 +1703,15 @@ fn apply_one(
                 }
             }
 
-            // Honor model-supplied baseRevision against surface_state.state_revision when
-            // present (mock/agent game.move patches). Fall back to the live CAS tip.
-            let expected_state_rev = op.base_revision.unwrap_or(current_rev);
+            // State OCC uses payload.baseStateRevision / stateRevision — never
+            // op.base_revision (definition-revision semantics). Same-transaction
+            // advance mirrors effective_base_revision.
+            let expected_state_rev = effective_state_base_revision(
+                op_base_state_revision(op),
+                current_rev,
+                initial_state_revisions,
+                sid,
+            );
             super::surfaces::save_surface_state_occ(db, sid, &current, expected_state_rev)
                 .map_err(|e| e.to_string())?;
 
@@ -2390,6 +2418,48 @@ fn effective_base_revision(
     }
 }
 
+/// Payload keys that carry state OCC tips and must not merge into surface state.
+fn is_state_occ_meta_key(key: &str) -> bool {
+    key == "baseStateRevision" || key == "stateRevision"
+}
+
+fn strip_state_occ_meta_keys(value: &mut Value) {
+    if let Some(obj) = value.as_object_mut() {
+        obj.remove("baseStateRevision");
+        obj.remove("stateRevision");
+    }
+}
+
+/// Optional state-revision CAS tip from payload (distinct from definition `baseRevision`).
+fn op_base_state_revision(op: &AppOperation) -> Option<i64> {
+    op.payload
+        .get("baseStateRevision")
+        .or_else(|| op.payload.get("stateRevision"))
+        .and_then(|v| v.as_i64())
+        .or_else(|| {
+            op.payload
+                .get("state")
+                .and_then(|s| s.get("baseStateRevision").or_else(|| s.get("stateRevision")))
+                .and_then(|v| v.as_i64())
+        })
+}
+
+/// Same-transaction advance for surface_state.state_revision (mirrors definition OCC).
+fn effective_state_base_revision(
+    requested: Option<i64>,
+    current_state_revision: i64,
+    initial_state_revisions: &std::collections::HashMap<String, i64>,
+    surface_id: &str,
+) -> i64 {
+    let init_rev = initial_state_revisions.get(surface_id).copied();
+    match (requested, init_rev) {
+        (Some(base), Some(init)) if base == init => current_state_revision,
+        (Some(base), _) if base == current_state_revision => current_state_revision,
+        (Some(base), _) => base,
+        (None, _) => current_state_revision,
+    }
+}
+
 fn prop_preservation_key(comp: &ToolComponent) -> Option<&str> {
     comp.props
         .as_ref()
@@ -2926,6 +2996,138 @@ mod tests {
         let stale_result = apply_transaction(&mut db, &stale_txn.id).unwrap();
         assert_eq!(stale_result.transaction.status, "failed");
         assert!(!stale_result.conflicts.is_empty());
+    }
+
+    #[test]
+    fn apply_sequential_state_patches_share_base_state_revision() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "StateSeq", None).unwrap();
+        let def = json!({
+            "schemaVersion": "coreside.document/v2",
+            "documentId": "doc-state-seq",
+            "title": "State Seq",
+            "stateContracts": [
+                {
+                    "key": "a",
+                    "type": "number",
+                    "initial": 0,
+                    "writePolicy": "model",
+                    "readPolicy": "all"
+                },
+                {
+                    "key": "b",
+                    "type": "number",
+                    "initial": 0,
+                    "writePolicy": "model",
+                    "readPolicy": "all"
+                }
+            ],
+            "sections": [{ "id": "main", "components": [] }]
+        });
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "State Seq",
+            &def,
+            &["coreside.core".to_string()],
+        )
+        .unwrap();
+        let def_rev = surface.current_revision;
+        let (_, state_rev0) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
+
+        // Advance state once so definition revision and state revision diverge.
+        let seed = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "seed-state",
+            &[op(
+                "state.patch",
+                Some(&surface.id),
+                json!({ "a": 1, "baseStateRevision": state_rev0 }),
+            )],
+            false,
+        )
+        .unwrap();
+        let seed_res = apply_transaction(&mut db, &seed.id).unwrap();
+        assert_eq!(seed_res.transaction.status, "applied", "{:?}", seed_res.conflicts);
+        let (_, state_rev1) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
+        assert!(state_rev1 > state_rev0);
+        let surface_after = get_surface(&db, &surface.id).unwrap();
+        assert_eq!(
+            surface_after.current_revision, def_rev,
+            "state.patch must not advance definition revision"
+        );
+
+        // Two patches in one txn share the txn-start state tip; definition baseRevision
+        // remains the (unchanged) definition revision even after state has advanced.
+        let mut op1 = op(
+            "state.patch",
+            Some(&surface.id),
+            json!({ "a": 2, "baseStateRevision": state_rev1 }),
+        );
+        op1.base_revision = Some(def_rev);
+        let mut op2 = op(
+            "state.patch",
+            Some(&surface.id),
+            json!({ "b": 3, "baseStateRevision": state_rev1 }),
+        );
+        op2.base_revision = Some(def_rev);
+
+        let txn = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "sequential-state-patches",
+            &[op1, op2],
+            false,
+        )
+        .unwrap();
+        let result = apply_transaction(&mut db, &txn.id).unwrap();
+        assert_eq!(
+            result.transaction.status, "applied",
+            "{:?}",
+            result.conflicts
+        );
+
+        let (state, final_state_rev) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
+        assert_eq!(state["a"], json!(2));
+        assert_eq!(state["b"], json!(3));
+        assert_eq!(final_state_rev, state_rev1 + 2);
+
+        // Definition-only baseRevision still applies when state_revision has advanced.
+        let mut def_base_only = op(
+            "state.patch",
+            Some(&surface.id),
+            json!({ "a": 9 }),
+        );
+        def_base_only.base_revision = Some(def_rev);
+        let follow = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "def-base-after-state-advance",
+            &[def_base_only],
+            false,
+        )
+        .unwrap();
+        let follow_res = apply_transaction(&mut db, &follow.id).unwrap();
+        assert_eq!(
+            follow_res.transaction.status, "applied",
+            "baseRevision=definition must not CAS against state_revision: {:?}",
+            follow_res.conflicts
+        );
+        let (state2, _) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
+        assert_eq!(state2["a"], json!(9));
     }
 
     #[test]

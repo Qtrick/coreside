@@ -1135,28 +1135,17 @@ body > .window-overlay-root > *,
     var(--core-header-overlay) 55%,
     transparent
   );
-  isolation: isolate;
 }
 
-/* Sticky kernel proposal must paint above composer-box / mention-menu (z-index 5)
- * so Journey 21 Apply is the elementFromPoint hit target. */
 .composer .change-proposal {
   position: relative;
-  z-index: 6;
   max-width: min(48rem, 100%);
   margin-inline: auto;
   width: 100%;
 }
 
-.composer .change-proposal [data-proposal-apply="true"],
-.composer .change-proposal [data-proposal-discard="true"] {
-  position: relative;
-  z-index: 1;
-}
-
 .composer-box {
   position: relative;
-  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -3267,7 +3256,8 @@ body > .window-overlay-root > *,
   left: 0;
   right: 0;
   bottom: calc(100% + 0.4rem);
-  z-index: 5;
+  /* Above sticky .composer .change-proposal so @mentions stay clickable. */
+  z-index: 7;
   max-height: 220px;
   overflow: auto;
   border: 1px solid var(--border);

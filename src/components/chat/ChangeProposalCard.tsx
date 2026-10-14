@@ -60,12 +60,17 @@ export function ChangeProposalCard({
       .kernelGetProposal(proposalId)
       .then((rec) => {
         if (!active) return;
+        const loadedOps = Array.isArray(rec.exactOperations)
+          ? (rec.exactOperations as unknown[])
+          : [];
         setProposalData({
           summary: (rec.summary as string) || initialSummary,
           impactSummary: (rec.impactSummary as string) || initialImpactSummary,
           risk: (rec.risk as string) || initialRisk,
           status: (rec.status as string) || initialStatus || "pending",
-          operations: (rec.exactOperations as unknown[]) || initialOperations,
+          // Empty array is truthy — never let a hollow row wipe prop ops and
+          // disable Apply (busy || operations.length===0).
+          operations: loadedOps.length > 0 ? loadedOps : initialOperations,
           error: (rec.error as string) || null,
         });
       })

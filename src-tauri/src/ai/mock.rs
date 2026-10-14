@@ -46,17 +46,58 @@ impl MockAiProvider {
         Self::parse_json_i64_field(system_prompt, "definitionRevision")
     }
 
-    /// OCC base revision for mock state mutations: prefer structured state
-    /// revision (state.patch CAS tip), then surface/definition revision, else
-    /// the highest definitionRevision in the prompt.
+    /// Definition revision for one surfaceId from prompt identity blocks.
+    /// Never returns the max across unrelated surfaces.
+    fn definition_revision_for_surface(system_prompt: &str, surface_id: &str) -> Option<i64> {
+        let sid_needle = format!("\"surfaceId\": \"{surface_id}\"");
+        let sid_needle_alt = format!("\"surfaceId\":\"{surface_id}\"");
+        let mut pos = 0usize;
+        while pos < system_prompt.len() {
+            let rest = &system_prompt[pos..];
+            let rel = rest
+                .find(&sid_needle)
+                .or_else(|| rest.find(&sid_needle_alt));
+            let Some(rel) = rel else {
+                break;
+            };
+            let abs = pos + rel;
+            // Prefer a nearby JSON object window around this surfaceId hit.
+            let start = abs.saturating_sub(120);
+            let end = (abs + 240).min(system_prompt.len());
+            if let Some(rev) =
+                Self::parse_json_i64_field(&system_prompt[start..end], "definitionRevision")
+            {
+                return Some(rev);
+            }
+            pos = abs + 1;
+        }
+        None
+    }
+
+    /// Definition-revision tip for `baseRevision` (never state_revision, never
+    /// max definitionRevision across unrelated surfaces).
     fn surface_base_revision(
         structured: Option<&super::structured_user_input::StructuredUserInput>,
         system_prompt: &str,
+        surface_id: Option<&str>,
     ) -> i64 {
-        structured
-            .and_then(|s| s.state_revision.or(s.surface_revision))
-            .or_else(|| Self::observed_definition_revision(system_prompt))
-            .unwrap_or(1)
+        if let Some(rev) = structured.and_then(|s| s.surface_revision) {
+            return rev;
+        }
+        let sid = surface_id.or_else(|| structured.and_then(|s| s.surface_id.as_deref()));
+        if let Some(sid) = sid {
+            if let Some(rev) = Self::definition_revision_for_surface(system_prompt, sid) {
+                return rev;
+            }
+        }
+        1
+    }
+
+    /// State-revision tip for payload.baseStateRevision only.
+    fn surface_state_base_revision(
+        structured: Option<&super::structured_user_input::StructuredUserInput>,
+    ) -> Option<i64> {
+        structured.and_then(|s| s.state_revision)
     }
 
     fn fixture_for_with_revision(user_text: &str, observed_revision: Option<i64>) -> String {
@@ -508,7 +549,22 @@ impl MockAiProvider {
             let surface_id = structured
                 .and_then(|s| s.surface_id.as_deref())
                 .unwrap_or("tool-tictactoe");
-            let base_revision = Self::surface_base_revision(structured, &request.system_prompt);
+            let base_revision =
+                Self::surface_base_revision(structured, &request.system_prompt, Some(surface_id));
+            let mut payload = json!({
+                "c0": "", "c1": "", "c2": "",
+                "c3": "", "c4": "", "c5": "",
+                "c6": "", "c7": "", "c8": "",
+                "turn": "X",
+                "status": "New game started! Your turn (X).",
+                "winner": ""
+            });
+            if let Some(state_rev) = Self::surface_state_base_revision(structured) {
+                payload
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("baseStateRevision".into(), json!(state_rev));
+            }
             return json!({
                 "schemaVersion": "2",
                 "assistantMessage": "New game started! Your turn (X). Click any square to play.",
@@ -520,14 +576,7 @@ impl MockAiProvider {
                         "type": "state.patch",
                         "baseRevision": base_revision,
                         "target": { "surfaceId": surface_id },
-                        "payload": {
-                            "c0": "", "c1": "", "c2": "",
-                            "c3": "", "c4": "", "c5": "",
-                            "c6": "", "c7": "", "c8": "",
-                            "turn": "X",
-                            "status": "New game started! Your turn (X).",
-                            "winner": ""
-                        }
+                        "payload": payload
                     }
                 ],
                 "diagnostics": { "fixture": "tictactoe_reset" }
@@ -539,7 +588,9 @@ impl MockAiProvider {
             let surface_id = structured
                 .and_then(|s| s.surface_id.as_deref())
                 .unwrap_or("tool-tictactoe");
-            let base_revision = Self::surface_base_revision(structured, &request.system_prompt);
+            let base_revision =
+                Self::surface_base_revision(structured, &request.system_prompt, Some(surface_id));
+            let state_base_revision = Self::surface_state_base_revision(structured);
 
             let mut board: Vec<String> = (0..9)
                 .map(|i| {
@@ -628,6 +679,20 @@ impl MockAiProvider {
                 }
             };
 
+            let mut payload = json!({
+                "c0": board[0], "c1": board[1], "c2": board[2],
+                "c3": board[3], "c4": board[4], "c5": board[5],
+                "c6": board[6], "c7": board[7], "c8": board[8],
+                "turn": next_turn,
+                "status": status,
+                "winner": winner
+            });
+            if let Some(state_rev) = state_base_revision {
+                payload
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("baseStateRevision".into(), json!(state_rev));
+            }
             return json!({
                 "schemaVersion": "2",
                 "assistantMessage": status,
@@ -639,14 +704,7 @@ impl MockAiProvider {
                         "type": "state.patch",
                         "baseRevision": base_revision,
                         "target": { "surfaceId": surface_id },
-                        "payload": {
-                            "c0": board[0], "c1": board[1], "c2": board[2],
-                            "c3": board[3], "c4": board[4], "c5": board[5],
-                            "c6": board[6], "c7": board[7], "c8": board[8],
-                            "turn": next_turn,
-                            "status": status,
-                            "winner": winner
-                        }
+                        "payload": payload
                     }
                 ],
                 "diagnostics": { "fixture": "tictactoe_move" }
@@ -812,8 +870,8 @@ impl MockAiProvider {
                 .pointer_mut("/operations/0/payload")
                 .and_then(|p| p.as_object_mut())
             {
-                // Board cells must be model-writable: game.move fixtures apply
-                // state.patch for both X and O. UI setValue may still target model keys.
+                // Board cells + turn/status/winner are model-writable (game.move
+                // state.patch). lastMove stays user — UI setValue owns that key.
                 payload.insert(
                     "stateContracts".into(),
                     json!([
@@ -826,7 +884,7 @@ impl MockAiProvider {
                         { "key": "c6", "type": "string", "initialValue": "", "writePolicy": "model" },
                         { "key": "c7", "type": "string", "initialValue": "", "writePolicy": "model" },
                         { "key": "c8", "type": "string", "initialValue": "", "writePolicy": "model" },
-                        { "key": "lastMove", "type": "integer", "initialValue": null, "nullable": true, "writePolicy": "model" },
+                        { "key": "lastMove", "type": "integer", "initialValue": null, "nullable": true, "writePolicy": "user" },
                         { "key": "turn", "type": "string", "initialValue": "X", "writePolicy": "model" },
                         { "key": "status", "type": "string", "initialValue": "Your turn (X). Click any square to play!", "writePolicy": "model" },
                         { "key": "winner", "type": "string", "initialValue": "", "writePolicy": "model" }
@@ -1263,7 +1321,34 @@ impl MockAiProvider {
         request: AgentRequest,
         tx: ProviderStreamTx,
     ) -> Result<AgentResponse, AiError> {
-        let base_revision = Self::surface_base_revision(None, &request.system_prompt);
+        // Target this surface only — never max definitionRevision across unrelated apps.
+        let base_revision = Self::surface_base_revision(
+            None,
+            &request.system_prompt,
+            Some("surf-tool-e2e-notes"),
+        );
+        let mut paint_payload = json!({
+            "state": { "note": "progressive preview note" }
+        });
+        if let Some(state_rev) = {
+            let sid = "surf-tool-e2e-notes";
+            let sid_needle = format!("\"surfaceId\": \"{sid}\"");
+            let sid_needle_alt = format!("\"surfaceId\":\"{sid}\"");
+            request
+                .system_prompt
+                .find(&sid_needle)
+                .or_else(|| request.system_prompt.find(&sid_needle_alt))
+                .and_then(|abs| {
+                    let start = abs.saturating_sub(120);
+                    let end = (abs + 240).min(request.system_prompt.len());
+                    Self::parse_json_i64_field(&request.system_prompt[start..end], "stateRevision")
+                })
+        } {
+            paint_payload
+                .as_object_mut()
+                .unwrap()
+                .insert("baseStateRevision".into(), json!(state_rev));
+        }
         let paint_op = json!({
             "id": "op-progressive-surface-preview",
             "type": "state.set",
@@ -1272,9 +1357,7 @@ impl MockAiProvider {
                 "surfaceId": "surf-tool-e2e-notes",
                 "toolId": "tool-e2e-notes"
             },
-            "payload": {
-                "state": { "note": "progressive preview note" }
-            }
+            "payload": paint_payload
         });
         let start = json!({
             "v": "coreside.ops.v1",
@@ -2244,8 +2327,12 @@ mod tests {
             let mut ops = parsed.payload.normalized_operations().expect("move ops");
             // Fixture op ids are stable; uniquify per turn for app_operations PK.
             ops[0].id = format!("op-tictactoe-ai-move-{turn_idx}");
-            // Prefer state_revision for state.patch OCC (surface_revision falls back).
-            assert_eq!(ops[0].base_revision, Some(state_rev));
+            // baseRevision = definition tip; state tip rides in payload.baseStateRevision.
+            assert_eq!(ops[0].base_revision, Some(def_rev));
+            assert_eq!(
+                ops[0].payload.get("baseStateRevision").and_then(|v| v.as_i64()),
+                Some(state_rev)
+            );
             assert_eq!(
                 ops[0].target.surface_id.as_deref(),
                 Some(surface_id.as_str())

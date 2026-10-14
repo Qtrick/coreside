@@ -459,33 +459,82 @@ export async function latestVisibleKernelApplyButton() {
  * which can be a hidden inline duplicate while the composer sticky owns Apply.
  */
 export async function clickVisibleKernelApplyButton() {
-  const applyBtn = await latestVisibleKernelApplyButton();
+  let applyBtn = await latestVisibleKernelApplyButton();
   if (!applyBtn) throw new Error("Kernel Apply missing");
   // Prefer nearest — block:center can scroll the Apply under overlapping chrome.
   await applyBtn.scrollIntoView({ block: "nearest", inline: "nearest" });
+
+  // Distinguish disabled (busy / empty operations) from hit-test obstruction.
+  // Use isEnabled() — getAttribute("disabled") is "" when present, and !"" is true.
+  await browser.waitUntil(
+    async () => {
+      const btn = await latestVisibleKernelApplyButton();
+      if (!btn) return false;
+      return await btn.isEnabled();
+    },
+    {
+      timeout: 15_000,
+      timeoutMsg:
+        "Kernel Apply stayed disabled (busy or operations.length===0) — not a hit-test issue",
+    },
+  );
+  applyBtn = await latestVisibleKernelApplyButton();
+  if (!applyBtn) throw new Error("Kernel Apply missing after enabled wait");
 
   try {
     await applyBtn.waitForClickable({ timeout: 8_000 });
     await applyBtn.click();
     return;
   } catch (clickErr) {
-    // Single execute: pick latest visible Apply, allow DOM click only when the
-    // page hit target is the button or an inert overlay — never through a modal.
+    // Single execute: pick latest visible Apply, allow DOM click when the page
+    // hit target is the button, same proposal card, or an inert overlay — never
+    // through a modal. Ancestors of the button (aside.change-proposal) used to
+    // false-positive as "obstructed" because contains() only checks descendants.
     const outcome = await browser.execute((sel: string) => {
       const nodes = Array.from(
         document.querySelectorAll(sel),
       ) as HTMLButtonElement[];
       let el: HTMLButtonElement | null = null;
+      let latestVisible: HTMLButtonElement | null = null;
       for (const node of nodes) {
-        if (node.disabled) continue;
         const style = window.getComputedStyle(node);
         if (style.display === "none" || style.visibility === "hidden") continue;
         const box = node.getBoundingClientRect();
         if (box.width <= 0 || box.height <= 0) continue;
-        el = node;
+        latestVisible = node;
+        if (!node.disabled) el = node;
       }
+      const diagOf = (btn: HTMLButtonElement | null, top: HTMLElement | null) => {
+        const r = btn?.getBoundingClientRect();
+        const cx = r ? r.left + r.width / 2 : 0;
+        const cy = r ? r.top + r.height / 2 : 0;
+        const hit =
+          top ??
+          (btn
+            ? (document.elementFromPoint(cx, cy) as HTMLElement | null)
+            : null);
+        return {
+          disabled: Boolean(btn?.disabled),
+          ariaBusy: btn?.getAttribute("aria-busy"),
+          topHtml: (hit?.outerHTML ?? "").slice(0, 300),
+        };
+      };
       if (!el) {
-        return { ok: false as const, reason: "missing" as const };
+        const top = latestVisible
+          ? (document.elementFromPoint(
+              latestVisible.getBoundingClientRect().left +
+                latestVisible.getBoundingClientRect().width / 2,
+              latestVisible.getBoundingClientRect().top +
+                latestVisible.getBoundingClientRect().height / 2,
+            ) as HTMLElement | null)
+          : null;
+        return {
+          ok: false as const,
+          reason: latestVisible?.disabled
+            ? ("disabled" as const)
+            : ("missing" as const),
+          ...diagOf(latestVisible, top),
+        };
       }
       const r = el.getBoundingClientRect();
       const top = document.elementFromPoint(
@@ -494,20 +543,36 @@ export async function clickVisibleKernelApplyButton() {
       ) as HTMLElement | null;
       const topPe = top ? window.getComputedStyle(top).pointerEvents : "";
       const isSelfOrChild = Boolean(top && (top === el || el.contains(top)));
+      const proposal = el.closest(".change-proposal");
+      const sameProposal = Boolean(
+        proposal && top && (proposal === top || proposal.contains(top)),
+      );
       const inertTop =
         !top ||
         topPe === "none" ||
         top.id === "coreside-window-overlay-root" ||
         top.classList.contains("window-overlay-root");
-      if (!(isSelfOrChild || inertTop)) {
-        return { ok: false as const, reason: "obstructed" as const };
+      if (!(isSelfOrChild || sameProposal || inertTop)) {
+        return {
+          ok: false as const,
+          reason: "obstructed" as const,
+          ...diagOf(el, top),
+        };
       }
       el.click();
-      return { ok: true as const };
+      return { ok: true as const, reason: "clicked" as const, ...diagOf(el, top) };
     }, KERNEL_APPLY_SELECTOR);
 
     if (!outcome.ok) {
-      throw clickErr;
+      const detail = [
+        `fallbackReason=${outcome.reason}`,
+        `disabled=${String(outcome.disabled)}`,
+        `aria-busy=${String(outcome.ariaBusy)}`,
+        `elementFromPoint=${outcome.topHtml || "(none)"}`,
+      ].join("; ");
+      const base =
+        clickErr instanceof Error ? clickErr.message : String(clickErr);
+      throw new Error(`${base} | ${detail}`);
     }
   }
 }

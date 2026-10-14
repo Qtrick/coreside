@@ -21,28 +21,55 @@ import { openExternalUrl } from "@/lib/open-url";
 import { useAppStore } from "@/stores/app-store";
 
 /**
- * Allowlist markdown link targets for chat. Protocol-relative (`//…`) is
- * rejected even when `URL` would invent `http:` against `about:blank`.
+ * Normalize markdown link targets for chat. Returns a fully resolved
+ * http/https/mailto href, or null when the target must not open externally.
+ * Protocol-relative (`//…` / `\\…`) is rejected even when `URL` would invent
+ * `http:` against `about:blank`.
  */
-export function isAllowedMarkdownHref(href: string | undefined | null): boolean {
-  if (!href) return false;
+export function normalizeMarkdownHref(
+  href: string | undefined | null,
+): string | null {
+  if (!href) return null;
   const trimmed = href.trim();
   if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("\\\\")) {
-    return false;
+    return null;
   }
   try {
     const parsed = new URL(trimmed, "about:blank");
     const protocol = parsed.protocol.toLowerCase();
-    return (
-      protocol === "http:" || protocol === "https:" || protocol === "mailto:"
-    );
+    if (
+      protocol === "http:" ||
+      protocol === "https:" ||
+      protocol === "mailto:"
+    ) {
+      return parsed.href;
+    }
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 
+/** True for in-page fragment anchors (remark-gfm footnotes). */
+export function isMarkdownFragmentHref(
+  href: string | undefined | null,
+): boolean {
+  if (!href) return false;
+  const trimmed = href.trim();
+  return trimmed.startsWith("#") && trimmed.length > 1;
+}
+
+/** @deprecated Prefer normalizeMarkdownHref; kept for boolean call sites/tests. */
+export function isAllowedMarkdownHref(
+  href: string | undefined | null,
+): boolean {
+  return normalizeMarkdownHref(href) !== null;
+}
+
 function safeMarkdownUrl(url: string): string {
-  return isAllowedMarkdownHref(url) ? url.trim() : "";
+  const trimmed = url.trim();
+  if (isMarkdownFragmentHref(trimmed)) return trimmed;
+  return normalizeMarkdownHref(trimmed) ?? "";
 }
 
 const MarkdownExternalLink: NonNullable<Components["a"]> = ({
@@ -51,21 +78,35 @@ const MarkdownExternalLink: NonNullable<Components["a"]> = ({
   node: _node,
   ...props
 }) => {
-  if (!isAllowedMarkdownHref(href)) {
+  if (isMarkdownFragmentHref(href)) {
+    return (
+      <a {...props} href={href!.trim()}>
+        {children}
+      </a>
+    );
+  }
+
+  const safeHref = normalizeMarkdownHref(href);
+  if (!safeHref) {
     return <span>{children}</span>;
   }
 
   const open = (e: MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault();
-    void openExternalUrl(href).catch(console.error);
+    void openExternalUrl(safeHref).catch(console.error);
   };
 
   return (
     <a
       {...props}
-      href={href}
+      href={safeHref}
       onClick={open}
-      onAuxClick={open}
+      onAuxClick={(e) => {
+        // Chromium/WebView2 fire auxclick for right-click (button 2) as well as
+        // middle-click (button 1). Only middle-click should open externally.
+        if (e.button !== 1) return;
+        open(e);
+      }}
       target="_blank"
       rel="noopener noreferrer"
     >
