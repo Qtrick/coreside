@@ -139,7 +139,8 @@ pub use surfaces::{
 #[allow(unused_imports)]
 pub use transactions::{
     apply_transaction, apply_transaction_with_bus, create_transaction, get_transaction,
-    list_transactions, undo_transaction, AppTransactionRecord, ApplyResult,
+    list_transactions, stamp_missing_state_base_revisions, undo_transaction, AppTransactionRecord,
+    ApplyResult,
 };
 #[allow(unused_imports)]
 pub use turn_journal::{

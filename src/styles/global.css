@@ -1137,11 +1137,27 @@ body > .window-overlay-root > *,
   );
 }
 
+/* Sticky kernel proposal above later-sibling composer-box (DOM order) so Apply
+ * is the real elementFromPoint target in WebKit WDIO. Do NOT set z-index on
+ * .composer-box — that would create a stacking context and trap .mention-menu
+ * (child, z-index 7) under this proposal regardless of the menu's own z-index. */
 .composer .change-proposal {
   position: relative;
+  z-index: 6;
   max-width: min(48rem, 100%);
   margin-inline: auto;
   width: 100%;
+}
+
+.composer .change-proposal .button-row {
+  position: relative;
+  z-index: 1;
+}
+
+.composer .change-proposal [data-proposal-apply="true"],
+.composer .change-proposal [data-proposal-discard="true"] {
+  position: relative;
+  z-index: 2;
 }
 
 .composer-box {

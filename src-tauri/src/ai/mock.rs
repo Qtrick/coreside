@@ -41,6 +41,56 @@ impl MockAiProvider {
         best
     }
 
+    /// First `"field": <digits>` after `from` (not max across the window).
+    fn parse_json_i64_field_first(haystack: &str, field: &str) -> Option<i64> {
+        let needle = format!("\"{field}\"");
+        let idx = haystack.find(&needle)?;
+        let rest = &haystack[idx..];
+        let colon = rest.find(':')?;
+        let after = rest[colon + 1..].trim_start();
+        let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+        digits.parse::<i64>().ok()
+    }
+
+    /// Snap a byte index down to the nearest UTF-8 char boundary.
+    fn snap_char_boundary(s: &str, mut i: usize) -> usize {
+        if i >= s.len() {
+            return s.len();
+        }
+        while i > 0 && !s.is_char_boundary(i) {
+            i -= 1;
+        }
+        i
+    }
+
+    /// Read `field` from the identity JSON object that contains `surfaceId`.
+    /// Uses char-safe windows and the nearest field after the match — never the
+    /// max across neighbouring surfaces.
+    fn field_near_surface(prompt: &str, surface_id: &str, field: &str) -> Option<i64> {
+        let sid_needle = format!("\"surfaceId\": \"{surface_id}\"");
+        let sid_needle_alt = format!("\"surfaceId\":\"{surface_id}\"");
+        let mut pos = 0usize;
+        while pos < prompt.len() {
+            // `pos` is always a char boundary (starts 0; advanced via snap).
+            let rest = &prompt[pos..];
+            let rel = rest
+                .find(&sid_needle)
+                .or_else(|| rest.find(&sid_needle_alt));
+            let Some(rel) = rel else {
+                break;
+            };
+            let abs = pos + rel;
+            // Identity blocks put revision fields after surfaceId; scan forward only.
+            let end = Self::snap_char_boundary(prompt, abs.saturating_add(400));
+            let window = &prompt[abs..end];
+            if let Some(rev) = Self::parse_json_i64_field_first(window, field) {
+                return Some(rev);
+            }
+            pos = Self::snap_char_boundary(prompt, abs.saturating_add(1));
+        }
+        None
+    }
+
     /// Parse the highest `definitionRevision` advertised in authoritative prompt context.
     fn observed_definition_revision(system_prompt: &str) -> Option<i64> {
         Self::parse_json_i64_field(system_prompt, "definitionRevision")
@@ -49,29 +99,7 @@ impl MockAiProvider {
     /// Definition revision for one surfaceId from prompt identity blocks.
     /// Never returns the max across unrelated surfaces.
     fn definition_revision_for_surface(system_prompt: &str, surface_id: &str) -> Option<i64> {
-        let sid_needle = format!("\"surfaceId\": \"{surface_id}\"");
-        let sid_needle_alt = format!("\"surfaceId\":\"{surface_id}\"");
-        let mut pos = 0usize;
-        while pos < system_prompt.len() {
-            let rest = &system_prompt[pos..];
-            let rel = rest
-                .find(&sid_needle)
-                .or_else(|| rest.find(&sid_needle_alt));
-            let Some(rel) = rel else {
-                break;
-            };
-            let abs = pos + rel;
-            // Prefer a nearby JSON object window around this surfaceId hit.
-            let start = abs.saturating_sub(120);
-            let end = (abs + 240).min(system_prompt.len());
-            if let Some(rev) =
-                Self::parse_json_i64_field(&system_prompt[start..end], "definitionRevision")
-            {
-                return Some(rev);
-            }
-            pos = abs + 1;
-        }
-        None
+        Self::field_near_surface(system_prompt, surface_id, "definitionRevision")
     }
 
     /// Definition-revision tip for `baseRevision` (never state_revision, never
@@ -1327,20 +1355,11 @@ impl MockAiProvider {
         let mut paint_payload = json!({
             "state": { "note": "progressive preview note" }
         });
-        if let Some(state_rev) = {
-            let sid = "surf-tool-e2e-notes";
-            let sid_needle = format!("\"surfaceId\": \"{sid}\"");
-            let sid_needle_alt = format!("\"surfaceId\":\"{sid}\"");
-            request
-                .system_prompt
-                .find(&sid_needle)
-                .or_else(|| request.system_prompt.find(&sid_needle_alt))
-                .and_then(|abs| {
-                    let start = abs.saturating_sub(120);
-                    let end = (abs + 240).min(request.system_prompt.len());
-                    Self::parse_json_i64_field(&request.system_prompt[start..end], "stateRevision")
-                })
-        } {
+        if let Some(state_rev) = Self::field_near_surface(
+            &request.system_prompt,
+            "surf-tool-e2e-notes",
+            "stateRevision",
+        ) {
             paint_payload
                 .as_object_mut()
                 .unwrap()
@@ -1554,6 +1573,68 @@ mod tests {
     use super::*;
     use crate::ai::response_schema::{ActionDefinition, ResponseType};
     use crate::ai::{parse_agent_response, AgentMessage};
+
+    #[test]
+    fn field_near_surface_survives_em_dash_heavy_prompt() {
+        // Multi-byte punctuation around the identity block must not panic on windows.
+        let prompt = format!(
+            "Notes — draft — review\n```json\n{}\n```\nMore — text — here",
+            r#"{
+  "applicationId": "tool-notes",
+  "surfaceId": "surf-tool-notes",
+  "definitionRevision": 3,
+  "stateRevision": 7
+}"#
+        );
+        assert_eq!(
+            MockAiProvider::field_near_surface(&prompt, "surf-tool-notes", "definitionRevision"),
+            Some(3)
+        );
+        assert_eq!(
+            MockAiProvider::field_near_surface(&prompt, "surf-tool-notes", "stateRevision"),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn field_near_surface_picks_matched_surface_not_neighbour_max() {
+        let prompt = r#"
+### A (`tool-a`)
+```json
+{
+  "applicationId": "tool-a",
+  "surfaceId": "surf-a",
+  "definitionRevision": 2,
+  "stateRevision": 4
+}
+```
+### B (`tool-b`)
+```json
+{
+  "applicationId": "tool-b",
+  "surfaceId": "surf-b",
+  "definitionRevision": 9,
+  "stateRevision": 12
+}
+```
+"#;
+        assert_eq!(
+            MockAiProvider::definition_revision_for_surface(prompt, "surf-a"),
+            Some(2)
+        );
+        assert_eq!(
+            MockAiProvider::field_near_surface(prompt, "surf-a", "stateRevision"),
+            Some(4)
+        );
+        assert_eq!(
+            MockAiProvider::definition_revision_for_surface(prompt, "surf-b"),
+            Some(9)
+        );
+        assert_eq!(
+            MockAiProvider::field_near_surface(prompt, "surf-b", "stateRevision"),
+            Some(12)
+        );
+    }
 
     #[tokio::test]
     async fn water_fixture_parses_as_tool_change() {

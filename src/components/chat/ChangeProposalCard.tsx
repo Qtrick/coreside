@@ -68,9 +68,9 @@ export function ChangeProposalCard({
           impactSummary: (rec.impactSummary as string) || initialImpactSummary,
           risk: (rec.risk as string) || initialRisk,
           status: (rec.status as string) || initialStatus || "pending",
-          // Empty array is truthy — never let a hollow row wipe prop ops and
-          // disable Apply (busy || operations.length===0).
-          operations: loadedOps.length > 0 ? loadedOps : initialOperations,
+          // Kernel row is authoritative. Empty exactOperations → empty state
+          // (Apply still goes through applyPendingKernelProposal / decide_proposal).
+          operations: loadedOps,
           error: (rec.error as string) || null,
         });
       })

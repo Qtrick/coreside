@@ -69,6 +69,7 @@ reports/release-evidence.json
 reports/local-beta-readiness.json
 reports/packaging-results.json
 reports/e2e-results.json
+reports/generated-task-tracker-results.json
 
 # Test / temp
 tmp/

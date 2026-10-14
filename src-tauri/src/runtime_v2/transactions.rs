@@ -60,9 +60,13 @@ pub fn create_transaction(
             )));
         }
     }
+    // Freeze state CAS tips at create time so missing baseStateRevision still
+    // conflicts when surface_state advances before apply (real agents rarely emit it).
+    let mut operations = operations.to_vec();
+    stamp_missing_state_base_revisions(db, &mut operations)?;
     let id = format!("txn-{}", Uuid::new_v4());
     let now = now_rfc3339();
-    let ops_json = serde_json::to_string(operations)?;
+    let ops_json = serde_json::to_string(&operations)?;
     db.conn().execute(
         "INSERT INTO app_transactions (
             id, turn_id, conversation_id, project_id, summary, status,
@@ -99,6 +103,50 @@ pub fn create_transaction(
         )?;
     }
     get_transaction(db, &id)
+}
+
+/// Stamp `payload.baseStateRevision` on state.set/state.patch when absent.
+/// Captures the live surface_state tip so later apply CAS detects lost updates.
+/// No-op when the tip is already present or the target surface does not exist yet.
+pub fn stamp_missing_state_base_revisions(
+    db: &Database,
+    operations: &mut [AppOperation],
+) -> DbResult<()> {
+    for op in operations.iter_mut() {
+        if op.op_type != "state.set" && op.op_type != "state.patch" {
+            continue;
+        }
+        if op_base_state_revision(op).is_some() {
+            continue;
+        }
+        let Some(sid) = op
+            .target
+            .surface_id
+            .clone()
+            .or_else(|| {
+                op.target
+                    .tool_id
+                    .as_deref()
+                    .map(super::surfaces::surface_id_for_tool)
+            })
+            .or_else(|| {
+                op.payload
+                    .get("surfaceId")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            })
+        else {
+            continue;
+        };
+        let Ok((_, state_rev)) = super::surfaces::get_surface_state_with_revision(db, &sid) else {
+            continue;
+        };
+        // Only attach onto object payloads — never replace a non-object body.
+        if let Some(map) = op.payload.as_object_mut() {
+            map.insert("baseStateRevision".into(), json!(state_rev));
+        }
+    }
+    Ok(())
 }
 
 pub fn get_transaction(db: &Database, id: &str) -> DbResult<AppTransactionRecord> {
@@ -2448,6 +2496,8 @@ fn op_base_state_revision(op: &AppOperation) -> Option<i64> {
 }
 
 /// Same-transaction advance for surface_state.state_revision (mirrors definition OCC).
+/// Missing tips should already be stamped at proposal/txn create; remaining None
+/// falls back to the apply-start tip (not live LWW) so concurrent writes still CAS.
 fn effective_state_base_revision(
     requested: Option<i64>,
     current_state_revision: i64,
@@ -2459,7 +2509,8 @@ fn effective_state_base_revision(
         (Some(base), Some(init)) if base == init => current_state_revision,
         (Some(base), _) if base == current_state_revision => current_state_revision,
         (Some(base), _) => base,
-        (None, _) => current_state_revision,
+        (None, Some(init)) => init,
+        (None, None) => current_state_revision,
     }
 }
 
@@ -3131,6 +3182,95 @@ mod tests {
         let (state2, _) =
             crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
         assert_eq!(state2["a"], json!(9));
+    }
+
+    #[test]
+    fn apply_state_patch_conflicts_when_state_advances_after_txn_create() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "StateOCC", None).unwrap();
+        let def = json!({
+            "schemaVersion": "coreside.document/v2",
+            "documentId": "doc-state-occ",
+            "title": "State OCC",
+            "stateContracts": [
+                {
+                    "key": "a",
+                    "type": "number",
+                    "initial": 0,
+                    "writePolicy": "model",
+                    "readPolicy": "all"
+                }
+            ],
+            "sections": [{ "id": "main", "components": [] }]
+        });
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "State OCC",
+            &def,
+            &["coreside.core".to_string()],
+        )
+        .unwrap();
+        let (_, tip_at_create) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
+
+        // Agent-shaped op: no baseStateRevision. create_transaction must stamp the tip.
+        let pending = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "stale-state-patch",
+            &[op("state.patch", Some(&surface.id), json!({ "a": 1 }))],
+            false,
+        )
+        .unwrap();
+        let stamped = pending.operations[0]
+            .payload
+            .get("baseStateRevision")
+            .and_then(|v| v.as_i64());
+        assert_eq!(stamped, Some(tip_at_create));
+
+        // State advances after the txn/proposal was frozen.
+        let race = create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "race-advance",
+            &[op(
+                "state.patch",
+                Some(&surface.id),
+                json!({ "a": 99, "baseStateRevision": tip_at_create }),
+            )],
+            false,
+        )
+        .unwrap();
+        let race_res = apply_transaction(&mut db, &race.id).unwrap();
+        assert_eq!(
+            race_res.transaction.status, "applied",
+            "{:?}",
+            race_res.conflicts
+        );
+        let (_, tip_after_race) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
+        assert!(tip_after_race > tip_at_create);
+
+        let stale = apply_transaction(&mut db, &pending.id).unwrap();
+        assert_eq!(stale.transaction.status, "failed");
+        assert!(
+            stale
+                .conflicts
+                .iter()
+                .any(|c| c.contains("revision") || c.contains("stale")),
+            "expected state OCC conflict, got {:?}",
+            stale.conflicts
+        );
+        let (state, _) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
+        assert_eq!(state["a"], json!(99), "losing write must not apply");
     }
 
     #[test]

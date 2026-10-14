@@ -265,6 +265,14 @@ pub fn apply_change(
         || req.require_approval;
 
     if needs_approval && !approval_granted {
+        // Stamp state CAS tips into the frozen proposal body (not before
+        // idempotency hashing on the direct-apply path — tip advance would
+        // make retries look like a different request body).
+        crate::runtime_v2::transactions::stamp_missing_state_base_revisions(
+            db,
+            &mut req.operations,
+        )
+        .map_err(KernelError::Db)?;
         let mut base_revisions = HashMap::new();
         let mut newly_created_surfaces = std::collections::HashSet::new();
         for op in &req.operations {
@@ -1710,6 +1718,100 @@ mod tests {
         // Surface must NOT have been deleted
         let surf = get_surface(&db, &surface.id).unwrap();
         assert_eq!(surf.id, surface.id);
+    }
+
+    #[test]
+    fn proposal_state_patch_conflicts_when_state_advances_before_apply() {
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "state-occ-proposal", None).unwrap();
+        let def = json!({
+            "schemaVersion": "coreside.document/v2",
+            "documentId": "doc-state-occ-proposal",
+            "title": "State OCC Proposal",
+            "stateContracts": [{
+                "key": "a",
+                "type": "number",
+                "initial": 0,
+                "writePolicy": "model",
+                "readPolicy": "all"
+            }],
+            "sections": [{ "id": "main", "components": [] }]
+        });
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "State OCC Proposal",
+            &def,
+            &["coreside.core".into()],
+        )
+        .unwrap();
+        let (_, tip0) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
+
+        let mut patch = op("state.patch");
+        patch.target.surface_id = Some(surface.id.clone());
+        patch.payload = json!({ "a": 1 });
+
+        let staged = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                turn_id: Some("turn-state-occ-1".into()),
+                summary: "state patch proposal".into(),
+                operations: vec![patch],
+                require_approval: true,
+                approval_granted: false,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let proposal_id = staged.proposal_id.expect("proposal staged");
+        let frozen = get_proposal(&db, &proposal_id).unwrap();
+        assert_eq!(
+            frozen.exact_operations[0]
+                .payload
+                .get("baseStateRevision")
+                .and_then(|v| v.as_i64()),
+            Some(tip0),
+            "proposal freeze must stamp live state tip"
+        );
+
+        // Concurrent UI/agent write advances state while the proposal is pending.
+        let race = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                turn_id: Some("turn-state-occ-race".into()),
+                summary: "race advance".into(),
+                operations: vec![{
+                    let mut o = op("state.patch");
+                    o.target.surface_id = Some(surface.id.clone());
+                    o.payload = json!({ "a": 99, "baseStateRevision": tip0 });
+                    o
+                }],
+                source_type: "user".into(),
+                approval_granted: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(race.is_committed(), "{:?}", race.conflicts);
+
+        let decided = decide_proposal(&mut db, None, &proposal_id, true).unwrap();
+        assert!(
+            !decided.is_committed(),
+            "stale state tip must not apply: {:?}",
+            decided
+        );
+        let (state, _) =
+            crate::runtime_v2::surfaces::get_surface_state_with_revision(&db, &surface.id).unwrap();
+        assert_eq!(state["a"], json!(99));
     }
 
     #[test]

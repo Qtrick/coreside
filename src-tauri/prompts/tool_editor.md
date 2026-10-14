@@ -11,7 +11,7 @@ When modifying, tuning, restyling, or adding to an existing tool, prefer emittin
 - **`component.insert`**: Insert a new component under `parentId` at a specific `index` without recreating existing children.
 - **`component.remove`**: Delete an existing component by `componentId`.
 - **`component.replace`**: Replace a single component subtree with an updated component.
-- **`state.patch`**: Update initial tool state keys (`valueKey`) without modifying the component hierarchy.
+- **`state.patch`**: Update initial tool state keys (`valueKey`) without modifying the component hierarchy. Include `payload.baseStateRevision` (authoritative `stateRevision` from identity context) so apply can detect lost updates; `baseRevision` remains the definition tip only.
 
 ### Example 1: Targeted Property Update (Changing a label, style, or options)
 ```json

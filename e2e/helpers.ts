@@ -486,10 +486,9 @@ export async function clickVisibleKernelApplyButton() {
     await applyBtn.click();
     return;
   } catch (clickErr) {
-    // Single execute: pick latest visible Apply, allow DOM click when the page
-    // hit target is the button, same proposal card, or an inert overlay — never
-    // through a modal. Ancestors of the button (aside.change-proposal) used to
-    // false-positive as "obstructed" because contains() only checks descendants.
+    // Single execute: pick latest visible Apply. Allow DOM click only when the
+    // hit target is the button, a descendant, or an inert overlay — never a
+    // sibling/ancestor inside .change-proposal (that means CSS hit-testing is wrong).
     const outcome = await browser.execute((sel: string) => {
       const nodes = Array.from(
         document.querySelectorAll(sel),
@@ -543,16 +542,12 @@ export async function clickVisibleKernelApplyButton() {
       ) as HTMLElement | null;
       const topPe = top ? window.getComputedStyle(top).pointerEvents : "";
       const isSelfOrChild = Boolean(top && (top === el || el.contains(top)));
-      const proposal = el.closest(".change-proposal");
-      const sameProposal = Boolean(
-        proposal && top && (proposal === top || proposal.contains(top)),
-      );
       const inertTop =
         !top ||
         topPe === "none" ||
         top.id === "coreside-window-overlay-root" ||
         top.classList.contains("window-overlay-root");
-      if (!(isSelfOrChild || sameProposal || inertTop)) {
+      if (!(isSelfOrChild || inertTop)) {
         return {
           ok: false as const,
           reason: "obstructed" as const,
