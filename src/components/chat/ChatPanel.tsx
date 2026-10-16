@@ -1,3 +1,4 @@
+import { MessageSquarePlus } from "lucide-react";
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
 import { ConversationQueue } from "./ConversationQueue";
@@ -61,6 +62,9 @@ export function ChatPanel() {
         </>
       ) : (
         <div className="empty-state">
+          <div className="empty-icon" aria-hidden>
+            <MessageSquarePlus size={24} />
+          </div>
           <h3>{EMPTY_STATES.noConversation.title}</h3>
           <p>{EMPTY_STATES.noConversation.body}</p>
           <div className="button-row empty-state-actions">

@@ -4,9 +4,18 @@ import {
   classifyToolHeaderDensity,
   clampSplitForWidth,
   clampSplitRatio,
+  LAYOUT_SAFE,
+  NARROW_SIDEBAR_MEDIA_QUERY,
 } from "./layout-mode";
 
 describe("layout mode", () => {
+  it("keeps narrow sidebar media query aligned with the CSS breakpoint", () => {
+    expect(NARROW_SIDEBAR_MEDIA_QUERY).toBe(
+      `(max-width: ${LAYOUT_SAFE.narrowSidebarMaxWidth}px)`,
+    );
+    expect(LAYOUT_SAFE.narrowSidebarMaxWidth).toBe(1100);
+  });
+
   it("clamps split ratio", () => {
     expect(clampSplitRatio(0.1)).toBe(0.28);
     expect(clampSplitRatio(0.9)).toBe(0.72);

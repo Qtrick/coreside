@@ -906,6 +906,15 @@ pub fn decide_proposal(
         ));
     }
 
+    if proposal.exact_operations.is_empty() {
+        if let Err(e) = db.conn().execute_batch("ROLLBACK") {
+            tracing::error!(error = %e, "ROLLBACK failed after empty proposal rejection");
+        }
+        return Err(KernelError::Validation(
+            "Proposal has no operations to apply".into(),
+        ));
+    }
+
     // 4. Apply frozen operations (retain project scope so isolation guards run)
     let ops = crate::runtime_v2::normalize_operations_for_validation(&proposal.exact_operations);
     let mut deferred = Vec::new();
@@ -1155,6 +1164,34 @@ mod tests {
             classify_risk(&[op("surface.delete"), op("component.insert")]),
             "strong"
         );
+    }
+
+    #[test]
+    fn decide_proposal_rejects_empty_operations_without_claiming_it() {
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "empty-proposal", None).unwrap();
+        let staged = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id),
+                summary: "empty proposal".into(),
+                operations: vec![],
+                require_approval: true,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let proposal_id = staged.proposal_id.expect("empty proposal must be staged");
+
+        let err = decide_proposal(&mut db, None, &proposal_id, true).unwrap_err();
+        assert!(
+            matches!(err, KernelError::Validation(ref message) if message.contains("no operations")),
+            "unexpected error: {err:?}"
+        );
+        assert_eq!(get_proposal(&db, &proposal_id).unwrap().status, "pending");
     }
 
     #[test]

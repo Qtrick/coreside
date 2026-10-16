@@ -17,6 +17,9 @@ import {
   clampSplitForWidth,
   clampSplitRatio,
   LAYOUT_SAFE,
+  NARROW_SIDEBAR_MEDIA_QUERY,
+  SIDEBAR_WIDTH_COLLAPSED,
+  SIDEBAR_WIDTH_EXPANDED,
 } from "@/lib/layout-mode";
 import {
   applyInterfaceTransparencyCssVars,
@@ -44,8 +47,23 @@ export function AppShell() {
   const [mainWidth, setMainWidth] = useState(0);
   const [liveSplit, setLiveSplit] = useState<number | null>(null);
   const mainRef = useRef<HTMLDivElement>(null);
+  const [narrowViewport, setNarrowViewport] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      Boolean(window.matchMedia?.(NARROW_SIDEBAR_MEDIA_QUERY).matches),
+  );
+
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const media = window.matchMedia(NARROW_SIDEBAR_MEDIA_QUERY);
+    const update = () => setNarrowViewport(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const effectiveSidebarCollapsed = sidebarCollapsed || narrowViewport;
   const view = useAppStore((s) => s.view);
   const activeToolId = useAppStore((s) => s.activeToolId);
   const activeTool = useAppStore((s) => s.activeTool);
@@ -192,7 +210,9 @@ export function AppShell() {
         const next = classifyLayoutMode({
           shellWidth: window.innerWidth,
           mainWidth: width,
-          sidebarWidth: sidebarCollapsed ? 80 : 272,
+          sidebarWidth: effectiveSidebarCollapsed
+            ? SIDEBAR_WIDTH_COLLAPSED
+            : SIDEBAR_WIDTH_EXPANDED,
           toolOpen: true,
           splitRatio: clampSplitRatio(chatToolSplitRatio),
         });
@@ -206,7 +226,7 @@ export function AppShell() {
     };
   }, [
     showToolCanvas,
-    sidebarCollapsed,
+    effectiveSidebarCollapsed,
     chatToolSplitRatio,
     layoutMode,
     setLayoutMode,
@@ -214,7 +234,7 @@ export function AppShell() {
 
   const classes = [
     "app-shell",
-    sidebarCollapsed ? "sidebar-collapsed" : "",
+    effectiveSidebarCollapsed ? "sidebar-collapsed" : "",
     !showToolCanvas ? "no-tool" : "",
     overlayMode ? "settings-mode" : "",
     layoutMode === "compact" && showToolCanvas ? "layout-compact" : "",

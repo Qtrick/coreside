@@ -96,6 +96,7 @@ export function ChangeProposalCard({
   const impactSummary = proposalData?.impactSummary ?? initialImpactSummary;
   const risk = proposalData?.risk ?? initialRisk;
   const operations = proposalData?.operations ?? initialOperations;
+  const loadedEmptyProposal = proposalData !== null && operations.length === 0;
   const proposalError = proposalData?.error ?? error;
   const statusUi = proposalStatusPresentation(currentStatus);
   const riskHint = consumerRiskHint(risk);
@@ -255,9 +256,9 @@ export function ChangeProposalCard({
         <p style={{ margin: "0.25rem 0 0" }}>{evolution.whatWillBePreserved}</p>
       </div>
 
-      {operations.length === 0 ? (
+      {loadedEmptyProposal ? (
         <p className="muted" role="status" style={{ margin: "0.65rem 0 0" }}>
-          No detailed preview is available for this proposal.
+          This proposal has no changes to apply. Regenerate it or discard it.
         </p>
       ) : null}
 
@@ -309,7 +310,7 @@ export function ChangeProposalCard({
             className="btn btn-primary"
             data-proposal-apply="true"
             aria-label="Apply proposed change"
-            disabled={busy || !proposalId}
+            disabled={busy || !proposalId || loadedEmptyProposal}
             onClick={() => void apply()}
             aria-busy={busy}
           >

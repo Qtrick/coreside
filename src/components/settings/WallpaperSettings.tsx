@@ -5,7 +5,6 @@ import {
   buildCanvasPresetProposal,
   buildStaticColorProposal,
   CURATED_WALLPAPER_PRESETS,
-  DEFAULT_WORKSPACE_WALLPAPER_JSON,
   type WallpaperPresetDefinition,
   parseWallpaperJson,
   schemaWallpaperToJson,
@@ -25,7 +24,7 @@ import {
 } from "@/lib/interface-transparency";
 import { useAppStore } from "@/stores/app-store";
 
-const DEFAULT_SOLID = "#141714";
+const DEFAULT_SOLID = "#171717";
 
 function readCommittedSolid(globalWallpaperJson: string | null | undefined): {
   color: string;
@@ -71,10 +70,8 @@ export function WallpaperSettings() {
   const [previewSpeed, setPreviewSpeed] = useState<number>(1.0);
   const transparencyCommitGenRef = useRef(0);
 
-  // Effective committed value: fresh profiles (null) render the built-in
-  // default; an explicitly cleared wallpaper ("") stays None.
-  const effectiveGlobalWallpaperJson =
-    globalWallpaperJson ?? DEFAULT_WORKSPACE_WALLPAPER_JSON;
+  // Fresh / cleared profiles are wallpaper-none (solid light/dark chrome).
+  const effectiveGlobalWallpaperJson = globalWallpaperJson ?? "";
 
   const committedSolid = useMemo(
     () => readCommittedSolid(globalWallpaperJson),
@@ -466,16 +463,16 @@ export function WallpaperSettings() {
         </div>
       </div>
 
-      {/* Wallpaper transparency control: ALWAYS visible. */}
-      <div className="wallpaper-tuning-panel" aria-label="Wallpaper transparency controls">
+      {/* Interface transparency: ALWAYS visible; show-through needs a wallpaper. */}
+      <div className="wallpaper-tuning-panel" aria-label="Interface transparency controls">
         <div className="tuning-header">
           <Sliders size={14} aria-hidden />
-          <strong>Wallpaper transparency ({interfaceTransparency}%)</strong>
+          <strong>Interface transparency ({interfaceTransparency}%)</strong>
         </div>
         <div className="tuning-control-group" style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap", minWidth: 0, maxWidth: "100%" }}>
           <div className="tuning-control" style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", minWidth: 0 }}>
             <label htmlFor="wallpaper-transparency-slider" className="sr-only">
-              Wallpaper transparency ({interfaceTransparency}%)
+              Interface transparency ({interfaceTransparency}%)
             </label>
             <input
               id="wallpaper-transparency-slider"
@@ -485,7 +482,7 @@ export function WallpaperSettings() {
               step={INTERFACE_TRANSPARENCY_STEP}
               value={interfaceTransparency}
               disabled={busy}
-              aria-label="Wallpaper transparency"
+              aria-label="Interface transparency"
               aria-valuemin={INTERFACE_TRANSPARENCY_MIN}
               aria-valuemax={INTERFACE_TRANSPARENCY_MAX}
               aria-valuenow={interfaceTransparency}

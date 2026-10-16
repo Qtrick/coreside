@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { LayoutGrid, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApplicationDetailsPanel } from "@/components/applications/ApplicationDetailsPanel";
 import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
@@ -529,6 +529,9 @@ export function ToolCanvas() {
     return (
       <section className="tool-canvas" aria-label="App canvas" data-coreside-tour="app-panel">
         <div className="empty-state">
+          <div className="empty-icon" aria-hidden>
+            <LayoutGrid size={24} />
+          </div>
           <h3>{EMPTY_STATES.noAppOpen.title}</h3>
           <p>{EMPTY_STATES.noAppOpen.body}</p>
           <div className="button-row empty-state-actions">

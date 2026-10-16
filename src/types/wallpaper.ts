@@ -137,10 +137,9 @@ export function schemaWallpaperToJson(config: SchemaWallpaperConfig): string {
 }
 
 /**
- * Built-in workspace default: calm obsidian gradient, no motion, cheap to render.
- * Applied as a *visual* default only when no wallpaper value was ever persisted
- * (`globalWallpaperJson == null`). An explicitly cleared wallpaper (`""`) stays
- * None and is never overwritten.
+ * Curated “Obsidian” ambient gradient — available in the wallpaper library.
+ * Not auto-applied. Fresh installs and cleared workspaces stay wallpaper-none
+ * (solid light/dark chrome) until the user picks a wallpaper.
  */
 export const DEFAULT_WORKSPACE_WALLPAPER_JSON: string = schemaWallpaperToJson({
   schemaVersion: "1",

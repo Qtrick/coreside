@@ -63,6 +63,8 @@ export function ProjectListItem({
               type="button"
               className="sidebar-nav-btn nested"
               onClick={() => onChatOpen(chat.id)}
+              aria-label={chat.title}
+              title={chat.title}
             >
               <span className="nav-label">{chat.title}</span>
             </button>
@@ -72,6 +74,8 @@ export function ProjectListItem({
               type="button"
               className="sidebar-nav-btn nested muted-link"
               onClick={onViewAll}
+              aria-label={`View all chats in ${project.name}`}
+              title={`View all chats in ${project.name}`}
             >
               View all
             </button>
@@ -116,7 +120,7 @@ export function ProjectList({
   if (visible.length === 0) {
     return (
       <p className="muted sidebar-empty-hint">
-        <span className="nav-label">No projects yet</span>
+        <span className="nav-label">No projects yet — use + to create one</span>
       </p>
     );
   }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -18,6 +18,7 @@ import { ProjectContextMenu } from "@/components/context-menu/ProjectContextMenu
 import { useContextMenuTrigger } from "@/components/context-menu/use-context-menu";
 import { ProjectList } from "@/components/projects/ProjectList";
 import { EMPTY_STATES } from "@/lib/empty-states";
+import { NARROW_SIDEBAR_MEDIA_QUERY } from "@/lib/layout-mode";
 import { isCurrentChat } from "@/lib/navigation";
 import type { Project } from "@/types/project";
 import type { Conversation } from "@/types/messages";
@@ -104,7 +105,21 @@ export function Sidebar() {
     })),
   );
 
-  const iconSize = sidebarCollapsed ? ICON_COLLAPSED : ICON_EXPANDED;
+  const [narrowViewport, setNarrowViewport] = useState(
+    () => typeof window !== "undefined" &&
+      Boolean(window.matchMedia?.(NARROW_SIDEBAR_MEDIA_QUERY).matches),
+  );
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const media = window.matchMedia(NARROW_SIDEBAR_MEDIA_QUERY);
+    const update = () => setNarrowViewport(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  const effectiveCollapsed = sidebarCollapsed || narrowViewport;
+  const iconSize = effectiveCollapsed ? ICON_COLLAPSED : ICON_EXPANDED;
   const chatMenu = useContextMenuTrigger();
   const projectMenu = useContextMenuTrigger();
   const [menuChat, setMenuChat] = useState<Conversation | null>(null);
@@ -142,16 +157,26 @@ export function Sidebar() {
 
   return (
     <aside
-      className={`sidebar${sidebarCollapsed ? " collapsed" : ""}`}
+      className={`sidebar${effectiveCollapsed ? " collapsed" : ""}`}
       aria-label="Coreside sidebar"
     >
       <div className="sidebar-brand">
-        {sidebarCollapsed ? (
+        {effectiveCollapsed ? (
           <button
             type="button"
             className="sidebar-brand-toggle"
-            onClick={() => void toggleSidebar()}
-            aria-label="Expand sidebar"
+            onClick={() => {
+              // Viewport-forced compact mode cannot expand; avoid toggling the
+              // persisted preference (which would flip expand → collapse).
+              if (narrowViewport) return;
+              void toggleSidebar();
+            }}
+            disabled={narrowViewport}
+            aria-label={
+              narrowViewport
+                ? "Sidebar stays compact on narrow windows"
+                : "Expand sidebar"
+            }
             aria-expanded={false}
           >
             <CoresideLogo
@@ -213,10 +238,11 @@ export function Sidebar() {
             className="sidebar-section-toggle"
             onClick={() => setProjectsExpanded(!projectsExpanded)}
             aria-expanded={projectsExpanded}
+            aria-label="Projects"
           >
             <Folder size={iconSize} aria-hidden />
             <span className="nav-label">Projects</span>
-            {!sidebarCollapsed ? (
+            {!effectiveCollapsed ? (
               <ChevronDown
                 size={14}
                 className={`section-chevron${projectsExpanded ? " open" : ""}`}
@@ -224,7 +250,7 @@ export function Sidebar() {
               />
             ) : null}
           </button>
-          {!sidebarCollapsed ? (
+          {!effectiveCollapsed ? (
             <button
               type="button"
               className="sidebar-inline-btn"
@@ -241,14 +267,14 @@ export function Sidebar() {
               projects={projects}
               conversations={conversations}
               activeProjectId={activeProjectId}
-              collapsed={sidebarCollapsed}
+              collapsed={effectiveCollapsed}
               onOpenProject={(id) => void navigateToProject(id)}
               onViewAllProject={(id) => void navigateToProject(id)}
               onChatOpen={(id) => void navigateToChat(id)}
               onProjectContextMenu={openProjectMenu}
               onProjectOverflow={openProjectMenu}
             />
-            {!sidebarCollapsed ? (
+            {!effectiveCollapsed ? (
               <button
                 type="button"
                 className="sidebar-nav-btn muted-link"
@@ -279,17 +305,17 @@ export function Sidebar() {
                   aria-label={conversation.title}
                   title={conversation.title}
                 >
-                  {sidebarCollapsed ? (
+                  {effectiveCollapsed ? (
                     <MessageSquare size={iconSize} aria-hidden />
                   ) : null}
                   <span className="nav-label">{conversation.title}</span>
-                  {conversation.projectId && !sidebarCollapsed ? (
+                  {conversation.projectId && !effectiveCollapsed ? (
                     <span className="nav-badge">
                       {projectNameById.get(conversation.projectId) ?? "Project"}
                     </span>
                   ) : null}
                 </button>
-                {!sidebarCollapsed ? (
+                {!effectiveCollapsed ? (
                   <button
                     type="button"
                     className="sidebar-overflow-btn"

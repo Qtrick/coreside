@@ -4,7 +4,6 @@ import type { WallpaperConfig, WallpaperKind } from "@/types/agent";
 import { WallpaperKindSchema } from "@/types/agent";
 import type { AppView } from "@/lib/navigation";
 import {
-  DEFAULT_WORKSPACE_WALLPAPER_JSON,
   parseWallpaperJson,
   type ResolvedWallpaper,
 } from "@/types/wallpaper";
@@ -93,12 +92,7 @@ export function resolveActiveWallpaper(input: {
     return { format: "legacy", config: globalWallpaper };
   }
 
-  // Fresh profiles that never persisted a wallpaper value render the built-in
-  // default. An explicitly cleared wallpaper ("") stays None.
-  if (globalWallpaperJson == null) {
-    const fallback = parseWallpaperJson(DEFAULT_WORKSPACE_WALLPAPER_JSON);
-    if (fallback.format !== "none") return fallback;
-  }
-
+  // Base form: no wallpaper until the user (or agent) explicitly chooses one.
+  // null (never set) and "" (cleared) both resolve to None.
   return { format: "none" };
 }

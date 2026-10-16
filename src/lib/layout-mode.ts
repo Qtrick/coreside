@@ -15,6 +15,8 @@ export const LAYOUT_SAFE = {
   compactMainThreshold: 720,
   /** Below this, prefer standard condensation over wide dual-pane. */
   standardMainThreshold: 960,
+  /** Match global.css `@media (max-width: 1100px)` forced-compact sidebar. */
+  narrowSidebarMaxWidth: 1100,
   defaultSplitRatio: 0.5,
   minSplitRatio: 0.28,
   maxSplitRatio: 0.72,
@@ -22,6 +24,12 @@ export const LAYOUT_SAFE = {
   toolHeaderMenuMax: 480,
   toolHeaderIconsMax: 720,
 } as const;
+
+/** Media query string kept in sync with LAYOUT_SAFE.narrowSidebarMaxWidth. */
+export const NARROW_SIDEBAR_MEDIA_QUERY = `(max-width: ${LAYOUT_SAFE.narrowSidebarMaxWidth}px)`;
+
+export const SIDEBAR_WIDTH_COLLAPSED = 80;
+export const SIDEBAR_WIDTH_EXPANDED = 272;
 
 export type LayoutMetrics = {
   shellWidth: number;

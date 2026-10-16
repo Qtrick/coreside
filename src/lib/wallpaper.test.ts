@@ -108,7 +108,7 @@ describe("resolveActiveWallpaper", () => {
 });
 
 describe("default workspace wallpaper", () => {
-  it("renders the built-in default when nothing was ever persisted", () => {
+  it("stays none when nothing was ever persisted (base form)", () => {
     const resolved = resolveActiveWallpaper({
       view: { kind: "chat", conversationId: "chat-2" },
       globalWallpaper: DEFAULT_WALLPAPER,
@@ -124,11 +124,8 @@ describe("default workspace wallpaper", () => {
       activeConversationId: "chat-2",
       activeProject: null,
     });
-    expect(resolved.format).toBe("schema");
-    if (resolved.format === "schema") {
-      expect(resolved.config.type).toBe("ambient-gradient");
-    }
-    // The default constant itself must parse to the same schema wallpaper.
+    expect(resolved.format).toBe("none");
+    // Curated Obsidian preset remains available in the library.
     expect(parseWallpaperJson(DEFAULT_WORKSPACE_WALLPAPER_JSON).format).toBe(
       "schema",
     );

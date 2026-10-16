@@ -54,12 +54,9 @@ body[data-wallpaper-active="true"] {
   background: transparent;
 }
 
-/* Quiet ambient wash — keeps chrome calm when no wallpaper is active. */
+/* Base form: solid light/dark chrome — no tinted wash without a wallpaper. */
 body:not([data-wallpaper-active="true"]) {
-  background:
-    radial-gradient(1100px 480px at 8% -12%, color-mix(in srgb, var(--accent-primary) 7%, transparent), transparent 58%),
-    radial-gradient(820px 380px at 100% 0%, color-mix(in srgb, var(--accent-secondary) 5%, transparent), transparent 52%),
-    var(--core-background);
+  background: var(--core-background);
 }
 
 button,
@@ -1645,6 +1642,7 @@ body > .window-overlay-root > *,
   text-align: center;
   padding: var(--space-8) var(--space-5);
   color: var(--text-secondary);
+  animation: empty-state-enter var(--motion-duration-enter) var(--motion-ease-enter) both;
 }
 
 .empty-state h2,
@@ -1678,6 +1676,19 @@ body > .window-overlay-root > *,
   border-radius: 16px;
   background: var(--core-muted-overlay);
   color: var(--accent-primary);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-soft);
+}
+
+@keyframes empty-state-enter {
+  from {
+    opacity: var(--motion-opacity-enter-from);
+    transform: translateY(var(--motion-distance));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .settings-panel {
@@ -2057,10 +2068,19 @@ body > .window-overlay-root > *,
   gap: var(--space-2);
 }
 
+.theme-options button {
+  min-width: 5.5rem;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-standard),
+    border-color var(--motion-duration-fast) var(--motion-ease-standard),
+    color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
 .theme-options button[aria-pressed="true"],
 .theme-options button[aria-checked="true"] {
   border-color: color-mix(in srgb, var(--accent-primary) 40%, var(--border));
   background: color-mix(in srgb, var(--accent-primary) 12%, var(--core-control-overlay));
+  box-shadow: var(--shadow-soft);
 }
 
 .settings-subheading {
@@ -2910,37 +2930,9 @@ body > .window-overlay-root > *,
   /* Compact tool mode is owned by .app-shell-main.compact — do not position
      the Tool Canvas outside the shell client area. */
 
-  .sidebar,
-  .sidebar:not(.collapsed) {
+  .sidebar {
     width: var(--sidebar-collapsed-width);
     max-width: var(--sidebar-collapsed-width);
-    padding: var(--space-3);
-    align-items: stretch;
-  }
-
-  .sidebar:not(.collapsed) .wordmark-text,
-  .sidebar:not(.collapsed) .sidebar-section-label,
-  .sidebar:not(.collapsed) .nav-label,
-  .sidebar:not(.collapsed) .nav-meta,
-  .sidebar:not(.collapsed) .nav-badge,
-  .sidebar:not(.collapsed) .section-chevron,
-  .sidebar:not(.collapsed) .sidebar-inline-btn,
-  .sidebar:not(.collapsed) .sidebar-overflow-btn {
-    display: none;
-  }
-
-  .sidebar:not(.collapsed) .sidebar-nav button,
-  .sidebar:not(.collapsed) .btn-block,
-  .sidebar:not(.collapsed) .sidebar-settings-btn {
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    min-height: 44px;
-    padding: 0.55rem;
-  }
-
-  .sidebar:not(.collapsed) .btn-block {
-    padding-inline: 0;
   }
 }
 
@@ -6165,12 +6157,18 @@ body > .window-overlay-root > *,
   gap: var(--space-3);
   max-width: 680px;
   margin: 0 auto;
+  animation: empty-state-enter var(--motion-duration-enter) var(--motion-ease-enter) both;
+}
+
+/* Nested empty-state already participates via the container enter animation. */
+.chat-starter-container .empty-state {
+  animation: none;
 }
 
 .chat-starter-heading {
   font-size: 0.82rem;
   font-weight: 600;
-  color: var(--core-text-muted, #94a3b8);
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin: 0;
@@ -6186,31 +6184,41 @@ body > .window-overlay-root > *,
 .chat-starter-card {
   padding: var(--space-3);
   border-radius: var(--radius-md);
-  background: var(--core-surface-secondary, rgba(255, 255, 255, 0.03));
-  border: 1px solid var(--core-border, rgba(255, 255, 255, 0.08));
+  background: var(--core-card-overlay);
+  border: 1px solid var(--border);
   text-align: left;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-standard),
+    border-color var(--motion-duration-fast) var(--motion-ease-standard),
+    transform var(--motion-duration-fast) var(--motion-ease-standard),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
   display: flex;
   flex-direction: column;
   gap: 4px;
+  box-shadow: var(--shadow-soft);
 }
 
 .chat-starter-card:hover {
-  background: var(--core-surface-hover, rgba(255, 255, 255, 0.06));
-  border-color: var(--core-accent-primary, #3b82f6);
+  background: var(--core-muted-overlay);
+  border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--border));
   transform: translateY(-1px);
+}
+
+.chat-starter-card:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
 }
 
 .chat-starter-title {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--core-text-primary, #f1f5f9);
+  color: var(--text-primary);
 }
 
 .chat-starter-desc {
   font-size: 0.75rem;
-  color: var(--core-text-muted, #94a3b8);
+  color: var(--text-secondary);
   line-height: 1.35;
 }
 

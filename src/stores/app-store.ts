@@ -37,6 +37,7 @@ import type { ToolMention } from "@/lib/mentions";
 import { ensureReadableForeground } from "@/lib/readability/contrast";
 import type { ActionLogMode } from "@/lib/action-log";
 import { validateToolDefinition } from "@/lib/tool-schema";
+import { INTERFACE_TRANSPARENCY_DEFAULT } from "@/lib/interface-transparency";
 import { normalizeCanonicalHex } from "@/lib/wallpaper-hex";
 import {
   catchUpConversationEvents as runConversationCatchUp,
@@ -668,18 +669,18 @@ const DEFAULT_ACCENTS: AccentPalette = {
 };
 
 const DEFAULT_SURFACES: SurfacePalette = {
-  backgroundLight: "#f5f6f1",
-  backgroundDark: "#141714",
+  backgroundLight: "#f5f5f5",
+  backgroundDark: "#0a0a0a",
   surfaceLight: "#ffffff",
-  surfaceDark: "#1c201c",
-  surfaceMutedLight: "#ecefe8",
-  surfaceMutedDark: "#242a24",
-  borderLight: "#d8d8d4",
-  borderDark: "#3a3a3a",
-  textPrimaryLight: "#1d211c",
-  textPrimaryDark: "#eef2ec",
-  textSecondaryLight: "#687066",
-  textSecondaryDark: "#a6afa3",
+  surfaceDark: "#171717",
+  surfaceMutedLight: "#ececec",
+  surfaceMutedDark: "#262626",
+  borderLight: "#e4e4e4",
+  borderDark: "#3f3f3f",
+  textPrimaryLight: "#171717",
+  textPrimaryDark: "#fafafa",
+  textSecondaryLight: "#737373",
+  textSecondaryDark: "#a3a3a3",
 };
 
 const DEFAULT_APPEARANCE: AppearancePalette = {
@@ -886,7 +887,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   appearance: { ...DEFAULT_APPEARANCE },
   wallpaper: { ...DEFAULT_WALLPAPER },
   globalWallpaperJson: null,
-  interfaceTransparency: 35,
+  interfaceTransparency: INTERFACE_TRANSPARENCY_DEFAULT,
   adaptiveWindowSizing: "smart",
   chatToolSplitRatio: 0.5,
   layoutMode: "wide",
@@ -995,7 +996,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const interfaceTransparency =
         typeof settings.interfaceTransparency === "number"
           ? Math.min(100, Math.max(0, Math.round(settings.interfaceTransparency)))
-          : 35;
+          : INTERFACE_TRANSPARENCY_DEFAULT;
       committedInterfaceTransparency = interfaceTransparency;
       interfaceTransparencyCommittedGen = interfaceTransparencyCommitGen;
       syncCommittedWallpaperFromSettings({

@@ -5,7 +5,8 @@
 
 export const INTERFACE_TRANSPARENCY_MIN = 0;
 export const INTERFACE_TRANSPARENCY_MAX = 100;
-export const INTERFACE_TRANSPARENCY_DEFAULT = 35;
+/** Base form is solid chrome; transparency is opt-in with a wallpaper. */
+export const INTERFACE_TRANSPARENCY_DEFAULT = 0;
 export const INTERFACE_TRANSPARENCY_STEP = 1;
 
 export const INTERFACE_TRANSPARENCY_PRESETS = [

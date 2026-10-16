@@ -1,10 +1,11 @@
 :root {
   color-scheme: light;
-  --background: #f4f5f0;
+  /* Neutral light baseline — standard app chrome, not tinted “mood” surfaces */
+  --background: #f5f5f5;
   --surface: #ffffff;
-  --surface-muted: #e9ece4;
-  --text-primary: #1a1f1a;
-  --text-secondary: #5f695f;
+  --surface-muted: #ececec;
+  --text-primary: #171717;
+  --text-secondary: #737373;
   /* Legacy aliases used by older selectors */
   --text: var(--text-primary);
   --text-muted: var(--text-secondary);
@@ -12,18 +13,18 @@
   --accent-primary-hover: #267752;
   --accent-on-primary: #ffffff;
   --accent-secondary: #c9843a;
-  --border: #d4d6cf;
+  --border: #e4e4e4;
   --border-subtle: color-mix(in srgb, var(--border) 72%, transparent);
   --danger: #b54a3c;
   --danger-muted: #f6e8e5;
   --success: #2f8f63;
   /* Soft elevation (Linear/Raycast-style tinted shadow, not heavy cards) */
   --shadow-soft:
-    0 1px 2px rgba(29, 33, 28, 0.04),
-    0 8px 24px rgba(29, 33, 28, 0.06);
+    0 1px 2px rgba(23, 23, 23, 0.04),
+    0 8px 24px rgba(23, 23, 23, 0.06);
   --shadow-composer:
-    0 1px 2px rgba(29, 33, 28, 0.04),
-    0 10px 28px rgba(29, 33, 28, 0.08);
+    0 1px 2px rgba(23, 23, 23, 0.04),
+    0 10px 28px rgba(23, 23, 23, 0.08);
   --radius: 12px;
   --radius-sm: 8px;
   --radius-md: var(--radius);
@@ -68,41 +69,41 @@
   --core-text-secondary: var(--text-secondary);
   --core-border: var(--border);
   --core-accent: var(--accent-primary);
-  /* Interface transparency defaults (overridden by JS from user preference). */
-  --interface-transparency: 35;
-  --interface-transparency-effective: 35;
-  --core-panel-alpha: 0.767;
-  --core-sidebar-alpha: 0.737;
-  --core-card-alpha: 0.827;
-  --core-control-alpha: 0.947;
-  --core-header-alpha: 0.847;
-  --core-modal-alpha: 1.0;
+  /* Interface transparency defaults — solid base form until wallpaper + preference. */
+  --interface-transparency: 0;
+  --interface-transparency-effective: 0;
+  --core-panel-alpha: 1;
+  --core-sidebar-alpha: 1;
+  --core-card-alpha: 1;
+  --core-control-alpha: 1;
+  --core-header-alpha: 1;
+  --core-modal-alpha: 1;
   --core-readable-scrim-alpha: 0;
-  --core-backdrop-blur: 12px;
+  --core-backdrop-blur: 0px;
   /* Integer percents match applyInterfaceTransparencyCssVars first-paint defaults. */
-  --core-content-overlay: color-mix(in srgb, var(--surface) 77%, transparent);
-  --core-sidebar-overlay: color-mix(in srgb, var(--surface) 74%, transparent);
-  --core-card-overlay: color-mix(in srgb, var(--surface) 83%, transparent);
-  --core-muted-overlay: color-mix(in srgb, var(--surface-muted) 83%, transparent);
-  --core-control-overlay: color-mix(in srgb, var(--surface) 95%, transparent);
-  --core-header-overlay: color-mix(in srgb, var(--surface) 85%, transparent);
-  --core-modal-overlay: color-mix(in srgb, var(--surface) 100%, transparent);
+  --core-content-overlay: var(--surface);
+  --core-sidebar-overlay: var(--surface);
+  --core-card-overlay: var(--surface);
+  --core-muted-overlay: var(--surface-muted);
+  --core-control-overlay: var(--surface);
+  --core-header-overlay: var(--surface);
+  --core-modal-overlay: var(--surface);
 }
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --background: #121512;
-  --surface: #1a1e1a;
-  --surface-muted: #222822;
-  --text-primary: #eef2ec;
-  --text-secondary: #9aa39a;
+  --background: #0a0a0a;
+  --surface: #171717;
+  --surface-muted: #262626;
+  --text-primary: #fafafa;
+  --text-secondary: #a3a3a3;
   --text: var(--text-primary);
   --text-muted: var(--text-secondary);
   --accent-primary: #69c994;
   --accent-primary-hover: #7ad7a3;
   --accent-on-primary: #0f1612;
   --accent-secondary: #e0a158;
-  --border: #2e342e;
+  --border: #3f3f3f;
   --border-subtle: color-mix(in srgb, var(--border) 80%, transparent);
   --danger: #e08a7c;
   --danger-muted: #3a2421;
@@ -114,11 +115,11 @@ html[data-theme="dark"] {
     0 1px 0 rgba(255, 255, 255, 0.04) inset,
     0 12px 32px rgba(0, 0, 0, 0.4);
 
-  --core-content-overlay: color-mix(in srgb, var(--surface) 77%, transparent);
-  --core-sidebar-overlay: color-mix(in srgb, var(--surface) 74%, transparent);
-  --core-card-overlay: color-mix(in srgb, var(--surface) 83%, transparent);
-  --core-muted-overlay: color-mix(in srgb, var(--surface-muted) 83%, transparent);
-  --core-control-overlay: color-mix(in srgb, var(--surface) 95%, transparent);
-  --core-header-overlay: color-mix(in srgb, var(--surface) 85%, transparent);
-  --core-modal-overlay: color-mix(in srgb, var(--surface) 100%, transparent);
+  --core-content-overlay: var(--surface);
+  --core-sidebar-overlay: var(--surface);
+  --core-card-overlay: var(--surface);
+  --core-muted-overlay: var(--surface-muted);
+  --core-control-overlay: var(--surface);
+  --core-header-overlay: var(--surface);
+  --core-modal-overlay: var(--surface);
 }

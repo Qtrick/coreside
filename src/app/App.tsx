@@ -16,9 +16,9 @@ function WebPreviewBanner() {
         padding: "0.35rem 0.75rem",
         fontSize: "0.75rem",
         textAlign: "center",
-        background: "var(--surface-muted, #ecefe8)",
-        color: "var(--text-secondary, #687066)",
-        borderBottom: "1px solid var(--border, #d8d8d4)",
+        background: "var(--surface-muted, #ececec)",
+        color: "var(--text-secondary, #737373)",
+        borderBottom: "1px solid var(--border, #e4e4e4)",
       }}
     >
       Web preview — in-memory mocks only; data is not persisted

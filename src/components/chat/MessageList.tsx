@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { MessageSquare } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { shouldShowActionLog } from "@/lib/action-log";
 import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
@@ -208,8 +209,29 @@ const STARTER_PROMPTS = [
       <div className="message-list">
         <div className="chat-starter-container">
           <div className="empty-state" style={{ padding: 0 }}>
+            <div className="empty-icon" aria-hidden>
+              <MessageSquare size={24} />
+            </div>
             <h3>{EMPTY_STATES.emptyChat.title}</h3>
             <p>{EMPTY_STATES.emptyChat.body}</p>
+            <div className="button-row empty-state-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  document.getElementById("composer-input")?.focus();
+                }}
+              >
+                {EMPTY_STATES.emptyChat.primaryCta}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => openHelpAndLearning(navigateToSettings)}
+              >
+                {EMPTY_STATES.helpLink.label}
+              </button>
+            </div>
           </div>
 
           <h4 className="chat-starter-heading">Quick Starters</h4>
@@ -231,16 +253,6 @@ const STARTER_PROMPTS = [
                 <span className="chat-starter-desc">{starter.desc}</span>
               </button>
             ))}
-          </div>
-
-          <div className="button-row empty-state-actions" style={{ justifyContent: "center", marginTop: "var(--space-2)" }}>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => openHelpAndLearning(navigateToSettings)}
-            >
-              {EMPTY_STATES.helpLink.label}
-            </button>
           </div>
         </div>
       </div>

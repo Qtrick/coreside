@@ -10,7 +10,7 @@ describe("interface transparency", () => {
     expect(clampInterfaceTransparency(20)).toBe(20);
     expect(clampInterfaceTransparency(150)).toBe(100);
     expect(clampInterfaceTransparency(99)).toBe(99);
-    expect(clampInterfaceTransparency("nope")).toBe(35);
+    expect(clampInterfaceTransparency("nope")).toBe(0);
   });
 
   it("keeps solid surfaces when no wallpaper is active", () => {

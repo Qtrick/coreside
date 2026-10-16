@@ -46,7 +46,7 @@ describe("ChangeProposalCard", () => {
     store.pendingKernelProposal = null;
   });
 
-  it("keeps Apply enabled for a pending proposal with an empty preview", async () => {
+  it("disables Apply when the loaded kernel proposal has no exact operations", async () => {
     kernelGetProposal.mockResolvedValue({
       summary: "Update app",
       impactSummary: "Updates the app",
@@ -68,13 +68,16 @@ describe("ChangeProposalCard", () => {
       />,
     );
 
-    await screen.findByText("No detailed preview is available for this proposal.");
+    await screen.findByText(
+      "This proposal has no changes to apply. Regenerate it or discard it.",
+    );
     const apply = screen.getByRole("button", {
       name: "Apply proposed change",
     });
-    expect(apply).toBeEnabled();
+    expect(apply).toBeDisabled();
 
     fireEvent.click(apply);
-    await waitFor(() => expect(applyPending).toHaveBeenCalledOnce());
+    await waitFor(() => expect(applyPending).not.toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Discard proposed change" })).toBeEnabled();
   });
 });

@@ -99,7 +99,7 @@ pub struct AppSettings {
     pub wallpaper: WallpaperConfig,
     /// Schema wallpaper JSON for media / gradient backgrounds (validated).
     pub wallpaper_json: Option<String>,
-    /// Interface transparency percent (0–100). Default 35.
+    /// Interface transparency percent (0–100). Default 0 (solid base form).
     pub interface_transparency: u8,
     /// Adaptive window sizing: `smart` | `ask` | `off`.
     pub adaptive_window_sizing: String,
@@ -119,18 +119,18 @@ const DEFAULT_ACCENT_PRIMARY_LIGHT: &str = "#2f8f63";
 const DEFAULT_ACCENT_PRIMARY_DARK: &str = "#69c994";
 const DEFAULT_ACCENT_SECONDARY_LIGHT: &str = "#d38b3d";
 const DEFAULT_ACCENT_SECONDARY_DARK: &str = "#e0a158";
-const DEFAULT_BACKGROUND_LIGHT: &str = "#f5f6f1";
-const DEFAULT_BACKGROUND_DARK: &str = "#141714";
+const DEFAULT_BACKGROUND_LIGHT: &str = "#f5f5f5";
+const DEFAULT_BACKGROUND_DARK: &str = "#0a0a0a";
 const DEFAULT_SURFACE_LIGHT: &str = "#ffffff";
-const DEFAULT_SURFACE_DARK: &str = "#1c201c";
-const DEFAULT_SURFACE_MUTED_LIGHT: &str = "#ecefe8";
-const DEFAULT_SURFACE_MUTED_DARK: &str = "#242a24";
-const DEFAULT_BORDER_LIGHT: &str = "#d8d8d4";
-const DEFAULT_BORDER_DARK: &str = "#3a3a3a";
-const DEFAULT_TEXT_PRIMARY_LIGHT: &str = "#1d211c";
-const DEFAULT_TEXT_PRIMARY_DARK: &str = "#eef2ec";
-const DEFAULT_TEXT_SECONDARY_LIGHT: &str = "#687066";
-const DEFAULT_TEXT_SECONDARY_DARK: &str = "#a6afa3";
+const DEFAULT_SURFACE_DARK: &str = "#171717";
+const DEFAULT_SURFACE_MUTED_LIGHT: &str = "#ececec";
+const DEFAULT_SURFACE_MUTED_DARK: &str = "#262626";
+const DEFAULT_BORDER_LIGHT: &str = "#e4e4e4";
+const DEFAULT_BORDER_DARK: &str = "#3f3f3f";
+const DEFAULT_TEXT_PRIMARY_LIGHT: &str = "#171717";
+const DEFAULT_TEXT_PRIMARY_DARK: &str = "#fafafa";
+const DEFAULT_TEXT_SECONDARY_LIGHT: &str = "#737373";
+const DEFAULT_TEXT_SECONDARY_DARK: &str = "#a3a3a3";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -255,7 +255,7 @@ fn settings_from_map(map: &std::collections::HashMap<String, String>) -> AppSett
             .or_else(|| map.get("interface_transparency"))
             .and_then(|s| s.trim().parse::<u8>().ok())
             .map(|n| n.min(100))
-            .unwrap_or(35),
+            .unwrap_or(0),
         adaptive_window_sizing: map
             .get("adaptiveWindowSizing")
             .or_else(|| map.get("adaptive_window_sizing"))

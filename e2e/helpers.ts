@@ -658,6 +658,86 @@ export async function measureToolCanvasLayout() {
     );
     const wallpaper = document.querySelector(".live-wallpaper");
 
+    const sidebarStyle = sidebar ? getComputedStyle(sidebar) : null;
+    const sidebarCollapsed = Boolean(sidebar?.classList.contains("collapsed"));
+    const sidebarWidthToken = sidebarStyle
+      ?.getPropertyValue(
+        sidebarCollapsed ? "--sidebar-collapsed-width" : "--sidebar-width",
+      )
+      .trim() ?? "";
+    const expectedSidebarWidth = Number.parseFloat(sidebarWidthToken);
+
+    const visibleSidebarButtons = Array.from(
+      sidebar?.querySelectorAll<HTMLElement>(".sidebar-nav-btn") ?? [],
+    ).filter((button) => {
+      const style = getComputedStyle(button);
+      const buttonRect = button.getBoundingClientRect();
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        buttonRect.width > 0 &&
+        buttonRect.height > 0
+      );
+    });
+    const visibleText = (root: HTMLElement) => {
+      const collect = (node: Node): string => {
+        if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+        if (!(node instanceof HTMLElement) && !(node instanceof SVGElement)) {
+          return "";
+        }
+        if (node.getAttribute("aria-hidden") === "true") return "";
+        const style = getComputedStyle(node);
+        if (style.display === "none" || style.visibility === "hidden") return "";
+        return Array.from(node.childNodes, collect).join(" ");
+      };
+      return collect(root).trim();
+    };
+    const unnamedSidebarButtons = visibleSidebarButtons
+      .filter((button) => {
+        const name =
+          button.getAttribute("aria-label") ||
+          visibleText(button) ||
+          button.getAttribute("title");
+        return !name?.trim();
+      })
+      .map((button) => String(button.className));
+    const sidebarRowsMissingIcon = visibleSidebarButtons
+      .filter((button) =>
+        button.closest(
+          '.sidebar-section[aria-label="Recent chats"], .project-list-item',
+        ) &&
+        !button.classList.contains("muted-link") &&
+        !button.querySelector("svg"),
+      )
+      .map(
+        (button) =>
+          button.getAttribute("aria-label") ||
+          button.textContent?.trim() ||
+          "unnamed",
+      );
+    const sidebarChildOverflow = sidebar
+      ? Array.from(sidebar.querySelectorAll<HTMLElement>("*"))
+          .filter((node) => {
+            const style = getComputedStyle(node);
+            const nodeRect = node.getBoundingClientRect();
+            const sidebarRect = sidebar.getBoundingClientRect();
+            if (
+              style.display === "none" ||
+              style.position === "fixed" ||
+              nodeRect.width <= 0 ||
+              nodeRect.height <= 0
+            ) {
+              return false;
+            }
+            return (
+              nodeRect.left < sidebarRect.left - 1 ||
+              nodeRect.right > sidebarRect.right + 1
+            );
+          })
+          .map((node) => String(node.className || node.tagName).slice(0, 120))
+          .slice(0, 8)
+      : [];
+
     const rect = (el: Element | null) => {
       if (!el) return null;
       const r = el.getBoundingClientRect();
@@ -725,6 +805,14 @@ export async function measureToolCanvasLayout() {
       mainClientWidth: main?.clientWidth ?? null,
       mainScrollWidth: main?.scrollWidth ?? null,
       sidebarClientWidth: sidebar?.clientWidth ?? null,
+      sidebarCollapsed,
+      sidebarWidthToken,
+      expectedSidebarWidth: Number.isFinite(expectedSidebarWidth)
+        ? expectedSidebarWidth
+        : null,
+      unnamedSidebarButtons,
+      sidebarRowsMissingIcon,
+      sidebarChildOverflow,
       windowInnerWidth: window.innerWidth,
       devicePixelRatio: window.devicePixelRatio || 1,
       wallpaperInsideShell: Boolean(shell?.contains(wallpaper)),
@@ -764,15 +852,13 @@ export async function waitForToolCanvasLayout(timeout = 2_000) {
   await browser.waitUntil(
     async () => {
       layout = await measureToolCanvasLayout();
-      const expectedSidebarW =
-        typeof layout.windowInnerWidth === "number" &&
-        layout.windowInnerWidth <= 1100
-          ? 80
-          : 272;
+      const expectedSidebarW = layout.expectedSidebarWidth;
       const sidebarSettled =
+        typeof expectedSidebarW === "number" &&
         typeof layout.sidebar?.rect?.w === "number" &&
         Math.abs(layout.sidebar.rect.w - expectedSidebarW) <= 2;
       const mainSettled =
+        typeof expectedSidebarW === "number" &&
         typeof layout.mainClientWidth === "number" &&
         typeof layout.windowInnerWidth === "number" &&
         Math.abs(layout.mainClientWidth + expectedSidebarW - layout.windowInnerWidth) <= 4;
@@ -817,11 +903,7 @@ export function assertNoLayoutOverflow(
     );
   }
   expect(layout.wallpaperInsideShell).toBe(false);
-  const expectedSidebarW =
-    typeof layout.windowInnerWidth === "number" &&
-    layout.windowInnerWidth <= 1100
-      ? 80
-      : 272;
+  const expectedSidebarW = layout.expectedSidebarWidth ?? 0;
   expect(
     Math.abs((layout.sidebar?.rect?.w ?? 0) - expectedSidebarW),
   ).toBeLessThanOrEqual(2);
@@ -829,6 +911,11 @@ export function assertNoLayoutOverflow(
     Math.max(200, (layout.windowInnerWidth ?? 0) * 0.4),
   );
   expect(layout.main?.["grid-column-start"]).toBe("2");
+  expect(layout.unnamedSidebarButtons).toEqual([]);
+  if (layout.sidebarCollapsed) {
+    expect(layout.sidebarRowsMissingIcon).toEqual([]);
+  }
+  expect(layout.sidebarChildOverflow).toEqual([]);
   expect(layout).toMatchObject({
     rootOverflow: false,
     mainOverflow: false,

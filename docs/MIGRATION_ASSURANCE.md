@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 37 forward migrations (001–037; includes `037_proposal_project_isolation.sql`)
+**Count:** 38 forward migrations (001–038; includes `038_appearance_baseline_reset.sql`)
 
 ## Inventory
 
@@ -45,6 +45,7 @@
 | 035 | `035_apply_idempotency_request_hash.sql` | Apply idempotency request hash binding (same key + different body → conflict) |
 | 036 | `036_approval_call_context.sql` | Approval call context binding (conversation/venue/presence/project/surface/component) |
 | 037 | `037_proposal_project_isolation.sql` | Proposal project scope binding and cross-project mutation guards |
+| 038 | `038_appearance_baseline_reset.sql` | One-time workspace appearance baseline: system theme, no wallpaper, solid chrome |
 
 ## What is verified
 

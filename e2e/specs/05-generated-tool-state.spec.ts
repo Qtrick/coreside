@@ -59,6 +59,27 @@ describe("Journey 5 — generated tool open + state persist", () => {
           );
           const resized = await waitForToolCanvasLayout();
           assertNoLayoutOverflow(resized, `${size.width}x${size.height}`);
+          if (size.width === 900 || size.width === 1024) {
+            const chat = await $(
+              '.sidebar-section[aria-label="Recent chats"] .sidebar-nav-btn',
+            );
+            await expect(chat).toBeDisplayed();
+            await browser.execute((button) => {
+              const rect = button.getBoundingClientRect();
+              button.dispatchEvent(
+                new MouseEvent("contextmenu", {
+                  bubbles: true,
+                  cancelable: true,
+                  clientX: rect.left + rect.width / 2,
+                  clientY: rect.top + rect.height / 2,
+                  button: 2,
+                }),
+              );
+            }, chat);
+            const menu = await $('[role="menu"]');
+            await menu.waitForDisplayed({ timeout: 5_000 });
+            await browser.keys("Escape");
+          }
         }
       } finally {
         await browser.setWindowRect(
