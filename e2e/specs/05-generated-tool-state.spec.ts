@@ -10,6 +10,7 @@ import {
   waitForAppReady,
   waitForSeededTool,
   waitForToolCanvas,
+  waitForToolCanvasLayout,
 } from "../helpers.js";
 
 describe("Journey 5 — generated tool open + state persist", () => {
@@ -56,7 +57,7 @@ describe("Journey 5 — generated tool open + state persist", () => {
               timeoutMsg: `window.innerWidth did not settle at ${size.width}`,
             },
           );
-          const resized = await measureToolCanvasLayout();
+          const resized = await waitForToolCanvasLayout();
           assertNoLayoutOverflow(resized, `${size.width}x${size.height}`);
         }
       } finally {

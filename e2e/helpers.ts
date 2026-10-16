@@ -758,6 +758,43 @@ export async function measureToolCanvasLayout() {
   });
 }
 
+/** Wait for responsive grid transitions and ResizeObserver layout mode to settle. */
+export async function waitForToolCanvasLayout(timeout = 2_000) {
+  let layout = await measureToolCanvasLayout();
+  await browser.waitUntil(
+    async () => {
+      layout = await measureToolCanvasLayout();
+      const expectedSidebarW =
+        typeof layout.windowInnerWidth === "number" &&
+        layout.windowInnerWidth <= 1100
+          ? 80
+          : 272;
+      const sidebarSettled =
+        typeof layout.sidebar?.rect?.w === "number" &&
+        Math.abs(layout.sidebar.rect.w - expectedSidebarW) <= 2;
+      const mainSettled =
+        typeof layout.mainClientWidth === "number" &&
+        typeof layout.windowInnerWidth === "number" &&
+        Math.abs(layout.mainClientWidth + expectedSidebarW - layout.windowInnerWidth) <= 4;
+      return (
+        sidebarSettled &&
+        mainSettled &&
+        !layout.rootOverflow &&
+        !layout.mainOverflow &&
+        !layout.canvasOverflow &&
+        !layout.bodyOverflow &&
+        layout.closeVisible
+      );
+    },
+    {
+      timeout,
+      interval: 50,
+      timeoutMsg: "Tool Canvas layout did not settle without overflow",
+    },
+  );
+  return layout;
+}
+
 export function assertNoLayoutOverflow(
   layout: Awaited<ReturnType<typeof measureToolCanvasLayout>>,
   label: string,
@@ -780,6 +817,14 @@ export function assertNoLayoutOverflow(
     );
   }
   expect(layout.wallpaperInsideShell).toBe(false);
+  const expectedSidebarW =
+    typeof layout.windowInnerWidth === "number" &&
+    layout.windowInnerWidth <= 1100
+      ? 80
+      : 272;
+  expect(
+    Math.abs((layout.sidebar?.rect?.w ?? 0) - expectedSidebarW),
+  ).toBeLessThanOrEqual(2);
   expect(layout.mainClientWidth).toBeGreaterThan(
     Math.max(200, (layout.windowInnerWidth ?? 0) * 0.4),
   );

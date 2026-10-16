@@ -41,6 +41,10 @@ describe("generated surface containment", () => {
     // Menu density chrome must stay fixed-size (no labeled More min-content).
     const menuDensity = rule('.tool-header-actions[data-density="menu"]');
     expect(menuDensity).toMatch(/flex-wrap:\s*nowrap/);
+
+    const collapsedSidebar = rule(".sidebar.collapsed");
+    expect(collapsedSidebar).toMatch(/width:\s*var\(--sidebar-collapsed-width\)/);
+    expect(collapsedSidebar).toMatch(/max-width:\s*var\(--sidebar-collapsed-width\)/);
   });
 
   it("keeps the canvas body as the explicit, bounded scroll owner", () => {

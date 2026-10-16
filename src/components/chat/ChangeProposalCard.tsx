@@ -257,7 +257,7 @@ export function ChangeProposalCard({
 
       {operations.length === 0 ? (
         <p className="muted" role="status" style={{ margin: "0.65rem 0 0" }}>
-          This preview has no changes to apply yet.
+          No detailed preview is available for this proposal.
         </p>
       ) : null}
 
@@ -309,7 +309,7 @@ export function ChangeProposalCard({
             className="btn btn-primary"
             data-proposal-apply="true"
             aria-label="Apply proposed change"
-            disabled={busy || operations.length === 0}
+            disabled={busy || !proposalId}
             onClick={() => void apply()}
             aria-busy={busy}
           >

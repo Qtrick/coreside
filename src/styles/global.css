@@ -439,6 +439,8 @@ body > .window-overlay-root > *,
 }
 
 .sidebar.collapsed {
+  width: var(--sidebar-collapsed-width);
+  max-width: var(--sidebar-collapsed-width);
   padding: var(--space-3);
   align-items: stretch;
   gap: var(--space-3);
@@ -2908,12 +2910,37 @@ body > .window-overlay-root > *,
   /* Compact tool mode is owned by .app-shell-main.compact — do not position
      the Tool Canvas outside the shell client area. */
 
+  .sidebar,
   .sidebar:not(.collapsed) {
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: var(--sidebar-width);
-    z-index: 30;
-    box-shadow: var(--shadow-soft);
+    width: var(--sidebar-collapsed-width);
+    max-width: var(--sidebar-collapsed-width);
+    padding: var(--space-3);
+    align-items: stretch;
+  }
+
+  .sidebar:not(.collapsed) .wordmark-text,
+  .sidebar:not(.collapsed) .sidebar-section-label,
+  .sidebar:not(.collapsed) .nav-label,
+  .sidebar:not(.collapsed) .nav-meta,
+  .sidebar:not(.collapsed) .nav-badge,
+  .sidebar:not(.collapsed) .section-chevron,
+  .sidebar:not(.collapsed) .sidebar-inline-btn,
+  .sidebar:not(.collapsed) .sidebar-overflow-btn {
+    display: none;
+  }
+
+  .sidebar:not(.collapsed) .sidebar-nav button,
+  .sidebar:not(.collapsed) .btn-block,
+  .sidebar:not(.collapsed) .sidebar-settings-btn {
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 0.55rem;
+  }
+
+  .sidebar:not(.collapsed) .btn-block {
+    padding-inline: 0;
   }
 }
 
