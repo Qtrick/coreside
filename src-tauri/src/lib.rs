@@ -26,6 +26,7 @@ mod search;
 mod security;
 mod settings;
 mod state;
+mod theme_presets;
 mod wallpapers;
 mod windows;
 
@@ -184,6 +185,14 @@ pub fn run() {
             commands::get_settings,
             commands::set_setting,
             commands::set_workspace_appearance,
+            commands::list_theme_presets,
+            commands::get_theme_preset_capabilities,
+            commands::save_current_theme_preset,
+            commands::rename_theme_preset,
+            commands::update_theme_preset_from_current,
+            commands::delete_theme_preset,
+            commands::apply_theme_preset,
+            commands::apply_appearance_bundle,
             commands::list_added_settings,
             commands::upsert_added_setting,
             commands::delete_added_setting,

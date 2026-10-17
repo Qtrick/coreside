@@ -63,6 +63,7 @@ import type {
 } from "@/types/project";
 import type { SurfaceDraftConflict } from "@/types/runtime-v2";
 import { parseWallpaperJson } from "@/types/wallpaper";
+import { AppearanceSnapshotSchema } from "@/types/theme-preset";
 import { surfaceIdForTool } from "@/lib/surface-ops";
 import {
   applyTextDelta,
@@ -301,6 +302,13 @@ type AppStore = {
   discardPendingToolChange: () => Promise<void>;
   applyPendingSettingsChange: () => Promise<void>;
   discardPendingSettingsChange: () => Promise<void>;
+  /** Reconcile Zustand committed appearance from canonical AppSettings (no IPC). */
+  reconcileCommittedAppearance: (settings: import("@/types/agent").AppSettings) => void;
+  /** Apply a saved theme preset after user confirmation (atomic Rust transaction). */
+  applyThemePreset: (
+    id: string,
+    expectedRevision: number,
+  ) => Promise<import("@/types/agent").AppSettings>;
   applyPendingKernelProposal: () => Promise<void>;
   discardPendingKernelProposal: () => Promise<void>;
   clearAppConflict: () => void;
@@ -2745,12 +2753,44 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
   },
 
+  reconcileCommittedAppearance: (settings) => {
+    const theme = settings.theme ?? get().theme;
+    const wallpaper = wallpaperFromSettings(settings);
+    const globalWallpaperJson = settings.wallpaperJson ?? null;
+    const interfaceTransparency =
+      typeof settings.interfaceTransparency === "number"
+        ? Math.min(100, Math.max(0, Math.round(settings.interfaceTransparency)))
+        : get().interfaceTransparency;
+    committedInterfaceTransparency = interfaceTransparency;
+    interfaceTransparencyCommittedGen = interfaceTransparencyCommitGen;
+    syncCommittedWallpaperFromSettings({ wallpaper, globalWallpaperJson });
+    set({
+      theme,
+      resolvedTheme: resolveTheme(theme),
+      appearance: appearanceFromSettings(settings),
+      wallpaper,
+      globalWallpaperJson,
+      interfaceTransparency,
+    });
+  },
+
+  applyThemePreset: async (id, expectedRevision) => {
+    const settings = await api.applyThemePreset({
+      id,
+      expectedRevision,
+    });
+    get().reconcileCommittedAppearance(settings);
+    return settings;
+  },
+
   applyPendingSettingsChange: async () => {
     const pending = get().pendingSettingsChange;
     if (!pending) return;
     const sc = pending.settingsChange;
     try {
-      // Expand pair roots → allowlisted *Light/*Dark hex keys (Rust rejects pair roots).
+      // Build one validated snapshot, then apply atomically (no partial KV writes).
+      const current = get();
+      const appearance = { ...current.appearance };
       const colorPairFields = [
         "accentPrimary",
         "accentSecondary",
@@ -2771,30 +2811,36 @@ export const useAppStore = create<AppStore>((set, get) => ({
           if (!hex) {
             throw new Error(`Invalid ${field}.${mode} color`);
           }
-          const key = `${field}${mode === "light" ? "Light" : "Dark"}`;
-          await api.setSetting(key, hex);
+          const key =
+            `${field}${mode === "light" ? "Light" : "Dark"}` as keyof AppearancePalette;
+          appearance[key] = hex;
         }
       }
-      if (sc.wallpaper) {
-        const wallpaperJson = JSON.stringify(sc.wallpaper);
-        await get().applyWorkspaceWallpaper(wallpaperJson);
+      const theme = sc.theme ?? current.theme;
+      const wallpaper = sc.wallpaper
+        ? wallpaperFromSettings({ wallpaper: sc.wallpaper })
+        : current.wallpaper;
+      // Agent proposals use legacy wallpaper kinds; clear schema JSON when replacing.
+      const wallpaperJson = sc.wallpaper
+        ? ""
+        : (current.globalWallpaperJson ?? "");
+      const parsed = AppearanceSnapshotSchema.safeParse({
+        schemaVersion: 1,
+        themePreference: theme,
+        ...appearance,
+        wallpaper,
+        wallpaperJson,
+        interfaceTransparency: current.interfaceTransparency,
+      });
+      if (!parsed.success) {
+        set({ sendError: "Invalid appearance change" });
+        return;
       }
-      if (sc.theme) {
-        await get().setTheme(sc.theme);
-      }
-      const settings = await api.getSettings();
-      const theme = settings.theme ?? get().theme;
-      const wallpaper = wallpaperFromSettings(settings);
-      const globalWallpaperJson = settings.wallpaperJson ?? null;
-      syncCommittedWallpaperFromSettings({ wallpaper, globalWallpaperJson });
+      const settings = await api.applyAppearanceBundle(parsed.data);
+      get().reconcileCommittedAppearance(settings);
       set({
         pendingSettingsChange: null,
         sendError: null,
-        theme,
-        resolvedTheme: resolveTheme(theme),
-        appearance: appearanceFromSettings(settings),
-        wallpaper,
-        globalWallpaperJson,
         messages: get().messages.map((m) =>
           m.id === pending.messageId
             ? {

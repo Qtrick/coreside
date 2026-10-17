@@ -160,6 +160,12 @@ const JOURNEYS = [
     coverage: "full",
   },
   {
+    id: 33,
+    name: "theme-preset-apply",
+    suite: "theme-preset-apply",
+    coverage: "full",
+  },
+  {
     id: 15,
     name: "first-run-welcome",
     suite: "first-run-welcome",
@@ -396,6 +402,8 @@ runSuite("multi-turn-undo");
 runSuite("multi-surface-progressive-evolution");
 // Progressive repair: validate fail → repair keyword → durable Apply.
 runSuite("progressive-repair-recovery");
+// Saved-theme confirmation and committed appearance fidelity on a clean profile.
+runSuite("theme-preset-apply");
 
 // Seeded local AI privacy disclosure profile.
 runSuite("local-ai-privacy", { seed: "local" });

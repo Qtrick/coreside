@@ -47,6 +47,11 @@ import type {
   MediaAssetUsage,
 } from "@/types/media";
 import type {
+  AppearanceSnapshot,
+  ThemePresetCapabilities,
+  ThemePresetRecord,
+} from "@/types/theme-preset";
+import type {
   ActionOutcome,
   ApprovalDecisionResult,
   ApprovalRequest,
@@ -387,6 +392,27 @@ export const api = {
     }
     return invoke<AppSettings>("set_workspace_appearance", { input: payload });
   },
+  listThemePresets: () =>
+    invoke<ThemePresetRecord[]>("list_theme_presets"),
+  getThemePresetCapabilities: () =>
+    invoke<ThemePresetCapabilities>("get_theme_preset_capabilities"),
+  saveCurrentThemePreset: (input: { name: string; description?: string }) =>
+    invoke<ThemePresetRecord>("save_current_theme_preset", { input }),
+  renameThemePreset: (input: {
+    id: string;
+    name: string;
+    expectedRevision: number;
+  }) => invoke<ThemePresetRecord>("rename_theme_preset", { input }),
+  updateThemePresetFromCurrent: (input: {
+    id: string;
+    expectedRevision: number;
+  }) => invoke<ThemePresetRecord>("update_theme_preset_from_current", { input }),
+  deleteThemePreset: (input: { id: string; expectedRevision: number }) =>
+    invoke<void>("delete_theme_preset", { input }),
+  applyThemePreset: (input: { id: string; expectedRevision: number }) =>
+    invoke<AppSettings>("apply_theme_preset", { input }),
+  applyAppearanceBundle: (snapshot: AppearanceSnapshot) =>
+    invoke<AppSettings>("apply_appearance_bundle", { input: { snapshot } }),
   listAddedSettings: (ownerToolId?: string | null) =>
     invoke<AddedSetting[]>("list_added_settings", {
       ownerToolId: ownerToolId ?? null,

@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 38 forward migrations (001–038; includes `038_appearance_baseline_reset.sql`)
+**Count:** 39 forward migrations (001–039; includes `039_theme_presets.sql`)
 
 ## Inventory
 
@@ -46,6 +46,7 @@
 | 036 | `036_approval_call_context.sql` | Approval call context binding (conversation/venue/presence/project/surface/component) |
 | 037 | `037_proposal_project_isolation.sql` | Proposal project scope binding and cross-project mutation guards |
 | 038 | `038_appearance_baseline_reset.sql` | One-time workspace appearance baseline: system theme, no wallpaper, solid chrome |
+| 039 | `039_theme_presets.sql` | User-saved theme presets table (name, snapshot JSON, revision, quota-backed CRUD) |
 
 ## What is verified
 

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rename-theme-preset"
+description = "Enables the rename_theme_preset command without any pre-configured scope."
+commands.allow = ["rename_theme_preset"]
+
+[[permission]]
+identifier = "deny-rename-theme-preset"
+description = "Denies the rename_theme_preset command without any pre-configured scope."
+commands.deny = ["rename_theme_preset"]

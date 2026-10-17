@@ -90,10 +90,15 @@ pub fn media_readable_in_scope(asset: &MediaAsset, project_id: Option<&str>) -> 
 
 pub fn delete_media_asset(db: &mut Database, id: &str) -> DbResult<()> {
     let asset = get_media_asset(db, id)?;
-    crate::media::thumbnails::delete_thumbnail(asset.thumbnail_filename.as_deref());
-    delete_asset_file(&asset.local_filename).map_err(|e| DbError::Invalid(e.to_string()))?;
+    // Remove authority first. A filesystem failure may leave an inert orphan
+    // for maintenance cleanup, but must never leave a trusted DB row pointing
+    // at a file that was already deleted.
     db.conn()
         .execute("DELETE FROM media_assets WHERE id = ?1", params![id])?;
+    if let Err(error) = delete_asset_file(&asset.local_filename) {
+        tracing::warn!(asset_id = %id, error = %error, "deleted media row but file cleanup failed");
+    }
+    crate::media::thumbnails::delete_thumbnail(asset.thumbnail_filename.as_deref());
     Ok(())
 }
 
@@ -207,8 +212,10 @@ pub struct MediaAssetUsage {
     pub project_name: String,
 }
 
-/// Projects whose validated wallpaper JSON references a media asset id.
+/// Projects, workspace wallpaper, and theme presets that reference a media asset.
 pub fn find_media_asset_usages(db: &Database, asset_id: &str) -> DbResult<Vec<MediaAssetUsage>> {
+    let mut usages = Vec::new();
+
     let mut stmt = db.conn().prepare(
         "SELECT id, name, wallpaper_json FROM projects
          WHERE wallpaper_json IS NOT NULL AND wallpaper_json != ''",
@@ -220,7 +227,6 @@ pub fn find_media_asset_usages(db: &Database, asset_id: &str) -> DbResult<Vec<Me
             row.get::<_, String>(2)?,
         ))
     })?;
-    let mut usages = Vec::new();
     for row in rows {
         let (project_id, project_name, wallpaper_json) = row?;
         if wallpaper_references_asset(&wallpaper_json, asset_id) {
@@ -230,6 +236,27 @@ pub fn find_media_asset_usages(db: &Database, asset_id: &str) -> DbResult<Vec<Me
             });
         }
     }
+
+    // Global workspace wallpaper (settings.wallpaperJson).
+    if let Some(wallpaper_json) = crate::db::get_setting(db, "wallpaperJson")? {
+        if wallpaper_references_asset(&wallpaper_json, asset_id) {
+            usages.push(MediaAssetUsage {
+                project_id: "workspace".into(),
+                project_name: "Workspace wallpaper".into(),
+            });
+        }
+    }
+
+    // Saved theme presets that embed the asset reference.
+    for (preset_id, preset_name) in
+        crate::theme_presets::find_theme_presets_referencing_asset(db, asset_id)?
+    {
+        usages.push(MediaAssetUsage {
+            project_id: format!("theme:{preset_id}"),
+            project_name: format!("Saved theme: {preset_name}"),
+        });
+    }
+
     Ok(usages)
 }
 

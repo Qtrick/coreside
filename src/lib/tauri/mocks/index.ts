@@ -43,6 +43,14 @@ import type {
   MediaAssetUsage,
 } from "@/types/media";
 import type {
+  AppearanceSnapshot,
+  ThemePresetCapabilities,
+  ThemePresetRecord,
+} from "@/types/theme-preset";
+
+/** Mock Free quota — must match Rust FREE_THEME_PRESET_LIMIT. */
+const MOCK_FREE_THEME_PRESET_LIMIT = 10;
+import type {
   ActionOutcome,
   ApprovalDecisionResult,
   ApprovalRequest,
@@ -130,6 +138,9 @@ const mockDb = {
   toolState: new Map<string, ToolState>(),
   toolVersions: new Map<string, ToolVersion[]>(),
   addedSettings: [] as AddedSetting[],
+  themePresets: [] as ThemePresetRecord[],
+  /** Test-only: raise mock quota (simulates server Pro). Default Free. */
+  themePresetLimit: MOCK_FREE_THEME_PRESET_LIMIT,
   settings: {
     theme: "system" as ThemePreference,
     sidebarCollapsed: false as boolean,
@@ -201,6 +212,65 @@ function titleFromContent(content: string): string {
   const trimmed = content.trim().replace(/\s+/g, " ");
   if (!trimmed) return "New chat";
   return trimmed.length > 48 ? `${trimmed.slice(0, 45)}…` : trimmed;
+}
+
+function snapshotFromMockSettings(): AppearanceSnapshot {
+  const s = mockDb.settings;
+  return {
+    schemaVersion: 1,
+    themePreference: s.theme,
+    accentPrimaryLight: s.accentPrimaryLight,
+    accentPrimaryDark: s.accentPrimaryDark,
+    accentSecondaryLight: s.accentSecondaryLight,
+    accentSecondaryDark: s.accentSecondaryDark,
+    backgroundLight: s.backgroundLight,
+    backgroundDark: s.backgroundDark,
+    surfaceLight: s.surfaceLight,
+    surfaceDark: s.surfaceDark,
+    surfaceMutedLight: s.surfaceMutedLight,
+    surfaceMutedDark: s.surfaceMutedDark,
+    borderLight: s.borderLight,
+    borderDark: s.borderDark,
+    textPrimaryLight: s.textPrimaryLight,
+    textPrimaryDark: s.textPrimaryDark,
+    textSecondaryLight: s.textSecondaryLight,
+    textSecondaryDark: s.textSecondaryDark,
+    wallpaper: { ...s.wallpaper },
+    wallpaperJson: s.wallpaperJson ?? "",
+    interfaceTransparency: s.interfaceTransparency,
+  };
+}
+
+function applySnapshotToMockSettings(snapshot: AppearanceSnapshot): void {
+  mockDb.settings.theme = snapshot.themePreference;
+  mockDb.settings.accentPrimaryLight = snapshot.accentPrimaryLight;
+  mockDb.settings.accentPrimaryDark = snapshot.accentPrimaryDark;
+  mockDb.settings.accentSecondaryLight = snapshot.accentSecondaryLight;
+  mockDb.settings.accentSecondaryDark = snapshot.accentSecondaryDark;
+  mockDb.settings.backgroundLight = snapshot.backgroundLight;
+  mockDb.settings.backgroundDark = snapshot.backgroundDark;
+  mockDb.settings.surfaceLight = snapshot.surfaceLight;
+  mockDb.settings.surfaceDark = snapshot.surfaceDark;
+  mockDb.settings.surfaceMutedLight = snapshot.surfaceMutedLight;
+  mockDb.settings.surfaceMutedDark = snapshot.surfaceMutedDark;
+  mockDb.settings.borderLight = snapshot.borderLight;
+  mockDb.settings.borderDark = snapshot.borderDark;
+  mockDb.settings.textPrimaryLight = snapshot.textPrimaryLight;
+  mockDb.settings.textPrimaryDark = snapshot.textPrimaryDark;
+  mockDb.settings.textSecondaryLight = snapshot.textSecondaryLight;
+  mockDb.settings.textSecondaryDark = snapshot.textSecondaryDark;
+  const wallpaperJson = (snapshot.wallpaperJson ?? "").trim();
+  if (wallpaperJson) {
+    mockDb.settings.wallpaperJson = wallpaperJson;
+    mockDb.settings.wallpaper = { ...DEFAULT_WALLPAPER };
+  } else {
+    mockDb.settings.wallpaperJson = null;
+    mockDb.settings.wallpaper = sanitizeMockWallpaper(snapshot.wallpaper);
+  }
+  mockDb.settings.interfaceTransparency = Math.min(
+    100,
+    Math.max(0, Math.round(snapshot.interfaceTransparency)),
+  );
 }
 
 export async function mockInvoke<T>(
@@ -1658,6 +1728,190 @@ export async function mockInvoke<T>(
       return { ...mockDb.settings } as T;
     }
 
+    case "list_theme_presets":
+      return [...mockDb.themePresets].sort((a, b) =>
+        b.updatedAt.localeCompare(a.updatedAt),
+      ) as T;
+
+    case "get_theme_preset_capabilities": {
+      const used = mockDb.themePresets.length;
+      const limit = mockDb.themePresetLimit;
+      return {
+        used,
+        limit,
+        canCreate: used < limit,
+        planId: limit > MOCK_FREE_THEME_PRESET_LIMIT ? "pro" : "free",
+        planSource:
+          limit > MOCK_FREE_THEME_PRESET_LIMIT ? "server" : "contract_default",
+        freeLimit: MOCK_FREE_THEME_PRESET_LIMIT,
+      } satisfies ThemePresetCapabilities as T;
+    }
+
+    case "save_current_theme_preset": {
+      const input = (args?.input ?? args) as {
+        name?: string;
+        description?: string;
+      };
+      const name = String(input?.name ?? "").trim();
+      if (!name) {
+        throw new TauriCommandError("Theme name is required", "invalid");
+      }
+      const nameNorm = name.toLowerCase();
+      if (
+        mockDb.themePresets.some((p) => p.name.trim().toLowerCase() === nameNorm)
+      ) {
+        throw new TauriCommandError(
+          "A theme with this name already exists",
+          "conflict",
+        );
+      }
+      const used = mockDb.themePresets.length;
+      if (used >= mockDb.themePresetLimit) {
+        throw new TauriCommandError(
+          `Theme preset limit reached (${mockDb.themePresetLimit}). Delete or update an existing theme.`,
+          "invalid",
+        );
+      }
+      const snapshot = snapshotFromMockSettings();
+      const stamp = now();
+      const record: ThemePresetRecord = {
+        id: `theme-mock-${used + 1}-${Date.now()}`,
+        name,
+        description: String(input?.description ?? "").trim(),
+        schemaVersion: 1,
+        snapshot,
+        revision: 1,
+        createdAt: stamp,
+        updatedAt: stamp,
+      };
+      // Re-check quota immediately before commit (mirrors Rust insert transaction).
+      if (mockDb.themePresets.length >= mockDb.themePresetLimit) {
+        throw new TauriCommandError(
+          `Theme preset limit reached (${mockDb.themePresetLimit}). Delete or update an existing theme.`,
+          "invalid",
+        );
+      }
+      mockDb.themePresets = [record, ...mockDb.themePresets];
+      return record as T;
+    }
+
+    case "rename_theme_preset": {
+      const input = (args?.input ?? args) as {
+        id?: string;
+        name?: string;
+        expectedRevision?: number;
+      };
+      const preset = mockDb.themePresets.find((p) => p.id === input?.id);
+      if (!preset) {
+        throw new TauriCommandError("theme preset not found", "not_found");
+      }
+      if (preset.revision !== input?.expectedRevision) {
+        throw new TauriCommandError(
+          "Theme preset was updated elsewhere. Refresh and try again.",
+          "conflict",
+        );
+      }
+      const name = String(input?.name ?? "").trim();
+      if (!name) {
+        throw new TauriCommandError("Theme name is required", "invalid");
+      }
+      const nameNorm = name.toLowerCase();
+      if (
+        mockDb.themePresets.some(
+          (p) => p.id !== preset.id && p.name.trim().toLowerCase() === nameNorm,
+        )
+      ) {
+        throw new TauriCommandError(
+          "A theme with this name already exists",
+          "conflict",
+        );
+      }
+      const updated: ThemePresetRecord = {
+        ...preset,
+        name,
+        revision: preset.revision + 1,
+        updatedAt: now(),
+      };
+      mockDb.themePresets = mockDb.themePresets.map((p) =>
+        p.id === preset.id ? updated : p,
+      );
+      return updated as T;
+    }
+
+    case "update_theme_preset_from_current": {
+      const input = (args?.input ?? args) as {
+        id?: string;
+        expectedRevision?: number;
+      };
+      const preset = mockDb.themePresets.find((p) => p.id === input?.id);
+      if (!preset) {
+        throw new TauriCommandError("theme preset not found", "not_found");
+      }
+      if (preset.revision !== input?.expectedRevision) {
+        throw new TauriCommandError(
+          "Theme preset was updated elsewhere. Refresh and try again.",
+          "conflict",
+        );
+      }
+      const updated: ThemePresetRecord = {
+        ...preset,
+        snapshot: snapshotFromMockSettings(),
+        revision: preset.revision + 1,
+        updatedAt: now(),
+      };
+      mockDb.themePresets = mockDb.themePresets.map((p) =>
+        p.id === preset.id ? updated : p,
+      );
+      return updated as T;
+    }
+
+    case "delete_theme_preset": {
+      const input = (args?.input ?? args) as {
+        id?: string;
+        expectedRevision: number;
+      };
+      const preset = mockDb.themePresets.find((p) => p.id === input?.id);
+      if (!preset) {
+        throw new TauriCommandError("theme preset not found", "not_found");
+      }
+      if (preset.revision !== input.expectedRevision) {
+        throw new TauriCommandError(
+          "Theme preset was updated elsewhere. Refresh and try again.",
+          "conflict",
+        );
+      }
+      mockDb.themePresets = mockDb.themePresets.filter((p) => p.id !== preset.id);
+      return undefined as T;
+    }
+
+    case "apply_theme_preset": {
+      const input = (args?.input ?? args) as {
+        id?: string;
+        expectedRevision: number;
+      };
+      const preset = mockDb.themePresets.find((p) => p.id === input?.id);
+      if (!preset) {
+        throw new TauriCommandError("theme preset not found", "not_found");
+      }
+      if (preset.revision !== input.expectedRevision) {
+        throw new TauriCommandError(
+          "Theme preset was updated elsewhere. Refresh and try again.",
+          "conflict",
+        );
+      }
+      applySnapshotToMockSettings(preset.snapshot);
+      return { ...mockDb.settings } as T;
+    }
+
+    case "apply_appearance_bundle": {
+      const input = (args?.input ?? args) as { snapshot?: AppearanceSnapshot };
+      if (!input?.snapshot || input.snapshot.schemaVersion !== 1) {
+        throw new TauriCommandError("invalid theme snapshot", "invalid");
+      }
+      applySnapshotToMockSettings(input.snapshot);
+      return { ...mockDb.settings } as T;
+    }
+
     case "list_added_settings": {
       const owner = args?.ownerToolId;
       const all = mockDb.addedSettings;
@@ -2833,6 +3087,11 @@ export function __setMockAiConfigured(configured: boolean): void {
 }
 
 /** Test helper to reset mock database. */
+/** Test helper: simulate a trusted Pro entitlement for mock quota. */
+export function __setMockThemePresetLimit(limit: number): void {
+  mockDb.themePresetLimit = Math.max(1, Math.floor(limit));
+}
+
 export function __resetMockDb(): void {
   mockTutorialProgress = [];
   mockDb.conversations = [];
@@ -2842,6 +3101,8 @@ export function __resetMockDb(): void {
   mockDb.toolState.clear();
   mockDb.toolVersions.clear();
   mockDb.addedSettings = [];
+  mockDb.themePresets = [];
+  mockDb.themePresetLimit = MOCK_FREE_THEME_PRESET_LIMIT;
   mockDb.settings = {
     theme: "system",
     sidebarCollapsed: false,

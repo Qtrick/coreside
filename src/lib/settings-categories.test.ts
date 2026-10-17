@@ -29,6 +29,10 @@ describe("settings categories", () => {
     expect(SETTINGS_CATEGORIES.find((c) => c.id === "added")?.label).toBe(
       "App settings",
     );
+    // User-facing Customization; keep internal id "appearance" for stored nav.
+    expect(SETTINGS_CATEGORIES.find((c) => c.id === "appearance")?.label).toBe(
+      "Customization",
+    );
   });
 
   it("normalizes invalid persisted category ids", () => {

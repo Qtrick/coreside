@@ -178,10 +178,14 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         "038_appearance_baseline_reset",
         include_str!("../../migrations/038_appearance_baseline_reset.sql"),
     ),
+    (
+        "039_theme_presets",
+        include_str!("../../migrations/039_theme_presets.sql"),
+    ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "038_appearance_baseline_reset";
+pub const LATEST_MIGRATION: &str = "039_theme_presets";
 
 #[derive(Debug, Error)]
 pub enum DbError {

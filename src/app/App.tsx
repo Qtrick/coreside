@@ -3,7 +3,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { ConflictBanner } from "@/components/chat/ConflictBanner";
 import { ToolRenderer } from "@/components/tool-renderer/ToolRenderer";
 import { BootstrapRecoveryScreen } from "@/components/recovery/BootstrapRecoveryScreen";
-import { api, isWebPreview } from "@/lib/tauri";
+import { api, isWebPreview, listenAppearanceChanged } from "@/lib/tauri";
 import { applyAppearanceCssVars, useAppStore } from "@/stores/app-store";
 
 function WebPreviewBanner() {
@@ -133,6 +133,9 @@ export function App() {
   const appearance = useAppStore((s) => s.appearance);
   const applyResolvedTheme = useAppStore((s) => s.applyResolvedTheme);
   const applyPersistedDockIcon = useAppStore((s) => s.applyPersistedDockIcon);
+  const reconcileCommittedAppearance = useAppStore(
+    (s) => s.reconcileCommittedAppearance,
+  );
   const toolRoute =
     typeof window !== "undefined" ? parseToolRoute(window.location.hash) : null;
 
@@ -141,6 +144,24 @@ export function App() {
       void bootstrap();
     }
   }, [bootstrap, toolRoute]);
+
+  // Cross-window appearance apply: refetch settings and reconcile store.
+  useEffect(() => {
+    if (!bootstrapped) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void listenAppearanceChanged(() => {
+      void api.getSettings().then((settings) => {
+        if (!cancelled) reconcileCommittedAppearance(settings);
+      });
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [bootstrapped, reconcileCommittedAppearance]);
 
   useEffect(() => {
     applyThemeToDocument(resolvedTheme);

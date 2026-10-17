@@ -6,6 +6,7 @@ import { AiProviderSettings } from "@/components/settings/AiProviderSettings";
 import { ManualDockIconSelector } from "@/components/settings/ManualDockIconSelector";
 import { RecoverySettings } from "@/components/settings/RecoverySettings";
 import { RuntimePermissionsSettings } from "@/components/applications/RuntimePermissionsSettings";
+import { ThemePresetsSettings } from "@/components/settings/ThemePresetsSettings";
 import { WallpaperSettings } from "@/components/settings/WallpaperSettings";
 import { SearchSettingsSection } from "@/components/search/SearchProviderSetup";
 import { MANUAL_DOCK_ICON_SELECTION_ENABLED } from "@/lib/branding/manual-dock-icon-capability";
@@ -581,10 +582,10 @@ export function SettingsPanel() {
               className="settings-section"
               aria-labelledby={settingsTargetDomId("theme")}
             >
-              <h3 id={settingsTargetDomId("theme")}>Theme</h3>
+              <h3 id={settingsTargetDomId("theme")}>Appearance</h3>
               <p>
-                Choose how Coreside looks. Wallpapers and panel transparency are
-                below.
+                Choose light, dark, or system. Wallpapers, transparency, and
+                saved themes are below.
               </p>
               <div className="theme-options" role="group" aria-label="Theme">
                 {themes.map((option) => (
@@ -616,6 +617,7 @@ export function SettingsPanel() {
               </p>
               <WallpaperSettings />
             </section>
+            <ThemePresetsSettings />
             </div>
           ) : null}
 

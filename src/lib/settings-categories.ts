@@ -35,9 +35,9 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
   },
   {
     id: "appearance",
-    label: "Appearance",
+    label: "Customization",
     group: "coreside",
-    description: "Theme and wallpapers.",
+    description: "Theme, colors, wallpapers, and saved themes.",
   },
   {
     id: "ai-access",
@@ -139,7 +139,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchEntry[] = [
     id: "theme",
     categoryId: "appearance",
     label: "Theme",
-    keywords: ["light", "dark", "system", "appearance"],
+    keywords: ["light", "dark", "system", "appearance", "customization"],
   },
   {
     id: "dock-icon",
@@ -152,6 +152,18 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchEntry[] = [
     categoryId: "appearance",
     label: "Wallpapers",
     keywords: ["wallpaper", "templates", "transparency", "live"],
+  },
+  {
+    id: "saved-themes",
+    categoryId: "appearance",
+    label: "Saved Themes",
+    keywords: [
+      "theme preset",
+      "saved theme",
+      "customization",
+      "appearance",
+      "preset",
+    ],
   },
   {
     id: "api-key",

@@ -19,6 +19,7 @@ mod project_cmds;
 mod runtime_v2_cmds;
 mod search_cmds;
 mod settings_cmds;
+mod theme_preset_cmds;
 mod tool_cmds;
 mod window_cmds;
 
@@ -41,6 +42,7 @@ pub use project_cmds::*;
 pub use runtime_v2_cmds::*;
 pub use search_cmds::*;
 pub use settings_cmds::*;
+pub use theme_preset_cmds::*;
 pub use tool_cmds::*;
 pub use window_cmds::*;
 

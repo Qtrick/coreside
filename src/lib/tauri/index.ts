@@ -9,6 +9,8 @@ export {
   isSyncEventForConversation,
   listenAgentTurn,
   listenApprovalsChanged,
+  listenAppearanceChanged,
+  listenThemePresetsChanged,
   subscribeConversationQueue,
   subscribeConversationSync,
   shouldApplyAgentTurnSync,

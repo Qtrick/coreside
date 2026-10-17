@@ -139,7 +139,8 @@ pub struct ValidateChangeTargetsResult {
     pub rejected: Vec<String>,
 }
 
-fn settings_from_map(map: &std::collections::HashMap<String, String>) -> AppSettings {
+/// Build typed settings from the KV map (shared by get_settings and theme apply).
+pub fn settings_from_map(map: &std::collections::HashMap<String, String>) -> AppSettings {
     let theme = map
         .get("theme")
         .cloned()

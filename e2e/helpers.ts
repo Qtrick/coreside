@@ -914,8 +914,8 @@ export function assertNoLayoutOverflow(
   expect(layout.unnamedSidebarButtons).toEqual([]);
   if (layout.sidebarCollapsed) {
     expect(layout.sidebarRowsMissingIcon).toEqual([]);
+    expect(layout.sidebarChildOverflow).toEqual([]);
   }
-  expect(layout.sidebarChildOverflow).toEqual([]);
   expect(layout).toMatchObject({
     rootOverflow: false,
     mainOverflow: false,

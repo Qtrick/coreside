@@ -191,6 +191,22 @@ export async function listenApprovalsChanged(
   return listen("runtime-approvals-changed", () => handler());
 }
 
+/** Theme preset list mutated in another window (save/rename/delete/update). */
+export async function listenThemePresetsChanged(
+  handler: () => void,
+): Promise<() => void> {
+  if (!isTauriRuntime()) return () => undefined;
+  return listen("theme-presets-changed", () => handler());
+}
+
+/** Committed appearance changed (theme preset apply or appearance bundle). */
+export async function listenAppearanceChanged(
+  handler: () => void,
+): Promise<() => void> {
+  if (!isTauriRuntime()) return () => undefined;
+  return listen("appearance-changed", () => handler());
+}
+
 /** Queue mutation kinds emitted by Rust after SQLite authoritative writes. */
 export type QueueChangeKind =
   | "itemAdded"
