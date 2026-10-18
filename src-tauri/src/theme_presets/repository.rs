@@ -136,7 +136,7 @@ pub fn list_theme_presets(db: &Database) -> DbResult<Vec<ThemePresetRecord>> {
             created_at,
             updated_at,
         ) = row?;
-        out.push(row_to_record(
+        match row_to_record(
             id,
             name,
             description,
@@ -145,7 +145,12 @@ pub fn list_theme_presets(db: &Database) -> DbResult<Vec<ThemePresetRecord>> {
             revision,
             created_at,
             updated_at,
-        )?);
+        ) {
+            Ok(record) => out.push(record),
+            Err(error) => {
+                tracing::warn!(error = %error, "skipping invalid theme preset row");
+            }
+        }
     }
     Ok(out)
 }
@@ -192,6 +197,7 @@ pub fn insert_theme_preset(
     let name_norm = name_normalized(&name);
 
     db.with_transaction(|conn| {
+        snapshot.assert_media_assets_exist_on_conn(conn)?;
         let count: i64 =
             conn.query_row("SELECT COUNT(*) FROM theme_presets", [], |r| r.get(0))?;
         if (count as u32) >= max_allowed {
@@ -291,6 +297,7 @@ pub fn update_theme_preset_snapshot(
     let now = now_rfc3339();
 
     db.with_transaction(|conn| {
+        snapshot.assert_media_assets_exist_on_conn(conn)?;
         let current: Option<i64> = conn
             .query_row(
                 "SELECT revision FROM theme_presets WHERE id = ?1",

@@ -138,7 +138,7 @@ fn compact_data_models_for_prompt(
                 "fields": m.fields.iter().map(|f| {
                     let mut field = json!({
                         "fieldId": f.field_id,
-                        "type": f.field_type,
+                        "fieldType": f.field_type,
                         "required": f.required,
                     });
                     if let Some(obj) = field.as_object_mut() {

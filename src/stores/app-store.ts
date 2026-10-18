@@ -38,7 +38,6 @@ import { ensureReadableForeground } from "@/lib/readability/contrast";
 import type { ActionLogMode } from "@/lib/action-log";
 import { validateToolDefinition } from "@/lib/tool-schema";
 import { INTERFACE_TRANSPARENCY_DEFAULT } from "@/lib/interface-transparency";
-import { normalizeCanonicalHex } from "@/lib/wallpaper-hex";
 import {
   catchUpConversationEvents as runConversationCatchUp,
 } from "@/lib/sync/conversation-catch-up";
@@ -63,7 +62,6 @@ import type {
 } from "@/types/project";
 import type { SurfaceDraftConflict } from "@/types/runtime-v2";
 import { parseWallpaperJson } from "@/types/wallpaper";
-import { AppearanceSnapshotSchema } from "@/types/theme-preset";
 import { surfaceIdForTool } from "@/lib/surface-ops";
 import {
   applyTextDelta,
@@ -179,6 +177,10 @@ type AppStore = {
   toolVersionsLoading: boolean;
   /** Speculative Channel preview paint — cleared on Sync / interrupt / error. */
   previewSurfacesByKey: Record<string, PreviewSurfaceOverlay>;
+  /** Per-surface durable Sync epoch used by mounted inline surface cards. */
+  surfaceSyncEpochs: Record<string, number>;
+  /** Bumped after kernel proposal Apply so message-scoped inline lists re-fetch. */
+  conversationInlineSurfaceEpochs: Record<string, number>;
 
   pendingToolChange: PendingToolChange | null;
   pendingSettingsChange: PendingSettingsChange | null;
@@ -308,6 +310,7 @@ type AppStore = {
   applyThemePreset: (
     id: string,
     expectedRevision: number,
+    expectedAppearanceFingerprint: string,
   ) => Promise<import("@/types/agent").AppSettings>;
   applyPendingKernelProposal: () => Promise<void>;
   discardPendingKernelProposal: () => Promise<void>;
@@ -345,11 +348,13 @@ type SyncListenerGet = () => {
   activeConversationId: string | null;
   activeToolId: string | null;
   previewSurfacesByKey: Record<string, PreviewSurfaceOverlay>;
+  surfaceSyncEpochs: Record<string, number>;
 };
 
 type SyncListenerSet = (partial: {
   appConflict?: AppConflict | null;
   previewSurfacesByKey?: Record<string, PreviewSurfaceOverlay>;
+  surfaceSyncEpochs?: Record<string, number>;
 }) => void;
 
 /**
@@ -421,6 +426,15 @@ function applySyncOrConflictEvent(
     return;
   }
   if (event.kind === "sync") {
+    const appliesToActiveScope = shouldApplyAgentTurnSync(event, scope);
+    const surfaceSyncEpochs = appliesToActiveScope
+      ? { ...get().surfaceSyncEpochs }
+      : get().surfaceSyncEpochs;
+    if (appliesToActiveScope) {
+      for (const surfaceId of event.surfaceIds ?? []) {
+        surfaceSyncEpochs[surfaceId] = (surfaceSyncEpochs[surfaceId] ?? 0) + 1;
+      }
+    }
     set({
       previewSurfacesByKey: clearPreviewOverlaysMatching(
         get().previewSurfacesByKey,
@@ -430,8 +444,9 @@ function applySyncOrConflictEvent(
           surfaceIds: event.surfaceIds ?? [],
         },
       ),
+      surfaceSyncEpochs,
     });
-    if (!shouldApplyAgentTurnSync(event, scope)) {
+    if (!appliesToActiveScope) {
       return;
     }
     void get().reloadActiveSurfaces(event.resetStateKeys ?? []);
@@ -958,6 +973,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toolState: {},
   toolVersionsLoading: false,
   previewSurfacesByKey: {},
+  surfaceSyncEpochs: {},
+  conversationInlineSurfaceEpochs: {},
 
   pendingToolChange: null,
   pendingSettingsChange: null,
@@ -2774,10 +2791,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
   },
 
-  applyThemePreset: async (id, expectedRevision) => {
+  applyThemePreset: async (id, expectedRevision, expectedAppearanceFingerprint) => {
     const settings = await api.applyThemePreset({
       id,
       expectedRevision,
+      expectedAppearanceFingerprint,
     });
     get().reconcileCommittedAppearance(settings);
     return settings;
@@ -2788,55 +2806,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (!pending) return;
     const sc = pending.settingsChange;
     try {
-      // Build one validated snapshot, then apply atomically (no partial KV writes).
-      const current = get();
-      const appearance = { ...current.appearance };
-      const colorPairFields = [
-        "accentPrimary",
-        "accentSecondary",
-        "background",
-        "surface",
-        "surfaceMuted",
-        "border",
-        "textPrimary",
-        "textSecondary",
-      ] as const;
-      for (const field of colorPairFields) {
-        const variants = sc[field];
-        if (!variants) continue;
-        for (const mode of ["light", "dark"] as const) {
-          const raw = variants[mode];
-          if (raw == null || raw === "") continue;
-          const hex = normalizeCanonicalHex(raw);
-          if (!hex) {
-            throw new Error(`Invalid ${field}.${mode} color`);
-          }
-          const key =
-            `${field}${mode === "light" ? "Light" : "Dark"}` as keyof AppearancePalette;
-          appearance[key] = hex;
-        }
-      }
-      const theme = sc.theme ?? current.theme;
-      const wallpaper = sc.wallpaper
-        ? wallpaperFromSettings({ wallpaper: sc.wallpaper })
-        : current.wallpaper;
-      // Agent proposals use legacy wallpaper kinds; clear schema JSON when replacing.
-      const wallpaperJson = sc.wallpaper
-        ? ""
-        : (current.globalWallpaperJson ?? "");
-      const parsed = AppearanceSnapshotSchema.safeParse({
-        schemaVersion: 1,
-        themePreference: theme,
-        ...appearance,
-        wallpaper,
-        wallpaperJson,
-        interfaceTransparency: current.interfaceTransparency,
-      });
-      if (!parsed.success) {
-        set({ sendError: "Invalid appearance change" });
-        return;
-      }
-      const settings = await api.applyAppearanceBundle(parsed.data);
+      // Rust merges only these approved deltas with committed SQLite state.
+      // Optimistic wallpaper/transparency/color previews are never serialized.
+      const settings = await api.applyAppearanceBundle(sc);
       get().reconcileCommittedAppearance(settings);
       set({
         pendingSettingsChange: null,
@@ -2917,8 +2889,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // user is not left with a second Apply after the proposal already committed.
       const clearToolPreview =
         get().pendingToolChange?.messageId === pending.messageId;
+      const inlineEpochs = { ...get().conversationInlineSurfaceEpochs };
+      inlineEpochs[pending.conversationId] =
+        (inlineEpochs[pending.conversationId] ?? 0) + 1;
       set({
         pendingKernelProposal: null,
+        conversationInlineSurfaceEpochs: inlineEpochs,
         ...(clearToolPreview ? { pendingToolChange: null } : {}),
         messages: get().messages.map((m) =>
           m.id === pending.messageId

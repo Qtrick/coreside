@@ -7,7 +7,7 @@ import { closeSettings, openSettings, openSettingsCategory, waitForAppReady } fr
  */
 const CATEGORY_LABELS = [
   "General",
-  "Appearance",
+  "Customization",
   "AI connections",
   "Assistant",
   "Web research",
@@ -95,9 +95,9 @@ describe("Journey 3 — Settings panel", () => {
     }
 
     await searchInput.click();
-    await searchInput.setValue("appear");
+    await searchInput.setValue("custom");
 
-    // At minimum one result containing "Appearance" should appear
+    // At minimum one result containing "Customization" should appear.
     await browser.waitUntil(
       async () => {
         const results = await browser.execute(() =>
@@ -109,7 +109,7 @@ describe("Journey 3 — Settings panel", () => {
     );
 
     const bodyText = await $("body").getText();
-    expect(bodyText).toMatch(/appear/i);
+    expect(bodyText).toMatch(/custom/i);
 
     // Clear the search and confirm nav is back to full list
     await searchInput.clearValue();

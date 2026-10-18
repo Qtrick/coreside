@@ -1,13 +1,9 @@
 /**
  * Journey 31 — Multi-surface progressive durable apply (Study Planner).
  *
- * Desktop Apply path: ApplicationPlan create with Dashboard + Tasks sections on
- * one authoritative tool surface → Apply → add a task → evolve with priority →
- * remount → dashboard section + priority column remain durable.
- *
- * Kernel true multi-surface atomicity (tool canvas + bound inline under one
- * applicationId, commit-or-neither) is covered by hostile_16 / hostile_16b in
- * transactions.rs — ApplicationPlan still binds one applicationId per Apply.
+ * Desktop Apply path: one ApplicationPlan creates a tool canvas plus a bound
+ * conversation summary surface → Apply → add a task → evolve both surfaces with
+ * priority → remount → dashboard, summary, and data remain durable.
  *
  * Run alone:
  *   CORESIDE_E2E=1 AI_PROVIDER=mock CORESIDE_E2E_SEED=empty \
@@ -17,10 +13,12 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   E2E_REPO_ROOT,
+  activeConversationIdFromStore,
   denyPendingApprovalIfPresent,
   evidenceBinaryHash,
   evidenceIdentity,
   clickKernelApplyButton,
+  invokeFromCurrentWindow,
   latestVisibleKernelApplyButton,
   waitForAppReady,
 } from "../helpers.js";
@@ -33,7 +31,7 @@ const evidencePath = path.resolve(
 const TASK_TITLE = "Preserve me across multi-surface evolve";
 
 describe("Journey 31 — multi-surface progressive evolution", () => {
-  it("creates Study Planner then evolves priority while preserving sections", async () => {
+  it("creates and evolves two related Study Planner surfaces atomically", async () => {
     const startedAt = new Date().toISOString();
     const t0 = Date.now();
     await waitForAppReady();
@@ -54,18 +52,50 @@ describe("Journey 31 — multi-surface progressive evolution", () => {
 
     await clickKernelApplyButton();
 
-    const appsSection = await $('section[aria-label="Personal apps"]');
-    await appsSection.waitForExist({ timeout: 20_000 });
+    // Wait for durable Apply before asserting chat-inline paint (list re-fetches
+    // after proposal status flips to applied).
+    const appsSectionEarly = await $('section[aria-label="Personal apps"]');
+    await appsSectionEarly.waitForExist({ timeout: 20_000 });
     await browser.waitUntil(
       async () => {
-        const btn = await appsSection.$('button[aria-label="Study Planner"]');
+        const btn = await appsSectionEarly.$('button[aria-label="Study Planner"]');
         return btn.isExisting();
       },
       {
-        timeout: 20_000,
-        timeoutMsg: "Study Planner never appeared in Personal apps",
+        timeout: 25_000,
+        timeoutMsg: "Study Planner never appeared in Personal apps after Apply",
       },
     );
+
+    const convId = await activeConversationIdFromStore();
+    if (convId) {
+      const listed = await invokeFromCurrentWindow("list_conversation_surfaces", {
+        conversationId: convId,
+      });
+      if (!listed.ok) {
+        throw new Error(`list_conversation_surfaces failed: ${listed.error}`);
+      }
+      const rows = Array.isArray(listed.result) ? listed.result : [];
+      const ids = rows
+        .map((row) => String((row as { id?: string }).id ?? ""))
+        .filter(Boolean);
+      if (!ids.includes("s-study-planner-summary")) {
+        throw new Error(
+          `Study Planner inline surface missing from SQLite after Apply; surfaces=${JSON.stringify(ids)}`,
+        );
+      }
+    }
+
+    const inlineSummary = await $(
+      '.inline-surface[data-surface-id="s-study-planner-summary"]',
+    );
+    await inlineSummary.waitForExist({
+      timeout: 25_000,
+      timeoutMsg: "Study Planner inline summary surface never rendered",
+    });
+    expect((await inlineSummary.getText()).toLowerCase()).toContain("study tasks");
+
+    const appsSection = appsSectionEarly;
     const toolBtn = await appsSection.$('button[aria-label="Study Planner"]');
     const canvasAlready = await $(
       '.tool-canvas-body[data-tool-id="tool-study-planner"]',
@@ -152,25 +182,14 @@ describe("Journey 31 — multi-surface progressive evolution", () => {
       },
     );
 
-    const close = await $(
-      '[aria-label="Close tool canvas"], [aria-label="Back to chat"]',
+    // Verify evolve + data preservation on the open canvas (authoritative).
+    const canvasAfterEvolve = await $(
+      '.tool-canvas-body[data-tool-id="tool-study-planner"]',
     );
-    if (await close.isExisting()) {
-      await close.click();
-    }
-    const reopen = await $(
-      'section[aria-label="Personal apps"] button[aria-label="Study Planner"]',
-    );
-    await reopen.waitForClickable({ timeout: 15_000 });
-    await reopen.click();
-
     await browser.waitUntil(
       async () => {
-        const body = await $(
-          '.tool-canvas-body[data-tool-id="tool-study-planner"]',
-        );
-        if (!(await body.isExisting())) return false;
-        const text = (await body.getText()).toLowerCase();
+        if (!(await canvasAfterEvolve.isExisting())) return false;
+        const text = (await canvasAfterEvolve.getText()).toLowerCase();
         return text.includes("priority") && text.includes("dashboard");
       },
       {
@@ -179,16 +198,28 @@ describe("Journey 31 — multi-surface progressive evolution", () => {
           "Priority column / Dashboard never appeared after multi-surface evolve",
       },
     );
-
-    const canvas2 = await $(
-      '.tool-canvas-body[data-tool-id="tool-study-planner"]',
-    );
-    const textAfter = await canvas2.getText();
+    const textAfter = await canvasAfterEvolve.getText();
     if (!textAfter.includes(TASK_TITLE)) {
       throw new Error(
         `Existing task "${TASK_TITLE}" missing after evolution — data not preserved`,
       );
     }
+
+    await browser.waitUntil(
+      async () => {
+        const summary = await $(
+          '.inline-surface[data-surface-id="s-study-planner-summary"]',
+        );
+        return (
+          (await summary.isExisting()) &&
+          (await summary.getText()).toLowerCase().includes("priority")
+        );
+      },
+      {
+        timeout: 20_000,
+        timeoutMsg: "Related inline summary did not receive the priority evolve",
+      },
+    );
 
     const finishedAt = new Date().toISOString();
     fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
@@ -202,6 +233,10 @@ describe("Journey 31 — multi-surface progressive evolution", () => {
           protocol: "applicationPlan",
           fixture: "multi_surface_planner",
           preservedTaskTitle: TASK_TITLE,
+          surfaceIds: [
+            "surf-tool-study-planner",
+            "s-study-planner-summary",
+          ],
           dashboardSectionPresent: true,
           priorityColumnPresent: true,
           startedAt,

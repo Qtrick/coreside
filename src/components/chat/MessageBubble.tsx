@@ -325,6 +325,12 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
             <InlineSurfacesForMessage
               conversationId={message.conversationId}
               messageId={message.id}
+              refreshKey={String(
+                (message.metadata as { kernelProposalStatus?: string } | null)
+                  ?.kernelProposalStatus ??
+                  kernelProposal?.status ??
+                  "",
+              )}
             />
             {kernelProposal ? (
               <ChangeProposalCard

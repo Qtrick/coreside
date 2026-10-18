@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-appearance-fingerprint"
+description = "Enables the get_appearance_fingerprint command without any pre-configured scope."
+commands.allow = ["get_appearance_fingerprint"]
+
+[[permission]]
+identifier = "deny-get-appearance-fingerprint"
+description = "Denies the get_appearance_fingerprint command without any pre-configured scope."
+commands.deny = ["get_appearance_fingerprint"]

@@ -57,6 +57,7 @@ permissions = [
   "allow-fetch-web-page-cmd",
   "allow-flush-patch-scheduler-cmd",
   "allow-get-ai-status",
+  "allow-get-appearance-fingerprint",
   "allow-get-app-info",
   "allow-get-bootstrap-status",
   "allow-get-chat-attachment-src",

@@ -21,8 +21,9 @@ The model **proposes**; the Rust kernel validates, compiles via ChangeIntent, an
     "baseRevision": null,
     "steps": [{ "id": "1", "description": "…" }],
     "intents": [
-      { "intent": "upsertDataModel", "applicationId": "tool-…", "model": { "modelId": "tasks", "displayName": "Tasks", "schemaVersion": 1, "fields": [] } },
-      { "intent": "createSurface", "tool": { /* ToolDefinition */ }, "changeSummary": "…" }
+      { "intent": "upsertDataModel", "applicationId": "tool-…", "model": { "modelId": "tasks", "displayName": "Tasks", "schemaVersion": 1, "fields": [{ "fieldId": "title", "fieldType": "text", "required": true }, { "fieldId": "priority", "fieldType": "enum", "required": false, "enumValues": ["High", "Medium", "Low"] }, { "fieldId": "status", "fieldType": "enum", "required": false, "enumValues": ["To Do", "In Progress", "Done"] }, { "fieldId": "completed", "fieldType": "boolean", "required": false, "default": false }] } },
+      { "intent": "createSurface", "tool": { /* ToolDefinition — tool_canvas */ }, "changeSummary": "…" },
+      { "intent": "createInlineSurface", "applicationId": "tool-…", "name": "Summary", "surfaceId": "s-inline-summary", "tool": { /* same applicationId; chat_inline panel — never use surf-* (tool-canvas reserved) */ }, "changeSummary": "…" }
     ],
     "tests": []
   }

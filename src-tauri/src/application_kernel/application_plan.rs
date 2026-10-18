@@ -303,6 +303,7 @@ pub fn validate_plan_against_db(
 pub(crate) fn plan_bound_application_id(plan: &ApplicationPlan) -> Result<&str, KernelError> {
     let create_tool_id = plan.intents.iter().find_map(|i| match i {
         ChangeIntent::CreateSurface { tool, .. } => Some(tool.id.as_str()),
+        ChangeIntent::CreateInlineSurface { application_id, .. } => Some(application_id.as_str()),
         _ => None,
     });
     match plan.kind {
@@ -374,6 +375,7 @@ fn bind_intents_to_plan_application(plan: &ApplicationPlan) -> Result<(), Kernel
 fn intent_application_id(intent: &ChangeIntent) -> Option<&str> {
     match intent {
         ChangeIntent::CreateSurface { tool, .. } => Some(tool.id.as_str()),
+        ChangeIntent::CreateInlineSurface { application_id, .. } => Some(application_id.as_str()),
         ChangeIntent::UpdateSurface { tool_id, .. } => Some(tool_id.as_str()),
         ChangeIntent::UpsertDataModel { application_id, .. }
         | ChangeIntent::MigrateDataModel { application_id, .. } => Some(application_id.as_str()),
@@ -431,6 +433,56 @@ fn validate_intent_refs(intent: &ChangeIntent) -> Result<(), KernelError> {
                 ));
             }
             for c in &tool.components {
+                validate_component_type_allowed(&c.component_type)
+                    .map_err(KernelError::CapabilityUnavailable)?;
+            }
+        }
+        ChangeIntent::CreateInlineSurface {
+            application_id,
+            name,
+            tool,
+            surface_id,
+            ..
+        } => {
+            crate::security::assert_not_protected(application_id)
+                .map_err(KernelError::Protected)?;
+            if application_id.trim().is_empty() || name.trim().is_empty() {
+                return Err(KernelError::Validation(
+                    "CreateInlineSurface requires applicationId and name".into(),
+                ));
+            }
+            if let Some(sid) = surface_id {
+                crate::security::assert_not_protected(sid).map_err(KernelError::Protected)?;
+                if sid.trim().starts_with("surf-") {
+                    return Err(KernelError::Validation(
+                        "CreateInlineSurface surfaceId must not use the reserved surf- tool-canvas namespace"
+                            .into(),
+                    ));
+                }
+            }
+            if !tool.id.is_empty() && tool.id != *application_id {
+                return Err(KernelError::Validation(
+                    "CreateInlineSurface tool.id must match applicationId when set".into(),
+                ));
+            }
+            if tool.components.is_empty() {
+                return Err(KernelError::Validation(
+                    "CreateInlineSurface requires at least one component".into(),
+                ));
+            }
+            let mut ids = std::collections::HashSet::new();
+            for c in &tool.components {
+                if c.id.trim().is_empty() {
+                    return Err(KernelError::Validation(
+                        "component id must be non-empty".into(),
+                    ));
+                }
+                if !ids.insert(c.id.as_str()) {
+                    return Err(KernelError::Validation(format!(
+                        "duplicate component id '{}'",
+                        c.id
+                    )));
+                }
                 validate_component_type_allowed(&c.component_type)
                     .map_err(KernelError::CapabilityUnavailable)?;
             }
@@ -509,6 +561,19 @@ fn validate_intent_refs(intent: &ChangeIntent) -> Result<(), KernelError> {
 fn intent_dedupe_key(intent: &ChangeIntent) -> String {
     match intent {
         ChangeIntent::CreateSurface { tool, .. } => format!("create_surface:{}", tool.id),
+        ChangeIntent::CreateInlineSurface {
+            application_id,
+            surface_id,
+            ..
+        } => {
+            let sid = surface_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("s-inline-{application_id}"));
+            format!("create_inline:{application_id}:{sid}")
+        }
         ChangeIntent::UpdateSurface { tool_id, .. } => format!("update_surface:{tool_id}"),
         ChangeIntent::UpsertDataModel {
             application_id,
@@ -839,6 +904,76 @@ mod tests {
             .operations
             .iter()
             .any(|op| op.op_type == "data.model_upsert"));
+    }
+
+    #[test]
+    fn create_plan_with_tool_canvas_and_inline_same_application_validates_and_compiles() {
+        let canvas = crate::ai::ToolDefinition {
+            id: "tool-study-planner".into(),
+            name: "Study Planner".into(),
+            description: "Canvas".into(),
+            layout: json!({ "type": "dashboard" }),
+            components: vec![crate::ai::ToolComponent {
+                id: "board".into(),
+                component_type: "heading".into(),
+                props: Some(json!({ "text": "Dashboard", "level": 1 })),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let inline = crate::ai::ToolDefinition {
+            id: "tool-study-planner".into(),
+            name: "Overdue Summary".into(),
+            description: "Inline panel".into(),
+            layout: json!({ "type": "stack" }),
+            components: vec![crate::ai::ToolComponent {
+                id: "sum-heading".into(),
+                component_type: "heading".into(),
+                props: Some(json!({ "text": "Summary", "level": 3 })),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let plan = ApplicationPlan {
+            schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+            plan_id: "plan-study-inline-create".into(),
+            kind: ApplicationPlanKind::Create,
+            summary: "Create Study Planner canvas plus chat inline summary".into(),
+            application_id: Some("tool-study-planner".into()),
+            base_revision: None,
+            steps: vec![PlanStep {
+                id: "1".into(),
+                description: "Create canvas and inline surfaces".into(),
+            }],
+            intents: vec![
+                ChangeIntent::CreateSurface {
+                    tool: canvas,
+                    change_summary: Some("Create tool canvas".into()),
+                },
+                ChangeIntent::CreateInlineSurface {
+                    application_id: "tool-study-planner".into(),
+                    name: "Overdue Summary".into(),
+                    surface_id: Some("s-inline-summary".into()),
+                    tool: inline,
+                    change_summary: Some("Add inline summary".into()),
+                },
+            ],
+            tests: vec![],
+            diagnostics: None,
+        };
+        validate_plan(&plan).expect("canvas + inline must bind to one applicationId");
+        let validated = compile_plan(&plan).unwrap();
+        let ops = &validated.compiled.operations;
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0].op_type, "surface.create");
+        assert_eq!(ops[0].target.tool_id.as_deref(), Some("tool-study-planner"));
+        assert_eq!(ops[1].op_type, "chat.inline_surface_create");
+        assert_eq!(ops[1].target.tool_id.as_deref(), Some("tool-study-planner"));
+        assert_eq!(ops[1].target.placement.as_deref(), Some("chat_inline"));
+        assert_eq!(
+            ops[1].target.surface_id.as_deref(),
+            Some("s-inline-summary")
+        );
     }
 
     #[test]
@@ -1507,6 +1642,47 @@ mod tests {
         let mut plan = sample_create_plan();
         let dup = plan.intents[0].clone();
         plan.intents.push(dup);
+        assert!(matches!(
+            validate_plan(&plan),
+            Err(KernelError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_two_default_inline_surfaces_for_same_application() {
+        let inline = |name: &str| ChangeIntent::CreateInlineSurface {
+            application_id: "tool-study-planner".into(),
+            name: name.into(),
+            surface_id: None,
+            tool: crate::ai::ToolDefinition {
+                id: "tool-study-planner".into(),
+                name: name.into(),
+                description: "".into(),
+                layout: json!({ "type": "stack" }),
+                components: vec![crate::ai::ToolComponent {
+                    id: format!("{name}-heading"),
+                    component_type: "heading".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            change_summary: None,
+        };
+        let plan = ApplicationPlan {
+            schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+            plan_id: "plan-inline-dedupe".into(),
+            kind: ApplicationPlanKind::Create,
+            summary: "Two inline panels".into(),
+            application_id: Some("tool-study-planner".into()),
+            base_revision: None,
+            steps: vec![PlanStep {
+                id: "1".into(),
+                description: "Add inline surfaces".into(),
+            }],
+            intents: vec![inline("Summary"), inline("Footer")],
+            tests: vec![],
+            diagnostics: None,
+        };
         assert!(matches!(
             validate_plan(&plan),
             Err(KernelError::Validation(_))

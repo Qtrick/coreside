@@ -5,18 +5,22 @@
   "protocol": "applicationPlan",
   "fixture": "multi_surface_planner",
   "preservedTaskTitle": "Preserve me across multi-surface evolve",
+  "surfaceIds": [
+    "surf-tool-study-planner",
+    "s-study-planner-summary"
+  ],
   "dashboardSectionPresent": true,
   "priorityColumnPresent": true,
-  "startedAt": "2026-10-06T06:11:33.920Z",
-  "finishedAt": "2026-10-06T06:11:44.623Z",
-  "durationMs": 10703,
+  "startedAt": "2026-10-17T22:28:01.886Z",
+  "finishedAt": "2026-10-17T22:28:12.396Z",
+  "durationMs": 10510,
   "identity": {
-    "commit": "1ecf1e34ef7c3c85e3fa1e65d19ec13a81f9ae75",
+    "commit": "63350ec633c90bd075b939d20738038ad30650e2",
     "dirty": true,
     "platform": "darwin",
     "arch": "arm64",
-    "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee"
+    "sourceFingerprint": "024e82342f4872d3d14e2f553fe3813a1b2e6ea77341dbdf78b1004339ad71bf"
   },
-  "binaryHash": "e863d8c27ea10c0b9f3944a934144c2f5a3d05d23d5510d499fcdb716506b60b",
+  "binaryHash": "c0563e95b23a7b750da0fc58d10aa2458c49ff6aa0235f58437425967340c7e1",
   "e2eSpec": "e2e/specs/31-multi-surface-progressive-evolution.spec.ts"
 }

@@ -263,7 +263,7 @@ impl MockAiProvider {
             let rev = observed_revision.unwrap_or(1);
             let plan = super::plan_fixtures::multi_surface_planner_add_priority_plan(Some(rev));
             return super::plan_fixtures::plan_response_json(
-                "I updated your Study Planner tasks with an optional priority column. The dashboard section and stable component IDs were preserved.",
+                "I updated your Study Planner tasks and its conversation summary with priority support. Existing data and stable component IDs were preserved.",
                 &plan,
             );
         }
@@ -320,7 +320,7 @@ impl MockAiProvider {
         if lower.contains("study planner") || lower.contains("study-planner") {
             let plan = super::plan_fixtures::multi_surface_planner_create_plan();
             return super::plan_fixtures::plan_response_json(
-                "I created a Study Planner with dashboard and tasks sections on one surface (multi-surface routing is represented as sections for now).",
+                "I created a Study Planner with a persistent dashboard and a related conversation summary surface.",
                 &plan,
             );
         }

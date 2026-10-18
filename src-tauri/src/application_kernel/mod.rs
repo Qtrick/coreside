@@ -49,6 +49,50 @@ use self::provenance::record_provenance;
 pub const COMPILER_VERSION: &str = "1";
 pub const MANIFEST_SCHEMA_VERSION: &str = "1";
 
+/// Attach proposal-created inline surfaces to the assistant message that staged the proposal.
+fn bind_inline_surfaces_to_proposal_message(
+    db: &Database,
+    conversation_id: &str,
+    proposal_id: &str,
+    surfaces: &[crate::runtime_v2::surfaces::SurfaceRecord],
+) {
+    use rusqlite::{params, OptionalExtension};
+    let message_id: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT id FROM messages
+             WHERE conversation_id = ?1
+               AND json_extract(metadata, '$.runtimeV2.proposalId') = ?2
+             ORDER BY created_at DESC
+             LIMIT 1",
+            params![conversation_id, proposal_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    let Some(message_id) = message_id else {
+        return;
+    };
+    for surface in surfaces {
+        if surface.surface_type != "inline" {
+            continue;
+        }
+        if let Err(e) = db.conn().execute(
+            "UPDATE surfaces SET message_id = ?1
+             WHERE id = ?2 AND conversation_id = ?3 AND message_id IS NULL",
+            params![message_id, surface.id, conversation_id],
+        ) {
+            tracing::warn!(
+                error = %e,
+                surface_id = %surface.id,
+                proposal_id = %proposal_id,
+                "failed to bind inline surface to proposal message"
+            );
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeRequest {
@@ -1055,6 +1099,13 @@ pub fn decide_proposal(
             tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during proposal status update");
         }
         return Err(KernelError::Db(crate::db::DbError::Sqlite(e)));
+    }
+
+    // 5b. Bind newly created inline surfaces to the assistant message that owns this
+    // proposal (message_id is not known at compile time). Matches send_message's
+    // post-apply bind so InlineSurfacesForMessage can render under the bubble.
+    if let Some(cid) = proposal.conversation_id.as_deref() {
+        bind_inline_surfaces_to_proposal_message(db, cid, proposal_id, &apply.surfaces);
     }
 
     // 6. Single COMMIT for all changes!
@@ -2591,5 +2642,70 @@ mod tests {
                 other
             ),
         }
+    }
+
+    #[test]
+    fn decide_proposal_binds_inline_surfaces_to_assistant_message() {
+        use crate::ai::plan_fixtures::multi_surface_planner_create_plan;
+        use crate::runtime_v2::surfaces::get_surface;
+
+        let mut db = test_db();
+        let conv = create_conversation(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            "Inline bind after Apply",
+            None,
+        )
+        .unwrap();
+        let create = multi_surface_planner_create_plan();
+        let create_ops = crate::application_kernel::application_plan::compile_plan(&create)
+            .unwrap()
+            .compiled
+            .operations;
+        let proposal_id = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Create Study Planner".into(),
+                operations: create_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .proposal_id
+        .expect("proposal");
+
+        let assistant = crate::db::insert_message(
+            &mut db,
+            &conv.id,
+            "assistant",
+            "Proposed Study Planner",
+            Some(&serde_json::json!({
+                "runtimeV2": {
+                    "proposalId": proposal_id,
+                    "status": "pending",
+                    "operations": [{"type": "placeholder"}],
+                }
+            })),
+        )
+        .unwrap();
+
+        assert!(decide_proposal(&mut db, None, &proposal_id, true)
+            .unwrap()
+            .is_committed());
+
+        let inline = get_surface(&db, "s-study-planner-summary").unwrap();
+        assert_eq!(
+            inline.message_id.as_deref(),
+            Some(assistant.id.as_str()),
+            "proposal Apply must bind inline surface to the staging assistant message"
+        );
+        let canvas = get_surface(&db, "surf-tool-study-planner").unwrap();
+        assert!(
+            canvas.message_id.is_none(),
+            "tool canvas must not be message-bound"
+        );
     }
 }

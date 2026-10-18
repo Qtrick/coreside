@@ -15,7 +15,10 @@ const stack: HTMLElement[] = [];
 
 function focusable(root: HTMLElement): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-    (el) => el.offsetParent !== null || el === document.activeElement,
+    (el) => {
+      if (el.classList.contains("provider-modal-backdrop")) return false;
+      return el.offsetParent !== null || el === document.activeElement;
+    },
   );
 }
 
@@ -44,6 +47,16 @@ export function ModalPortal({
     if (!node) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
     stack.push(node);
+
+    // Make the app shell inert while any modal is open so pointer/keyboard
+    // cannot reach background controls (ARIA alone is insufficient).
+    const appRoot =
+      document.getElementById("root") ??
+      document.querySelector<HTMLElement>("#coreside-root, [data-coreside-root]");
+    if (stack.length === 1 && appRoot) {
+      appRoot.setAttribute("inert", "");
+      appRoot.setAttribute("aria-hidden", "true");
+    }
 
     const frame = window.requestAnimationFrame(() => {
       if (node.contains(document.activeElement)) return;
@@ -82,6 +95,11 @@ export function ModalPortal({
       document.removeEventListener("keydown", onKeyDown, true);
       const index = stack.indexOf(node);
       if (index >= 0) stack.splice(index, 1);
+
+      if (stack.length === 0 && appRoot) {
+        appRoot.removeAttribute("inert");
+        appRoot.removeAttribute("aria-hidden");
+      }
 
       // Closing a dialog that is not the topmost one must not pull focus out of
       // the dialog the user is still looking at.

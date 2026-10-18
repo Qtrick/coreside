@@ -6814,7 +6814,7 @@ mod tests {
         let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "H16b", None).unwrap();
         let tool_id = "tool-study-planner-ms-fail";
         let canvas_sid = crate::runtime_v2::surfaces::surface_id_for_tool(tool_id);
-        let inline_sid = "surf-study-planner-tasks-fail";
+        let inline_sid = "s-study-planner-tasks-fail";
 
         let canvas_def = ToolDefinition {
             id: tool_id.into(),
@@ -6877,6 +6877,13 @@ mod tests {
         .unwrap();
         let res = apply_transaction(&mut db, &txn.id).unwrap();
         assert_eq!(res.transaction.status, "failed");
+        assert!(
+            res.conflicts
+                .iter()
+                .any(|conflict| conflict.contains("revision")),
+            "rollback proof must reach the intended stale mutation, got {:?}",
+            res.conflicts
+        );
         assert!(
             get_surface(&db, &canvas_sid).is_err(),
             "dashboard surface must not remain after multi-surface txn failure"

@@ -3706,7 +3706,7 @@ body > .window-overlay-root > *,
 
 .sidebar-nav-row {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 0.15rem;
 }
 
@@ -3757,6 +3757,12 @@ body > .window-overlay-root > *,
 .sidebar-empty-hint {
   padding: 0.5rem 0.75rem;
   margin: 0;
+}
+
+/* Empty-state labels are not flex items, so give ellipsis an actual box. */
+.sidebar-empty-hint .nav-label {
+  display: block;
+  max-width: 100%;
 }
 
 .project-list-item {

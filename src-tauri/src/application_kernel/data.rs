@@ -41,7 +41,11 @@ pub struct DataModelDefinition {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DataField {
+    /// Canonical wire key is `fieldId`. Models often emit component-like `id`/`name`.
+    #[serde(alias = "id", alias = "name")]
     pub field_id: String,
+    /// Canonical wire key is `fieldType`. Prompts historically showed `"type"`.
+    #[serde(alias = "type")]
     pub field_type: String,
     #[serde(default)]
     pub required: bool,
@@ -967,6 +971,43 @@ pub fn apply_kernel_operations(db: &mut Database, ops: &[AppOperation]) -> DbRes
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepts_model_common_field_aliases() {
+        // Models often mirror component shape (`id`/`type`) because prompts and
+        // UI catalogs use those keys elsewhere. Accept them; serialize canonical.
+        let raw = json!({
+            "modelId": "tasks",
+            "displayName": "Tasks",
+            "schemaVersion": 1,
+            "fields": [
+                {"id": "title", "type": "text", "required": true},
+                {
+                    "fieldId": "priority",
+                    "type": "enum",
+                    "required": false,
+                    "enumValues": ["High", "Medium", "Low"]
+                },
+                {"name": "status", "fieldType": "text", "required": false}
+            ]
+        });
+        let def: DataModelDefinition =
+            serde_json::from_value(raw).expect("aliased fields must deserialize");
+        assert_eq!(def.fields[0].field_id, "title");
+        assert_eq!(def.fields[0].field_type, "text");
+        assert_eq!(def.fields[1].field_id, "priority");
+        assert_eq!(def.fields[1].field_type, "enum");
+        assert_eq!(def.fields[2].field_id, "status");
+        assert_eq!(def.fields[2].field_type, "text");
+        validate_model(&def).expect("aliased model must validate");
+
+        let out = serde_json::to_value(&def).expect("serialize");
+        let f0 = &out["fields"][0];
+        assert_eq!(f0["fieldId"], "title");
+        assert_eq!(f0["fieldType"], "text");
+        assert!(f0.get("type").is_none());
+        assert!(f0.get("id").is_none());
+    }
 
     fn habit_model() -> DataModelDefinition {
         DataModelDefinition {

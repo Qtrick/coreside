@@ -1,6 +1,7 @@
 //! Theme preset repository + atomic apply integration tests.
 
 use super::*;
+use crate::ai::SettingsChangePayload;
 use crate::db::{self, Database};
 use tempfile::tempdir;
 
@@ -110,6 +111,34 @@ fn apply_is_atomic_and_preserves_unrelated_settings() {
         map.get("preferredModel").map(String::as_str),
         Some("kept-model")
     );
+}
+
+#[test]
+fn partial_appearance_apply_preserves_committed_previewable_fields() {
+    let (_dir, mut db) = open_db();
+    seed_appearance(&mut db, "dark", "matrix", 55);
+
+    let changes: SettingsChangePayload = serde_json::from_value(serde_json::json!({
+        "accentPrimary": { "light": "#123456", "dark": "#abcdef" }
+    }))
+    .unwrap();
+    apply_appearance_changes(&mut db, &changes).unwrap();
+
+    let map = db::get_settings(&db).unwrap();
+    assert_eq!(
+        map.get("accentPrimaryLight").map(String::as_str),
+        Some("#123456")
+    );
+    assert_eq!(
+        map.get("accentPrimaryDark").map(String::as_str),
+        Some("#abcdef")
+    );
+    assert_eq!(map.get("theme").map(String::as_str), Some("dark"));
+    assert_eq!(
+        map.get("interfaceTransparency").map(String::as_str),
+        Some("55")
+    );
+    assert!(map.get("wallpaper").unwrap().contains("matrix"));
 }
 
 #[test]
@@ -241,30 +270,55 @@ fn stale_delete_is_rejected_without_removing_the_newer_preset() {
 }
 
 #[test]
-fn corrupt_preset_makes_list_and_get_fail_closed() {
+fn stale_snapshot_update_is_rejected_without_replacing_the_newer_snapshot() {
     let (_dir, mut db) = open_db();
-    seed_appearance(&mut db, "system", "none", 0);
-    let snap = AppearanceSnapshot::from_settings_map(&db::get_settings(&db).unwrap()).unwrap();
-    let preset = insert_theme_preset(&mut db, "Corrupt", "", &snap, 10).unwrap();
-    db.conn()
-        .execute(
-            "UPDATE theme_presets SET snapshot_json = '{}' WHERE id = ?1",
-            [&preset.id],
-        )
-        .unwrap();
+    seed_appearance(&mut db, "dark", "matrix", 25);
+    let original = AppearanceSnapshot::from_settings_map(&db::get_settings(&db).unwrap()).unwrap();
+    let preset = insert_theme_preset(&mut db, "Current", "", &original, 10).unwrap();
 
-    assert!(matches!(
-        list_theme_presets(&db),
-        Err(db::DbError::Corrupted(_))
-    ));
-    assert!(matches!(
-        get_theme_preset(&db, &preset.id),
-        Err(db::DbError::Corrupted(_))
-    ));
+    seed_appearance(&mut db, "light", "aurora", 40);
+    let newer = AppearanceSnapshot::from_settings_map(&db::get_settings(&db).unwrap()).unwrap();
+    let updated =
+        update_theme_preset_snapshot(&mut db, &preset.id, &newer, preset.revision).unwrap();
+
+    seed_appearance(&mut db, "system", "rain", 5);
+    let stale = AppearanceSnapshot::from_settings_map(&db::get_settings(&db).unwrap()).unwrap();
+    let err =
+        update_theme_preset_snapshot(&mut db, &preset.id, &stale, preset.revision).unwrap_err();
+
+    assert!(matches!(err, db::DbError::Conflict(_)));
+    assert_eq!(get_theme_preset(&db, &preset.id).unwrap(), updated);
 }
 
 #[test]
-fn schema_version_mismatch_makes_list_and_get_fail_closed() {
+fn list_skips_corrupt_preset_and_corrupt_row_can_be_deleted() {
+    let (_dir, mut db) = open_db();
+    seed_appearance(&mut db, "system", "none", 0);
+    let snap = AppearanceSnapshot::from_settings_map(&db::get_settings(&db).unwrap()).unwrap();
+    let valid = insert_theme_preset(&mut db, "Valid", "", &snap, 10).unwrap();
+    let corrupt = insert_theme_preset(&mut db, "Corrupt", "", &snap, 10).unwrap();
+    db.conn()
+        .execute(
+            "UPDATE theme_presets SET snapshot_json = '{}' WHERE id = ?1",
+            [&corrupt.id],
+        )
+        .unwrap();
+
+    let listed = list_theme_presets(&db).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, valid.id);
+    assert!(matches!(
+        get_theme_preset(&db, &corrupt.id),
+        Err(db::DbError::Corrupted(_))
+    ));
+
+    delete_theme_preset(&mut db, &corrupt.id, corrupt.revision).unwrap();
+    assert_eq!(count_theme_presets(&db).unwrap(), 1);
+    assert_eq!(list_theme_presets(&db).unwrap()[0].id, valid.id);
+}
+
+#[test]
+fn schema_version_mismatch_is_skipped_by_list_and_get_fails_closed() {
     let (_dir, mut db) = open_db();
     seed_appearance(&mut db, "system", "none", 0);
     let snap = AppearanceSnapshot::from_settings_map(&db::get_settings(&db).unwrap()).unwrap();
@@ -276,10 +330,7 @@ fn schema_version_mismatch_makes_list_and_get_fail_closed() {
         )
         .unwrap();
 
-    assert!(matches!(
-        list_theme_presets(&db),
-        Err(db::DbError::Corrupted(_))
-    ));
+    assert!(list_theme_presets(&db).unwrap().is_empty());
     assert!(matches!(
         get_theme_preset(&db, &preset.id),
         Err(db::DbError::Corrupted(_))
@@ -300,6 +351,63 @@ fn missing_media_rejects_apply() {
     // Active appearance unchanged.
     let map = db::get_settings(&db).unwrap();
     assert_eq!(map.get("theme").map(String::as_str), Some("dark"));
+}
+
+#[test]
+fn missing_media_rejects_preset_insert() {
+    let (_dir, mut db) = open_db();
+    seed_appearance(&mut db, "dark", "none", 0);
+    let mut snap = AppearanceSnapshot::from_settings_map(&db::get_settings(&db).unwrap()).unwrap();
+    snap.wallpaper_json =
+        r#"{"schemaVersion":"1","type":"image-cover","assetId":"missing-asset","opacity":0.5}"#
+            .into();
+
+    let err = insert_theme_preset(&mut db, "Missing media", "", &snap, 10).unwrap_err();
+    assert!(err.to_string().contains("missing-asset"));
+    assert_eq!(count_theme_presets(&db).unwrap(), 0);
+}
+
+#[test]
+fn invalid_media_rejects_apply_without_partial_appearance_writes() {
+    let (_dir, mut db) = open_db();
+    seed_appearance(&mut db, "dark", "matrix", 30);
+    let before = db::get_settings(&db).unwrap();
+    db.conn()
+        .execute(
+            "INSERT INTO media_assets
+             (id, project_id, category, title, local_filename, mime_type, byte_size,
+              width, height, duration_ms, content_hash, source_url, source_page_url,
+              creator, license, attribution, validation_status, thumbnail_filename)
+             VALUES ('asset-invalid', NULL, 'image', 'Invalid', 'invalid.png', 'image/png', 12,
+              1, 1, NULL, 'hash-invalid-theme', NULL, NULL, NULL, NULL, NULL, 'quarantined', NULL)",
+            [],
+        )
+        .unwrap();
+    let mut snap = AppearanceSnapshot::from_settings_map(&before).unwrap();
+    snap.theme_preference = "light".into();
+    snap.wallpaper_json =
+        r#"{"schemaVersion":"1","type":"image-cover","assetId":"asset-invalid","opacity":0.5}"#
+            .into();
+
+    let err = apply_appearance_snapshot(&mut db, &snap).unwrap_err();
+
+    assert!(err.to_string().contains("not valid"));
+    assert_eq!(db::get_settings(&db).unwrap(), before);
+}
+
+#[test]
+fn missing_slideshow_asset_rejects_apply_without_partial_appearance_writes() {
+    let (_dir, mut db) = open_db();
+    seed_appearance(&mut db, "dark", "matrix", 30);
+    let before = db::get_settings(&db).unwrap();
+    let mut snap = AppearanceSnapshot::from_settings_map(&before).unwrap();
+    snap.theme_preference = "light".into();
+    snap.wallpaper_json = r#"{"schemaVersion":"1","type":"slideshow","slideAssetIds":["missing-slide"],"intervalSeconds":30}"#.into();
+
+    let err = apply_appearance_snapshot(&mut db, &snap).unwrap_err();
+
+    assert!(err.to_string().contains("missing-slide"));
+    assert_eq!(db::get_settings(&db).unwrap(), before);
 }
 
 #[test]
@@ -325,4 +433,126 @@ fn duplicate_names_conflict() {
     insert_theme_preset(&mut db, "Same", "", &snap, 10).unwrap();
     let err = insert_theme_preset(&mut db, "same", "", &snap, 10).unwrap_err();
     assert!(matches!(err, db::DbError::Conflict(_)));
+}
+
+#[test]
+fn appearance_fingerprint_changes_when_committed_appearance_changes() {
+    let (_dir, mut db) = open_db();
+    seed_appearance(&mut db, "dark", "matrix", 20);
+    let before = AppearanceSnapshot::from_settings_map(&db::get_settings(&db).unwrap()).unwrap();
+    let fp_before = before.fingerprint().unwrap();
+    seed_appearance(&mut db, "light", "aurora", 5);
+    let after = AppearanceSnapshot::from_settings_map(&db::get_settings(&db).unwrap()).unwrap();
+    let fp_after = after.fingerprint().unwrap();
+    assert_ne!(fp_before, fp_after);
+}
+
+#[test]
+fn appearance_fingerprint_is_stable_for_unchanged_committed_settings() {
+    let (_dir, mut db) = open_db();
+    seed_appearance(&mut db, "dark", "matrix", 20);
+    let fp1 = AppearanceSnapshot::committed_fingerprint_from_db(&db).unwrap();
+    let fp2 = AppearanceSnapshot::committed_fingerprint_from_db(&db).unwrap();
+    assert_eq!(fp1, fp2);
+}
+
+#[test]
+fn apply_cas_blocks_preset_when_appearance_changed_after_confirmation() {
+    let (_dir, mut db) = open_db();
+    seed_appearance(&mut db, "dark", "matrix", 55);
+    let snap = AppearanceSnapshot::from_settings_map(&db::get_settings(&db).unwrap()).unwrap();
+    let preset = insert_theme_preset(&mut db, "Ocean", "", &snap, 10).unwrap();
+    let fp_at_confirm = AppearanceSnapshot::committed_fingerprint_from_db(&db).unwrap();
+
+    seed_appearance(&mut db, "light", "none", 0);
+    let fp_now = AppearanceSnapshot::committed_fingerprint_from_db(&db).unwrap();
+    assert_ne!(fp_at_confirm, fp_now);
+    assert_eq!(
+        db::get_settings(&db)
+            .unwrap()
+            .get("theme")
+            .map(String::as_str),
+        Some("light")
+    );
+    assert_eq!(
+        AppearanceSnapshot::committed_fingerprint_from_db(&db).unwrap(),
+        fp_now
+    );
+
+    apply_appearance_snapshot(&mut db, &preset.snapshot).unwrap();
+    assert_eq!(
+        db::get_settings(&db)
+            .unwrap()
+            .get("theme")
+            .map(String::as_str),
+        Some("dark")
+    );
+}
+
+#[test]
+fn project_scoped_media_rejected_for_theme_wallpaper() {
+    let (_dir, mut db) = open_db();
+    seed_appearance(&mut db, "dark", "none", 0);
+    db.conn()
+        .execute(
+            "INSERT INTO projects (id, name, description, instructions)
+             VALUES ('project-study', 'Study', '', '')",
+            [],
+        )
+        .unwrap();
+    db.conn()
+        .execute(
+            "INSERT INTO media_assets
+             (id, project_id, category, title, local_filename, mime_type, byte_size,
+              width, height, duration_ms, content_hash, source_url, source_page_url,
+              creator, license, attribution, validation_status, thumbnail_filename)
+             VALUES ('asset-proj', 'project-study', 'image', 'Scoped', 'scoped.png', 'image/png', 12,
+              1, 1, NULL, 'hash-proj-theme', NULL, NULL, NULL, NULL, NULL, 'ok', NULL)",
+            [],
+        )
+        .unwrap();
+    let mut snap = AppearanceSnapshot::from_settings_map(&db::get_settings(&db).unwrap()).unwrap();
+    snap.wallpaper_json =
+        r#"{"schemaVersion":"1","type":"image-cover","assetId":"asset-proj","opacity":0.5}"#.into();
+    let err = apply_appearance_snapshot(&mut db, &snap).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("project-scoped") || msg.contains("asset-proj"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn project_scoped_media_rejected_when_updating_preset() {
+    let (_dir, mut db) = open_db();
+    seed_appearance(&mut db, "dark", "none", 0);
+    let original = AppearanceSnapshot::from_settings_map(&db::get_settings(&db).unwrap()).unwrap();
+    let preset = insert_theme_preset(&mut db, "Global", "", &original, 10).unwrap();
+    db.conn()
+        .execute(
+            "INSERT INTO projects (id, name, description, instructions)
+             VALUES ('project-owned', 'Owned', '', '')",
+            [],
+        )
+        .unwrap();
+    db.conn()
+        .execute(
+            "INSERT INTO media_assets
+             (id, project_id, category, title, local_filename, mime_type, byte_size,
+              width, height, duration_ms, content_hash, source_url, source_page_url,
+              creator, license, attribution, validation_status, thumbnail_filename)
+             VALUES ('asset-owned', 'project-owned', 'image', 'Owned', 'owned.png', 'image/png', 12,
+              1, 1, NULL, 'hash-owned-theme', NULL, NULL, NULL, NULL, NULL, 'ok', NULL)",
+            [],
+        )
+        .unwrap();
+    let mut update = original.clone();
+    update.wallpaper_json =
+        r#"{"schemaVersion":"1","type":"image-cover","assetId":"asset-owned","opacity":0.5}"#
+            .into();
+
+    let err =
+        update_theme_preset_snapshot(&mut db, &preset.id, &update, preset.revision).unwrap_err();
+    assert!(err.to_string().contains("project-scoped"));
+    assert_eq!(get_theme_preset(&db, &preset.id).unwrap(), preset);
 }

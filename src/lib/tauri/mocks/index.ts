@@ -13,6 +13,7 @@ import type {
   DockIconConfig,
   ModelCatalog,
   SendMessageResult,
+  SettingsChange,
   ThemePreference,
   ToolChange,
   WallpaperConfig,
@@ -241,6 +242,11 @@ function snapshotFromMockSettings(): AppearanceSnapshot {
   };
 }
 
+/** Deterministic mock fingerprint (not cryptographic; mirrors CAS contract). */
+function mockAppearanceFingerprint(): string {
+  return `mock-fp:${JSON.stringify(snapshotFromMockSettings())}`;
+}
+
 function applySnapshotToMockSettings(snapshot: AppearanceSnapshot): void {
   mockDb.settings.theme = snapshot.themePreference;
   mockDb.settings.accentPrimaryLight = snapshot.accentPrimaryLight;
@@ -271,6 +277,30 @@ function applySnapshotToMockSettings(snapshot: AppearanceSnapshot): void {
     100,
     Math.max(0, Math.round(snapshot.interfaceTransparency)),
   );
+}
+
+function applySettingsChangeToMockSettings(changes: SettingsChange): void {
+  if (changes.theme) mockDb.settings.theme = changes.theme;
+  const colorFields = [
+    "accentPrimary",
+    "accentSecondary",
+    "background",
+    "surface",
+    "surfaceMuted",
+    "border",
+    "textPrimary",
+    "textSecondary",
+  ] as const;
+  for (const field of colorFields) {
+    const variants = changes[field];
+    if (!variants) continue;
+    if (variants.light) mockDb.settings[`${field}Light`] = variants.light;
+    if (variants.dark) mockDb.settings[`${field}Dark`] = variants.dark;
+  }
+  if (changes.wallpaper) {
+    mockDb.settings.wallpaper = sanitizeMockWallpaper(changes.wallpaper);
+    mockDb.settings.wallpaperJson = null;
+  }
 }
 
 export async function mockInvoke<T>(
@@ -1884,10 +1914,15 @@ export async function mockInvoke<T>(
       return undefined as T;
     }
 
+    case "get_appearance_fingerprint": {
+      return mockAppearanceFingerprint() as T;
+    }
+
     case "apply_theme_preset": {
       const input = (args?.input ?? args) as {
         id?: string;
         expectedRevision: number;
+        expectedAppearanceFingerprint?: string;
       };
       const preset = mockDb.themePresets.find((p) => p.id === input?.id);
       if (!preset) {
@@ -1899,16 +1934,26 @@ export async function mockInvoke<T>(
           "conflict",
         );
       }
+      const currentFp = mockAppearanceFingerprint();
+      if (
+        !input.expectedAppearanceFingerprint ||
+        input.expectedAppearanceFingerprint !== currentFp
+      ) {
+        throw new TauriCommandError(
+          "Your appearance changed since this confirmation opened. Review and try Apply again.",
+          "conflict",
+        );
+      }
       applySnapshotToMockSettings(preset.snapshot);
       return { ...mockDb.settings } as T;
     }
 
     case "apply_appearance_bundle": {
-      const input = (args?.input ?? args) as { snapshot?: AppearanceSnapshot };
-      if (!input?.snapshot || input.snapshot.schemaVersion !== 1) {
-        throw new TauriCommandError("invalid theme snapshot", "invalid");
+      const input = (args?.input ?? args) as { changes?: SettingsChange };
+      if (!input?.changes || Object.keys(input.changes).length === 0) {
+        throw new TauriCommandError("invalid appearance changes", "invalid");
       }
-      applySnapshotToMockSettings(input.snapshot);
+      applySettingsChangeToMockSettings(input.changes);
       return { ...mockDb.settings } as T;
     }
 

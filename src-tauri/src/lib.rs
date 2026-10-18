@@ -89,7 +89,9 @@ pub fn run() {
     let app_state = AppState::new_with_bootstrap(config, database, bootstrap);
     let scheduler_handle = Arc::new(SchedulerHandle::default());
 
-    let builder = tauri::Builder::default().plugin(tauri_plugin_shell::init());
+    // ponytail: no shell/opener plugin — external links go through open_external_url
+    // after SSRF validation (tool windows must not gain browser-open plugin rights).
+    let builder = tauri::Builder::default();
 
     // WebDriver plugins are compile-gated behind Cargo feature `e2e`.
     // Production `tauri build` / default features never register them.
@@ -187,6 +189,7 @@ pub fn run() {
             commands::set_workspace_appearance,
             commands::list_theme_presets,
             commands::get_theme_preset_capabilities,
+            commands::get_appearance_fingerprint,
             commands::save_current_theme_preset,
             commands::rename_theme_preset,
             commands::update_theme_preset_from_current,

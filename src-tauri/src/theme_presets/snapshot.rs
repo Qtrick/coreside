@@ -4,7 +4,7 @@ use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::ai::{normalize_setting_kv, WallpaperConfig};
+use crate::ai::{normalize_setting_kv, SettingsChangePayload, WallpaperConfig};
 use crate::db::{self, Database, DbError, DbResult};
 
 pub const APPEARANCE_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
@@ -108,6 +108,19 @@ impl AppearanceSnapshot {
             return Err("theme snapshot is too large".into());
         }
         Ok(json)
+    }
+
+    /// Stable hash of the committed appearance snapshot (CAS for Apply confirmations).
+    pub fn fingerprint(&self) -> Result<String, String> {
+        use sha2::{Digest, Sha256};
+        let json = self.to_json_string()?;
+        Ok(hex::encode(Sha256::digest(json.as_bytes())))
+    }
+
+    /// Fingerprint of the workspace's committed appearance settings (not live preview).
+    pub fn committed_fingerprint_from_db(db: &Database) -> Result<String, String> {
+        let map = db::get_settings(db).map_err(|e| e.to_string())?;
+        Self::from_settings_map(&map)?.fingerprint()
     }
 
     pub fn parse_and_validate(raw: &str) -> Result<Self, String> {
@@ -248,19 +261,34 @@ impl AppearanceSnapshot {
         ids
     }
 
-    /// Ensure referenced media assets exist (same connection as apply transaction).
-    fn assert_media_assets_exist_on_conn(&self, conn: &rusqlite::Connection) -> DbResult<()> {
+    /// Ensure referenced media assets exist and are global (not project-scoped).
+    /// Workspace theme presets must not adopt project-owned media.
+    pub(crate) fn assert_media_assets_exist_on_conn(
+        &self,
+        conn: &rusqlite::Connection,
+    ) -> DbResult<()> {
         for asset_id in self.referenced_asset_ids() {
             let asset = conn
                 .query_row(
-                    "SELECT local_filename, validation_status FROM media_assets WHERE id = ?1 LIMIT 1",
+                    "SELECT local_filename, validation_status, project_id FROM media_assets WHERE id = ?1 LIMIT 1",
                     [&asset_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    },
                 )
                 .optional()?;
-            let Some((local_filename, validation_status)) = asset else {
+            let Some((local_filename, validation_status, project_id)) = asset else {
                 return Err(DbError::NotFound(asset_id));
             };
+            if project_id.as_ref().is_some_and(|p| !p.trim().is_empty()) {
+                return Err(DbError::Invalid(format!(
+                    "theme wallpaper cannot use project-scoped media asset {asset_id}"
+                )));
+            }
             if validation_status != "ok" {
                 return Err(DbError::Invalid(format!(
                     "theme wallpaper asset {asset_id} is not valid"
@@ -284,6 +312,27 @@ pub fn apply_appearance_snapshot(db: &mut Database, snapshot: &AppearanceSnapsho
         snapshot.assert_media_assets_exist_on_conn(conn)?;
         for (key, value) in &writes {
             db::set_setting_on_conn(conn, key, value)?;
+        }
+        Ok(())
+    })
+}
+
+/// Apply only user-approved appearance fields against committed SQLite state.
+/// Unmentioned fields never come from optimistic frontend previews.
+pub fn apply_appearance_changes(
+    db: &mut Database,
+    changes: &SettingsChangePayload,
+) -> DbResult<()> {
+    let mut writes = changes.to_kv_pairs().map_err(DbError::Invalid)?;
+    if changes.wallpaper.is_some() {
+        // Agent wallpaper proposals use the legacy live-wallpaper shape. Clear
+        // schema wallpaper JSON in the same transaction when replacing it.
+        writes.push(("wallpaperJson".into(), String::new()));
+    }
+    db.with_transaction(|conn| {
+        for (key, value) in &writes {
+            let normalized = normalize_setting_kv(key, value).map_err(DbError::Invalid)?;
+            db::set_setting_on_conn(conn, key, &normalized)?;
         }
         Ok(())
     })
@@ -337,5 +386,14 @@ mod tests {
         let mut snap = AppearanceSnapshot::from_settings_map(&sample_map()).unwrap();
         snap.schema_version = 99;
         assert!(snap.validate().is_err());
+    }
+
+    #[test]
+    fn fingerprint_is_stable_for_unchanged_snapshot() {
+        let snap = AppearanceSnapshot::from_settings_map(&sample_map()).unwrap();
+        let fp1 = snap.fingerprint().unwrap();
+        let fp2 = snap.fingerprint().unwrap();
+        assert_eq!(fp1, fp2);
+        assert_eq!(fp1.len(), 64);
     }
 }

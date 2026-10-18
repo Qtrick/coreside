@@ -216,6 +216,7 @@ fn main() {
             "set_workspace_appearance",
             "list_theme_presets",
             "get_theme_preset_capabilities",
+            "get_appearance_fingerprint",
             "save_current_theme_preset",
             "rename_theme_preset",
             "update_theme_preset_from_current",

@@ -3,6 +3,7 @@ import { MessageSquare } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { shouldShowActionLog } from "@/lib/action-log";
 import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
+import { kernelProposalFromMetadata } from "@/components/chat/proposal-metadata";
 import { AnimatedRevealText } from "./AnimatedRevealText";
 import { MessageBubble } from "./MessageBubble";
 import {
@@ -67,6 +68,22 @@ export function MessageList() {
     setHoldingReveal(false);
     setHoldStreamText("");
   }, [activeConversationId]);
+
+  // Proposal turns must show the durable assistant bubble (Apply + inline surfaces).
+  // Letter-reveal hold must not keep hiding that bubble after the stream ends.
+  useEffect(() => {
+    if (liveHere || !holdingReveal) return;
+    const last = messages[messages.length - 1];
+    if (
+      last?.role === "assistant" &&
+      kernelProposalFromMetadata(
+        last.metadata as Record<string, unknown> | null | undefined,
+      )
+    ) {
+      setHoldingReveal(false);
+      setHoldStreamText("");
+    }
+  }, [holdingReveal, liveHere, messages]);
 
   const showLiveRow = liveHere || holdingReveal;
   const revealText = streamingText || holdStreamText;
@@ -305,12 +322,20 @@ const STARTER_PROMPTS = [
           // but hide ordinary chat bubbles unless Action Log mode is always on.
           if (isSilent && actionLogMode !== "always") return false;
           // Avoid duplicating the trailing assistant message while letter-reveal finishes.
+          // Keep proposal messages visible — they own Apply + inline surface mounts.
           if (
             holdingReveal &&
             !liveHere &&
             message.role === "assistant" &&
             index === list.length - 1
           ) {
+            if (
+              kernelProposalFromMetadata(
+                message.metadata as Record<string, unknown> | null | undefined,
+              )
+            ) {
+              return true;
+            }
             return false;
           }
           return true;

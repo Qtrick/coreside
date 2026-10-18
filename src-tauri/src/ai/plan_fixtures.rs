@@ -901,6 +901,27 @@ fn study_planner_tool_v1() -> ToolDefinition {
     }
 }
 
+const STUDY_PLANNER_INLINE_SURFACE_ID: &str = "s-study-planner-summary";
+
+fn study_planner_summary_v1() -> ToolDefinition {
+    ToolDefinition {
+        id: "tool-study-planner".into(),
+        name: "Study Summary".into(),
+        description: "Conversation summary for the Study Planner application".into(),
+        layout: json!({ "type": "single-column", "density": "compact" }),
+        components: vec![ToolComponent {
+            id: "sp-summary-text".into(),
+            component_type: "text".into(),
+            props: Some(json!({
+                "text": "Your study tasks are ready. Open Study Planner for the full dashboard.",
+                "tone": "muted"
+            })),
+            ..Default::default()
+        }],
+        ..Default::default()
+    }
+}
+
 fn study_tasks_model_v1() -> DataModelDefinition {
     DataModelDefinition {
         model_id: "studyTasks".into(),
@@ -977,6 +998,10 @@ pub fn multi_surface_planner_add_priority_plan(base_revision: Option<i64>) -> Ap
                 id: "2".into(),
                 description: "Extend tasks table; preserve dashboard section component IDs".into(),
             },
+            PlanStep {
+                id: "3".into(),
+                description: "Update the related conversation summary surface".into(),
+            },
         ],
         intents: vec![
             ChangeIntent::MigrateDataModel {
@@ -989,6 +1014,16 @@ pub fn multi_surface_planner_add_priority_plan(base_revision: Option<i64>) -> Ap
                 tool_id: "tool-study-planner".into(),
                 tool: study_planner_tool_v2_priority(),
                 change_summary: Some("Add priority to study tasks".into()),
+                base_revision,
+            },
+            ChangeIntent::UpdateComponent {
+                surface_id: STUDY_PLANNER_INLINE_SURFACE_ID.into(),
+                component_id: "sp-summary-text".into(),
+                component_type: None,
+                props: Some(json!({
+                    "text": "Priority is now tracked across your Study Planner tasks.",
+                    "tone": "muted"
+                })),
                 base_revision,
             },
         ],
@@ -1044,17 +1079,14 @@ pub fn progressive_repair_recovery_success_plan() -> ApplicationPlan {
 
 /// Study planner fixture used by Journey 31 ApplicationPlan Apply.
 ///
-/// Desktop path still ships Dashboard + Tasks as stable sections on one tool
-/// surface (ApplicationPlan binds one applicationId per Apply). Kernel proof of
-/// true multi-surface atomic commit (tool canvas + bound inline) lives in
-/// `hostile_16_multi_surface_create_mutate_atomic_commit` /
-/// `hostile_16b_multi_surface_second_surface_failure_rolls_back_both`.
+/// One plan creates two independently persisted surfaces under one application:
+/// the tool canvas plus a conversation-bound inline summary.
 pub fn multi_surface_planner_create_plan() -> ApplicationPlan {
     ApplicationPlan {
         schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
         plan_id: "plan-study-planner-create".into(),
         kind: ApplicationPlanKind::Create,
-        summary: "Create Study Planner with dashboard and tasks sections on one surface".into(),
+        summary: "Create Study Planner dashboard and conversation summary surfaces".into(),
         application_id: Some("tool-study-planner".into()),
         base_revision: None,
         steps: vec![
@@ -1068,6 +1100,10 @@ pub fn multi_surface_planner_create_plan() -> ApplicationPlan {
                     "Create Study Planner tool surface with Dashboard + Tasks (stable component IDs)"
                         .into(),
             },
+            PlanStep {
+                id: "3".into(),
+                description: "Create a related inline study summary surface".into(),
+            },
         ],
         intents: vec![
             ChangeIntent::CreateSurface {
@@ -1075,6 +1111,13 @@ pub fn multi_surface_planner_create_plan() -> ApplicationPlan {
                 change_summary: Some(
                     "Create Study Planner with dashboard and tasks sections".into(),
                 ),
+            },
+            ChangeIntent::CreateInlineSurface {
+                application_id: "tool-study-planner".into(),
+                name: "Study Summary".into(),
+                surface_id: Some(STUDY_PLANNER_INLINE_SURFACE_ID.into()),
+                tool: study_planner_summary_v1(),
+                change_summary: Some("Create the related conversation summary".into()),
             },
             ChangeIntent::UpsertDataModel {
                 application_id: "tool-study-planner".into(),
@@ -1084,7 +1127,7 @@ pub fn multi_surface_planner_create_plan() -> ApplicationPlan {
         tests: vec![],
         diagnostics: Some(json!({
             "fixture": "multi_surface_planner_plan",
-            "multiSurfaceNote": "Journey 31 Apply path uses one authoritative tool surface with Dashboard/Tasks sections. Cross-surface atomic create+mutate is covered by hostile_16 / hostile_16b transaction tests."
+            "surfaceIds": ["surf-tool-study-planner", STUDY_PLANNER_INLINE_SURFACE_ID]
         })),
     }
 }
@@ -1225,7 +1268,31 @@ mod tests {
 
     #[test]
     fn multi_surface_planner_create_plan_compiles() {
-        assert_create_plan_compiles(&multi_surface_planner_create_plan());
+        let compiled = compile_plan(&multi_surface_planner_create_plan()).unwrap();
+        let ops = &compiled.compiled.operations;
+        assert!(ops.iter().any(|o| o.op_type == "surface.create"));
+        assert!(ops
+            .iter()
+            .any(|o| o.op_type == "chat.inline_surface_create"));
+        assert!(ops.iter().any(|o| o.op_type == "data.model_upsert"));
+        assert_eq!(
+            ops.iter()
+                .filter_map(|o| o.target.tool_id.as_deref())
+                .collect::<std::collections::HashSet<_>>(),
+            std::collections::HashSet::from(["tool-study-planner"])
+        );
+    }
+
+    #[test]
+    fn multi_surface_planner_evolve_targets_canvas_and_inline_surface() {
+        let compiled = compile_plan(&multi_surface_planner_add_priority_plan(Some(1))).unwrap();
+        let ops = &compiled.compiled.operations;
+        assert!(ops.iter().any(|o| o.op_type == "tool.full_replace"));
+        assert!(ops.iter().any(|o| {
+            o.op_type == "component.update_props"
+                && o.target.surface_id.as_deref() == Some(STUDY_PLANNER_INLINE_SURFACE_ID)
+                && o.base_revision == Some(1)
+        }));
     }
 
     #[test]

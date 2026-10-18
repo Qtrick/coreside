@@ -63,8 +63,10 @@ export function ThemePresetsSettings() {
   const [saveBusy, setSaveBusy] = useState(false);
 
   const [applyTarget, setApplyTarget] = useState<ThemePresetRecord | null>(null);
+  const [applyFingerprint, setApplyFingerprint] = useState<string | null>(null);
   const [applyBusy, setApplyBusy] = useState(false);
   const applyInFlightRef = useRef(false);
+  const applyDialogRequestRef = useRef(0);
 
   const [renameTarget, setRenameTarget] = useState<ThemePresetRecord | null>(null);
   const [renameName, setRenameName] = useState("");
@@ -77,6 +79,8 @@ export function ThemePresetsSettings() {
   const [updateBusy, setUpdateBusy] = useState(false);
 
   const [menuId, setMenuId] = useState<string | null>(null);
+  const presetRequestRef = useRef(0);
+  const capabilitiesRequestRef = useRef(0);
 
   const saveTitleId = useId();
   const applyTitleId = useId();
@@ -85,47 +89,84 @@ export function ThemePresetsSettings() {
   const deleteTitleId = useId();
   const updateTitleId = useId();
 
-  const refresh = useCallback(async () => {
+  const refreshPresets = useCallback(async () => {
+    const request = ++presetRequestRef.current;
     try {
-      const [list, capabilities] = await Promise.all([
-        api.listThemePresets(),
-        api.getThemePresetCapabilities(),
-      ]);
+      const list = await api.listThemePresets();
+      if (request !== presetRequestRef.current) return;
       setPresets(list);
-      setCaps(capabilities);
       setError(null);
     } catch (err) {
+      if (request !== presetRequestRef.current) return;
       setError(
         err instanceof TauriCommandError || err instanceof Error
           ? err.message
           : "Could not load saved themes",
       );
     } finally {
-      setLoading(false);
+      if (request === presetRequestRef.current) setLoading(false);
+    }
+  }, []);
+
+  const refreshCapabilities = useCallback(async () => {
+    const request = ++capabilitiesRequestRef.current;
+    try {
+      const next = await api.getThemePresetCapabilities();
+      if (request === capabilitiesRequestRef.current) setCaps(next);
+    } catch {
+      // Local preset listing remains usable while entitlement lookup is offline.
+      if (request === capabilitiesRequestRef.current) setCaps(null);
     }
   }, []);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void refreshPresets();
+    void refreshCapabilities();
+  }, [refreshCapabilities, refreshPresets]);
 
   useEffect(() => {
     let unlistenPresets: (() => void) | undefined;
     let cancelled = false;
     void listenThemePresetsChanged(() => {
-      if (!cancelled) void refresh();
+      if (!cancelled) {
+        void refreshPresets();
+        void refreshCapabilities();
+      }
     }).then((fn) => {
-      unlistenPresets = fn;
-    });
+      if (cancelled) fn();
+      else unlistenPresets = fn;
+    }).catch(() => undefined);
     return () => {
       cancelled = true;
+      applyDialogRequestRef.current += 1;
       unlistenPresets?.();
     };
-  }, [refresh]);
+  }, [refreshCapabilities, refreshPresets]);
 
   const dismissApplyDialog = () => {
     if (applyBusy) return;
+    applyDialogRequestRef.current += 1;
     setApplyTarget(null);
+    setApplyFingerprint(null);
+  };
+
+  const openApplyDialog = async (preset: ThemePresetRecord) => {
+    const request = ++applyDialogRequestRef.current;
+    setError(null);
+    setStatus(null);
+    try {
+      const fingerprint = await api.getAppearanceFingerprint();
+      if (request !== applyDialogRequestRef.current) return;
+      setApplyFingerprint(fingerprint);
+      setApplyTarget(preset);
+    } catch (err) {
+      if (request !== applyDialogRequestRef.current) return;
+      setError(
+        err instanceof TauriCommandError || err instanceof Error
+          ? err.message
+          : "Could not prepare Apply confirmation",
+      );
+    }
   };
 
   const openSave = () => {
@@ -142,9 +183,9 @@ export function ThemePresetsSettings() {
       setError("Theme name is required");
       return;
     }
-    if (!caps?.canCreate) {
+    if (caps && !caps.canCreate) {
       setError(
-        `You've reached the limit of ${caps?.limit ?? 10} saved themes. Delete or update an existing theme.`,
+        `You've reached the limit of ${caps.limit} saved themes. Delete or update an existing theme.`,
       );
       return;
     }
@@ -157,7 +198,8 @@ export function ThemePresetsSettings() {
       });
       setSaveOpen(false);
       setStatus(`Saved “${name}”.`);
-      await refresh();
+      await refreshPresets();
+      void refreshCapabilities();
     } catch (err) {
       setError(
         err instanceof TauriCommandError || err instanceof Error
@@ -170,20 +212,37 @@ export function ThemePresetsSettings() {
   };
 
   const confirmApply = async () => {
-    if (!applyTarget || applyInFlightRef.current) return;
+    if (!applyTarget || !applyFingerprint || applyInFlightRef.current) return;
     applyInFlightRef.current = true;
     setApplyBusy(true);
     setError(null);
     try {
-      await applyThemePreset(applyTarget.id, applyTarget.revision);
+      await applyThemePreset(
+        applyTarget.id,
+        applyTarget.revision,
+        applyFingerprint,
+      );
       setStatus(`Applied “${applyTarget.name}”.`);
       setApplyTarget(null);
+      setApplyFingerprint(null);
     } catch (err) {
-      setError(
+      const message =
         err instanceof TauriCommandError || err instanceof Error
           ? err.message
-          : "Couldn't apply this theme. Your current appearance was not changed.",
-      );
+          : "Couldn't apply this theme. Your current appearance was not changed.";
+      if (
+        err instanceof TauriCommandError &&
+        err.code === "conflict" &&
+        message.includes("appearance changed")
+      ) {
+        try {
+          const nextFingerprint = await api.getAppearanceFingerprint();
+          setApplyFingerprint(nextFingerprint);
+        } catch {
+          setApplyFingerprint(null);
+        }
+      }
+      setError(message);
     } finally {
       applyInFlightRef.current = false;
       setApplyBusy(false);
@@ -206,7 +265,8 @@ export function ThemePresetsSettings() {
       });
       setRenameTarget(null);
       setStatus(`Renamed to “${name}”.`);
-      await refresh();
+      await refreshPresets();
+      void refreshCapabilities();
     } catch (err) {
       setError(
         err instanceof TauriCommandError || err instanceof Error
@@ -228,7 +288,8 @@ export function ThemePresetsSettings() {
       });
       setDeleteTarget(null);
       setStatus(`Deleted “${deleteTarget.name}”.`);
-      await refresh();
+      await refreshPresets();
+      void refreshCapabilities();
     } catch (err) {
       setError(
         err instanceof TauriCommandError || err instanceof Error
@@ -250,7 +311,8 @@ export function ThemePresetsSettings() {
       });
       setUpdateTarget(null);
       setStatus(`Updated “${updateTarget.name}” from your current theme.`);
-      await refresh();
+      await refreshPresets();
+      void refreshCapabilities();
     } catch (err) {
       setError(
         err instanceof TauriCommandError || err instanceof Error
@@ -268,6 +330,26 @@ export function ThemePresetsSettings() {
   const dialogOpen = Boolean(
     saveOpen || applyTarget || renameTarget || deleteTarget || updateTarget,
   );
+
+  useEffect(() => {
+    if (!menuId || dialogOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMenuId(null);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(".theme-preset-menu")) return;
+      setMenuId(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [dialogOpen, menuId]);
 
   return (
     <section
@@ -338,11 +420,7 @@ export function ThemePresetsSettings() {
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => {
-                    setApplyTarget(preset);
-                    setError(null);
-                    setStatus(null);
-                  }}
+                  onClick={() => void openApplyDialog(preset)}
                 >
                   Apply Theme
                 </button>
@@ -547,7 +625,7 @@ export function ThemePresetsSettings() {
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={applyBusy}
+                  disabled={applyBusy || !applyFingerprint}
                   onClick={() => void confirmApply()}
                 >
                   {applyBusy ? "Applying…" : "Apply Theme"}

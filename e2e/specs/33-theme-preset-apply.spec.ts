@@ -83,6 +83,36 @@ describe("Journey 33 — theme preset apply dialog", () => {
     };
   }
 
+  function approvedChanges(snapshot: typeof midnightSnapshot) {
+    return {
+      theme: snapshot.themePreference,
+      accentPrimary: {
+        light: snapshot.accentPrimaryLight,
+        dark: snapshot.accentPrimaryDark,
+      },
+      accentSecondary: {
+        light: snapshot.accentSecondaryLight,
+        dark: snapshot.accentSecondaryDark,
+      },
+      background: { light: snapshot.backgroundLight, dark: snapshot.backgroundDark },
+      surface: { light: snapshot.surfaceLight, dark: snapshot.surfaceDark },
+      surfaceMuted: {
+        light: snapshot.surfaceMutedLight,
+        dark: snapshot.surfaceMutedDark,
+      },
+      border: { light: snapshot.borderLight, dark: snapshot.borderDark },
+      textPrimary: {
+        light: snapshot.textPrimaryLight,
+        dark: snapshot.textPrimaryDark,
+      },
+      textSecondary: {
+        light: snapshot.textSecondaryLight,
+        dark: snapshot.textSecondaryDark,
+      },
+      wallpaper: snapshot.wallpaper,
+    };
+  }
+
   async function openCustomizationCategory() {
     await browser.execute(() => {
       const items = Array.from(
@@ -119,13 +149,19 @@ describe("Journey 33 — theme preset apply dialog", () => {
 
   async function seedSavedThemes() {
     await invokeOrThrow("apply_appearance_bundle", {
-      input: { snapshot: midnightSnapshot },
+      input: { changes: approvedChanges(midnightSnapshot) },
+    });
+    await invokeOrThrow("set_workspace_appearance", {
+      input: { interfaceTransparency: midnightSnapshot.interfaceTransparency },
     });
     await invokeOrThrow("save_current_theme_preset", {
       input: { name: midnightName, description: "Desktop fidelity fixture" },
     });
     await invokeOrThrow("apply_appearance_bundle", {
-      input: { snapshot: morningSnapshot },
+      input: { changes: approvedChanges(morningSnapshot) },
+    });
+    await invokeOrThrow("set_workspace_appearance", {
+      input: { interfaceTransparency: morningSnapshot.interfaceTransparency },
     });
     await invokeOrThrow("save_current_theme_preset", {
       input: { name: morningName, description: "Cancellation baseline" },

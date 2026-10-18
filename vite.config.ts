@@ -24,7 +24,6 @@ export default defineConfig({
       "@tauri-apps/api",
       "@tauri-apps/api/core",
       "@tauri-apps/api/event",
-      "@tauri-apps/plugin-shell",
       "react-markdown",
       "remark-gfm",
     ],

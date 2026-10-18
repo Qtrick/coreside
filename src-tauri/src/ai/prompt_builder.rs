@@ -456,7 +456,7 @@ mod tests {
                 "modelId": "tasks",
                 "displayName": "Tasks",
                 "schemaVersion": 1,
-                "fields": [{"fieldId": "title", "type": "text", "required": true}]
+                "fields": [{"fieldId": "title", "fieldType": "text", "required": true}]
             })],
         }];
         let p = build_agent_prompt_with_references_and_state(None, &[], None, None, &slices);
@@ -501,7 +501,7 @@ mod tests {
                 "modelId": "secrets",
                 "fields": [{
                     "fieldId": "apiKey",
-                    "type": "text",
+                    "fieldType": "text",
                     "required": false,
                     "default": "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF"
                 }]

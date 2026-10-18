@@ -18,7 +18,8 @@ pub use repository::{
     update_theme_preset_snapshot, ThemePresetCapabilities, ThemePresetRecord,
 };
 pub use snapshot::{
-    apply_appearance_snapshot, AppearanceSnapshot, APPEARANCE_SNAPSHOT_SCHEMA_VERSION,
+    apply_appearance_changes, apply_appearance_snapshot, AppearanceSnapshot,
+    APPEARANCE_SNAPSHOT_SCHEMA_VERSION,
 };
 
 #[cfg(test)]

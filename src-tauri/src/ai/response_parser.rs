@@ -457,6 +457,66 @@ mod tests {
     }
 
     #[test]
+    fn accepts_data_model_fields_with_id_and_type_aliases() {
+        // Regression: live models often emit component-like `id`/`type` instead of
+        // `fieldId`/`fieldType`, which previously failed closed with
+        // "missing field `fieldId`" on task-manager creates.
+        use crate::ai::plan_fixtures::task_tracker_create_plan;
+        use serde_json::{json, Value};
+
+        let plan = task_tracker_create_plan();
+        let mut envelope = json!({
+            "schemaVersion": "1",
+            "assistantMessage": "Proposed a task manager.",
+            "responseType": "tool_change",
+            "applicationPlan": plan,
+        });
+        let intents = envelope["applicationPlan"]["intents"]
+            .as_array_mut()
+            .expect("intents");
+        let upsert = intents
+            .iter_mut()
+            .find(|i| i.get("intent").and_then(|v| v.as_str()) == Some("upsertDataModel"))
+            .expect("upsertDataModel intent");
+        upsert["model"]["fields"] = json!([
+            {"id": "title", "type": "text", "required": true},
+            {
+                "id": "priority",
+                "type": "enum",
+                "required": false,
+                "enumValues": ["High", "Medium", "Low"]
+            },
+            {
+                "name": "status",
+                "type": "enum",
+                "required": false,
+                "enumValues": ["To Do", "In Progress", "Done"]
+            }
+        ]);
+        let raw = envelope.to_string();
+        let parsed = parse_agent_response(&raw)
+            .unwrap_or_else(|e| panic!("aliased fieldId/type must parse, got: {e}"));
+        assert!(parsed.payload.application_plan.is_some());
+        let ops = parsed
+            .payload
+            .inspection_operations()
+            .expect("aliased plan must compile");
+        assert!(ops.iter().any(|o| o.op_type == "data.model_upsert"));
+        let model_op = ops
+            .iter()
+            .find(|o| o.op_type == "data.model_upsert")
+            .expect("model upsert");
+        let fields = model_op
+            .payload
+            .get("model")
+            .and_then(|m| m.get("fields"))
+            .and_then(Value::as_array)
+            .expect("fields");
+        assert!(fields.iter().any(|f| f["fieldId"] == "title"));
+        assert!(fields.iter().any(|f| f["fieldType"] == "text"));
+    }
+
+    #[test]
     fn recovers_assistant_message_on_bad_json() {
         let raw = "Sure, I can help with that.";
         let parsed = parse_agent_response(raw).unwrap();

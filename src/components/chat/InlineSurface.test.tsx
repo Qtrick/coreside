@@ -7,6 +7,7 @@ import type { SurfaceRecord } from "@/types/runtime-v2";
 const mockSendMessage = vi.fn();
 const mockSetSurfaceDraftConflict = vi.fn();
 const rendererStates: Array<Record<string, unknown>> = [];
+let mockSurfaceSyncEpoch = 0;
 
 vi.mock("@/stores/app-store", () => ({
   useAppStore: (selector: (s: unknown) => unknown) => {
@@ -15,6 +16,8 @@ vi.mock("@/stores/app-store", () => ({
       activeProjectId: "proj-1",
       setSurfaceDraftConflict: mockSetSurfaceDraftConflict,
       previewSurfacesByKey: {},
+      surfaceSyncEpochs: { "surf-100": mockSurfaceSyncEpoch },
+      conversationInlineSurfaceEpochs: {},
     };
     return selector(state);
   },
@@ -43,6 +46,7 @@ vi.mock("@/lib/tauri", () => ({
     interactiveUndo: vi.fn(),
     interactiveHistory: vi.fn().mockResolvedValue([]),
     interactiveReplay: vi.fn(),
+    getSurface: vi.fn(),
   },
   TauriCommandError: class TauriCommandError extends Error {
     code: string;
@@ -141,6 +145,7 @@ describe("InlineSurfaceCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     rendererStates.length = 0;
+    mockSurfaceSyncEpoch = 0;
     vi.mocked(api.getSurfaceStateWithRevision).mockResolvedValue({
       state: { count: 0 },
       stateRevision: 2,
@@ -151,6 +156,56 @@ describe("InlineSurfaceCard", () => {
     render(<InlineSurfaceCard surface={sampleSurface} conversationId="conv-100" />);
     expect(screen.getByText("Counter App")).toBeDefined();
     expect(screen.getByText("r5")).toBeDefined();
+  });
+
+  it("reloads only its authoritative surface after a targeted durable sync", async () => {
+    const updated: SurfaceRecord = {
+      ...sampleSurface,
+      currentRevision: 6,
+      definition: {
+        ...sampleSurface.definition,
+        name: "Updated Counter App",
+      },
+    };
+    vi.mocked(api.getSurface).mockResolvedValue(updated);
+    const view = render(
+      <InlineSurfaceCard surface={sampleSurface} conversationId="conv-100" />,
+    );
+
+    mockSurfaceSyncEpoch = 1;
+    view.rerender(
+      <InlineSurfaceCard surface={sampleSurface} conversationId="conv-100" />,
+    );
+
+    await waitFor(() => expect(api.getSurface).toHaveBeenCalledWith("surf-100"));
+    expect(await screen.findByText("Updated Counter App")).toBeDefined();
+    expect(screen.getByText("r6")).toBeDefined();
+  });
+
+  it("prefers definition name over lagging surface.name after durable sync", async () => {
+    const updated: SurfaceRecord = {
+      ...sampleSurface,
+      name: "Counter App",
+      currentRevision: 7,
+      definition: {
+        ...sampleSurface.definition,
+        name: "Evolved Counter Title",
+      },
+    };
+    vi.mocked(api.getSurface).mockResolvedValue(updated);
+    const view = render(
+      <InlineSurfaceCard surface={sampleSurface} conversationId="conv-100" />,
+    );
+
+    mockSurfaceSyncEpoch = 1;
+    view.rerender(
+      <InlineSurfaceCard surface={sampleSurface} conversationId="conv-100" />,
+    );
+
+    await waitFor(() => expect(api.getSurface).toHaveBeenCalledWith("surf-100"));
+    expect(await screen.findByText("Evolved Counter Title")).toBeDefined();
+    expect(screen.queryByText("Counter App")).toBeNull();
+    expect(screen.getByText("r7")).toBeDefined();
   });
 
   it("serializes interactive submissions and passes authoritative revisions and idempotency key", async () => {

@@ -78,6 +78,20 @@ pub enum ChangeIntent {
         #[serde(default)]
         change_summary: Option<String>,
     },
+    /// Conversation-bound inline surface under the same application as CreateSurface.
+    /// Compiles to `chat.inline_surface_create` (conversation filled at apply from txn).
+    #[serde(rename_all = "camelCase")]
+    CreateInlineSurface {
+        application_id: String,
+        name: String,
+        /// Preferred surface id for same-txn follow-up intents (optional).
+        #[serde(default)]
+        surface_id: Option<String>,
+        /// Layout + components (tool.id should match applicationId when set).
+        tool: crate::ai::ToolDefinition,
+        #[serde(default)]
+        change_summary: Option<String>,
+    },
     /// Evolve an existing surface — compiles to `surface.create` with action update.
     #[serde(rename_all = "camelCase")]
     UpdateSurface {
@@ -378,6 +392,94 @@ pub fn compile(intent: ChangeIntent) -> Result<CompiledChange, KernelError> {
                 rollback_hint: "surface.delete".into(),
             })
         }
+        ChangeIntent::CreateInlineSurface {
+            application_id,
+            name,
+            surface_id,
+            tool,
+            change_summary,
+        } => {
+            crate::security::assert_not_protected(&application_id)
+                .map_err(KernelError::Protected)?;
+            if application_id.trim().is_empty() || name.trim().is_empty() {
+                return Err(KernelError::Validation(
+                    "CreateInlineSurface requires applicationId and name".into(),
+                ));
+            }
+            if !tool.id.is_empty() && tool.id != application_id {
+                return Err(KernelError::Validation(
+                    "CreateInlineSurface tool.id must match applicationId when set".into(),
+                ));
+            }
+            if tool.components.is_empty() {
+                return Err(KernelError::Validation(
+                    "CreateInlineSurface requires at least one component".into(),
+                ));
+            }
+            if let Some(sid) = surface_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                crate::security::assert_not_protected(sid).map_err(KernelError::Protected)?;
+                if sid.starts_with("surf-") {
+                    return Err(KernelError::Validation(
+                        "CreateInlineSurface surfaceId must not use the reserved surf- tool-canvas namespace"
+                            .into(),
+                    ));
+                }
+            }
+            let mut ids = std::collections::HashSet::new();
+            for c in &tool.components {
+                if c.id.trim().is_empty() {
+                    return Err(KernelError::Validation(
+                        "component id must be non-empty".into(),
+                    ));
+                }
+                if !ids.insert(c.id.as_str()) {
+                    return Err(KernelError::Validation(format!(
+                        "duplicate component id '{}'",
+                        c.id
+                    )));
+                }
+                validate_component_type_allowed(&c.component_type)
+                    .map_err(KernelError::CapabilityUnavailable)?;
+            }
+            let preferred = surface_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                // `surf-{toolId}` is reserved for the canonical tool canvas.
+                // Inline instances use the non-canonical `s-*` namespace.
+                .unwrap_or_else(|| format!("s-inline-{application_id}"));
+            let mut definition = tool;
+            definition.id = application_id.clone();
+            definition.name = name.clone();
+            let op = new_op(
+                "chat.inline_surface_create",
+                OperationTarget {
+                    surface_id: Some(preferred),
+                    tool_id: Some(application_id.clone()),
+                    surface_type: Some("inline".into()),
+                    placement: Some("chat_inline".into()),
+                    // conversationId is authoritative from the apply transaction.
+                    ..Default::default()
+                },
+                json!({
+                    "name": name,
+                    "definition": definition,
+                    "changeSummary": change_summary
+                        .unwrap_or_else(|| format!("Create inline surface {name}")),
+                }),
+            );
+            Ok(CompiledChange {
+                compiler_version: COMPILER_VERSION.into(),
+                operations: vec![op],
+                summary: format!("Create inline surface {name}"),
+                rollback_hint: "surface.delete".into(),
+            })
+        }
         ChangeIntent::UpdateSurface {
             tool_id,
             tool,
@@ -566,6 +668,109 @@ mod tests {
         assert_eq!(compiled.operations.len(), 2);
         assert_eq!(compiled.operations[0].op_type, "surface.create");
         assert_eq!(compiled.operations[1].op_type, "data.model_upsert");
+    }
+
+    #[test]
+    fn create_inline_surface_compiles_to_chat_inline_create() {
+        let tool = crate::ai::ToolDefinition {
+            id: "tool-study-planner".into(),
+            name: "Summary".into(),
+            description: "Overdue summary".into(),
+            layout: json!({"type": "stack"}),
+            components: vec![crate::ai::ToolComponent {
+                id: "sum-heading".into(),
+                component_type: "heading".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let compiled = compile(ChangeIntent::CreateInlineSurface {
+            application_id: "tool-study-planner".into(),
+            name: "Overdue Summary".into(),
+            surface_id: Some("s-inline-summary".into()),
+            tool,
+            change_summary: Some("Add summary panel".into()),
+        })
+        .unwrap();
+        assert_eq!(compiled.operations.len(), 1);
+        let op = &compiled.operations[0];
+        assert_eq!(op.op_type, "chat.inline_surface_create");
+        assert_eq!(op.target.placement.as_deref(), Some("chat_inline"));
+        assert_eq!(op.target.surface_type.as_deref(), Some("inline"));
+        assert_eq!(op.target.tool_id.as_deref(), Some("tool-study-planner"));
+        assert_eq!(op.target.surface_id.as_deref(), Some("s-inline-summary"));
+        assert!(op.target.conversation_id.is_none());
+    }
+
+    #[test]
+    fn create_surface_and_inline_compile_together() {
+        let canvas = crate::ai::ToolDefinition {
+            id: "tool-study-planner".into(),
+            name: "Study Planner".into(),
+            description: "".into(),
+            layout: json!({"type": "dashboard"}),
+            components: vec![crate::ai::ToolComponent {
+                id: "board".into(),
+                component_type: "heading".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let inline = crate::ai::ToolDefinition {
+            id: "tool-study-planner".into(),
+            name: "Summary".into(),
+            description: "".into(),
+            layout: json!({"type": "stack"}),
+            components: vec![crate::ai::ToolComponent {
+                id: "sum".into(),
+                component_type: "text".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let compiled = compile_all(&[
+            ChangeIntent::CreateSurface {
+                tool: canvas,
+                change_summary: None,
+            },
+            ChangeIntent::CreateInlineSurface {
+                application_id: "tool-study-planner".into(),
+                name: "Overdue Summary".into(),
+                surface_id: None,
+                tool: inline,
+                change_summary: None,
+            },
+        ])
+        .unwrap();
+        assert_eq!(compiled.operations[0].op_type, "surface.create");
+        assert_eq!(compiled.operations[1].op_type, "chat.inline_surface_create");
+        assert_eq!(
+            compiled.operations[1].target.surface_id.as_deref(),
+            Some("s-inline-tool-study-planner")
+        );
+    }
+
+    #[test]
+    fn create_inline_surface_rejects_reserved_canvas_surface_id() {
+        let tool = crate::ai::ToolDefinition {
+            id: "tool-study-planner".into(),
+            name: "Summary".into(),
+            components: vec![crate::ai::ToolComponent {
+                id: "summary".into(),
+                component_type: "text".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let err = compile(ChangeIntent::CreateInlineSurface {
+            application_id: "tool-study-planner".into(),
+            name: "Summary".into(),
+            surface_id: Some("surf-inline-summary".into()),
+            tool,
+            change_summary: None,
+        })
+        .expect_err("surf- is reserved for canonical tool canvases");
+        assert!(matches!(err, KernelError::Validation(ref msg) if msg.contains("reserved surf-")));
     }
 
     #[test]

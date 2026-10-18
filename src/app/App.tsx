@@ -33,6 +33,7 @@ function parseToolRoute(hash: string): string | null {
 
 function applyThemeToDocument(theme: "light" | "dark") {
   document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
 }
 
 function ToolWindowView({ toolId }: { toolId: string }) {
@@ -146,17 +147,27 @@ export function App() {
   }, [bootstrap, toolRoute]);
 
   // Cross-window appearance apply: refetch settings and reconcile store.
+  // Generation counter rejects out-of-order getSettings responses so a slower
+  // older fetch cannot regress a newer committed appearance.
   useEffect(() => {
     if (!bootstrapped) return;
     let cancelled = false;
     let unlisten: (() => void) | undefined;
+    let appearanceFetchGen = 0;
     void listenAppearanceChanged(() => {
-      void api.getSettings().then((settings) => {
-        if (!cancelled) reconcileCommittedAppearance(settings);
-      });
+      const gen = ++appearanceFetchGen;
+      void api
+        .getSettings()
+        .then((settings) => {
+          if (!cancelled && gen === appearanceFetchGen) {
+            reconcileCommittedAppearance(settings);
+          }
+        })
+        .catch(() => undefined);
     }).then((fn) => {
-      unlisten = fn;
-    });
+      if (cancelled) fn();
+      else unlisten = fn;
+    }).catch(() => undefined);
     return () => {
       cancelled = true;
       unlisten?.();

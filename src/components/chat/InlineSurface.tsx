@@ -137,6 +137,9 @@ export function InlineSurfaceCard({
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const setSurfaceDraftConflict = useAppStore((s) => s.setSurfaceDraftConflict);
   const previewSurfacesByKey = useAppStore((s) => s.previewSurfacesByKey);
+  const surfaceSyncEpoch = useAppStore(
+    (s) => s.surfaceSyncEpochs[surface.id] ?? 0,
+  );
 
   const isInteractive = hasInteractiveDefinition(surface.definition);
   const flushPendingState = useCallback(
@@ -215,7 +218,9 @@ export function InlineSurfaceCard({
   useEffect(() => {
     const prevTool = previousToolRef.current;
     const nextTool = asToolDefinition(initial);
-    setSurface(initial);
+    setSurface((current) =>
+      initial.currentRevision >= current.currentRevision ? initial : current,
+    );
     if (!hydrated) return;
     if (prevTool && prevTool.id === nextTool.id) {
       setState((current) =>
@@ -229,6 +234,20 @@ export function InlineSurfaceCard({
     }
     previousToolRef.current = nextTool;
   }, [hydrated, initial]);
+
+  useEffect(() => {
+    if (surfaceSyncEpoch === 0) return;
+    let cancelled = false;
+    void api
+      .getSurface(surface.id)
+      .then((latest) => {
+        if (!cancelled) setSurface(latest);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [surface.id, surfaceSyncEpoch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -513,11 +532,11 @@ export function InlineSurfaceCard({
       className={`inline-surface${fullWidth ? " full-width" : ""}${collapsed ? " collapsed" : ""}`}
       data-surface-id={surface.id}
       data-instance-id={surface.instanceId}
-      aria-label={surface.name || "Inline surface"}
+      aria-label={tool.name || surface.name || "Inline surface"}
     >
       <header className="inline-surface-header">
         <div className="inline-surface-title">
-          <strong>{surface.name || tool.name}</strong>
+          <strong>{tool.name || surface.name}</strong>
           <span className="muted">r{surface.currentRevision}</span>
           {isPreviewPaint ? (
             <span
@@ -738,11 +757,17 @@ export function InlineSurfaceCard({
 export function InlineSurfacesForMessage({
   conversationId,
   messageId,
+  refreshKey = "",
 }: {
   conversationId: string;
   messageId: string;
+  /** Bump after proposal Apply so newly bound inline surfaces re-list. */
+  refreshKey?: string;
 }) {
   const [surfaces, setSurfaces] = useState<SurfaceRecord[]>([]);
+  const listEpoch = useAppStore(
+    (s) => s.conversationInlineSurfaceEpochs[conversationId] ?? 0,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -750,7 +775,18 @@ export function InlineSurfacesForMessage({
       try {
         const all = await api.listConversationSurfaces(conversationId);
         if (!cancelled) {
-          setSurfaces(all.filter((s) => s.messageId === messageId));
+          // Prefer message-bound surfaces. After this message's proposal Apply,
+          // also accept still-unbound inline rows (bind can lag one paint).
+          const bound = all.filter((s) => s.messageId === messageId);
+          if (bound.length > 0) {
+            setSurfaces(bound);
+            return;
+          }
+          if (refreshKey === "applied") {
+            setSurfaces(all.filter((s) => !s.messageId));
+            return;
+          }
+          setSurfaces([]);
         }
       } catch {
         if (!cancelled) setSurfaces([]);
@@ -759,7 +795,7 @@ export function InlineSurfacesForMessage({
     return () => {
       cancelled = true;
     };
-  }, [conversationId, messageId]);
+  }, [conversationId, messageId, refreshKey, listEpoch]);
 
   if (!surfaces.length) return null;
   // Soft per-message UI cap (matches MAX_INLINE_SURFACES_VISIBLE). Backend list
