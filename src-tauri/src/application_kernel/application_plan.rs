@@ -12,7 +12,9 @@ use crate::db::Database;
 use crate::runtime_v2::operations::AppOperation;
 use crate::runtime_v2::packs::validate_component_type_allowed;
 
-use super::compiler::{compile, compile_all, ChangeIntent, CompiledChange};
+use super::compiler::{
+    compile, compile_all, validate_create_inline_surface_inputs, ChangeIntent, CompiledChange,
+};
 use super::errors::KernelError;
 use super::lineage::{
     resolve_application_identity, resolve_application_surface, resolve_surface_for_application,
@@ -444,56 +446,7 @@ fn validate_intent_refs(intent: &ChangeIntent) -> Result<(), KernelError> {
             surface_id,
             ..
         } => {
-            crate::security::assert_not_protected(application_id)
-                .map_err(KernelError::Protected)?;
-            if application_id.trim().is_empty() || name.trim().is_empty() {
-                return Err(KernelError::Validation(
-                    "CreateInlineSurface requires applicationId and name".into(),
-                ));
-            }
-            let sid = surface_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| {
-                    KernelError::Validation(
-                        "CreateInlineSurface requires an explicit surfaceId (do not rely on s-inline-{applicationId})"
-                            .into(),
-                    )
-                })?;
-            crate::security::assert_not_protected(sid).map_err(KernelError::Protected)?;
-            if sid.starts_with("surf-") {
-                return Err(KernelError::Validation(
-                    "CreateInlineSurface surfaceId must not use the reserved surf- tool-canvas namespace"
-                        .into(),
-                ));
-            }
-            if !tool.id.is_empty() && tool.id != *application_id {
-                return Err(KernelError::Validation(
-                    "CreateInlineSurface tool.id must match applicationId when set".into(),
-                ));
-            }
-            if tool.components.is_empty() {
-                return Err(KernelError::Validation(
-                    "CreateInlineSurface requires at least one component".into(),
-                ));
-            }
-            let mut ids = std::collections::HashSet::new();
-            for c in &tool.components {
-                if c.id.trim().is_empty() {
-                    return Err(KernelError::Validation(
-                        "component id must be non-empty".into(),
-                    ));
-                }
-                if !ids.insert(c.id.as_str()) {
-                    return Err(KernelError::Validation(format!(
-                        "duplicate component id '{}'",
-                        c.id
-                    )));
-                }
-                validate_component_type_allowed(&c.component_type)
-                    .map_err(KernelError::CapabilityUnavailable)?;
-            }
+            validate_create_inline_surface_inputs(application_id, name, tool, surface_id)?;
         }
         ChangeIntent::UpsertDataModel {
             application_id,
@@ -2367,6 +2320,21 @@ mod tests {
             )
             .unwrap()
             .proposal_id
+            .unwrap();
+            // Inline surfaces bind fail-closed to the staging assistant message.
+            let _assistant = crate::db::insert_message(
+                &mut db,
+                &conv.id,
+                "assistant",
+                "Proposed Study Planner",
+                Some(&serde_json::json!({
+                    "runtimeV2": {
+                        "proposalId": prop,
+                        "status": "pending",
+                        "operations": [{"type": "placeholder"}],
+                    }
+                })),
+            )
             .unwrap();
             assert!(decide_proposal(&mut db, None, &prop, true)
                 .unwrap()

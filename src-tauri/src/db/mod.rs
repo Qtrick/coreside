@@ -182,10 +182,14 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         "039_theme_presets",
         include_str!("../../migrations/039_theme_presets.sql"),
     ),
+    (
+        "040_backfill_inline_surface_message_id",
+        include_str!("../../migrations/040_backfill_inline_surface_message_id.sql"),
+    ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "039_theme_presets";
+pub const LATEST_MIGRATION: &str = "040_backfill_inline_surface_message_id";
 
 #[derive(Debug, Error)]
 pub enum DbError {

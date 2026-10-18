@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-recoverable-generation-preview"
+description = "Enables the get_recoverable_generation_preview command without any pre-configured scope."
+commands.allow = ["get_recoverable_generation_preview"]
+
+[[permission]]
+identifier = "deny-get-recoverable-generation-preview"
+description = "Denies the get_recoverable_generation_preview command without any pre-configured scope."
+commands.deny = ["get_recoverable_generation_preview"]

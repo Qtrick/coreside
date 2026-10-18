@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ModalPortal } from "@/components/ui/ModalPortal";
+import { OverlayPortal } from "@/components/ui/OverlayPortal";
 import { ApprovalCard } from "@/components/applications/ApprovalCard";
 import { api, listenApprovalsChanged } from "@/lib/tauri";
 import type { ApprovalRequest, ManifestRecord } from "@/types/application-kernel";
@@ -50,8 +50,10 @@ export function PendingApprovalsHost() {
 
   if (approvals.length === 0) return null;
 
+  // Non-blocking host: approvals must not mark #root inert (Journey 7 /
+  // multi-window approval race needs the rest of the app clickable).
   return (
-    <ModalPortal>
+    <OverlayPortal>
       <div className="approval-host" aria-live="polite">
         {approvals.map((approval) => (
           <ApprovalCard
@@ -66,6 +68,6 @@ export function PendingApprovalsHost() {
           />
         ))}
       </div>
-    </ModalPortal>
+    </OverlayPortal>
   );
 }

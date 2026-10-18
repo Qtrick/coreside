@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 39 forward migrations (001–039; includes `039_theme_presets.sql`)
+**Count:** 40 forward migrations (001–040; includes `040_backfill_inline_surface_message_id.sql`)
 
 ## Inventory
 
@@ -47,6 +47,7 @@
 | 037 | `037_proposal_project_isolation.sql` | Proposal project scope binding and cross-project mutation guards |
 | 038 | `038_appearance_baseline_reset.sql` | One-time workspace appearance baseline: system theme, no wallpaper, solid chrome |
 | 039 | `039_theme_presets.sql` | User-saved theme presets table (name, snapshot JSON, revision, quota-backed CRUD) |
+| 040 | `040_backfill_inline_surface_message_id.sql` | Backfill `message_id` on legacy chat-inline surfaces so fail-closed ownership filtering does not hide them |
 
 ## What is verified
 

@@ -66,4 +66,18 @@ describe("ModalPortal", () => {
     expect(root.hasAttribute("inert")).toBe(false);
     expect(root.hasAttribute("aria-hidden")).toBe(false);
   });
+
+  it("does not mark #root inert when inertBackground is false", () => {
+    render(
+      <ModalPortal inertBackground={false}>
+        <div role="dialog" aria-label="Non-blocking">
+          Content
+        </div>
+      </ModalPortal>,
+    );
+
+    expect(root.hasAttribute("inert")).toBe(false);
+    expect(root.hasAttribute("aria-hidden")).toBe(false);
+    expect(screen.getByRole("dialog", { name: "Non-blocking" })).toBeInTheDocument();
+  });
 });

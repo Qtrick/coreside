@@ -23,7 +23,7 @@ The model **proposes**; the Rust kernel validates, compiles via ChangeIntent, an
     "intents": [
       { "intent": "upsertDataModel", "applicationId": "tool-…", "model": { "modelId": "tasks", "displayName": "Tasks", "schemaVersion": 1, "fields": [{ "fieldId": "title", "fieldType": "text", "required": true }, { "fieldId": "priority", "fieldType": "enum", "required": false, "enumValues": ["High", "Medium", "Low"] }, { "fieldId": "status", "fieldType": "enum", "required": false, "enumValues": ["To Do", "In Progress", "Done"] }, { "fieldId": "completed", "fieldType": "boolean", "required": false, "default": false }] } },
       { "intent": "createSurface", "tool": { /* ToolDefinition — tool_canvas */ }, "changeSummary": "…" },
-      { "intent": "createInlineSurface", "applicationId": "tool-…", "name": "Summary", "surfaceId": "s-inline-summary", "tool": { /* same applicationId; chat_inline panel — never use surf-* (tool-canvas reserved) */ }, "changeSummary": "…" }
+      { "intent": "createInlineSurface", "applicationId": "tool-…", "name": "Summary", "surfaceId": "s-{applicationId}-summary", "tool": { /* same applicationId; chat_inline panel — never use surf-* (tool-canvas reserved) */ }, "changeSummary": "…" }
     ],
     "tests": []
   }
@@ -34,6 +34,7 @@ Rules:
 - Never mutate SQLite, grants, approvals, filesystem, network, or Tauri commands directly.
 - Prefer `kind: "evolve"` with stable component IDs when modifying an existing app — do not create a second unrelated application.
 - Prefer `migrateDataModel` with `migrationStrategy: "add_optional_fields"` for additive schema changes. Destructive strategies require `requireApproval: true`.
+- `createInlineSurface.surfaceId` is **required** and must be unique per application (example: `s-{applicationId}-{purpose}` such as `s-tool-study-planner-summary`). Never omit it, never reuse one id for two inlines, and never use the reserved `surf-*` tool-canvas namespace.
 - Legacy `toolChange` alone remains accepted; when `applicationPlan` is present it is authoritative for operations.
 - Invalid plans fail closed with structured diagnostics — do not invent privilege escalation.
 

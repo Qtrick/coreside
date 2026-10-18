@@ -53,17 +53,18 @@ pub const MANIFEST_SCHEMA_VERSION: &str = "1";
 ///
 /// Fail closed: if this apply created any chat-inline surfaces, each must be bound to the
 /// proposal's assistant message before COMMIT. Missing ownership breaks restoration.
+/// Mutations of existing inlines (component.insert, etc.) do not require a bind message.
 fn bind_inline_surfaces_to_proposal_message(
     db: &Database,
     conversation_id: &str,
     proposal_id: &str,
-    surfaces: &[crate::runtime_v2::surfaces::SurfaceRecord],
+    operations: &[AppOperation],
 ) -> Result<(), KernelError> {
     use rusqlite::{params, OptionalExtension};
-    let inline_ids: Vec<&str> = surfaces
+    let inline_ids: Vec<&str> = operations
         .iter()
-        .filter(|s| s.surface_type == "inline")
-        .map(|s| s.id.as_str())
+        .filter(|op| op.op_type == "chat.inline_surface_create")
+        .filter_map(|op| op.target.surface_id.as_deref())
         .collect();
     if inline_ids.is_empty() {
         return Ok(());
@@ -1140,15 +1141,12 @@ pub fn decide_proposal(
     // 5b. Bind newly created inline surfaces to the assistant message that owns this
     // proposal (message_id is not known at compile time). Fail closed before COMMIT —
     // unbound inlines break restoration and must not leave a partial durable apply.
-    let has_inline = apply
-        .surfaces
+    let needs_inline_bind = ops
         .iter()
-        .any(|s| s.surface_type == "inline");
-    if has_inline {
+        .any(|op| op.op_type == "chat.inline_surface_create");
+    if needs_inline_bind {
         let bind_result = match proposal.conversation_id.as_deref() {
-            Some(cid) => {
-                bind_inline_surfaces_to_proposal_message(db, cid, proposal_id, &apply.surfaces)
-            }
+            Some(cid) => bind_inline_surfaces_to_proposal_message(db, cid, proposal_id, &ops),
             None => Err(KernelError::Validation(
                 "Cannot apply proposal with inline surfaces without a conversationId".into(),
             )),

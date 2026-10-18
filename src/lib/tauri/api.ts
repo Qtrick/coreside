@@ -287,7 +287,8 @@ export const api = {
       formId: string;
       eventName?: string | null;
       applicationId?: string | null;
-      surfaceId?: string | null;
+      /** Required: binds the form submission to a durable surface. */
+      surfaceId: string;
       fields: Record<string, unknown>;
     } | null;
     /** Per-send Channel handler — authoritative for text/action/error/operation. */
@@ -694,12 +695,81 @@ export const api = {
         updatedAt: string;
       }>
     >("list_interrupted_turns", { conversationId, limit }),
-  discardInterruptedTurn: (turnId: string) =>
+  listRecoverableGenerations: (conversationId: string, limit?: number) =>
+    invoke<
+      Array<{
+        turnId: string;
+        conversationId: string;
+        attemptId: string;
+        sequence: number;
+        complete: boolean;
+        status:
+          | "previewAvailable"
+          | "previewUnavailable"
+          | "checkpointCorrupted"
+          | "notRecoverable";
+        opCount: number;
+        contentHash?: string | null;
+        updatedAt: string;
+        canRetry: boolean;
+        canDiscard: boolean;
+        canReview: boolean;
+      }>
+    >("list_recoverable_generations", { conversationId, limit }),
+  getRecoverableGenerationPreview: (args: {
+    conversationId: string;
+    turnId: string;
+    expectedAttemptId: string;
+    expectedSequence?: number;
+  }) =>
+    invoke<{
+      turnId: string;
+      conversationId: string;
+      attemptId: string;
+      sequence: number;
+      complete: boolean;
+      contentHash?: string | null;
+      readOnly: boolean;
+      surfaces: Array<{
+        surfaceId: string;
+        toolId?: string | null;
+        applicationId?: string | null;
+        definitionJson: unknown;
+        stateJson: unknown;
+        revision: number;
+        sequence: number;
+      }>;
+      warnings: string[];
+    }>("get_recoverable_generation_preview", args),
+  retryRecoverableGeneration: (args: {
+    conversationId: string;
+    turnId: string;
+    expectedAttemptId: string;
+    expectedSequence?: number;
+  }) =>
+    invoke<{
+      retiredTurnId: string;
+      conversationId: string;
+      originalContent: string;
+      userMessageId: string;
+      startsNewAttempt: boolean;
+    }>("retry_recoverable_generation", args),
+  discardInterruptedTurn: (
+    turnId: string,
+    conversationId: string,
+    expectedAttemptId?: string,
+    expectedSequence?: number,
+  ) =>
     invoke<{
       id: string;
       state: string;
       errorCategory?: string | null;
-    }>("discard_interrupted_turn", { turnId }),
+    }>("discard_interrupted_turn", {
+      turnId,
+      conversationId,
+      expectedAttemptId: expectedAttemptId ?? null,
+      expectedSequence: expectedSequence ?? null,
+    }),
 
   // Runtime V2
   listCapabilityPacks: () =>

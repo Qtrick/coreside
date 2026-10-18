@@ -113,6 +113,67 @@ pub struct CompiledChange {
     pub rollback_hint: String,
 }
 
+/// Shared CreateInlineSurface checks used by plan validation and compile.
+///
+/// Returns the trimmed explicit `surfaceId` on success.
+pub(crate) fn validate_create_inline_surface_inputs(
+    application_id: &str,
+    name: &str,
+    tool: &crate::ai::ToolDefinition,
+    surface_id: &Option<String>,
+) -> Result<String, KernelError> {
+    crate::security::assert_not_protected(application_id).map_err(KernelError::Protected)?;
+    if application_id.trim().is_empty() || name.trim().is_empty() {
+        return Err(KernelError::Validation(
+            "CreateInlineSurface requires applicationId and name".into(),
+        ));
+    }
+    if !tool.id.is_empty() && tool.id != application_id {
+        return Err(KernelError::Validation(
+            "CreateInlineSurface tool.id must match applicationId when set".into(),
+        ));
+    }
+    if tool.components.is_empty() {
+        return Err(KernelError::Validation(
+            "CreateInlineSurface requires at least one component".into(),
+        ));
+    }
+    let sid = surface_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            KernelError::Validation(
+                "CreateInlineSurface requires an explicit surfaceId (do not rely on s-inline-{applicationId})"
+                    .into(),
+            )
+        })?;
+    crate::security::assert_not_protected(sid).map_err(KernelError::Protected)?;
+    if sid.starts_with("surf-") {
+        return Err(KernelError::Validation(
+            "CreateInlineSurface surfaceId must not use the reserved surf- tool-canvas namespace"
+                .into(),
+        ));
+    }
+    let mut ids = std::collections::HashSet::new();
+    for c in &tool.components {
+        if c.id.trim().is_empty() {
+            return Err(KernelError::Validation(
+                "component id must be non-empty".into(),
+            ));
+        }
+        if !ids.insert(c.id.as_str()) {
+            return Err(KernelError::Validation(format!(
+                "duplicate component id '{}'",
+                c.id
+            )));
+        }
+        validate_component_type_allowed(&c.component_type)
+            .map_err(KernelError::CapabilityUnavailable)?;
+    }
+    Ok(sid.to_string())
+}
+
 fn new_op(op_type: &str, target: OperationTarget, payload: serde_json::Value) -> AppOperation {
     AppOperation {
         id: format!("op-{}", Uuid::new_v4()),
@@ -399,64 +460,9 @@ pub fn compile(intent: ChangeIntent) -> Result<CompiledChange, KernelError> {
             tool,
             change_summary,
         } => {
-            crate::security::assert_not_protected(&application_id)
-                .map_err(KernelError::Protected)?;
-            if application_id.trim().is_empty() || name.trim().is_empty() {
-                return Err(KernelError::Validation(
-                    "CreateInlineSurface requires applicationId and name".into(),
-                ));
-            }
-            if !tool.id.is_empty() && tool.id != application_id {
-                return Err(KernelError::Validation(
-                    "CreateInlineSurface tool.id must match applicationId when set".into(),
-                ));
-            }
-            if tool.components.is_empty() {
-                return Err(KernelError::Validation(
-                    "CreateInlineSurface requires at least one component".into(),
-                ));
-            }
-            if let Some(sid) = surface_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-            {
-                crate::security::assert_not_protected(sid).map_err(KernelError::Protected)?;
-                if sid.starts_with("surf-") {
-                    return Err(KernelError::Validation(
-                        "CreateInlineSurface surfaceId must not use the reserved surf- tool-canvas namespace"
-                            .into(),
-                    ));
-                }
-            }
-            let mut ids = std::collections::HashSet::new();
-            for c in &tool.components {
-                if c.id.trim().is_empty() {
-                    return Err(KernelError::Validation(
-                        "component id must be non-empty".into(),
-                    ));
-                }
-                if !ids.insert(c.id.as_str()) {
-                    return Err(KernelError::Validation(format!(
-                        "duplicate component id '{}'",
-                        c.id
-                    )));
-                }
-                validate_component_type_allowed(&c.component_type)
-                    .map_err(KernelError::CapabilityUnavailable)?;
-            }
-            // Explicit surfaceId is required by ApplicationPlan validation.
-            // `surf-*` remains reserved for tool canvas; inline uses `s-*`.
-            let preferred = surface_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .ok_or_else(|| {
-                    KernelError::Validation(
-                        "CreateInlineSurface requires an explicit surfaceId".into(),
-                    )
-                })?;
+            // Explicit surfaceId is required; `surf-*` stays reserved for canvas.
+            let preferred =
+                validate_create_inline_surface_inputs(&application_id, &name, &tool, &surface_id)?;
             let mut definition = tool;
             definition.id = application_id.clone();
             definition.name = name.clone();

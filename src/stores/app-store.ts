@@ -289,7 +289,7 @@ type AppStore = {
       formId: string;
       eventName?: string | null;
       applicationId?: string | null;
-      surfaceId?: string | null;
+      surfaceId: string;
       surfaceRevision?: number | null;
       stateRevision?: number | null;
       componentId?: string | null;

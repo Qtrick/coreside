@@ -99,11 +99,58 @@ fn row_to_record(
     })
 }
 
+/// Count presets that survive the same parse/validation as [`list_theme_presets`].
+/// Invalid rows are skipped (and logged) so quota matches what the UI can show.
+fn count_valid_theme_presets_on_conn(conn: &rusqlite::Connection) -> DbResult<u32> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, description, schema_version, snapshot_json, revision, created_at, updated_at
+         FROM theme_presets",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, String>(7)?,
+        ))
+    })?;
+    let mut n = 0u32;
+    for row in rows {
+        let (
+            id,
+            name,
+            description,
+            schema_version,
+            snapshot_json,
+            revision,
+            created_at,
+            updated_at,
+        ) = row?;
+        match row_to_record(
+            id,
+            name,
+            description,
+            schema_version,
+            snapshot_json,
+            revision,
+            created_at,
+            updated_at,
+        ) {
+            Ok(_) => n += 1,
+            Err(error) => {
+                tracing::warn!(error = %error, "skipping invalid theme preset row");
+            }
+        }
+    }
+    Ok(n)
+}
+
 pub fn count_theme_presets(db: &Database) -> DbResult<u32> {
-    let n: i64 = db
-        .conn()
-        .query_row("SELECT COUNT(*) FROM theme_presets", [], |r| r.get(0))?;
-    Ok(n.max(0) as u32)
+    count_valid_theme_presets_on_conn(db.conn())
 }
 
 pub fn list_theme_presets(db: &Database) -> DbResult<Vec<ThemePresetRecord>> {
@@ -198,9 +245,9 @@ pub fn insert_theme_preset(
 
     db.with_transaction(|conn| {
         snapshot.assert_media_assets_exist_on_conn(conn)?;
-        let count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM theme_presets", [], |r| r.get(0))?;
-        if (count as u32) >= max_allowed {
+        // Quota must match list/count: only valid (parseable) presets consume slots.
+        let count = count_valid_theme_presets_on_conn(conn)?;
+        if count >= max_allowed {
             return Err(DbError::Invalid(format!(
                 "Theme preset limit reached ({max_allowed}). Delete or update an existing theme."
             )));

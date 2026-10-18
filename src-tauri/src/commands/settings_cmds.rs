@@ -463,6 +463,10 @@ pub fn set_workspace_appearance(
     let mut db = state.db.lock();
     db.with_transaction(|conn| {
         for (key, value) in &pending {
+            if key == "wallpaperJson" && !value.trim().is_empty() {
+                let ids = crate::theme_presets::asset_ids_from_wallpaper_json(value);
+                crate::theme_presets::assert_wallpaper_media_asset_ids_on_conn(conn, &ids)?;
+            }
             db::set_setting_on_conn(conn, key, value)?;
         }
         Ok(())

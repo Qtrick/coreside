@@ -18,8 +18,8 @@ pub use repository::{
     update_theme_preset_snapshot, ThemePresetCapabilities, ThemePresetRecord,
 };
 pub use snapshot::{
-    apply_appearance_changes, apply_appearance_snapshot, AppearanceSnapshot,
-    APPEARANCE_SNAPSHOT_SCHEMA_VERSION,
+    apply_appearance_changes, apply_appearance_snapshot, assert_wallpaper_media_asset_ids_on_conn,
+    asset_ids_from_wallpaper_json, AppearanceSnapshot, APPEARANCE_SNAPSHOT_SCHEMA_VERSION,
 };
 
 #[cfg(test)]

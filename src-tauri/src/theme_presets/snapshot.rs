@@ -235,30 +235,7 @@ impl AppearanceSnapshot {
 
     /// Collect media asset IDs referenced by the snapshot wallpaper.
     pub fn referenced_asset_ids(&self) -> Vec<String> {
-        let mut ids = Vec::new();
-        if self.wallpaper_json.trim().is_empty() {
-            return ids;
-        }
-        let Ok(value) = serde_json::from_str::<Value>(&self.wallpaper_json) else {
-            return ids;
-        };
-        if let Some(id) = value.get("assetId").and_then(|v| v.as_str()) {
-            if !id.is_empty() {
-                ids.push(id.to_string());
-            }
-        }
-        if let Some(arr) = value.get("slideAssetIds").and_then(|v| v.as_array()) {
-            for item in arr {
-                if let Some(id) = item.as_str() {
-                    if !id.is_empty() {
-                        ids.push(id.to_string());
-                    }
-                }
-            }
-        }
-        ids.sort();
-        ids.dedup();
-        ids
+        asset_ids_from_wallpaper_json(&self.wallpaper_json)
     }
 
     /// Ensure referenced media assets exist and are global (not project-scoped).
@@ -267,39 +244,74 @@ impl AppearanceSnapshot {
         &self,
         conn: &rusqlite::Connection,
     ) -> DbResult<()> {
-        for asset_id in self.referenced_asset_ids() {
-            let asset = conn
-                .query_row(
-                    "SELECT local_filename, validation_status, project_id FROM media_assets WHERE id = ?1 LIMIT 1",
-                    [&asset_id],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, Option<String>>(2)?,
-                        ))
-                    },
-                )
-                .optional()?;
-            let Some((local_filename, validation_status, project_id)) = asset else {
-                return Err(DbError::NotFound(asset_id));
-            };
-            if project_id.as_ref().is_some_and(|p| !p.trim().is_empty()) {
-                return Err(DbError::Invalid(format!(
-                    "theme wallpaper cannot use project-scoped media asset {asset_id}"
-                )));
-            }
-            if validation_status != "ok" {
-                return Err(DbError::Invalid(format!(
-                    "theme wallpaper asset {asset_id} is not valid"
-                )));
-            }
-            crate::media::resolve_asset_file_path(&local_filename).map_err(|_| {
-                DbError::NotFound(format!("theme wallpaper asset file for {asset_id}"))
-            })?;
-        }
-        Ok(())
+        assert_wallpaper_media_asset_ids_on_conn(conn, &self.referenced_asset_ids())
     }
+}
+
+/// Shared media gate for wallpaperJson asset IDs (theme presets + appearance paths).
+pub fn assert_wallpaper_media_asset_ids_on_conn(
+    conn: &rusqlite::Connection,
+    asset_ids: &[String],
+) -> DbResult<()> {
+    for asset_id in asset_ids {
+        let asset = conn
+            .query_row(
+                "SELECT local_filename, validation_status, project_id FROM media_assets WHERE id = ?1 LIMIT 1",
+                [asset_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((local_filename, validation_status, project_id)) = asset else {
+            return Err(DbError::NotFound(asset_id.clone()));
+        };
+        if project_id.as_ref().is_some_and(|p| !p.trim().is_empty()) {
+            return Err(DbError::Invalid(format!(
+                "theme wallpaper cannot use project-scoped media asset {asset_id}"
+            )));
+        }
+        if validation_status != "ok" {
+            return Err(DbError::Invalid(format!(
+                "theme wallpaper asset {asset_id} is not valid"
+            )));
+        }
+        crate::media::resolve_asset_file_path(&local_filename).map_err(|_| {
+            DbError::NotFound(format!("theme wallpaper asset file for {asset_id}"))
+        })?;
+    }
+    Ok(())
+}
+
+pub fn asset_ids_from_wallpaper_json(wallpaper_json: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    if wallpaper_json.trim().is_empty() {
+        return ids;
+    }
+    let Ok(value) = serde_json::from_str::<Value>(wallpaper_json) else {
+        return ids;
+    };
+    if let Some(id) = value.get("assetId").and_then(|v| v.as_str()) {
+        if !id.is_empty() {
+            ids.push(id.to_string());
+        }
+    }
+    if let Some(arr) = value.get("slideAssetIds").and_then(|v| v.as_array()) {
+        for item in arr {
+            if let Some(id) = item.as_str() {
+                if !id.is_empty() {
+                    ids.push(id.to_string());
+                }
+            }
+        }
+    }
+    ids.sort();
+    ids.dedup();
+    ids
 }
 
 /// Apply a validated appearance snapshot in one SQLite transaction.
@@ -330,9 +342,21 @@ pub fn apply_appearance_changes(
         writes.push(("wallpaperJson".into(), String::new()));
     }
     db.with_transaction(|conn| {
+        let mut normalized_writes: Vec<(String, String)> = Vec::with_capacity(writes.len());
         for (key, value) in &writes {
             let normalized = normalize_setting_kv(key, value).map_err(DbError::Invalid)?;
-            db::set_setting_on_conn(conn, key, &normalized)?;
+            normalized_writes.push((key.clone(), normalized));
+        }
+        // Same media gate as theme-preset snapshot apply — schema validation alone
+        // is not enough for wallpaperJson that references local assets.
+        for (key, value) in &normalized_writes {
+            if key == "wallpaperJson" && !value.trim().is_empty() {
+                let ids = asset_ids_from_wallpaper_json(value);
+                assert_wallpaper_media_asset_ids_on_conn(conn, &ids)?;
+            }
+        }
+        for (key, value) in &normalized_writes {
+            db::set_setting_on_conn(conn, key, value)?;
         }
         Ok(())
     })

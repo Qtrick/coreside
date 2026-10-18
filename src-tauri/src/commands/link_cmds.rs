@@ -27,33 +27,33 @@ pub async fn open_external_url(url: String) -> Result<(), CommandError> {
 }
 
 /// Open a validated http(s) URL with the OS default browser (no shell plugin).
+///
+/// Spawns the opener and returns once the process has started — do not wait on
+/// the browser (that would block the async runtime until the user quits it).
 fn open_http_url_in_browser(url: &str) -> Result<(), String> {
     // ponytail: URL already passed validate_public_http_url; use the OS opener
     // directly so we do not need deprecated shell.open / a second opener plugin.
-    let status = {
+    let child = {
         #[cfg(target_os = "macos")]
         {
-            std::process::Command::new("open").arg(url).status()
+            std::process::Command::new("open").arg(url).spawn()
         }
         #[cfg(target_os = "windows")]
         {
             // Avoid cmd.exe: URL query metacharacters must never enter a shell parser.
             std::process::Command::new("rundll32.exe")
                 .args(["url.dll,FileProtocolHandler", url])
-                .status()
+                .spawn()
         }
         #[cfg(all(unix, not(target_os = "macos")))]
         {
-            std::process::Command::new("xdg-open").arg(url).status()
+            std::process::Command::new("xdg-open").arg(url).spawn()
         }
     }
     .map_err(|err| err.to_string())?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("browser opener exited with {status}"))
-    }
+    // Detach: drop Child without waiting so the opener can outlive this call.
+    drop(child);
+    Ok(())
 }
 
 #[cfg(test)]

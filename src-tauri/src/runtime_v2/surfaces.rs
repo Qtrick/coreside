@@ -870,11 +870,27 @@ pub fn update_surface_definition(
         params![version_id, surface_id, next, def_json, change_summary, curr_state_json, curr_state_rev, now],
     )?;
 
-    // Keep linked tool in sync when this is a tool surface via canonical projection
+    // Keep the linked tools row in sync only from the canonical tool canvas.
+    // Conversation inlines may share tool_id for lineage; mutating them must not
+    // rename/replace the Personal app entry (Journey 31 Study Summary vs Planner).
     if let Some(tool_id) = current.tool_id.as_ref() {
-        let tool: ToolDefinition = if definition.get("sections").is_some() {
-            if let Ok(doc) = super::software_document::SoftwareDocument::from_value(definition) {
-                doc.to_tool_definition()
+        if current.placement == "tool_canvas" {
+            let tool: ToolDefinition = if definition.get("sections").is_some() {
+                if let Ok(doc) = super::software_document::SoftwareDocument::from_value(definition)
+                {
+                    doc.to_tool_definition()
+                } else {
+                    serde_json::from_value::<ToolDefinition>(definition.clone()).unwrap_or_else(
+                        |_| ToolDefinition {
+                            id: tool_id.clone(),
+                            name: current.name.clone(),
+                            description: String::new(),
+                            layout: serde_json::json!({ "type": "single-column" }),
+                            components: Vec::new(),
+                            ..Default::default()
+                        },
+                    )
+                }
             } else {
                 serde_json::from_value::<ToolDefinition>(definition.clone()).unwrap_or_else(|_| {
                     ToolDefinition {
@@ -886,34 +902,23 @@ pub fn update_surface_definition(
                         ..Default::default()
                     }
                 })
-            }
-        } else {
-            serde_json::from_value::<ToolDefinition>(definition.clone()).unwrap_or_else(|_| {
-                ToolDefinition {
-                    id: tool_id.clone(),
-                    name: current.name.clone(),
-                    description: String::new(),
-                    layout: serde_json::json!({ "type": "single-column" }),
-                    components: Vec::new(),
-                    ..Default::default()
-                }
-            })
-        };
-        let layout = layout_type_string(&tool.layout);
-        let tool_def_json = serde_json::to_string(&tool)?;
-        db.conn().execute(
-            "UPDATE tools SET name = ?1, description = ?2, layout = ?3, definition_json = ?4,
-             current_version = ?5, updated_at = ?6 WHERE id = ?7",
-            params![
-                tool.name,
-                tool.description,
-                layout,
-                tool_def_json,
-                next,
-                now,
-                tool_id
-            ],
-        )?;
+            };
+            let layout = layout_type_string(&tool.layout);
+            let tool_def_json = serde_json::to_string(&tool)?;
+            db.conn().execute(
+                "UPDATE tools SET name = ?1, description = ?2, layout = ?3, definition_json = ?4,
+                 current_version = ?5, updated_at = ?6 WHERE id = ?7",
+                params![
+                    tool.name,
+                    tool.description,
+                    layout,
+                    tool_def_json,
+                    next,
+                    now,
+                    tool_id
+                ],
+            )?;
+        }
     }
     get_surface(db, surface_id)
 }
@@ -1298,6 +1303,84 @@ mod tests {
 
         let err = promote_inline_to_tool(&mut db, &surface.id, DEFAULT_WORKSPACE_ID).unwrap_err();
         assert!(matches!(err, DbError::Invalid(_)));
+    }
+
+    #[test]
+    fn updating_bound_inline_does_not_rename_personal_tool() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Chat", None).unwrap();
+        apply_tool_change(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            &ToolDefinition {
+                id: "tool-study-planner".into(),
+                name: "Study Planner".into(),
+                description: "dashboard".into(),
+                layout: json!("stack"),
+                components: vec![crate::ai::ToolComponent {
+                    id: "h".into(),
+                    component_type: "heading".into(),
+                    value_key: None,
+                    props: Some(json!({ "text": "Dashboard" })),
+                    children: None,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            "create",
+            None,
+            "test",
+        )
+        .unwrap();
+
+        let mut inline = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Study Summary",
+            &json!({
+                "id": "tool-study-planner",
+                "name": "Study Summary",
+                "description": "",
+                "layout": "stack",
+                "components": [{
+                    "id": "sp-summary-text",
+                    "type": "text",
+                    "props": { "text": "ready" }
+                }]
+            }),
+            &[],
+        )
+        .unwrap();
+        bind_surface_tool_id(&mut db, &inline.id, "tool-study-planner").unwrap();
+        inline = get_surface(&db, &inline.id).unwrap();
+        assert_eq!(inline.tool_id.as_deref(), Some("tool-study-planner"));
+
+        update_surface_definition(
+            &mut db,
+            &inline.id,
+            &json!({
+                "id": "tool-study-planner",
+                "name": "Study Summary",
+                "description": "",
+                "layout": "stack",
+                "components": [{
+                    "id": "sp-summary-text",
+                    "type": "text",
+                    "props": { "text": "Priority is now tracked." }
+                }]
+            }),
+            "update summary copy",
+            Some(inline.current_revision),
+        )
+        .unwrap();
+
+        let tool = crate::db::get_tool(&db, "tool-study-planner").unwrap();
+        assert_eq!(
+            tool.name, "Study Planner",
+            "inline prop updates must not overwrite the Personal apps tool name"
+        );
     }
 
     #[test]

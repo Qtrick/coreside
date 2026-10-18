@@ -5493,7 +5493,19 @@ body > .window-overlay-root > *,
 .generation-recovery-actions {
   display: flex;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.35rem;
+}
+
+.generation-recovery-card[data-reviewing="true"] {
+  border-color: color-mix(in srgb, var(--accent, #3d8b6e) 45%, var(--border));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .generation-recovery-card {
+    transition: none;
+  }
 }
 
 .generation-recovery-error {

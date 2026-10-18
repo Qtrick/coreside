@@ -12,6 +12,8 @@ const FOCUSABLE = [
 
 /** Innermost portal first: only the topmost modal reacts to Tab and Escape. */
 const stack: HTMLElement[] = [];
+/** Count of open portals that requested a blocking (#root inert) backdrop. */
+let inertHolders = 0;
 
 function focusable(root: HTMLElement): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
@@ -33,29 +35,42 @@ function focusable(root: HTMLElement): HTMLElement[] {
 export function ModalPortal({
   children,
   onClose,
+  inertBackground = true,
 }: {
   children: ReactNode;
   /** When provided, Escape closes the topmost dialog. */
   onClose?: () => void;
+  /**
+   * When true (default), mark #root inert while this portal is open.
+   * Set false for non-blocking hosts (e.g. pending approvals) that must not
+   * freeze the rest of the app.
+   */
+  inertBackground?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const inertRef = useRef(inertBackground);
+  inertRef.current = inertBackground;
 
   useEffect(() => {
     const node = containerRef.current;
     if (!node) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
     stack.push(node);
+    const makeInert = inertRef.current;
 
-    // Make the app shell inert while any modal is open so pointer/keyboard
+    // Make the app shell inert while a blocking modal is open so pointer/keyboard
     // cannot reach background controls (ARIA alone is insufficient).
     const appRoot =
       document.getElementById("root") ??
       document.querySelector<HTMLElement>("#coreside-root, [data-coreside-root]");
-    if (stack.length === 1 && appRoot) {
-      appRoot.setAttribute("inert", "");
-      appRoot.setAttribute("aria-hidden", "true");
+    if (makeInert) {
+      inertHolders += 1;
+      if (inertHolders === 1 && appRoot) {
+        appRoot.setAttribute("inert", "");
+        appRoot.setAttribute("aria-hidden", "true");
+      }
     }
 
     const frame = window.requestAnimationFrame(() => {
@@ -96,9 +111,12 @@ export function ModalPortal({
       const index = stack.indexOf(node);
       if (index >= 0) stack.splice(index, 1);
 
-      if (stack.length === 0 && appRoot) {
-        appRoot.removeAttribute("inert");
-        appRoot.removeAttribute("aria-hidden");
+      if (makeInert) {
+        inertHolders = Math.max(0, inertHolders - 1);
+        if (inertHolders === 0 && appRoot) {
+          appRoot.removeAttribute("inert");
+          appRoot.removeAttribute("aria-hidden");
+        }
       }
 
       // Closing a dialog that is not the topmost one must not pull focus out of

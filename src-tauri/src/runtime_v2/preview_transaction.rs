@@ -10,6 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -105,6 +106,161 @@ pub struct PreviewPaintEvent {
     pub state_json: Value,
     pub revision: i64,
     pub sequence: u64,
+}
+
+/// Renderer-safe recovered preview (staging only — never Apply authority).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoverableGenerationPreview {
+    pub turn_id: String,
+    pub conversation_id: String,
+    pub attempt_id: String,
+    pub sequence: u32,
+    pub complete: bool,
+    pub content_hash: Option<String>,
+    pub read_only: bool,
+    pub surfaces: Vec<RecoverablePreviewSurface>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoverablePreviewSurface {
+    pub surface_id: String,
+    pub tool_id: Option<String>,
+    pub application_id: Option<String>,
+    pub definition_json: Value,
+    pub state_json: Value,
+    pub revision: i64,
+    pub sequence: u64,
+}
+
+/// Reconstruct a read-only speculative preview from a durable ops checkpoint.
+///
+/// Does not write SQLite, execute actions, or Apply. Seeds from authoritative
+/// surfaces when present; create ops may introduce speculative-only surfaces.
+pub fn reconstruct_recoverable_preview(
+    db: &crate::db::Database,
+    turn: &super::turn_journal::TurnJournalRecord,
+    expected_conversation_id: &str,
+    expected_attempt_id: &str,
+    expected_sequence: Option<u32>,
+) -> crate::db::DbResult<RecoverableGenerationPreview> {
+    use crate::db::DbError;
+    use super::turn_journal::ProgressiveOpsCheckpoint;
+    use super::{get_surface, get_surface_state};
+
+    if turn.conversation_id != expected_conversation_id {
+        return Err(DbError::Invalid(
+            "turn does not belong to conversation".into(),
+        ));
+    }
+    if turn.attempt_id != expected_attempt_id {
+        return Err(DbError::Invalid(
+            "stale_attempt: preview attempt_id mismatch".into(),
+        ));
+    }
+    if turn.state != super::turn_journal::TurnState::InterruptedRecoverable {
+        return Err(DbError::Invalid(format!(
+            "preview only from interrupted_recoverable, got {:?}",
+            turn.state
+        )));
+    }
+    let raw = turn.operations_json.as_deref().ok_or_else(|| {
+        DbError::Invalid("preview_unavailable: no checkpoint on turn".into())
+    })?;
+    let cp = ProgressiveOpsCheckpoint::parse(raw)?;
+    if cp.attempt_id != expected_attempt_id {
+        return Err(DbError::Invalid(
+            "stale_attempt: checkpoint attempt_id mismatch".into(),
+        ));
+    }
+    if let Some(seq) = expected_sequence {
+        if cp.sequence != seq {
+            return Err(DbError::Invalid(
+                "stale_checkpoint: preview sequence mismatch".into(),
+            ));
+        }
+    }
+    if cp.ops.is_empty() {
+        return Err(DbError::Invalid(
+            "preview_unavailable: checkpoint has no operations".into(),
+        ));
+    }
+
+    let mut preview = PreviewTransaction::new(turn.id.clone(), None);
+    let mut warnings = Vec::new();
+    let mut last_paints: std::collections::HashMap<String, PreviewPaintEvent> =
+        std::collections::HashMap::new();
+
+    for op in &cp.ops {
+        if let Err(e) = preview.accept(op.clone()) {
+            warnings.push(format!("skip accept {}: {e}", op.id));
+            continue;
+        }
+        match preview.paint_op(op, |surface_id| {
+            let surface = get_surface(db, surface_id).ok()?;
+            let raw_state = get_surface_state(db, surface_id).ok()?;
+            Some(renderer_safe_preview_seed(
+                &surface.id,
+                surface.tool_id.clone(),
+                crate::application_kernel::manifest::authoritative_application_id(
+                    db,
+                    surface.tool_id.as_deref(),
+                ),
+                surface.capability_packs,
+                &surface.definition,
+                &raw_state,
+                surface.current_revision,
+            ))
+        }) {
+            Ok(Some(paint)) => {
+                last_paints.insert(paint.surface_id.clone(), paint);
+            }
+            Ok(None) => {}
+            Err(e) => {
+                warnings.push(format!("paint {}: {e}", op.id));
+            }
+        }
+    }
+
+    if last_paints.is_empty() && warnings.is_empty() {
+        return Err(DbError::Invalid(
+            "preview_unavailable: no reconstructable surfaces".into(),
+        ));
+    }
+    if last_paints.is_empty() {
+        return Err(DbError::Invalid(format!(
+            "preview_stale: could not reconstruct surfaces ({})",
+            warnings.join("; ")
+        )));
+    }
+
+    let mut surfaces: Vec<RecoverablePreviewSurface> = last_paints
+        .into_values()
+        .map(|p| RecoverablePreviewSurface {
+            surface_id: p.surface_id,
+            tool_id: p.tool_id,
+            application_id: p.application_id,
+            definition_json: p.definition_json,
+            state_json: p.state_json,
+            revision: p.revision,
+            sequence: p.sequence,
+        })
+        .collect();
+    surfaces.sort_by(|a, b| a.surface_id.cmp(&b.surface_id));
+
+    Ok(RecoverableGenerationPreview {
+        turn_id: turn.id.clone(),
+        conversation_id: turn.conversation_id.clone(),
+        attempt_id: turn.attempt_id.clone(),
+        sequence: cp.sequence,
+        complete: cp.complete,
+        content_hash: cp.content_hash,
+        read_only: true,
+        surfaces,
+        warnings,
+    })
 }
 
 /// In-memory preview bag for one agent turn.
@@ -2348,5 +2504,188 @@ mod tests {
             .paint_op(&op, |_| None)
             .expect_err("user writePolicy");
         assert!(err.contains("user"), "got: {err}");
+    }
+
+    fn surface_create_recovery_op(surface_id: &str, tool_id: &str) -> AppOperation {
+        serde_json::from_value(json!({
+            "id": "op-create-recovery",
+            "type": "surface.create",
+            "target": { "surfaceId": surface_id },
+            "payload": {
+                "definition": {
+                    "id": tool_id,
+                    "name": "Recovered Tool",
+                    "layout": { "type": "single-column" },
+                    "components": [{
+                        "id": "c1",
+                        "type": "progress",
+                        "props": { "maximum": 8, "value": 2 }
+                    }]
+                }
+            }
+        }))
+        .expect("surface.create op")
+    }
+
+    fn interrupt_turn_with_ops(
+        db: &Database,
+        turn: &crate::runtime_v2::TurnJournalRecord,
+        ops: Vec<AppOperation>,
+    ) {
+        use crate::runtime_v2::{
+            transition_turn, write_progressive_checkpoint, TurnPatch, TurnState,
+        };
+        transition_turn(
+            db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::Claimed,
+            TurnPatch::default(),
+        )
+        .unwrap();
+        transition_turn(
+            db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::ProviderStarted,
+            TurnPatch::default(),
+        )
+        .unwrap();
+        write_progressive_checkpoint(db, &turn.id, &turn.attempt_id, ops, false).unwrap();
+        transition_turn(
+            db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::InterruptedRecoverable,
+            TurnPatch::default(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn reconstruct_recoverable_preview_happy_path_with_surface_create() {
+        use crate::db::{create_conversation, DEFAULT_WORKSPACE_ID};
+        use crate::runtime_v2::{create_turn, get_turn};
+
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("recon-happy.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Recovery", None).unwrap();
+        let turn = create_turn(&db, &conv.id, None, "idem-recon-create", Some("interactive"))
+            .unwrap();
+        let surface_id = "surf-recovery-create";
+        let tool_id = "tool-recovery-create";
+        interrupt_turn_with_ops(
+            &db,
+            &turn,
+            vec![surface_create_recovery_op(surface_id, tool_id)],
+        );
+        let interrupted = get_turn(&db, &turn.id).unwrap();
+
+        let preview = reconstruct_recoverable_preview(
+            &db,
+            &interrupted,
+            &conv.id,
+            &interrupted.attempt_id,
+            Some(1),
+        )
+        .expect("reconstruct from surface.create checkpoint");
+
+        assert!(preview.read_only);
+        assert_eq!(preview.turn_id, turn.id);
+        assert_eq!(preview.conversation_id, conv.id);
+        assert_eq!(preview.attempt_id, interrupted.attempt_id);
+        assert_eq!(preview.sequence, 1);
+        assert!(!preview.complete);
+        assert!(preview.content_hash.is_some());
+        assert_eq!(preview.surfaces.len(), 1);
+        assert_eq!(preview.surfaces[0].surface_id, surface_id);
+        assert_eq!(preview.surfaces[0].tool_id.as_deref(), Some(tool_id));
+        assert_eq!(
+            preview.surfaces[0].definition_json["components"][0]["props"]["maximum"],
+            json!(8)
+        );
+        // Speculative create must not durable-write the surface.
+        assert!(
+            get_surface(&db, surface_id).is_err(),
+            "reconstruct must not Apply / persist speculative surfaces"
+        );
+    }
+
+    #[test]
+    fn reconstruct_recoverable_preview_denies_wrong_conversation_attempt_sequence() {
+        use crate::db::{create_conversation, DEFAULT_WORKSPACE_ID};
+        use crate::runtime_v2::{create_turn, get_turn};
+
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("recon-deny.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Owner", None).unwrap();
+        let other = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Other", None).unwrap();
+        let turn = create_turn(&db, &conv.id, None, "idem-recon-deny", Some("interactive"))
+            .unwrap();
+        interrupt_turn_with_ops(
+            &db,
+            &turn,
+            vec![surface_create_recovery_op("surf-deny", "tool-deny")],
+        );
+        let interrupted = get_turn(&db, &turn.id).unwrap();
+
+        let wrong_conv = reconstruct_recoverable_preview(
+            &db,
+            &interrupted,
+            &other.id,
+            &interrupted.attempt_id,
+            Some(1),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                wrong_conv,
+                crate::db::DbError::Invalid(ref msg) if msg.contains("does not belong")
+            ),
+            "expected conversation ownership denial, got: {wrong_conv:?}"
+        );
+
+        let wrong_attempt = reconstruct_recoverable_preview(
+            &db,
+            &interrupted,
+            &conv.id,
+            "attempt-stale",
+            Some(1),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                wrong_attempt,
+                crate::db::DbError::Invalid(ref msg) if msg.contains("stale_attempt")
+            ),
+            "expected attempt denial, got: {wrong_attempt:?}"
+        );
+
+        let wrong_seq = reconstruct_recoverable_preview(
+            &db,
+            &interrupted,
+            &conv.id,
+            &interrupted.attempt_id,
+            Some(99),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                wrong_seq,
+                crate::db::DbError::Invalid(ref msg) if msg.contains("stale_checkpoint")
+            ),
+            "expected sequence denial, got: {wrong_seq:?}"
+        );
+
+        // Matching credentials still succeed after denials.
+        let ok = reconstruct_recoverable_preview(
+            &db,
+            &interrupted,
+            &conv.id,
+            &interrupted.attempt_id,
+            Some(1),
+        )
+        .expect("matching credentials");
+        assert_eq!(ok.surfaces.len(), 1);
     }
 }

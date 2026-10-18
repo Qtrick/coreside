@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -803,6 +804,60 @@ fn emit_live_text_delta(
     }
 }
 
+/// Throttle progressive ops checkpoints: every N new ops or 500ms, plus terminal.
+struct ProgressiveCheckpointThrottle {
+    last_write: Option<std::time::Instant>,
+    last_ops_len: usize,
+    /// After checkpoint_too_large, stop further writes for this turn.
+    stop: bool,
+    /// Emit at most one user-visible durability warning per turn.
+    warned: bool,
+}
+
+impl ProgressiveCheckpointThrottle {
+    const OPS_INTERVAL: usize = 8;
+    const TIME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
+    fn new() -> Self {
+        Self {
+            last_write: None,
+            last_ops_len: 0,
+            stop: false,
+            warned: false,
+        }
+    }
+
+    fn should_write(&self, after_len: usize, terminal_complete: bool) -> bool {
+        if self.stop {
+            return false;
+        }
+        if terminal_complete {
+            return true;
+        }
+        if after_len == 0 {
+            return false;
+        }
+        if after_len.saturating_sub(self.last_ops_len) >= Self::OPS_INTERVAL {
+            return true;
+        }
+        match self.last_write {
+            None => true,
+            Some(t) => t.elapsed() >= Self::TIME_INTERVAL,
+        }
+    }
+
+    fn record_success(&mut self, after_len: usize) {
+        self.last_write = Some(std::time::Instant::now());
+        self.last_ops_len = after_len;
+    }
+
+    fn note_error(&mut self, err: &crate::db::DbError) {
+        if err.to_string().contains("checkpoint_too_large") {
+            self.stop = true;
+        }
+    }
+}
+
 /// Progressive op preview + speculative surface paint (RC3.10).
 ///
 /// Provider wire format is `coreside.ops.v1`. Speculative paint is in-memory;
@@ -818,6 +873,7 @@ fn emit_progressive_op_previews(
     preview_txn: &mut crate::runtime_v2::PreviewTransaction,
     delta: &str,
     checkpoint: Option<(&str, &str)>,
+    checkpoint_throttle: &mut ProgressiveCheckpointThrottle,
 ) {
     use crate::runtime_v2::{get_surface, get_surface_state, renderer_safe_preview_seed};
 
@@ -894,21 +950,43 @@ fn emit_progressive_op_previews(
 
     let after_len = preview_txn.accepted_operations().len();
     if let Some((turn_id, attempt_id)) = checkpoint {
-        if after_len > before_len || saw_terminal_complete {
+        let grew = after_len > before_len;
+        if (grew || saw_terminal_complete)
+            && checkpoint_throttle.should_write(after_len, saw_terminal_complete)
+        {
             let ops = preview_txn.accepted_operations().to_vec();
             let db = state.db.lock();
-            if let Err(e) = crate::runtime_v2::write_progressive_checkpoint(
+            match crate::runtime_v2::write_progressive_checkpoint(
                 &db,
                 turn_id,
                 attempt_id,
                 ops,
                 saw_terminal_complete,
             ) {
-                tracing::warn!(
-                    error = %e,
-                    turn_id = %turn_id,
-                    "progressive ops checkpoint write failed"
-                );
+                Ok(_) => checkpoint_throttle.record_success(after_len),
+                Err(e) => {
+                    checkpoint_throttle.note_error(&e);
+                    tracing::warn!(
+                        error = %e,
+                        turn_id = %turn_id,
+                        "progressive ops checkpoint write failed"
+                    );
+                    // Live preview may continue, but do not claim durable recovery.
+                    if !checkpoint_throttle.warned {
+                        checkpoint_throttle.warned = true;
+                        emit_turn(
+                            app,
+                            on_event,
+                            AgentTurnEvent::Error {
+                                conversation_id: conversation_id.to_string(),
+                                message: sanitize_error(
+                                    "Live preview continues, but durable recovery could not be saved for this turn.",
+                                    None,
+                                ),
+                            },
+                        );
+                    }
+                }
             }
         }
     }
@@ -2460,6 +2538,19 @@ async fn send_message_inner(
             }
         }
         let db = state.db.lock();
+        // A new user message supersedes other interrupted staging in this chat
+        // (keep the turn we are about to run / retry).
+        if let Err(e) = crate::runtime_v2::supersede_conversation_recoverable_turns(
+            &db,
+            &conversation_id,
+            Some(&turn_id),
+        ) {
+            tracing::warn!(
+                error = %e,
+                conversation_id = %conversation_id,
+                "failed to supersede prior recoverable turns"
+            );
+        }
         let _ = crate::runtime_v2::transition_turn(
             &db,
             &turn_id,
@@ -2495,6 +2586,7 @@ async fn send_message_inner(
         });
     let mut protocol_detector = crate::runtime_v2::ProgressiveProtocolDetector::default();
     let mut preview_txn = crate::runtime_v2::PreviewTransaction::new(turn_id.clone(), None);
+    let mut checkpoint_throttle = ProgressiveCheckpointThrottle::new();
     let progressive_checkpoint = has_turn_record.then(|| (turn_id.clone(), attempt_id.clone()));
     let resolved = chat_with_auto(
         &access,
@@ -2569,6 +2661,7 @@ async fn send_message_inner(
                             progressive_checkpoint
                                 .as_ref()
                                 .map(|(t, a)| (t.as_str(), a.as_str())),
+                            &mut checkpoint_throttle,
                         );
                     }
                 }
@@ -2818,6 +2911,7 @@ async fn send_message_inner(
         // deltas after the first frame, halting the parser and discarding durable ops.
         protocol_detector = crate::runtime_v2::ProgressiveProtocolDetector::default();
         preview_txn = crate::runtime_v2::PreviewTransaction::new(turn_id.clone(), None);
+        checkpoint_throttle = ProgressiveCheckpointThrottle::new();
 
         let follow_up = chat_with_auto(
             &access,
@@ -2887,6 +2981,7 @@ async fn send_message_inner(
                                 progressive_checkpoint
                                     .as_ref()
                                     .map(|(t, a)| (t.as_str(), a.as_str())),
+                                &mut checkpoint_throttle,
                             );
                         }
                     }
@@ -3920,18 +4015,72 @@ async fn send_message_inner(
             }
             // Bind inline surfaces created this turn to the assistant message when unset,
             // so InlineSurfacesForMessage can render them under the correct bubble.
-            // Executing this inside the BEGIN IMMEDIATE write transaction ensures atomic
-            // binding with the assistant message insertion and honors the deletion barrier.
+            // Fail closed (same contract as decide_proposal): unbound inlines must not
+            // commit with the assistant message.
             if let Some(apply) = &v2_apply {
                 if let Some(surfaces) = apply.get("surfaces").and_then(|v| v.as_array()) {
                     for surface in surfaces {
-                        if let Some(surface_id) = surface.get("id").and_then(|v| v.as_str()) {
-                            if let Err(e) = db.conn().execute(
+                        let is_inline = surface
+                            .get("surfaceType")
+                            .or_else(|| surface.get("surface_type"))
+                            .and_then(|v| v.as_str())
+                            == Some("inline")
+                            || surface.get("placement").and_then(|v| v.as_str())
+                                == Some("chat_inline");
+                        if !is_inline {
+                            continue;
+                        }
+                        let Some(surface_id) = surface.get("id").and_then(|v| v.as_str()) else {
+                            continue;
+                        };
+                        let updated = db
+                            .conn()
+                            .execute(
                                 "UPDATE surfaces SET message_id = ?1
                                  WHERE id = ?2 AND conversation_id = ?3 AND message_id IS NULL",
                                 rusqlite::params![assistant.id, surface_id, conversation_id],
-                            ) {
-                                tracing::warn!(error = %e, surface_id = %surface_id, "failed to bind surface to message");
+                            )
+                            .map_err(|e| {
+                                CommandError::new("storage", sanitize_error(&e.to_string(), None))
+                            })?;
+                        if updated > 0 {
+                            continue;
+                        }
+                        let current: Option<Option<String>> = db
+                            .conn()
+                            .query_row(
+                                "SELECT message_id FROM surfaces
+                                 WHERE id = ?1 AND conversation_id = ?2",
+                                rusqlite::params![surface_id, conversation_id],
+                                |r| r.get(0),
+                            )
+                            .optional()
+                            .map_err(|e| {
+                                CommandError::new("storage", sanitize_error(&e.to_string(), None))
+                            })?;
+                        match current {
+                            Some(Some(bound)) if bound == assistant.id => {}
+                            Some(Some(_)) => {
+                                return Err(CommandError::new(
+                                    "validation",
+                                    format!(
+                                        "Inline surface {surface_id} is bound to a different message"
+                                    ),
+                                ));
+                            }
+                            Some(None) => {
+                                return Err(CommandError::new(
+                                    "validation",
+                                    format!(
+                                        "Failed to bind inline surface {surface_id} to assistant message"
+                                    ),
+                                ));
+                            }
+                            None => {
+                                return Err(CommandError::new(
+                                    "validation",
+                                    format!("Inline surface {surface_id} missing after apply"),
+                                ));
                             }
                         }
                     }
@@ -4497,13 +4646,188 @@ pub fn list_interrupted_turns(
     .map_err(|e| CommandError::new("db_error", e.to_string()))
 }
 
+/// Typed recovery summaries — backend validates eligibility; no raw ops payload.
+#[tauri::command]
+pub fn list_recoverable_generations(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    limit: Option<usize>,
+) -> Result<Vec<crate::runtime_v2::RecoverableGenerationSummary>, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    // Verify conversation exists under the active profile DB.
+    db::get_conversation(&db, &conversation_id)
+        .map_err(|e| CommandError::new("not_found", e.to_string()))?;
+    crate::runtime_v2::list_recoverable_generations(&db, &conversation_id, limit.unwrap_or(5))
+        .map_err(|e| CommandError::new("db_error", e.to_string()))
+}
+
+/// Reconstruct a read-only renderer-safe preview from staged checkpoint ops.
+/// Never Applies. Never executes generated actions.
+#[tauri::command]
+pub fn get_recoverable_generation_preview(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    turn_id: String,
+    expected_attempt_id: String,
+    expected_sequence: Option<u32>,
+) -> Result<crate::runtime_v2::RecoverableGenerationPreview, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    db::get_conversation(&db, &conversation_id)
+        .map_err(|e| CommandError::new("not_found", e.to_string()))?;
+    let turn = crate::runtime_v2::get_turn(&db, &turn_id)
+        .map_err(|e| CommandError::new("not_found", e.to_string()))?;
+    if turn.conversation_id != conversation_id {
+        return Err(CommandError::new(
+            "forbidden",
+            "turn does not belong to conversation",
+        ));
+    }
+    crate::runtime_v2::reconstruct_recoverable_preview(
+        &db,
+        &turn,
+        &conversation_id,
+        &expected_attempt_id,
+        expected_sequence,
+    )
+    .map_err(|e| CommandError::new("db_error", e.to_string()))
+}
+
 #[tauri::command]
 pub fn discard_interrupted_turn(
     state: State<'_, AppState>,
     turn_id: String,
+    conversation_id: String,
+    expected_attempt_id: Option<String>,
+    expected_sequence: Option<u32>,
 ) -> Result<crate::runtime_v2::TurnJournalRecord, CommandError> {
     state.require_profile()?;
     let db = state.db.lock();
-    crate::runtime_v2::discard_recoverable_turn(&db, &turn_id)
-        .map_err(|e| CommandError::new("db_error", e.to_string()))
+    db::get_conversation(&db, &conversation_id)
+        .map_err(|e| CommandError::new("not_found", e.to_string()))?;
+    crate::runtime_v2::discard_recoverable_turn(
+        &db,
+        &turn_id,
+        &conversation_id,
+        expected_attempt_id.as_deref(),
+        expected_sequence,
+        "discarded",
+        "User discarded recoverable progressive staging",
+    )
+    .map_err(|e| CommandError::new("db_error", e.to_string()))
+}
+
+/// Prepare a safe retry of an interrupted generation (does not Apply staging).
+///
+/// Retires the interrupted attempt so its checkpoint cannot Apply, then returns
+/// the original user request so the frontend can start a **new** generation via
+/// `send_message`. This does not resume a prior provider stream.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetryRecoverableGenerationResult {
+    pub retired_turn_id: String,
+    pub conversation_id: String,
+    pub original_content: String,
+    pub user_message_id: String,
+    pub starts_new_attempt: bool,
+}
+
+#[tauri::command]
+pub fn retry_recoverable_generation(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    turn_id: String,
+    expected_attempt_id: String,
+    expected_sequence: Option<u32>,
+) -> Result<RetryRecoverableGenerationResult, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    db::get_conversation(&db, &conversation_id)
+        .map_err(|e| CommandError::new("not_found", e.to_string()))?;
+    let turn = crate::runtime_v2::get_turn(&db, &turn_id)
+        .map_err(|e| CommandError::new("not_found", e.to_string()))?;
+    if turn.conversation_id != conversation_id {
+        return Err(CommandError::new(
+            "forbidden",
+            "turn does not belong to conversation",
+        ));
+    }
+    if turn.state != crate::runtime_v2::TurnState::InterruptedRecoverable {
+        return Err(CommandError::new(
+            "conflict",
+            format!("retry only from interrupted_recoverable, got {:?}", turn.state),
+        ));
+    }
+    if turn.attempt_id != expected_attempt_id {
+        return Err(CommandError::new(
+            "conflict",
+            "stale_attempt: retry attempt_id mismatch",
+        ));
+    }
+    if let Some(seq) = expected_sequence {
+        if let Some(raw) = turn.operations_json.as_deref() {
+            let cp = crate::runtime_v2::ProgressiveOpsCheckpoint::parse(raw)
+                .map_err(|e| CommandError::new("conflict", e.to_string()))?;
+            if cp.sequence != seq {
+                return Err(CommandError::new(
+                    "conflict",
+                    "stale_checkpoint: retry sequence mismatch",
+                ));
+            }
+        } else if seq != 0 {
+            return Err(CommandError::new(
+                "conflict",
+                "stale_checkpoint: retry sequence mismatch",
+            ));
+        }
+    }
+
+    let user_message_id = crate::runtime_v2::resolve_turn_user_message_id(&turn.idempotency_key)
+        .ok_or_else(|| {
+            CommandError::new(
+                "invalid",
+                "Cannot reconstruct the original request for this turn. Send a new message instead.",
+            )
+        })?;
+    let user_message = db::get_message(&db, &user_message_id).map_err(|e| {
+        CommandError::new(
+            "not_found",
+            format!("Original user message unavailable: {e}"),
+        )
+    })?;
+    if user_message.conversation_id != conversation_id {
+        return Err(CommandError::new(
+            "forbidden",
+            "Original message does not belong to this conversation",
+        ));
+    }
+    if user_message.role != "user" {
+        return Err(CommandError::new(
+            "invalid",
+            "Turn idempotency does not resolve to a user message",
+        ));
+    }
+
+    // Retire staging (CAS) so the old checkpoint cannot Apply; then a new
+    // send_message creates a fresh turn. begin_retry_attempt is reserved for
+    // same-idempotency retries (e.g. structured input) inside send_message.
+    let retired = crate::runtime_v2::discard_recoverable_turn(
+        &db,
+        &turn_id,
+        &conversation_id,
+        Some(expected_attempt_id.as_str()),
+        expected_sequence,
+        "retried",
+        "User chose Retry Generation — staging retired; new attempt via send_message",
+    )
+    .map_err(|e| CommandError::new("conflict", e.to_string()))?;
+
+    Ok(RetryRecoverableGenerationResult {
+        retired_turn_id: retired.id,
+        conversation_id,
+        original_content: user_message.content,
+        user_message_id,
+        starts_new_attempt: true,
+    })
 }

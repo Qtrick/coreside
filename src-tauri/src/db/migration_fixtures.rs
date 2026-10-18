@@ -503,7 +503,7 @@ mod tests {
             .iter()
             .map(|(n, _)| *n)
             .collect::<Vec<_>>();
-        assert_eq!(names.len(), 39);
+        assert_eq!(names.len(), 40);
         for (i, name) in names.iter().enumerate() {
             let expected = format!("{:03}_", i + 1);
             assert!(
@@ -511,8 +511,8 @@ mod tests {
                 "migration {i} should start with {expected}, got {name}"
             );
         }
-        assert_eq!(names[38], LATEST_MIGRATION);
-        assert_eq!(LATEST_MIGRATION, "039_theme_presets");
+        assert_eq!(names[39], LATEST_MIGRATION);
+        assert_eq!(LATEST_MIGRATION, "040_backfill_inline_surface_message_id");
     }
 
     #[test]

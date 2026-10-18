@@ -1,6 +1,7 @@
 //! Safe generated data models — declarative schemas compiled to namespaced CRUD.
 //! No arbitrary SQL from the agent.
 
+use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -38,14 +39,12 @@ pub struct DataModelDefinition {
     pub schema_version: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DataField {
-    /// Canonical wire key is `fieldId`. Models often emit component-like `id`/`name`.
-    #[serde(alias = "id", alias = "name")]
+    /// Canonical wire key is `fieldId`.
     pub field_id: String,
-    /// Canonical wire key is `fieldType`. Prompts historically showed `"type"`.
-    #[serde(alias = "type")]
+    /// Canonical wire key is `fieldType`.
     pub field_type: String,
     #[serde(default)]
     pub required: bool,
@@ -53,6 +52,47 @@ pub struct DataField {
     pub default: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enum_values: Option<Vec<String>>,
+}
+
+impl<'de> Deserialize<'de> for DataField {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Prefer canonical keys; fall back to historical aliases only when the
+        // real key is missing. Serde `alias` rejects objects that carry both.
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Raw {
+            field_id: Option<String>,
+            id: Option<String>,
+            name: Option<String>,
+            field_type: Option<String>,
+            #[serde(rename = "type")]
+            type_alias: Option<String>,
+            #[serde(default)]
+            required: bool,
+            #[serde(default)]
+            default: Option<Value>,
+            #[serde(default)]
+            enum_values: Option<Vec<String>>,
+        }
+
+        let raw = Raw::deserialize(deserializer)?;
+        let field_id = raw
+            .field_id
+            .or(raw.id)
+            .or(raw.name)
+            .ok_or_else(|| de::Error::missing_field("fieldId"))?;
+        let field_type = raw
+            .field_type
+            .or(raw.type_alias)
+            .ok_or_else(|| de::Error::missing_field("fieldType"))?;
+        Ok(DataField {
+            field_id,
+            field_type,
+            required: raw.required,
+            default: raw.default,
+            enum_values: raw.enum_values,
+        })
+    }
 }
 
 const ALLOWED_FIELD_TYPES: &[&str] = &[
@@ -1007,6 +1047,29 @@ mod tests {
         assert_eq!(f0["fieldType"], "text");
         assert!(f0.get("type").is_none());
         assert!(f0.get("id").is_none());
+    }
+
+    #[test]
+    fn prefers_canonical_keys_when_aliases_also_present() {
+        let field: DataField = serde_json::from_value(json!({
+            "fieldId": "a",
+            "name": "A",
+            "fieldType": "text"
+        }))
+        .expect("canonical + alias must not fail as duplicate field");
+        assert_eq!(field.field_id, "a");
+        assert_eq!(field.field_type, "text");
+    }
+
+    #[test]
+    fn accepts_legacy_id_and_type_only() {
+        let field: DataField = serde_json::from_value(json!({
+            "id": "a",
+            "type": "text"
+        }))
+        .expect("legacy id/type aliases must deserialize");
+        assert_eq!(field.field_id, "a");
+        assert_eq!(field.field_type, "text");
     }
 
     fn habit_model() -> DataModelDefinition {

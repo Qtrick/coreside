@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-retry-recoverable-generation"
+description = "Enables the retry_recoverable_generation command without any pre-configured scope."
+commands.allow = ["retry_recoverable_generation"]
+
+[[permission]]
+identifier = "deny-retry-recoverable-generation"
+description = "Denies the retry_recoverable_generation command without any pre-configured scope."
+commands.deny = ["retry_recoverable_generation"]

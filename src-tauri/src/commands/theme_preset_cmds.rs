@@ -66,28 +66,37 @@ async fn resolve_plan() -> HostedPlanPresentation {
         }
     }
     const ENTITLEMENT_LOOKUP_BUDGET: Duration = Duration::from_secs(2);
-    let plan =
+    let fetched =
         match tokio::time::timeout(ENTITLEMENT_LOOKUP_BUDGET, fetch_server_plan_presentation())
             .await
         {
-            Ok(Ok(plan)) => plan,
-            Ok(Err(_)) | Err(_) => contract_default_plan_presentation(),
+            Ok(Ok(plan)) => Ok(plan),
+            Ok(Err(_)) | Err(_) => Err(()),
         };
     // The keyring session can change while the network request is in flight.
     // Never cache or apply an entitlement fetched under a different user.
     let current_session = crate::credentials::load_valid_session(None);
-    if current_session.as_ref().map(|current| current.user_id.as_str())
+    if current_session
+        .as_ref()
+        .map(|current| current.user_id.as_str())
         != Some(session.user_id.as_str())
     {
         return contract_default_plan_presentation();
     }
-    let mut cache = PLAN_CACHE.lock().await;
-    *cache = Some(CachedPlan {
-        fetched_at: Instant::now(),
-        user_id: session.user_id,
-        plan: plan.clone(),
-    });
-    plan
+    // Only cache successful server lookups. Caching Free after timeout/error
+    // would suppress a later successful Pro/Plus entitlement for PLAN_CACHE_TTL.
+    match fetched {
+        Ok(plan) => {
+            let mut cache = PLAN_CACHE.lock().await;
+            *cache = Some(CachedPlan {
+                fetched_at: Instant::now(),
+                user_id: session.user_id,
+                plan: plan.clone(),
+            });
+            plan
+        }
+        Err(()) => contract_default_plan_presentation(),
+    }
 }
 
 fn capabilities_for(used: u32, plan: &HostedPlanPresentation) -> ThemePresetCapabilities {
