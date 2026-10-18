@@ -775,18 +775,9 @@ export function InlineSurfacesForMessage({
       try {
         const all = await api.listConversationSurfaces(conversationId);
         if (!cancelled) {
-          // Prefer message-bound surfaces. After this message's proposal Apply,
-          // also accept still-unbound inline rows (bind can lag one paint).
-          const bound = all.filter((s) => s.messageId === messageId);
-          if (bound.length > 0) {
-            setSurfaces(bound);
-            return;
-          }
-          if (refreshKey === "applied") {
-            setSurfaces(all.filter((s) => !s.messageId));
-            return;
-          }
-          setSurfaces([]);
+          // Authoritative ownership only: never attach unbound inlines to a
+          // bubble (that cross-attaches surfaces after a failed bind).
+          setSurfaces(all.filter((s) => s.messageId === messageId));
         }
       } catch {
         if (!cancelled) setSurfaces([]);

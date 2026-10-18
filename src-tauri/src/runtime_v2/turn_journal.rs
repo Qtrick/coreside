@@ -91,10 +91,226 @@ impl TurnState {
                     Created | Claimed | Reserved | ProviderStarted | Streaming | TypedTerminal
                         | Finalizing,
                     InterruptedRecoverable
-                ) // Failed|InterruptedRecoverable → Claimed requires begin_retry_attempt
-                  // (rotates attempt_id). Do not allow transition_turn to reclaim without rotation.
+                )
+                // Explicit discard of recoverable staging (not a retry reclaim).
+                | (InterruptedRecoverable, Failed)
+                // Failed|InterruptedRecoverable → Claimed requires begin_retry_attempt
+                // (rotates attempt_id). Do not allow transition_turn to reclaim without rotation.
         )
     }
+}
+
+/// Durable progressive ops checkpoint schema (staging only — never Apply authority).
+pub const PROGRESSIVE_CHECKPOINT_V: &str = "coreside.ops.checkpoint.v1";
+/// Cap serialized checkpoint JSON so SQLite growth stays bounded.
+pub const MAX_PROGRESSIVE_CHECKPOINT_BYTES: usize = 256 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgressiveOpsCheckpoint {
+    pub v: String,
+    pub attempt_id: String,
+    pub sequence: u32,
+    pub complete: bool,
+    pub ops: Vec<crate::runtime_v2::operations::AppOperation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+}
+
+impl ProgressiveOpsCheckpoint {
+    pub fn new(
+        attempt_id: impl Into<String>,
+        ops: Vec<crate::runtime_v2::operations::AppOperation>,
+        complete: bool,
+    ) -> Self {
+        let sequence = ops.len() as u32;
+        let mut cp = Self {
+            v: PROGRESSIVE_CHECKPOINT_V.into(),
+            attempt_id: attempt_id.into(),
+            sequence,
+            complete,
+            ops,
+            content_hash: None,
+        };
+        cp.content_hash = Some(cp.compute_hash());
+        cp
+    }
+
+    fn compute_hash(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(self.v.as_bytes());
+        hasher.update(self.attempt_id.as_bytes());
+        hasher.update(self.sequence.to_le_bytes());
+        hasher.update([u8::from(self.complete)]);
+        if let Ok(ops) = serde_json::to_vec(&self.ops) {
+            hasher.update(&ops);
+        }
+        format!("{:x}", hasher.finalize())
+    }
+
+    pub fn serialize_bounded(&self) -> DbResult<String> {
+        let json = serde_json::to_string(self)
+            .map_err(|e| DbError::Invalid(format!("checkpoint_serialize: {e}")))?;
+        if json.len() > MAX_PROGRESSIVE_CHECKPOINT_BYTES {
+            return Err(DbError::Invalid(format!(
+                "checkpoint_too_large: {} bytes (max {MAX_PROGRESSIVE_CHECKPOINT_BYTES})",
+                json.len()
+            )));
+        }
+        Ok(json)
+    }
+
+    pub fn parse(raw: &str) -> DbResult<Self> {
+        let cp: Self = serde_json::from_str(raw)
+            .map_err(|e| DbError::Invalid(format!("checkpoint_parse: {e}")))?;
+        if cp.v != PROGRESSIVE_CHECKPOINT_V {
+            return Err(DbError::Invalid(format!(
+                "checkpoint_version: unsupported {}",
+                cp.v
+            )));
+        }
+        if cp.ops.len() as u32 != cp.sequence {
+            return Err(DbError::Invalid(
+                "checkpoint_sequence_mismatch: sequence must equal ops.len()".into(),
+            ));
+        }
+        // Integrity: when a hash is present it must match ops (STAGED integrity only;
+        // never treat checkpoint as Apply authority).
+        if let Some(ref stored) = cp.content_hash {
+            let expected = cp.compute_hash();
+            if stored != &expected {
+                return Err(DbError::Invalid(
+                    "checkpoint_hash_mismatch: operations_json tampered or corrupt".into(),
+                ));
+            }
+        }
+        Ok(cp)
+    }
+}
+
+/// Persist a validated progressive ops checkpoint on the turn journal (staging only).
+pub fn write_progressive_checkpoint(
+    db: &Database,
+    turn_id: &str,
+    attempt_id: &str,
+    ops: Vec<crate::runtime_v2::operations::AppOperation>,
+    complete: bool,
+) -> DbResult<TurnJournalRecord> {
+    let current = get_turn(db, turn_id)?;
+    if current.attempt_id != attempt_id {
+        return Err(DbError::Invalid(
+            "stale_attempt: checkpoint attempt_id mismatch".into(),
+        ));
+    }
+    if matches!(
+        current.state,
+        TurnState::Committed | TurnState::Published | TurnState::Failed
+    ) {
+        return Err(DbError::Invalid(format!(
+            "checkpoint_denied: turn is {:?}",
+            current.state
+        )));
+    }
+    // Reject regressing to an older ops prefix for the same attempt.
+    // Same-length replay is idempotent unless we are promoting complete:false → true
+    // (terminal_complete often arrives after the last op was already checkpointed).
+    if let Some(raw) = current.operations_json.as_deref() {
+        if let Ok(prior) = ProgressiveOpsCheckpoint::parse(raw) {
+            if prior.attempt_id == attempt_id && ops.len() < prior.ops.len() {
+                return Err(DbError::Invalid(
+                    "checkpoint_out_of_order: cannot regress ops sequence".into(),
+                ));
+            }
+            if prior.attempt_id == attempt_id && ops.len() == prior.ops.len() {
+                let promote_complete = !prior.complete && complete;
+                if !promote_complete {
+                    // Idempotent only when ops+complete match; diverge → conflict.
+                    let candidate =
+                        ProgressiveOpsCheckpoint::new(attempt_id, ops.clone(), complete);
+                    if let (Some(a), Some(b)) =
+                        (prior.content_hash.as_deref(), candidate.content_hash.as_deref())
+                    {
+                        if a != b {
+                            return Err(DbError::Invalid(
+                                "checkpoint_conflict: same sequence with different ops".into(),
+                            ));
+                        }
+                    }
+                    return Ok(current);
+                }
+                // Fall through to rewrite with complete=true.
+            }
+        }
+    }
+    let checkpoint = ProgressiveOpsCheckpoint::new(attempt_id, ops, complete);
+    let json = checkpoint.serialize_bounded()?;
+    let next_state = match current.state {
+        TurnState::ProviderStarted | TurnState::Streaming => TurnState::Streaming,
+        other => other,
+    };
+    if next_state != current.state {
+        transition_turn(
+            db,
+            turn_id,
+            attempt_id,
+            next_state,
+            TurnPatch {
+                operations_json: Some(json),
+                ..Default::default()
+            },
+        )
+    } else {
+        // Same state: still patch operations_json via a no-op self-transition.
+        // transition_turn requires a state change — update directly with CAS.
+        let now = now_rfc3339();
+        let n = db.conn().execute(
+            "UPDATE turn_journal SET operations_json = ?1, updated_at = ?2
+             WHERE id = ?3 AND attempt_id = ?4 AND state = ?5",
+            params![json, now, turn_id, attempt_id, current.state.as_str()],
+        )?;
+        if n != 1 {
+            return Err(DbError::Invalid(
+                "turn_cas_conflict: checkpoint write failed".into(),
+            ));
+        }
+        get_turn(db, turn_id)
+    }
+}
+
+/// Discard recoverable staging without applying. Clears operations_json.
+pub fn discard_recoverable_turn(db: &Database, turn_id: &str) -> DbResult<TurnJournalRecord> {
+    let current = get_turn(db, turn_id)?;
+    if current.state != TurnState::InterruptedRecoverable {
+        return Err(DbError::Invalid(format!(
+            "discard only from interrupted_recoverable, got {:?}",
+            current.state
+        )));
+    }
+    let now = now_rfc3339();
+    let n = db.conn().execute(
+        "UPDATE turn_journal SET
+            state = 'failed',
+            operations_json = NULL,
+            provisional_text = NULL,
+            error_category = 'discarded',
+            error_message = ?1,
+            updated_at = ?2,
+            finalized_at = ?2
+         WHERE id = ?3 AND attempt_id = ?4 AND state = 'interrupted_recoverable'",
+        params![
+            "User discarded recoverable progressive preview",
+            now,
+            turn_id,
+            current.attempt_id
+        ],
+    )?;
+    if n != 1 {
+        return Err(DbError::Invalid(
+            "turn_cas_conflict: discard recoverable turn failed".into(),
+        ));
+    }
+    get_turn(db, turn_id)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -324,6 +540,7 @@ pub fn begin_retry_attempt(
     }
     let new_attempt = format!("attempt-{}", Uuid::new_v4());
     let now = now_rfc3339();
+    // Clear prior attempt staging so retries cannot Apply stale incomplete ops.
     let n = db.conn().execute(
         "UPDATE turn_journal SET
             attempt_id = ?1,
@@ -331,7 +548,9 @@ pub fn begin_retry_attempt(
             updated_at = ?2,
             finalized_at = NULL,
             error_category = NULL,
-            error_message = NULL
+            error_message = NULL,
+            operations_json = NULL,
+            provisional_text = NULL
          WHERE id = ?3 AND attempt_id = ?4 AND state = ?5",
         params![
             new_attempt,
@@ -1238,5 +1457,253 @@ mod tests {
         assert_eq!(seen.len(), 20);
         assert_eq!(*seen.iter().next().unwrap(), 1);
         assert_eq!(*seen.iter().next_back().unwrap(), 20);
+    }
+
+    fn sample_checkpoint_op(id: &str) -> crate::runtime_v2::operations::AppOperation {
+        crate::runtime_v2::operations::AppOperation {
+            id: id.into(),
+            op_type: "component.update_props".into(),
+            target: crate::runtime_v2::operations::OperationTarget {
+                surface_id: Some("s-study-planner-summary".into()),
+                ..Default::default()
+            },
+            payload: serde_json::json!({ "componentId": "heading", "props": { "text": id } }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn progressive_checkpoint_persists_and_survives_reopen_semantics() {
+        let mut db = db();
+        seed_conversation(&mut db, "c-ckpt");
+        let turn = create_turn(&db, "c-ckpt", None, "idem-ckpt-1", Some("interactive")).unwrap();
+        transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::Claimed,
+            TurnPatch::default(),
+        )
+        .unwrap();
+        transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::ProviderStarted,
+            TurnPatch::default(),
+        )
+        .unwrap();
+
+        let ops = vec![sample_checkpoint_op("op-1")];
+        let updated = write_progressive_checkpoint(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            ops.clone(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(updated.state, TurnState::Streaming);
+        let parsed = ProgressiveOpsCheckpoint::parse(updated.operations_json.as_deref().unwrap())
+            .unwrap();
+        assert_eq!(parsed.v, PROGRESSIVE_CHECKPOINT_V);
+        assert_eq!(parsed.sequence, 1);
+        assert!(!parsed.complete);
+        assert_eq!(parsed.ops.len(), 1);
+
+        // Idempotent same-length checkpoint.
+        let again = write_progressive_checkpoint(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            ops.clone(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(again.operations_json, updated.operations_json);
+
+        // Terminal complete with no new ops must promote complete=true.
+        let completed = write_progressive_checkpoint(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            ops,
+            true,
+        )
+        .unwrap();
+        let completed_cp =
+            ProgressiveOpsCheckpoint::parse(completed.operations_json.as_deref().unwrap())
+                .unwrap();
+        assert!(completed_cp.complete);
+        assert_eq!(completed_cp.sequence, 1);
+
+        // Out-of-order regression rejected.
+        let err = write_progressive_checkpoint(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            vec![],
+            false,
+        )
+        .unwrap_err();
+        assert!(matches!(err, DbError::Invalid(msg) if msg.contains("out_of_order")));
+    }
+
+    #[test]
+    fn begin_retry_clears_prior_checkpoint_and_discard_clears_recoverable() {
+        let mut db = db();
+        seed_conversation(&mut db, "c-retry-ckpt");
+        let turn =
+            create_turn(&db, "c-retry-ckpt", None, "idem-retry-ckpt", Some("interactive")).unwrap();
+        transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::Claimed,
+            TurnPatch::default(),
+        )
+        .unwrap();
+        transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::ProviderStarted,
+            TurnPatch::default(),
+        )
+        .unwrap();
+        write_progressive_checkpoint(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            vec![sample_checkpoint_op("op-a")],
+            false,
+        )
+        .unwrap();
+        transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::InterruptedRecoverable,
+            TurnPatch::default(),
+        )
+        .unwrap();
+
+        let prior = get_turn(&db, &turn.id).unwrap();
+        assert!(prior.operations_json.is_some());
+        let retried = begin_retry_attempt(&db, &turn.id, &prior.attempt_id).unwrap();
+        assert!(retried.operations_json.is_none());
+        assert_eq!(retried.state, TurnState::Claimed);
+
+        // Interrupt again and discard.
+        transition_turn(
+            &db,
+            &retried.id,
+            &retried.attempt_id,
+            TurnState::ProviderStarted,
+            TurnPatch::default(),
+        )
+        .unwrap();
+        write_progressive_checkpoint(
+            &db,
+            &retried.id,
+            &retried.attempt_id,
+            vec![sample_checkpoint_op("op-b")],
+            false,
+        )
+        .unwrap();
+        transition_turn(
+            &db,
+            &retried.id,
+            &retried.attempt_id,
+            TurnState::InterruptedRecoverable,
+            TurnPatch::default(),
+        )
+        .unwrap();
+        let discarded = discard_recoverable_turn(&db, &retried.id).unwrap();
+        assert_eq!(discarded.state, TurnState::Failed);
+        assert_eq!(discarded.error_category.as_deref(), Some("discarded"));
+        assert!(discarded.operations_json.is_none());
+    }
+
+    #[test]
+    fn progressive_checkpoint_rejects_stale_attempt_terminal_state_and_bad_parse() {
+        let mut db = db();
+        seed_conversation(&mut db, "c-ckpt-deny");
+        let turn =
+            create_turn(&db, "c-ckpt-deny", None, "idem-ckpt-deny", Some("interactive")).unwrap();
+        transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::Claimed,
+            TurnPatch::default(),
+        )
+        .unwrap();
+        transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::ProviderStarted,
+            TurnPatch::default(),
+        )
+        .unwrap();
+
+        let stale = write_progressive_checkpoint(
+            &db,
+            &turn.id,
+            "attempt-stale",
+            vec![sample_checkpoint_op("op-stale")],
+            false,
+        )
+        .unwrap_err();
+        assert!(matches!(stale, DbError::Invalid(msg) if msg.contains("stale_attempt")));
+
+        // Terminal Failed denies further staging writes.
+        transition_turn(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            TurnState::Failed,
+            TurnPatch {
+                error_category: Some("provider".into()),
+                error_message: Some("boom".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let denied = write_progressive_checkpoint(
+            &db,
+            &turn.id,
+            &turn.attempt_id,
+            vec![sample_checkpoint_op("op-after-fail")],
+            false,
+        )
+        .unwrap_err();
+        assert!(matches!(denied, DbError::Invalid(msg) if msg.contains("checkpoint_denied")));
+
+        // Discard is only legal from interrupted_recoverable.
+        let discard_err = discard_recoverable_turn(&db, &turn.id).unwrap_err();
+        assert!(matches!(
+            discard_err,
+            DbError::Invalid(msg) if msg.contains("interrupted_recoverable")
+        ));
+
+        let bad_version = ProgressiveOpsCheckpoint::parse(
+            r#"{"v":"coreside.ops.checkpoint.v0","attemptId":"a","sequence":0,"complete":false,"ops":[]}"#,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            bad_version,
+            DbError::Invalid(msg) if msg.contains("checkpoint_version")
+        ));
+
+        let bad_seq = ProgressiveOpsCheckpoint::parse(
+            r#"{"v":"coreside.ops.checkpoint.v1","attemptId":"a","sequence":2,"complete":false,"ops":[]}"#,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            bad_seq,
+            DbError::Invalid(msg) if msg.contains("checkpoint_sequence_mismatch")
+        ));
     }
 }

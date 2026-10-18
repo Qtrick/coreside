@@ -50,13 +50,24 @@ pub const COMPILER_VERSION: &str = "1";
 pub const MANIFEST_SCHEMA_VERSION: &str = "1";
 
 /// Attach proposal-created inline surfaces to the assistant message that staged the proposal.
+///
+/// Fail closed: if this apply created any chat-inline surfaces, each must be bound to the
+/// proposal's assistant message before COMMIT. Missing ownership breaks restoration.
 fn bind_inline_surfaces_to_proposal_message(
     db: &Database,
     conversation_id: &str,
     proposal_id: &str,
     surfaces: &[crate::runtime_v2::surfaces::SurfaceRecord],
-) {
+) -> Result<(), KernelError> {
     use rusqlite::{params, OptionalExtension};
+    let inline_ids: Vec<&str> = surfaces
+        .iter()
+        .filter(|s| s.surface_type == "inline")
+        .map(|s| s.id.as_str())
+        .collect();
+    if inline_ids.is_empty() {
+        return Ok(());
+    }
     let message_id: Option<String> = db
         .conn()
         .query_row(
@@ -69,28 +80,53 @@ fn bind_inline_surfaces_to_proposal_message(
             |r| r.get(0),
         )
         .optional()
-        .ok()
-        .flatten();
+        .map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
     let Some(message_id) = message_id else {
-        return;
+        return Err(KernelError::Validation(format!(
+            "Cannot apply proposal {proposal_id}: assistant message missing for inline surface binding"
+        )));
     };
-    for surface in surfaces {
-        if surface.surface_type != "inline" {
+    for surface_id in inline_ids {
+        let updated = db
+            .conn()
+            .execute(
+                "UPDATE surfaces SET message_id = ?1
+                 WHERE id = ?2 AND conversation_id = ?3 AND message_id IS NULL",
+                params![message_id, surface_id, conversation_id],
+            )
+            .map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
+        if updated > 0 {
             continue;
         }
-        if let Err(e) = db.conn().execute(
-            "UPDATE surfaces SET message_id = ?1
-             WHERE id = ?2 AND conversation_id = ?3 AND message_id IS NULL",
-            params![message_id, surface.id, conversation_id],
-        ) {
-            tracing::warn!(
-                error = %e,
-                surface_id = %surface.id,
-                proposal_id = %proposal_id,
-                "failed to bind inline surface to proposal message"
-            );
+        let current: Option<Option<String>> = db
+            .conn()
+            .query_row(
+                "SELECT message_id FROM surfaces WHERE id = ?1 AND conversation_id = ?2",
+                params![surface_id, conversation_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
+        match current {
+            Some(Some(bound)) if bound == message_id => {}
+            Some(Some(_)) => {
+                return Err(KernelError::Validation(format!(
+                    "Inline surface {surface_id} is bound to a different message"
+                )));
+            }
+            Some(None) => {
+                return Err(KernelError::Validation(format!(
+                    "Failed to bind inline surface {surface_id} to proposal message"
+                )));
+            }
+            None => {
+                return Err(KernelError::Validation(format!(
+                    "Inline surface {surface_id} missing after apply"
+                )));
+            }
         }
     }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1102,10 +1138,35 @@ pub fn decide_proposal(
     }
 
     // 5b. Bind newly created inline surfaces to the assistant message that owns this
-    // proposal (message_id is not known at compile time). Matches send_message's
-    // post-apply bind so InlineSurfacesForMessage can render under the bubble.
-    if let Some(cid) = proposal.conversation_id.as_deref() {
-        bind_inline_surfaces_to_proposal_message(db, cid, proposal_id, &apply.surfaces);
+    // proposal (message_id is not known at compile time). Fail closed before COMMIT —
+    // unbound inlines break restoration and must not leave a partial durable apply.
+    let has_inline = apply
+        .surfaces
+        .iter()
+        .any(|s| s.surface_type == "inline");
+    if has_inline {
+        let bind_result = match proposal.conversation_id.as_deref() {
+            Some(cid) => {
+                bind_inline_surfaces_to_proposal_message(db, cid, proposal_id, &apply.surfaces)
+            }
+            None => Err(KernelError::Validation(
+                "Cannot apply proposal with inline surfaces without a conversationId".into(),
+            )),
+        };
+        if let Err(e) = bind_result {
+            if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
+                tracing::error!(
+                    error = %rb_err,
+                    original_error = %e,
+                    "ROLLBACK failed during inline surface message binding"
+                );
+            }
+            let _ = db.conn().execute(
+                "UPDATE kernel_change_proposals SET status = 'failed', error = ? WHERE id = ?",
+                rusqlite::params![e.to_string(), proposal_id],
+            );
+            return Err(e);
+        }
     }
 
     // 6. Single COMMIT for all changes!
@@ -2706,6 +2767,64 @@ mod tests {
         assert!(
             canvas.message_id.is_none(),
             "tool canvas must not be message-bound"
+        );
+    }
+
+    #[test]
+    fn decide_proposal_fails_closed_when_inline_message_missing() {
+        use crate::ai::plan_fixtures::multi_surface_planner_create_plan;
+        use crate::runtime_v2::surfaces::get_surface;
+
+        let mut db = test_db();
+        let conv = create_conversation(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            "Inline bind fail-closed",
+            None,
+        )
+        .unwrap();
+        let create = multi_surface_planner_create_plan();
+        let create_ops = crate::application_kernel::application_plan::compile_plan(&create)
+            .unwrap()
+            .compiled
+            .operations;
+        let proposal_id = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Create Study Planner".into(),
+                operations: create_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .proposal_id
+        .expect("proposal");
+
+        // No assistant message with runtimeV2.proposalId — Apply must not commit
+        // unbound inline surfaces.
+        let err = decide_proposal(&mut db, None, &proposal_id, true)
+            .expect_err("missing assistant message must fail closed");
+        assert!(
+            matches!(&err, KernelError::Validation(msg) if msg.contains("assistant message")),
+            "expected assistant-message bind failure, got {err:?}"
+        );
+
+        let proposal = get_proposal(&db, &proposal_id).unwrap();
+        assert_ne!(
+            proposal.status.as_str(),
+            "applied",
+            "proposal must not remain applied after bind failure"
+        );
+        assert!(
+            get_surface(&db, "s-study-planner-summary").is_err(),
+            "inline surface must roll back when bind fails"
+        );
+        assert!(
+            get_surface(&db, "surf-tool-study-planner").is_err(),
+            "tool canvas must roll back with the failed inline bind"
         );
     }
 }

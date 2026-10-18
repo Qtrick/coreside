@@ -175,6 +175,7 @@ pub fn run() {
             commands::run_attachment_gc,
             commands::discard_tool_change,
             commands::list_interrupted_turns,
+            commands::discard_interrupted_turn,
             commands::discard_kernel_proposal,
             commands::set_kernel_proposal_status,
             commands::apply_tool_change,

@@ -451,14 +451,22 @@ fn validate_intent_refs(intent: &ChangeIntent) -> Result<(), KernelError> {
                     "CreateInlineSurface requires applicationId and name".into(),
                 ));
             }
-            if let Some(sid) = surface_id {
-                crate::security::assert_not_protected(sid).map_err(KernelError::Protected)?;
-                if sid.trim().starts_with("surf-") {
-                    return Err(KernelError::Validation(
-                        "CreateInlineSurface surfaceId must not use the reserved surf- tool-canvas namespace"
+            let sid = surface_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    KernelError::Validation(
+                        "CreateInlineSurface requires an explicit surfaceId (do not rely on s-inline-{applicationId})"
                             .into(),
-                    ));
-                }
+                    )
+                })?;
+            crate::security::assert_not_protected(sid).map_err(KernelError::Protected)?;
+            if sid.starts_with("surf-") {
+                return Err(KernelError::Validation(
+                    "CreateInlineSurface surfaceId must not use the reserved surf- tool-canvas namespace"
+                        .into(),
+                ));
             }
             if !tool.id.is_empty() && tool.id != *application_id {
                 return Err(KernelError::Validation(
@@ -1649,7 +1657,50 @@ mod tests {
     }
 
     #[test]
+    fn rejects_create_inline_surface_without_explicit_surface_id() {
+        let plan = ApplicationPlan {
+            schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+            plan_id: "plan-inline-missing-id".into(),
+            kind: ApplicationPlanKind::Create,
+            summary: "Inline without surfaceId".into(),
+            application_id: Some("tool-study-planner".into()),
+            base_revision: None,
+            steps: vec![PlanStep {
+                id: "1".into(),
+                description: "Add inline surface".into(),
+            }],
+            intents: vec![ChangeIntent::CreateInlineSurface {
+                application_id: "tool-study-planner".into(),
+                name: "Summary".into(),
+                surface_id: None,
+                tool: crate::ai::ToolDefinition {
+                    id: "tool-study-planner".into(),
+                    name: "Summary".into(),
+                    description: "".into(),
+                    layout: json!({ "type": "stack" }),
+                    components: vec![crate::ai::ToolComponent {
+                        id: "summary-heading".into(),
+                        component_type: "heading".into(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                change_summary: None,
+            }],
+            tests: vec![],
+            diagnostics: None,
+        };
+        let err = validate_plan(&plan).expect_err("missing surfaceId must fail");
+        assert!(
+            matches!(&err, KernelError::Validation(msg) if msg.contains("surfaceId")),
+            "expected surfaceId validation, got {err:?}"
+        );
+    }
+
+    #[test]
     fn rejects_two_default_inline_surfaces_for_same_application() {
+        // Even with distinct names, omitted surfaceIds collide on the legacy
+        // s-inline-{applicationId} default — validation now rejects missing ids first.
         let inline = |name: &str| ChangeIntent::CreateInlineSurface {
             application_id: "tool-study-planner".into(),
             name: name.into(),

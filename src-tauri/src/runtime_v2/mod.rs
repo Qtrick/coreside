@@ -145,10 +145,12 @@ pub use transactions::{
 #[allow(unused_imports)]
 pub use turn_journal::{
     advance_conversation_sync_cursor, append_conversation_event, begin_retry_attempt,
-    compact_turn_journal, create_turn, get_conversation_events, get_conversation_sync_cursor,
-    get_turn, get_turn_by_idempotency, list_conversation_recoverable_turns, list_recoverable_turns,
-    mark_interrupted_in_flight, transition_turn, ConversationEventRecord, TurnJournalRecord,
-    TurnPatch, TurnState,
+    compact_turn_journal, create_turn, discard_recoverable_turn, get_conversation_events,
+    get_conversation_sync_cursor, get_turn, get_turn_by_idempotency,
+    list_conversation_recoverable_turns, list_recoverable_turns, mark_interrupted_in_flight,
+    transition_turn, write_progressive_checkpoint, ConversationEventRecord,
+    ProgressiveOpsCheckpoint, TurnJournalRecord, TurnPatch, TurnState, MAX_PROGRESSIVE_CHECKPOINT_BYTES,
+    PROGRESSIVE_CHECKPOINT_V,
 };
 pub use turn_timeline::{
     list_turn_timeline_events, try_append_turn_timeline_event, TurnTimelineEvent,

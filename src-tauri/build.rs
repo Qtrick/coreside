@@ -164,6 +164,7 @@ fn main() {
             "list_exa_usage",
             "list_export_formats",
             "list_interrupted_turns",
+            "discard_interrupted_turn",
             "list_managed_backups",
             "list_media_assets_cmd",
             "list_project_conversations_cmd",

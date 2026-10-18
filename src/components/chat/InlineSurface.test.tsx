@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { InlineSurfaceCard } from "./InlineSurface";
+import { InlineSurfaceCard, InlineSurfacesForMessage } from "./InlineSurface";
 import { api } from "@/lib/tauri";
 import type { SurfaceRecord } from "@/types/runtime-v2";
 
@@ -25,6 +25,7 @@ vi.mock("@/stores/app-store", () => ({
 
 vi.mock("@/lib/tauri", () => ({
   api: {
+    listConversationSurfaces: vi.fn().mockResolvedValue([]),
     getSurfaceStateWithRevision: vi.fn().mockResolvedValue({ state: { count: 0 }, stateRevision: 2 }),
     getSurfaceState: vi.fn().mockResolvedValue({ count: 0 }),
     getContinuity: vi.fn().mockResolvedValue(null),
@@ -391,5 +392,94 @@ describe("InlineSurfaceCard", () => {
     });
     expect(screen.getByRole("alert").textContent).toMatch(/state unavailable|rev unavailable/);
     expect(api.interactiveView).not.toHaveBeenCalled();
+  });
+});
+
+describe("InlineSurfacesForMessage ownership", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    rendererStates.length = 0;
+    mockSurfaceSyncEpoch = 0;
+    vi.mocked(api.listConversationSurfaces).mockReset();
+    vi.mocked(api.getSurfaceStateWithRevision).mockResolvedValue({
+      state: { count: 0 },
+      stateRevision: 2,
+    });
+    vi.mocked(api.getSurfaceState).mockResolvedValue({ count: 0 });
+    vi.mocked(api.getContinuity).mockResolvedValue(null as never);
+  });
+
+  it("renders only surfaces bound to this message", async () => {
+    vi.mocked(api.listConversationSurfaces).mockResolvedValue([
+      {
+        ...sampleSurface,
+        id: "s-mine",
+        instanceId: "inst-mine",
+        messageId: "msg-a",
+        name: "Mine",
+        definition: { ...sampleSurface.definition, name: "Mine" },
+      },
+      {
+        ...sampleSurface,
+        id: "s-other",
+        instanceId: "inst-other",
+        messageId: "msg-b",
+        name: "Other",
+        definition: { ...sampleSurface.definition, name: "Other" },
+      },
+      {
+        ...sampleSurface,
+        id: "s-unbound",
+        instanceId: "inst-unbound",
+        messageId: null,
+        name: "Unbound",
+        definition: { ...sampleSurface.definition, name: "Unbound" },
+      },
+    ]);
+
+    const { container } = render(
+      <InlineSurfacesForMessage
+        conversationId="conv-100"
+        messageId="msg-a"
+        refreshKey="applied"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-surface-id="s-mine"]')).not.toBeNull();
+    });
+    expect(screen.getByText("Mine")).toBeDefined();
+    expect(container.querySelector('[data-surface-id="s-other"]')).toBeNull();
+    expect(container.querySelector('[data-surface-id="s-unbound"]')).toBeNull();
+    expect(screen.queryByText("Other")).toBeNull();
+    expect(screen.queryByText("Unbound")).toBeNull();
+  });
+
+  it("does not attach unbound surfaces after applied refreshKey", async () => {
+    vi.mocked(api.listConversationSurfaces).mockResolvedValue([
+      {
+        ...sampleSurface,
+        id: "s-orphan",
+        instanceId: "inst-orphan",
+        messageId: null,
+        name: "Orphan Inline",
+        definition: { ...sampleSurface.definition, name: "Orphan Inline" },
+      },
+    ]);
+
+    const { container } = render(
+      <InlineSurfacesForMessage
+        conversationId="conv-100"
+        messageId="msg-applied"
+        refreshKey="applied"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(api.listConversationSurfaces).toHaveBeenCalled();
+    });
+    expect(container.querySelector(".inline-surfaces")).toBeNull();
+    expect(container.querySelector('[data-surface-id="s-orphan"]')).toBeNull();
+    expect(screen.queryByText("Orphan Inline")).toBeNull();
   });
 });

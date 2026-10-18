@@ -445,14 +445,18 @@ pub fn compile(intent: ChangeIntent) -> Result<CompiledChange, KernelError> {
                 validate_component_type_allowed(&c.component_type)
                     .map_err(KernelError::CapabilityUnavailable)?;
             }
+            // Explicit surfaceId is required by ApplicationPlan validation.
+            // `surf-*` remains reserved for tool canvas; inline uses `s-*`.
             let preferred = surface_id
                 .as_deref()
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_string)
-                // `surf-{toolId}` is reserved for the canonical tool canvas.
-                // Inline instances use the non-canonical `s-*` namespace.
-                .unwrap_or_else(|| format!("s-inline-{application_id}"));
+                .ok_or_else(|| {
+                    KernelError::Validation(
+                        "CreateInlineSurface requires an explicit surfaceId".into(),
+                    )
+                })?;
             let mut definition = tool;
             definition.id = application_id.clone();
             definition.name = name.clone();
@@ -736,7 +740,7 @@ mod tests {
             ChangeIntent::CreateInlineSurface {
                 application_id: "tool-study-planner".into(),
                 name: "Overdue Summary".into(),
-                surface_id: None,
+                surface_id: Some("s-study-planner-summary".into()),
                 tool: inline,
                 change_summary: None,
             },
@@ -746,8 +750,34 @@ mod tests {
         assert_eq!(compiled.operations[1].op_type, "chat.inline_surface_create");
         assert_eq!(
             compiled.operations[1].target.surface_id.as_deref(),
-            Some("s-inline-tool-study-planner")
+            Some("s-study-planner-summary")
         );
+    }
+
+    #[test]
+    fn create_inline_surface_rejects_missing_surface_id() {
+        let tool = crate::ai::ToolDefinition {
+            id: "tool-study-planner".into(),
+            name: "Summary".into(),
+            components: vec![crate::ai::ToolComponent {
+                id: "summary".into(),
+                component_type: "text".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let err = compile(ChangeIntent::CreateInlineSurface {
+            application_id: "tool-study-planner".into(),
+            name: "Summary".into(),
+            surface_id: None,
+            tool,
+            change_summary: None,
+        })
+        .expect_err("explicit surfaceId is required");
+        assert!(matches!(
+            err,
+            KernelError::Validation(ref msg) if msg.contains("surfaceId")
+        ));
     }
 
     #[test]

@@ -680,6 +680,27 @@ export const api = {
   touchMediaAsset: (assetId: string) =>
     invoke<void>("touch_media_asset_cmd", { assetId }),
 
+  // Progressive generation recovery (turn_journal staging — not Apply authority)
+  listInterruptedTurns: (conversationId: string, limit?: number) =>
+    invoke<
+      Array<{
+        id: string;
+        conversationId: string;
+        attemptId: string;
+        state: string;
+        operationsJson?: string | null;
+        provisionalText?: string | null;
+        errorCategory?: string | null;
+        updatedAt: string;
+      }>
+    >("list_interrupted_turns", { conversationId, limit }),
+  discardInterruptedTurn: (turnId: string) =>
+    invoke<{
+      id: string;
+      state: string;
+      errorCategory?: string | null;
+    }>("discard_interrupted_turn", { turnId }),
+
   // Runtime V2
   listCapabilityPacks: () =>
     invoke<Array<Record<string, unknown>>>("list_capability_packs"),

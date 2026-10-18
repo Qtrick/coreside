@@ -5454,6 +5454,54 @@ body > .window-overlay-root > *,
   background: var(--core-muted-overlay);
 }
 
+.generation-recovery {
+  margin: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.generation-recovery-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--core-muted-overlay);
+}
+
+.generation-recovery-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.generation-recovery-copy strong {
+  display: block;
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.generation-recovery-copy p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted-foreground, var(--text-secondary));
+  line-height: 1.4;
+}
+
+.generation-recovery-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.35rem;
+}
+
+.generation-recovery-error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--danger, #b42318);
+}
+
 .conversation-queue-summary {
   margin: 0;
   font-size: 0.85rem;

@@ -805,8 +805,10 @@ fn emit_live_text_delta(
 
 /// Progressive op preview + speculative surface paint (RC3.10).
 ///
-/// Provider wire format is `coreside.ops.v1`. Speculative paint is in-memory
-/// only; durable apply requires a valid progressive terminal (`complete`).
+/// Provider wire format is `coreside.ops.v1`. Speculative paint is in-memory;
+/// accepted ops are also staged on `turn_journal.operations_json` (checkpoint)
+/// when a durable turn row exists. Staging is never Apply authority — durable
+/// surface mutation still requires a valid terminal + kernel Apply.
 fn emit_progressive_op_previews(
     app: &AppHandle,
     state: &AppState,
@@ -815,9 +817,11 @@ fn emit_progressive_op_previews(
     parser: &mut crate::runtime_v2::ProgressiveOpsParser,
     preview_txn: &mut crate::runtime_v2::PreviewTransaction,
     delta: &str,
+    checkpoint: Option<(&str, &str)>,
 ) {
     use crate::runtime_v2::{get_surface, get_surface_state, renderer_safe_preview_seed};
 
+    let before_len = preview_txn.accepted_operations().len();
     let events = crate::runtime_v2::ingest_progressive_chunk_with_seed(
         parser,
         preview_txn,
@@ -841,9 +845,11 @@ fn emit_progressive_op_previews(
         },
     );
 
+    let mut saw_terminal_complete = false;
     for ev in events {
         let status = ev.status.clone();
         if status == "terminal_complete" {
+            saw_terminal_complete = true;
             continue;
         }
         emit_turn(
@@ -881,6 +887,27 @@ fn emit_progressive_op_previews(
                         conversation_id: conversation_id.to_string(),
                         message: sanitize_error(&reason, None),
                     },
+                );
+            }
+        }
+    }
+
+    let after_len = preview_txn.accepted_operations().len();
+    if let Some((turn_id, attempt_id)) = checkpoint {
+        if after_len > before_len || saw_terminal_complete {
+            let ops = preview_txn.accepted_operations().to_vec();
+            let db = state.db.lock();
+            if let Err(e) = crate::runtime_v2::write_progressive_checkpoint(
+                &db,
+                turn_id,
+                attempt_id,
+                ops,
+                saw_terminal_complete,
+            ) {
+                tracing::warn!(
+                    error = %e,
+                    turn_id = %turn_id,
+                    "progressive ops checkpoint write failed"
                 );
             }
         }
@@ -2468,6 +2495,7 @@ async fn send_message_inner(
         });
     let mut protocol_detector = crate::runtime_v2::ProgressiveProtocolDetector::default();
     let mut preview_txn = crate::runtime_v2::PreviewTransaction::new(turn_id.clone(), None);
+    let progressive_checkpoint = has_turn_record.then(|| (turn_id.clone(), attempt_id.clone()));
     let resolved = chat_with_auto(
         &access,
         &model_preference,
@@ -2538,6 +2566,9 @@ async fn send_message_inner(
                             &mut progressive_parser,
                             &mut preview_txn,
                             &text,
+                            progressive_checkpoint
+                                .as_ref()
+                                .map(|(t, a)| (t.as_str(), a.as_str())),
                         );
                     }
                 }
@@ -2853,6 +2884,9 @@ async fn send_message_inner(
                                 &mut progressive_parser,
                                 &mut preview_txn,
                                 &text,
+                                progressive_checkpoint
+                                    .as_ref()
+                                    .map(|(t, a)| (t.as_str(), a.as_str())),
                             );
                         }
                     }
@@ -4461,4 +4495,15 @@ pub fn list_interrupted_turns(
         limit.unwrap_or(20),
     )
     .map_err(|e| CommandError::new("db_error", e.to_string()))
+}
+
+#[tauri::command]
+pub fn discard_interrupted_turn(
+    state: State<'_, AppState>,
+    turn_id: String,
+) -> Result<crate::runtime_v2::TurnJournalRecord, CommandError> {
+    state.require_profile()?;
+    let db = state.db.lock();
+    crate::runtime_v2::discard_recoverable_turn(&db, &turn_id)
+        .map_err(|e| CommandError::new("db_error", e.to_string()))
 }

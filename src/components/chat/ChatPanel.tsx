@@ -3,6 +3,7 @@ import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
 import { ConversationQueue } from "./ConversationQueue";
 import { ConversationHistory } from "./ConversationHistory";
+import { GenerationRecoveryBanner } from "./GenerationRecoveryBanner";
 import { ProjectIndicator } from "./ProjectIndicator";
 import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
 import { useAppStore } from "@/stores/app-store";
@@ -57,6 +58,7 @@ export function ChatPanel() {
       {activeConversationId ? (
         <>
           <ConversationQueue conversationId={activeConversationId} />
+          <GenerationRecoveryBanner conversationId={activeConversationId} />
           <MessageList />
           <Composer />
         </>

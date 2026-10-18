@@ -3,7 +3,7 @@
  *
  * Desktop Apply path: one ApplicationPlan creates a tool canvas plus a bound
  * conversation summary surface → Apply → add a task → evolve both surfaces with
- * priority → remount → dashboard, summary, and data remain durable.
+ * priority → close canvas → reopen → dashboard, summary, and data remain durable.
  *
  * Run alone:
  *   CORESIDE_E2E=1 AI_PROVIDER=mock CORESIDE_E2E_SEED=empty \
@@ -182,28 +182,26 @@ describe("Journey 31 — multi-surface progressive evolution", () => {
       },
     );
 
-    // Verify evolve + data preservation on the open canvas (authoritative).
-    const canvasAfterEvolve = await $(
-      '.tool-canvas-body[data-tool-id="tool-study-planner"]',
+    // Remount: close canvas, confirm inline summary still bound in chat, reopen.
+    const close = await $(
+      '[aria-label="Close tool canvas"], [aria-label="Back to chat"]',
     );
+    if (await close.isExisting()) {
+      await close.click();
+    }
+
     await browser.waitUntil(
       async () => {
-        if (!(await canvasAfterEvolve.isExisting())) return false;
-        const text = (await canvasAfterEvolve.getText()).toLowerCase();
-        return text.includes("priority") && text.includes("dashboard");
+        const openCanvas = await $(
+          '.tool-canvas-body[data-tool-id="tool-study-planner"]',
+        );
+        return !(await openCanvas.isExisting());
       },
       {
-        timeout: 25_000,
-        timeoutMsg:
-          "Priority column / Dashboard never appeared after multi-surface evolve",
+        timeout: 10_000,
+        timeoutMsg: "Study Planner canvas did not close",
       },
     );
-    const textAfter = await canvasAfterEvolve.getText();
-    if (!textAfter.includes(TASK_TITLE)) {
-      throw new Error(
-        `Existing task "${TASK_TITLE}" missing after evolution — data not preserved`,
-      );
-    }
 
     await browser.waitUntil(
       async () => {
@@ -217,9 +215,36 @@ describe("Journey 31 — multi-surface progressive evolution", () => {
       },
       {
         timeout: 20_000,
-        timeoutMsg: "Related inline summary did not receive the priority evolve",
+        timeoutMsg:
+          "Inline summary missing or stale after canvas close (binding/restoration)",
       },
     );
+
+    const reopen = await appsSection.$('button[aria-label="Study Planner"]');
+    await reopen.waitForClickable({ timeout: 15_000 });
+    await reopen.click();
+
+    const canvasAfterEvolve = await $(
+      '.tool-canvas-body[data-tool-id="tool-study-planner"]',
+    );
+    await browser.waitUntil(
+      async () => {
+        if (!(await canvasAfterEvolve.isExisting())) return false;
+        const text = (await canvasAfterEvolve.getText()).toLowerCase();
+        return text.includes("priority") && text.includes("dashboard");
+      },
+      {
+        timeout: 25_000,
+        timeoutMsg:
+          "Priority column / Dashboard never appeared after close/reopen remount",
+      },
+    );
+    const textAfter = await canvasAfterEvolve.getText();
+    if (!textAfter.includes(TASK_TITLE)) {
+      throw new Error(
+        `Existing task "${TASK_TITLE}" missing after close/reopen — data not preserved`,
+      );
+    }
 
     const finishedAt = new Date().toISOString();
     fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
