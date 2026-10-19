@@ -91,7 +91,9 @@ export function GenerationRecoveryBanner({
   const [review, setReview] = useState<RecoveredPreviewView | null>(null);
   const refreshGen = useRef(0);
   const reviewToken = useRef(0);
+  const gensEmptyRef = useRef(true);
   const descId = useId();
+  gensEmptyRef.current = gens.length === 0;
 
   const refresh = useCallback(
     async (signal?: { cancelled: boolean }) => {
@@ -135,6 +137,11 @@ export function GenerationRecoveryBanner({
         event.kind === "sync"
       ) {
         void refresh();
+        // Cancel settlement can race the first list read; one deferred reload
+        // picks up interrupted_recoverable after the journal transition commits.
+        window.setTimeout(() => {
+          if (!disposed) void refresh();
+        }, 250);
       }
     }).then((unlisten) => {
       if (disposed) unlisten();
@@ -142,10 +149,16 @@ export function GenerationRecoveryBanner({
     });
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
+    // While no banner is showing, poll briefly so cancel→recoverable races
+    // cannot leave the UI empty after the journal has already committed.
+    const poll = window.setInterval(() => {
+      if (!disposed && gensEmptyRef.current) void refresh();
+    }, 1500);
     return () => {
       disposed = true;
       stop?.();
       window.removeEventListener("focus", onFocus);
+      window.clearInterval(poll);
     };
   }, [conversationId, refresh]);
 
@@ -256,47 +269,15 @@ export function GenerationRecoveryBanner({
   const onRetry = async (gen: RecoverableGeneration) => {
     setBusyId(gen.turnId);
     setError(null);
-    const turnConversationId = conversationId;
-    useAppStore.setState({
-      sending: true,
-      sendingConversationId: turnConversationId,
-      sendError: null,
-    });
     try {
-      // Backend-owned admission: reuses the original user message and only
-      // clears staging after the request slot + provider are admitted.
-      const result = await api.retryRecoverableGeneration({
-        conversationId: turnConversationId,
+      // Store-owned path mirrors sendMessage: full AgentTurnEvent handling,
+      // getMessages reload, and toolChange/runtimeV2 proposal staging.
+      const result = await useAppStore.getState().retryRecoverableGeneration({
+        conversationId,
         turnId: gen.turnId,
         expectedAttemptId: gen.attemptId,
         expectedSequence:
           gen.status === "previewAvailable" ? gen.sequence : undefined,
-        onEvent: (event) => {
-          if (
-            !("conversationId" in event) ||
-            event.conversationId !== turnConversationId
-          ) {
-            return;
-          }
-          if (event.kind === "previewSurface") {
-            useAppStore.setState((state) => ({
-              previewSurfacesByKey: applyPreviewSurfaceOverlay(
-                state.previewSurfacesByKey,
-                {
-                  conversationId: event.conversationId,
-                  turnId: event.turnId,
-                  toolId: event.toolId,
-                  surfaceId: event.surfaceId,
-                  applicationId: event.applicationId,
-                  definitionJson: event.definitionJson,
-                  stateJson: event.stateJson,
-                  revision: event.revision,
-                  sequence: event.sequence,
-                },
-              ),
-            }));
-          }
-        },
       });
       if (!result.admitted) {
         setError(
@@ -316,11 +297,6 @@ export function GenerationRecoveryBanner({
         ),
       );
     } finally {
-      useAppStore.setState((state) =>
-        state.sendingConversationId === turnConversationId
-          ? { sending: false, sendingConversationId: null }
-          : {},
-      );
       setBusyId(null);
     }
   };

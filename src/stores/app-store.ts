@@ -297,6 +297,16 @@ type AppStore = {
       fields: Record<string, unknown>;
     } | null,
   ) => Promise<boolean>;
+  /**
+   * Backend-owned recovery retry: full Channel event handling, message reload,
+   * and proposal staging (same post-turn contract as sendMessage).
+   */
+  retryRecoverableGeneration: (args: {
+    conversationId: string;
+    turnId: string;
+    expectedAttemptId: string;
+    expectedSequence?: number;
+  }) => Promise<{ admitted: boolean }>;
   cancelRequest: () => Promise<void>;
   retryLastFailed: () => Promise<void>;
   editAndResendMessage: (messageId: string, content: string) => Promise<void>;
@@ -619,6 +629,142 @@ function upsertTurnFromChannel(
       [conversationId]: turnId,
     },
   };
+}
+
+/**
+ * Apply invoke-scoped AgentTurnEvent kinds the same way sendMessage does
+ * (streaming text, actions, preview paint, errors, sync/conflict).
+ */
+function applyAgentTurnChannelEvent(
+  get: () => AppStore,
+  set: (
+    partial:
+      | Partial<AppStore>
+      | ((state: AppStore) => Partial<AppStore>),
+  ) => void,
+  turnConversationId: string,
+  event: AgentTurnEvent,
+) {
+  if (event.kind === "sync" || event.kind === "conflict") {
+    applySyncOrConflictEvent(get, set, event);
+    return;
+  }
+  if (!("conversationId" in event) || event.conversationId !== turnConversationId) {
+    return;
+  }
+  const isActive = get().activeConversationId === turnConversationId;
+
+  if (event.kind === "previewSurface") {
+    set((state) => ({
+      previewSurfacesByKey: applyPreviewSurfaceOverlay(
+        state.previewSurfacesByKey,
+        {
+          conversationId: turnConversationId,
+          turnId: event.turnId,
+          toolId: event.toolId,
+          surfaceId: event.surfaceId,
+          applicationId: event.applicationId,
+          definitionJson: event.definitionJson,
+          stateJson: event.stateJson,
+          revision: event.revision,
+          sequence: event.sequence,
+        },
+      ),
+    }));
+    return;
+  }
+
+  if (event.kind === "operation") {
+    const shortId = event.operationId.slice(0, 8) || "—";
+    const label =
+      event.status === "preview"
+        ? `Preview: ${shortId}`
+        : event.status === "interrupted"
+          ? "Preview interrupted"
+          : `Operation ${event.status}: ${shortId}`;
+    set((state) => {
+      const upserted = upsertTurnFromChannel(state, turnConversationId, null);
+      const actions = [...upserted.turn.actions, label].slice(-8);
+      const clearPreview =
+        event.status === "interrupted" || event.status === "fatal";
+      return {
+        turnsById: {
+          ...upserted.turnsById,
+          [upserted.turnId]: { ...upserted.turn, actions },
+        },
+        activeTurnIdByConversation: upserted.activeTurnIdByConversation,
+        ...(clearPreview
+          ? {
+              previewSurfacesByKey: clearPreviewOverlaysForConversation(
+                state.previewSurfacesByKey,
+                turnConversationId,
+              ),
+            }
+          : {}),
+        ...(isActive
+          ? { agentActions: [...state.agentActions, label].slice(-8) }
+          : {}),
+      };
+    });
+    return;
+  }
+  if (event.kind === "action") {
+    set((state) => {
+      const upserted = upsertTurnFromChannel(state, turnConversationId, null);
+      const actions = [...upserted.turn.actions, event.label].slice(-8);
+      return {
+        turnsById: {
+          ...upserted.turnsById,
+          [upserted.turnId]: { ...upserted.turn, actions },
+        },
+        activeTurnIdByConversation: upserted.activeTurnIdByConversation,
+        ...(isActive
+          ? { agentActions: [...state.agentActions, event.label].slice(-8) }
+          : {}),
+      };
+    });
+    return;
+  }
+  if (event.kind === "text") {
+    set((state) => {
+      const upserted = upsertTurnFromChannel(
+        state,
+        turnConversationId,
+        event.turnId,
+      );
+      const next = applyTextDelta(upserted.turn, event);
+      return {
+        turnsById: {
+          ...upserted.turnsById,
+          [upserted.turnId]: next,
+        },
+        activeTurnIdByConversation: upserted.activeTurnIdByConversation,
+        ...(isActive ? { streamingText: next.text || null } : {}),
+      };
+    });
+    return;
+  }
+  if (event.kind === "error") {
+    set((state) => {
+      const upserted = upsertTurnFromChannel(state, turnConversationId, null);
+      return {
+        turnsById: {
+          ...upserted.turnsById,
+          [upserted.turnId]: {
+            ...upserted.turn,
+            error: event.message,
+            status: "failed" as const,
+          },
+        },
+        activeTurnIdByConversation: upserted.activeTurnIdByConversation,
+        previewSurfacesByKey: clearPreviewOverlaysForConversation(
+          state.previewSurfacesByKey,
+          turnConversationId,
+        ),
+        ...(isActive ? { sendError: event.message } : {}),
+      };
+    });
+  }
 }
 
 function attachAgentTurnSyncListener(
@@ -2337,132 +2483,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     const turnConversationId = conversationId;
     const onChannelEvent = (event: AgentTurnEvent) => {
-      // Sync/Conflict: Rust prefers subscribeConversationSync; invoke Channel
-      // is only used when no sync subscriber delivered. Apply whichever arrives
-      // — never both for the same emit (see emit_turn ordering).
-      if (event.kind === "sync" || event.kind === "conflict") {
-        applySyncOrConflictEvent(get, set, event);
-        return;
-      }
-      // Defense in depth: Channel is invoke-scoped, but still require conversation match.
-      if (!("conversationId" in event) || event.conversationId !== turnConversationId) {
-        return;
-      }
-      // Always accumulate in turnsById (even when navigated away). Only mirror
-      // derived live UI fields when this conversation is on screen.
-      const isActive = get().activeConversationId === turnConversationId;
-
-      if (event.kind === "previewSurface") {
-        set((state) => ({
-          previewSurfacesByKey: applyPreviewSurfaceOverlay(
-            state.previewSurfacesByKey,
-            {
-              conversationId: turnConversationId,
-              turnId: event.turnId,
-              toolId: event.toolId,
-              surfaceId: event.surfaceId,
-              applicationId: event.applicationId,
-              definitionJson: event.definitionJson,
-              stateJson: event.stateJson,
-              revision: event.revision,
-              sequence: event.sequence,
-            },
-          ),
-        }));
-        return;
-      }
-
-      if (event.kind === "operation") {
-        const shortId = event.operationId.slice(0, 8) || "—";
-        const label =
-          event.status === "preview"
-            ? `Preview: ${shortId}`
-            : event.status === "interrupted"
-              ? "Preview interrupted"
-              : `Operation ${event.status}: ${shortId}`;
-        set((state) => {
-          const upserted = upsertTurnFromChannel(state, turnConversationId, null);
-          const actions = [...upserted.turn.actions, label].slice(-8);
-          const clearPreview =
-            event.status === "interrupted" || event.status === "fatal";
-          return {
-            turnsById: {
-              ...upserted.turnsById,
-              [upserted.turnId]: { ...upserted.turn, actions },
-            },
-            activeTurnIdByConversation: upserted.activeTurnIdByConversation,
-            ...(clearPreview
-              ? {
-                  previewSurfacesByKey: clearPreviewOverlaysForConversation(
-                    state.previewSurfacesByKey,
-                    turnConversationId,
-                  ),
-                }
-              : {}),
-            ...(isActive
-              ? { agentActions: [...state.agentActions, label].slice(-8) }
-              : {}),
-          };
-        });
-        return;
-      }
-      if (event.kind === "action") {
-        set((state) => {
-          const upserted = upsertTurnFromChannel(state, turnConversationId, null);
-          const actions = [...upserted.turn.actions, event.label].slice(-8);
-          return {
-            turnsById: {
-              ...upserted.turnsById,
-              [upserted.turnId]: { ...upserted.turn, actions },
-            },
-            activeTurnIdByConversation: upserted.activeTurnIdByConversation,
-            ...(isActive
-              ? { agentActions: [...state.agentActions, event.label].slice(-8) }
-              : {}),
-          };
-        });
-        return;
-      }
-      if (event.kind === "text") {
-        set((state) => {
-          const upserted = upsertTurnFromChannel(
-            state,
-            turnConversationId,
-            event.turnId,
-          );
-          const next = applyTextDelta(upserted.turn, event);
-          return {
-            turnsById: {
-              ...upserted.turnsById,
-              [upserted.turnId]: next,
-            },
-            activeTurnIdByConversation: upserted.activeTurnIdByConversation,
-            ...(isActive ? { streamingText: next.text || null } : {}),
-          };
-        });
-        return;
-      }
-      if (event.kind === "error") {
-        set((state) => {
-          const upserted = upsertTurnFromChannel(state, turnConversationId, null);
-          return {
-            turnsById: {
-              ...upserted.turnsById,
-              [upserted.turnId]: {
-                ...upserted.turn,
-                error: event.message,
-                status: "failed" as const,
-              },
-            },
-            activeTurnIdByConversation: upserted.activeTurnIdByConversation,
-            previewSurfacesByKey: clearPreviewOverlaysForConversation(
-              state.previewSurfacesByKey,
-              turnConversationId,
-            ),
-            ...(isActive ? { sendError: event.message } : {}),
-          };
-        });
-      }
+      applyAgentTurnChannelEvent(get, set, turnConversationId, event);
     };
 
     try {
@@ -2636,6 +2657,189 @@ export const useAppStore = create<AppStore>((set, get) => ({
         ),
       }));
       return false;
+    }
+  },
+
+  retryRecoverableGeneration: async ({
+    conversationId,
+    turnId,
+    expectedAttemptId,
+    expectedSequence,
+  }) => {
+    const turnConversationId = conversationId.trim();
+    if (!turnConversationId) {
+      throw new Error("Conversation is required for recovery retry");
+    }
+
+    set((state) => {
+      const provisionalId = pendingTurnId(turnConversationId);
+      const stillViewing = state.activeConversationId === turnConversationId;
+      return {
+        sending: true,
+        sendingConversationId: turnConversationId,
+        sendError: null,
+        agentActions: stillViewing ? [] : state.agentActions,
+        streamingText: stillViewing ? null : state.streamingText,
+        turnsById: {
+          ...state.turnsById,
+          [provisionalId]: createTurnLiveState(provisionalId, turnConversationId),
+        },
+        activeTurnIdByConversation: {
+          ...state.activeTurnIdByConversation,
+          [turnConversationId]: provisionalId,
+        },
+      };
+    });
+
+    const onChannelEvent = (event: AgentTurnEvent) => {
+      applyAgentTurnChannelEvent(get, set, turnConversationId, event);
+    };
+
+    try {
+      const result = await api.retryRecoverableGeneration({
+        conversationId: turnConversationId,
+        turnId,
+        expectedAttemptId,
+        expectedSequence,
+        onEvent: onChannelEvent,
+      });
+
+      const messages = await api.getMessages(turnConversationId);
+      await get().refreshConversations();
+
+      const messageId = result.messageId ?? "";
+      const pending =
+        result.toolChange != null && messageId
+          ? {
+              conversationId: turnConversationId,
+              messageId,
+              toolChange: result.toolChange,
+            }
+          : null;
+
+      let kernelProposal: PendingKernelProposal | null = null;
+      const rv = result.runtimeV2 as
+        | {
+            proposalId?: string;
+            risk?: string;
+            impactSummary?: string;
+            summary?: string;
+            operations?: unknown[];
+            status?: string;
+            error?: string;
+          }
+        | null
+        | undefined;
+      if (
+        messageId &&
+        rv?.proposalId &&
+        Array.isArray(rv.operations) &&
+        rv.operations.length > 0 &&
+        rv.status !== "discarded" &&
+        rv.status !== "applied"
+      ) {
+        kernelProposal = {
+          conversationId: turnConversationId,
+          messageId,
+          proposalId: rv.proposalId,
+          summary: rv.summary ?? "Proposed application change",
+          impactSummary: rv.impactSummary ?? "",
+          risk: rv.risk ?? "strong",
+          operations: rv.operations,
+        };
+      }
+
+      const pendingSettings: PendingSettingsChange | null =
+        result.settingsChange && messageId
+          ? {
+              conversationId: turnConversationId,
+              messageId,
+              settingsChange: result.settingsChange,
+            }
+          : null;
+
+      const stillActive = get().activeConversationId === turnConversationId;
+      if (!stillActive) {
+        set((state) => ({
+          sending: false,
+          sendingConversationId: null,
+          agentActions: [],
+          streamingText: null,
+          ...finalizeTurnInState(
+            state,
+            turnConversationId,
+            result.admitted ? "completed" : "failed",
+          ),
+          ...(pendingSettings ? { pendingSettingsChange: pendingSettings } : {}),
+          ...(kernelProposal ? { pendingKernelProposal: kernelProposal } : {}),
+        }));
+        return { admitted: result.admitted };
+      }
+
+      set((state) => ({
+        messages,
+        sending: false,
+        sendingConversationId: null,
+        pendingToolChange: kernelProposal ? null : pending,
+        pendingSettingsChange: pendingSettings ?? state.pendingSettingsChange,
+        pendingKernelProposal: kernelProposal,
+        agentActions: [],
+        streamingText: null,
+        sendError: rv?.error
+          ? String(rv.error)
+          : result.admitted
+            ? null
+            : "Retry was not admitted. Your saved preview remains available.",
+        ...finalizeTurnInState(
+          state,
+          turnConversationId,
+          rv?.error || !result.admitted ? "failed" : "completed",
+          rv?.error
+            ? String(rv.error)
+            : result.admitted
+              ? null
+              : "Retry was not admitted",
+        ),
+      }));
+      return { admitted: result.admitted };
+    } catch (error) {
+      const message =
+        error instanceof TauriCommandError || error instanceof Error
+          ? error.message
+          : "Retry failed. Your saved preview remains available if it was not admitted.";
+      try {
+        const messages = await api.getMessages(turnConversationId);
+        if (get().activeConversationId === turnConversationId) {
+          set((state) => ({
+            messages,
+            sending: false,
+            sendingConversationId: null,
+            sendError: message,
+            agentActions: [],
+            streamingText: null,
+            ...finalizeTurnInState(state, turnConversationId, "failed", message),
+          }));
+        } else {
+          set((state) => ({
+            sending: false,
+            sendingConversationId: null,
+            agentActions: [],
+            streamingText: null,
+            ...finalizeTurnInState(state, turnConversationId, "failed", message),
+          }));
+        }
+      } catch {
+        set((state) => ({
+          sending: false,
+          sendingConversationId: null,
+          sendError:
+            get().activeConversationId === turnConversationId ? message : state.sendError,
+          agentActions: [],
+          streamingText: null,
+          ...finalizeTurnInState(state, turnConversationId, "failed", message),
+        }));
+      }
+      throw error instanceof Error ? error : new Error(message);
     }
   },
 

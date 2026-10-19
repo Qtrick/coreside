@@ -206,25 +206,19 @@ describe("GenerationRecoveryBanner", () => {
     ).toBeDefined();
   });
 
-  it("retries via backend admission without sendMessage", async () => {
+  it("retries via store action without sendMessage", async () => {
     const sendMessage = vi.fn();
+    const retryRecoverableGeneration = vi.fn().mockResolvedValue({
+      admitted: true,
+    });
     vi.mocked(useAppStore.getState).mockReturnValue({
       previewSurfacesByKey: {},
       sendMessage,
+      retryRecoverableGeneration,
     } as never);
     vi.mocked(api.listRecoverableGenerations)
       .mockResolvedValueOnce([recoverableGen({ turnId: "turn-retry" })])
       .mockResolvedValueOnce([]);
-    vi.mocked(api.retryRecoverableGeneration).mockResolvedValue({
-      admitted: true,
-      retiredTurnId: "turn-retry",
-      conversationId: "conv-1",
-      originalContent: "Build a study planner",
-      userMessageId: "msg-1",
-      reusedExistingMessage: true,
-      startsNewAttempt: true,
-      assistantMessage: "ok",
-    });
 
     render(<GenerationRecoveryBanner conversationId="conv-1" />);
     fireEvent.click(
@@ -232,26 +226,30 @@ describe("GenerationRecoveryBanner", () => {
     );
 
     await waitFor(() => {
-      expect(api.retryRecoverableGeneration).toHaveBeenCalledWith(
-        expect.objectContaining({
-          conversationId: "conv-1",
-          turnId: "turn-retry",
-          expectedAttemptId: "attempt-1",
-          expectedSequence: 1,
-          onEvent: expect.any(Function),
-        }),
-      );
+      expect(retryRecoverableGeneration).toHaveBeenCalledWith({
+        conversationId: "conv-1",
+        turnId: "turn-retry",
+        expectedAttemptId: "attempt-1",
+        expectedSequence: 1,
+      });
     });
     expect(sendMessage).not.toHaveBeenCalled();
+    expect(api.retryRecoverableGeneration).not.toHaveBeenCalled();
   });
 
   it("keeps the banner and shows an error when retry admission fails", async () => {
+    const retryRecoverableGeneration = vi
+      .fn()
+      .mockRejectedValue(
+        new Error("not_configured. Your saved preview remains available."),
+      );
+    vi.mocked(useAppStore.getState).mockReturnValue({
+      previewSurfacesByKey: {},
+      retryRecoverableGeneration,
+    } as never);
     vi.mocked(api.listRecoverableGenerations).mockResolvedValue([
       recoverableGen({ turnId: "turn-keep" }),
     ]);
-    vi.mocked(api.retryRecoverableGeneration).mockRejectedValue(
-      new Error("not_configured. Your saved preview remains available."),
-    );
 
     render(<GenerationRecoveryBanner conversationId="conv-1" />);
     fireEvent.click(

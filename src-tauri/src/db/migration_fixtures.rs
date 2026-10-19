@@ -888,15 +888,15 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("from040-inline.db");
         {
-            let db =
-                Database::open_path_through(&path, "040_backfill_inline_surface_message_id")
-                    .unwrap();
+            let db = Database::open_path_through(&path, "040_backfill_inline_surface_message_id")
+                .unwrap();
             seed_core_user_data(&db);
             // Two assistant messages — 040 would invent ownership to the latest.
+            // msg-mid sits between the surface created_at and the wrongly bound msg-new.
             db.conn()
                 .execute(
                     "INSERT INTO messages (id, conversation_id, role, content, created_at)
-                     VALUES ('msg-old', 'conv-biology', 'assistant', 'older', '2020-01-01T00:00:00Z')",
+                     VALUES ('msg-mid', 'conv-biology', 'assistant', 'middle', '2020-03-01T00:00:00Z')",
                     [],
                 )
                 .unwrap();
@@ -907,7 +907,8 @@ mod tests {
                     [],
                 )
                 .unwrap();
-            // Ambiguous: surface predates the bound (latest) assistant message.
+            // Ambiguous: surface predates bound msg-new with intervening msg-mid
+            // (040 latest-assistant backfill).
             db.conn()
                 .execute(
                     "INSERT INTO surfaces (
@@ -918,6 +919,30 @@ mod tests {
                         'surf-ambig', 'inst-ambig', 'tool', 'chat_inline', 'workspace', ?1,
                         'conv-biology', 'msg-new', 'Legacy inline', '{}',
                         '2020-02-01T00:00:00Z', '2020-02-01T00:00:00Z', 1
+                     )",
+                    [DEFAULT_WORKSPACE_ID],
+                )
+                .unwrap();
+            // Legitimate runtime bind: surface created seconds before its own assistant
+            // message in a multi-assistant conversation (no intervening assistant).
+            db.conn()
+                .execute(
+                    "INSERT INTO messages (id, conversation_id, role, content, created_at)
+                     VALUES ('msg-legit', 'conv-biology', 'assistant', 'owner',
+                             '2020-07-01T00:00:05Z')",
+                    [],
+                )
+                .unwrap();
+            db.conn()
+                .execute(
+                    "INSERT INTO surfaces (
+                        id, instance_id, surface_type, placement, owner_type, owner_id,
+                        conversation_id, message_id, name, definition_json,
+                        created_at, updated_at, current_revision
+                     ) VALUES (
+                        'surf-legit', 'inst-legit', 'tool', 'chat_inline', 'workspace', ?1,
+                        'conv-biology', 'msg-legit', 'Runtime inline', '{}',
+                        '2020-07-01T00:00:00Z', '2020-07-01T00:00:00Z', 1
                      )",
                     [DEFAULT_WORKSPACE_ID],
                 )
@@ -980,10 +1005,27 @@ mod tests {
             .unwrap();
         assert_eq!(ok.as_deref(), Some("msg-only"));
 
+        let legit: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT message_id FROM surfaces WHERE id = 'surf-legit'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            legit.as_deref(),
+            Some("msg-legit"),
+            "041 must keep surface bound when created seconds before its own assistant message"
+        );
+
         // Surfaces themselves must survive.
         assert_eq!(
-            count(&db, "SELECT COUNT(*) FROM surfaces WHERE id IN ('surf-ambig','surf-ok')"),
-            2
+            count(
+                &db,
+                "SELECT COUNT(*) FROM surfaces WHERE id IN ('surf-ambig','surf-ok','surf-legit')"
+            ),
+            3
         );
     }
 }

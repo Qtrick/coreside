@@ -769,6 +769,10 @@ export const api = {
         reusedExistingMessage: boolean;
         startsNewAttempt: boolean;
         assistantMessage?: string | null;
+        messageId?: string | null;
+        toolChange?: ToolChange | null;
+        settingsChange?: SettingsChange | null;
+        runtimeV2?: unknown;
       }>("retry_recoverable_generation", {
         ...cmdArgs,
         onEvent: channel,
@@ -783,6 +787,10 @@ export const api = {
       reusedExistingMessage: boolean;
       startsNewAttempt: boolean;
       assistantMessage?: string | null;
+      messageId?: string | null;
+      toolChange?: ToolChange | null;
+      settingsChange?: SettingsChange | null;
+      runtimeV2?: unknown;
     }>("retry_recoverable_generation", {
       ...cmdArgs,
       onEvent: onEvent ?? null,

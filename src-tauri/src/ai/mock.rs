@@ -1403,14 +1403,31 @@ impl MockAiProvider {
             + "\n";
 
         // Final durable ops must match the progressive set (empty [] would diverge).
-        let raw = json!({
-            "schemaVersion": "2",
-            "assistantMessage": "Progressive surface preview complete",
-            "responseType": "message",
-            "operations": [paint_op],
-            "diagnostics": { "fixture": "progressive_surface_preview" }
-        })
-        .to_string();
+        // When the prompt also asks for a task tracker, complete into ApplicationPlan
+        // so Journey 34 can Retry a cancelled progressive hold into a proposal.
+        let user_lower = request
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.role == crate::ai::AgentRole::User)
+            .map(|m| m.content.to_lowercase())
+            .unwrap_or_default();
+        let raw = if user_lower.contains("task tracker") || user_lower.contains("task-tracker") {
+            let plan = super::plan_fixtures::task_tracker_create_plan();
+            super::plan_fixtures::plan_response_json(
+                "Progressive surface preview complete — Task Tracker proposal ready.",
+                &plan,
+            )
+        } else {
+            json!({
+                "schemaVersion": "2",
+                "assistantMessage": "Progressive surface preview complete",
+                "responseType": "message",
+                "operations": [paint_op],
+                "diagnostics": { "fixture": "progressive_surface_preview" }
+            })
+            .to_string()
+        };
 
         let _ = tx
             .send(ProviderStreamEvent::ResponseStarted {

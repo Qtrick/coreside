@@ -280,9 +280,8 @@ pub fn assert_wallpaper_media_asset_ids_on_conn(
                 "theme wallpaper asset {asset_id} is not valid"
             )));
         }
-        crate::media::resolve_asset_file_path(&local_filename).map_err(|_| {
-            DbError::NotFound(format!("theme wallpaper asset file for {asset_id}"))
-        })?;
+        crate::media::resolve_asset_file_path(&local_filename)
+            .map_err(|_| DbError::NotFound(format!("theme wallpaper asset file for {asset_id}")))?;
     }
     Ok(())
 }

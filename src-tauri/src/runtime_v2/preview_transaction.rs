@@ -161,9 +161,9 @@ pub fn reconstruct_recoverable_preview(
     expected_attempt_id: &str,
     expected_sequence: Option<u32>,
 ) -> crate::db::DbResult<RecoverableGenerationPreview> {
-    use crate::db::DbError;
-    use super::turn_journal::ProgressiveOpsCheckpoint;
     use super::get_surface_state;
+    use super::turn_journal::ProgressiveOpsCheckpoint;
+    use crate::db::DbError;
 
     if turn.conversation_id != expected_conversation_id {
         return Err(DbError::Invalid(
@@ -181,9 +181,10 @@ pub fn reconstruct_recoverable_preview(
             turn.state
         )));
     }
-    let raw = turn.operations_json.as_deref().ok_or_else(|| {
-        DbError::Invalid("preview_unavailable: no checkpoint on turn".into())
-    })?;
+    let raw = turn
+        .operations_json
+        .as_deref()
+        .ok_or_else(|| DbError::Invalid("preview_unavailable: no checkpoint on turn".into()))?;
     let cp = ProgressiveOpsCheckpoint::parse(raw)?;
     if cp.attempt_id != expected_attempt_id {
         return Err(DbError::Invalid(
@@ -216,6 +217,8 @@ pub fn reconstruct_recoverable_preview(
         }
         match preview.paint_op(op, |surface_id| {
             // Fail closed: never seed a surface from another conversation/project.
+            // Workspace personal tools (tool_canvas) intentionally omit conversation_id
+            // — still allow recovery Review when the active chat requested the paint.
             let surface = match super::surfaces::resolve_and_authorize_surface_scope(
                 db,
                 surface_id,
@@ -224,9 +227,24 @@ pub fn reconstruct_recoverable_preview(
             ) {
                 Ok(s) => s,
                 Err(_) => {
-                    // Speculative create ops may still introduce never-applied surfaces
-                    // when no authorized seed exists.
-                    return None;
+                    let Ok(candidate) = super::surfaces::get_surface(db, surface_id) else {
+                        return None;
+                    };
+                    let workspace_tool = candidate.conversation_id.is_none()
+                        && candidate.placement == "tool_canvas"
+                        && candidate.owner_type == "workspace"
+                        && crate::db::conversation_exists(db, expected_conversation_id);
+                    if !workspace_tool {
+                        return None;
+                    }
+                    if let Some(expected_pid) = expected_project {
+                        match candidate.project_id.as_deref() {
+                            Some(actual) if actual == expected_pid => {}
+                            None => {}
+                            Some(_) => return None,
+                        }
+                    }
+                    candidate
                 }
             };
             let raw_state = get_surface_state(db, surface_id).ok()?;
@@ -2607,8 +2625,14 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut db = Database::open_path(&dir.path().join("recon-happy.db")).unwrap();
         let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Recovery", None).unwrap();
-        let turn = create_turn(&db, &conv.id, None, "idem-recon-create", Some("interactive"))
-            .unwrap();
+        let turn = create_turn(
+            &db,
+            &conv.id,
+            None,
+            "idem-recon-create",
+            Some("interactive"),
+        )
+        .unwrap();
         let surface_id = "surf-recovery-create";
         let tool_id = "tool-recovery-create";
         interrupt_turn_with_ops(
@@ -2659,8 +2683,8 @@ mod tests {
         let mut db = Database::open_path(&dir.path().join("recon-deny.db")).unwrap();
         let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Owner", None).unwrap();
         let other = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Other", None).unwrap();
-        let turn = create_turn(&db, &conv.id, None, "idem-recon-deny", Some("interactive"))
-            .unwrap();
+        let turn =
+            create_turn(&db, &conv.id, None, "idem-recon-deny", Some("interactive")).unwrap();
         interrupt_turn_with_ops(
             &db,
             &turn,
@@ -2684,14 +2708,9 @@ mod tests {
             "expected conversation ownership denial, got: {wrong_conv:?}"
         );
 
-        let wrong_attempt = reconstruct_recoverable_preview(
-            &db,
-            &interrupted,
-            &conv.id,
-            "attempt-stale",
-            Some(1),
-        )
-        .unwrap_err();
+        let wrong_attempt =
+            reconstruct_recoverable_preview(&db, &interrupted, &conv.id, "attempt-stale", Some(1))
+                .unwrap_err();
         assert!(
             matches!(
                 wrong_attempt,

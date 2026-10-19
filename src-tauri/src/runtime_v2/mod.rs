@@ -107,8 +107,7 @@ pub use preview_transaction::{
     finish_progressive_ingest, ingest_live_chunk, ingest_live_chunk_with_seed,
     ingest_progressive_chunk_with_seed, reconstruct_recoverable_preview,
     renderer_safe_preview_seed, PreviewOpEvent, PreviewPaintEvent, PreviewSurfaceModel,
-    PreviewTransaction, RecoverableGenerationPreview, RecoverablePreviewSurface,
-    RejectedPreviewOp,
+    PreviewTransaction, RecoverableGenerationPreview, RecoverablePreviewSurface, RejectedPreviewOp,
 };
 #[allow(unused_imports)]
 pub use progressive_ops::{
@@ -150,9 +149,8 @@ pub use turn_journal::{
     classify_recoverable_turn, compact_turn_journal, create_turn, discard_recoverable_turn,
     get_conversation_events, get_conversation_sync_cursor, get_turn, get_turn_by_idempotency,
     list_conversation_recoverable_turns, list_recoverable_generations, list_recoverable_turns,
-    mark_interrupted_in_flight, resolve_turn_user_message_id,
-    prune_recoverable_turns_over_cap, supersede_conversation_recoverable_turns, transition_turn,
-    write_progressive_checkpoint,
+    mark_interrupted_in_flight, prune_recoverable_turns_over_cap, resolve_turn_user_message_id,
+    supersede_conversation_recoverable_turns, transition_turn, write_progressive_checkpoint,
     ConversationEventRecord, ProgressiveOpsCheckpoint, RecoverableGenerationSummary,
     RecoveryStatus, TurnJournalRecord, TurnPatch, TurnState, MAX_PROGRESSIVE_CHECKPOINT_BYTES,
     PROGRESSIVE_CHECKPOINT_V,

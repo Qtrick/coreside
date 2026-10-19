@@ -352,9 +352,10 @@ pub fn discard_recoverable_turn(
     // When sequence is asserted, CAS on the exact checkpoint blob so a concurrent
     // mutation between parse and UPDATE cannot retire a different staging payload.
     let ops_cas: Option<String> = if let Some(expected_seq) = expected_sequence {
-        let raw = current.operations_json.as_deref().ok_or_else(|| {
-            DbError::Invalid("discard_sequence: no checkpoint on turn".into())
-        })?;
+        let raw = current
+            .operations_json
+            .as_deref()
+            .ok_or_else(|| DbError::Invalid("discard_sequence: no checkpoint on turn".into()))?;
         let cp = ProgressiveOpsCheckpoint::parse(raw)?;
         if cp.sequence != expected_seq {
             return Err(DbError::Invalid(
@@ -454,22 +455,19 @@ pub fn classify_recoverable_turn(turn: &TurnJournalRecord) -> RecoverableGenerat
         content_hash,
         updated_at: turn.updated_at.clone(),
         // Corrupted staging still allows Retry (new attempt) and Discard — only
-        // Review requires a parseable non-empty checkpoint.
+        // Review requires a parseable non-empty checkpoint. User cancel of a
+        // progressive hold is recoverable (Journey 34) — do not hide it.
         can_retry: matches!(
             status,
             RecoveryStatus::PreviewAvailable
                 | RecoveryStatus::PreviewUnavailable
                 | RecoveryStatus::CheckpointCorrupted
-        ) && turn.state == TurnState::InterruptedRecoverable
-            && turn.error_category.as_deref() != Some("cancelled"),
-        can_discard: turn.state == TurnState::InterruptedRecoverable
-            && turn.error_category.as_deref() != Some("cancelled"),
+        ) && turn.state == TurnState::InterruptedRecoverable,
+        can_discard: turn.state == TurnState::InterruptedRecoverable,
         can_review,
     };
 
-    if turn.state != TurnState::InterruptedRecoverable
-        || turn.error_category.as_deref() == Some("cancelled")
-    {
+    if turn.state != TurnState::InterruptedRecoverable {
         return base(RecoveryStatus::NotRecoverable, 0, false, 0, None, false);
     }
 
@@ -493,7 +491,14 @@ pub fn classify_recoverable_turn(turn: &TurnJournalRecord) -> RecoverableGenerat
             cp.content_hash,
             false,
         ),
-        Err(_) => base(RecoveryStatus::CheckpointCorrupted, 0, false, 0, None, false),
+        Err(_) => base(
+            RecoveryStatus::CheckpointCorrupted,
+            0,
+            false,
+            0,
+            None,
+            false,
+        ),
     }
 }
 
@@ -514,7 +519,6 @@ pub fn list_recoverable_generations(
         "SELECT id FROM turn_journal
          WHERE conversation_id = ?1
            AND state = 'interrupted_recoverable'
-           AND (error_category IS NULL OR error_category != 'cancelled')
          ORDER BY updated_at DESC
          LIMIT ?2",
     )?;
@@ -596,7 +600,6 @@ pub fn prune_recoverable_turns_over_cap(
         "SELECT id FROM turn_journal
          WHERE conversation_id = ?1
            AND state = 'interrupted_recoverable'
-           AND (error_category IS NULL OR error_category != 'cancelled')
          ORDER BY updated_at DESC",
     )?;
     let ids: Vec<String> = stmt
@@ -933,14 +936,14 @@ pub fn list_conversation_recoverable_turns(
     limit: usize,
 ) -> DbResult<Vec<TurnJournalRecord>> {
     // Only checkpointed staging is recoverable in the UI. Newest first so the
-    // banner surfaces the latest interrupted attempt. User-cancelled turns keep
-    // error_category='cancelled' and must not appear here.
+    // banner surfaces the latest interrupted attempt. User cancel of a
+    // progressive hold keeps error_category='cancelled' and MUST appear when
+    // operations_json is present (Review / Retry / Discard).
     let mut stmt = db.conn().prepare(
         "SELECT id FROM turn_journal
          WHERE conversation_id = ?1
            AND state = 'interrupted_recoverable'
            AND operations_json IS NOT NULL
-           AND (error_category IS NULL OR error_category != 'cancelled')
          ORDER BY updated_at DESC
          LIMIT ?2",
     )?;
@@ -2149,9 +2152,25 @@ mod tests {
         .unwrap();
 
         let listed = list_conversation_recoverable_turns(&db, "c-list-rec", 10).unwrap();
-        assert_eq!(listed.len(), 2, "empty ops and cancelled must be excluded");
-        assert_eq!(listed[0].id, newer.id, "newest checkpointed first");
-        assert_eq!(listed[1].id, older.id);
+        assert_eq!(
+            listed.len(),
+            3,
+            "empty ops excluded; cancelled with checkpoint included"
+        );
+        assert_eq!(listed[0].id, cancelled.id, "newest checkpointed first");
+        assert_eq!(listed[1].id, newer.id);
+        assert_eq!(listed[2].id, older.id);
+        let gens = list_recoverable_generations(&db, "c-list-rec", 10).unwrap();
+        assert!(
+            gens.iter().any(|g| {
+                g.turn_id == cancelled.id
+                    && g.status == RecoveryStatus::PreviewAvailable
+                    && g.can_retry
+                    && g.can_discard
+                    && g.can_review
+            }),
+            "user-cancelled progressive hold must be recoverable"
+        );
     }
 
     #[test]
@@ -2220,14 +2239,8 @@ mod tests {
 
         let op_a = sample_checkpoint_op("op-a");
         let op_b = sample_checkpoint_op("op-b");
-        write_progressive_checkpoint(
-            &db,
-            &turn.id,
-            &turn.attempt_id,
-            vec![op_a.clone()],
-            false,
-        )
-        .unwrap();
+        write_progressive_checkpoint(&db, &turn.id, &turn.attempt_id, vec![op_a.clone()], false)
+            .unwrap();
 
         // Longer checkpoint that drops the prior prefix must fail.
         let altered = write_progressive_checkpoint(
@@ -2357,8 +2370,7 @@ mod tests {
         let ok = create_turn(&db, "c-class", None, "idem-ok", Some("interactive")).unwrap();
         interrupt_with_checkpoint(&db, &ok, "op-ok");
 
-        let empty =
-            create_turn(&db, "c-class", None, "idem-empty", Some("interactive")).unwrap();
+        let empty = create_turn(&db, "c-class", None, "idem-empty", Some("interactive")).unwrap();
         transition_turn(
             &db,
             &empty.id,
@@ -2425,8 +2437,7 @@ mod tests {
     fn progressive_checkpoint_denied_after_interrupted_recoverable() {
         let mut db = db();
         seed_conversation(&mut db, "c-freeze");
-        let turn =
-            create_turn(&db, "c-freeze", None, "idem-freeze", Some("interactive")).unwrap();
+        let turn = create_turn(&db, "c-freeze", None, "idem-freeze", Some("interactive")).unwrap();
         interrupt_with_checkpoint(&db, &turn, "op-freeze");
 
         let denied = write_progressive_checkpoint(
@@ -2549,8 +2560,14 @@ mod tests {
     fn progressive_checkpoint_rejects_same_sequence_different_ops() {
         let mut db = db();
         seed_conversation(&mut db, "c-same-seq");
-        let turn =
-            create_turn(&db, "c-same-seq", None, "idem-same-seq", Some("interactive")).unwrap();
+        let turn = create_turn(
+            &db,
+            "c-same-seq",
+            None,
+            "idem-same-seq",
+            Some("interactive"),
+        )
+        .unwrap();
         transition_turn(
             &db,
             &turn.id,
@@ -2619,7 +2636,10 @@ mod tests {
         let mut huge_ops = Vec::new();
         // Build ops until serialized checkpoint exceeds the byte cap.
         for i in 0..512 {
-            huge_ops.push(sample_checkpoint_op(&format!("op-pad-{i}-{}", "y".repeat(512))));
+            huge_ops.push(sample_checkpoint_op(&format!(
+                "op-pad-{i}-{}",
+                "y".repeat(512)
+            )));
         }
         let huge = ProgressiveOpsCheckpoint::new("attempt-huge", huge_ops, false);
         let ser_err = huge.serialize_bounded().unwrap_err();
