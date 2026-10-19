@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyPreviewSurfaceOverlay,
   clearPreviewOverlaysForConversation,
+  clearPreviewOverlaysForTurn,
   clearPreviewOverlaysMatching,
   clearPreviewSurfaceOverlays,
   getPreviewOverlayForTool,
@@ -162,6 +163,20 @@ describe("preview surface overlay", () => {
     });
     expect(next["tool-1"]).toBeUndefined();
     expect(next["tool-2"]).toBeDefined();
+  });
+
+  it("clears only one turn within a conversation", () => {
+    const current = {
+      "tool-a": sampleOverlay({ turnId: "turn-a", toolId: "tool-a" }),
+      "tool-b": sampleOverlay({
+        turnId: "turn-b",
+        toolId: "tool-b",
+        surfaceId: "surf-b",
+      }),
+    };
+    const next = clearPreviewOverlaysForTurn(current, "conv-1", "turn-a");
+    expect(next["tool-a"]).toBeUndefined();
+    expect(next["tool-b"]?.turnId).toBe("turn-b");
   });
 
   it("clears conversation overlays on conflict-style empty targeting", () => {

@@ -1493,6 +1493,7 @@ async fn drain_queued_turns(app: AppHandle, conversation_id: String) {
             false,
             None,
             Some(item.id.clone()),
+            None,
         )
         .await;
 
@@ -1572,6 +1573,7 @@ pub async fn send_message(
         structured_user_input,
         true,
         Some(on_event),
+        None,
         None,
     )
     .await
@@ -1736,6 +1738,8 @@ async fn send_message_inner(
     schedule_drain: bool,
     on_event: Option<tauri::ipc::Channel<AgentTurnEvent>>,
     active_queue_item_id: Option<String>,
+    // When set, reuse an existing user message (recovery retry) — no duplicate row.
+    reuse_user_message_id: Option<String>,
 ) -> Result<SendMessageResult, CommandError> {
     state.require_profile()?;
     if state
@@ -1748,9 +1752,20 @@ async fn send_message_inner(
             "Conversation has been deleted",
         ));
     }
+    let reuse_user_message_id = reuse_user_message_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     let mut content = content.trim().to_string();
     let attachments = attachments.unwrap_or_default();
-    if content.is_empty() && attachments.is_empty() && structured_user_input.is_none() {
+    // Recovery retry may pass empty content — authoritative text loads from the
+    // existing user message after admission.
+    if content.is_empty()
+        && attachments.is_empty()
+        && structured_user_input.is_none()
+        && reuse_user_message_id.is_none()
+    {
         return Err(CommandError::new(
             "invalid",
             "Message content cannot be empty",
@@ -1952,10 +1967,13 @@ async fn send_message_inner(
         }
     };
 
-    let (user_message, history, active_tool, referenced_tools, project_id, trusted_attachments) = {
-        let attachment_ids: Vec<String> = attachments.iter().map(|a| a.id.clone()).collect();
-        crate::commands::attachment_cmds::assert_staged_attachments_ready(state, &attachment_ids)?;
+    // Admit provider before inserting a user message or reclaiming recoverable
+    // staging. Slot is already held; release via active_request_guard on return.
+    if let Err(e) = crate::ai::create_provider_for_access(&access, Some(&model_preference)) {
+        return Err(CommandError::sanitized(e.code(), e, api_key_ref));
+    }
 
+    let (user_message, history, active_tool, referenced_tools, project_id, trusted_attachments) = {
         let mut db = state.db.lock();
         if state
             .deleted_conversations
@@ -1971,141 +1989,214 @@ async fn send_message_inner(
         let conv = db::get_conversation(&db, &conversation_id)?;
         let project_id = conv.project_id.clone();
 
-        let mention_meta = {
-            let mut meta = serde_json::Map::new();
-            if let Some(rows) = mentions.as_ref().filter(|m| !m.is_empty()) {
-                meta.insert(
-                    "mentions".into(),
-                    json!(rows
-                        .iter()
-                        .map(|m| json!({
-                            "toolId": m.tool_id,
-                            "label": m.label,
-                        }))
-                        .collect::<Vec<_>>()),
-                );
-            }
-            if let Some(ref sui) = sealed_structured {
-                let sealed_meta = structured_metadata_value(sui);
-                if let Some(obj) = sealed_meta.as_object() {
-                    for (k, v) in obj {
-                        meta.insert(k.clone(), v.clone());
-                    }
-                }
-                if sui
-                    .event_name
-                    .as_deref()
-                    .map(|n| n.starts_with("game.") || n.ends_with(".silent"))
-                    .unwrap_or(false)
-                    || sui
-                        .fields
-                        .get("silent")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                {
-                    meta.insert("silent".into(), json!(true));
-                }
-            }
-            if meta.is_empty() {
-                None
-            } else {
-                Some(serde_json::Value::Object(meta))
-            }
-        };
-
-        // One SQLite transaction for insert + claim + metadata so readers never see
-        // a message without matching chat_attachments rows (and crash mid-flight rolls back).
-        db.conn()
-            .execute_batch("BEGIN IMMEDIATE")
-            .map_err(|e| CommandError::new("storage", sanitize_error(&e.to_string(), None)))?;
-        let commit_result = (|| {
-            let user_message = db::insert_message(
-                &mut db,
-                &conversation_id,
-                "user",
-                &content,
-                mention_meta.as_ref(),
-            )?;
-            let claimed = crate::commands::attachment_cmds::claim_attachments_on_conn(
-                db.conn(),
-                &conversation_id,
-                &user_message.id,
-                &attachment_ids,
-            )?;
-            let mut user_message = user_message;
-            if !claimed.attachments.is_empty() {
-                let mut meta = match &user_message.metadata {
-                    Some(serde_json::Value::Object(m)) => m.clone(),
-                    _ => serde_json::Map::new(),
-                };
-                meta.insert(
-                    "attachments".into(),
-                    json!(claimed
-                        .attachments
-                        .iter()
-                        .map(|a| json!({
-                            "id": a.id,
-                            "name": a.name,
-                            "mimeType": a.mime_type,
-                            "byteSize": a.byte_size,
-                        }))
-                        .collect::<Vec<_>>()),
-                );
-                let meta_value = serde_json::Value::Object(meta);
-                db::update_message_metadata(&mut db, &user_message.id, &meta_value)?;
-                user_message.metadata = Some(meta_value);
-            }
-            Ok::<_, CommandError>((user_message, claimed))
-        })();
-        let (user_message, claimed) = match commit_result {
-            Ok(ok) => {
-                if let Err(e) = db.conn().execute_batch("COMMIT") {
-                    let _ = db.conn().execute_batch("ROLLBACK");
+        let (user_message, trusted_attachments, mentions_for_refs) =
+            if let Some(ref existing_id) = reuse_user_message_id {
+                // Recovery retry: reuse the original user message — no duplicate row.
+                let user_message = db::get_message(&db, existing_id).map_err(|e| {
+                    CommandError::new(
+                        "not_found",
+                        format!("Original user message unavailable: {e}"),
+                    )
+                })?;
+                if user_message.conversation_id != conversation_id {
                     return Err(CommandError::new(
-                        "storage",
-                        sanitize_error(&e.to_string(), None),
+                        "forbidden",
+                        "Original message does not belong to this conversation",
                     ));
                 }
-                ok
-            }
-            Err(err) => {
-                let _ = db.conn().execute_batch("ROLLBACK");
-                return Err(err);
-            }
-        };
+                if user_message.role != "user" {
+                    return Err(CommandError::new(
+                        "invalid",
+                        "Reuse target is not a user message",
+                    ));
+                }
+                content = user_message.content.clone();
+                let attachment_ids = attachment_ids_from_message_metadata(&user_message.metadata);
+                let claimed = crate::commands::attachment_cmds::claim_attachments_on_conn(
+                    db.conn(),
+                    &conversation_id,
+                    &user_message.id,
+                    &attachment_ids,
+                )?;
+                // Already-bound attachments may still need durable promotion after a crash.
+                let promote_keys = claimed.promote_keys.clone();
+                let trusted = claimed.attachments;
+                let mentions_for_refs = mentions_from_message_metadata(&user_message.metadata)
+                    .or_else(|| mentions.clone());
+                drop(db);
+                if let Err(err) =
+                    crate::commands::attachment_cmds::promote_claimed_attachment_files(&promote_keys)
+                {
+                    return Err(err);
+                }
+                (user_message, trusted, mentions_for_refs)
+            } else {
+                let attachment_ids: Vec<String> =
+                    attachments.iter().map(|a| a.id.clone()).collect();
+                drop(db);
+                crate::commands::attachment_cmds::assert_staged_attachments_ready(
+                    state,
+                    &attachment_ids,
+                )?;
+                let mut db = state.db.lock();
+                if state
+                    .deleted_conversations
+                    .lock()
+                    .contains(&conversation_id)
+                    || !db::conversation_exists(&db, &conversation_id)
+                {
+                    return Err(CommandError::new(
+                        "not_found",
+                        "Conversation has been deleted",
+                    ));
+                }
 
-        let promote_keys = claimed.promote_keys;
-        let new_claim_ids = claimed.new_claim_ids;
-        let trusted_attachments = claimed.attachments;
-        drop(db);
+                let mention_meta = {
+                    let mut meta = serde_json::Map::new();
+                    if let Some(rows) = mentions.as_ref().filter(|m| !m.is_empty()) {
+                        meta.insert(
+                            "mentions".into(),
+                            json!(rows
+                                .iter()
+                                .map(|m| json!({
+                                    "toolId": m.tool_id,
+                                    "label": m.label,
+                                }))
+                                .collect::<Vec<_>>()),
+                        );
+                    }
+                    if let Some(ref sui) = sealed_structured {
+                        let sealed_meta = structured_metadata_value(sui);
+                        if let Some(obj) = sealed_meta.as_object() {
+                            for (k, v) in obj {
+                                meta.insert(k.clone(), v.clone());
+                            }
+                        }
+                        if sui
+                            .event_name
+                            .as_deref()
+                            .map(|n| n.starts_with("game.") || n.ends_with(".silent"))
+                            .unwrap_or(false)
+                            || sui
+                                .fields
+                                .get("silent")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                        {
+                            meta.insert("silent".into(), json!(true));
+                        }
+                    }
+                    if meta.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::Value::Object(meta))
+                    }
+                };
 
-        if let Err(err) =
-            crate::commands::attachment_cmds::promote_claimed_attachment_files(&promote_keys)
-        {
-            let mut db = state.db.lock();
-            let _ = crate::commands::attachment_cmds::unbind_attachments_from_message(
-                &mut db,
-                &user_message.id,
-                &new_claim_ids,
-            );
-            if let Err(cleanup_err) = delete_orphaned_user_message(&mut db, &user_message.id) {
-                tracing::warn!(
-                    message_id = %user_message.id,
-                    error = %cleanup_err,
-                    "orphaned user message cleanup failed — searchable copy may remain"
-                );
-            }
-            return Err(err);
-        }
+                // One SQLite transaction for insert + claim + metadata so readers never see
+                // a message without matching chat_attachments rows.
+                db.conn()
+                    .execute_batch("BEGIN IMMEDIATE")
+                    .map_err(|e| {
+                        CommandError::new("storage", sanitize_error(&e.to_string(), None))
+                    })?;
+                let commit_result = (|| {
+                    let user_message = db::insert_message(
+                        &mut db,
+                        &conversation_id,
+                        "user",
+                        &content,
+                        mention_meta.as_ref(),
+                    )?;
+                    let claimed = crate::commands::attachment_cmds::claim_attachments_on_conn(
+                        db.conn(),
+                        &conversation_id,
+                        &user_message.id,
+                        &attachment_ids,
+                    )?;
+                    let mut user_message = user_message;
+                    if !claimed.attachments.is_empty() {
+                        let mut meta = match &user_message.metadata {
+                            Some(serde_json::Value::Object(m)) => m.clone(),
+                            _ => serde_json::Map::new(),
+                        };
+                        meta.insert(
+                            "attachments".into(),
+                            json!(claimed
+                                .attachments
+                                .iter()
+                                .map(|a| json!({
+                                    "id": a.id,
+                                    "name": a.name,
+                                    "mimeType": a.mime_type,
+                                    "byteSize": a.byte_size,
+                                }))
+                                .collect::<Vec<_>>()),
+                        );
+                        let meta_value = serde_json::Value::Object(meta);
+                        db::update_message_metadata(&mut db, &user_message.id, &meta_value)?;
+                        user_message.metadata = Some(meta_value);
+                    }
+                    Ok::<_, CommandError>((user_message, claimed))
+                })();
+                let (user_message, claimed) = match commit_result {
+                    Ok(ok) => {
+                        if let Err(e) = db.conn().execute_batch("COMMIT") {
+                            let _ = db.conn().execute_batch("ROLLBACK");
+                            return Err(CommandError::new(
+                                "storage",
+                                sanitize_error(&e.to_string(), None),
+                            ));
+                        }
+                        ok
+                    }
+                    Err(err) => {
+                        let _ = db.conn().execute_batch("ROLLBACK");
+                        return Err(err);
+                    }
+                };
 
-        let mut db = state.db.lock();
-        let _ = db::maybe_rename_conversation_from_message(&mut db, &conversation_id, &content)?;
+                let promote_keys = claimed.promote_keys;
+                let new_claim_ids = claimed.new_claim_ids;
+                let trusted_attachments = claimed.attachments;
+                drop(db);
 
+                if let Err(err) =
+                    crate::commands::attachment_cmds::promote_claimed_attachment_files(&promote_keys)
+                {
+                    let mut db = state.db.lock();
+                    let _ = crate::commands::attachment_cmds::unbind_attachments_from_message(
+                        &mut db,
+                        &user_message.id,
+                        &new_claim_ids,
+                    );
+                    if let Err(cleanup_err) =
+                        delete_orphaned_user_message(&mut db, &user_message.id)
+                    {
+                        tracing::warn!(
+                            message_id = %user_message.id,
+                            error = %cleanup_err,
+                            "orphaned user message cleanup failed — searchable copy may remain"
+                        );
+                    }
+                    return Err(err);
+                }
+
+                let mut db = state.db.lock();
+                let _ = db::maybe_rename_conversation_from_message(
+                    &mut db,
+                    &conversation_id,
+                    &content,
+                )?;
+                (user_message, trusted_attachments, mentions.clone())
+            };
+
+        let db = state.db.lock();
         let history = db::get_recent_messages(&db, &conversation_id, 40)?;
 
         let mut referenced_tools = Vec::new();
         let mut seen_ref_ids = std::collections::HashSet::new();
-        if let Some(rows) = mentions.as_ref() {
+        if let Some(rows) = mentions_for_refs.as_ref() {
             for mention in rows {
                 if !seen_ref_ids.insert(mention.tool_id.clone()) {
                     continue;
@@ -2538,17 +2629,18 @@ async fn send_message_inner(
             }
         }
         let db = state.db.lock();
-        // A new user message supersedes other interrupted staging in this chat
-        // (keep the turn we are about to run / retry).
-        if let Err(e) = crate::runtime_v2::supersede_conversation_recoverable_turns(
+        // Ordinary chat must not silently destroy sibling recoverable staging.
+        // Bound retention: keep the newest N interrupted recoveries per conversation.
+        if let Err(e) = crate::runtime_v2::prune_recoverable_turns_over_cap(
             &db,
             &conversation_id,
+            5,
             Some(&turn_id),
         ) {
             tracing::warn!(
                 error = %e,
                 conversation_id = %conversation_id,
-                "failed to supersede prior recoverable turns"
+                "failed to prune excess recoverable turns"
             );
         }
         let _ = crate::runtime_v2::transition_turn(
@@ -4718,116 +4810,243 @@ pub fn discard_interrupted_turn(
     .map_err(|e| CommandError::new("db_error", e.to_string()))
 }
 
-/// Prepare a safe retry of an interrupted generation (does not Apply staging).
+/// Backend-owned recovery retry admission.
 ///
-/// Retires the interrupted attempt so its checkpoint cannot Apply, then returns
-/// the original user request so the frontend can start a **new** generation via
-/// `send_message`. This does not resume a prior provider stream.
+/// Validates the interrupted turn and reconstructs the original request, then
+/// admits a new attempt via `send_message_inner` **reusing** the original user
+/// message. Staging is cleared only inside `begin_retry_attempt` after the
+/// active-request slot and provider are admitted — never before.
+///
+/// Does not Apply staging. Does not create a duplicate user message.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RetryRecoverableGenerationResult {
+    pub admitted: bool,
     pub retired_turn_id: String,
     pub conversation_id: String,
     pub original_content: String,
     pub user_message_id: String,
+    pub reused_existing_message: bool,
     pub starts_new_attempt: bool,
+    pub assistant_message: Option<String>,
 }
 
 #[tauri::command]
-pub fn retry_recoverable_generation(
+pub async fn retry_recoverable_generation(
+    app: AppHandle,
     state: State<'_, AppState>,
     conversation_id: String,
     turn_id: String,
     expected_attempt_id: String,
     expected_sequence: Option<u32>,
+    on_event: tauri::ipc::Channel<AgentTurnEvent>,
 ) -> Result<RetryRecoverableGenerationResult, CommandError> {
     state.require_profile()?;
-    let db = state.db.lock();
-    db::get_conversation(&db, &conversation_id)
-        .map_err(|e| CommandError::new("not_found", e.to_string()))?;
-    let turn = crate::runtime_v2::get_turn(&db, &turn_id)
-        .map_err(|e| CommandError::new("not_found", e.to_string()))?;
-    if turn.conversation_id != conversation_id {
-        return Err(CommandError::new(
-            "forbidden",
-            "turn does not belong to conversation",
-        ));
-    }
-    if turn.state != crate::runtime_v2::TurnState::InterruptedRecoverable {
-        return Err(CommandError::new(
-            "conflict",
-            format!("retry only from interrupted_recoverable, got {:?}", turn.state),
-        ));
-    }
-    if turn.attempt_id != expected_attempt_id {
-        return Err(CommandError::new(
-            "conflict",
-            "stale_attempt: retry attempt_id mismatch",
-        ));
-    }
-    if let Some(seq) = expected_sequence {
-        if let Some(raw) = turn.operations_json.as_deref() {
-            let cp = crate::runtime_v2::ProgressiveOpsCheckpoint::parse(raw)
-                .map_err(|e| CommandError::new("conflict", e.to_string()))?;
-            if cp.sequence != seq {
+
+    // Phase 1: validate + reconstruct envelope. Do NOT retire staging here.
+    let (user_message_id, original_content, mentions, attachments) = {
+        let db = state.db.lock();
+        db::get_conversation(&db, &conversation_id)
+            .map_err(|e| CommandError::new("not_found", e.to_string()))?;
+        let turn = crate::runtime_v2::get_turn(&db, &turn_id)
+            .map_err(|e| CommandError::new("not_found", e.to_string()))?;
+        if turn.conversation_id != conversation_id {
+            return Err(CommandError::new(
+                "forbidden",
+                "turn does not belong to conversation",
+            ));
+        }
+        if turn.state != crate::runtime_v2::TurnState::InterruptedRecoverable {
+            // Idempotent: already admitted / in-flight retry.
+            if matches!(
+                turn.state,
+                crate::runtime_v2::TurnState::Claimed
+                    | crate::runtime_v2::TurnState::Reserved
+                    | crate::runtime_v2::TurnState::ProviderStarted
+                    | crate::runtime_v2::TurnState::Streaming
+                    | crate::runtime_v2::TurnState::TypedTerminal
+                    | crate::runtime_v2::TurnState::Finalizing
+            ) {
+                return Err(CommandError::new(
+                    "conflict",
+                    "retry_already_admitted: a generation attempt is already in progress for this turn",
+                ));
+            }
+            return Err(CommandError::new(
+                "conflict",
+                format!("retry only from interrupted_recoverable, got {:?}", turn.state),
+            ));
+        }
+        if turn.attempt_id != expected_attempt_id {
+            return Err(CommandError::new(
+                "conflict",
+                "stale_attempt: retry attempt_id mismatch",
+            ));
+        }
+        if let Some(seq) = expected_sequence {
+            if let Some(raw) = turn.operations_json.as_deref() {
+                let cp = crate::runtime_v2::ProgressiveOpsCheckpoint::parse(raw)
+                    .map_err(|e| CommandError::new("conflict", e.to_string()))?;
+                if cp.sequence != seq {
+                    return Err(CommandError::new(
+                        "conflict",
+                        "stale_checkpoint: retry sequence mismatch",
+                    ));
+                }
+            } else if seq != 0 {
                 return Err(CommandError::new(
                     "conflict",
                     "stale_checkpoint: retry sequence mismatch",
                 ));
             }
-        } else if seq != 0 {
-            return Err(CommandError::new(
-                "conflict",
-                "stale_checkpoint: retry sequence mismatch",
-            ));
         }
-    }
 
-    let user_message_id = crate::runtime_v2::resolve_turn_user_message_id(&turn.idempotency_key)
-        .ok_or_else(|| {
+        let user_message_id =
+            crate::runtime_v2::resolve_turn_user_message_id(&turn.idempotency_key).ok_or_else(
+                || {
+                    CommandError::new(
+                        "invalid",
+                        "Cannot reconstruct the original request for this turn. Your saved preview remains available — send a new message instead.",
+                    )
+                },
+            )?;
+        let user_message = db::get_message(&db, &user_message_id).map_err(|e| {
             CommandError::new(
-                "invalid",
-                "Cannot reconstruct the original request for this turn. Send a new message instead.",
+                "not_found",
+                format!(
+                    "Original user message unavailable ({e}). Your saved preview remains available."
+                ),
             )
         })?;
-    let user_message = db::get_message(&db, &user_message_id).map_err(|e| {
-        CommandError::new(
-            "not_found",
-            format!("Original user message unavailable: {e}"),
+        if user_message.conversation_id != conversation_id {
+            return Err(CommandError::new(
+                "forbidden",
+                "Original message does not belong to this conversation",
+            ));
+        }
+        if user_message.role != "user" {
+            return Err(CommandError::new(
+                "invalid",
+                "Turn idempotency does not resolve to a user message",
+            ));
+        }
+        let mentions = mentions_from_message_metadata(&user_message.metadata);
+        let attachment_ids = attachment_ids_from_message_metadata(&user_message.metadata);
+        let attachments = if attachment_ids.is_empty() {
+            None
+        } else {
+            Some(
+                attachment_ids
+                    .into_iter()
+                    .map(|id| ChatAttachmentInput {
+                        id,
+                        name: None,
+                        mime_type: None,
+                        byte_size: None,
+                        local_filename: None,
+                    })
+                    .collect(),
+            )
+        };
+        (
+            user_message_id,
+            user_message.content.clone(),
+            mentions,
+            attachments,
         )
-    })?;
-    if user_message.conversation_id != conversation_id {
-        return Err(CommandError::new(
-            "forbidden",
-            "Original message does not belong to this conversation",
-        ));
-    }
-    if user_message.role != "user" {
-        return Err(CommandError::new(
-            "invalid",
-            "Turn idempotency does not resolve to a user message",
-        ));
-    }
+    };
 
-    // Retire staging (CAS) so the old checkpoint cannot Apply; then a new
-    // send_message creates a fresh turn. begin_retry_attempt is reserved for
-    // same-idempotency retries (e.g. structured input) inside send_message.
-    let retired = crate::runtime_v2::discard_recoverable_turn(
-        &db,
-        &turn_id,
-        &conversation_id,
-        Some(expected_attempt_id.as_str()),
-        expected_sequence,
-        "retried",
-        "User chose Retry Generation — staging retired; new attempt via send_message",
+    // Phase 2: admit + run generation bound to this conversation and user message.
+    // send_message_inner registers the slot and builds the provider BEFORE
+    // begin_retry_attempt clears staging. On busy/not_configured, staging remains.
+    let send_result = send_message_inner(
+        app,
+        state.inner(),
+        original_content.clone(),
+        conversation_id.clone(),
+        None,
+        None,
+        mentions,
+        attachments,
+        None,
+        true,
+        Some(on_event),
+        None,
+        Some(user_message_id.clone()),
     )
-    .map_err(|e| CommandError::new("conflict", e.to_string()))?;
+    .await
+    .map_err(|e| {
+        // Preserve user-facing hint that staging survives failed admission.
+        if e.code == "busy" || e.code == "not_configured" || e.code == "not_found" {
+            CommandError::new(
+                &e.code,
+                format!(
+                    "{}. Your saved preview remains available.",
+                    e.message.trim_end_matches('.')
+                ),
+            )
+        } else {
+            e
+        }
+    })?;
 
     Ok(RetryRecoverableGenerationResult {
-        retired_turn_id: retired.id,
+        admitted: true,
+        retired_turn_id: turn_id,
         conversation_id,
-        original_content: user_message.content,
+        original_content,
         user_message_id,
+        reused_existing_message: true,
         starts_new_attempt: true,
+        assistant_message: Some(send_result.assistant_message),
     })
+}
+
+fn attachment_ids_from_message_metadata(metadata: &Option<serde_json::Value>) -> Vec<String> {
+    let Some(meta) = metadata.as_ref() else {
+        return Vec::new();
+    };
+    let Some(arr) = meta.get("attachments").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|item| {
+            item.get("id")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+        })
+        .collect()
+}
+
+fn mentions_from_message_metadata(
+    metadata: &Option<serde_json::Value>,
+) -> Option<Vec<ToolMentionInput>> {
+    let meta = metadata.as_ref()?;
+    let arr = meta.get("mentions")?.as_array()?;
+    let mut out = Vec::new();
+    for item in arr {
+        let Some(tool_id) = item
+            .get("toolId")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        let label = item
+            .get("label")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        out.push(ToolMentionInput {
+            tool_id: tool_id.to_string(),
+            label,
+        });
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
 }

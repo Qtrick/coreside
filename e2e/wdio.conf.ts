@@ -215,6 +215,9 @@ export const config: Options.Testrunner = {
       "./specs/32-progressive-repair-recovery.spec.ts",
     ],
     "theme-preset-apply": ["./specs/33-theme-preset-apply.spec.ts"],
+    "generation-recovery-retry": [
+      "./specs/34-generation-recovery-retry.spec.ts",
+    ],
     "wallpaper-targeted": ["./specs/13-wallpaper-targeted-update.spec.ts"],
     "first-run-welcome": ["./specs/15-first-run-welcome.spec.ts"],
     "core-tutorial": ["./specs/16-core-tutorial.spec.ts"],

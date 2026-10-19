@@ -112,6 +112,27 @@ export function clearPreviewOverlaysForConversation(
   return changed ? next : current;
 }
 
+/** Drop overlays for one recovery/live turn only — leave sibling turns intact. */
+export function clearPreviewOverlaysForTurn(
+  current: Record<string, PreviewSurfaceOverlay>,
+  conversationId: string | null | undefined,
+  turnId: string | null | undefined,
+): Record<string, PreviewSurfaceOverlay> {
+  const conv = (conversationId ?? "").trim();
+  const turn = (turnId ?? "").trim();
+  if (!conv || !turn || Object.keys(current).length === 0) return current;
+  let changed = false;
+  const next: Record<string, PreviewSurfaceOverlay> = {};
+  for (const [key, overlay] of Object.entries(current)) {
+    if (overlay.conversationId === conv && overlay.turnId === turn) {
+      changed = true;
+      continue;
+    }
+    next[key] = overlay;
+  }
+  return changed ? next : current;
+}
+
 /**
  * Clear overlays after Sync / durable commit.
  *

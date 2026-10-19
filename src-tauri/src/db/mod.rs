@@ -186,10 +186,14 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         "040_backfill_inline_surface_message_id",
         include_str!("../../migrations/040_backfill_inline_surface_message_id.sql"),
     ),
+    (
+        "041_repair_ambiguous_inline_surface_message_id",
+        include_str!("../../migrations/041_repair_ambiguous_inline_surface_message_id.sql"),
+    ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "040_backfill_inline_surface_message_id";
+pub const LATEST_MIGRATION: &str = "041_repair_ambiguous_inline_surface_message_id";
 
 #[derive(Debug, Error)]
 pub enum DbError {

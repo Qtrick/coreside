@@ -5470,6 +5470,103 @@ body > .window-overlay-root > *,
   border: 1px solid var(--border);
   border-radius: 0.65rem;
   background: var(--core-muted-overlay);
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.recovered-preview-host {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--accent, #3d8b6e) 40%, var(--border));
+  border-radius: 0.75rem;
+  background: var(--core-card-overlay, var(--core-muted-overlay));
+  animation: recovered-preview-in 180ms ease-out;
+}
+
+@keyframes recovered-preview-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recovered-preview-host {
+    animation: none;
+  }
+}
+
+.recovered-preview-host-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.recovered-preview-host-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.recovered-preview-host-copy h2 {
+  margin: 0.35rem 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.recovered-preview-host-copy p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted-foreground, var(--text-secondary));
+  line-height: 1.4;
+}
+
+.recovered-preview-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent, #3d8b6e);
+}
+
+.recovered-preview-warnings {
+  margin-top: 0.35rem !important;
+  color: var(--warning, #9a6700) !important;
+}
+
+.recovered-preview-host-surfaces {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.recovered-preview-surface {
+  border: 1px dashed var(--border);
+  border-radius: 0.65rem;
+  background: var(--core-muted-overlay);
+  overflow: hidden;
+}
+
+.recovered-preview-surface-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.recovered-preview-surface-body {
+  padding: 0.65rem 0.7rem;
+  max-height: 360px;
+  overflow: auto;
 }
 
 .generation-recovery-copy {

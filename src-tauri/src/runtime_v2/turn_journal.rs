@@ -549,8 +549,10 @@ pub fn resolve_turn_user_message_id(idempotency_key: &str) -> Option<String> {
 
 /// Mark other interrupted recoverable turns in a conversation as superseded.
 ///
-/// Called when the user starts a new message so stale staging does not linger
-/// on the recovery banner. Optionally exclude the turn being retried.
+/// Soft supersession: staging bytes are retained (`operations_json` kept) so a
+/// failed admission / mistaken supersede cannot silently destroy the only copy.
+/// Rows leave `interrupted_recoverable` and therefore leave the recovery banner.
+/// Prefer [`prune_recoverable_turns_over_cap`] for ordinary chat retention.
 pub fn supersede_conversation_recoverable_turns(
     db: &Database,
     conversation_id: &str,
@@ -560,8 +562,6 @@ pub fn supersede_conversation_recoverable_turns(
     let n = db.conn().execute(
         "UPDATE turn_journal SET
             state = 'failed',
-            operations_json = NULL,
-            provisional_text = NULL,
             error_category = 'superseded',
             error_message = ?1,
             updated_at = ?2,
@@ -577,6 +577,63 @@ pub fn supersede_conversation_recoverable_turns(
         ],
     )?;
     Ok(n)
+}
+
+/// Bound recoverable staging per conversation (newest kept).
+///
+/// Ordinary new messages must not wipe sibling recoveries; only excess beyond
+/// `max_keep` is retired. `except_turn_id` is never pruned.
+pub fn prune_recoverable_turns_over_cap(
+    db: &Database,
+    conversation_id: &str,
+    max_keep: usize,
+    except_turn_id: Option<&str>,
+) -> DbResult<usize> {
+    if max_keep == 0 {
+        return Ok(0);
+    }
+    let mut stmt = db.conn().prepare(
+        "SELECT id FROM turn_journal
+         WHERE conversation_id = ?1
+           AND state = 'interrupted_recoverable'
+           AND (error_category IS NULL OR error_category != 'cancelled')
+         ORDER BY updated_at DESC",
+    )?;
+    let ids: Vec<String> = stmt
+        .query_map(params![conversation_id], |r| r.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut kept = 0usize;
+    let mut pruned = 0usize;
+    let now = now_rfc3339();
+    for id in ids {
+        if except_turn_id == Some(id.as_str()) {
+            kept += 1;
+            continue;
+        }
+        if kept < max_keep {
+            kept += 1;
+            continue;
+        }
+        let n = db.conn().execute(
+            "UPDATE turn_journal SET
+                state = 'failed',
+                operations_json = NULL,
+                provisional_text = NULL,
+                error_category = 'retention_capped',
+                error_message = ?1,
+                updated_at = ?2,
+                finalized_at = ?2
+             WHERE id = ?3 AND conversation_id = ?4 AND state = 'interrupted_recoverable'",
+            params![
+                "Recoverable staging retired by retention cap",
+                now,
+                id,
+                conversation_id
+            ],
+        )?;
+        pruned += n;
+    }
+    Ok(pruned)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2390,7 +2447,7 @@ mod tests {
     }
 
     #[test]
-    fn supersede_conversation_recoverable_turns_clears_staging() {
+    fn supersede_conversation_recoverable_turns_keeps_staging_bytes() {
         let mut db = db();
         seed_conversation(&mut db, "c-supersede");
         let keep = create_turn(&db, "c-supersede", None, "idem-keep", Some("interactive")).unwrap();
@@ -2407,7 +2464,85 @@ mod tests {
         let dropped = get_turn(&db, &drop.id).unwrap();
         assert_eq!(dropped.state, TurnState::Failed);
         assert_eq!(dropped.error_category.as_deref(), Some("superseded"));
-        assert!(dropped.operations_json.is_none());
+        // Soft supersede retains checkpoint bytes (banner no longer lists it).
+        assert!(dropped.operations_json.is_some());
+    }
+
+    #[test]
+    fn interrupted_checkpoint_survives_sqlite_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("reopen-recovery.db");
+        let turn_id;
+        let attempt_id;
+        let ops_json;
+        {
+            let mut db = Database::open_path(&path).unwrap();
+            seed_conversation(&mut db, "c-reopen");
+            let turn =
+                create_turn(&db, "c-reopen", None, "idem-reopen", Some("interactive")).unwrap();
+            interrupt_with_checkpoint(&db, &turn, "op-reopen");
+            let row = get_turn(&db, &turn.id).unwrap();
+            assert_eq!(row.state, TurnState::InterruptedRecoverable);
+            assert!(row.operations_json.is_some());
+            turn_id = row.id.clone();
+            attempt_id = row.attempt_id.clone();
+            ops_json = row.operations_json.clone();
+        }
+        let db = Database::open_path(&path).unwrap();
+        let restored = get_turn(&db, &turn_id).unwrap();
+        assert_eq!(restored.state, TurnState::InterruptedRecoverable);
+        assert_eq!(restored.attempt_id, attempt_id);
+        assert_eq!(restored.operations_json, ops_json);
+        let listed = list_recoverable_generations(&db, "c-reopen", 5).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].status, RecoveryStatus::PreviewAvailable);
+    }
+
+    #[test]
+    fn prune_recoverable_turns_over_cap_retires_oldest() {
+        let mut db = db();
+        seed_conversation(&mut db, "c-prune");
+        let t1 = create_turn(&db, "c-prune", None, "idem-p1", Some("interactive")).unwrap();
+        interrupt_with_checkpoint(&db, &t1, "op-p1");
+        let t2 = create_turn(&db, "c-prune", None, "idem-p2", Some("interactive")).unwrap();
+        interrupt_with_checkpoint(&db, &t2, "op-p2");
+        let t3 = create_turn(&db, "c-prune", None, "idem-p3", Some("interactive")).unwrap();
+        interrupt_with_checkpoint(&db, &t3, "op-p3");
+        // Deterministic recency: t1 oldest, t3 newest.
+        db.conn()
+            .execute(
+                "UPDATE turn_journal SET updated_at = '2020-01-01T00:00:00Z' WHERE id = ?1",
+                params![t1.id],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE turn_journal SET updated_at = '2020-01-02T00:00:00Z' WHERE id = ?1",
+                params![t2.id],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE turn_journal SET updated_at = '2020-01-03T00:00:00Z' WHERE id = ?1",
+                params![t3.id],
+            )
+            .unwrap();
+
+        let n = prune_recoverable_turns_over_cap(&db, "c-prune", 2, None).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(
+            get_turn(&db, &t1.id).unwrap().error_category.as_deref(),
+            Some("retention_capped")
+        );
+        assert!(get_turn(&db, &t1.id).unwrap().operations_json.is_none());
+        assert_eq!(
+            get_turn(&db, &t2.id).unwrap().state,
+            TurnState::InterruptedRecoverable
+        );
+        assert_eq!(
+            get_turn(&db, &t3.id).unwrap().state,
+            TurnState::InterruptedRecoverable
+        );
     }
 
     #[test]

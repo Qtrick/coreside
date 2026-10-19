@@ -12,19 +12,23 @@ vi.mock("@/lib/tauri", () => ({
     discardInterruptedTurn: vi.fn(),
   },
   listenAgentTurn: vi.fn(async () => () => undefined),
+  listenApprovalsChanged: vi.fn(async () => () => undefined),
 }));
 
 vi.mock("@/stores/app-store", () => ({
-  useAppStore: Object.assign(
-    vi.fn(),
-    {
-      getState: vi.fn(() => ({
-        previewSurfacesByKey: {},
-        sendMessage: vi.fn().mockResolvedValue(undefined),
-      })),
-      setState: vi.fn(),
-    },
-  ),
+  useAppStore: Object.assign(vi.fn(), {
+    getState: vi.fn(() => ({
+      previewSurfacesByKey: {},
+    })),
+    setState: vi.fn((update) => {
+      if (typeof update === "function") {
+        update({
+          previewSurfacesByKey: {},
+          sendingConversationId: "conv-1",
+        });
+      }
+    }),
+  }),
 }));
 
 type Gen = {
@@ -62,6 +66,40 @@ function recoverableGen(overrides: Partial<Gen> = {}): Gen {
   };
 }
 
+function previewDto(overrides: Record<string, unknown> = {}) {
+  return {
+    turnId: "turn-review",
+    conversationId: "conv-1",
+    attemptId: "attempt-1",
+    sequence: 1,
+    complete: false,
+    readOnly: true,
+    applyEligible: false,
+    fidelity: "full" as const,
+    surfaces: [
+      {
+        surfaceId: "surf-1",
+        toolId: "tool-1",
+        applicationId: "app-1",
+        definitionJson: {
+          id: "tool-1",
+          name: "Planner",
+          description: "Recovered planner",
+          layout: { type: "single-column" },
+          components: [
+            { id: "t1", type: "text", props: { content: "Recovered plan" } },
+          ],
+        },
+        stateJson: {},
+        revision: 1,
+        sequence: 1,
+      },
+    ],
+    warnings: [] as string[],
+    ...overrides,
+  };
+}
+
 describe("GenerationRecoveryBanner", () => {
   beforeEach(() => {
     vi.mocked(api.listRecoverableGenerations).mockReset();
@@ -71,7 +109,6 @@ describe("GenerationRecoveryBanner", () => {
     vi.mocked(useAppStore.setState).mockReset();
     vi.mocked(useAppStore.getState).mockReturnValue({
       previewSurfacesByKey: {},
-      sendMessage: vi.fn().mockResolvedValue(undefined),
     } as never);
   });
 
@@ -142,35 +179,13 @@ describe("GenerationRecoveryBanner", () => {
     expect(screen.getByRole("button", { name: "Discard Preview" })).toBeDefined();
   });
 
-  it("loads a read-only recovered preview on Review", async () => {
+  it("mounts a read-only recovered preview host on Review", async () => {
     vi.mocked(api.listRecoverableGenerations).mockResolvedValue([
       recoverableGen({ turnId: "turn-review" }),
     ]);
-    vi.mocked(api.getRecoverableGenerationPreview).mockResolvedValue({
-      turnId: "turn-review",
-      conversationId: "conv-1",
-      attemptId: "attempt-1",
-      sequence: 1,
-      complete: false,
-      readOnly: true,
-      surfaces: [
-        {
-          surfaceId: "surf-1",
-          toolId: "tool-1",
-          applicationId: "app-1",
-          definitionJson: {
-            id: "tool-1",
-            name: "Planner",
-            layout: "stack",
-            components: [],
-          },
-          stateJson: {},
-          revision: 1,
-          sequence: 1,
-        },
-      ],
-      warnings: [],
-    });
+    vi.mocked(api.getRecoverableGenerationPreview).mockResolvedValue(
+      previewDto(),
+    );
 
     render(<GenerationRecoveryBanner conversationId="conv-1" />);
     fireEvent.click(await screen.findByRole("button", { name: "Review Preview" }));
@@ -183,16 +198,16 @@ describe("GenerationRecoveryBanner", () => {
         expectedSequence: 1,
       });
     });
-    await waitFor(() => {
-      expect(useAppStore.setState).toHaveBeenCalled();
-    });
+    expect(await screen.findByTestId("recovered-preview-host")).toBeDefined();
+    expect(screen.getByTestId("recovered-preview-surface")).toBeDefined();
+    expect(screen.getByText("Saved application preview")).toBeDefined();
     expect(
       await screen.findByRole("button", { name: "Refresh Preview" }),
     ).toBeDefined();
   });
 
-  it("retries by retiring staging then sending the original request", async () => {
-    const sendMessage = vi.fn().mockResolvedValue(undefined);
+  it("retries via backend admission without sendMessage", async () => {
+    const sendMessage = vi.fn();
     vi.mocked(useAppStore.getState).mockReturnValue({
       previewSurfacesByKey: {},
       sendMessage,
@@ -201,11 +216,14 @@ describe("GenerationRecoveryBanner", () => {
       .mockResolvedValueOnce([recoverableGen({ turnId: "turn-retry" })])
       .mockResolvedValueOnce([]);
     vi.mocked(api.retryRecoverableGeneration).mockResolvedValue({
+      admitted: true,
       retiredTurnId: "turn-retry",
       conversationId: "conv-1",
       originalContent: "Build a study planner",
       userMessageId: "msg-1",
+      reusedExistingMessage: true,
       startsNewAttempt: true,
+      assistantMessage: "ok",
     });
 
     render(<GenerationRecoveryBanner conversationId="conv-1" />);
@@ -214,16 +232,37 @@ describe("GenerationRecoveryBanner", () => {
     );
 
     await waitFor(() => {
-      expect(api.retryRecoverableGeneration).toHaveBeenCalledWith({
-        conversationId: "conv-1",
-        turnId: "turn-retry",
-        expectedAttemptId: "attempt-1",
-        expectedSequence: 1,
-      });
+      expect(api.retryRecoverableGeneration).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationId: "conv-1",
+          turnId: "turn-retry",
+          expectedAttemptId: "attempt-1",
+          expectedSequence: 1,
+          onEvent: expect.any(Function),
+        }),
+      );
     });
-    await waitFor(() => {
-      expect(sendMessage).toHaveBeenCalledWith("Build a study planner");
-    });
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps the banner and shows an error when retry admission fails", async () => {
+    vi.mocked(api.listRecoverableGenerations).mockResolvedValue([
+      recoverableGen({ turnId: "turn-keep" }),
+    ]);
+    vi.mocked(api.retryRecoverableGeneration).mockRejectedValue(
+      new Error("not_configured. Your saved preview remains available."),
+    );
+
+    render(<GenerationRecoveryBanner conversationId="conv-1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Retry Generation" }),
+    );
+
+    expect(
+      await screen.findByText(/saved preview remains available/i),
+    ).toBeDefined();
+    expect(screen.getByTestId("generation-recovery")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Retry Generation" })).toBeDefined();
   });
 
   it("discards with attempt and sequence CAS then clears the banner", async () => {
@@ -272,7 +311,7 @@ describe("GenerationRecoveryBanner", () => {
       await screen.findByRole("button", { name: "Discard Preview" }),
     );
 
-    expect(await screen.findByText("turn_cas_conflict")).toBeDefined();
+    expect(await screen.findByText("Discard failed")).toBeDefined();
     expect(screen.getByTestId("generation-recovery")).toBeDefined();
   });
 

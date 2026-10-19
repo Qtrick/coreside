@@ -166,6 +166,12 @@ const JOURNEYS = [
     coverage: "full",
   },
   {
+    id: 34,
+    name: "generation-recovery-retry",
+    suite: "generation-recovery-retry",
+    coverage: "full",
+  },
+  {
     id: 15,
     name: "first-run-welcome",
     suite: "first-run-welcome",
@@ -404,6 +410,8 @@ runSuite("multi-surface-progressive-evolution");
 runSuite("progressive-repair-recovery");
 // Saved-theme confirmation and committed appearance fidelity on a clean profile.
 runSuite("theme-preset-apply");
+// Interrupted progressive generation → Review Preview host → Retry / Discard.
+runSuite("generation-recovery-retry", { seed: "existing" });
 
 // Seeded local AI privacy disclosure profile.
 runSuite("local-ai-privacy", { seed: "local" });

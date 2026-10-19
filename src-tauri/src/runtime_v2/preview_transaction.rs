@@ -108,6 +108,18 @@ pub struct PreviewPaintEvent {
     pub sequence: u64,
 }
 
+/// How complete a reconstructed recovery preview is.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RecoverablePreviewFidelity {
+    /// All checkpoint ops painted without warnings.
+    Full,
+    /// Some ops skipped/failed; inspect-only — never an Apply candidate.
+    Partial,
+    /// Checkpoint parse/seed failed hard (surfaced as Err, not this enum).
+    Unavailable,
+}
+
 /// Renderer-safe recovered preview (staging only — never Apply authority).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -119,6 +131,9 @@ pub struct RecoverableGenerationPreview {
     pub complete: bool,
     pub content_hash: Option<String>,
     pub read_only: bool,
+    /// Never true for recovered previews — Apply is a separate kernel path.
+    pub apply_eligible: bool,
+    pub fidelity: RecoverablePreviewFidelity,
     pub surfaces: Vec<RecoverablePreviewSurface>,
     pub warnings: Vec<String>,
 }
@@ -148,7 +163,7 @@ pub fn reconstruct_recoverable_preview(
 ) -> crate::db::DbResult<RecoverableGenerationPreview> {
     use crate::db::DbError;
     use super::turn_journal::ProgressiveOpsCheckpoint;
-    use super::{get_surface, get_surface_state};
+    use super::get_surface_state;
 
     if turn.conversation_id != expected_conversation_id {
         return Err(DbError::Invalid(
@@ -192,6 +207,7 @@ pub fn reconstruct_recoverable_preview(
     let mut warnings = Vec::new();
     let mut last_paints: std::collections::HashMap<String, PreviewPaintEvent> =
         std::collections::HashMap::new();
+    let expected_project = turn.project_id.as_deref();
 
     for op in &cp.ops {
         if let Err(e) = preview.accept(op.clone()) {
@@ -199,7 +215,20 @@ pub fn reconstruct_recoverable_preview(
             continue;
         }
         match preview.paint_op(op, |surface_id| {
-            let surface = get_surface(db, surface_id).ok()?;
+            // Fail closed: never seed a surface from another conversation/project.
+            let surface = match super::surfaces::resolve_and_authorize_surface_scope(
+                db,
+                surface_id,
+                Some(expected_conversation_id),
+                expected_project,
+            ) {
+                Ok(s) => s,
+                Err(_) => {
+                    // Speculative create ops may still introduce never-applied surfaces
+                    // when no authorized seed exists.
+                    return None;
+                }
+            };
             let raw_state = get_surface_state(db, surface_id).ok()?;
             Some(renderer_safe_preview_seed(
                 &surface.id,
@@ -250,6 +279,12 @@ pub fn reconstruct_recoverable_preview(
         .collect();
     surfaces.sort_by(|a, b| a.surface_id.cmp(&b.surface_id));
 
+    let fidelity = if warnings.is_empty() {
+        RecoverablePreviewFidelity::Full
+    } else {
+        RecoverablePreviewFidelity::Partial
+    };
+
     Ok(RecoverableGenerationPreview {
         turn_id: turn.id.clone(),
         conversation_id: turn.conversation_id.clone(),
@@ -258,6 +293,8 @@ pub fn reconstruct_recoverable_preview(
         complete: cp.complete,
         content_hash: cp.content_hash,
         read_only: true,
+        apply_eligible: false,
+        fidelity,
         surfaces,
         warnings,
     })
@@ -2591,6 +2628,8 @@ mod tests {
         .expect("reconstruct from surface.create checkpoint");
 
         assert!(preview.read_only);
+        assert!(!preview.apply_eligible);
+        assert_eq!(preview.fidelity, RecoverablePreviewFidelity::Full);
         assert_eq!(preview.turn_id, turn.id);
         assert_eq!(preview.conversation_id, conv.id);
         assert_eq!(preview.attempt_id, interrupted.attempt_id);

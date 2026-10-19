@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, listenAgentTurn } from "@/lib/tauri";
 import type { AgentTurnEvent } from "@/lib/tauri";
-import { applyPreviewSurfaceOverlay } from "@/lib/preview/surface-overlay";
+import {
+  applyPreviewSurfaceOverlay,
+  clearPreviewOverlaysForTurn,
+} from "@/lib/preview/surface-overlay";
+import { validateToolDefinition } from "@/lib/tool-schema";
 import { useAppStore } from "@/stores/app-store";
+import {
+  RecoveredPreviewHost,
+  type RecoveredPreviewView,
+} from "./RecoveredPreviewHost";
 
 export type RecoverableGeneration = {
   turnId: string;
@@ -56,6 +64,18 @@ function statusCopy(gen: RecoverableGeneration): {
   }
 }
 
+function consumerError(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    const msg = error.message.trim();
+    // Avoid dumping raw Rust/SQLite internals into the banner.
+    if (/turn_cas|stale_|DbError|rusqlite|sqlite/i.test(msg)) {
+      return fallback;
+    }
+    return msg;
+  }
+  return fallback;
+}
+
 /**
  * Surfaces interrupted progressive generation with backend-validated recovery
  * eligibility. Staging is never applied automatically.
@@ -68,8 +88,9 @@ export function GenerationRecoveryBanner({
   const [gens, setGens] = useState<RecoverableGeneration[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [review, setReview] = useState<RecoveredPreviewView | null>(null);
   const refreshGen = useRef(0);
+  const reviewToken = useRef(0);
   const descId = useId();
 
   const refresh = useCallback(
@@ -82,9 +103,7 @@ export function GenerationRecoveryBanner({
         setError(null);
       } catch (e) {
         if (signal?.cancelled || gen !== refreshGen.current) return;
-        setError(
-          e instanceof Error ? e.message : "Could not load recovery state",
-        );
+        setError(consumerError(e, "Could not load recovery state"));
         setGens([]);
       }
     },
@@ -99,8 +118,12 @@ export function GenerationRecoveryBanner({
     };
   }, [refresh]);
 
-  // Refresh when this conversation's turn/stream settles so superseded or
-  // newly interrupted staging appears without a remount.
+  // Drop review host when leaving the conversation (staging remains).
+  useEffect(() => {
+    setReview(null);
+    reviewToken.current += 1;
+  }, [conversationId]);
+
   useEffect(() => {
     let disposed = false;
     let stop: (() => void) | undefined;
@@ -126,18 +149,27 @@ export function GenerationRecoveryBanner({
     };
   }, [conversationId, refresh]);
 
-  const clearRecoveredOverlay = useCallback(() => {
-    useAppStore.setState((state) => ({
-      previewSurfacesByKey: Object.fromEntries(
-        Object.entries(state.previewSurfacesByKey).filter(
-          ([, overlay]) => overlay.conversationId !== conversationId,
+  const clearReviewForTurn = useCallback(
+    (turnId: string) => {
+      useAppStore.setState((state) => ({
+        previewSurfacesByKey: clearPreviewOverlaysForTurn(
+          state.previewSurfacesByKey,
+          conversationId,
+          turnId,
         ),
-      ),
-    }));
-    setReviewingId(null);
-  }, [conversationId]);
+      }));
+      setReview((current) => (current?.turnId === turnId ? null : current));
+    },
+    [conversationId],
+  );
+
+  const onCloseReview = useCallback(() => {
+    if (review) clearReviewForTurn(review.turnId);
+    else setReview(null);
+  }, [clearReviewForTurn, review]);
 
   const onReview = async (gen: RecoverableGeneration) => {
+    const token = ++reviewToken.current;
     setBusyId(gen.turnId);
     setError(null);
     try {
@@ -147,13 +179,39 @@ export function GenerationRecoveryBanner({
         expectedAttemptId: gen.attemptId,
         expectedSequence: gen.sequence,
       });
+      if (token !== reviewToken.current) return;
+
+      const surfaces: RecoveredPreviewView["surfaces"] = [];
+      for (const surface of preview.surfaces) {
+        const validated = validateToolDefinition(surface.definitionJson);
+        if (!validated.success) continue;
+        const state =
+          surface.stateJson &&
+          typeof surface.stateJson === "object" &&
+          !Array.isArray(surface.stateJson)
+            ? (surface.stateJson as Record<string, unknown>)
+            : {};
+        surfaces.push({
+          surfaceId: surface.surfaceId,
+          toolId: surface.toolId ?? validated.data.id,
+          applicationId: surface.applicationId ?? null,
+          tool: validated.data,
+          state,
+          revision: surface.revision,
+          sequence: surface.sequence,
+        });
+      }
+      if (surfaces.length === 0) {
+        setError(
+          "Could not restore a visible preview from the saved checkpoint. Your staging is still available — try Retry or Discard.",
+        );
+        setReview(null);
+        return;
+      }
+
+      // Paint overlays for already-mounted hosts without clearing other turns.
       let next = useAppStore.getState().previewSurfacesByKey;
-      // Drop prior overlays for this conversation before painting recovered ones.
-      next = Object.fromEntries(
-        Object.entries(next).filter(
-          ([, overlay]) => overlay.conversationId !== conversationId,
-        ),
-      );
+      next = clearPreviewOverlaysForTurn(next, conversationId, preview.turnId);
       for (const surface of preview.surfaces) {
         next = applyPreviewSurfaceOverlay(next, {
           conversationId,
@@ -168,15 +226,28 @@ export function GenerationRecoveryBanner({
         });
       }
       useAppStore.setState({ previewSurfacesByKey: next });
-      setReviewingId(gen.turnId);
-      if (preview.warnings.length > 0) {
+
+      const fidelity =
+        preview.fidelity === "partial" || preview.warnings.length > 0
+          ? "partial"
+          : "full";
+      setReview({
+        turnId: preview.turnId,
+        conversationId: preview.conversationId,
+        attemptId: preview.attemptId,
+        fidelity,
+        surfaces,
+        warnings: preview.warnings,
+      });
+      if (fidelity === "partial") {
         setError(
-          `Preview restored with warnings: ${preview.warnings.slice(0, 2).join("; ")}`,
+          "Preview restored partially — some staged operations could not be reconstructed. Inspect-only; nothing was applied.",
         );
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not restore preview");
-      setReviewingId(null);
+      if (token !== reviewToken.current) return;
+      setError(consumerError(e, "Could not restore preview"));
+      setReview(null);
     } finally {
       setBusyId(null);
     }
@@ -185,24 +256,71 @@ export function GenerationRecoveryBanner({
   const onRetry = async (gen: RecoverableGeneration) => {
     setBusyId(gen.turnId);
     setError(null);
+    const turnConversationId = conversationId;
+    useAppStore.setState({
+      sending: true,
+      sendingConversationId: turnConversationId,
+      sendError: null,
+    });
     try {
+      // Backend-owned admission: reuses the original user message and only
+      // clears staging after the request slot + provider are admitted.
       const result = await api.retryRecoverableGeneration({
-        conversationId,
+        conversationId: turnConversationId,
         turnId: gen.turnId,
         expectedAttemptId: gen.attemptId,
         expectedSequence:
           gen.status === "previewAvailable" ? gen.sequence : undefined,
+        onEvent: (event) => {
+          if (
+            !("conversationId" in event) ||
+            event.conversationId !== turnConversationId
+          ) {
+            return;
+          }
+          if (event.kind === "previewSurface") {
+            useAppStore.setState((state) => ({
+              previewSurfacesByKey: applyPreviewSurfaceOverlay(
+                state.previewSurfacesByKey,
+                {
+                  conversationId: event.conversationId,
+                  turnId: event.turnId,
+                  toolId: event.toolId,
+                  surfaceId: event.surfaceId,
+                  applicationId: event.applicationId,
+                  definitionJson: event.definitionJson,
+                  stateJson: event.stateJson,
+                  revision: event.revision,
+                  sequence: event.sequence,
+                },
+              ),
+            }));
+          }
+        },
       });
-      // Clear overlay only after staging is retired so a failed CAS keeps Review.
-      clearRecoveredOverlay();
+      if (!result.admitted) {
+        setError(
+          "Retry was not admitted. Your saved preview remains available.",
+        );
+        await refresh();
+        return;
+      }
+      clearReviewForTurn(gen.turnId);
       await refresh();
-      // New generation attempt — does not resume the prior provider stream.
-      await useAppStore.getState().sendMessage(result.originalContent);
     } catch (e) {
-      // Refresh first; it clears error on success, so re-apply the action error after.
       await refresh();
-      setError(e instanceof Error ? e.message : "Retry failed");
+      setError(
+        consumerError(
+          e,
+          "Retry failed. Your saved preview remains available if it was not admitted.",
+        ),
+      );
     } finally {
+      useAppStore.setState((state) =>
+        state.sendingConversationId === turnConversationId
+          ? { sending: false, sendingConversationId: null }
+          : {},
+      );
       setBusyId(null);
     }
   };
@@ -217,19 +335,17 @@ export function GenerationRecoveryBanner({
         gen.attemptId,
         gen.status === "previewAvailable" ? gen.sequence : undefined,
       );
-      if (reviewingId === gen.turnId) {
-        clearRecoveredOverlay();
-      }
+      clearReviewForTurn(gen.turnId);
       await refresh();
     } catch (e) {
       await refresh();
-      setError(e instanceof Error ? e.message : "Discard failed");
+      setError(consumerError(e, "Discard failed"));
     } finally {
       setBusyId(null);
     }
   };
 
-  if (!gens.length && !error) return null;
+  if (!gens.length && !error && !review) return null;
 
   return (
     <div
@@ -244,10 +360,13 @@ export function GenerationRecoveryBanner({
           {error}
         </p>
       ) : null}
+      {review ? (
+        <RecoveredPreviewHost preview={review} onClose={onCloseReview} />
+      ) : null}
       {gens.map((gen) => {
         const copy = statusCopy(gen);
         const busy = busyId === gen.turnId;
-        const reviewing = reviewingId === gen.turnId;
+        const reviewing = review?.turnId === gen.turnId;
         const desc = `${descId}-${gen.turnId}`;
         return (
           <div
@@ -288,7 +407,9 @@ export function GenerationRecoveryBanner({
                   title="Starts a new generation attempt with your original request"
                   onClick={() => void onRetry(gen)}
                 >
-                  Retry Generation
+                  {busy && busyId === gen.turnId
+                    ? "Starting…"
+                    : "Retry Generation"}
                 </button>
               ) : null}
               {gen.canDiscard ? (

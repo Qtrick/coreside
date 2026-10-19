@@ -503,7 +503,7 @@ mod tests {
             .iter()
             .map(|(n, _)| *n)
             .collect::<Vec<_>>();
-        assert_eq!(names.len(), 40);
+        assert_eq!(names.len(), 41);
         for (i, name) in names.iter().enumerate() {
             let expected = format!("{:03}_", i + 1);
             assert!(
@@ -511,8 +511,11 @@ mod tests {
                 "migration {i} should start with {expected}, got {name}"
             );
         }
-        assert_eq!(names[39], LATEST_MIGRATION);
-        assert_eq!(LATEST_MIGRATION, "040_backfill_inline_surface_message_id");
+        assert_eq!(names[40], LATEST_MIGRATION);
+        assert_eq!(
+            LATEST_MIGRATION,
+            "041_repair_ambiguous_inline_surface_message_id"
+        );
     }
 
     #[test]
@@ -878,5 +881,109 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stored, "abc123");
+    }
+
+    #[test]
+    fn upgrade_041_unbinds_ambiguous_040_inline_message_bindings() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("from040-inline.db");
+        {
+            let db =
+                Database::open_path_through(&path, "040_backfill_inline_surface_message_id")
+                    .unwrap();
+            seed_core_user_data(&db);
+            // Two assistant messages — 040 would invent ownership to the latest.
+            db.conn()
+                .execute(
+                    "INSERT INTO messages (id, conversation_id, role, content, created_at)
+                     VALUES ('msg-old', 'conv-biology', 'assistant', 'older', '2020-01-01T00:00:00Z')",
+                    [],
+                )
+                .unwrap();
+            db.conn()
+                .execute(
+                    "INSERT INTO messages (id, conversation_id, role, content, created_at)
+                     VALUES ('msg-new', 'conv-biology', 'assistant', 'newer', '2020-06-01T00:00:00Z')",
+                    [],
+                )
+                .unwrap();
+            // Ambiguous: surface predates the bound (latest) assistant message.
+            db.conn()
+                .execute(
+                    "INSERT INTO surfaces (
+                        id, instance_id, surface_type, placement, owner_type, owner_id,
+                        conversation_id, message_id, name, definition_json,
+                        created_at, updated_at, current_revision
+                     ) VALUES (
+                        'surf-ambig', 'inst-ambig', 'tool', 'chat_inline', 'workspace', ?1,
+                        'conv-biology', 'msg-new', 'Legacy inline', '{}',
+                        '2020-02-01T00:00:00Z', '2020-02-01T00:00:00Z', 1
+                     )",
+                    [DEFAULT_WORKSPACE_ID],
+                )
+                .unwrap();
+            // Unambiguous: only one assistant in another conversation — keep binding.
+            db.conn()
+                .execute(
+                    "INSERT INTO conversations (id, workspace_id, title, project_id)
+                     VALUES ('conv-single', ?1, 'Single assistant', NULL)",
+                    [DEFAULT_WORKSPACE_ID],
+                )
+                .unwrap();
+            db.conn()
+                .execute(
+                    "INSERT INTO messages (id, conversation_id, role, content, created_at)
+                     VALUES ('msg-only', 'conv-single', 'assistant', 'only', '2020-01-01T00:00:00Z')",
+                    [],
+                )
+                .unwrap();
+            db.conn()
+                .execute(
+                    "INSERT INTO surfaces (
+                        id, instance_id, surface_type, placement, owner_type, owner_id,
+                        conversation_id, message_id, name, definition_json,
+                        created_at, updated_at, current_revision
+                     ) VALUES (
+                        'surf-ok', 'inst-ok', 'tool', 'chat_inline', 'workspace', ?1,
+                        'conv-single', 'msg-only', 'Bound inline', '{}',
+                        '2020-01-02T00:00:00Z', '2020-01-02T00:00:00Z', 1
+                     )",
+                    [DEFAULT_WORKSPACE_ID],
+                )
+                .unwrap();
+        }
+
+        let db = Database::open_path(&path).unwrap();
+        assert_latest(&db);
+        assert_fk_ok(&db);
+
+        let ambig: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT message_id FROM surfaces WHERE id = 'surf-ambig'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            ambig.is_none(),
+            "041 must clear ambiguous 040 binding, got {ambig:?}"
+        );
+
+        let ok: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT message_id FROM surfaces WHERE id = 'surf-ok'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ok.as_deref(), Some("msg-only"));
+
+        // Surfaces themselves must survive.
+        assert_eq!(
+            count(&db, "SELECT COUNT(*) FROM surfaces WHERE id IN ('surf-ambig','surf-ok')"),
+            2
+        );
     }
 }

@@ -730,6 +730,8 @@ export const api = {
       complete: boolean;
       contentHash?: string | null;
       readOnly: boolean;
+      applyEligible: boolean;
+      fidelity: "full" | "partial" | "unavailable";
       surfaces: Array<{
         surfaceId: string;
         toolId?: string | null;
@@ -741,19 +743,51 @@ export const api = {
       }>;
       warnings: string[];
     }>("get_recoverable_generation_preview", args),
+  /**
+   * Backend-owned recovery retry. Admits a new attempt on the original
+   * conversation/user message; staging is cleared only after admission.
+   */
   retryRecoverableGeneration: (args: {
     conversationId: string;
     turnId: string;
     expectedAttemptId: string;
     expectedSequence?: number;
-  }) =>
-    invoke<{
+    onEvent?: (event: AgentTurnEvent) => void;
+  }) => {
+    const { onEvent, ...cmdArgs } = args;
+    if (isTauriRuntime()) {
+      const channel = new Channel<AgentTurnEvent>();
+      if (onEvent) {
+        channel.onmessage = onEvent;
+      }
+      return invoke<{
+        admitted: boolean;
+        retiredTurnId: string;
+        conversationId: string;
+        originalContent: string;
+        userMessageId: string;
+        reusedExistingMessage: boolean;
+        startsNewAttempt: boolean;
+        assistantMessage?: string | null;
+      }>("retry_recoverable_generation", {
+        ...cmdArgs,
+        onEvent: channel,
+      });
+    }
+    return invoke<{
+      admitted: boolean;
       retiredTurnId: string;
       conversationId: string;
       originalContent: string;
       userMessageId: string;
+      reusedExistingMessage: boolean;
       startsNewAttempt: boolean;
-    }>("retry_recoverable_generation", args),
+      assistantMessage?: string | null;
+    }>("retry_recoverable_generation", {
+      ...cmdArgs,
+      onEvent: onEvent ?? null,
+    });
+  },
   discardInterruptedTurn: (
     turnId: string,
     conversationId: string,
