@@ -258,7 +258,11 @@ pub static BUNDLED_ACTIONS: Lazy<Vec<ActionDescriptor>> = Lazy::new(|| {
             json!({
                 "type": "object",
                 "required": ["recordId"],
-                "properties": { "recordId": { "type": "string" } }
+                "properties": {
+                    "recordId": { "type": "string" },
+                    // Optional hint for scoped runtime-application-data-changed.
+                    "modelId": { "type": "string" }
+                }
             }),
             ActionRisk::Destructive,
             false,

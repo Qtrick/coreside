@@ -1379,6 +1379,83 @@ mod tests {
     }
 
     #[test]
+    fn approved_write_rejects_wrong_field_type_without_persisting() {
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        let ctx = app_ctx(APP);
+        // title is text — a number must fail closed after approval consume path.
+        let input = json!({ "modelId": "note", "data": { "title": 42 } });
+        let first = execute_registered_action(&mut db, &ctx, "local_data.write", &input, None);
+        let approval_id = match &first {
+            ActionOutcome::PendingApproval { approval_id, .. } => approval_id.clone(),
+            other => panic!("expected approval, got {}", outcome_code(other)),
+        };
+        approvals::decide(&mut db, &approval_id, true, None, "user").unwrap();
+        let second = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &input,
+            Some(&approval_id),
+        );
+        assert!(
+            matches!(second, ActionOutcome::Error { .. }),
+            "wrong type must error, got {}",
+            outcome_code(&second)
+        );
+        assert!(
+            crate::application_kernel::data::query_records(&db, APP, "note", 20)
+                .unwrap()
+                .is_empty(),
+            "invalid typed write must not persist"
+        );
+    }
+
+    #[test]
+    fn approval_replay_is_idempotent_after_successful_consume() {
+        let (mut db, _dir) = test_db();
+        seed(&mut db);
+        let ctx = app_ctx(APP);
+        let input = json!({ "modelId": "note", "data": { "title": "Once" } });
+        let first = execute_registered_action(&mut db, &ctx, "local_data.write", &input, None);
+        let approval_id = match &first {
+            ActionOutcome::PendingApproval { approval_id, .. } => approval_id.clone(),
+            other => panic!("expected approval, got {}", outcome_code(other)),
+        };
+        approvals::decide(&mut db, &approval_id, true, None, "user").unwrap();
+        let ok = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &input,
+            Some(&approval_id),
+        );
+        assert!(ok.is_ok(), "{}", outcome_code(&ok));
+        assert_eq!(
+            crate::application_kernel::data::query_records(&db, APP, "note", 20)
+                .unwrap()
+                .len(),
+            1
+        );
+        // Second replay with the same approval must not double-write.
+        let replay = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &input,
+            Some(&approval_id),
+        );
+        assert_eq!(outcome_code(&replay), "blocked:approval_invalid");
+        assert_eq!(
+            crate::application_kernel::data::query_records(&db, APP, "note", 20)
+                .unwrap()
+                .len(),
+            1,
+            "idempotent replay must not create a second record"
+        );
+    }
+
+    #[test]
     fn chat_venue_cannot_touch_application_data() {
         let (mut db, _dir) = test_db();
         seed(&mut db);

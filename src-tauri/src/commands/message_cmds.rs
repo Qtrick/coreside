@@ -2651,23 +2651,29 @@ async fn send_message_inner(
             ) {
                 // Fail-closed: never continue generation under a stale attempt when
                 // CAS rotation fails (concurrent retry, malformed state, DB error).
-                let retried = crate::runtime_v2::begin_retry_attempt(
-                    &db,
-                    &existing.id,
-                    &existing.attempt_id,
-                )
-                .map_err(|e| CommandError::new("conflict", e.to_string()))?;
+                let retried =
+                    crate::runtime_v2::begin_retry_attempt(&db, &existing.id, &existing.attempt_id)
+                        .map_err(|e| CommandError::new("conflict", e.to_string()))?;
                 (retried.id, retried.attempt_id, true)
             } else {
                 (existing.id, existing.attempt_id, true)
             }
-        } else if let Ok(rec) = crate::runtime_v2::create_turn(
-            &db,
-            &conversation_id,
-            project_id.as_deref(),
-            &turn_idem_key,
-            Some("interactive"),
-        ) {
+        } else {
+            // Fail closed: progressive recovery and attempt CAS require a durable
+            // turn journal row. Do not continue with ephemeral UUIDs.
+            let rec = crate::runtime_v2::create_turn(
+                &db,
+                &conversation_id,
+                project_id.as_deref(),
+                &turn_idem_key,
+                Some("interactive"),
+            )
+            .map_err(|e| {
+                CommandError::new(
+                    "turn_journal",
+                    format!("Could not create a durable turn record: {e}"),
+                )
+            })?;
             let _ = crate::runtime_v2::transition_turn(
                 &db,
                 &rec.id,
@@ -2676,12 +2682,6 @@ async fn send_message_inner(
                 Default::default(),
             );
             (rec.id, rec.attempt_id, true)
-        } else {
-            (
-                Uuid::new_v4().to_string(),
-                Uuid::new_v4().to_string(),
-                false,
-            )
         }
     };
     if has_turn_record {
@@ -5422,7 +5422,10 @@ mod recovery_retry_admission_tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(still, 1, "historical user message must survive retry cleanup");
+        assert_eq!(
+            still, 1,
+            "historical user message must survive retry cleanup"
+        );
         let fts_after: i64 = db
             .conn()
             .query_row(
@@ -5449,7 +5452,10 @@ mod recovery_retry_admission_tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert!(meta.contains("att-1"), "attachment metadata binding preserved");
+        assert!(
+            meta.contains("att-1"),
+            "attachment metadata binding preserved"
+        );
     }
 
     /// Genuinely new orphaned messages remain eligible for cleanup.
@@ -5529,7 +5535,10 @@ mod recovery_retry_admission_tests {
 
         let after = get_turn(&db, &turn.id).unwrap();
         assert_eq!(after.state, TurnState::InterruptedRecoverable);
-        assert!(after.operations_json.is_some(), "staging must remain recoverable");
+        assert!(
+            after.operations_json.is_some(),
+            "staging must remain recoverable"
+        );
         let msg_count: i64 = db
             .conn()
             .query_row(

@@ -172,6 +172,24 @@ const JOURNEYS = [
     coverage: "full",
   },
   {
+    id: 36,
+    name: "study-planner-reactive-crud",
+    suite: "study-planner-reactive-crud",
+    coverage: "full",
+  },
+  {
+    id: 37,
+    name: "cross-surface-reactive-sync",
+    suite: "cross-surface-reactive-sync",
+    coverage: "full",
+  },
+  {
+    id: 38,
+    name: "cancel-during-retry",
+    suite: "cancel-during-retry",
+    coverage: "full",
+  },
+  {
     id: 15,
     name: "first-run-welcome",
     suite: "first-run-welcome",
@@ -412,6 +430,12 @@ runSuite("progressive-repair-recovery");
 runSuite("theme-preset-apply");
 // Interrupted progressive generation → Review Preview host → Retry / Discard.
 runSuite("generation-recovery-retry", { seed: "existing" });
+// Study Planner multi-field CRUD + reactive summaries (clean profile).
+runSuite("study-planner-reactive-crud");
+// Canvas ↔ inline summary reactive sync without another model turn.
+runSuite("cross-surface-reactive-sync");
+// Cancel while recovery retry is streaming (seeded progressive hold).
+runSuite("cancel-during-retry", { seed: "existing" });
 
 // Seeded local AI privacy disclosure profile.
 runSuite("local-ai-privacy", { seed: "local" });

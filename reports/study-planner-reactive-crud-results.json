@@ -1,0 +1,24 @@
+{
+  "status": "passed",
+  "journey": 36,
+  "name": "study-planner-reactive-crud",
+  "taskTitle": "Review Chapter 5 reactive notes",
+  "dueDate": "2030-06-15",
+  "notesPersisted": true,
+  "completionSynced": true,
+  "editPersisted": true,
+  "deleteSynced": true,
+  "priorityEvolvePreserved": true,
+  "startedAt": "2026-10-20T05:06:46.339Z",
+  "finishedAt": "2026-10-20T05:06:57.626Z",
+  "durationMs": 11287,
+  "identity": {
+    "commit": "2225101304ef4f56801a3d92cd4750b78c78c77b",
+    "dirty": true,
+    "platform": "darwin",
+    "arch": "arm64",
+    "sourceFingerprint": "024e82342f4872d3d14e2f553fe3813a1b2e6ea77341dbdf78b1004339ad71bf"
+  },
+  "binaryHash": "30c8539a1a15db78cecb3d97c98ab943acaeb95f42d15c3d9c31b4ad0f2e2bc4",
+  "e2eSpec": "e2e/specs/36-study-planner-reactive-crud.spec.ts"
+}

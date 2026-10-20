@@ -2352,6 +2352,13 @@ mod tests {
             .expect("study planner evolve");
             let ops = &validated.compiled.operations;
             assert!(
+                ops.len() <= crate::runtime_v2::limits::MAX_OPERATIONS_PER_TURN,
+                "evolve must stay within MAX_OPERATIONS_PER_TURN ({}), got {} {:?}",
+                crate::runtime_v2::limits::MAX_OPERATIONS_PER_TURN,
+                ops.len(),
+                ops.iter().map(|o| o.op_type.as_str()).collect::<Vec<_>>()
+            );
+            assert!(
                 !ops.iter().any(|o| o.op_type == "tool.full_replace"),
                 "tasks-only evolve must stay granular, got {:?}",
                 ops.iter().map(|o| o.op_type.as_str()).collect::<Vec<_>>()
@@ -2370,6 +2377,36 @@ mod tests {
                         )
                 }),
                 "dashboard section must not be remounted"
+            );
+            assert!(
+                !ops.is_empty(),
+                "evolve must produce durable operations for kernel proposal"
+            );
+            let evolve_prop = apply_change(
+                &mut db,
+                None,
+                ChangeRequest {
+                    conversation_id: Some(conv.id.clone()),
+                    summary: "Evolve Study Planner priority".into(),
+                    operations: ops.clone(),
+                    source_type: "agent".into(),
+                    ..Default::default()
+                },
+            )
+            .expect("evolve apply_change")
+            .proposal_id
+            .expect("evolve proposal id");
+            assert!(
+                decide_proposal(&mut db, None, &evolve_prop, true)
+                    .unwrap()
+                    .is_committed(),
+                "evolve decide must commit"
+            );
+            let after = get_surface(&db, &format!("surf-{STUDY_APP}")).unwrap();
+            let def = after.definition.to_string();
+            assert!(
+                def.contains("sp-stat-high") || def.contains("priority"),
+                "committed evolve must add priority UI"
             );
         }
     }

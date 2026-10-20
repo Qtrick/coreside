@@ -806,6 +806,55 @@ pub fn journal_create_plan() -> ApplicationPlan {
     }
 }
 
+fn study_tasks_query_refresh() -> ActionDefinition {
+    ActionDefinition::InvokeRegisteredAction {
+        action_name: "local_data.query".into(),
+        input: Some(json!({ "modelId": "studyTasks", "limit": 100 })),
+        input_from_state: None,
+        component_id: None,
+        result_key: Some("studyTasksResult".into()),
+    }
+}
+
+fn study_tasks_summary_props(include_priority: bool) -> serde_json::Value {
+    let mut metrics = json!({
+        "total": { "op": "count" },
+        "done": { "op": "countWhere", "field": "status", "equals": "done" },
+        "remaining": { "op": "countWhere", "field": "status", "notEquals": "done" },
+        "overdue": {
+            "op": "countOverdue",
+            "field": "dueDate",
+            "statusField": "status",
+            "excludeStatus": "done"
+        }
+    });
+    let mut template =
+        "{total} study tasks · {remaining} remaining · {done} completed · {overdue} overdue"
+            .to_string();
+    if include_priority {
+        metrics.as_object_mut().unwrap().insert(
+            "high".into(),
+            json!({ "op": "countWhere", "field": "priority", "equals": "high" }),
+        );
+        template.push_str(" · {high} high priority");
+    }
+    json!({
+        "text": "Your study tasks are ready. Open Study Planner for the full dashboard.",
+        "tone": "muted",
+        "rowsKey": "studyTasksResult",
+        "summary": {
+            "template": template,
+            "metrics": metrics,
+            "emptyText": "No study tasks yet. Open Study Planner to add one."
+        },
+        "dataSource": {
+            "actionName": "local_data.query",
+            "input": { "modelId": "studyTasks", "limit": 100 },
+            "resultKey": "studyTasksResult"
+        }
+    })
+}
+
 fn study_planner_tool_v1() -> ToolDefinition {
     ToolDefinition {
         id: "tool-study-planner".into(),
@@ -821,12 +870,31 @@ fn study_planner_tool_v1() -> ToolDefinition {
                 ..Default::default()
             },
             ToolComponent {
+                id: "sp-stat-remaining".into(),
+                component_type: "stat".into(),
+                props: Some(json!({
+                    "label": "Remaining",
+                    "rowsKey": "studyTasksResult",
+                    "metric": { "op": "countWhere", "field": "status", "notEquals": "done" },
+                    "value": "0"
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "sp-stat-done".into(),
+                component_type: "stat".into(),
+                props: Some(json!({
+                    "label": "Completed",
+                    "rowsKey": "studyTasksResult",
+                    "metric": { "op": "countWhere", "field": "status", "equals": "done" },
+                    "value": "0"
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
                 id: "sp-dash-summary".into(),
                 component_type: "text".into(),
-                props: Some(json!({
-                    "text": "Overview of study sessions and upcoming focus blocks.",
-                    "tone": "muted"
-                })),
+                props: Some(study_tasks_summary_props(false)),
                 ..Default::default()
             },
             ToolComponent {
@@ -841,7 +909,9 @@ fn study_planner_tool_v1() -> ToolDefinition {
                 props: Some(json!({
                     "columns": [
                         { "id": "title", "accessor": "title", "header": "Task" },
-                        { "id": "status", "accessor": "status", "header": "Status" }
+                        { "id": "status", "accessor": "status", "header": "Status" },
+                        { "id": "dueDate", "accessor": "dueDate", "header": "Due" },
+                        { "id": "notes", "accessor": "notes", "header": "Notes" }
                     ],
                     "rowsKey": "studyTasksResult",
                     "selectionKey": "selectedStudyTaskId",
@@ -883,7 +953,7 @@ fn study_planner_tool_v1() -> ToolDefinition {
             ToolComponent {
                 id: "sp-add-btn".into(),
                 component_type: "button".into(),
-                props: Some(json!({ "label": "Add Task" })),
+                props: Some(json!({ "label": "Add Task", "variant": "primary" })),
                 actions: Some(vec![
                     ActionDefinition::InvokeRegisteredAction {
                         action_name: "local_data.write".into(),
@@ -903,13 +973,7 @@ fn study_planner_tool_v1() -> ToolDefinition {
                         component_id: None,
                         result_key: None,
                     },
-                    ActionDefinition::InvokeRegisteredAction {
-                        action_name: "local_data.query".into(),
-                        input: Some(json!({ "modelId": "studyTasks", "limit": 100 })),
-                        input_from_state: None,
-                        component_id: None,
-                        result_key: Some("studyTasksResult".into()),
-                    },
+                    study_tasks_query_refresh(),
                     ActionDefinition::SetValue {
                         target: "newStudyTaskTitle".into(),
                         value: json!(""),
@@ -920,6 +984,122 @@ fn study_planner_tool_v1() -> ToolDefinition {
                     },
                     ActionDefinition::SetValue {
                         target: "newStudyTaskNotes".into(),
+                        value: json!(""),
+                    },
+                ]),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "sp-done-btn".into(),
+                component_type: "button".into(),
+                props: Some(json!({ "label": "Mark Done" })),
+                actions: Some(vec![
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.write".into(),
+                        input: Some(json!({
+                            "modelId": "studyTasks",
+                            "data": { "status": "done" }
+                        })),
+                        input_from_state: Some(
+                            [("recordId".into(), "selectedStudyTaskId".into())]
+                                .into_iter()
+                                .collect(),
+                        ),
+                        component_id: None,
+                        result_key: None,
+                    },
+                    study_tasks_query_refresh(),
+                ]),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "sp-reopen-btn".into(),
+                component_type: "button".into(),
+                props: Some(json!({ "label": "Reopen" })),
+                actions: Some(vec![
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.write".into(),
+                        input: Some(json!({
+                            "modelId": "studyTasks",
+                            "data": { "status": "todo" }
+                        })),
+                        input_from_state: Some(
+                            [("recordId".into(), "selectedStudyTaskId".into())]
+                                .into_iter()
+                                .collect(),
+                        ),
+                        component_id: None,
+                        result_key: None,
+                    },
+                    study_tasks_query_refresh(),
+                ]),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "sp-edit-notes".into(),
+                component_type: "textArea".into(),
+                value_key: Some("editStudyTaskNotes".into()),
+                props: Some(json!({
+                    "label": "Edit Notes",
+                    "placeholder": "Update notes for the selected task"
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "sp-edit-due".into(),
+                component_type: "dateInput".into(),
+                value_key: Some("editStudyTaskDueDate".into()),
+                props: Some(json!({ "label": "Edit Due Date" })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "sp-save-edit-btn".into(),
+                component_type: "button".into(),
+                props: Some(json!({ "label": "Save Changes" })),
+                actions: Some(vec![
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.write".into(),
+                        input: Some(json!({
+                            "modelId": "studyTasks",
+                            "data": {}
+                        })),
+                        input_from_state: Some(
+                            [
+                                ("recordId".into(), "selectedStudyTaskId".into()),
+                                ("data.notes".into(), "editStudyTaskNotes".into()),
+                                ("data.dueDate".into(), "editStudyTaskDueDate".into()),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        ),
+                        component_id: None,
+                        result_key: None,
+                    },
+                    study_tasks_query_refresh(),
+                ]),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "sp-delete-btn".into(),
+                component_type: "button".into(),
+                props: Some(json!({ "label": "Delete Task", "variant": "danger" })),
+                actions: Some(vec![
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.delete".into(),
+                        // modelId is optional for delete schema but enables scoped
+                        // runtime-application-data-changed invalidation.
+                        input: Some(json!({ "modelId": "studyTasks" })),
+                        input_from_state: Some(
+                            [("recordId".into(), "selectedStudyTaskId".into())]
+                                .into_iter()
+                                .collect(),
+                        ),
+                        component_id: None,
+                        result_key: None,
+                    },
+                    study_tasks_query_refresh(),
+                    ActionDefinition::SetValue {
+                        target: "selectedStudyTaskId".into(),
                         value: json!(""),
                     },
                 ]),
@@ -941,10 +1121,7 @@ fn study_planner_summary_v1() -> ToolDefinition {
         components: vec![ToolComponent {
             id: "sp-summary-text".into(),
             component_type: "text".into(),
-            props: Some(json!({
-                "text": "Your study tasks are ready. Open Study Planner for the full dashboard.",
-                "tone": "muted"
-            })),
+            props: Some(study_tasks_summary_props(false)),
             ..Default::default()
         }],
         ..Default::default()
@@ -1013,11 +1190,6 @@ fn study_planner_tool_v2_priority() -> ToolDefinition {
         if let Some(props) = table.props.as_mut() {
             if let Some(cols) = props.get_mut("columns").and_then(|c| c.as_array_mut()) {
                 cols.push(json!({
-                    "id": "dueDate",
-                    "accessor": "dueDate",
-                    "header": "Due"
-                }));
-                cols.push(json!({
                     "id": "priority",
                     "accessor": "priority",
                     "header": "Priority"
@@ -1025,41 +1197,87 @@ fn study_planner_tool_v2_priority() -> ToolDefinition {
             }
         }
     }
-    // Evolve also adds priority to the add-task form (title/due/notes already in v1).
-    if let Some(add_idx) = tool.components.iter().position(|c| c.id == "sp-add-btn") {
-        tool.components.insert(
-            add_idx,
-            ToolComponent {
-                id: "sp-new-priority".into(),
-                component_type: "select".into(),
-                value_key: Some("newStudyTaskPriority".into()),
-                props: Some(json!({
-                    "label": "Priority",
-                    "options": [
-                        { "label": "High", "value": "high" },
-                        { "label": "Medium", "value": "medium" },
-                        { "label": "Low", "value": "low" }
-                    ]
-                })),
-                ..Default::default()
-            },
-        );
-        if let Some(btn) = tool.components.iter_mut().find(|c| c.id == "sp-add-btn") {
-            if let Some(actions) = btn.actions.as_mut() {
-                if let Some(ActionDefinition::InvokeRegisteredAction {
-                    input_from_state: Some(map),
-                    ..
-                }) = actions.first_mut()
-                {
-                    map.insert("data.priority".into(), "newStudyTaskPriority".into());
-                }
-                actions.push(ActionDefinition::SetValue {
-                    target: "newStudyTaskPriority".into(),
-                    value: json!("medium"),
-                });
+    if let Some(summary) = tool
+        .components
+        .iter_mut()
+        .find(|c| c.id == "sp-dash-summary")
+    {
+        summary.props = Some(study_tasks_summary_props(true));
+    }
+    // Wire priority into existing add/save actions without mid-list inserts.
+    // Appending new components keeps sibling indices stable so surface_diff
+    // stays under MAX_OPERATIONS_PER_TURN (mid-list insert cascades moves).
+    if let Some(btn) = tool.components.iter_mut().find(|c| c.id == "sp-add-btn") {
+        if let Some(actions) = btn.actions.as_mut() {
+            if let Some(ActionDefinition::InvokeRegisteredAction {
+                input_from_state: Some(map),
+                ..
+            }) = actions.first_mut()
+            {
+                map.insert("data.priority".into(), "newStudyTaskPriority".into());
+            }
+            actions.push(ActionDefinition::SetValue {
+                target: "newStudyTaskPriority".into(),
+                value: json!("medium"),
+            });
+        }
+    }
+    if let Some(btn) = tool
+        .components
+        .iter_mut()
+        .find(|c| c.id == "sp-save-edit-btn")
+    {
+        if let Some(actions) = btn.actions.as_mut() {
+            if let Some(ActionDefinition::InvokeRegisteredAction {
+                input_from_state: Some(map),
+                ..
+            }) = actions.first_mut()
+            {
+                map.insert("data.priority".into(), "editStudyTaskPriority".into());
             }
         }
     }
+    tool.components.extend([
+        ToolComponent {
+            id: "sp-stat-high".into(),
+            component_type: "stat".into(),
+            props: Some(json!({
+                "label": "High priority",
+                "rowsKey": "studyTasksResult",
+                "metric": { "op": "countWhere", "field": "priority", "equals": "high" },
+                "value": "0"
+            })),
+            ..Default::default()
+        },
+        ToolComponent {
+            id: "sp-new-priority".into(),
+            component_type: "select".into(),
+            value_key: Some("newStudyTaskPriority".into()),
+            props: Some(json!({
+                "label": "Priority",
+                "options": [
+                    { "label": "High", "value": "high" },
+                    { "label": "Medium", "value": "medium" },
+                    { "label": "Low", "value": "low" }
+                ]
+            })),
+            ..Default::default()
+        },
+        ToolComponent {
+            id: "sp-edit-priority".into(),
+            component_type: "select".into(),
+            value_key: Some("editStudyTaskPriority".into()),
+            props: Some(json!({
+                "label": "Edit Priority",
+                "options": [
+                    { "label": "High", "value": "high" },
+                    { "label": "Medium", "value": "medium" },
+                    { "label": "Low", "value": "low" }
+                ]
+            })),
+            ..Default::default()
+        },
+    ]);
     tool
 }
 
@@ -1104,10 +1322,7 @@ pub fn multi_surface_planner_add_priority_plan(base_revision: Option<i64>) -> Ap
                 surface_id: STUDY_PLANNER_INLINE_SURFACE_ID.into(),
                 component_id: "sp-summary-text".into(),
                 component_type: None,
-                props: Some(json!({
-                    "text": "Priority is now tracked across your Study Planner tasks.",
-                    "tone": "muted"
-                })),
+                props: Some(study_tasks_summary_props(true)),
                 base_revision,
             },
         ],
@@ -1351,6 +1566,41 @@ mod tests {
     }
 
     #[test]
+    fn multi_surface_planner_summary_is_query_backed() {
+        let summary = study_planner_summary_v1();
+        let text = summary
+            .components
+            .iter()
+            .find(|c| c.id == "sp-summary-text")
+            .expect("summary text");
+        let props = text.props.as_ref().expect("props");
+        assert_eq!(
+            props.get("rowsKey").and_then(|v| v.as_str()),
+            Some("studyTasksResult")
+        );
+        assert!(
+            props.get("summary").is_some(),
+            "declarative summary metrics"
+        );
+        assert!(
+            props.get("dataSource").is_some(),
+            "inline summary must hydrate studyTasks"
+        );
+        let tool = study_planner_tool_v1();
+        assert!(
+            tool.components.iter().any(|c| c.id == "sp-done-btn"),
+            "completion affordance"
+        );
+        assert!(
+            tool.components.iter().any(|c| c.id == "sp-delete-btn"),
+            "delete affordance"
+        );
+        assert!(
+            tool.components.iter().any(|c| c.id == "sp-save-edit-btn"),
+            "edit affordance"
+        );
+    }
+
     fn multi_surface_planner_create_plan_compiles() {
         let compiled = compile_plan(&multi_surface_planner_create_plan()).unwrap();
         let ops = &compiled.compiled.operations;
@@ -1377,6 +1627,53 @@ mod tests {
                 && o.target.surface_id.as_deref() == Some(STUDY_PLANNER_INLINE_SURFACE_ID)
                 && o.base_revision == Some(1)
         }));
+    }
+
+    /// Regression: mid-list priority inserts cascaded component.move ops past
+    /// MAX_OPERATIONS_PER_TURN. New priority UI must be appended after v1 ids.
+    #[test]
+    fn study_planner_priority_ui_components_append_at_list_end() {
+        let v1 = study_planner_tool_v1();
+        let v2 = study_planner_tool_v2_priority();
+        let v1_len = v1.components.len();
+        assert!(
+            v2.components.len() > v1_len,
+            "priority evolve must add components"
+        );
+        let v1_ids: std::collections::HashSet<&str> =
+            v1.components.iter().map(|c| c.id.as_str()).collect();
+        for (i, c) in v2.components.iter().enumerate() {
+            if !v1_ids.contains(c.id.as_str()) {
+                assert!(
+                    i >= v1_len,
+                    "new priority component {} must append (index {i} < v1_len {v1_len})",
+                    c.id
+                );
+            }
+        }
+        let suffix: Vec<&str> = v2.components[v1_len..]
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        assert_eq!(
+            suffix,
+            vec!["sp-stat-high", "sp-new-priority", "sp-edit-priority"],
+            "expected priority UI suffix order"
+        );
+    }
+
+    #[test]
+    fn study_planner_priority_evolve_inspection_ops_stay_under_max() {
+        let ops = compile_plan(&multi_surface_planner_add_priority_plan(Some(1)))
+            .unwrap()
+            .compiled
+            .operations;
+        assert!(
+            ops.len() <= crate::runtime_v2::limits::MAX_OPERATIONS_PER_TURN,
+            "inspection evolve must stay within MAX_OPERATIONS_PER_TURN ({}), got {}",
+            crate::runtime_v2::limits::MAX_OPERATIONS_PER_TURN,
+            ops.len()
+        );
     }
 
     #[test]

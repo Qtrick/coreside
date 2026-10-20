@@ -191,6 +191,41 @@ export async function listenApprovalsChanged(
   return listen("runtime-approvals-changed", () => handler());
 }
 
+/** Hint that committed local_data write/delete affected an application model. */
+export type ApplicationDataChangedEvent = {
+  applicationId: string;
+  modelId?: string | null;
+  action?: string | null;
+};
+
+/**
+ * Authoritative application-data mutation committed in SQLite. Surfaces that
+ * hydrate the same application re-query; other apps ignore the event.
+ */
+export async function listenApplicationDataChanged(
+  handler: (event: ApplicationDataChangedEvent) => void,
+): Promise<() => void> {
+  if (!isTauriRuntime()) return () => undefined;
+  return listen<ApplicationDataChangedEvent>(
+    "runtime-application-data-changed",
+    (event) => {
+      const payload = event.payload;
+      if (!payload || typeof payload.applicationId !== "string") return;
+      const applicationId = payload.applicationId.trim();
+      if (!applicationId) return;
+      const rawModel =
+        typeof payload.modelId === "string" ? payload.modelId.trim() : "";
+      const rawAction =
+        typeof payload.action === "string" ? payload.action.trim() : "";
+      handler({
+        applicationId,
+        modelId: rawModel || null,
+        action: rawAction || null,
+      });
+    },
+  );
+}
+
 /** Theme preset list mutated in another window (save/rename/delete/update). */
 export async function listenThemePresetsChanged(
   handler: () => void,

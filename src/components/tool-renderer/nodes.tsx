@@ -3,6 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { ActionDefinition, ToolComponent } from "@/types/tool";
 import { useToolRuntime } from "./context";
 import { resolveMediaAssetUrl } from "@/lib/media";
+import {
+  evaluateRecordMetric,
+  formatRecordSummary,
+} from "@/lib/record-summary";
 import { api } from "@/lib/tauri";
 import type { MediaAsset } from "@/types/media";
 
@@ -207,9 +211,22 @@ export function HeadingNode({ component }: ToolNodeProps) {
 }
 
 export function TextNode({ component }: ToolNodeProps) {
+  const { getValue } = useToolRuntime();
+  const rowsKey = stateKeyFor(component, "rowsKey");
+  const summarySpec = component.props?.summary;
+  let text = asString(component.props?.text, asString(component.props?.children));
+  const isDerived = Boolean(rowsKey && summarySpec);
+  if (isDerived) {
+    const derived = formatRecordSummary(getValue(rowsKey!), summarySpec);
+    if (derived !== null) text = derived;
+  }
   return (
-    <p className="tr-text" data-component-id={component.id}>
-      {asString(component.props?.text, asString(component.props?.children))}
+    <p
+      className="tr-text"
+      data-component-id={component.id}
+      {...(isDerived ? { "aria-live": "polite" as const } : {})}
+    >
+      {text}
     </p>
   );
 }
@@ -679,7 +696,14 @@ export function ProgressNode({ component }: ToolNodeProps) {
 export function StatNode({ component }: ToolNodeProps) {
   const { getValue } = useToolRuntime();
   const key = stateKeyFor(component, "valueKey", "stateKey");
-  const value = key ? getValue(key, component.props?.value ?? "—") : (component.props?.value ?? "—");
+  const rowsKey = stateKeyFor(component, "rowsKey");
+  let value: unknown = key
+    ? getValue(key, component.props?.value ?? "—")
+    : (component.props?.value ?? "—");
+  if (rowsKey && component.props?.metric) {
+    const derived = evaluateRecordMetric(getValue(rowsKey), component.props.metric);
+    if (derived !== null) value = derived;
+  }
   return (
     <div className="tr-stat" data-component-id={component.id}>
       <span className="muted">{asString(component.props?.label, "Stat")}</span>

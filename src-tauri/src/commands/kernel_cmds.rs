@@ -539,9 +539,61 @@ pub fn kernel_clear_policy_override(
 /// each window refresh on demand instead of polling on a timer.
 pub const APPROVALS_CHANGED_EVENT: &str = "runtime-approvals-changed";
 
+/// Committed local_data write/delete. Payload is an invalidation hint only —
+/// surfaces re-query; raw record contents are never broadcast.
+pub const APPLICATION_DATA_CHANGED_EVENT: &str = "runtime-application-data-changed";
+
 fn notify_approvals_changed(app: &tauri::AppHandle) {
     use tauri::Emitter;
     let _ = app.emit(APPROVALS_CHANGED_EVENT, ());
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApplicationDataChangedPayload {
+    application_id: String,
+    model_id: Option<String>,
+    action: String,
+}
+
+fn notify_application_data_changed(
+    app: &tauri::AppHandle,
+    application_id: &str,
+    model_id: Option<&str>,
+    action: &str,
+) {
+    use tauri::Emitter;
+    let app_id = application_id.trim();
+    if app_id.is_empty() {
+        return;
+    }
+    let _ = app.emit(
+        APPLICATION_DATA_CHANGED_EVENT,
+        ApplicationDataChangedPayload {
+            application_id: app_id.into(),
+            model_id: model_id
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            action: action.into(),
+        },
+    );
+}
+
+fn is_local_data_mutation(action_name: &str) -> bool {
+    action_name == "local_data.write" || action_name == "local_data.delete"
+}
+
+/// Optional model hint for scoped invalidation. Deletes often omit modelId
+/// (schema only requires recordId) — callers still notify with None.
+fn local_data_mutation_model_id(input: &Value) -> Option<String> {
+    input
+        .get("modelId")
+        .or_else(|| input.get("model"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 #[tauri::command]
@@ -678,6 +730,12 @@ pub fn kernel_invoke_registered_action(
     };
     if matches!(outcome, ActionOutcome::PendingApproval { .. }) {
         notify_approvals_changed(&app);
+    } else if outcome.is_ok() && is_local_data_mutation(&request.action_name) {
+        // Notify even when modelId is absent (typical for local_data.delete).
+        if let Some(app_id) = request.application_id.as_deref() {
+            let model = local_data_mutation_model_id(&request.input);
+            notify_application_data_changed(&app, app_id, model.as_deref(), &request.action_name);
+        }
     }
     Ok(outcome)
 }
@@ -720,6 +778,7 @@ pub fn kernel_decide_approval(
         .map_err(CommandError::from)?;
     // Exactly-once execution: after a user approval, re-run the frozen call through
     // the gateway so the action is not left hanging until a second click.
+    let mut data_notify: Option<(String, Option<String>, String)> = None;
     if approve {
         let input = approvals::frozen_input(&db, &approval_id).map_err(CommandError::from)?;
         // Reconstruct call identity from frozen approval fields. Do not re-derive
@@ -727,13 +786,26 @@ pub fn kernel_decide_approval(
         // while the original invoke hashed the active chat conversation.
         let ctx = approvals::replay_context_from_approval(&result.approval)
             .map_err(CommandError::from)?;
-        result.outcome = Some(execute_registered_action(
+        let outcome = execute_registered_action(
             &mut db,
             &ctx,
             &result.approval.action_name,
             &input,
             Some(&approval_id),
-        ));
+        );
+        // Only local_data mutations invalidate application data. Use frozen
+        // approval input (not a reconstructed client payload).
+        if outcome.is_ok() && is_local_data_mutation(&result.approval.action_name) {
+            if let Some(app_id) = result.approval.application_id.as_deref() {
+                let model = local_data_mutation_model_id(&input);
+                data_notify = Some((
+                    app_id.to_string(),
+                    model,
+                    result.approval.action_name.clone(),
+                ));
+            }
+        }
+        result.outcome = Some(outcome);
         if result.approval.presence == "away" {
             if let Some(app_id) = result.approval.application_id.as_deref() {
                 let _ = crate::db::clear_automation_waiting_for_application(&mut db, app_id);
@@ -742,6 +814,9 @@ pub fn kernel_decide_approval(
     }
     drop(db);
     notify_approvals_changed(&app);
+    if let Some((app_id, model, action)) = data_notify {
+        notify_application_data_changed(&app, &app_id, model.as_deref(), &action);
+    }
     Ok(result)
 }
 
@@ -942,4 +1017,70 @@ pub fn kernel_unified_search(
 
     hits.truncate(lim as usize);
     Ok(hits)
+}
+
+/// Pure gate used by invoke + approval replay: emit only after a successful
+/// local_data mutation commit (not pending approval, not query, not errors).
+#[cfg(test)]
+fn should_emit_application_data_changed(outcome_ok: bool, action_name: &str) -> bool {
+    outcome_ok && is_local_data_mutation(action_name)
+}
+
+#[cfg(test)]
+mod application_data_emit_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn only_write_and_delete_are_local_data_mutations() {
+        assert!(is_local_data_mutation("local_data.write"));
+        assert!(is_local_data_mutation("local_data.delete"));
+        assert!(!is_local_data_mutation("local_data.query"));
+        assert!(!is_local_data_mutation("media.read"));
+        assert!(!is_local_data_mutation(""));
+    }
+
+    #[test]
+    fn model_id_hint_accepts_model_id_or_model_alias_and_trims() {
+        assert_eq!(
+            local_data_mutation_model_id(&json!({"modelId": "  studyTasks  "})).as_deref(),
+            Some("studyTasks")
+        );
+        assert_eq!(
+            local_data_mutation_model_id(&json!({"model": "notes"})).as_deref(),
+            Some("notes")
+        );
+        assert_eq!(
+            local_data_mutation_model_id(&json!({"modelId": "preferred", "model": "alt"}))
+                .as_deref(),
+            Some("preferred")
+        );
+        assert!(local_data_mutation_model_id(&json!({"modelId": "   "})).is_none());
+        assert!(local_data_mutation_model_id(&json!({"recordId": "rec-1"})).is_none());
+    }
+
+    #[test]
+    fn data_change_emit_only_after_successful_mutation_commit() {
+        assert!(should_emit_application_data_changed(
+            true,
+            "local_data.write"
+        ));
+        assert!(should_emit_application_data_changed(
+            true,
+            "local_data.delete"
+        ));
+        // Pending approval / failed outcome / read-only must not invalidate.
+        assert!(!should_emit_application_data_changed(
+            false,
+            "local_data.write"
+        ));
+        assert!(!should_emit_application_data_changed(
+            true,
+            "local_data.query"
+        ));
+        assert!(!should_emit_application_data_changed(
+            false,
+            "local_data.query"
+        ));
+    }
 }

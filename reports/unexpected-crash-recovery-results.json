@@ -1,0 +1,50 @@
+{
+  "status": "passed",
+  "harness": "unexpected-crash-recovery",
+  "mode": "sigkill_mid_generation",
+  "evidenceLevel": "Full OS Process Crash Relaunch Verified",
+  "cancelledByUser": false,
+  "recoveryVisible": true,
+  "reviewPreviewReadOnly": true,
+  "startedAt": "2026-10-20T05:09:50.963Z",
+  "finishedAt": "2026-10-20T05:09:59.172Z",
+  "identity": {
+    "commit": "2225101304ef4f56801a3d92cd4750b78c78c77b",
+    "dirty": true,
+    "platform": "darwin",
+    "arch": "arm64",
+    "sourceFingerprint": "024e82342f4872d3d14e2f553fe3813a1b2e6ea77341dbdf78b1004339ad71bf"
+  },
+  "binaryHash": "30c8539a1a15db78cecb3d97c98ab943acaeb95f42d15c3d9c31b4ad0f2e2bc4",
+  "prior": {
+    "phase": "A",
+    "mode": "in_flight_awaiting_sigkill",
+    "writtenAt": "2026-10-20T05:09:46.425Z",
+    "dbPath": "/var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/coreside-crash-rWgPox/coreside.db",
+    "cancelledByUser": false
+  },
+  "e2eSpec": "e2e/specs/39b-unexpected-crash-phase-b.spec.ts",
+  "supervisor": {
+    "harness": "unexpected-crash-recovery",
+    "mode": "sigkill_mid_generation",
+    "evidenceLevel": "Full OS Process Crash Relaunch Verified",
+    "note": "Phase A left generation in flight; supervisor SIGKILLed WebDriver holder on :4445 matching E2E binary only. Not user Cancel.",
+    "startedAt": "2026-10-20T05:09:43.502Z",
+    "finishedAt": "2026-10-20T05:09:59.691Z",
+    "host": "vl965-172-31-99-170.wireless.umass.edu",
+    "status": "passed",
+    "dbPath": "/var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/coreside-crash-rWgPox/coreside.db",
+    "binary": "/Users/qunyingfan/Coreside/src-tauri/target/debug/Coreside",
+    "killedPids": [
+      40949
+    ],
+    "phaseBExit": 0,
+    "state": {
+      "phase": "A",
+      "mode": "in_flight_awaiting_sigkill",
+      "writtenAt": "2026-10-20T05:09:46.425Z",
+      "dbPath": "/var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/coreside-crash-rWgPox/coreside.db",
+      "cancelledByUser": false
+    }
+  }
+}

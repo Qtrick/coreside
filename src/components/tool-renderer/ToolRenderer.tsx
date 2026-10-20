@@ -15,9 +15,17 @@ import {
   setDottedPath,
   type InteractiveDispatchOutcome,
 } from "@/lib/actions";
-import { api, listenApprovalsChanged } from "@/lib/tauri";
+import {
+  api,
+  listenApprovalsChanged,
+  listenApplicationDataChanged,
+} from "@/lib/tauri";
 import type { ActionOutcome } from "@/types/application-kernel";
 import type { ActionDefinition, DataSource, ToolComponent, ToolDefinition, ToolState } from "@/types/tool";
+import {
+  isCurrentHydrationGeneration,
+  shouldRefreshForApplicationDataEvent,
+} from "./application-data-refresh";
 import { ToolRuntimeProvider } from "./context";
 import { resolveComponent } from "./registry";
 import { ToolLayoutContainer } from "./ToolLayoutContainer";
@@ -243,26 +251,66 @@ export function ToolRenderer({
   }, [tool.dataSource, tool.dataSources, tool.components]);
 
   const hydrationRef = useRef<Record<string, { lastRun: number; depSignature: string }>>({});
+  // Generation counter so out-of-order query responses cannot regress UI state.
+  const hydrationGenRef = useRef<Record<string, number>>({});
   // Approve-once auto-replays writes on the backend; the interrupted action
   // chain never reaches the follow-up local_data.query. Rehydrate read
   // dataSources when approvals change so tables reflect the frozen write.
-  const [approvalRefreshEpoch, setApprovalRefreshEpoch] = useState(0);
+  // Cross-surface / cross-window local_data mutations use the same epoch via
+  // runtime-application-data-changed.
+  const [dataRefreshEpoch, setDataRefreshEpoch] = useState(0);
+  // Approve-once emits approvals-changed and application-data-changed together;
+  // coalesce so one user approval does not double-query.
+  const bumpCoalesceRef = useRef(false);
+
+  const bumpDataRefresh = useCallback(() => {
+    hydrationRef.current = {};
+    if (bumpCoalesceRef.current) return;
+    bumpCoalesceRef.current = true;
+    queueMicrotask(() => {
+      bumpCoalesceRef.current = false;
+      setDataRefreshEpoch((n) => n + 1);
+    });
+  }, []);
+
+  const dataSourcesRef = useRef(dataSources);
+  dataSourcesRef.current = dataSources;
 
   useEffect(() => {
-    let stop: (() => void) | null = null;
+    let stopApprovals: (() => void) | null = null;
+    let stopData: (() => void) | null = null;
     let disposed = false;
+    const appId = (applicationId ?? tool.id ?? "").trim();
     void listenApprovalsChanged(() => {
-      hydrationRef.current = {};
-      setApprovalRefreshEpoch((n) => n + 1);
+      bumpDataRefresh();
     }).then((unlisten) => {
       if (disposed) unlisten();
-      else stop = unlisten;
+      else stopApprovals = unlisten;
+    });
+    void listenApplicationDataChanged((event) => {
+      // When modelId is present, only refresh if a dataSource targets that model
+      // (fail-closed: unknown/unrelated models do not invalidate).
+      if (
+        !shouldRefreshForApplicationDataEvent({
+          appId,
+          eventApplicationId: event.applicationId,
+          eventModelId: event.modelId,
+          dataSources: dataSourcesRef.current,
+        })
+      ) {
+        return;
+      }
+      bumpDataRefresh();
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else stopData = unlisten;
     });
     return () => {
       disposed = true;
-      stop?.();
+      stopApprovals?.();
+      stopData?.();
     };
-  }, []);
+  }, [applicationId, tool.id, bumpDataRefresh]);
 
   useEffect(() => {
     if (isPreviewMode || isCustomizingMode) return;
@@ -276,7 +324,7 @@ export function ToolRenderer({
       if (!ds.resultKey) continue;
 
       const depValues = (ds.refreshOn ?? []).map((k) => String(stateRef.current[k]));
-      const depSignature = depValues.join("::");
+      const depSignature = `${depValues.join("::")}::e${dataRefreshEpoch}`;
 
       const existing = hydrationRef.current[ds.resultKey];
       const now = Date.now();
@@ -290,6 +338,8 @@ export function ToolRenderer({
       }
 
       hydrationRef.current[ds.resultKey] = { lastRun: now, depSignature };
+      const gen = (hydrationGenRef.current[ds.resultKey] ?? 0) + 1;
+      hydrationGenRef.current[ds.resultKey] = gen;
 
       const input: Record<string, unknown> = { ...(ds.input ?? {}) };
       if (ds.inputFromState) {
@@ -304,6 +354,7 @@ export function ToolRenderer({
         }
       }
 
+      const resultKey = ds.resultKey;
       void api
         .kernelInvokeRegisteredAction({
           actionName: ds.actionName,
@@ -315,15 +366,21 @@ export function ToolRenderer({
           projectId: projectId ?? null,
         })
         .then((outcome) => {
+          if (!isCurrentHydrationGeneration(hydrationGenRef.current, resultKey, gen)) {
+            return;
+          }
           if (outcome && outcome.status === "ok" && outcome.data !== undefined) {
-            const currentVal = stateRef.current[ds.resultKey];
+            const currentVal = stateRef.current[resultKey];
             if (JSON.stringify(currentVal) !== JSON.stringify(outcome.data)) {
-              onStateChange({ ...stateRef.current, [ds.resultKey]: outcome.data });
+              onStateChange({ ...stateRef.current, [resultKey]: outcome.data });
             }
           }
         })
         .catch((err) => {
-          console.error(`[ToolRenderer] dataSource hydration failed for ${ds.resultKey}:`, err);
+          if (!isCurrentHydrationGeneration(hydrationGenRef.current, resultKey, gen)) {
+            return;
+          }
+          console.error(`[ToolRenderer] dataSource hydration failed for ${resultKey}:`, err);
         });
     }
   }, [
@@ -337,7 +394,7 @@ export function ToolRenderer({
     tool.id,
     onStateChange,
     state,
-    approvalRefreshEpoch,
+    dataRefreshEpoch,
   ]);
 
   // Interaction failures are shown in the surface itself: a button that cannot

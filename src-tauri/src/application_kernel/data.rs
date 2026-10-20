@@ -1612,6 +1612,86 @@ mod tests {
     }
 
     #[test]
+    fn validate_record_rejects_wrong_field_types_and_missing_required() {
+        let m = DataModelDefinition {
+            model_id: "typed".into(),
+            display_name: "Typed".into(),
+            schema_version: 1,
+            fields: vec![
+                DataField {
+                    field_id: "title".into(),
+                    field_type: "text".into(),
+                    required: true,
+                    default: None,
+                    enum_values: None,
+                },
+                DataField {
+                    field_id: "count".into(),
+                    field_type: "integer".into(),
+                    required: false,
+                    default: None,
+                    enum_values: None,
+                },
+                DataField {
+                    field_id: "done".into(),
+                    field_type: "boolean".into(),
+                    required: false,
+                    default: None,
+                    enum_values: None,
+                },
+                DataField {
+                    field_id: "dueDate".into(),
+                    field_type: "date".into(),
+                    required: false,
+                    default: None,
+                    enum_values: None,
+                },
+            ],
+        };
+
+        let missing = validate_record(&m, &json!({"count": 1})).expect_err("required");
+        assert!(missing.contains("missing required field"), "got {missing}");
+
+        let bad_int = validate_record(&m, &json!({"title": "x", "count": "3"})).expect_err("int");
+        assert!(bad_int.contains("must be integer"), "got {bad_int}");
+
+        let bad_bool =
+            validate_record(&m, &json!({"title": "x", "done": "yes"})).expect_err("bool");
+        assert!(bad_bool.contains("must be boolean"), "got {bad_bool}");
+
+        let bad_date =
+            validate_record(&m, &json!({"title": "x", "dueDate": 20260101})).expect_err("date");
+        assert!(bad_date.contains("must be string"), "got {bad_date}");
+
+        validate_record(
+            &m,
+            &json!({"title": "ok", "count": 2, "done": false, "dueDate": "2026-10-01"}),
+        )
+        .expect("canonical types must pass");
+    }
+
+    #[test]
+    fn create_record_rejects_non_string_date_without_persisting() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("bad-date.db")).unwrap();
+        seed_writable_habit_app(&mut db, "app-date");
+        let err = create_record(
+            &mut db,
+            "app-date",
+            "habit",
+            json!({"name": "x", "frequency": "daily", "completionDate": 20240101}),
+        )
+        .expect_err("non-string date");
+        assert!(
+            err.to_string().contains("must be string"),
+            "expected string type error, got {err}"
+        );
+        assert!(query_records(&db, "app-date", "habit", 10)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
     fn fork_application_isolates_records_from_source() {
         use crate::application_kernel::manifest::{upsert_manifest, ApplicationManifest};
         use std::collections::HashMap;

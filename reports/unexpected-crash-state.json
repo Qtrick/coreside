@@ -1,0 +1,7 @@
+{
+  "phase": "A",
+  "mode": "in_flight_awaiting_sigkill",
+  "writtenAt": "2026-10-20T05:09:46.425Z",
+  "dbPath": "/var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/coreside-crash-rWgPox/coreside.db",
+  "cancelledByUser": false
+}

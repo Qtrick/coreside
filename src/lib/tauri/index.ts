@@ -1,6 +1,7 @@
 export type {
   AgentTurnEvent,
   AgentTurnSyncMatchContext,
+  ApplicationDataChangedEvent,
   QueueChangedEvent,
   QueueChangeKind,
 } from "./events";
@@ -9,6 +10,7 @@ export {
   isSyncEventForConversation,
   listenAgentTurn,
   listenApprovalsChanged,
+  listenApplicationDataChanged,
   listenAppearanceChanged,
   listenThemePresetsChanged,
   subscribeConversationQueue,

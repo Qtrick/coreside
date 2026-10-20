@@ -75,12 +75,17 @@ function resolveExecutablePath(pid: number): string | null {
 
 function pathsMatchBinary(candidate: string | null, binaryPath: string): boolean {
   if (!candidate) return false;
-  const norm = (p: string) => path.resolve(p.replace(/\s+$/, ""));
   try {
-    return (
-      norm(candidate) === norm(binaryPath) ||
-      path.basename(candidate) === path.basename(binaryPath)
-    );
+    const resolvedBinary = path.resolve(binaryPath);
+    const resolvedCandidate = path.resolve(candidate);
+    if (resolvedCandidate === resolvedBinary) return true;
+    // darwin `ps -o comm=` returns basename only — accept that form exclusively.
+    // Never match basename when candidate is a full path to a different binary
+    // (e.g. packaged /Applications/.../Coreside vs target/debug/Coreside).
+    if (!candidate.includes(path.sep) && path.basename(resolvedBinary) === candidate) {
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }
@@ -223,6 +228,19 @@ export const config: Options.Testrunner = {
     ],
     "process-relaunch-phase-b": [
       "./specs/35b-process-relaunch-phase-b.spec.ts",
+    ],
+    "study-planner-reactive-crud": [
+      "./specs/36-study-planner-reactive-crud.spec.ts",
+    ],
+    "cross-surface-reactive-sync": [
+      "./specs/37-cross-surface-reactive-sync.spec.ts",
+    ],
+    "cancel-during-retry": ["./specs/38-cancel-during-retry.spec.ts"],
+    "unexpected-crash-phase-a": [
+      "./specs/39a-unexpected-crash-phase-a.spec.ts",
+    ],
+    "unexpected-crash-phase-b": [
+      "./specs/39b-unexpected-crash-phase-b.spec.ts",
     ],
     "wallpaper-targeted": ["./specs/13-wallpaper-targeted-update.spec.ts"],
     "first-run-welcome": ["./specs/15-first-run-welcome.spec.ts"],

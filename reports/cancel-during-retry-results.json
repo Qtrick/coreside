@@ -1,0 +1,19 @@
+{
+  "status": "passed",
+  "journey": 38,
+  "name": "cancel-during-retry",
+  "originalPromptPreserved": true,
+  "recoveryAfterCancel": true,
+  "secondRetryAdmitted": true,
+  "startedAt": "2026-10-20T05:09:13.523Z",
+  "finishedAt": "2026-10-20T05:09:18.520Z",
+  "identity": {
+    "commit": "2225101304ef4f56801a3d92cd4750b78c78c77b",
+    "dirty": true,
+    "platform": "darwin",
+    "arch": "arm64",
+    "sourceFingerprint": "024e82342f4872d3d14e2f553fe3813a1b2e6ea77341dbdf78b1004339ad71bf"
+  },
+  "binaryHash": "30c8539a1a15db78cecb3d97c98ab943acaeb95f42d15c3d9c31b4ad0f2e2bc4",
+  "e2eSpec": "e2e/specs/38-cancel-during-retry.spec.ts"
+}

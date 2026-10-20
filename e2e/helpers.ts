@@ -285,6 +285,18 @@ export async function approveOnce() {
   );
 }
 
+/** Soft approve for journeys where a prior grant may already cover the write. */
+export async function approveOnceIfPresent(timeout = 4_000) {
+  const approve = await $("button=Approve once");
+  try {
+    await approve.waitForExist({ timeout });
+    await approve.waitForClickable({ timeout: 5_000 });
+    await approve.click();
+  } catch {
+    // already granted / no pending card
+  }
+}
+
 export async function waitForSeededTool(timeout = 20_000) {
   await browser.waitUntil(
     async () => {
