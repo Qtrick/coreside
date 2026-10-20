@@ -5528,10 +5528,12 @@ body > .window-overlay-root > *,
 
 .recovered-preview-badge {
   display: inline-block;
+  max-width: 100%;
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  white-space: nowrap;
   color: var(--accent, #3d8b6e);
 }
 

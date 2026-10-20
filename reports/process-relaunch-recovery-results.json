@@ -1,24 +1,24 @@
 {
   "harness": "process-relaunch-recovery",
-  "mode": "sqlite_reopen_proxy",
-  "note": "Full OS process relaunch under embedded WebDriver remains environmentally blocked; this harness proves checkpoint durability across Database::open_path reopen (authoritative SQLite identity).",
-  "startedAt": "2026-10-19T04:57:53.606Z",
-  "finishedAt": "2026-10-19T04:57:53.607Z",
+  "mode": "os_process_relaunch",
+  "evidenceLevel": "Full OS Process Relaunch Verified",
+  "note": "Two sequential WDIO sessions; embedded WebDriver lives inside each Coreside E2E process. Supervisor process survives both.",
+  "startedAt": "2026-10-19T17:52:43.997Z",
+  "finishedAt": "2026-10-19T17:52:59.068Z",
   "host": "vl965-172-31-99-170.wireless.umass.edu",
   "status": "passed",
-  "rustExitCode": 0,
-  "rustStdoutTail": [
-    "",
-    "running 1 test",
-    "test runtime_v2::turn_journal::tests::interrupted_checkpoint_survives_sqlite_reopen ... ok",
-    "",
-    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1429 filtered out; finished in 0.09s",
-    "",
-    ""
-  ],
-  "rustStderrTail": [
-    "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.18s",
-    "     Running unittests src/lib.rs (src-tauri/target/debug/deps/coreside_lib-de8bdbec669c8a21)",
-    ""
-  ]
+  "dbPath": "/var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/coreside-relaunch-WrNFk1/coreside.db",
+  "binary": "/Users/qunyingfan/Coreside/src-tauri/target/debug/Coreside",
+  "phaseAExit": 0,
+  "phaseBExit": 0,
+  "state": {
+    "phase": "B",
+    "writtenAt": "2026-10-19T17:52:47.326Z",
+    "dbPath": "/var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/coreside-relaunch-WrNFk1/coreside.db",
+    "recoveryVisible": true,
+    "noteInputId": "e2e-note-input",
+    "verifiedAt": "2026-10-19T17:52:58.611Z",
+    "previewMounted": true,
+    "surfaceCount": 1
+  }
 }

@@ -218,6 +218,12 @@ export const config: Options.Testrunner = {
     "generation-recovery-retry": [
       "./specs/34-generation-recovery-retry.spec.ts",
     ],
+    "process-relaunch-phase-a": [
+      "./specs/35a-process-relaunch-phase-a.spec.ts",
+    ],
+    "process-relaunch-phase-b": [
+      "./specs/35b-process-relaunch-phase-b.spec.ts",
+    ],
     "wallpaper-targeted": ["./specs/13-wallpaper-targeted-update.spec.ts"],
     "first-run-welcome": ["./specs/15-first-run-welcome.spec.ts"],
     "core-tutorial": ["./specs/16-core-tutorial.spec.ts"],

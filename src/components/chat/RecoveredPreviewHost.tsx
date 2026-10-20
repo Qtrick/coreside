@@ -42,17 +42,18 @@ export function RecoveredPreviewHost({
       className="recovered-preview-host"
       role="region"
       aria-labelledby={titleId}
+      aria-describedby={`${titleId}-desc`}
       data-testid="recovered-preview-host"
       data-fidelity={preview.fidelity}
       data-turn-id={preview.turnId}
     >
       <header className="recovered-preview-host-header">
         <div className="recovered-preview-host-copy">
-          <span className="recovered-preview-badge" aria-hidden>
+          <span className="recovered-preview-badge" role="status" aria-atomic="true">
             Speculative preview
           </span>
           <h2 id={titleId}>Saved application preview</h2>
-          <p>
+          <p id={`${titleId}-desc`}>
             {partial
               ? "Partially restored — some staged operations could not be reconstructed. This is inspect-only and cannot be applied."
               : "Read-only view of your last saved progressive preview. Nothing has been applied to your application."}

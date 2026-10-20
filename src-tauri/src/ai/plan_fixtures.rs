@@ -858,8 +858,25 @@ fn study_planner_tool_v1() -> ToolDefinition {
                 component_type: "textInput".into(),
                 value_key: Some("newStudyTaskTitle".into()),
                 props: Some(json!({
-                    "label": "New Study Task",
+                    "label": "Task Name",
                     "placeholder": "Read chapter 3"
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "sp-new-due".into(),
+                component_type: "dateInput".into(),
+                value_key: Some("newStudyTaskDueDate".into()),
+                props: Some(json!({ "label": "Due Date" })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "sp-new-notes".into(),
+                component_type: "textArea".into(),
+                value_key: Some("newStudyTaskNotes".into()),
+                props: Some(json!({
+                    "label": "Study Notes",
+                    "placeholder": "Optional study notes"
                 })),
                 ..Default::default()
             },
@@ -875,9 +892,13 @@ fn study_planner_tool_v1() -> ToolDefinition {
                             "data": { "status": "todo" }
                         })),
                         input_from_state: Some(
-                            [("data.title".into(), "newStudyTaskTitle".into())]
-                                .into_iter()
-                                .collect(),
+                            [
+                                ("data.title".into(), "newStudyTaskTitle".into()),
+                                ("data.dueDate".into(), "newStudyTaskDueDate".into()),
+                                ("data.notes".into(), "newStudyTaskNotes".into()),
+                            ]
+                            .into_iter()
+                            .collect(),
                         ),
                         component_id: None,
                         result_key: None,
@@ -891,6 +912,14 @@ fn study_planner_tool_v1() -> ToolDefinition {
                     },
                     ActionDefinition::SetValue {
                         target: "newStudyTaskTitle".into(),
+                        value: json!(""),
+                    },
+                    ActionDefinition::SetValue {
+                        target: "newStudyTaskDueDate".into(),
+                        value: json!(""),
+                    },
+                    ActionDefinition::SetValue {
+                        target: "newStudyTaskNotes".into(),
                         value: json!(""),
                     },
                 ]),
@@ -942,6 +971,21 @@ fn study_tasks_model_v1() -> DataModelDefinition {
                 default: Some(json!("todo")),
                 enum_values: Some(vec!["todo".into(), "in_progress".into(), "done".into()]),
             },
+            // Priority remains a Journey 31 evolve step (schema v2).
+            DataField {
+                field_id: "dueDate".into(),
+                field_type: "date".into(),
+                required: false,
+                default: None,
+                enum_values: None,
+            },
+            DataField {
+                field_id: "notes".into(),
+                field_type: "long_text".into(),
+                required: false,
+                default: None,
+                enum_values: None,
+            },
         ],
     }
 }
@@ -969,10 +1013,50 @@ fn study_planner_tool_v2_priority() -> ToolDefinition {
         if let Some(props) = table.props.as_mut() {
             if let Some(cols) = props.get_mut("columns").and_then(|c| c.as_array_mut()) {
                 cols.push(json!({
+                    "id": "dueDate",
+                    "accessor": "dueDate",
+                    "header": "Due"
+                }));
+                cols.push(json!({
                     "id": "priority",
                     "accessor": "priority",
                     "header": "Priority"
                 }));
+            }
+        }
+    }
+    // Evolve also adds priority to the add-task form (title/due/notes already in v1).
+    if let Some(add_idx) = tool.components.iter().position(|c| c.id == "sp-add-btn") {
+        tool.components.insert(
+            add_idx,
+            ToolComponent {
+                id: "sp-new-priority".into(),
+                component_type: "select".into(),
+                value_key: Some("newStudyTaskPriority".into()),
+                props: Some(json!({
+                    "label": "Priority",
+                    "options": [
+                        { "label": "High", "value": "high" },
+                        { "label": "Medium", "value": "medium" },
+                        { "label": "Low", "value": "low" }
+                    ]
+                })),
+                ..Default::default()
+            },
+        );
+        if let Some(btn) = tool.components.iter_mut().find(|c| c.id == "sp-add-btn") {
+            if let Some(actions) = btn.actions.as_mut() {
+                if let Some(ActionDefinition::InvokeRegisteredAction {
+                    input_from_state: Some(map),
+                    ..
+                }) = actions.first_mut()
+                {
+                    map.insert("data.priority".into(), "newStudyTaskPriority".into());
+                }
+                actions.push(ActionDefinition::SetValue {
+                    target: "newStudyTaskPriority".into(),
+                    value: json!("medium"),
+                });
             }
         }
     }

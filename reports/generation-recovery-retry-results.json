@@ -1,21 +1,26 @@
 {
   "journey": 34,
   "name": "generation-recovery-retry",
-  "startedAt": "2026-10-19T07:32:27.025Z",
-  "finishedAt": "2026-10-19T07:34:08.040Z",
+  "startedAt": "2026-10-19T17:51:21.110Z",
+  "finishedAt": "2026-10-19T17:51:26.227Z",
   "identity": {
-    "commit": "32b624f18f8119427244116240a55440b7014387",
+    "commit": "ab33b0fe5b37ecef66634835ce4c934d1e4c0125",
     "dirty": true,
     "platform": "darwin",
     "arch": "arm64",
     "sourceFingerprint": "024e82342f4872d3d14e2f553fe3813a1b2e6ea77341dbdf78b1004339ad71bf"
   },
-  "binaryHash": "dd8f7dbada75e6d5a9e8e46b0ca492684d6f3dd2a2e2e5657de6750a51910b64",
+  "binaryHash": "6aa24c96d3d41ef4e243a69326a544d1b0c0220ef22a96af44b97e3b5eec340c",
   "status": "passed",
   "checks": {
     "recoveryBanner": true,
     "reviewHostMounted": true,
+    "reviewSurfaceCount": 1,
+    "reviewFidelity": "full",
+    "reviewReadOnly": true,
     "closeKeepsStaging": true,
-    "retryAdmitted": true
+    "retryAdmitted": true,
+    "originalUserPromptPreserved": true,
+    "userPromptNotDuplicated": true
   }
 }

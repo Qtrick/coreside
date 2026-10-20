@@ -2649,13 +2649,15 @@ async fn send_message_inner(
                 crate::runtime_v2::TurnState::Failed
                     | crate::runtime_v2::TurnState::InterruptedRecoverable
             ) {
-                if let Ok(retried) =
-                    crate::runtime_v2::begin_retry_attempt(&db, &existing.id, &existing.attempt_id)
-                {
-                    (retried.id, retried.attempt_id, true)
-                } else {
-                    (existing.id, existing.attempt_id, true)
-                }
+                // Fail-closed: never continue generation under a stale attempt when
+                // CAS rotation fails (concurrent retry, malformed state, DB error).
+                let retried = crate::runtime_v2::begin_retry_attempt(
+                    &db,
+                    &existing.id,
+                    &existing.attempt_id,
+                )
+                .map_err(|e| CommandError::new("conflict", e.to_string()))?;
+                (retried.id, retried.attempt_id, true)
             } else {
                 (existing.id, existing.attempt_id, true)
             }
@@ -4977,9 +4979,18 @@ pub async fn retry_recoverable_generation(
         let user_message_id =
             crate::runtime_v2::resolve_turn_user_message_id(&turn.idempotency_key).ok_or_else(
                 || {
+                    // sui-* / migrated / malformed keys: fail closed without
+                    // deleting staging or forging structured-input replay.
+                    let kind = if turn.idempotency_key.starts_with("sui-") {
+                        "structured form submission"
+                    } else {
+                        "this turn"
+                    };
                     CommandError::new(
                         "invalid",
-                        "Cannot reconstruct the original request for this turn. Your saved preview remains available — send a new message instead.",
+                        format!(
+                            "Cannot safely retry {kind} from recovery (original request envelope is not reconstructible). Your saved preview remains available — send a new message instead."
+                        ),
                     )
                 },
             )?;
@@ -5356,5 +5367,189 @@ mod recovery_retry_admission_tests {
                 || err.message.contains("turn_cas_conflict")
                 || err.message.contains("retry")
         );
+    }
+
+    /// P0: provider-validation-style cleanup must not delete a historical
+    /// user message reused for recovery retry (messages + FTS + metadata).
+    #[test]
+    fn reuse_cleanup_preserves_historical_message_and_fts() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("preserve-msg.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Preserve", None).unwrap();
+        let msg_id = "msg-hist-preserve";
+        db.conn()
+            .execute(
+                "INSERT INTO messages (id, conversation_id, role, content, metadata)
+                 VALUES (?1, ?2, 'user', 'build a study planner', ?3)",
+                rusqlite::params![
+                    msg_id,
+                    conv.id,
+                    json!({"attachments":[{"id":"att-1"}],"mentions":[]}).to_string()
+                ],
+            )
+            .unwrap();
+        // Insert FTS directly — projects::indexing is private; schema is the contract.
+        db.conn()
+            .execute(
+                "INSERT INTO message_fts (message_id, conversation_id, project_id, role, content, title)
+                 VALUES (?1, ?2, NULL, 'user', 'build a study planner', ?3)",
+                rusqlite::params![msg_id, conv.id, conv.title],
+            )
+            .unwrap();
+
+        let fts_before: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM message_fts WHERE message_id = ?1",
+                [msg_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_before, 1);
+
+        // Simulate the post-admission provider-validation failure branch.
+        let reuse = Some(msg_id);
+        assert!(!may_cleanup_user_message_after_send_failure(reuse));
+        if may_cleanup_user_message_after_send_failure(reuse) {
+            delete_orphaned_user_message(&mut db, msg_id).unwrap();
+        }
+
+        let still: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE id = ?1",
+                [msg_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(still, 1, "historical user message must survive retry cleanup");
+        let fts_after: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM message_fts WHERE message_id = ?1",
+                [msg_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_after, 1, "FTS row must remain for historical message");
+        let content: String = db
+            .conn()
+            .query_row(
+                "SELECT content FROM messages WHERE id = ?1",
+                [msg_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(content, "build a study planner");
+        let meta: String = db
+            .conn()
+            .query_row(
+                "SELECT metadata FROM messages WHERE id = ?1",
+                [msg_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(meta.contains("att-1"), "attachment metadata binding preserved");
+    }
+
+    /// Genuinely new orphaned messages remain eligible for cleanup.
+    #[test]
+    fn new_message_cleanup_still_deletes_orphan_and_fts() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("orphan-clean.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Orphan", None).unwrap();
+        let msg_id = "msg-new-orphan";
+        db.conn()
+            .execute(
+                "INSERT INTO messages (id, conversation_id, role, content)
+                 VALUES (?1, ?2, 'user', 'ephemeral draft')",
+                rusqlite::params![msg_id, conv.id],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO message_fts (message_id, conversation_id, project_id, role, content, title)
+                 VALUES (?1, ?2, NULL, 'user', 'ephemeral draft', ?3)",
+                rusqlite::params![msg_id, conv.id, conv.title],
+            )
+            .unwrap();
+
+        assert!(may_cleanup_user_message_after_send_failure(None));
+        delete_orphaned_user_message(&mut db, msg_id).unwrap();
+
+        let gone: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE id = ?1",
+                [msg_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(gone, 0);
+        let fts_gone: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM message_fts WHERE message_id = ?1",
+                [msg_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_gone, 0);
+    }
+
+    /// Interrupted recoverable staging survives a skipped cleanup (failed
+    /// provider validation before attempt rotation).
+    #[test]
+    fn failed_retry_cleanup_skip_keeps_checkpoint_and_message() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("keep-cp.db")).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "KeepCp", None).unwrap();
+        let msg_id = "msg-keep-cp";
+        db.conn()
+            .execute(
+                "INSERT INTO messages (id, conversation_id, role, content)
+                 VALUES (?1, ?2, 'user', 'progressive app')",
+                rusqlite::params![msg_id, conv.id],
+            )
+            .unwrap();
+        let turn = create_turn(
+            &db,
+            &conv.id,
+            None,
+            &format!("turn-{msg_id}"),
+            Some("interactive"),
+        )
+        .unwrap();
+        interrupt_turn(&db, &turn.id, &turn.attempt_id);
+        let prior = get_turn(&db, &turn.id).unwrap();
+        assert!(prior.operations_json.is_some());
+
+        // Provider validation fails before reclaim — ownership guard skips delete.
+        assert!(!may_cleanup_user_message_after_send_failure(Some(msg_id)));
+
+        let after = get_turn(&db, &turn.id).unwrap();
+        assert_eq!(after.state, TurnState::InterruptedRecoverable);
+        assert!(after.operations_json.is_some(), "staging must remain recoverable");
+        let msg_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE id = ?1",
+                [msg_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(msg_count, 1);
+    }
+
+    #[test]
+    fn structured_input_idempotency_cannot_resolve_user_message() {
+        // Single-use sui-* keys must not invent a message id — recovery rejects.
+        assert!(crate::runtime_v2::resolve_turn_user_message_id("sui-idem-1").is_none());
+        assert_eq!(
+            crate::runtime_v2::resolve_turn_user_message_id("turn-msg-abc").as_deref(),
+            Some("msg-abc")
+        );
+        assert!(crate::runtime_v2::resolve_turn_user_message_id("turn-").is_none());
+        assert!(crate::runtime_v2::resolve_turn_user_message_id("").is_none());
     }
 }

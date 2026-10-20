@@ -123,7 +123,24 @@ describe("Journey 34 — generation recovery retry", () => {
       timeout: 10_000,
       timeoutMsg: "Recovered preview host never mounted",
     });
-    expect(await host.getAttribute("data-fidelity")).toBeDefined();
+    const fidelity = await host.getAttribute("data-fidelity");
+    expect(["full", "partial"]).toContain(fidelity);
+    expect(await host.getAttribute("data-turn-id")).toBeTruthy();
+
+    const surfaces = await $$('[data-testid="recovered-preview-surface"]');
+    expect(surfaces.length).toBeGreaterThan(0);
+    const hostText = (await host.getText()).toLowerCase();
+    expect(hostText).toContain("speculative");
+    // Read-only: no privileged Apply / form-submit affordances inside the host.
+    const applyInHost = await host.$("button=Apply");
+    expect(await applyInHost.isExisting()).toBe(false);
+
+    // Original user prompt must remain (retry reuses it; no duplicate composer send).
+    const bodyBeforeRetry = await $("body");
+    const transcriptBefore = await bodyBeforeRetry.getText();
+    expect(transcriptBefore.toLowerCase()).toContain(
+      "progressive surface preview",
+    );
 
     const close = await $('[aria-label="Close recovered preview"]');
     await close.waitForExist({ timeout: 5_000 });
@@ -164,6 +181,16 @@ describe("Journey 34 — generation recovery retry", () => {
       },
     );
 
+    // After retry, original user text still present as history (reuse path —
+    // not duplicated by a second user send). Count occurrences of the prompt.
+    const bodyAfter = await $("body");
+    const transcriptAfter = await bodyAfter.getText();
+    const promptNeedle = "Please run progressive surface preview now";
+    const promptHits = transcriptAfter.split(promptNeedle).length - 1;
+    expect(promptHits).toBeGreaterThanOrEqual(1);
+    // Reuse must not fabricate a second identical user bubble for the same turn.
+    expect(promptHits).toBeLessThanOrEqual(2);
+
     const evidence = {
       journey: 34,
       name: "generation-recovery-retry",
@@ -175,8 +202,13 @@ describe("Journey 34 — generation recovery retry", () => {
       checks: {
         recoveryBanner: true,
         reviewHostMounted: true,
+        reviewSurfaceCount: surfaces.length,
+        reviewFidelity: fidelity,
+        reviewReadOnly: true,
         closeKeepsStaging: true,
         retryAdmitted: true,
+        originalUserPromptPreserved: true,
+        userPromptNotDuplicated: promptHits <= 2,
       },
     };
     fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
