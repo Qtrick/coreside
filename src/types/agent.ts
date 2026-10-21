@@ -261,6 +261,8 @@ export const SendMessageResultSchema = z.object({
   responseType: ResponseTypeSchema,
   toolChange: ToolChangeSchema.nullable().optional(),
   settingsChange: SettingsChangeSchema.nullable().optional(),
+  /** Chat automation proposal — confirm via upsertAutomation before schedule. */
+  automationChange: z.record(z.unknown()).nullable().optional(),
   diagnostics: AgentDiagnosticsSchema,
   userMessageId: z.string().nullable().optional(),
   runtimeV2: z.record(z.unknown()).nullable().optional(),

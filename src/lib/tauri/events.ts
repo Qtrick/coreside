@@ -2,7 +2,18 @@ import { listen } from "@tauri-apps/api/event";
 import { isTauriRuntime } from "./runtime";
 
 export type AgentTurnEvent =
-  | { kind: "action"; conversationId: string; label: string }
+  | {
+      kind: "action";
+      conversationId: string;
+      label: string;
+      /** Stable id for upsert / correlation. */
+      id?: string | null;
+      eventType?: string | null;
+      /** pending | running | completed | failed | cancelled | awaitingApproval | blocked */
+      status?: string | null;
+      stepId?: string | null;
+      durationMs?: number | null;
+    }
   | {
       kind: "text";
       conversationId: string;

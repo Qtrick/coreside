@@ -4,6 +4,7 @@ mod access_mode;
 mod anthropic;
 mod anthropic_family;
 mod auto;
+mod automation_change;
 mod capability_registry;
 mod errors;
 mod gemini;
@@ -33,6 +34,7 @@ pub use access_mode::{resolve_access_presentation, AiAccessPresentation, Disclos
 
 pub use anthropic::AnthropicProvider;
 pub use auto::{chat_with_auto, peek_assistant_message};
+pub use automation_change::AutomationChangePayload;
 pub use capability_registry::{
     hash_tool_results, seal_tool_result_envelope, tool_result_display_summary, AgentCapability,
     ToolCallRequest, ToolCallResult,

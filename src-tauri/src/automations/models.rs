@@ -40,7 +40,7 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AutomationTrigger {
     #[serde(rename = "interval")]
@@ -66,7 +66,7 @@ pub enum AutomationTrigger {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AutomationAction {
     #[serde(rename = "cycle_workspace_backgrounds")]

@@ -24,8 +24,8 @@ describe("EMPTY_STATES", () => {
           "title": "No app open",
         },
         "noAutomations": {
-          "body": "Create a recurring routine in chat — Coreside can schedule safe changes while the app is open.",
-          "primaryCta": "Create automation",
+          "body": "Ask in chat to schedule a safe recurring change (for example wallpaper rotation). You confirm before it runs, and it only runs while Coreside is open.",
+          "primaryCta": "Ask in chat",
           "title": "No automations yet",
         },
         "noConversation": {

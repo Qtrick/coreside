@@ -246,6 +246,7 @@ fn main() {
             "update_surface_cmd",
             "upsert_added_setting",
             "upsert_automation",
+            "resolve_automation_change",
             "upsert_provider_connection",
             "upsert_tutorial_progress",
             "upsert_workspace_background",

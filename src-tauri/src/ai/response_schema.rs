@@ -1,5 +1,6 @@
 //! Serde types for structured agent JSON responses.
 
+use super::automation_change::AutomationChangePayload;
 use super::capability_registry::ToolCallRequest;
 use super::settings_change::SettingsChangePayload;
 use serde::{Deserialize, Serialize};
@@ -714,6 +715,9 @@ pub struct AgentResponsePayload {
     pub application_plan: Option<crate::application_kernel::application_plan::ApplicationPlan>,
     #[serde(default)]
     pub settings_change: Option<SettingsChangePayload>,
+    /// Chat-proposed automation — never schedules until the user confirms.
+    #[serde(default)]
+    pub automation_change: Option<AutomationChangePayload>,
     #[serde(default)]
     pub tool_calls: Option<Vec<ToolCallRequest>>,
     #[serde(default)]
@@ -944,7 +948,16 @@ impl AgentResponsePayload {
         if let Some(plan) = &self.application_plan {
             let inspected =
                 crate::application_kernel::application_plan::compile_for_inspection(plan)
-                    .map_err(|e| format!("applicationPlan rejected: {e}"))?;
+                    .map_err(|e| {
+                        let detail = e.to_string();
+                        if detail.contains("does not match plan application")
+                            || detail.contains("tool.id must match applicationId")
+                        {
+                            "applicationPlan rejected: That proposal used inconsistent application IDs. Ask Coreside to try again.".into()
+                        } else {
+                            format!("applicationPlan rejected: {e}")
+                        }
+                    })?;
             return Ok(crate::runtime_v2::normalize_operations_for_validation(
                 inspected.operations_for_inspection(),
             ));
@@ -1123,6 +1136,10 @@ impl AgentResponsePayload {
             }
         }
 
+        if let Some(ac) = &self.automation_change {
+            ac.validate()?;
+        }
+
         Ok(())
     }
 }
@@ -1141,6 +1158,7 @@ mod tests {
             tool_change: None,
             application_plan: None,
             settings_change: None,
+            automation_change: None,
             tool_calls: None,
             citations: None,
             diagnostics: None,

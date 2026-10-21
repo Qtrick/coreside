@@ -256,6 +256,7 @@ pub fn validate_plan_against_db(
     plan: &ApplicationPlan,
     scope: &LineageScope,
 ) -> Result<(), KernelError> {
+    // Callers that hold a mutable plan should normalize first; compile paths clone+normalize.
     validate_plan(plan)?;
     let bound = plan_bound_application_id(plan)?;
     let allow_missing = plan.kind == ApplicationPlanKind::Create;
@@ -353,6 +354,97 @@ fn intent_surface_ids(plan: &ApplicationPlan) -> Vec<String> {
     out.sort();
     out.dedup();
     out
+}
+
+/// Whether `candidate` is a common LLM alias of the plan-bound application id
+/// (surface naming confused for application identity). True cross-app ids stay false.
+fn is_application_id_alias(bound: &str, candidate: &str) -> bool {
+    if bound.is_empty() || candidate.is_empty() || bound == candidate {
+        return false;
+    }
+    candidate == format!("{bound}-surface")
+        || candidate == format!("surf-{bound}")
+        || candidate == format!("s-{bound}")
+        || candidate == format!("{bound}-app")
+        || candidate == format!("{bound}-inline")
+        || candidate.starts_with(&format!("s-{bound}-"))
+}
+
+fn rewrite_id_if_alias(bound: &str, id: &mut String) -> bool {
+    if is_application_id_alias(bound, id) {
+        *id = bound.to_string();
+        return true;
+    }
+    false
+}
+
+/// CreateInlineSurface.tool.id is application identity. Coerce same-app typos;
+/// never coerce a different `tool-*` application id.
+fn should_coerce_inline_tool_id(bound: &str, application_id: &str, tool_id: &str) -> bool {
+    if tool_id.is_empty() || tool_id == application_id || application_id != bound {
+        return false;
+    }
+    if is_application_id_alias(bound, tool_id) {
+        return true;
+    }
+    // Distinct tool-* = real cross-app — leave for bind/validate to reject.
+    if tool_id.starts_with("tool-") && tool_id != bound {
+        return false;
+    }
+    // Surface-like / display slugs on an already-bound inline → coerce.
+    true
+}
+
+/// Rewrite common surface/app id mix-ups onto the plan-bound application id.
+/// True cross-application intents remain rejected by [`bind_intents_to_plan_application`].
+pub fn normalize_plan_application_aliases(plan: &mut ApplicationPlan) {
+    let Ok(bound) = plan_bound_application_id(plan) else {
+        return;
+    };
+    let bound = bound.to_string();
+    for intent in &mut plan.intents {
+        match intent {
+            ChangeIntent::CreateSurface { tool, .. } => {
+                rewrite_id_if_alias(&bound, &mut tool.id);
+            }
+            ChangeIntent::CreateInlineSurface {
+                application_id,
+                tool,
+                ..
+            } => {
+                rewrite_id_if_alias(&bound, application_id);
+                rewrite_id_if_alias(&bound, &mut tool.id);
+                if should_coerce_inline_tool_id(&bound, application_id, &tool.id) {
+                    tool.id = application_id.clone();
+                }
+            }
+            ChangeIntent::UpdateSurface { tool_id, tool, .. } => {
+                rewrite_id_if_alias(&bound, tool_id);
+                rewrite_id_if_alias(&bound, &mut tool.id);
+                if !tool.id.is_empty()
+                    && tool.id != *tool_id
+                    && tool_id == &bound
+                    && should_coerce_inline_tool_id(&bound, tool_id, &tool.id)
+                {
+                    tool.id = tool_id.clone();
+                }
+            }
+            ChangeIntent::UpsertDataModel { application_id, .. }
+            | ChangeIntent::MigrateDataModel { application_id, .. } => {
+                rewrite_id_if_alias(&bound, application_id);
+            }
+            ChangeIntent::AddSetting { application_id, .. }
+            | ChangeIntent::NavigateRoute { application_id, .. } => {
+                rewrite_id_if_alias(&bound, application_id);
+            }
+            ChangeIntent::UpsertManifest { manifest } => {
+                rewrite_id_if_alias(&bound, &mut manifest.application_id);
+            }
+            ChangeIntent::InsertComponent { .. }
+            | ChangeIntent::UpdateComponent { .. }
+            | ChangeIntent::RemoveComponent { .. } => {}
+        }
+    }
 }
 
 /// One Apply must not silently mutate multiple applications.
@@ -621,11 +713,13 @@ fn apply_plan_base_revision(plan: &ApplicationPlan, compiled: &mut CompiledChang
 /// proposal/apply, or [`compile_for_inspection`] when the call site needs an
 /// explicitly non-authoritative result type.
 pub fn compile_plan(plan: &ApplicationPlan) -> Result<ValidatedApplicationPlan, KernelError> {
-    validate_plan(plan)?;
+    let mut plan = plan.clone();
+    normalize_plan_application_aliases(&mut plan);
+    validate_plan(&plan)?;
     let mut compiled = compile_all(&plan.intents)?;
-    apply_plan_base_revision(plan, &mut compiled);
+    apply_plan_base_revision(&plan, &mut compiled);
     Ok(ValidatedApplicationPlan {
-        plan: plan.clone(),
+        plan,
         compiled,
         diagnostics: vec!["inspection-only: no SQLite lineage/OCC".into()],
     })
@@ -735,11 +829,13 @@ pub fn compile_plan_against_db(
     plan: &ApplicationPlan,
     scope: &LineageScope,
 ) -> Result<ValidatedApplicationPlan, KernelError> {
-    validate_plan_against_db(db, plan, scope)?;
+    let mut plan = plan.clone();
+    normalize_plan_application_aliases(&mut plan);
+    validate_plan_against_db(db, &plan, scope)?;
     let mut compiled = compile_all_against_db(db, &plan.intents)?;
-    apply_plan_base_revision(plan, &mut compiled);
+    apply_plan_base_revision(&plan, &mut compiled);
     Ok(ValidatedApplicationPlan {
-        plan: plan.clone(),
+        plan,
         compiled,
         diagnostics: Vec::new(),
     })
@@ -1809,6 +1905,120 @@ mod tests {
         let err = validate_plan(&plan).expect_err("cross-app upsert must fail");
         assert!(
             matches!(err, KernelError::Validation(ref m) if m.contains("does not match")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn normalizes_surface_suffix_application_id_alias() {
+        let mut plan = sample_create_plan();
+        let bound = plan_bound_application_id(&plan).unwrap().to_string();
+        if let ChangeIntent::UpsertDataModel { application_id, .. } = &mut plan.intents[1] {
+            *application_id = format!("{bound}-surface");
+        }
+        normalize_plan_application_aliases(&mut plan);
+        validate_plan(&plan).expect("surface-suffix alias must rewrite then validate");
+        if let ChangeIntent::UpsertDataModel { application_id, .. } = &plan.intents[1] {
+            assert_eq!(application_id, &bound);
+        } else {
+            panic!("expected UpsertDataModel");
+        }
+        let validated = compile_plan(&plan).expect("compile after alias rewrite");
+        assert!(!validated.compiled.operations.is_empty());
+    }
+
+    #[test]
+    fn normalizes_surf_prefix_alias_on_inline_create() {
+        let mut plan = sample_create_plan();
+        let bound = plan_bound_application_id(&plan).unwrap().to_string();
+        let inline_tool = crate::ai::ToolDefinition {
+            id: format!("surf-{bound}"),
+            name: "Summary".into(),
+            description: "Inline".into(),
+            layout: json!({ "type": "stack" }),
+            components: vec![crate::ai::ToolComponent {
+                id: "title".into(),
+                component_type: "heading".into(),
+                props: Some(json!({ "text": "Summary", "level": 2 })),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        plan.intents.push(ChangeIntent::CreateInlineSurface {
+            application_id: format!("{bound}-surface"),
+            name: "Summary".into(),
+            surface_id: Some(format!("s-{bound}-summary")),
+            tool: inline_tool,
+            change_summary: Some("Inline summary".into()),
+        });
+        let validated = compile_plan(&plan).expect("surf-/ -surface aliases rewrite");
+        assert!(validated.plan.intents.iter().any(|i| matches!(
+            i,
+            ChangeIntent::CreateInlineSurface { application_id, tool, .. }
+                if application_id == &bound && tool.id == bound
+        )));
+    }
+
+    #[test]
+    fn coerces_inline_tool_id_surface_slug_to_application_id() {
+        // Matches the live failure: applicationId correct, tool.id is a surface slug.
+        let mut plan = sample_create_plan();
+        let bound = plan_bound_application_id(&plan).unwrap().to_string();
+        plan.intents.push(ChangeIntent::CreateInlineSurface {
+            application_id: bound.clone(),
+            name: "Summary".into(),
+            surface_id: Some(format!("s-{bound}-summary")),
+            tool: crate::ai::ToolDefinition {
+                id: format!("s-{bound}-summary"),
+                name: "Summary".into(),
+                description: "Inline".into(),
+                layout: json!({ "type": "stack" }),
+                components: vec![crate::ai::ToolComponent {
+                    id: "title".into(),
+                    component_type: "heading".into(),
+                    props: Some(json!({ "text": "Summary", "level": 2 })),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            change_summary: Some("Inline summary".into()),
+        });
+        let validated =
+            compile_plan(&plan).expect("inline tool.id surface slug must coerce to applicationId");
+        assert!(validated.plan.intents.iter().any(|i| matches!(
+            i,
+            ChangeIntent::CreateInlineSurface { application_id, tool, .. }
+                if application_id == &bound && tool.id == bound
+        )));
+    }
+
+    #[test]
+    fn does_not_coerce_inline_tool_id_for_other_application() {
+        let mut plan = sample_create_plan();
+        let bound = plan_bound_application_id(&plan).unwrap().to_string();
+        plan.intents.push(ChangeIntent::CreateInlineSurface {
+            application_id: bound.clone(),
+            name: "Summary".into(),
+            surface_id: Some(format!("s-{bound}-summary")),
+            tool: crate::ai::ToolDefinition {
+                id: "tool-other-app".into(),
+                name: "Summary".into(),
+                description: "Inline".into(),
+                layout: json!({ "type": "stack" }),
+                components: vec![crate::ai::ToolComponent {
+                    id: "title".into(),
+                    component_type: "heading".into(),
+                    props: Some(json!({ "text": "Summary", "level": 2 })),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            change_summary: None,
+        });
+        normalize_plan_application_aliases(&mut plan);
+        let err = validate_plan(&plan).expect_err("other tool-* must stay rejected");
+        assert!(
+            matches!(err, KernelError::Validation(ref m) if m.contains("must match applicationId")),
             "got {err:?}"
         );
     }

@@ -50,6 +50,12 @@ impl KernelError {
 
     pub fn user_message(&self) -> String {
         match self {
+            Self::Validation(m)
+                if m.contains("does not match plan application")
+                    || m.contains("tool.id must match applicationId") =>
+            {
+                "That application proposal used inconsistent IDs. Ask Coreside to try again.".into()
+            }
             Self::Validation(m) => format!("This change could not be validated: {m}"),
             Self::PermissionDenied(m) => format!("Permission denied: {m}"),
             Self::PolicyDenied(m) => format!("This action is not allowed: {m}"),

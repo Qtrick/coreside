@@ -35,7 +35,16 @@ import type { AgentTurnEvent } from "@/lib/tauri";
 import { MANUAL_DOCK_ICON_SELECTION_ENABLED } from "@/lib/branding/manual-dock-icon-capability";
 import type { ToolMention } from "@/lib/mentions";
 import { ensureReadableForeground } from "@/lib/readability/contrast";
-import type { ActionLogMode } from "@/lib/action-log";
+import {
+  normalizeActionStatus,
+  upsertAgentAction,
+  type ActionLogMode,
+  type AgentActionEntry,
+} from "@/lib/action-log";
+import {
+  parseAutomationChange,
+  toUpsertAutomationInput,
+} from "@/lib/automation-proposal";
 import { validateToolDefinition } from "@/lib/tool-schema";
 import { INTERFACE_TRANSPARENCY_DEFAULT } from "@/lib/interface-transparency";
 import {
@@ -81,6 +90,12 @@ export type PendingSettingsChange = {
   conversationId: string;
   messageId: string;
   settingsChange: import("@/types/agent").SettingsChange;
+};
+
+export type PendingAutomationChange = {
+  conversationId: string;
+  messageId: string;
+  proposal: import("@/lib/automation-proposal").AutomationChangeProposal;
 };
 
 export type PendingKernelProposal = {
@@ -184,9 +199,11 @@ type AppStore = {
 
   pendingToolChange: PendingToolChange | null;
   pendingSettingsChange: PendingSettingsChange | null;
+  pendingAutomationChange: PendingAutomationChange | null;
   pendingKernelProposal: PendingKernelProposal | null;
   /** True while Apply/Discard IPC for the staged kernel proposal is in flight. */
   kernelProposalApplying: boolean;
+  automationProposalApplying: boolean;
   appConflict: AppConflict | null;
   surfaceDraftConflict: SurfaceDraftConflict | null;
   sending: boolean;
@@ -195,7 +212,7 @@ type AppStore = {
   /** Conversations with deletion in flight — guards against double deletion. */
   deletingConversationIds: string[];
   sendError: string | null;
-  agentActions: string[];
+  agentActions: AgentActionEntry[];
   /** Derived view of active-conversation stream text (MessageList compatibility). */
   streamingText: string | null;
   /** Per-turn Channel accumulation — survives navigation away from the chat. */
@@ -314,6 +331,9 @@ type AppStore = {
   discardPendingToolChange: () => Promise<void>;
   applyPendingSettingsChange: () => Promise<void>;
   discardPendingSettingsChange: () => Promise<void>;
+  stagePendingAutomationChange: (pending: PendingAutomationChange) => void;
+  applyPendingAutomationChange: () => Promise<void>;
+  discardPendingAutomationChange: () => Promise<void>;
   /** Reconcile Zustand committed appearance from canonical AppSettings (no IPC). */
   reconcileCommittedAppearance: (settings: import("@/types/agent").AppSettings) => void;
   /** Apply a saved theme preset after user confirmation (atomic Rust transaction). */
@@ -684,7 +704,20 @@ function applyAgentTurnChannelEvent(
           : `Operation ${event.status}: ${shortId}`;
     set((state) => {
       const upserted = upsertTurnFromChannel(state, turnConversationId, null);
-      const actions = [...upserted.turn.actions, label].slice(-8);
+      const entry: AgentActionEntry = {
+        id: `op-${event.operationId}`,
+        label,
+        status: normalizeActionStatus(
+          event.status === "interrupted" || event.status === "fatal"
+            ? "failed"
+            : event.status === "preview"
+              ? "running"
+              : "completed",
+        ),
+        eventType: "operation",
+        stepId: `op-${event.operationId}`,
+      };
+      const actions = upsertAgentAction(upserted.turn.actions, entry, 8);
       const clearPreview =
         event.status === "interrupted" || event.status === "fatal";
       return {
@@ -702,7 +735,7 @@ function applyAgentTurnChannelEvent(
             }
           : {}),
         ...(isActive
-          ? { agentActions: [...state.agentActions, label].slice(-8) }
+          ? { agentActions: upsertAgentAction(state.agentActions, entry, 8) }
           : {}),
       };
     });
@@ -711,7 +744,20 @@ function applyAgentTurnChannelEvent(
   if (event.kind === "action") {
     set((state) => {
       const upserted = upsertTurnFromChannel(state, turnConversationId, null);
-      const actions = [...upserted.turn.actions, event.label].slice(-8);
+      const entry: AgentActionEntry = {
+        id:
+          (typeof event.id === "string" && event.id) ||
+          `act-${upserted.turn.actions.length}`,
+        label: event.label,
+        // Bare live emits (no status) are in-progress; never invent "completed".
+        status: normalizeActionStatus(event.status ?? "running"),
+        eventType:
+          typeof event.eventType === "string" ? event.eventType : undefined,
+        stepId: typeof event.stepId === "string" ? event.stepId : undefined,
+        durationMs:
+          typeof event.durationMs === "number" ? event.durationMs : undefined,
+      };
+      const actions = upsertAgentAction(upserted.turn.actions, entry, 8);
       return {
         turnsById: {
           ...upserted.turnsById,
@@ -719,7 +765,7 @@ function applyAgentTurnChannelEvent(
         },
         activeTurnIdByConversation: upserted.activeTurnIdByConversation,
         ...(isActive
-          ? { agentActions: [...state.agentActions, event.label].slice(-8) }
+          ? { agentActions: upsertAgentAction(state.agentActions, entry, 8) }
           : {}),
       };
     });
@@ -1124,8 +1170,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   pendingToolChange: null,
   pendingSettingsChange: null,
+  pendingAutomationChange: null,
   pendingKernelProposal: null,
   kernelProposalApplying: false,
+  automationProposalApplying: false,
   appConflict: null,
   surfaceDraftConflict: null,
   sending: false,
@@ -1378,12 +1426,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
         const messages = await api.getMessages(trimmed);
         let pending: PendingToolChange | null = null;
         let kernelProposal: PendingKernelProposal | null = null;
+        let pendingAutomation: PendingAutomationChange | null = null;
         for (let i = messages.length - 1; i >= 0; i -= 1) {
           const meta = messages[i].metadata as
             | {
                 toolChange?: ToolChange;
                 pending?: boolean;
                 toolChangeStatus?: string;
+                automationChange?: unknown;
+                automationChangeStatus?: string;
                 runtimeV2?: {
                   proposalId?: string;
                   risk?: string;
@@ -1405,6 +1456,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
               messageId: messages[i].id,
               toolChange: meta.toolChange,
             };
+          }
+          if (!pendingAutomation) {
+            const automationStatus = meta?.automationChangeStatus;
+            const automationStillOpen =
+              automationStatus !== "applied" &&
+              automationStatus !== "discarded" &&
+              automationStatus !== "failed";
+            const automationProposal = automationStillOpen
+              ? parseAutomationChange(meta?.automationChange)
+              : null;
+            if (automationProposal) {
+              pendingAutomation = {
+                conversationId: trimmed,
+                messageId: messages[i].id,
+                proposal: automationProposal,
+              };
+            }
           }
           const rv = meta?.runtimeV2;
           if (
@@ -1436,6 +1504,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           messagesLoading: false,
           pendingToolChange: kernelProposal ? null : pending,
           pendingKernelProposal: kernelProposal,
+          pendingAutomationChange: pendingAutomation,
         });
       } catch (error) {
         if (get().activeConversationId !== trimmed) return;
@@ -2566,7 +2635,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
         set((state) => ({
           sending: false,
           sendingConversationId: null,
-          agentActions: ["Message queued"],
+          agentActions: [
+            {
+              id: "act-queued",
+              label: "Message queued",
+              status: "pending",
+              eventType: "request_queued",
+            },
+          ],
           streamingText: null,
           sendError: null,
           ...finalizeTurnInState(state, conversationId, "completed"),
@@ -2591,6 +2667,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
             settingsChange: result.settingsChange,
           }
         : null;
+      const automationProposal = parseAutomationChange(result.automationChange);
+      const pendingAutomation: PendingAutomationChange | null = automationProposal
+        ? {
+            conversationId,
+            messageId: result.messageId,
+            proposal: automationProposal,
+          }
+        : null;
 
       // The user may have navigated away while the turn finished. Conversation-scoped
       // fields must not overwrite whichever chat is now open.
@@ -2602,6 +2686,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
           streamingText: null,
           ...finalizeTurnInState(state, conversationId, "completed"),
           ...(pendingSettings ? { pendingSettingsChange: pendingSettings } : {}),
+          ...(pendingAutomation
+            ? { pendingAutomationChange: pendingAutomation }
+            : {}),
         }));
         return true;
       }
@@ -2615,6 +2702,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // lets legacy create the surface first and mark the proposal stale).
         pendingToolChange: kernelProposal ? null : pending,
         pendingSettingsChange: pendingSettings ?? state.pendingSettingsChange,
+        pendingAutomationChange:
+          pendingAutomation ?? state.pendingAutomationChange,
         pendingKernelProposal: kernelProposal,
         agentActions: [],
         streamingText: null,
@@ -2757,6 +2846,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
               settingsChange: result.settingsChange,
             }
           : null;
+      const automationProposal = parseAutomationChange(result.automationChange);
+      const pendingAutomation: PendingAutomationChange | null =
+        automationProposal && messageId
+          ? {
+              conversationId: turnConversationId,
+              messageId,
+              proposal: automationProposal,
+            }
+          : null;
 
       const stillActive = get().activeConversationId === turnConversationId;
       if (!stillActive) {
@@ -2771,6 +2869,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
             result.admitted ? "completed" : "failed",
           ),
           ...(pendingSettings ? { pendingSettingsChange: pendingSettings } : {}),
+          ...(pendingAutomation
+            ? { pendingAutomationChange: pendingAutomation }
+            : {}),
           ...(kernelProposal ? { pendingKernelProposal: kernelProposal } : {}),
         }));
         return { admitted: result.admitted };
@@ -2782,6 +2883,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
         sendingConversationId: null,
         pendingToolChange: kernelProposal ? null : pending,
         pendingSettingsChange: pendingSettings ?? state.pendingSettingsChange,
+        pendingAutomationChange:
+          pendingAutomation ?? state.pendingAutomationChange,
         pendingKernelProposal: kernelProposal,
         agentActions: [],
         streamingText: null,
@@ -3052,6 +3155,87 @@ export const useAppStore = create<AppStore>((set, get) => ({
                 ...(m.metadata ?? {}),
                 pending: false,
                 settingsChangeStatus: "discarded",
+              },
+            }
+          : m,
+      ),
+    });
+  },
+
+  stagePendingAutomationChange: (pending) => {
+    set({ pendingAutomationChange: pending, sendError: null });
+  },
+
+  applyPendingAutomationChange: async () => {
+    const pending = get().pendingAutomationChange;
+    if (!pending || get().automationProposalApplying) return;
+    set({ automationProposalApplying: true, sendError: null });
+    try {
+      await api.upsertAutomation(
+        toUpsertAutomationInput(pending.proposal, {
+          sourceMessageId: pending.messageId,
+        }),
+      );
+      try {
+        await api.resolveAutomationChange(pending.messageId, "applied");
+      } catch {
+        // Scheduling succeeded; metadata mark is best-effort for reload UX.
+      }
+      set({
+        pendingAutomationChange: null,
+        automationProposalApplying: false,
+        messages: get().messages.map((m) =>
+          m.id === pending.messageId
+            ? {
+                ...m,
+                metadata: {
+                  ...(m.metadata ?? {}),
+                  automationChangeStatus: "applied",
+                  pending: false,
+                },
+              }
+            : m,
+        ),
+      });
+    } catch (error) {
+      // Keep pending + message status so the user can retry (match settings Apply).
+      set({
+        automationProposalApplying: false,
+        sendError:
+          error instanceof TauriCommandError || error instanceof Error
+            ? error.message
+            : "Failed to schedule automation",
+      });
+    }
+  },
+
+  discardPendingAutomationChange: async () => {
+    const pending = get().pendingAutomationChange;
+    if (!pending || get().automationProposalApplying) return;
+    set({ automationProposalApplying: true, sendError: null });
+    try {
+      await api.resolveAutomationChange(pending.messageId, "discarded");
+    } catch (error) {
+      set({
+        automationProposalApplying: false,
+        sendError:
+          error instanceof TauriCommandError || error instanceof Error
+            ? error.message
+            : "Failed to discard automation proposal",
+      });
+      return;
+    }
+    set({
+      pendingAutomationChange: null,
+      automationProposalApplying: false,
+      messages: get().messages.map((m) =>
+        m.id === pending.messageId
+          ? {
+              ...m,
+              metadata: {
+                ...(m.metadata ?? {}),
+                pending: false,
+                automationChangeStatus: "discarded",
               },
             }
           : m,

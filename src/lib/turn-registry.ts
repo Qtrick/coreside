@@ -6,6 +6,8 @@
  * view for the active conversation (MessageList compatibility).
  */
 
+import type { AgentActionEntry } from "@/lib/action-log";
+
 export type TurnLiveStatus = "streaming" | "completed" | "failed" | "cancelled";
 
 export type TurnLiveState = {
@@ -14,7 +16,7 @@ export type TurnLiveState = {
   status: TurnLiveStatus;
   text: string;
   lastSequence: number;
-  actions: string[];
+  actions: AgentActionEntry[];
   error: string | null;
   startedAt: number;
 };

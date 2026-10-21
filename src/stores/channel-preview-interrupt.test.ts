@@ -94,7 +94,7 @@ describe("sendMessage channel preview lifecycle", () => {
       useAppStore
         .getState()
         .turnsById[useAppStore.getState().activeTurnIdByConversation[conversationId]!]
-        ?.actions.some((a) => a.includes("interrupted")),
+        ?.actions.some((a) => a.label.includes("interrupted")),
     ).toBe(true);
   });
 });

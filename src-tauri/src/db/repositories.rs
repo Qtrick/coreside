@@ -1443,6 +1443,8 @@ pub fn action_events_are_substantive(events: &[serde_json::Value]) -> bool {
         "crawl_started",
         "crawl_completed",
         "project_context_loaded",
+        "automation_proposed",
+        "automation_applied",
     ];
     events.iter().any(|evt| {
         let Some(obj) = evt.as_object() else {
@@ -1506,7 +1508,13 @@ pub fn insert_action_event(
         }
     };
     let safe_status = match status.trim() {
-        "completed" | "failed" | "cancelled" | "running" => status.trim().to_string(),
+        "pending" => "pending".to_string(),
+        "running" => "running".to_string(),
+        "completed" | "succeeded" => "completed".to_string(),
+        "failed" => "failed".to_string(),
+        "cancelled" => "cancelled".to_string(),
+        "awaitingApproval" | "awaiting_approval" => "awaitingApproval".to_string(),
+        "blocked" => "blocked".to_string(),
         _ => "completed".to_string(),
     };
     db.conn().execute(
@@ -1967,5 +1975,60 @@ mod action_log_mode_tests {
             ActionLogMode::Always,
             &boilerplate
         ));
+    }
+
+    #[test]
+    fn insert_preserves_lifecycle_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("action-status.db")).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO conversations (id, workspace_id, title) VALUES ('c1', ?1, 't')",
+                [crate::db::DEFAULT_WORKSPACE_ID],
+            )
+            .unwrap();
+        let user = insert_message(&mut db, "c1", "user", "hi", None).unwrap();
+
+        let running = insert_action_event(
+            &mut db,
+            &user.id,
+            Some("c1"),
+            "tool_started",
+            "Searching the web",
+            "running",
+            0,
+        )
+        .unwrap();
+        assert_eq!(running.status, "running");
+
+        let awaiting = insert_action_event(
+            &mut db,
+            &user.id,
+            Some("c1"),
+            "change_proposed",
+            "Proposed a change",
+            "awaitingApproval",
+            1,
+        )
+        .unwrap();
+        assert_eq!(awaiting.status, "awaitingApproval");
+
+        let succeeded_alias = insert_action_event(
+            &mut db,
+            &user.id,
+            Some("c1"),
+            "tool_completed",
+            "Searching the web",
+            "succeeded",
+            2,
+        )
+        .unwrap();
+        assert_eq!(succeeded_alias.status, "completed");
+
+        let listed = list_action_events_for_request(&db, &user.id).unwrap();
+        assert_eq!(listed.len(), 3);
+        assert_eq!(listed[0].status, "running");
+        assert_eq!(listed[1].status, "awaitingApproval");
+        assert_eq!(listed[2].status, "completed");
     }
 }

@@ -30,6 +30,7 @@ import { ModelPicker } from "./ModelPicker";
 import { ToolChangePreview } from "./ToolChangePreview";
 import { SettingsChangePreview } from "./SettingsChangePreview";
 import { KernelProposalPreview } from "./KernelProposalPreview";
+import { AutomationProposalPreview } from "./AutomationProposalCard";
 import { ConflictBanner } from "./ConflictBanner";
 
 const MAX_ATTACHMENTS = 5;
@@ -356,6 +357,7 @@ export function Composer() {
       <ToolChangePreview />
       <SettingsChangePreview />
       <KernelProposalPreview />
+      <AutomationProposalPreview />
       <ConflictBanner />
       {needsSetup ? (
         <div className="setup-banner" role="status">

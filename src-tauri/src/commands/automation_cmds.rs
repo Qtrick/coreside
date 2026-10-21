@@ -150,6 +150,59 @@ pub fn run_automation_now(
         .map_err(|e| CommandError::new("automation", e))
 }
 
+/// Mark a chat-proposed automation as applied or discarded on the source message.
+/// Does not schedule — Confirm must call `upsert_automation` first when applying.
+#[tauri::command]
+pub fn resolve_automation_change(
+    state: State<'_, AppState>,
+    message_id: String,
+    status: String,
+) -> Result<db::Message, CommandError> {
+    state.require_profile()?;
+    let status = status.trim();
+    if status != "applied" && status != "discarded" {
+        return Err(CommandError::new(
+            "invalid",
+            "status must be applied or discarded",
+        ));
+    }
+    let mut db = state.db.lock();
+    let mut msg = db::get_message(&db, message_id.trim())?;
+    let mut meta = msg.metadata.unwrap_or_else(|| serde_json::json!({}));
+    if let Some(obj) = meta.as_object_mut() {
+        // Refuse to revive a resolved proposal or invent one from an empty message.
+        let has_proposal = obj.get("automationChange").is_some_and(|v| !v.is_null());
+        if !has_proposal {
+            return Err(CommandError::new(
+                "invalid",
+                "Message has no automation proposal to resolve",
+            ));
+        }
+        let current = obj
+            .get("automationChangeStatus")
+            .and_then(|v| v.as_str())
+            .unwrap_or("pending");
+        if current == "applied" || current == "discarded" {
+            if current == status {
+                msg.metadata = Some(meta);
+                return Ok(msg);
+            }
+            return Err(CommandError::new(
+                "conflict",
+                format!("Automation proposal already {current}"),
+            ));
+        }
+        obj.insert(
+            "automationChangeStatus".into(),
+            serde_json::Value::String(status.to_string()),
+        );
+        obj.insert("pending".into(), serde_json::json!(false));
+    }
+    db::update_message_metadata(&mut db, message_id.trim(), &meta)?;
+    msg.metadata = Some(meta);
+    Ok(msg)
+}
+
 #[tauri::command]
 pub fn list_workspace_backgrounds(
     state: State<'_, AppState>,

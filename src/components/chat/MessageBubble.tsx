@@ -13,11 +13,16 @@ import { ActionLog } from "@/components/action-log/ActionLog";
 import { kernelProposalFromMetadata } from "@/components/chat/proposal-metadata";
 import { searchDataFromMetadata } from "@/components/search/search-metadata";
 import { ChangeProposalCard } from "@/components/chat/ChangeProposalCard";
+import { AutomationProposalCard } from "@/components/chat/AutomationProposalCard";
 import { InlineSurfacesForMessage } from "@/components/chat/InlineSurface";
 import { MessageAttachments } from "@/components/chat/MessageAttachments";
 import { SearchResults } from "@/components/search/SearchResults";
 import type { ChatMessage } from "@/types/messages";
 import { openExternalUrl } from "@/lib/open-url";
+import {
+  automationChangeStatusFromMetadata,
+  parseAutomationChange,
+} from "@/lib/automation-proposal";
 import { useAppStore } from "@/stores/app-store";
 
 /**
@@ -345,6 +350,22 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
                 preservationSummary={kernelProposal.preservationSummary}
               />
             ) : null}
+            {(() => {
+              const meta =
+                message.metadata && typeof message.metadata === "object"
+                  ? (message.metadata as Record<string, unknown>)
+                  : null;
+              const automation = parseAutomationChange(meta?.automationChange);
+              if (!automation) return null;
+              return (
+                <AutomationProposalCard
+                  proposal={automation}
+                  status={automationChangeStatusFromMetadata(meta)}
+                  messageId={message.id}
+                  conversationId={message.conversationId}
+                />
+              );
+            })()}
             <ActionLog message={message} />
           </>
         )}

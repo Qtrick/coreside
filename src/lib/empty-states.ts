@@ -33,8 +33,8 @@ export const EMPTY_STATES = {
   },
   noAutomations: {
     title: "No automations yet",
-    body: "Create a recurring routine in chat — Coreside can schedule safe changes while the app is open.",
-    primaryCta: "Create automation",
+    body: "Ask in chat to schedule a safe recurring change (for example wallpaper rotation). You confirm before it runs, and it only runs while Coreside is open.",
+    primaryCta: "Ask in chat",
   },
   sidebarNoChats: {
     hint: "No chats yet — use New chat",

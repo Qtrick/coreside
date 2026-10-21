@@ -103,9 +103,37 @@ pub fn kernel_decide_proposal(
     state.require_profile()?;
     require_main_for_sensitive_kernel(&window)?;
     let mut db = state.db.lock();
+    // Capture timeline identity before decide mutates proposal status.
+    let timeline_hook = crate::application_kernel::get_proposal(&db, &proposal_id)
+        .ok()
+        .and_then(|p| {
+            let cid = p.conversation_id.filter(|s| !s.trim().is_empty())?;
+            let tid = p.turn_id.filter(|s| !s.trim().is_empty())?;
+            Some((cid, tid))
+        });
     let mut bus = state.event_bus.lock();
-    crate::application_kernel::decide_proposal(&mut db, Some(&mut bus), &proposal_id, approve)
-        .map_err(map_kernel)
+    let result = crate::application_kernel::decide_proposal(
+        &mut db,
+        Some(&mut bus),
+        &proposal_id,
+        approve,
+    )
+    .map_err(map_kernel)?;
+    if let Some((cid, tid)) = timeline_hook {
+        let kind = if approve { "commit" } else { "cancellation" };
+        crate::runtime_v2::try_append_turn_timeline_event(
+            &db,
+            &cid,
+            &tid,
+            kind,
+            serde_json::json!({
+                "proposalId": proposal_id,
+                "approved": approve,
+                "source": "user_decide",
+            }),
+        );
+    }
+    Ok(result)
 }
 
 #[tauri::command]

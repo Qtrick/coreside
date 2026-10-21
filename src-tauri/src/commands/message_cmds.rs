@@ -17,8 +17,9 @@ use crate::ai::{
     seal_tool_result_envelope, structured_metadata_value, structured_trust_from_text,
     tool_result_display_summary, AgentCapability, AgentContentPart, AgentMessage, AgentRequest,
     AgentRole, ApplicationStatePromptSlice, ParsedAgentResponse, ResponseType,
-    SettingsChangePayload, SourceCitation, StructuredUserInput, StructuredUserInputSubmission,
-    ToolCallRequest, ToolCallResult, ToolChangePayload, ToolLoop, ToolLoopContext, PROMPT_VERSION,
+    AutomationChangePayload, SettingsChangePayload, SourceCitation, StructuredUserInput,
+    StructuredUserInputSubmission, ToolCallRequest, ToolCallResult, ToolChangePayload, ToolLoop,
+    ToolLoopContext, PROMPT_VERSION,
 };
 use crate::db::{self, Message};
 use crate::search::SearchRegistry;
@@ -349,6 +350,8 @@ pub struct SendMessageResult {
     pub response_type: ResponseType,
     pub tool_change: Option<ToolChangePayload>,
     pub settings_change: Option<SettingsChangePayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automation_change: Option<AutomationChangePayload>,
     pub diagnostics: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_message_id: Option<String>,
@@ -369,6 +372,18 @@ pub enum AgentTurnEvent {
     Action {
         conversation_id: String,
         label: String,
+        /// Stable step id for start→terminal correlation (optional for legacy emitters).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        event_type: Option<String>,
+        /// pending | running | completed | failed | cancelled | awaitingApproval | blocked
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<i64>,
     },
     #[serde(rename_all = "camelCase")]
     Text {
@@ -708,12 +723,41 @@ fn emit_action(
     conversation_id: &str,
     label: &str,
 ) {
+    emit_action_event(
+        app,
+        on_event,
+        conversation_id,
+        label,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+}
+
+fn emit_action_event(
+    app: &AppHandle,
+    on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
+    conversation_id: &str,
+    label: &str,
+    id: Option<String>,
+    event_type: Option<String>,
+    status: Option<String>,
+    step_id: Option<String>,
+    duration_ms: Option<i64>,
+) {
     emit_turn(
         app,
         on_event,
         AgentTurnEvent::Action {
             conversation_id: conversation_id.to_string(),
             label: label.to_string(),
+            id,
+            event_type,
+            status,
+            step_id,
+            duration_ms,
         },
     );
 }
@@ -734,6 +778,38 @@ fn sanitize_action_label(label: &str, api_key: Option<&str>) -> String {
     }
 }
 
+/// Map event types to lifecycle status. Starts must not masquerade as completed.
+fn default_status_for_event_type(event_type: &str) -> &'static str {
+    match event_type {
+        "tool_started"
+        | "search_started"
+        | "crawl_started"
+        | "request_started"
+        | "provider_request_started" => "running",
+        "change_proposed" | "tool_change_proposed" | "automation_proposed" => "awaitingApproval",
+        "change_failed" | "tool_failed" | "interactive_action_rejected" => "failed",
+        "tool_completed"
+        | "search_completed"
+        | "crawl_completed"
+        | "change_applied"
+        | "automation_applied" => "completed",
+        _ => "completed",
+    }
+}
+
+fn normalize_action_status(status: &str) -> String {
+    match status.trim() {
+        "pending" => "pending".into(),
+        "running" => "running".into(),
+        "completed" | "succeeded" => "completed".into(),
+        "failed" => "failed".into(),
+        "cancelled" => "cancelled".into(),
+        "awaitingApproval" | "awaiting_approval" => "awaitingApproval".into(),
+        "blocked" => "blocked".into(),
+        _ => "completed".into(),
+    }
+}
+
 fn record_action(
     app: &AppHandle,
     on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
@@ -743,20 +819,198 @@ fn record_action(
     event_type: &str,
     api_key: Option<&str>,
 ) {
+    record_action_step(
+        app,
+        on_event,
+        conversation_id,
+        log,
+        label,
+        event_type,
+        default_status_for_event_type(event_type),
+        None,
+        api_key,
+    );
+}
+
+fn record_action_step(
+    app: &AppHandle,
+    on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
+    conversation_id: &str,
+    log: &mut Option<Vec<serde_json::Value>>,
+    label: &str,
+    event_type: &str,
+    status: &str,
+    step_id: Option<&str>,
+    api_key: Option<&str>,
+) {
     let Some(events) = log else {
         // Action Log default-off: do not emit or collect events when disabled.
         return;
     };
     let safe_label = sanitize_action_label(label, api_key);
-    emit_action(app, on_event, conversation_id, &safe_label);
+    let safe_status = normalize_action_status(status);
+    let now_ms = chrono::Utc::now().timestamp_millis();
+
+    // Upsert by step_id so start→terminal stays one visible step.
+    if let Some(sid) = step_id.filter(|s| !s.is_empty()) {
+        if let Some(existing) = events.iter_mut().find(|evt| {
+            evt.get("stepId")
+                .and_then(|v| v.as_str())
+                .is_some_and(|v| v == sid)
+        }) {
+            let started_at = existing
+                .get("startedAt")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(now_ms);
+            let duration_ms = if safe_status == "running" || safe_status == "pending" {
+                None
+            } else {
+                Some((now_ms - started_at).max(0))
+            };
+            existing["eventType"] = json!(event_type);
+            existing["label"] = json!(safe_label);
+            existing["status"] = json!(safe_status);
+            if let Some(ms) = duration_ms {
+                existing["durationMs"] = json!(ms);
+                existing["completedAt"] = json!(now_ms);
+            }
+            let id = existing
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            emit_action_event(
+                app,
+                on_event,
+                conversation_id,
+                &safe_label,
+                Some(id),
+                Some(event_type.to_string()),
+                Some(safe_status),
+                Some(sid.to_string()),
+                duration_ms,
+            );
+            return;
+        }
+    }
+
     let sequence = events.len() as i64;
-    events.push(json!({
-        "id": format!("act-{sequence}"),
+    let id = format!("act-{sequence}");
+    let mut row = json!({
+        "id": id,
         "eventType": event_type,
         "label": safe_label,
-        "status": "completed",
+        "status": safe_status,
         "sequence": sequence,
-    }));
+        "startedAt": now_ms,
+    });
+    if let Some(sid) = step_id.filter(|s| !s.is_empty()) {
+        row["stepId"] = json!(sid);
+    }
+    events.push(row);
+    emit_action_event(
+        app,
+        on_event,
+        conversation_id,
+        &safe_label,
+        Some(format!("act-{sequence}")),
+        Some(event_type.to_string()),
+        Some(safe_status),
+        step_id.map(str::to_string),
+        None,
+    );
+}
+
+/// Close any still-open steps when the turn ends.
+///
+/// Tool/search/crawl starts that never received a terminal update must not look
+/// succeeded. Boilerplate markers (`request_started`, `provider_request_started`)
+/// complete on a clean finish — they are not failures.
+fn finalize_open_action_steps(events: &mut [serde_json::Value], cancelled: bool) {
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    for evt in events.iter_mut() {
+        let status = evt
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("completed");
+        if status != "running" && status != "pending" {
+            continue;
+        }
+        let ty = evt
+            .get("eventType")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let work_start =
+            matches!(ty.as_str(), "tool_started" | "search_started" | "crawl_started");
+        let terminal = if cancelled {
+            "cancelled"
+        } else if work_start {
+            "failed"
+        } else {
+            "completed"
+        };
+        let started_at = evt.get("startedAt").and_then(|v| v.as_i64()).unwrap_or(now_ms);
+        evt["status"] = json!(terminal);
+        evt["durationMs"] = json!((now_ms - started_at).max(0));
+        evt["completedAt"] = json!(now_ms);
+        if work_start || (cancelled && ty.ends_with("_started")) {
+            evt["eventType"] = json!("tool_failed");
+        }
+    }
+}
+
+fn record_tool_lifecycle(
+    app: &AppHandle,
+    on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
+    conversation_id: &str,
+    log: &mut Option<Vec<serde_json::Value>>,
+    tool_round: usize,
+    calls: &[ToolCallRequest],
+    results: &[ToolCallResult],
+    cancelled: bool,
+    api_key: Option<&str>,
+) {
+    for (i, call) in calls.iter().enumerate() {
+        let step_id = format!("tool-{tool_round}-{i}");
+        let base_label = action_label_for_capability(&call.capability);
+        let (event_type, status, label) = match results.get(i) {
+            Some(r) if r.ok => ("tool_completed", "completed", base_label.to_string()),
+            Some(r)
+                if r.error
+                    .as_deref()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("cancelled")) =>
+            {
+                (
+                    "tool_failed",
+                    "cancelled",
+                    format!("{base_label} — cancelled"),
+                )
+            }
+            Some(_) => ("tool_failed", "failed", format!("{base_label} — failed")),
+            None if cancelled => (
+                "tool_failed",
+                "cancelled",
+                format!("{base_label} — cancelled"),
+            ),
+            None => (
+                "tool_failed",
+                "failed",
+                format!("{base_label} — interrupted"),
+            ),
+        };
+        record_action_step(
+            app,
+            on_event,
+            conversation_id,
+            log,
+            &label,
+            event_type,
+            status,
+            Some(&step_id),
+            api_key,
+        );
+    }
 }
 
 /// Forward live provider text to the UI. JSON protocols peek `assistantMessage`;
@@ -1984,6 +2238,7 @@ async fn send_message_inner(
             response_type: ResponseType::Message,
             tool_change: None,
             settings_change: None,
+            automation_change: None,
             diagnostics: None,
             user_message_id: None,
             runtime_v2: None,
@@ -3004,14 +3259,17 @@ async fn send_message_inner(
 
         let tool_calls = parsed.payload.tool_calls.clone().unwrap_or_default();
 
-        for call in &tool_calls {
-            record_action(
+        for (i, call) in tool_calls.iter().enumerate() {
+            let step_id = format!("tool-{tool_round}-{i}");
+            record_action_step(
                 &app,
                 on_event.as_ref(),
                 &conversation_id,
                 &mut action_log,
                 action_label_for_capability(&call.capability),
                 "tool_started",
+                "running",
+                Some(&step_id),
                 api_key_ref,
             );
         }
@@ -3051,7 +3309,20 @@ async fn send_message_inner(
             .run(&state, &loop_ctx, tool_calls.clone(), &cancel)
             .await;
 
-        if cancel.is_cancelled() {
+        let tools_cancelled = cancel.is_cancelled();
+        record_tool_lifecycle(
+            &app,
+            on_event.as_ref(),
+            &conversation_id,
+            &mut action_log,
+            tool_round,
+            &tool_calls,
+            &tool_results,
+            tools_cancelled,
+            api_key_ref,
+        );
+
+        if tools_cancelled {
             parsed.payload.response_type = ResponseType::Message;
             if parsed.payload.assistant_message.trim().is_empty() {
                 parsed.payload.assistant_message = "Stopped.".into();
@@ -3638,6 +3909,7 @@ async fn send_message_inner(
     }
 
     let settings_change = parsed.payload.settings_change.clone();
+    let automation_change = parsed.payload.automation_change.clone();
     // Appearance / wallpaper proposals must not silently commit. Validate and
     // normalize here; return the proposal for explicit user Apply/Discard.
     // Durable writes happen only through set_workspace_appearance / project wallpaper
@@ -3674,6 +3946,23 @@ async fn send_message_inner(
         }
         // Validated. Do not write SQLite here — frontend must Apply via trusted commands.
         let _ = pending;
+    }
+
+    // Automation proposals never schedule here — user confirms via upsert_automation.
+    if let Some(ref ac) = automation_change {
+        ac.validate()
+            .map_err(|e| CommandError::sanitized("validation", e, api_key_ref))?;
+        record_action_step(
+            &app,
+            on_event.as_ref(),
+            &conversation_id,
+            &mut action_log,
+            "Proposing an automation for your confirmation",
+            "automation_proposed",
+            "awaitingApproval",
+            Some("automation-propose"),
+            api_key_ref,
+        );
     }
 
     if tool_change.is_some() {
@@ -4049,6 +4338,16 @@ async fn send_message_inner(
                                         "change_proposed",
                                         api_key_ref,
                                     );
+                                    note_timeline(
+                                        &state,
+                                        &conversation_id,
+                                        &turn_id,
+                                        "approval",
+                                        json!({
+                                            "status": "pending",
+                                            "proposalId": change.proposal_id,
+                                        }),
+                                    );
                                     handled = true;
                                 } else if !handled {
                                     // Non-commit without proposal/conflicts — do not claim pending approval.
@@ -4106,7 +4405,12 @@ async fn send_message_inner(
         }
     }
 
-    let raw_events = action_log.clone().unwrap_or_default();
+    let mut raw_events = action_log.clone().unwrap_or_default();
+    // Never persist a start event as completed — close open steps before attach.
+    finalize_open_action_steps(&mut raw_events, cancel.is_cancelled());
+    if let Some(log) = action_log.as_mut() {
+        *log = raw_events.clone();
+    }
     let action_events = if db::should_attach_action_events(action_log_mode, &raw_events) {
         raw_events
     } else {
@@ -4119,7 +4423,12 @@ async fn send_message_inner(
         "settingsChange": settings_change,
         "settingsChangeStatus": if settings_change.is_some() { "pending" } else { "none" },
         "toolChangeStatus": if tool_change.is_some() { "pending" } else { "none" },
-        "pending": tool_change.is_some() || settings_change.is_some() || v2_apply.as_ref().and_then(|v| v.get("proposalId")).is_some(),
+        "automationChange": automation_change,
+        "automationChangeStatus": if automation_change.is_some() { "pending" } else { "none" },
+        "pending": tool_change.is_some()
+            || settings_change.is_some()
+            || automation_change.is_some()
+            || v2_apply.as_ref().and_then(|v| v.get("proposalId")).is_some(),
         "recovered": parsed.recovered,
         "diagnostics": diagnostics,
         "actionEvents": action_events,
@@ -4181,13 +4490,17 @@ async fn send_message_inner(
                         .get("eventType")
                         .and_then(|v| v.as_str())
                         .unwrap_or("request_started");
+                    let status = event
+                        .get("status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_else(|| default_status_for_event_type(event_type));
                     if let Err(e) = db::insert_action_event(
                         &mut db,
                         &user_message.id,
                         Some(&conversation_id),
                         event_type,
                         label,
-                        "completed",
+                        status,
                         i as i64,
                     ) {
                         tracing::warn!(error = %e, "failed to insert action event for audit trail");
@@ -4342,6 +4655,7 @@ async fn send_message_inner(
         response_type: parsed.payload.response_type,
         tool_change,
         settings_change,
+        automation_change,
         diagnostics,
         user_message_id: Some(user_message.id),
         runtime_v2: v2_apply,
@@ -5702,5 +6016,68 @@ mod recovery_retry_admission_tests {
         );
         assert!(crate::runtime_v2::resolve_turn_user_message_id("turn-").is_none());
         assert!(crate::runtime_v2::resolve_turn_user_message_id("").is_none());
+    }
+
+    #[test]
+    fn tool_started_defaults_to_running_not_completed() {
+        assert_eq!(default_status_for_event_type("tool_started"), "running");
+        assert_eq!(
+            default_status_for_event_type("change_proposed"),
+            "awaitingApproval"
+        );
+        assert_eq!(default_status_for_event_type("tool_completed"), "completed");
+        assert_eq!(default_status_for_event_type("change_failed"), "failed");
+    }
+
+    #[test]
+    fn finalize_open_action_steps_closes_running_as_cancelled() {
+        let mut events = vec![json!({
+            "id": "act-0",
+            "eventType": "tool_started",
+            "label": "Searching the web",
+            "status": "running",
+            "stepId": "tool-1-0",
+            "startedAt": 1_000i64,
+        })];
+        finalize_open_action_steps(&mut events, true);
+        assert_eq!(events[0]["status"], "cancelled");
+        assert_eq!(events[0]["eventType"], "tool_failed");
+        assert!(events[0]["durationMs"].as_i64().unwrap() >= 0);
+    }
+
+    #[test]
+    fn finalize_open_action_steps_completes_request_started_on_success() {
+        let mut events = vec![json!({
+            "id": "act-0",
+            "eventType": "request_started",
+            "label": "Preparing your request",
+            "status": "running",
+            "startedAt": 1_000i64,
+        })];
+        finalize_open_action_steps(&mut events, false);
+        assert_eq!(events[0]["status"], "completed");
+        assert_eq!(events[0]["eventType"], "request_started");
+    }
+
+    #[test]
+    fn finalize_open_action_steps_fails_orphan_tool_started_on_success() {
+        let mut events = vec![json!({
+            "id": "act-0",
+            "eventType": "tool_started",
+            "label": "Searching the web",
+            "status": "running",
+            "stepId": "tool-1-0",
+            "startedAt": 1_000i64,
+        })];
+        finalize_open_action_steps(&mut events, false);
+        assert_eq!(events[0]["status"], "failed");
+        assert_eq!(events[0]["eventType"], "tool_failed");
+    }
+
+    #[test]
+    fn normalize_action_status_aliases() {
+        assert_eq!(normalize_action_status("succeeded"), "completed");
+        assert_eq!(normalize_action_status("awaiting_approval"), "awaitingApproval");
+        assert_eq!(normalize_action_status("running"), "running");
     }
 }

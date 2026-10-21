@@ -126,7 +126,7 @@ describe("retryRecoverableGeneration channel + proposals", () => {
       useAppStore
         .getState()
         .turnsById[useAppStore.getState().activeTurnIdByConversation[conversationId]!]
-        ?.actions.some((a) => a.includes("Validated plan")),
+        ?.actions.some((a) => a.label.includes("Validated plan")),
     ).toBe(true);
   });
 

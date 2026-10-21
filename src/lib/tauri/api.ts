@@ -468,6 +468,15 @@ export const api = {
   listAutomations: () => invoke<Record<string, unknown>[]>("list_automations"),
   upsertAutomation: (input: unknown) =>
     invoke<Record<string, unknown>>("upsert_automation", { input }),
+  /** Persist chat automation proposal Confirm/Discard onto message metadata. */
+  resolveAutomationChange: (
+    messageId: string,
+    status: "applied" | "discarded",
+  ) =>
+    invoke<Record<string, unknown>>("resolve_automation_change", {
+      messageId,
+      status,
+    }),
   setAutomationEnabled: (automationId: string, enabled: boolean) =>
     invoke<Record<string, unknown>>("set_automation_enabled", {
       automationId,
@@ -772,6 +781,7 @@ export const api = {
         messageId?: string | null;
         toolChange?: ToolChange | null;
         settingsChange?: SettingsChange | null;
+        automationChange?: Record<string, unknown> | null;
         runtimeV2?: unknown;
       }>("retry_recoverable_generation", {
         ...cmdArgs,
@@ -790,6 +800,7 @@ export const api = {
       messageId?: string | null;
       toolChange?: ToolChange | null;
       settingsChange?: SettingsChange | null;
+      automationChange?: Record<string, unknown> | null;
       runtimeV2?: unknown;
     }>("retry_recoverable_generation", {
       ...cmdArgs,

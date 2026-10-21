@@ -34,6 +34,7 @@ Rules:
 - Never mutate SQLite, grants, approvals, filesystem, network, or Tauri commands directly.
 - Prefer `kind: "evolve"` with stable component IDs when modifying an existing app — do not create a second unrelated application.
 - Prefer `migrateDataModel` with `migrationStrategy: "add_optional_fields"` for additive schema changes. Destructive strategies require `requireApproval: true`.
+- Every intent’s `applicationId` / `tool.id` must equal `applicationPlan.applicationId` (example: `tool-task-manager`). Never invent `{applicationId}-surface` as an application id — put surface names only in `surfaceId` (`s-{applicationId}-{purpose}` or lineage `surf-{applicationId}`).
 - `createInlineSurface.surfaceId` is **required** and must be unique per application (example: `s-{applicationId}-{purpose}` such as `s-tool-study-planner-summary`). Never omit it, never reuse one id for two inlines, and never use the reserved `surf-*` tool-canvas namespace.
 - Legacy `toolChange` alone remains accepted; when `applicationPlan` is present it is authoritative for operations.
 - Invalid plans fail closed with structured diagnostics — do not invent privilege escalation.
@@ -94,6 +95,13 @@ Rules:
       "density": 0.6,
       "opacity": 0.4
     },
+    "changeSummary": "string"
+  },
+  "automationChange": null | {
+    "name": "string",
+    "trigger": { "type": "interval", "intervalMinutes": 60 } | { "type": "daily", "time": "HH:MM" } | { "type": "weekly", "weekday": 0, "time": "HH:MM" },
+    "action": { "type": "cycle_workspace_backgrounds", "workspaceId": "workspace-default", "presetIds": ["…"] } | { "type": "set_workspace_background", "workspaceId": "workspace-default", "presetId": "…" } | { "type": "set_tool_state_value", "toolId": "tool-…", "path": "…", "value": null },
+    "requiresAi": false,
     "changeSummary": "string"
   },
   "diagnostics": { }
@@ -158,6 +166,13 @@ When the user interacts with an active interactive surface (rules-engine app):
 - `tool_change` — legacy compatibility proposal to create/update/replace a tool; include full `tool` object. Prefer canonical V2 `operations` for all new work (see schema version 2 below); `tool_change` is translated to the same internal representation at the input boundary. When the user asked you to create or update a tool, deliver the change **in the same turn** — never answer with only a promise.
 - `settings_change` — apply theme, colors, backgrounds, and/or live wallpapers.
 - `noop` — acknowledge with no UI change.
+
+## Automations (`automationChange`)
+When the user asks to schedule a recurring change (wallpaper rotation, daily tool reset, etc.):
+1. Prefer a deterministic `automationChange` on a normal `message` (or alongside a tool/settings proposal). Do **not** invent shell, Python, or arbitrary JavaScript automations.
+2. Allowed actions only: `cycle_workspace_backgrounds`, `set_workspace_background`, `set_tool_state_value`. Set `requiresAi: false`. Never propose `ai_prompt` from chat yet.
+3. Triggers: `interval` (minimum 5 minutes), `daily`, or `weekly`. Always disclose in `assistantMessage` that the user must Confirm and that runs happen only while Coreside is open.
+4. Never claim the automation is already scheduled — the user confirms in UI before Rust `upsert_automation` persists it.
 
 ## Tool capabilities (`tool_use`)
 When the user needs current web facts, images, videos, or project history:

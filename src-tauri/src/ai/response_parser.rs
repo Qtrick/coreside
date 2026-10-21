@@ -31,6 +31,13 @@ pub fn parse_agent_response(raw: &str) -> Result<ParsedAgentResponse, String> {
                 ));
                 payload.schema_version = SCHEMA_VERSION.to_string();
             }
+            // Align common surface/app id mix-ups before structural validate so
+            // the durable plan stored on the payload matches compile admission.
+            if let Some(plan) = payload.application_plan.as_mut() {
+                crate::application_kernel::application_plan::normalize_plan_application_aliases(
+                    plan,
+                );
+            }
             match payload.validate() {
                 Ok(()) => Ok(ParsedAgentResponse {
                     payload,
@@ -153,6 +160,7 @@ pub fn parse_agent_response(raw: &str) -> Result<ParsedAgentResponse, String> {
                     tool_change: None,
                     application_plan: None,
                     settings_change: None,
+                    automation_change: None,
                     tool_calls: None,
                     citations: None,
                     diagnostics: Some(serde_json::json!({
@@ -302,6 +310,7 @@ fn try_recover_from_value(value: &Value) -> Option<ParsedAgentResponse> {
             tool_change: None,
             application_plan: recovered_plan,
             settings_change: None,
+            automation_change: None,
             tool_calls: None,
             citations: None,
             diagnostics: Some(serde_json::json!({ "recoveredFromPartialJson": true })),
@@ -579,6 +588,7 @@ mod tests {
             }),
             application_plan: None,
             settings_change: None,
+            automation_change: None,
             tool_calls: None,
             citations: None,
             diagnostics: None,
@@ -611,6 +621,7 @@ mod tests {
             }),
             application_plan: None,
             settings_change: None,
+            automation_change: None,
             tool_calls: None,
             citations: None,
             diagnostics: None,
@@ -662,6 +673,7 @@ mod tests {
             }),
             application_plan: None,
             settings_change: None,
+            automation_change: None,
             tool_calls: None,
             citations: None,
             diagnostics: None,

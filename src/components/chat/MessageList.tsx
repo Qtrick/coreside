@@ -2,15 +2,21 @@ import { useEffect, useRef, useState } from "react";
 import { MessageSquare } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { shouldShowActionLog } from "@/lib/action-log";
+import { deriveAgentPresence } from "@/lib/agent-activity";
+import { parseAutomationChange } from "@/lib/automation-proposal";
 import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
 import { kernelProposalFromMetadata } from "@/components/chat/proposal-metadata";
+import { ActionTimelineCard } from "@/components/action-log/ActionLog";
+import { AgentPresence } from "./AgentPresence";
 import { AnimatedRevealText } from "./AnimatedRevealText";
 import { MessageBubble } from "./MessageBubble";
-import {
-  computeLiveApplicationGenerationIndex,
-  humanizeAgentActionLabel,
-  LIVE_APPLICATION_GENERATION_STEPS,
-} from "@/lib/application-proposal-status";
+
+function messageHasConfirmableProposal(
+  metadata: Record<string, unknown> | null | undefined,
+): boolean {
+  if (kernelProposalFromMetadata(metadata)) return true;
+  return Boolean(parseAutomationChange(metadata?.automationChange));
+}
 
 export function MessageList() {
   const messages = useAppStore((s) => s.messages);
@@ -21,6 +27,7 @@ export function MessageList() {
   const streamingText = useAppStore((s) => s.streamingText);
   const messagesLoading = useAppStore((s) => s.messagesLoading);
   const messagesError = useAppStore((s) => s.messagesError);
+  const sendError = useAppStore((s) => s.sendError);
   const activeConversationId = useAppStore((s) => s.activeConversationId);
   const navigateToSettings = useAppStore((s) => s.navigateToSettings);
   const activeTurnId = useAppStore((s) =>
@@ -37,8 +44,6 @@ export function MessageList() {
   });
   const chatViewState = useAppStore((s) => s.chatViewState);
   const setChatScrollTop = useAppStore((s) => s.setChatScrollTop);
-  const pendingKernelProposal = useAppStore((s) => s.pendingKernelProposal);
-  const kernelProposalApplying = useAppStore((s) => s.kernelProposalApplying);
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -69,14 +74,14 @@ export function MessageList() {
     setHoldStreamText("");
   }, [activeConversationId]);
 
-  // Proposal turns must show the durable assistant bubble (Apply + inline surfaces).
+  // Proposal turns must show the durable assistant bubble (Apply + confirm cards).
   // Letter-reveal hold must not keep hiding that bubble after the stream ends.
   useEffect(() => {
     if (liveHere || !holdingReveal) return;
     const last = messages[messages.length - 1];
     if (
       last?.role === "assistant" &&
-      kernelProposalFromMetadata(
+      messageHasConfirmableProposal(
         last.metadata as Record<string, unknown> | null | undefined,
       )
     ) {
@@ -276,9 +281,8 @@ const STARTER_PROMPTS = [
     );
   }
 
-  const latestAction = agentActions[agentActions.length - 1] ?? null;
-  const visibleActions = agentActions.filter((label) => {
-    const lower = label.toLowerCase();
+  const visibleActions = agentActions.filter((entry) => {
+    const lower = entry.label.toLowerCase();
     return !(
       lower.includes("working model")
       || lower.includes("model availability")
@@ -287,16 +291,14 @@ const STARTER_PROMPTS = [
       || lower.includes("selecting a")
     );
   });
-  const liveEvents = visibleActions.map((label) => ({ label }));
-  const showLiveActionLog = shouldShowActionLog(actionLogMode, liveEvents);
-  const lifecycleIndex = computeLiveApplicationGenerationIndex(
-    visibleActions,
-    Boolean(streamingText),
-    {
-      hasPendingProposal: Boolean(pendingKernelProposal),
-      applying: kernelProposalApplying && !streamingText,
-    },
-  );
+  const showLiveActionLog = shouldShowActionLog(actionLogMode, visibleActions);
+  // Plain derive (not useMemo): this path sits after early returns; hooks must not.
+  const presence = deriveAgentPresence({
+    actions: visibleActions,
+    streaming: Boolean(streamingText),
+    sending: liveHere,
+    error: liveHere ? sendError : null,
+  });
 
   return (
     <div className="message-list" ref={listRef} aria-live="polite">
@@ -322,7 +324,7 @@ const STARTER_PROMPTS = [
           // but hide ordinary chat bubbles unless Action Log mode is always on.
           if (isSilent && actionLogMode !== "always") return false;
           // Avoid duplicating the trailing assistant message while letter-reveal finishes.
-          // Keep proposal messages visible — they own Apply + inline surface mounts.
+          // Keep proposal messages visible — they own Apply + confirm cards.
           if (
             holdingReveal &&
             !liveHere &&
@@ -330,7 +332,7 @@ const STARTER_PROMPTS = [
             index === list.length - 1
           ) {
             if (
-              kernelProposalFromMetadata(
+              messageHasConfirmableProposal(
                 message.metadata as Record<string, unknown> | null | undefined,
               )
             ) {
@@ -345,48 +347,9 @@ const STARTER_PROMPTS = [
         ))}
       {showLiveRow ? (
         <div className="message-row assistant agent-live" aria-label="Agent is responding">
-          {/* Human-Readable Generation Lifecycle Indicator */}
-          {liveHere ? (
-            <div className="generation-lifecycle" aria-label="Application progress">
-              {LIVE_APPLICATION_GENERATION_STEPS.map((label, index) => (
-                <span key={label} style={{ display: "contents" }}>
-                  {index > 0 ? <span className="lifecycle-arrow">→</span> : null}
-                  <div
-                    className={`lifecycle-step ${
-                      lifecycleIndex === index
-                        ? "active"
-                        : lifecycleIndex > index
-                          ? "complete"
-                          : ""
-                    }`}
-                  >
-                    <span className="step-dot" /> {label}
-                  </div>
-                </span>
-              ))}
-            </div>
-          ) : null}
-
+          {liveHere ? <AgentPresence presence={presence} /> : null}
           {liveHere && showLiveActionLog && visibleActions.length > 0 ? (
-            <ul className="agent-action-log" aria-label="Action log">
-              {visibleActions.map((label, index) => (
-                <li
-                  key={`${index}-${label}`}
-                  className={index === visibleActions.length - 1 ? "current" : ""}
-                >
-                  {humanizeAgentActionLabel(label)}
-                </li>
-              ))}
-            </ul>
-          ) : liveHere ? (
-            <p className="muted agent-action-pending">
-              {showLiveActionLog &&
-              latestAction &&
-              !latestAction.toLowerCase().includes("model") &&
-              !latestAction.toLowerCase().includes("unavailable")
-                ? humanizeAgentActionLabel(latestAction)
-                : "Working…"}
-            </p>
+            <ActionTimelineCard events={visibleActions} live />
           ) : null}
           {revealText ? (
             <div
