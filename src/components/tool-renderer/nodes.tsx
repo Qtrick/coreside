@@ -9,6 +9,7 @@ import {
 } from "@/lib/record-summary";
 import { api } from "@/lib/tauri";
 import type { MediaAsset } from "@/types/media";
+import { isQueryBackedDataTable } from "./data-table-mode";
 
 export type RenderChild = (component: ToolComponent) => ReactNode;
 
@@ -1911,8 +1912,24 @@ export function DataTableNode({ component }: ToolNodeProps) {
     typeof queryMeta?.limit === "number" && Number.isFinite(queryMeta.limit)
       ? Math.floor(queryMeta.limit as number)
       : null;
-  // Query-backed when the payload carries authoritative pagination metadata.
-  const queryBacked = serverTotal != null;
+  // Server mode when query control keys are wired; otherwise client-side
+  // filter/sort/page the hydrated rows (even if totalCount is present).
+  const queryBacked = isQueryBackedDataTable({
+    totalCount: serverTotal,
+    offsetKey,
+    sortFieldKey,
+    sortDirKey,
+    searchKey,
+  });
+  const queryStatus = key ? asString(getValue(`${key}__status`)) : "";
+  const queryError = key ? asString(getValue(`${key}__error`)) : "";
+  // Loading: explicit status, or first paint before any ok/error. Never treat
+  // status "ok" as loading when totalCount is absent (malformed payload).
+  const queryLoading =
+    queryBacked &&
+    (queryStatus === "loading" ||
+      (serverTotal == null && queryStatus !== "error" && queryStatus !== "ok"));
+  const queryFailed = queryBacked && queryStatus === "error";
 
   let rawRows: unknown[] = [];
   if (Array.isArray(stateRows)) {
@@ -2159,11 +2176,22 @@ export function DataTableNode({ component }: ToolNodeProps) {
         </div>
       ) : null}
 
+      {queryFailed && rows.length > 0 ? (
+        <p className="tr-data-table-query-error" role="alert">
+          {queryError || "Could not refresh records. Showing the last loaded page."}
+        </p>
+      ) : null}
+
       <div className="tr-data-table-scroll">
         <table>
           <caption>{title}</caption>
           <thead>
             <tr>
+              {selectionKey ? (
+                <th scope="col" className="tr-data-table-select-col">
+                  <span className="sr-only">Select</span>
+                </th>
+              ) : null}
               {columns.map((c) => {
                 const isSorted = activeSortColumn === c.id;
                 const ariaSort = isSorted
@@ -2177,6 +2205,11 @@ export function DataTableNode({ component }: ToolNodeProps) {
                       type="button"
                       onClick={() => handleSort(c.id)}
                       title={`Sort by ${c.label}`}
+                      aria-label={
+                        isSorted
+                          ? `Sorted by ${c.label}, ${activeSortDir === "asc" ? "ascending" : "descending"}. Activate to change sort.`
+                          : `Sort by ${c.label}`
+                      }
                     >
                       {c.label}
                       <span aria-hidden="true">
@@ -2193,14 +2226,35 @@ export function DataTableNode({ component }: ToolNodeProps) {
               pagedRows.map((row, i) => {
                 const rowId = asString(row._id ?? row.id ?? i);
                 const isSelected = selectedId === rowId;
+                const rowLabel =
+                  asString(row.title ?? row.name ?? row[columns[0]?.id ?? ""] ?? rowId) ||
+                  `Record ${i + 1}`;
                 return (
                   <tr
                     key={row._id ? String(row._id) : i}
                     className={isSelected ? "tr-row-selected" : undefined}
                     aria-selected={selectionKey ? isSelected : undefined}
-                    onClick={() => handleRowClick(row, i)}
+                    onClick={selectionKey ? () => handleRowClick(row, i) : undefined}
                     style={selectionKey ? { cursor: "pointer" } : undefined}
                   >
+                    {selectionKey ? (
+                      <td className="tr-data-table-select-col">
+                        <button
+                          type="button"
+                          className="tr-data-table-select-btn"
+                          aria-pressed={isSelected}
+                          aria-label={
+                            isSelected ? `Selected ${rowLabel}` : `Select ${rowLabel}`
+                          }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRowClick(row, i);
+                          }}
+                        >
+                          {isSelected ? "Selected" : "Select"}
+                        </button>
+                      </td>
+                    ) : null}
                     {columns.map((c) => (
                       <td key={c.id}>{String(row[c.id] ?? "")}</td>
                     ))}
@@ -2209,12 +2263,18 @@ export function DataTableNode({ component }: ToolNodeProps) {
               })
             ) : (
               <tr>
-                <td colSpan={columns.length || 1} className="tr-data-table-empty">
-                  {searchValue
-                    ? "No matching records found."
-                    : queryBacked && serverHasMore
+                <td
+                  colSpan={(columns.length || 1) + (selectionKey ? 1 : 0)}
+                  className="tr-data-table-empty"
+                  role={queryFailed ? "alert" : undefined}
+                >
+                  {queryFailed
+                    ? queryError || "Could not load records."
+                    : queryLoading
                       ? "Loading…"
-                      : "No data available."}
+                      : searchValue
+                        ? "No matching records found."
+                        : "No data available."}
                 </td>
               </tr>
             )}

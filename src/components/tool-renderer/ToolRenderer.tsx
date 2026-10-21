@@ -255,6 +255,10 @@ export function ToolRenderer({
   const hydrationRef = useRef<Record<string, { lastRun: number; depSignature: string }>>({});
   // Generation counter so out-of-order query responses cannot regress UI state.
   const hydrationGenRef = useRef<Record<string, number>>({});
+  // Latest successful hydration payload per resultKey. Concurrent completions
+  // merge through this map so one key cannot overwrite another before React
+  // commits the previous onStateChange.
+  const hydrationResultsRef = useRef<Record<string, unknown>>({});
   // Approve-once auto-replays writes on the backend; the interrupted action
   // chain never reaches the follow-up local_data.query. Rehydrate read
   // dataSources when approvals change so tables reflect the frozen write.
@@ -306,9 +310,9 @@ export function ToolRenderer({
     }, 32);
   }, []);
 
-  // Track last seen revision per model for missed-event reconciliation on
-  // visibility regain (events are transient; revision is durable in query results).
-  const lastRevisionRef = useRef<Record<string, number>>({});
+  // Track last seen revision per resultKey so sibling dataSources on the same
+  // model are not skipped after one of them hydrates the shared model revision.
+  const lastRevisionByResultKeyRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     let stopApprovals: (() => void) | null = null;
@@ -335,12 +339,25 @@ export function ToolRenderer({
         return;
       }
       if (event.modelId && typeof event.revision === "number" && event.revision > 0) {
-        const prev = lastRevisionRef.current[event.modelId] ?? 0;
-        if (event.revision <= prev) {
-          // Already reconciled to this or a newer revision.
-          return;
-        }
-        lastRevisionRef.current[event.modelId] = event.revision;
+        const keys = hydrationKeysToInvalidate(
+          dataSourcesRef.current,
+          event.modelId,
+        );
+        const resultKeys =
+          keys === "all"
+            ? dataSourcesRef.current
+                .map((ds) =>
+                  typeof ds.resultKey === "string" ? ds.resultKey.trim() : "",
+                )
+                .filter(Boolean)
+            : keys;
+        // Skip only when every matching resultKey already observed this revision.
+        const allCaughtUp =
+          resultKeys.length > 0 &&
+          resultKeys.every(
+            (key) => (lastRevisionByResultKeyRef.current[key] ?? 0) >= event.revision!,
+          );
+        if (allCaughtUp) return;
       }
       scheduleDataRefresh({ modelId: event.modelId ?? null });
     }).then((unlisten) => {
@@ -407,6 +424,8 @@ export function ToolRenderer({
       hydrationRef.current[ds.resultKey] = { lastRun: now, depSignature };
       const gen = (hydrationGenRef.current[ds.resultKey] ?? 0) + 1;
       hydrationGenRef.current[ds.resultKey] = gen;
+      // Mark loading without clearing prior page data (avoids blank flash).
+      hydrationResultsRef.current[`${ds.resultKey}__status`] = "loading";
 
       const input: Record<string, unknown> = { ...(ds.input ?? {}) };
       if (ds.inputFromState) {
@@ -439,21 +458,55 @@ export function ToolRenderer({
           if (outcome && outcome.status === "ok" && outcome.data !== undefined) {
             if (outcome.data && typeof outcome.data === "object" && !Array.isArray(outcome.data)) {
               const payload = outcome.data as Record<string, unknown>;
-              const model =
-                typeof payload.modelId === "string" ? payload.modelId.trim() : "";
               const rev =
                 typeof payload.revision === "number" && Number.isFinite(payload.revision)
                   ? Math.floor(payload.revision)
                   : null;
-              if (model && rev != null && rev > 0) {
-                const prev = lastRevisionRef.current[model] ?? 0;
-                if (rev > prev) lastRevisionRef.current[model] = rev;
+              if (rev != null && rev > 0) {
+                const prev = lastRevisionByResultKeyRef.current[resultKey] ?? 0;
+                if (rev > prev) lastRevisionByResultKeyRef.current[resultKey] = rev;
               }
             }
-            const currentVal = stateRef.current[resultKey];
-            if (JSON.stringify(currentVal) !== JSON.stringify(outcome.data)) {
-              onStateChange({ ...stateRef.current, [resultKey]: outcome.data });
+            const statusKey = `${resultKey}__status`;
+            const errorKey = `${resultKey}__error`;
+            hydrationResultsRef.current[resultKey] = outcome.data;
+            hydrationResultsRef.current[statusKey] = "ok";
+            delete hydrationResultsRef.current[errorKey];
+            const dataUnchanged =
+              JSON.stringify(stateRef.current[resultKey]) ===
+              JSON.stringify(outcome.data);
+            const alreadyOk =
+              stateRef.current[statusKey] === "ok" &&
+              stateRef.current[errorKey] == null;
+            // Always clear loading/error status even when the page payload is unchanged
+            // (retry-after-error or sibling merge that leaked "loading" into state).
+            if (dataUnchanged && alreadyOk) {
+              return;
             }
+            const nextState: Record<string, unknown> = {
+              ...stateRef.current,
+              ...hydrationResultsRef.current,
+              [resultKey]: outcome.data,
+              [statusKey]: "ok",
+            };
+            delete nextState[errorKey];
+            onStateChange(nextState);
+          } else if (outcome && outcome.status === "error") {
+            hydrationResultsRef.current[`${resultKey}__status`] = "error";
+            hydrationResultsRef.current[`${resultKey}__error`] =
+              outcome.message || "Query failed";
+            onStateChange({
+              ...stateRef.current,
+              ...hydrationResultsRef.current,
+            });
+          } else if (outcome && outcome.status === "blocked") {
+            hydrationResultsRef.current[`${resultKey}__status`] = "error";
+            hydrationResultsRef.current[`${resultKey}__error`] =
+              outcome.reason || "Query blocked";
+            onStateChange({
+              ...stateRef.current,
+              ...hydrationResultsRef.current,
+            });
           }
         })
         .catch((err) => {
@@ -461,6 +514,13 @@ export function ToolRenderer({
             return;
           }
           console.error(`[ToolRenderer] dataSource hydration failed for ${resultKey}:`, err);
+          hydrationResultsRef.current[`${resultKey}__status`] = "error";
+          hydrationResultsRef.current[`${resultKey}__error`] =
+            err instanceof Error ? err.message : "Query failed";
+          onStateChange({
+            ...stateRef.current,
+            ...hydrationResultsRef.current,
+          });
         });
     }
   }, [

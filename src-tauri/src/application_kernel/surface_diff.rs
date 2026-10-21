@@ -221,8 +221,21 @@ pub fn diff_surface_update(
     let mut removals = Vec::new();
 
     // Shared siblings whose relative order is unchanged do not need moves when
-    // absolute indices shift solely because of inserts/removals (insert at index
-    // N already shifts later siblings in the runtime).
+    // absolute indices shift solely because of inserts (insert at index N already
+    // shifts later siblings). Removals alone are also safe (remove then indices
+    // collapse). But inserts run BEFORE removals in the op stream, so a parent
+    // with both inserts and removals must keep absolute-index moves — otherwise
+    // final insert indices land against the pre-removal list (e.g. [a,b,c,d] →
+    // [a,c,X,d] would become [a,X,c,d]).
+    let parents_with_removals: BTreeSet<Option<String>> = cur_ids
+        .difference(&prop_ids)
+        .filter_map(|id| cur_idx.get(id).map(|n| n.parent_id.clone()))
+        .collect();
+    let parents_with_inserts: BTreeSet<Option<String>> = prop_ids
+        .difference(&cur_ids)
+        .filter_map(|id| prop_idx.get(id).map(|n| n.parent_id.clone()))
+        .collect();
+
     let mut needs_move: BTreeSet<String> = BTreeSet::new();
     {
         // Group shared ids by before-parent; compare relative order to after.
@@ -239,13 +252,13 @@ pub fn diff_surface_update(
                 .or_default()
                 .push(id.clone());
         }
-        for (_parent, mut ids) in by_parent {
+        for (parent, mut ids) in by_parent {
             let mut before_order = ids.clone();
             before_order.sort_by_key(|id| cur_idx.get(id).map(|n| n.index).unwrap_or(0));
             ids.sort_by_key(|id| prop_idx.get(id).map(|n| n.index).unwrap_or(0));
-            if before_order != ids {
-                // Relative order changed — emit moves for ids whose absolute
-                // index or position in the shared sequence differs.
+            let mixed_insert_remove =
+                parents_with_removals.contains(&parent) && parents_with_inserts.contains(&parent);
+            if before_order != ids || mixed_insert_remove {
                 for id in &ids {
                     let before = cur_idx.get(id).expect("indexed");
                     let after = prop_idx.get(id).expect("indexed");
@@ -559,6 +572,76 @@ mod tests {
             "expected small op set, got {}",
             compiled.operations.len()
         );
+    }
+
+    #[test]
+    fn remove_and_insert_same_parent_keeps_absolute_index_moves() {
+        use crate::ai::response_schema::ToolComponent;
+        // [a,b,c,d] → [a,c,X,d]: insert X at final index 2 before remove b would
+        // yield [a,X,c,d] unless c (and possibly d) still receive moves.
+        let mut current = ToolDefinition {
+            id: "tool-order".into(),
+            name: "Order".into(),
+            ..Default::default()
+        };
+        current.components = ["a", "b", "c", "d"]
+            .into_iter()
+            .map(|id| ToolComponent {
+                id: id.into(),
+                component_type: "text".into(),
+                props: Some(json!({ "text": id })),
+                ..Default::default()
+            })
+            .collect();
+        let mut proposed = current.clone();
+        proposed.components = ["a", "c", "X", "d"]
+            .into_iter()
+            .map(|id| ToolComponent {
+                id: id.into(),
+                component_type: "text".into(),
+                props: Some(json!({ "text": id })),
+                ..Default::default()
+            })
+            .collect();
+        let spec = ApplicationSpec {
+            application_id: "tool-order".into(),
+            revision: 1,
+            surface_id: "surf-order".into(),
+            tool: current,
+        };
+        let compiled = diff_surface_update(
+            &spec,
+            &proposed,
+            "tool-order",
+            Some("Remove b insert X"),
+            Some(1),
+        )
+        .unwrap();
+        let move_ids: Vec<_> = compiled
+            .operations
+            .iter()
+            .filter(|o| o.op_type == "component.move")
+            .filter_map(|o| o.target.component_id.clone())
+            .collect();
+        assert!(
+            move_ids.iter().any(|id| id == "c"),
+            "expected move for c so insert+remove does not land X before c; moves={move_ids:?} ops={:?}",
+            compiled
+                .operations
+                .iter()
+                .map(|o| (o.op_type.as_str(), o.target.component_id.as_deref()))
+                .collect::<Vec<_>>()
+        );
+        assert!(compiled
+            .operations
+            .iter()
+            .any(|o| o.op_type == "component.insert"
+                && o.target.component_id.as_deref() == Some("X")));
+        assert!(compiled
+            .operations
+            .iter()
+            .any(|o| o.op_type == "component.remove"
+                && o.target.component_id.as_deref() == Some("b")));
     }
 
     #[test]

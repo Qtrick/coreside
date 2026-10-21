@@ -137,17 +137,6 @@ function evaluateMetric(
   }
 }
 
-function metricAggregateKey(name: string, metric: RecordMetric): string | null {
-  // Prefer exact metric name match in aggregates payload.
-  if (name) return name;
-  switch (metric.op) {
-    case "count":
-      return "total";
-    default:
-      return null;
-  }
-}
-
 function isMetric(value: unknown): value is RecordMetric {
   if (!value || typeof value !== "object") return false;
   const op = (value as { op?: unknown }).op;
@@ -207,33 +196,31 @@ export function formatRecordSummary(
   const queryLimit = parseQueryLimit(s.queryLimit);
   const serverTotal = authoritativeTotalCount(rowsValue);
   const serverAggs = authoritativeAggregates(rowsValue);
-  const authoritative = serverTotal != null || serverAggs != null;
+  const truncated =
+    serverTotal != null && serverTotal > records.length;
   const today = localTodayIsoDate(now);
   const entries = Object.entries(s.metrics).slice(0, MAX_METRICS);
   const values: Record<string, string> = {};
   for (const [name, metric] of entries) {
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name) || !isMetric(metric)) continue;
-    let n: number;
+    // Aggregates match by exact metric name only — never by field/equals aliases.
     if (serverAggs && typeof serverAggs[name] === "number") {
-      n = serverAggs[name]!;
-    } else if (metric.op === "count" && serverTotal != null) {
-      n = serverTotal;
-    } else if (authoritative && serverAggs) {
-      // Authoritative payload without this key — do not invent from a page slice.
-      const fallbackKey = metricAggregateKey(name, metric);
-      if (fallbackKey && typeof serverAggs[fallbackKey] === "number") {
-        n = serverAggs[fallbackKey]!;
-      } else if (metric.op === "count" && serverTotal != null) {
-        n = serverTotal;
-      } else {
-        // Still compute client-side only when aggregate key is absent; prefer 0
-        // over a truncated page for countWhere when totalCount says there are more.
-        n = evaluateMetric(records, metric, today);
-      }
-    } else {
-      n = evaluateMetric(records, metric, today);
+      values[name] = String(serverAggs[name]);
+      continue;
     }
-    values[name] = formatCountDisplay(n, records.length, queryLimit, authoritative);
+    if (metric.op === "count" && serverTotal != null) {
+      values[name] = String(serverTotal);
+      continue;
+    }
+    if (truncated) {
+      // Page is incomplete and this metric has no server aggregate — do not
+      // invent an exact total from the slice; surface a truncated hint.
+      const pageN = evaluateMetric(records, metric, today);
+      values[name] = `${pageN}+`;
+      continue;
+    }
+    const n = evaluateMetric(records, metric, today);
+    values[name] = formatCountDisplay(n, records.length, queryLimit, false);
   }
 
   const totalRaw =
@@ -260,25 +247,20 @@ export function evaluateRecordMetric(
 ): number | string | null {
   if (rowsValue === undefined || rowsValue === null) return null;
   if (!isMetric(metric)) return null;
-  const serverAggs = authoritativeAggregates(rowsValue);
   const serverTotal = authoritativeTotalCount(rowsValue);
   if (metric.op === "count" && serverTotal != null) {
     return serverTotal;
   }
-  // Stat components may name aggregates via a dedicated aggregates key matching
-  // common patterns (done/remaining/overdue) when the query requested them.
-  if (serverAggs) {
-    if (metric.op === "countWhere" && "equals" in metric && typeof metric.equals === "string") {
-      for (const [k, v] of Object.entries(serverAggs)) {
-        if (k === metric.equals || k === metric.field) return v;
-      }
-    }
-  }
   const records = unwrapRecords(rowsValue).slice(0, 500);
+  const truncated = serverTotal != null && serverTotal > records.length;
+  if (truncated) {
+    // No exact aggregate name is available here — do not invent from a page.
+    const pageN = evaluateMetric(records, metric, localTodayIsoDate(now));
+    return `${pageN}+`;
+  }
   const n = evaluateMetric(records, metric, localTodayIsoDate(now));
   const limit = parseQueryLimit(queryLimit);
-  const authoritative = serverTotal != null || serverAggs != null;
-  if (!authoritative && limit && records.length >= limit) {
+  if (limit && records.length >= limit) {
     return formatCountDisplay(n, records.length, limit, false);
   }
   return n;

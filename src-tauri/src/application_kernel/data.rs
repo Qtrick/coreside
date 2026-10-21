@@ -95,6 +95,49 @@ impl<'de> Deserialize<'de> for DataField {
     }
 }
 
+/// Calendar-valid ISO date `YYYY-MM-DD` (rejects 2026-02-31, 2026-13-01, etc.).
+pub(crate) fn is_valid_iso_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return false;
+    }
+    if !b.iter().enumerate().all(|(i, c)| {
+        if i == 4 || i == 7 {
+            true
+        } else {
+            c.is_ascii_digit()
+        }
+    }) {
+        return false;
+    }
+    let Ok(y) = std::str::from_utf8(&b[0..4]).unwrap_or("").parse::<i32>() else {
+        return false;
+    };
+    let Ok(m) = std::str::from_utf8(&b[5..7]).unwrap_or("").parse::<u32>() else {
+        return false;
+    };
+    let Ok(d) = std::str::from_utf8(&b[8..10]).unwrap_or("").parse::<u32>() else {
+        return false;
+    };
+    if !(1..=12).contains(&m) || d == 0 {
+        return false;
+    }
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let max_day = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+        _ => return false,
+    };
+    d <= max_day
+}
+
 const ALLOWED_FIELD_TYPES: &[&str] = &[
     "text",
     "long_text",
@@ -168,7 +211,16 @@ pub fn validate_record(def: &DataModelDefinition, data: &Value) -> Result<(), St
                 "boolean" if !v.is_boolean() => {
                     return Err(format!("{} must be boolean", f.field_id));
                 }
-                "text" | "long_text" | "date" | "time" | "date_time" | "duration" | "reference"
+                "date" => {
+                    if let Some(s) = v.as_str() {
+                        if !is_valid_iso_date(s) {
+                            return Err(format!("{} must be a valid YYYY-MM-DD date", f.field_id));
+                        }
+                    } else if !v.is_null() {
+                        return Err(format!("{} must be string", f.field_id));
+                    }
+                }
+                "text" | "long_text" | "time" | "date_time" | "duration" | "reference"
                 | "media_ref" | "surface_ref" | "tool_ref"
                     if !v.is_string() && !v.is_null() =>
                 {
@@ -279,6 +331,35 @@ pub fn list_models(db: &Database, application_id: &str) -> DbResult<Vec<DataMode
     Ok(out)
 }
 
+/// Group a data write + revision bump so they commit or roll back together.
+/// Uses SAVEPOINT so nested calls inside gateway/fork transactions still work
+/// (BEGIN-in-BEGIN fails; savepoints nest).
+fn with_data_write_savepoint<T>(
+    db: &mut Database,
+    f: impl FnOnce(&rusqlite::Connection) -> DbResult<T>,
+) -> DbResult<T> {
+    db.conn()
+        .execute_batch("SAVEPOINT coreside_data_write")
+        .map_err(DbError::Sqlite)?;
+    match f(db.conn()) {
+        Ok(v) => {
+            db.conn()
+                .execute_batch("RELEASE SAVEPOINT coreside_data_write")
+                .map_err(DbError::Sqlite)?;
+            Ok(v)
+        }
+        Err(e) => {
+            let _ = db
+                .conn()
+                .execute_batch("ROLLBACK TO SAVEPOINT coreside_data_write");
+            let _ = db
+                .conn()
+                .execute_batch("RELEASE SAVEPOINT coreside_data_write");
+            Err(e)
+        }
+    }
+}
+
 pub fn create_record(
     db: &mut Database,
     application_id: &str,
@@ -302,13 +383,18 @@ pub fn create_record(
     validate_record(&def, &data).map_err(DbError::Invalid)?;
     let id = format!("rec-{}", Uuid::new_v4());
     let now = now_rfc3339();
-    db.conn().execute(
-        "INSERT INTO generated_data_records (
-            id, application_id, model_id, record_version, data_json, created_at, updated_at
-         ) VALUES (?1,?2,?3,1,?4,?5,?5)",
-        params![id, application_id, model_id, data.to_string(), now],
-    )?;
-    let _ = super::query::bump_model_revision(db, application_id, model_id)?;
+    // SAVEPOINT works inside an outer gateway/fork txn and still groups the
+    // insert + revision bump when called standalone (no nested BEGIN).
+    with_data_write_savepoint(db, |conn| {
+        conn.execute(
+            "INSERT INTO generated_data_records (
+                id, application_id, model_id, record_version, data_json, created_at, updated_at
+             ) VALUES (?1,?2,?3,1,?4,?5,?5)",
+            params![id, application_id, model_id, data.to_string(), now],
+        )?;
+        super::query::bump_model_revision_sql(conn, application_id, model_id)?;
+        Ok(())
+    })?;
     Ok(id)
 }
 
@@ -365,24 +451,26 @@ pub fn update_record(
     // Atomic CAS on the version we merged against so concurrent patches cannot
     // silently lose sibling fields under the merge path.
     let expected_version = base_version.unwrap_or(version);
-    let rows = db.conn().execute(
-        "UPDATE generated_data_records SET data_json = ?3, record_version = record_version + 1, updated_at = ?4
-         WHERE id = ?1 AND application_id = ?2 AND record_version = ?5",
-        params![
-            record_id,
-            application_id,
-            merged.to_string(),
-            now_rfc3339(),
-            expected_version
-        ],
-    )?;
-    if rows == 0 {
-        return Err(DbError::Invalid(format!(
-            "revision_conflict: expected {expected_version}, found concurrent update"
-        )));
-    }
-    let _ = super::query::bump_model_revision(db, application_id, &model_id)?;
-    Ok(())
+    with_data_write_savepoint(db, |conn| {
+        let rows = conn.execute(
+            "UPDATE generated_data_records SET data_json = ?3, record_version = record_version + 1, updated_at = ?4
+             WHERE id = ?1 AND application_id = ?2 AND record_version = ?5",
+            params![
+                record_id,
+                application_id,
+                merged.to_string(),
+                now_rfc3339(),
+                expected_version
+            ],
+        )?;
+        if rows == 0 {
+            return Err(DbError::Invalid(format!(
+                "revision_conflict: expected {expected_version}, found concurrent update"
+            )));
+        }
+        super::query::bump_model_revision_sql(conn, application_id, &model_id)?;
+        Ok(())
+    })
 }
 
 /// Deletes a record and returns its authoritative `model_id` from SQLite.
@@ -421,26 +509,31 @@ pub fn delete_record_with_version(
                 "revision_conflict: expected {base}, found {version}"
             )));
         }
-        let removed = db.conn().execute(
-            "DELETE FROM generated_data_records
-             WHERE id = ?1 AND application_id = ?2 AND record_version = ?3",
-            params![record_id, application_id, base],
-        )?;
-        if removed == 0 {
-            return Err(DbError::Invalid(format!(
-                "revision_conflict: expected {base}, found concurrent update"
-            )));
-        }
-    } else {
-        let removed = db.conn().execute(
-            "DELETE FROM generated_data_records WHERE id = ?1 AND application_id = ?2",
-            params![record_id, application_id],
-        )?;
-        if removed == 0 {
-            return Err(DbError::NotFound(format!("record {record_id}")));
-        }
     }
-    let _ = super::query::bump_model_revision(db, application_id, &model_id)?;
+    with_data_write_savepoint(db, |conn| {
+        if let Some(base) = base_version {
+            let removed = conn.execute(
+                "DELETE FROM generated_data_records
+                 WHERE id = ?1 AND application_id = ?2 AND record_version = ?3",
+                params![record_id, application_id, base],
+            )?;
+            if removed == 0 {
+                return Err(DbError::Invalid(format!(
+                    "revision_conflict: expected {base}, found concurrent update"
+                )));
+            }
+        } else {
+            let removed = conn.execute(
+                "DELETE FROM generated_data_records WHERE id = ?1 AND application_id = ?2",
+                params![record_id, application_id],
+            )?;
+            if removed == 0 {
+                return Err(DbError::NotFound(format!("record {record_id}")));
+            }
+        }
+        super::query::bump_model_revision_sql(conn, application_id, &model_id)?;
+        Ok(())
+    })?;
     Ok(model_id)
 }
 
@@ -1162,6 +1255,37 @@ mod tests {
     #[test]
     fn validates_habit_model() {
         assert!(validate_model(&habit_model()).is_ok());
+    }
+
+    #[test]
+    fn is_valid_iso_date_enforces_leap_year_calendar_rules() {
+        assert!(is_valid_iso_date("2024-02-29"));
+        assert!(is_valid_iso_date("2000-02-29"));
+        assert!(!is_valid_iso_date("2023-02-29"));
+        assert!(!is_valid_iso_date("1900-02-29"));
+        assert!(!is_valid_iso_date("2026-02-31"));
+        assert!(!is_valid_iso_date("2026-13-01"));
+        assert!(!is_valid_iso_date("2026-00-10"));
+        assert!(!is_valid_iso_date("2026-04-31"));
+        assert!(!is_valid_iso_date("26-04-01"));
+        assert!(!is_valid_iso_date("2026/04/01"));
+        assert!(!is_valid_iso_date(""));
+        // Record validation surfaces the same calendar check.
+        let m = habit_model();
+        assert!(validate_record(
+            &m,
+            &json!({"name": "x", "frequency": "daily", "completionDate": "2024-02-29"}),
+        )
+        .is_ok());
+        let err = validate_record(
+            &m,
+            &json!({"name": "x", "frequency": "daily", "completionDate": "2023-02-29"}),
+        )
+        .expect_err("non-leap Feb 29");
+        assert!(
+            err.contains("YYYY-MM-DD") || err.contains("date"),
+            "got {err}"
+        );
     }
 
     #[test]

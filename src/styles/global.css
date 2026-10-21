@@ -6478,6 +6478,50 @@ body > .window-overlay-root > *,
   background: color-mix(in srgb, var(--core-accent, #3d7a5a) 14%, transparent);
 }
 
+.tr-data-table-query-error {
+  margin: 0 0 0.5rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--core-danger, #b42318) 35%, transparent);
+  background: color-mix(in srgb, var(--core-danger, #b42318) 10%, transparent);
+  color: var(--core-fg, #1c1f24);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.tr-data-table-select-col {
+  width: 5.5rem;
+  white-space: nowrap;
+}
+
+.tr-data-table-select-btn {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--core-border, #c9cdd3) 80%, transparent);
+  background: color-mix(in srgb, var(--core-surface, #fff) 92%, transparent);
+  color: var(--core-fg, #1c1f24);
+  border-radius: 0.4rem;
+  padding: 0.2rem 0.55rem;
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.tr-data-table-select-btn:hover {
+  border-color: color-mix(in srgb, var(--core-accent, #3d7a5a) 45%, var(--core-border, #c9cdd3));
+}
+
+.tr-data-table-select-btn:focus-visible {
+  outline: 2px solid var(--core-accent, #3d7a5a);
+  outline-offset: 2px;
+}
+
+.tr-data-table-select-btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--core-accent, #3d7a5a) 18%, transparent);
+  border-color: color-mix(in srgb, var(--core-accent, #3d7a5a) 55%, transparent);
+  font-weight: 600;
+}
+
 /* Chat Starter Grid */
 .chat-starter-container {
   padding: var(--space-4) var(--space-2);

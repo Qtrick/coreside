@@ -199,4 +199,50 @@ describe("record-summary", () => {
     );
     expect(evaluateRecordMetric(payload, { op: "count" })).toBe(150);
   });
+
+  it("does not invent exact metrics from a truncated page without aggregates", () => {
+    const page = Array.from({ length: 25 }, (_, i) => ({
+      title: `T${i}`,
+      status: i === 0 ? "done" : "todo",
+    }));
+    const payload = {
+      records: page,
+      count: 25,
+      returnedCount: 25,
+      totalCount: 150,
+    };
+    const text = formatRecordSummary(payload, {
+      template: "{total} study tasks · {done} completed",
+      metrics: {
+        total: { op: "count" },
+        done: { op: "countWhere", field: "status", equals: "done" },
+      },
+      queryLimit: 25,
+    });
+    // total uses totalCount; done has no aggregate → truncated hint, not page exact.
+    expect(text).toBe("150 study tasks · 1+ completed");
+    expect(
+      evaluateRecordMetric(payload, {
+        op: "countWhere",
+        field: "status",
+        equals: "done",
+      }),
+    ).toBe("1+");
+  });
+
+  it("matches aggregates by exact metric name only", () => {
+    const payload = {
+      records: [{ status: "done" }],
+      totalCount: 10,
+      aggregates: { done: 4, todo: 6 },
+    };
+    // Metric name "completed" must not pick up aggregates.done via equals alias.
+    const text = formatRecordSummary(payload, {
+      template: "{completed} completed",
+      metrics: {
+        completed: { op: "countWhere", field: "status", equals: "done" },
+      },
+    });
+    expect(text).toBe("1+ completed");
+  });
 });

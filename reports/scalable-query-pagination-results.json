@@ -1,0 +1,18 @@
+{
+  "journey": 40,
+  "name": "scalable-query-pagination",
+  "status": "passed",
+  "startedAt": "2026-10-21T03:19:55.552Z",
+  "finishedAt": "2026-10-21T03:20:05.158Z",
+  "durationMs": 9606,
+  "seedCount": 120,
+  "pageSize": 25,
+  "searchTarget": "Bulk Task 105",
+  "binaryHash": "f3d3acc7d31b97ad51940c2fd08ec40723c88af96b8304c699af1f25ed57af60",
+  "commit": "1270ea26c60ab2abe2176a44d9ebd8e7e96aedd2",
+  "dirty": true,
+  "platform": "darwin",
+  "arch": "arm64",
+  "sourceFingerprint": "024e82342f4872d3d14e2f553fe3813a1b2e6ea77341dbdf78b1004339ad71bf",
+  "e2eSpec": "e2e/specs/40-scalable-query-pagination.spec.ts"
+}

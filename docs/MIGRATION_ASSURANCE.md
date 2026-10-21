@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 41 forward migrations (001–041; includes `041_repair_ambiguous_inline_surface_message_id.sql`)
+**Count:** 42 forward migrations (001–042; includes `042_generated_data_revisions.sql`)
 
 ## Inventory
 
@@ -49,6 +49,7 @@
 | 039 | `039_theme_presets.sql` | User-saved theme presets table (name, snapshot JSON, revision, quota-backed CRUD) |
 | 040 | `040_backfill_inline_surface_message_id.sql` | Backfill `message_id` on legacy chat-inline surfaces so fail-closed ownership filtering does not hide them |
 | 041 | `041_repair_ambiguous_inline_surface_message_id.sql` | Clear ambiguous 040 bindings only when another assistant message sits between the surface and the bound message |
+| 042 | `042_generated_data_revisions.sql` | Monotonic per-application/model data revisions for query freshness and missed-event reconciliation |
 
 ## What is verified
 
