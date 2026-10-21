@@ -701,7 +701,33 @@ export function StatNode({ component }: ToolNodeProps) {
     ? getValue(key, component.props?.value ?? "—")
     : (component.props?.value ?? "—");
   if (rowsKey && component.props?.metric) {
-    const derived = evaluateRecordMetric(getValue(rowsKey), component.props.metric);
+    const rowsValue = getValue(rowsKey);
+    let derived: number | string | null = null;
+    const aggKey = asString(component.props?.aggregateKey, "");
+    if (aggKey && rowsValue && typeof rowsValue === "object") {
+      const aggs = (rowsValue as Record<string, unknown>).aggregates;
+      if (aggs && typeof aggs === "object" && !Array.isArray(aggs)) {
+        const n = (aggs as Record<string, unknown>)[aggKey];
+        if (typeof n === "number" && Number.isFinite(n)) {
+          derived = Math.floor(n);
+        }
+      }
+    }
+    if (derived === null) {
+      const rawLimit = component.props?.queryLimit;
+      const queryLimit =
+        typeof rawLimit === "number"
+          ? rawLimit
+          : typeof rawLimit === "string"
+            ? Number(rawLimit)
+            : undefined;
+      derived = evaluateRecordMetric(
+        rowsValue,
+        component.props.metric,
+        undefined,
+        Number.isFinite(queryLimit) ? queryLimit : undefined,
+      );
+    }
     if (derived !== null) value = derived;
   }
   return (
@@ -1862,18 +1888,40 @@ export function DataTableNode({ component }: ToolNodeProps) {
   const key = stateKeyFor(component, "valueKey", "stateKey", "dataKey", "rowsKey");
   const selectionKey = stateKeyFor(component, "selectionKey");
   const searchKey = stateKeyFor(component, "searchKey");
+  const offsetKey = stateKeyFor(component, "offsetKey", "queryOffsetKey");
+  const sortFieldKey = stateKeyFor(component, "sortFieldKey", "querySortFieldKey");
+  const sortDirKey = stateKeyFor(component, "sortDirKey", "querySortDirKey");
   const selectedId = selectionKey ? asString(getValue(selectionKey)) : null;
 
   const stateRows = key ? getValue(key) : undefined;
+  const queryMeta =
+    stateRows && typeof stateRows === "object" && !Array.isArray(stateRows)
+      ? (stateRows as Record<string, unknown>)
+      : null;
+  const serverTotal =
+    typeof queryMeta?.totalCount === "number" && Number.isFinite(queryMeta.totalCount)
+      ? Math.floor(queryMeta.totalCount as number)
+      : null;
+  const serverHasMore = queryMeta?.hasMore === true;
+  const serverOffset =
+    typeof queryMeta?.offset === "number" && Number.isFinite(queryMeta.offset)
+      ? Math.floor(queryMeta.offset as number)
+      : 0;
+  const serverLimit =
+    typeof queryMeta?.limit === "number" && Number.isFinite(queryMeta.limit)
+      ? Math.floor(queryMeta.limit as number)
+      : null;
+  // Query-backed when the payload carries authoritative pagination metadata.
+  const queryBacked = serverTotal != null;
+
   let rawRows: unknown[] = [];
   if (Array.isArray(stateRows)) {
     rawRows = stateRows;
-  } else if (stateRows && typeof stateRows === "object") {
-    const obj = stateRows as Record<string, unknown>;
-    if (Array.isArray(obj.records)) rawRows = obj.records;
-    else if (Array.isArray(obj.rows)) rawRows = obj.rows;
-    else if (Array.isArray(obj.items)) rawRows = obj.items;
-    else if (Array.isArray(obj.data)) rawRows = obj.data;
+  } else if (queryMeta) {
+    if (Array.isArray(queryMeta.records)) rawRows = queryMeta.records;
+    else if (Array.isArray(queryMeta.rows)) rawRows = queryMeta.rows;
+    else if (Array.isArray(queryMeta.items)) rawRows = queryMeta.items;
+    else if (Array.isArray(queryMeta.data)) rawRows = queryMeta.data;
   } else if (Array.isArray(component.props?.rows)) {
     rawRows = component.props.rows as unknown[];
   }
@@ -1896,24 +1944,31 @@ export function DataTableNode({ component }: ToolNodeProps) {
     return [];
   }, [component.props?.columns, rows]);
 
-  const pageSizeProp = asNumber(component.props?.pageSize, 10);
+  const pageSizeProp = asNumber(component.props?.pageSize, queryBacked ? (serverLimit ?? 25) : 10);
   const pageSize = pageSizeProp > 0 && pageSizeProp <= 100 ? pageSizeProp : 10;
 
   const [filterText, setFilterText] = useState("");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc" | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [searchDraft, setSearchDraft] = useState("");
 
-  const externalSearch = searchKey ? asString(getValue(searchKey)).trim().toLowerCase() : "";
+  const boundSearch = searchKey ? asString(getValue(searchKey)) : "";
+  const externalSearch = searchKey ? boundSearch.trim().toLowerCase() : "";
   const filtersFromState = (component.props?.filtersFromState ?? component.props?.filters) as
     | Record<string, string>
     | undefined;
 
-  // Filter
+  // Keep local search draft in sync when an external searchKey drives the query.
+  useEffect(() => {
+    if (searchKey) setSearchDraft(boundSearch);
+  }, [searchKey, boundSearch]);
+
+  // Client-side path (static / in-memory tables).
   const filteredRows = useMemo(() => {
+    if (queryBacked) return rows;
     let result = rows;
 
-    // Apply external filtersFromState (e.g. { priority: "filterPriority", status: "filterStatus" })
     if (filtersFromState && typeof filtersFromState === "object") {
       for (const [colField, stateVar] of Object.entries(filtersFromState)) {
         if (typeof stateVar === "string" && stateVar) {
@@ -1929,7 +1984,6 @@ export function DataTableNode({ component }: ToolNodeProps) {
       }
     }
 
-    // Apply external searchKey query if present
     if (externalSearch) {
       result = result.filter((row) =>
         columns.some((col) => {
@@ -1939,7 +1993,6 @@ export function DataTableNode({ component }: ToolNodeProps) {
       );
     }
 
-    // Apply internal toolbar search input
     const q = filterText.trim().toLowerCase();
     if (q) {
       result = result.filter((row) =>
@@ -1951,10 +2004,10 @@ export function DataTableNode({ component }: ToolNodeProps) {
     }
 
     return result;
-  }, [rows, columns, filterText, externalSearch, filtersFromState, getValue]);
+  }, [rows, columns, filterText, externalSearch, filtersFromState, getValue, queryBacked]);
 
-  // Sort
   const sortedRows = useMemo(() => {
+    if (queryBacked) return filteredRows;
     if (!sortColumn || !sortDir) return filteredRows;
     const sorted = [...filteredRows];
     sorted.sort((a, b) => {
@@ -1972,17 +2025,43 @@ export function DataTableNode({ component }: ToolNodeProps) {
       return sortDir === "asc" ? strA.localeCompare(strB) : strB.localeCompare(strA);
     });
     return sorted;
-  }, [filteredRows, sortColumn, sortDir]);
+  }, [filteredRows, sortColumn, sortDir, queryBacked]);
 
-  // Pagination
-  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
-  const safePage = Math.min(Math.max(1, currentPage), totalPages);
+  const totalCount = queryBacked ? (serverTotal ?? rows.length) : sortedRows.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const queryPage = queryBacked
+    ? Math.floor(serverOffset / pageSize) + 1
+    : currentPage;
+  const safePage = Math.min(Math.max(1, queryPage), totalPages);
   const pagedRows = useMemo(() => {
+    if (queryBacked) return sortedRows;
     const start = (safePage - 1) * pageSize;
     return sortedRows.slice(start, start + pageSize);
-  }, [sortedRows, safePage, pageSize]);
+  }, [sortedRows, safePage, pageSize, queryBacked]);
+
+  const activeSortColumn = queryBacked && sortFieldKey
+    ? asString(getValue(sortFieldKey)) || null
+    : sortColumn;
+  const activeSortDir = queryBacked && sortDirKey
+    ? (asString(getValue(sortDirKey)) as "asc" | "desc" | "") || null
+    : sortDir;
 
   const handleSort = (colId: string) => {
+    if (queryBacked && sortFieldKey && sortDirKey) {
+      const curField = asString(getValue(sortFieldKey));
+      const curDir = asString(getValue(sortDirKey));
+      if (curField !== colId) {
+        setValue(sortFieldKey, colId);
+        setValue(sortDirKey, "asc");
+      } else if (curDir === "asc") {
+        setValue(sortDirKey, "desc");
+      } else {
+        setValue(sortFieldKey, "");
+        setValue(sortDirKey, "");
+      }
+      if (offsetKey) setValue(offsetKey, 0);
+      return;
+    }
     if (sortColumn !== colId) {
       setSortColumn(colId);
       setSortDir("asc");
@@ -1994,10 +2073,35 @@ export function DataTableNode({ component }: ToolNodeProps) {
     }
   };
 
+  const goToPage = (page: number) => {
+    const next = Math.min(Math.max(1, page), totalPages);
+    if (queryBacked && offsetKey) {
+      setValue(offsetKey, (next - 1) * pageSize);
+      return;
+    }
+    setCurrentPage(next);
+  };
+
+  const commitSearch = (value: string) => {
+    if (searchKey) {
+      setValue(searchKey, value);
+      if (offsetKey) setValue(offsetKey, 0);
+    } else {
+      setFilterText(value);
+      setCurrentPage(1);
+    }
+  };
+
   const handleRowClick = (row: Record<string, unknown>, i: number) => {
     if (selectionKey) {
       const id = asString(row._id ?? row.id ?? i);
       setValue(selectionKey, id);
+      // Propagate OCC version for conflict-safe edits when a version key is declared.
+      const versionKey = stateKeyFor(component, "selectionVersionKey");
+      if (versionKey) {
+        const ver = row._version;
+        setValue(versionKey, typeof ver === "number" ? ver : null);
+      }
     }
     if (Array.isArray(component.actions) && component.actions.length > 0) {
       runActions(component.actions, component.id);
@@ -2006,25 +2110,51 @@ export function DataTableNode({ component }: ToolNodeProps) {
 
   const title = asString(component.props?.title, "Data table");
   const enableSearch = component.props?.searchable !== false;
+  const searchValue = searchKey ? searchDraft : filterText;
+  const showToolbar = enableSearch || totalCount > 5 || queryBacked;
 
   return (
-    <div className="tr-data-table" data-component-id={component.id} role="region" aria-label={title}>
-      {enableSearch || rows.length > 5 ? (
+    <div
+      className={`tr-data-table${queryBacked ? " tr-data-table-query" : ""}`}
+      data-component-id={component.id}
+      data-query-backed={queryBacked ? "true" : "false"}
+      role="region"
+      aria-label={title}
+    >
+      {showToolbar ? (
         <div className="tr-data-table-toolbar">
           <input
             type="search"
             className="tr-data-table-search"
-            placeholder="Search records…"
-            value={filterText}
+            placeholder={queryBacked ? "Search all records…" : "Search records…"}
+            value={searchValue}
             onChange={(e) => {
-              setFilterText(e.target.value);
-              setCurrentPage(1);
+              const v = e.target.value;
+              if (searchKey) {
+                setSearchDraft(v);
+              } else {
+                setFilterText(v);
+                setCurrentPage(1);
+              }
             }}
-            aria-label="Filter records"
+            onBlur={() => {
+              if (searchKey && searchDraft !== boundSearch) commitSearch(searchDraft);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && searchKey) {
+                e.preventDefault();
+                commitSearch(searchDraft);
+              }
+            }}
+            aria-label={queryBacked ? "Search all records" : "Filter records"}
           />
-          <span className="tr-data-table-summary">
-            {sortedRows.length} {sortedRows.length === 1 ? "record" : "records"}
-            {filterText ? ` (filtered from ${rows.length})` : ""}
+          <span className="tr-data-table-summary" data-testid="data-table-total">
+            {totalCount} {totalCount === 1 ? "record" : "records"}
+            {queryBacked && rows.length < totalCount
+              ? ` · showing ${rows.length}`
+              : !queryBacked && filterText
+                ? ` (filtered from ${rows.length})`
+                : ""}
           </span>
         </div>
       ) : null}
@@ -2035,8 +2165,12 @@ export function DataTableNode({ component }: ToolNodeProps) {
           <thead>
             <tr>
               {columns.map((c) => {
-                const isSorted = sortColumn === c.id;
-                const ariaSort = isSorted ? (sortDir === "asc" ? "ascending" : "descending") : "none";
+                const isSorted = activeSortColumn === c.id;
+                const ariaSort = isSorted
+                  ? activeSortDir === "asc"
+                    ? "ascending"
+                    : "descending"
+                  : "none";
                 return (
                   <th key={c.id} scope="col" aria-sort={ariaSort}>
                     <button
@@ -2046,7 +2180,7 @@ export function DataTableNode({ component }: ToolNodeProps) {
                     >
                       {c.label}
                       <span aria-hidden="true">
-                        {isSorted ? (sortDir === "asc" ? " ▲" : " ▼") : " ⇅"}
+                        {isSorted ? (activeSortDir === "asc" ? " ▲" : " ▼") : " ⇅"}
                       </span>
                     </button>
                   </th>
@@ -2076,7 +2210,11 @@ export function DataTableNode({ component }: ToolNodeProps) {
             ) : (
               <tr>
                 <td colSpan={columns.length || 1} className="tr-data-table-empty">
-                  {filterText ? "No matching records found." : "No data available."}
+                  {searchValue
+                    ? "No matching records found."
+                    : queryBacked && serverHasMore
+                      ? "Loading…"
+                      : "No data available."}
                 </td>
               </tr>
             )}
@@ -2084,7 +2222,7 @@ export function DataTableNode({ component }: ToolNodeProps) {
         </table>
       </div>
 
-      {totalPages > 1 ? (
+      {totalPages > 1 || (queryBacked && (serverHasMore || serverOffset > 0)) ? (
         <div className="tr-data-table-pagination">
           <span>
             Page {safePage} of {totalPages}
@@ -2094,15 +2232,15 @@ export function DataTableNode({ component }: ToolNodeProps) {
               type="button"
               className="tr-data-table-pagination-btn"
               disabled={safePage <= 1}
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              onClick={() => goToPage(safePage - 1)}
             >
               Previous
             </button>
             <button
               type="button"
               className="tr-data-table-pagination-btn"
-              disabled={safePage >= totalPages}
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage >= totalPages && !serverHasMore}
+              onClick={() => goToPage(safePage + 1)}
             >
               Next
             </button>

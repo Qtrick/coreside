@@ -220,6 +220,43 @@ pub fn diff_surface_update(
     let mut inserts = Vec::new();
     let mut removals = Vec::new();
 
+    // Shared siblings whose relative order is unchanged do not need moves when
+    // absolute indices shift solely because of inserts/removals (insert at index
+    // N already shifts later siblings in the runtime).
+    let mut needs_move: BTreeSet<String> = BTreeSet::new();
+    {
+        // Group shared ids by before-parent; compare relative order to after.
+        let mut by_parent: BTreeMap<Option<String>, Vec<String>> = BTreeMap::new();
+        for id in cur_ids.intersection(&prop_ids) {
+            let before = cur_idx.get(id).expect("indexed");
+            let after = prop_idx.get(id).expect("indexed");
+            if before.parent_id != after.parent_id {
+                needs_move.insert(id.clone());
+                continue;
+            }
+            by_parent
+                .entry(before.parent_id.clone())
+                .or_default()
+                .push(id.clone());
+        }
+        for (_parent, mut ids) in by_parent {
+            let mut before_order = ids.clone();
+            before_order.sort_by_key(|id| cur_idx.get(id).map(|n| n.index).unwrap_or(0));
+            ids.sort_by_key(|id| prop_idx.get(id).map(|n| n.index).unwrap_or(0));
+            if before_order != ids {
+                // Relative order changed — emit moves for ids whose absolute
+                // index or position in the shared sequence differs.
+                for id in &ids {
+                    let before = cur_idx.get(id).expect("indexed");
+                    let after = prop_idx.get(id).expect("indexed");
+                    if before.index != after.index {
+                        needs_move.insert(id.clone());
+                    }
+                }
+            }
+        }
+    }
+
     // Shared ids: move/replace/update before inserts; removals last so children can
     // be reparented off wrapper nodes persisted by surface.create (e.g. section-main).
     for id in cur_ids.intersection(&prop_ids) {
@@ -242,7 +279,7 @@ pub fn diff_surface_update(
             continue;
         }
 
-        if before.parent_id != after.parent_id || before.index != after.index {
+        if needs_move.contains(id) {
             let mut op = new_op(
                 "component.move",
                 OperationTarget {
@@ -456,6 +493,72 @@ mod tests {
             }
         }
         panic!("evolve plan missing UpdateSurface");
+    }
+
+    #[test]
+    fn mid_list_insert_does_not_emit_redundant_sibling_moves() {
+        use crate::ai::response_schema::ToolComponent;
+        let mut current = tool_from_create();
+        // Ensure a flat sibling list with stable ids.
+        current.components = (0..12)
+            .map(|i| ToolComponent {
+                id: format!("row-{i}"),
+                component_type: "text".into(),
+                props: Some(json!({ "text": format!("Row {i}") })),
+                ..Default::default()
+            })
+            .collect();
+        let mut proposed = current.clone();
+        // Insert in the middle — absolute indices of later siblings shift, but
+        // relative order among survivors is unchanged.
+        proposed.components.insert(
+            5,
+            ToolComponent {
+                id: "row-new".into(),
+                component_type: "text".into(),
+                props: Some(json!({ "text": "Inserted" })),
+                ..Default::default()
+            },
+        );
+        let spec = ApplicationSpec {
+            application_id: "tool-task-tracker".into(),
+            revision: 1,
+            surface_id: "surf-tool-task-tracker".into(),
+            tool: current,
+        };
+        let compiled = diff_surface_update(
+            &spec,
+            &proposed,
+            "tool-task-tracker",
+            Some("Insert mid"),
+            Some(1),
+        )
+        .unwrap();
+        let moves: Vec<_> = compiled
+            .operations
+            .iter()
+            .filter(|o| o.op_type == "component.move")
+            .collect();
+        let inserts: Vec<_> = compiled
+            .operations
+            .iter()
+            .filter(|o| o.op_type == "component.insert")
+            .collect();
+        assert_eq!(inserts.len(), 1, "expected one insert, got {inserts:?}");
+        assert!(
+            moves.is_empty(),
+            "mid-list insert must not cascade sibling moves; got {} moves: {:?}",
+            moves.len(),
+            moves
+                .iter()
+                .map(|o| o.target.component_id.as_deref())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            compiled.operations.len() < 8,
+            "expected small op set, got {}",
+            compiled.operations.len()
+        );
     }
 
     #[test]

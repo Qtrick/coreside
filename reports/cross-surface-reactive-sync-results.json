@@ -5,16 +5,16 @@
   "createSynced": true,
   "completeSynced": true,
   "remountHydrated": true,
-  "startedAt": "2026-10-20T05:07:25.622Z",
-  "finishedAt": "2026-10-20T05:07:35.186Z",
-  "durationMs": 9564,
+  "startedAt": "2026-10-20T16:59:27.169Z",
+  "finishedAt": "2026-10-20T16:59:36.932Z",
+  "durationMs": 9763,
   "identity": {
-    "commit": "2225101304ef4f56801a3d92cd4750b78c78c77b",
+    "commit": "db19ecd3cc04f1556e5f91bf64cb501c48e43541",
     "dirty": true,
     "platform": "darwin",
     "arch": "arm64",
     "sourceFingerprint": "024e82342f4872d3d14e2f553fe3813a1b2e6ea77341dbdf78b1004339ad71bf"
   },
-  "binaryHash": "30c8539a1a15db78cecb3d97c98ab943acaeb95f42d15c3d9c31b4ad0f2e2bc4",
+  "binaryHash": "21f3ae89d4e27cd3990f32ac61e986bca2a77d8d5d9003e3d0b6581c960c65ad",
   "e2eSpec": "e2e/specs/37-cross-surface-reactive-sync.spec.ts"
 }

@@ -40,17 +40,19 @@ describe("listenApplicationDataChanged", () => {
       applicationId: "tool-study-planner",
       modelId: "studyTasks",
       action: "local_data.write",
+      revision: null,
     });
 
     handler.mockClear();
     inner({ payload: { applicationId: "   " } });
     expect(handler).not.toHaveBeenCalled();
 
-    inner({ payload: { applicationId: "app-a", modelId: "  " } });
+    inner({ payload: { applicationId: "app-a", modelId: "  ", revision: 7 } });
     expect(handler).toHaveBeenCalledWith({
       applicationId: "app-a",
       modelId: null,
       action: null,
+      revision: 7,
     });
   });
 });

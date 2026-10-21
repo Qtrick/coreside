@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  dataSourceMatchesEventModel,
+  hydrationKeysToInvalidate,
   isCurrentHydrationGeneration,
   shouldRefreshForApplicationDataEvent,
 } from "./application-data-refresh";
 
 describe("shouldRefreshForApplicationDataEvent", () => {
   const sources = [
-    { input: { modelId: "studyTasks", limit: 100 } },
-    { input: { model: "notes" } },
+    { input: { modelId: "studyTasks", limit: 100 }, resultKey: "studyTasksResult" },
+    { input: { model: "notes" }, resultKey: "notesResult" },
   ];
 
   it("ignores events for a different application", () => {
@@ -51,6 +53,27 @@ describe("shouldRefreshForApplicationDataEvent", () => {
     ).toBe(true);
   });
 
+  it("treats inputFromState modelId as a dynamic match", () => {
+    const dynamic = [
+      {
+        input: { limit: 50 },
+        inputFromState: { modelId: "selectedModelId" },
+        resultKey: "dynResult",
+      },
+    ];
+    expect(
+      dataSourceMatchesEventModel(dynamic[0]!, "anything"),
+    ).toBe(true);
+    expect(
+      shouldRefreshForApplicationDataEvent({
+        appId: "tool-study-planner",
+        eventApplicationId: "tool-study-planner",
+        eventModelId: "studyTasks",
+        dataSources: dynamic,
+      }),
+    ).toBe(true);
+  });
+
   it("does not refresh for an unrelated modelId when sources are scoped", () => {
     expect(
       shouldRefreshForApplicationDataEvent({
@@ -79,6 +102,25 @@ describe("shouldRefreshForApplicationDataEvent", () => {
         dataSources: sources,
       }),
     ).toBe(true);
+  });
+});
+
+describe("hydrationKeysToInvalidate", () => {
+  const sources = [
+    { input: { modelId: "studyTasks" }, resultKey: "studyTasksResult" },
+    { input: { modelId: "notes" }, resultKey: "notesResult" },
+  ];
+
+  it("returns all when modelId is absent", () => {
+    expect(hydrationKeysToInvalidate(sources, null)).toBe("all");
+    expect(hydrationKeysToInvalidate(sources, "")).toBe("all");
+  });
+
+  it("returns only matching resultKeys for a scoped model", () => {
+    expect(hydrationKeysToInvalidate(sources, "studyTasks")).toEqual([
+      "studyTasksResult",
+    ]);
+    expect(hydrationKeysToInvalidate(sources, "missing")).toEqual([]);
   });
 });
 

@@ -6464,6 +6464,20 @@ body > .window-overlay-root > *,
   cursor: not-allowed;
 }
 
+.tr-data-table-query tbody tr {
+  transition: background-color var(--motion-duration-fast, 120ms) ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tr-data-table-query tbody tr {
+    transition: none;
+  }
+}
+
+.tr-data-table .tr-row-selected {
+  background: color-mix(in srgb, var(--core-accent, #3d7a5a) 14%, transparent);
+}
+
 /* Chat Starter Grid */
 .chat-starter-container {
   padding: var(--space-4) var(--space-2);

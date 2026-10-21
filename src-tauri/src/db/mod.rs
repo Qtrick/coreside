@@ -190,10 +190,14 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
         "041_repair_ambiguous_inline_surface_message_id",
         include_str!("../../migrations/041_repair_ambiguous_inline_surface_message_id.sql"),
     ),
+    (
+        "042_generated_data_revisions",
+        include_str!("../../migrations/042_generated_data_revisions.sql"),
+    ),
 ];
 
 /// Latest migration name after a fully upgraded database.
-pub const LATEST_MIGRATION: &str = "041_repair_ambiguous_inline_surface_message_id";
+pub const LATEST_MIGRATION: &str = "042_generated_data_revisions";
 
 #[derive(Debug, Error)]
 pub enum DbError {

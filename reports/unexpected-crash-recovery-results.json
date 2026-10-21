@@ -20,7 +20,7 @@
     "phase": "A",
     "mode": "in_flight_awaiting_sigkill",
     "writtenAt": "2026-10-20T05:09:46.425Z",
-    "dbPath": "/var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/coreside-crash-rWgPox/coreside.db",
+    "dbPath": "<isolated-temp-db>",
     "cancelledByUser": false
   },
   "e2eSpec": "e2e/specs/39b-unexpected-crash-phase-b.spec.ts",
@@ -31,10 +31,9 @@
     "note": "Phase A left generation in flight; supervisor SIGKILLed WebDriver holder on :4445 matching E2E binary only. Not user Cancel.",
     "startedAt": "2026-10-20T05:09:43.502Z",
     "finishedAt": "2026-10-20T05:09:59.691Z",
-    "host": "vl965-172-31-99-170.wireless.umass.edu",
     "status": "passed",
-    "dbPath": "/var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/coreside-crash-rWgPox/coreside.db",
-    "binary": "/Users/qunyingfan/Coreside/src-tauri/target/debug/Coreside",
+    "dbPath": "<isolated-temp-db>",
+    "binary": "Coreside",
     "killedPids": [
       40949
     ],
@@ -43,7 +42,7 @@
       "phase": "A",
       "mode": "in_flight_awaiting_sigkill",
       "writtenAt": "2026-10-20T05:09:46.425Z",
-      "dbPath": "/var/folders/3d/yr4tb1f91bd1fq80fk24jsxr0000gn/T/coreside-crash-rWgPox/coreside.db",
+      "dbPath": "<isolated-temp-db>",
       "cancelledByUser": false
     }
   }

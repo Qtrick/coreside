@@ -308,6 +308,7 @@ pub fn create_record(
          ) VALUES (?1,?2,?3,1,?4,?5,?5)",
         params![id, application_id, model_id, data.to_string(), now],
     )?;
+    let _ = super::query::bump_model_revision(db, application_id, model_id)?;
     Ok(id)
 }
 
@@ -380,19 +381,67 @@ pub fn update_record(
             "revision_conflict: expected {expected_version}, found concurrent update"
         )));
     }
+    let _ = super::query::bump_model_revision(db, application_id, &model_id)?;
     Ok(())
 }
 
-pub fn delete_record(db: &mut Database, application_id: &str, record_id: &str) -> DbResult<()> {
+/// Deletes a record and returns its authoritative `model_id` from SQLite.
+/// Callers must not trust a client-supplied modelId for delete invalidation.
+///
+/// When `base_version` is provided, rejects stale deletes (OCC) so a concurrent
+/// update cannot be silently destroyed.
+pub fn delete_record(db: &mut Database, application_id: &str, record_id: &str) -> DbResult<String> {
+    delete_record_with_version(db, application_id, record_id, None)
+}
+
+pub fn delete_record_with_version(
+    db: &mut Database,
+    application_id: &str,
+    record_id: &str,
+    base_version: Option<i64>,
+) -> DbResult<String> {
     assert_can_write_data(db, application_id)?;
-    let removed = db.conn().execute(
-        "DELETE FROM generated_data_records WHERE id = ?1 AND application_id = ?2",
-        params![record_id, application_id],
-    )?;
-    if removed == 0 {
-        return Err(DbError::NotFound(format!("record {record_id}")));
+    let (model_id, version): (String, i64) = db
+        .conn()
+        .query_row(
+            "SELECT model_id, record_version FROM generated_data_records
+         WHERE id = ?1 AND application_id = ?2",
+            params![record_id, application_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                DbError::NotFound(format!("record {record_id}"))
+            }
+            other => DbError::Sqlite(other),
+        })?;
+    if let Some(base) = base_version {
+        if base != version {
+            return Err(DbError::Invalid(format!(
+                "revision_conflict: expected {base}, found {version}"
+            )));
+        }
+        let removed = db.conn().execute(
+            "DELETE FROM generated_data_records
+             WHERE id = ?1 AND application_id = ?2 AND record_version = ?3",
+            params![record_id, application_id, base],
+        )?;
+        if removed == 0 {
+            return Err(DbError::Invalid(format!(
+                "revision_conflict: expected {base}, found concurrent update"
+            )));
+        }
+    } else {
+        let removed = db.conn().execute(
+            "DELETE FROM generated_data_records WHERE id = ?1 AND application_id = ?2",
+            params![record_id, application_id],
+        )?;
+        if removed == 0 {
+            return Err(DbError::NotFound(format!("record {record_id}")));
+        }
     }
-    Ok(())
+    let _ = super::query::bump_model_revision(db, application_id, &model_id)?;
+    Ok(model_id)
 }
 
 pub fn query_records(
@@ -405,7 +454,7 @@ pub fn query_records(
     let mut stmt = db.conn().prepare(
         "SELECT id, record_version, data_json, created_at, updated_at FROM generated_data_records
          WHERE application_id = ?1 AND model_id = ?2
-         ORDER BY updated_at DESC LIMIT ?3",
+         ORDER BY updated_at DESC, id DESC LIMIT ?3",
     )?;
     let rows = stmt.query_map(params![application_id, model_id, lim as i64], |row| {
         let id: String = row.get(0)?;

@@ -232,6 +232,9 @@ export const config: Options.Testrunner = {
     "study-planner-reactive-crud": [
       "./specs/36-study-planner-reactive-crud.spec.ts",
     ],
+    "scalable-query-pagination": [
+      "./specs/40-scalable-query-pagination.spec.ts",
+    ],
     "cross-surface-reactive-sync": [
       "./specs/37-cross-surface-reactive-sync.spec.ts",
     ],

@@ -18,6 +18,7 @@ pub mod packages;
 pub mod permissions;
 pub mod policy;
 pub mod provenance;
+pub mod query;
 pub mod recovery;
 pub mod registered_actions;
 pub mod repair;

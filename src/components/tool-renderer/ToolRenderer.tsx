@@ -22,8 +22,10 @@ import {
 } from "@/lib/tauri";
 import type { ActionOutcome } from "@/types/application-kernel";
 import type { ActionDefinition, DataSource, ToolComponent, ToolDefinition, ToolState } from "@/types/tool";
+import { msUntilLocalMidnight } from "@/lib/record-summary";
 import {
   isCurrentHydrationGeneration,
+  hydrationKeysToInvalidate,
   shouldRefreshForApplicationDataEvent,
 } from "./application-data-refresh";
 import { ToolRuntimeProvider } from "./context";
@@ -258,23 +260,55 @@ export function ToolRenderer({
   // dataSources when approvals change so tables reflect the frozen write.
   // Cross-surface / cross-window local_data mutations use the same epoch via
   // runtime-application-data-changed.
-  const [dataRefreshEpoch, setDataRefreshEpoch] = useState(0);
+  // Tick re-runs hydration after selective hydrationRef clears. Unrelated
+  // sources keep their cache entries and skip refetch via depSignature.
+  const [dataRefreshTick, setDataRefreshTick] = useState(0);
   // Approve-once emits approvals-changed and application-data-changed together;
-  // coalesce so one user approval does not double-query.
-  const bumpCoalesceRef = useRef(false);
-
-  const bumpDataRefresh = useCallback(() => {
-    hydrationRef.current = {};
-    if (bumpCoalesceRef.current) return;
-    bumpCoalesceRef.current = true;
-    queueMicrotask(() => {
-      bumpCoalesceRef.current = false;
-      setDataRefreshEpoch((n) => n + 1);
-    });
-  }, []);
+  // coalesce on a short timer (not queueMicrotask) so one approval = one refetch.
+  const bumpCoalesceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Accumulated invalidation: 'all' or specific resultKeys. */
+  const pendingInvalidationRef = useRef<"all" | Set<string> | null>(null);
 
   const dataSourcesRef = useRef(dataSources);
   dataSourcesRef.current = dataSources;
+
+  const scheduleDataRefresh = useCallback((mode: "all" | { modelId: string | null }) => {
+    if (mode === "all" || mode.modelId == null) {
+      pendingInvalidationRef.current = "all";
+    } else {
+      const keys = hydrationKeysToInvalidate(dataSourcesRef.current, mode.modelId);
+      if (pendingInvalidationRef.current !== "all") {
+        if (keys === "all") {
+          pendingInvalidationRef.current = "all";
+        } else {
+          const set =
+            pendingInvalidationRef.current instanceof Set
+              ? pendingInvalidationRef.current
+              : new Set<string>();
+          for (const k of keys) set.add(k);
+          pendingInvalidationRef.current = set;
+        }
+      }
+    }
+    if (bumpCoalesceTimerRef.current != null) return;
+    bumpCoalesceTimerRef.current = setTimeout(() => {
+      bumpCoalesceTimerRef.current = null;
+      const pending = pendingInvalidationRef.current;
+      pendingInvalidationRef.current = null;
+      if (pending === "all" || pending == null) {
+        hydrationRef.current = {};
+      } else {
+        for (const key of pending) {
+          delete hydrationRef.current[key];
+        }
+      }
+      setDataRefreshTick((n) => n + 1);
+    }, 32);
+  }, []);
+
+  // Track last seen revision per model for missed-event reconciliation on
+  // visibility regain (events are transient; revision is durable in query results).
+  const lastRevisionRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     let stopApprovals: (() => void) | null = null;
@@ -282,7 +316,7 @@ export function ToolRenderer({
     let disposed = false;
     const appId = (applicationId ?? tool.id ?? "").trim();
     void listenApprovalsChanged(() => {
-      bumpDataRefresh();
+      scheduleDataRefresh("all");
     }).then((unlisten) => {
       if (disposed) unlisten();
       else stopApprovals = unlisten;
@@ -300,17 +334,50 @@ export function ToolRenderer({
       ) {
         return;
       }
-      bumpDataRefresh();
+      if (event.modelId && typeof event.revision === "number" && event.revision > 0) {
+        const prev = lastRevisionRef.current[event.modelId] ?? 0;
+        if (event.revision <= prev) {
+          // Already reconciled to this or a newer revision.
+          return;
+        }
+        lastRevisionRef.current[event.modelId] = event.revision;
+      }
+      scheduleDataRefresh({ modelId: event.modelId ?? null });
     }).then((unlisten) => {
       if (disposed) unlisten();
       else stopData = unlisten;
     });
+
+    // Overdue metrics use local calendar dates — refresh once at midnight.
+    let midnightTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleMidnight = () => {
+      midnightTimer = setTimeout(() => {
+        scheduleDataRefresh("all");
+        scheduleMidnight();
+      }, msUntilLocalMidnight());
+    };
+    scheduleMidnight();
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        // Missed-event catch-up: rehydrate when the surface becomes visible again.
+        scheduleDataRefresh("all");
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
     return () => {
       disposed = true;
+      if (bumpCoalesceTimerRef.current != null) {
+        clearTimeout(bumpCoalesceTimerRef.current);
+        bumpCoalesceTimerRef.current = null;
+      }
+      if (midnightTimer != null) clearTimeout(midnightTimer);
+      document.removeEventListener("visibilitychange", onVisible);
       stopApprovals?.();
       stopData?.();
     };
-  }, [applicationId, tool.id, bumpDataRefresh]);
+  }, [applicationId, tool.id, scheduleDataRefresh]);
 
   useEffect(() => {
     if (isPreviewMode || isCustomizingMode) return;
@@ -324,7 +391,7 @@ export function ToolRenderer({
       if (!ds.resultKey) continue;
 
       const depValues = (ds.refreshOn ?? []).map((k) => String(stateRef.current[k]));
-      const depSignature = `${depValues.join("::")}::e${dataRefreshEpoch}`;
+      const depSignature = depValues.join("::");
 
       const existing = hydrationRef.current[ds.resultKey];
       const now = Date.now();
@@ -370,6 +437,19 @@ export function ToolRenderer({
             return;
           }
           if (outcome && outcome.status === "ok" && outcome.data !== undefined) {
+            if (outcome.data && typeof outcome.data === "object" && !Array.isArray(outcome.data)) {
+              const payload = outcome.data as Record<string, unknown>;
+              const model =
+                typeof payload.modelId === "string" ? payload.modelId.trim() : "";
+              const rev =
+                typeof payload.revision === "number" && Number.isFinite(payload.revision)
+                  ? Math.floor(payload.revision)
+                  : null;
+              if (model && rev != null && rev > 0) {
+                const prev = lastRevisionRef.current[model] ?? 0;
+                if (rev > prev) lastRevisionRef.current[model] = rev;
+              }
+            }
             const currentVal = stateRef.current[resultKey];
             if (JSON.stringify(currentVal) !== JSON.stringify(outcome.data)) {
               onStateChange({ ...stateRef.current, [resultKey]: outcome.data });
@@ -394,7 +474,7 @@ export function ToolRenderer({
     tool.id,
     onStateChange,
     state,
-    dataRefreshEpoch,
+    dataRefreshTick,
   ]);
 
   // Interaction failures are shown in the surface itself: a button that cannot

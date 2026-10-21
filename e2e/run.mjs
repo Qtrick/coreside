@@ -178,6 +178,12 @@ const JOURNEYS = [
     coverage: "full",
   },
   {
+    id: 40,
+    name: "scalable-query-pagination",
+    suite: "scalable-query-pagination",
+    coverage: "full",
+  },
+  {
     id: 37,
     name: "cross-surface-reactive-sync",
     suite: "cross-surface-reactive-sync",
@@ -432,6 +438,7 @@ runSuite("theme-preset-apply");
 runSuite("generation-recovery-retry", { seed: "existing" });
 // Study Planner multi-field CRUD + reactive summaries (clean profile).
 runSuite("study-planner-reactive-crud");
+runSuite("scalable-query-pagination");
 // Canvas ↔ inline summary reactive sync without another model turn.
 runSuite("cross-surface-reactive-sync");
 // Cancel while recovery retry is streaming (seeded progressive hold).

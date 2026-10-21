@@ -5,6 +5,7 @@ import { RecoveredPreviewHost } from "./RecoveredPreviewHost";
 vi.mock("@/lib/tauri", () => ({
   api: {},
   listenApprovalsChanged: vi.fn(async () => () => undefined),
+  listenApplicationDataChanged: vi.fn(async () => () => undefined),
 }));
 
 describe("RecoveredPreviewHost", () => {

@@ -554,10 +554,13 @@ struct ApplicationDataChangedPayload {
     application_id: String,
     model_id: Option<String>,
     action: String,
+    /// Monotonic per-model revision after the committed mutation (0 when unknown).
+    revision: i64,
 }
 
 fn notify_application_data_changed(
     app: &tauri::AppHandle,
+    db: &crate::db::Database,
     application_id: &str,
     model_id: Option<&str>,
     action: &str,
@@ -567,15 +570,21 @@ fn notify_application_data_changed(
     if app_id.is_empty() {
         return;
     }
+    let model = model_id
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let revision = model
+        .as_deref()
+        .and_then(|m| crate::application_kernel::query::model_revision(db, app_id, m).ok())
+        .unwrap_or(0);
     let _ = app.emit(
         APPLICATION_DATA_CHANGED_EVENT,
         ApplicationDataChangedPayload {
             application_id: app_id.into(),
-            model_id: model_id
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string),
+            model_id: model,
             action: action.into(),
+            revision,
         },
     );
 }
@@ -584,8 +593,7 @@ fn is_local_data_mutation(action_name: &str) -> bool {
     action_name == "local_data.write" || action_name == "local_data.delete"
 }
 
-/// Optional model hint for scoped invalidation. Deletes often omit modelId
-/// (schema only requires recordId) — callers still notify with None.
+/// Optional model hint for scoped invalidation (writes / queries).
 fn local_data_mutation_model_id(input: &Value) -> Option<String> {
     input
         .get("modelId")
@@ -594,6 +602,31 @@ fn local_data_mutation_model_id(input: &Value) -> Option<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
+}
+
+/// Resolve modelId for application-data-changed.
+///
+/// Deletes: authoritative modelId from the action outcome (SQLite row), never
+/// client input. Missing/unknown → None (refresh all sources for the app).
+/// Writes: validated input modelId (required by the write schema).
+fn model_id_for_data_change_notify(
+    action_name: &str,
+    input: &Value,
+    outcome: &ActionOutcome,
+) -> Option<String> {
+    if action_name == "local_data.delete" {
+        match outcome {
+            ActionOutcome::Ok { data, .. } => data
+                .get("modelId")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            _ => None,
+        }
+    } else {
+        local_data_mutation_model_id(input)
+    }
 }
 
 #[tauri::command]
@@ -720,23 +753,31 @@ pub fn kernel_invoke_registered_action(
     let ctx = ActionRunContext::from_client(&request, venue);
     let outcome = {
         let mut db = state.db.lock();
-        execute_registered_action(
+        let outcome = execute_registered_action(
             &mut db,
             &ctx,
             &request.action_name,
             &request.input,
             request.approval_id.as_deref(),
-        )
-    };
-    if matches!(outcome, ActionOutcome::PendingApproval { .. }) {
-        notify_approvals_changed(&app);
-    } else if outcome.is_ok() && is_local_data_mutation(&request.action_name) {
-        // Notify even when modelId is absent (typical for local_data.delete).
-        if let Some(app_id) = request.application_id.as_deref() {
-            let model = local_data_mutation_model_id(&request.input);
-            notify_application_data_changed(&app, app_id, model.as_deref(), &request.action_name);
+        );
+        if matches!(outcome, ActionOutcome::PendingApproval { .. }) {
+            drop(db);
+            notify_approvals_changed(&app);
+        } else if outcome.is_ok() && is_local_data_mutation(&request.action_name) {
+            if let Some(app_id) = request.application_id.as_deref() {
+                let model =
+                    model_id_for_data_change_notify(&request.action_name, &request.input, &outcome);
+                notify_application_data_changed(
+                    &app,
+                    &db,
+                    app_id,
+                    model.as_deref(),
+                    &request.action_name,
+                );
+            }
         }
-    }
+        outcome
+    };
     Ok(outcome)
 }
 
@@ -793,11 +834,12 @@ pub fn kernel_decide_approval(
             &input,
             Some(&approval_id),
         );
-        // Only local_data mutations invalidate application data. Use frozen
-        // approval input (not a reconstructed client payload).
+        // Only local_data mutations invalidate application data. Delete modelId
+        // comes from the committed outcome (SQLite), not frozen client input.
         if outcome.is_ok() && is_local_data_mutation(&result.approval.action_name) {
             if let Some(app_id) = result.approval.application_id.as_deref() {
-                let model = local_data_mutation_model_id(&input);
+                let model =
+                    model_id_for_data_change_notify(&result.approval.action_name, &input, &outcome);
                 data_notify = Some((
                     app_id.to_string(),
                     model,
@@ -812,11 +854,11 @@ pub fn kernel_decide_approval(
             }
         }
     }
-    drop(db);
     notify_approvals_changed(&app);
     if let Some((app_id, model, action)) = data_notify {
-        notify_application_data_changed(&app, &app_id, model.as_deref(), &action);
+        notify_application_data_changed(&app, &db, &app_id, model.as_deref(), &action);
     }
+    drop(db);
     Ok(result)
 }
 
@@ -1057,6 +1099,43 @@ mod application_data_emit_tests {
         );
         assert!(local_data_mutation_model_id(&json!({"modelId": "   "})).is_none());
         assert!(local_data_mutation_model_id(&json!({"recordId": "rec-1"})).is_none());
+    }
+
+    #[test]
+    fn delete_notify_model_id_comes_from_outcome_not_client_input() {
+        let forged = json!({"recordId": "rec-1", "modelId": "forged-model"});
+        let outcome = ActionOutcome::Ok {
+            data: json!({ "recordId": "rec-1", "deleted": true, "modelId": "studyTasks" }),
+            state_bindable: true,
+            sensitivity: Default::default(),
+        };
+        assert_eq!(
+            model_id_for_data_change_notify("local_data.delete", &forged, &outcome).as_deref(),
+            Some("studyTasks")
+        );
+        let missing = ActionOutcome::Ok {
+            data: json!({ "recordId": "rec-1", "deleted": true }),
+            state_bindable: true,
+            sensitivity: Default::default(),
+        };
+        assert!(
+            model_id_for_data_change_notify("local_data.delete", &forged, &missing).is_none(),
+            "unknown delete modelId must fall back to refresh-all"
+        );
+        let write = ActionOutcome::Ok {
+            data: json!({ "recordId": "rec-1", "created": true }),
+            state_bindable: true,
+            sensitivity: Default::default(),
+        };
+        assert_eq!(
+            model_id_for_data_change_notify(
+                "local_data.write",
+                &json!({"modelId": "studyTasks"}),
+                &write
+            )
+            .as_deref(),
+            Some("studyTasks")
+        );
     }
 
     #[test]

@@ -806,11 +806,53 @@ pub fn journal_create_plan() -> ApplicationPlan {
     }
 }
 
+fn study_tasks_query_aggregates(include_priority: bool) -> serde_json::Value {
+    let mut aggs = vec![
+        json!({ "key": "total", "op": "count" }),
+        json!({ "key": "done", "op": "countWhere", "field": "status", "equals": "done" }),
+        json!({ "key": "remaining", "op": "countWhere", "field": "status", "notEquals": "done" }),
+        json!({
+            "key": "overdue",
+            "op": "countOverdue",
+            "field": "dueDate",
+            "statusField": "status",
+            "excludeStatus": "done"
+        }),
+    ];
+    if include_priority {
+        aggs.push(json!({
+            "key": "high",
+            "op": "countWhere",
+            "field": "priority",
+            "equals": "high"
+        }));
+    }
+    json!(aggs)
+}
+
+fn study_tasks_query_input(include_priority: bool) -> serde_json::Value {
+    json!({
+        "modelId": "studyTasks",
+        "limit": 25,
+        "offset": 0,
+        "aggregates": study_tasks_query_aggregates(include_priority)
+    })
+}
+
 fn study_tasks_query_refresh() -> ActionDefinition {
     ActionDefinition::InvokeRegisteredAction {
         action_name: "local_data.query".into(),
-        input: Some(json!({ "modelId": "studyTasks", "limit": 100 })),
-        input_from_state: None,
+        input: Some(study_tasks_query_input(false)),
+        input_from_state: Some(
+            [
+                ("offset".into(), "studyTasksOffset".into()),
+                ("search".into(), "studyTasksSearch".into()),
+                ("sort.field".into(), "studyTasksSortField".into()),
+                ("sort.direction".into(), "studyTasksSortDir".into()),
+            ]
+            .into_iter()
+            .collect(),
+        ),
         component_id: None,
         result_key: Some("studyTasksResult".into()),
     }
@@ -849,7 +891,19 @@ fn study_tasks_summary_props(include_priority: bool) -> serde_json::Value {
         },
         "dataSource": {
             "actionName": "local_data.query",
-            "input": { "modelId": "studyTasks", "limit": 100 },
+            "input": study_tasks_query_input(include_priority),
+            "inputFromState": {
+                "offset": "studyTasksOffset",
+                "search": "studyTasksSearch",
+                "sort.field": "studyTasksSortField",
+                "sort.direction": "studyTasksSortDir"
+            },
+            "refreshOn": [
+                "studyTasksOffset",
+                "studyTasksSearch",
+                "studyTasksSortField",
+                "studyTasksSortDir"
+            ],
             "resultKey": "studyTasksResult"
         }
     })
@@ -875,6 +929,7 @@ fn study_planner_tool_v1() -> ToolDefinition {
                 props: Some(json!({
                     "label": "Remaining",
                     "rowsKey": "studyTasksResult",
+                    "aggregateKey": "remaining",
                     "metric": { "op": "countWhere", "field": "status", "notEquals": "done" },
                     "value": "0"
                 })),
@@ -886,6 +941,7 @@ fn study_planner_tool_v1() -> ToolDefinition {
                 props: Some(json!({
                     "label": "Completed",
                     "rowsKey": "studyTasksResult",
+                    "aggregateKey": "done",
                     "metric": { "op": "countWhere", "field": "status", "equals": "done" },
                     "value": "0"
                 })),
@@ -915,9 +971,27 @@ fn study_planner_tool_v1() -> ToolDefinition {
                     ],
                     "rowsKey": "studyTasksResult",
                     "selectionKey": "selectedStudyTaskId",
+                    "selectionVersionKey": "selectedStudyTaskVersion",
+                    "searchKey": "studyTasksSearch",
+                    "offsetKey": "studyTasksOffset",
+                    "sortFieldKey": "studyTasksSortField",
+                    "sortDirKey": "studyTasksSortDir",
+                    "pageSize": 25,
                     "dataSource": {
                         "actionName": "local_data.query",
-                        "input": { "modelId": "studyTasks", "limit": 100 },
+                        "input": study_tasks_query_input(false),
+                        "inputFromState": {
+                            "offset": "studyTasksOffset",
+                            "search": "studyTasksSearch",
+                            "sort.field": "studyTasksSortField",
+                            "sort.direction": "studyTasksSortDir"
+                        },
+                        "refreshOn": [
+                            "studyTasksOffset",
+                            "studyTasksSearch",
+                            "studyTasksSortField",
+                            "studyTasksSortDir"
+                        ],
                         "resultKey": "studyTasksResult"
                     }
                 })),
@@ -1001,9 +1075,12 @@ fn study_planner_tool_v1() -> ToolDefinition {
                             "data": { "status": "done" }
                         })),
                         input_from_state: Some(
-                            [("recordId".into(), "selectedStudyTaskId".into())]
-                                .into_iter()
-                                .collect(),
+                            [
+                                ("recordId".into(), "selectedStudyTaskId".into()),
+                                ("baseVersion".into(), "selectedStudyTaskVersion".into()),
+                            ]
+                            .into_iter()
+                            .collect(),
                         ),
                         component_id: None,
                         result_key: None,
@@ -1024,9 +1101,12 @@ fn study_planner_tool_v1() -> ToolDefinition {
                             "data": { "status": "todo" }
                         })),
                         input_from_state: Some(
-                            [("recordId".into(), "selectedStudyTaskId".into())]
-                                .into_iter()
-                                .collect(),
+                            [
+                                ("recordId".into(), "selectedStudyTaskId".into()),
+                                ("baseVersion".into(), "selectedStudyTaskVersion".into()),
+                            ]
+                            .into_iter()
+                            .collect(),
                         ),
                         component_id: None,
                         result_key: None,
@@ -1066,6 +1146,7 @@ fn study_planner_tool_v1() -> ToolDefinition {
                         input_from_state: Some(
                             [
                                 ("recordId".into(), "selectedStudyTaskId".into()),
+                                ("baseVersion".into(), "selectedStudyTaskVersion".into()),
                                 ("data.notes".into(), "editStudyTaskNotes".into()),
                                 ("data.dueDate".into(), "editStudyTaskDueDate".into()),
                             ]
@@ -1090,9 +1171,12 @@ fn study_planner_tool_v1() -> ToolDefinition {
                         // runtime-application-data-changed invalidation.
                         input: Some(json!({ "modelId": "studyTasks" })),
                         input_from_state: Some(
-                            [("recordId".into(), "selectedStudyTaskId".into())]
-                                .into_iter()
-                                .collect(),
+                            [
+                                ("recordId".into(), "selectedStudyTaskId".into()),
+                                ("baseVersion".into(), "selectedStudyTaskVersion".into()),
+                            ]
+                            .into_iter()
+                            .collect(),
                         ),
                         component_id: None,
                         result_key: None,
@@ -1101,6 +1185,10 @@ fn study_planner_tool_v1() -> ToolDefinition {
                     ActionDefinition::SetValue {
                         target: "selectedStudyTaskId".into(),
                         value: json!(""),
+                    },
+                    ActionDefinition::SetValue {
+                        target: "selectedStudyTaskVersion".into(),
+                        value: json!(null),
                     },
                 ]),
                 ..Default::default()
@@ -1245,6 +1333,7 @@ fn study_planner_tool_v2_priority() -> ToolDefinition {
                 "label": "High priority",
                 "rowsKey": "studyTasksResult",
                 "metric": { "op": "countWhere", "field": "priority", "equals": "high" },
+                "queryLimit": 100,
                 "value": "0"
             })),
             ..Default::default()

@@ -93,14 +93,11 @@ fn model_id_field<'a>(input: &'a Value) -> Result<&'a str, ActionError> {
 
 fn local_data_query(db: &mut Database, ctx: &ActionRunContext, input: &Value) -> HandlerResult {
     let app = application_id(ctx)?;
-    let model_id = model_id_field(input)?;
-    let limit = input
-        .get("limit")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(100)
-        .min(500) as usize;
-    let records = super::super::data::query_records(db, app, model_id, limit)?;
-    Ok(json!({ "records": records, "count": records.len() }))
+    let query = super::super::query::parse_record_query(input)?;
+    // Ownership: query is scoped to the action's application_id only.
+    let _ = model_id_field(input)?;
+    let result = super::super::query::execute_query(db, app, &query)?;
+    Ok(result.to_json())
 }
 
 fn local_data_write(db: &mut Database, ctx: &ActionRunContext, input: &Value) -> HandlerResult {
@@ -137,8 +134,15 @@ fn local_data_delete(db: &mut Database, ctx: &ActionRunContext, input: &Value) -
         .and_then(|v| v.as_str())
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| ActionError::invalid("recordId is required"))?;
-    super::super::data::delete_record(db, app, record_id)?;
-    Ok(json!({ "recordId": record_id, "deleted": true }))
+    let base = input.get("baseVersion").and_then(|v| v.as_i64());
+    // modelId comes from the deleted SQLite row — never trust client input for
+    // application-data-changed scoping.
+    let model_id = super::super::data::delete_record_with_version(db, app, record_id, base)?;
+    Ok(json!({
+        "recordId": record_id,
+        "deleted": true,
+        "modelId": model_id,
+    }))
 }
 
 fn tool_state_set(db: &mut Database, ctx: &ActionRunContext, input: &Value) -> HandlerResult {

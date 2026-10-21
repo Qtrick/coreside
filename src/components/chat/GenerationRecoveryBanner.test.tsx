@@ -13,6 +13,7 @@ vi.mock("@/lib/tauri", () => ({
   },
   listenAgentTurn: vi.fn(async () => () => undefined),
   listenApprovalsChanged: vi.fn(async () => () => undefined),
+  listenApplicationDataChanged: vi.fn(async () => () => undefined),
 }));
 
 vi.mock("@/stores/app-store", () => ({

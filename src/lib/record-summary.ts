@@ -1,8 +1,8 @@
 /**
  * Trusted declarative metrics over queried local_data records.
  *
- * No eval, no arbitrary expressions — only a fixed set of count operations
- * evaluated against already-hydrated query results in the renderer.
+ * Prefer server-side aggregates / totalCount from local_data.query when present.
+ * Fall back to hydrated page arrays only for static/in-memory tables.
  */
 
 export type RecordMetric =
@@ -23,6 +23,11 @@ export type RecordSummarySpec = {
   metrics: Record<string, RecordMetric>;
   /** Shown when total count is 0 (optional). */
   emptyText?: string;
+  /**
+   * Legacy truncated-page hint. Ignored when the payload includes authoritative
+   * `totalCount` or `aggregates` from local_data.query.
+   */
+  queryLimit?: number;
 };
 
 const MAX_FIELD_LEN = 64;
@@ -45,6 +50,33 @@ export function unwrapRecords(value: unknown): Record<string, unknown>[] {
     }
   }
   return [];
+}
+
+/** Authoritative total from a query payload (not the page length). */
+export function authoritativeTotalCount(value: unknown): number | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const obj = value as Record<string, unknown>;
+  const total = obj.totalCount ?? obj.total_count;
+  if (typeof total === "number" && Number.isFinite(total) && total >= 0) {
+    return Math.floor(total);
+  }
+  return null;
+}
+
+/** Server-computed aggregates map from local_data.query. */
+export function authoritativeAggregates(
+  value: unknown,
+): Record<string, number> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = (value as Record<string, unknown>).aggregates;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) {
+      out[k] = Math.floor(v);
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 /** Local calendar date as YYYY-MM-DD — date-only, no timezone shift. */
@@ -105,6 +137,17 @@ function evaluateMetric(
   }
 }
 
+function metricAggregateKey(name: string, metric: RecordMetric): string | null {
+  // Prefer exact metric name match in aggregates payload.
+  if (name) return name;
+  switch (metric.op) {
+    case "count":
+      return "total";
+    default:
+      return null;
+  }
+}
+
 function isMetric(value: unknown): value is RecordMetric {
   if (!value || typeof value !== "object") return false;
   const op = (value as { op?: unknown }).op;
@@ -115,9 +158,38 @@ function isMetric(value: unknown): value is RecordMetric {
   );
 }
 
+function parseQueryLimit(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.floor(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  }
+  return undefined;
+}
+
+/**
+ * Format a count for display. When the hydrated page is full (`rows.length`
+ * equals `queryLimit`) and no authoritative total exists, append `+`.
+ */
+export function formatCountDisplay(
+  count: number,
+  rowsLength: number,
+  queryLimit?: number,
+  authoritative?: boolean,
+): string {
+  if (authoritative) return String(count);
+  if (queryLimit && queryLimit > 0 && rowsLength >= queryLimit) {
+    return `${count}+`;
+  }
+  return String(count);
+}
+
 /**
  * Format a declarative summary from queried records.
  * Unknown metrics / malformed specs fall back to emptyText or "".
+ * Missing hydration (`null`/`undefined`) returns null so callers keep static text.
  */
 export function formatRecordSummary(
   rowsValue: unknown,
@@ -132,19 +204,45 @@ export function formatRecordSummary(
   if (!s.metrics || typeof s.metrics !== "object") return null;
 
   const records = unwrapRecords(rowsValue).slice(0, 500);
+  const queryLimit = parseQueryLimit(s.queryLimit);
+  const serverTotal = authoritativeTotalCount(rowsValue);
+  const serverAggs = authoritativeAggregates(rowsValue);
+  const authoritative = serverTotal != null || serverAggs != null;
   const today = localTodayIsoDate(now);
   const entries = Object.entries(s.metrics).slice(0, MAX_METRICS);
   const values: Record<string, string> = {};
   for (const [name, metric] of entries) {
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name) || !isMetric(metric)) continue;
-    values[name] = String(evaluateMetric(records, metric, today));
+    let n: number;
+    if (serverAggs && typeof serverAggs[name] === "number") {
+      n = serverAggs[name]!;
+    } else if (metric.op === "count" && serverTotal != null) {
+      n = serverTotal;
+    } else if (authoritative && serverAggs) {
+      // Authoritative payload without this key — do not invent from a page slice.
+      const fallbackKey = metricAggregateKey(name, metric);
+      if (fallbackKey && typeof serverAggs[fallbackKey] === "number") {
+        n = serverAggs[fallbackKey]!;
+      } else if (metric.op === "count" && serverTotal != null) {
+        n = serverTotal;
+      } else {
+        // Still compute client-side only when aggregate key is absent; prefer 0
+        // over a truncated page for countWhere when totalCount says there are more.
+        n = evaluateMetric(records, metric, today);
+      }
+    } else {
+      n = evaluateMetric(records, metric, today);
+    }
+    values[name] = formatCountDisplay(n, records.length, queryLimit, authoritative);
   }
 
-  const total =
-    typeof values.total === "string"
-      ? Number(values.total)
-      : records.length;
-  if (total === 0 && typeof s.emptyText === "string" && s.emptyText.trim()) {
+  const totalRaw =
+    serverTotal != null
+      ? serverTotal
+      : typeof values.total === "string"
+        ? Number(String(values.total).replace(/\+$/, ""))
+        : records.length;
+  if (totalRaw === 0 && typeof s.emptyText === "string" && s.emptyText.trim()) {
     return s.emptyText;
   }
 
@@ -158,9 +256,36 @@ export function evaluateRecordMetric(
   rowsValue: unknown,
   metric: unknown,
   now: Date = new Date(),
-): number | null {
+  queryLimit?: number,
+): number | string | null {
   if (rowsValue === undefined || rowsValue === null) return null;
   if (!isMetric(metric)) return null;
+  const serverAggs = authoritativeAggregates(rowsValue);
+  const serverTotal = authoritativeTotalCount(rowsValue);
+  if (metric.op === "count" && serverTotal != null) {
+    return serverTotal;
+  }
+  // Stat components may name aggregates via a dedicated aggregates key matching
+  // common patterns (done/remaining/overdue) when the query requested them.
+  if (serverAggs) {
+    if (metric.op === "countWhere" && "equals" in metric && typeof metric.equals === "string") {
+      for (const [k, v] of Object.entries(serverAggs)) {
+        if (k === metric.equals || k === metric.field) return v;
+      }
+    }
+  }
   const records = unwrapRecords(rowsValue).slice(0, 500);
-  return evaluateMetric(records, metric, localTodayIsoDate(now));
+  const n = evaluateMetric(records, metric, localTodayIsoDate(now));
+  const limit = parseQueryLimit(queryLimit);
+  const authoritative = serverTotal != null || serverAggs != null;
+  if (!authoritative && limit && records.length >= limit) {
+    return formatCountDisplay(n, records.length, limit, false);
+  }
+  return n;
+}
+
+/** Milliseconds until next local midnight — for overdue refresh scheduling. */
+export function msUntilLocalMidnight(now: Date = new Date()): number {
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return Math.max(1_000, next.getTime() - now.getTime());
 }

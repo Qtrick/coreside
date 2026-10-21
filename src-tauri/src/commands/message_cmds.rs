@@ -1230,6 +1230,32 @@ fn may_cleanup_user_message_after_send_failure(reuse_user_message_id: Option<&st
     reuse_user_message_id.is_none()
 }
 
+/// Shared cleanup for admission failures after a user message was persisted
+/// (provider validation, turn-journal create, attachment promote). Recovery
+/// retries pass `reuse_user_message_id` and are never deleted here.
+fn cleanup_user_message_after_send_admission_failure(
+    db: &mut crate::db::Database,
+    user_message_id: &str,
+    attachment_ids: &[String],
+    reuse_user_message_id: Option<&str>,
+) {
+    if !may_cleanup_user_message_after_send_failure(reuse_user_message_id) {
+        return;
+    }
+    let _ = crate::commands::attachment_cmds::unbind_attachments_from_message(
+        db,
+        user_message_id,
+        attachment_ids,
+    );
+    if let Err(cleanup_err) = delete_orphaned_user_message(db, user_message_id) {
+        tracing::warn!(
+            message_id = %user_message_id,
+            error = %cleanup_err,
+            "orphaned user message cleanup failed — searchable copy may remain"
+        );
+    }
+}
+
 /// CAS reclaim for recovery Retry: InterruptedRecoverable + matching attempt only.
 /// Does not fall back when begin_retry_attempt fails.
 fn reclaim_recoverable_turn_for_retry(
@@ -2579,23 +2605,16 @@ async fn send_message_inner(
     {
         // Recovery retry reuses a durable user message — never delete/unbind it
         // when provider validation fails after admission checks.
-        if may_cleanup_user_message_after_send_failure(reuse_user_message_id.as_deref()) {
+        {
             let attachment_ids: Vec<String> =
                 trusted_attachments.iter().map(|a| a.id.clone()).collect();
             let mut db = state.db.lock();
-            let _ = crate::commands::attachment_cmds::unbind_attachments_from_message(
+            cleanup_user_message_after_send_admission_failure(
                 &mut db,
                 &user_message.id,
                 &attachment_ids,
+                reuse_user_message_id.as_deref(),
             );
-            if let Err(cleanup_err) = delete_orphaned_user_message(&mut db, &user_message.id) {
-                tracing::warn!(
-                    message_id = %user_message.id,
-                    error = %cleanup_err,
-                    "orphaned user message cleanup failed — searchable copy may remain"
-                );
-            }
-            drop(db);
         }
         let message = sanitize_error(&e.to_string(), api_key_ref);
         emit_turn(
@@ -2631,7 +2650,7 @@ async fn send_message_inner(
     } else {
         format!("turn-{}", user_message.id)
     };
-    let (turn_id, attempt_id, has_turn_record) = {
+    let turn_admission: Result<(String, String, bool), CommandError> = {
         let db = state.db.lock();
         if let Some(ref expected_attempt) = reuse_expected_attempt_id {
             let (id, attempt) = reclaim_recoverable_turn_for_retry(
@@ -2640,7 +2659,7 @@ async fn send_message_inner(
                 &turn_idem_key,
                 expected_attempt.as_str(),
             )?;
-            (id, attempt, true)
+            Ok((id, attempt, true))
         } else if let Ok(existing) =
             crate::runtime_v2::get_turn_by_idempotency(&db, &conversation_id, &turn_idem_key)
         {
@@ -2654,34 +2673,63 @@ async fn send_message_inner(
                 let retried =
                     crate::runtime_v2::begin_retry_attempt(&db, &existing.id, &existing.attempt_id)
                         .map_err(|e| CommandError::new("conflict", e.to_string()))?;
-                (retried.id, retried.attempt_id, true)
+                Ok((retried.id, retried.attempt_id, true))
             } else {
-                (existing.id, existing.attempt_id, true)
+                Ok((existing.id, existing.attempt_id, true))
             }
         } else {
             // Fail closed: progressive recovery and attempt CAS require a durable
             // turn journal row. Do not continue with ephemeral UUIDs.
-            let rec = crate::runtime_v2::create_turn(
+            match crate::runtime_v2::create_turn(
                 &db,
                 &conversation_id,
                 project_id.as_deref(),
                 &turn_idem_key,
                 Some("interactive"),
-            )
-            .map_err(|e| {
-                CommandError::new(
+            ) {
+                Ok(rec) => {
+                    let _ = crate::runtime_v2::transition_turn(
+                        &db,
+                        &rec.id,
+                        &rec.attempt_id,
+                        crate::runtime_v2::TurnState::Claimed,
+                        Default::default(),
+                    );
+                    Ok((rec.id, rec.attempt_id, true))
+                }
+                Err(e) => Err(CommandError::new(
                     "turn_journal",
                     format!("Could not create a durable turn record: {e}"),
-                )
-            })?;
-            let _ = crate::runtime_v2::transition_turn(
-                &db,
-                &rec.id,
-                &rec.attempt_id,
-                crate::runtime_v2::TurnState::Claimed,
-                Default::default(),
+                )),
+            }
+        }
+    };
+    let (turn_id, attempt_id, has_turn_record) = match turn_admission {
+        Ok(v) => v,
+        Err(err) => {
+            // Mirror validate_provider_send failure: orphaned user messages created
+            // for this send must not linger when turn journal admission fails.
+            {
+                let attachment_ids: Vec<String> =
+                    trusted_attachments.iter().map(|a| a.id.clone()).collect();
+                let mut db = state.db.lock();
+                cleanup_user_message_after_send_admission_failure(
+                    &mut db,
+                    &user_message.id,
+                    &attachment_ids,
+                    reuse_user_message_id.as_deref(),
+                );
+            }
+            let message = sanitize_error(&err.message, api_key_ref);
+            emit_turn(
+                &app,
+                on_event.as_ref(),
+                AgentTurnEvent::Error {
+                    conversation_id: conversation_id.clone(),
+                    message,
+                },
             );
-            (rec.id, rec.attempt_id, true)
+            return Err(err);
         }
     };
     if has_turn_record {
@@ -5209,6 +5257,100 @@ mod recovery_retry_admission_tests {
     fn may_cleanup_skips_when_reusing_user_message() {
         assert!(may_cleanup_user_message_after_send_failure(None));
         assert!(!may_cleanup_user_message_after_send_failure(Some("msg-1")));
+    }
+
+    /// create_turn failure must clean up a freshly inserted user message the
+    /// same way provider-validation failure does (and must preserve reuse).
+    #[test]
+    fn create_turn_failure_cleans_up_orphaned_user_message() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("turn-create-fail.db")).unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Turn create fail", None).unwrap();
+        let msg_id = "msg-orphaned-turn-fail";
+        db.conn()
+            .execute(
+                "INSERT INTO messages (id, conversation_id, role, content)
+                 VALUES (?1, ?2, 'user', 'hello')",
+                rusqlite::params![msg_id, conv.id],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO message_fts (message_id, conversation_id, project_id, role, content, title)
+                 VALUES (?1, ?2, NULL, 'user', 'hello', ?3)",
+                rusqlite::params![msg_id, conv.id, conv.title],
+            )
+            .unwrap();
+
+        // Force durable turn creation to fail (table missing).
+        db.conn()
+            .execute_batch("ALTER TABLE turn_journal RENAME TO turn_journal_bak")
+            .unwrap();
+        let create_err = create_turn(
+            &db,
+            &conv.id,
+            None,
+            &format!("turn-{msg_id}"),
+            Some("interactive"),
+        );
+        assert!(
+            create_err.is_err(),
+            "create_turn must fail without turn_journal"
+        );
+
+        // Production Err branch: cleanup then surface turn_journal error.
+        cleanup_user_message_after_send_admission_failure(&mut db, msg_id, &[], None);
+
+        let remaining: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE id = ?1",
+                [msg_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0, "orphaned user message must be deleted");
+        let fts: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM message_fts WHERE message_id = ?1",
+                [msg_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts, 0, "FTS copy must be deleted with the message");
+    }
+
+    #[test]
+    fn create_turn_failure_preserves_reused_user_message() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("turn-create-reuse.db")).unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Turn create reuse", None).unwrap();
+        let msg_id = "msg-reuse-turn-fail";
+        db.conn()
+            .execute(
+                "INSERT INTO messages (id, conversation_id, role, content)
+                 VALUES (?1, ?2, 'user', 'retry me')",
+                rusqlite::params![msg_id, conv.id],
+            )
+            .unwrap();
+
+        cleanup_user_message_after_send_admission_failure(&mut db, msg_id, &[], Some(msg_id));
+
+        let remaining: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE id = ?1",
+                [msg_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            remaining, 1,
+            "recovery reuse must never delete the original"
+        );
     }
 
     #[test]

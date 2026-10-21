@@ -196,6 +196,8 @@ export type ApplicationDataChangedEvent = {
   applicationId: string;
   modelId?: string | null;
   action?: string | null;
+  /** Monotonic per-model revision after commit (0 when unknown). */
+  revision?: number | null;
 };
 
 /**
@@ -217,10 +219,15 @@ export async function listenApplicationDataChanged(
         typeof payload.modelId === "string" ? payload.modelId.trim() : "";
       const rawAction =
         typeof payload.action === "string" ? payload.action.trim() : "";
+      const revision =
+        typeof payload.revision === "number" && Number.isFinite(payload.revision)
+          ? Math.floor(payload.revision)
+          : null;
       handler({
         applicationId,
         modelId: rawModel || null,
         action: rawAction || null,
+        revision,
       });
     },
   );

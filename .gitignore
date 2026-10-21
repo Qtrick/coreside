@@ -70,6 +70,9 @@ reports/local-beta-readiness.json
 reports/packaging-results.json
 reports/e2e-results.json
 reports/generated-task-tracker-results.json
+# Ephemeral multi-phase E2E harness state (local paths / hostnames)
+reports/unexpected-crash-state.json
+reports/process-relaunch-state.json
 
 # Test / temp
 tmp/

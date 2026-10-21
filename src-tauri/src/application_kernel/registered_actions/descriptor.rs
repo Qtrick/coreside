@@ -224,7 +224,52 @@ pub static BUNDLED_ACTIONS: Lazy<Vec<ActionDescriptor>> = Lazy::new(|| {
                 "required": ["modelId"],
                 "properties": {
                     "modelId": { "type": "string" },
-                    "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
+                    "offset": { "type": "integer", "minimum": 0, "maximum": 100000 },
+                    "search": { "type": "string", "maxLength": 200 },
+                    "searchFields": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "maxItems": 16
+                    },
+                    "sort": {
+                        "type": "object",
+                        "properties": {
+                            "field": { "type": "string" },
+                            "direction": { "type": "string", "enum": ["asc", "desc"] }
+                        }
+                    },
+                    "filters": {
+                        "type": "array",
+                        "maxItems": 8,
+                        "items": {
+                            "type": "object",
+                            "required": ["field", "op", "value"],
+                            "properties": {
+                                "field": { "type": "string" },
+                                "op": { "type": "string" },
+                                "value": {}
+                            }
+                        }
+                    },
+                    "aggregates": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                            "type": "object",
+                            "required": ["key", "op"],
+                            "properties": {
+                                "key": { "type": "string" },
+                                "op": { "type": "string" },
+                                "field": { "type": "string" },
+                                "equals": { "type": "string" },
+                                "notEquals": { "type": "string" },
+                                "statusField": { "type": "string" },
+                                "excludeStatus": { "type": "string" },
+                                "asOf": { "type": "string" }
+                            }
+                        }
+                    }
                 }
             }),
             ActionRisk::Read,
@@ -261,7 +306,8 @@ pub static BUNDLED_ACTIONS: Lazy<Vec<ActionDescriptor>> = Lazy::new(|| {
                 "properties": {
                     "recordId": { "type": "string" },
                     // Optional hint for scoped runtime-application-data-changed.
-                    "modelId": { "type": "string" }
+                    "modelId": { "type": "string" },
+                    "baseVersion": { "type": "integer" }
                 }
             }),
             ActionRisk::Destructive,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   evaluateRecordMetric,
+  formatCountDisplay,
   formatRecordSummary,
   localTodayIsoDate,
   unwrapRecords,
@@ -139,5 +140,63 @@ describe("record-summary", () => {
       },
     );
     expect(text).toBe("3 tasks ·  leftover");
+  });
+
+  it("shows N+ when hydrated rows fill the query limit", () => {
+    expect(formatCountDisplay(100, 100, 100)).toBe("100+");
+    expect(formatCountDisplay(3, 3, 100)).toBe("3");
+    const fullPage = Array.from({ length: 100 }, (_, i) => ({
+      title: `T${i}`,
+      status: "todo",
+    }));
+    const text = formatRecordSummary(
+      { records: fullPage },
+      {
+        template: "{total} study tasks · {remaining} remaining",
+        metrics: {
+          total: { op: "count" },
+          remaining: { op: "countWhere", field: "status", notEquals: "done" },
+        },
+        queryLimit: 100,
+      },
+    );
+    expect(text).toBe("100+ study tasks · 100+ remaining");
+    expect(evaluateRecordMetric({ records: fullPage }, { op: "count" }, undefined, 100)).toBe(
+      "100+",
+    );
+  });
+
+  it("prefers authoritative totalCount and aggregates over page length", () => {
+    const page = Array.from({ length: 25 }, (_, i) => ({
+      title: `T${i}`,
+      status: i === 0 ? "done" : "todo",
+    }));
+    const payload = {
+      records: page,
+      count: 25,
+      returnedCount: 25,
+      totalCount: 150,
+      aggregates: { total: 150, done: 30, remaining: 120, overdue: 12 },
+    };
+    const text = formatRecordSummary(payload, {
+      template: "{total} study tasks · {remaining} remaining · {done} completed · {overdue} overdue",
+      metrics: {
+        total: { op: "count" },
+        done: { op: "countWhere", field: "status", equals: "done" },
+        remaining: { op: "countWhere", field: "status", notEquals: "done" },
+        overdue: {
+          op: "countOverdue",
+          field: "dueDate",
+          statusField: "status",
+          excludeStatus: "done",
+        },
+      },
+      emptyText: "No study tasks yet.",
+      queryLimit: 25,
+    });
+    expect(text).toBe(
+      "150 study tasks · 120 remaining · 30 completed · 12 overdue",
+    );
+    expect(evaluateRecordMetric(payload, { op: "count" })).toBe(150);
   });
 });
