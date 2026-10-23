@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-confirm-automation-change"
+description = "Enables the confirm_automation_change command without any pre-configured scope."
+commands.allow = ["confirm_automation_change"]
+
+[[permission]]
+identifier = "deny-confirm-automation-change"
+description = "Denies the confirm_automation_change command without any pre-configured scope."
+commands.deny = ["confirm_automation_change"]

@@ -49,7 +49,11 @@ function eventsFromMessage(message: ChatMessage): AgentActionEntry[] {
           "string"
         ? (metaObj.runtimeV2 as { status: string }).status
         : null;
-  return resolveActionEventsAfterProposal(out, proposalStatus);
+  const automationStatus =
+    typeof metaObj.automationChangeStatus === "string"
+      ? metaObj.automationChangeStatus
+      : null;
+  return resolveActionEventsAfterProposal(out, proposalStatus, automationStatus);
 }
 
 function statusGlyph(status: ActionEventStatus): {

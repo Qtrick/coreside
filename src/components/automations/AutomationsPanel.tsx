@@ -152,7 +152,29 @@ export function AutomationsPanel({ onBack }: { onBack: () => void }) {
                       setBusyId(row.id);
                       void api
                         .runAutomationNow(row.id)
-                        .then(() => reload())
+                        .then((outcome) => {
+                          if (
+                            outcome.status !== "success" &&
+                            outcome.status !== "awaiting_approval" &&
+                            outcome.status !== "skipped" &&
+                            outcome.status !== "busy"
+                          ) {
+                            setError(
+                              outcome.summary ||
+                                `Run finished with status: ${outcome.status}`,
+                            );
+                          } else {
+                            setError(null);
+                          }
+                          return reload();
+                        })
+                        .catch((err) => {
+                          setError(
+                            err instanceof Error
+                              ? err.message
+                              : "Could not run automation",
+                          );
+                        })
                         .finally(() => setBusyId(null));
                     }}
                   >

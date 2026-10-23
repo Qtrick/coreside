@@ -51,6 +51,7 @@ mp4parse = "0.17"
 base64 = "0.22"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 tempfile = "3"
+chrono-tz = "0.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

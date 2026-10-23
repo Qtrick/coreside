@@ -2167,7 +2167,22 @@ export async function mockInvoke<T>(
     case "list_workspace_backgrounds":
       return [] as T;
     case "run_automation_now":
-      return "Automation run completed" as T;
+      return {
+        status: "success",
+        summary: "Automation run completed",
+        errorCategory: null,
+      } as T;
+    case "confirm_automation_change":
+      return {
+        automation: {
+          id: "auto-chat-mock",
+          name: "Mock automation",
+          enabled: true,
+          requiresAi: false,
+        },
+        message: { id: "msg-mock", metadata: { automationChangeStatus: "applied" } },
+        alreadyApplied: false,
+      } as T;
     case "upsert_automation":
     case "set_automation_enabled":
       return {

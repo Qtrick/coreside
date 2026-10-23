@@ -468,15 +468,19 @@ export const api = {
   listAutomations: () => invoke<Record<string, unknown>[]>("list_automations"),
   upsertAutomation: (input: unknown) =>
     invoke<Record<string, unknown>>("upsert_automation", { input }),
-  /** Persist chat automation proposal Confirm/Discard onto message metadata. */
-  resolveAutomationChange: (
-    messageId: string,
-    status: "applied" | "discarded",
-  ) =>
+  /** Discard chat automation proposal on message metadata (apply via confirmAutomationChange). */
+  resolveAutomationChange: (messageId: string, status: "discarded") =>
     invoke<Record<string, unknown>>("resolve_automation_change", {
       messageId,
       status,
     }),
+  /** Trusted confirm: upsert schedule + stamp message status (idempotent). */
+  confirmAutomationChange: (messageId: string, expectedChange: unknown) =>
+    invoke<{
+      automation: Record<string, unknown>;
+      message: Record<string, unknown>;
+      alreadyApplied: boolean;
+    }>("confirm_automation_change", { messageId, expectedChange }),
   setAutomationEnabled: (automationId: string, enabled: boolean) =>
     invoke<Record<string, unknown>>("set_automation_enabled", {
       automationId,
@@ -487,7 +491,11 @@ export const api = {
   listAutomationRuns: (automationId: string) =>
     invoke<Record<string, unknown>[]>("list_automation_runs", { automationId }),
   runAutomationNow: (automationId: string) =>
-    invoke<string>("run_automation_now", { automationId }),
+    invoke<{
+      status: string;
+      summary: string;
+      errorCategory?: string | null;
+    }>("run_automation_now", { automationId }),
   listWorkspaceBackgrounds: (workspaceId?: string | null) =>
     invoke<Record<string, unknown>[]>("list_workspace_backgrounds", {
       workspaceId: workspaceId ?? null,

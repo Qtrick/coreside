@@ -1,8 +1,18 @@
-use super::models::{AutomationAction, AutomationTrigger};
+use super::models::{parse_trigger_timezone, AutomationAction, AutomationTrigger};
 
 pub const MIN_INTERVAL_MINUTES: u32 = 5;
 pub const MIN_AI_INTERVAL_MINUTES: u32 = 30;
 pub const MAX_CONSECUTIVE_FAILURES: i64 = 5;
+/// Keep in sync with ai_exec::MAX_PROMPT_CHARS and frontend parseAction.
+pub const MAX_AI_PROMPT_CHARS: usize = 4_000;
+
+fn trigger_timezone(trigger: &AutomationTrigger) -> Option<&str> {
+    match trigger {
+        AutomationTrigger::Interval { timezone, .. }
+        | AutomationTrigger::Daily { timezone, .. }
+        | AutomationTrigger::Weekly { timezone, .. } => timezone.as_deref(),
+    }
+}
 
 pub fn validate_automation(
     name: &str,
@@ -13,6 +23,7 @@ pub fn validate_automation(
     if name.trim().is_empty() {
         return Err("Automation name is required".into());
     }
+    parse_trigger_timezone(trigger_timezone(trigger))?;
     match trigger {
         AutomationTrigger::Interval {
             interval_minutes, ..
@@ -47,6 +58,11 @@ pub fn validate_automation(
             }
             if prompt.trim().is_empty() {
                 return Err("AI prompt cannot be empty".into());
+            }
+            if prompt.chars().count() > MAX_AI_PROMPT_CHARS {
+                return Err(format!(
+                    "AI prompt exceeds the allowed length ({MAX_AI_PROMPT_CHARS} characters)"
+                ));
             }
         }
         AutomationAction::SetToolStateValue { tool_id, path, .. } => {
@@ -93,5 +109,24 @@ mod tests {
             false,
         );
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_ai_prompt() {
+        let prompt = "x".repeat(MAX_AI_PROMPT_CHARS + 1);
+        let err = validate_automation(
+            "review",
+            &AutomationTrigger::Daily {
+                time: "08:00".into(),
+                timezone: None,
+            },
+            &AutomationAction::AiPrompt {
+                prompt,
+                conversation_id: None,
+            },
+            true,
+        )
+        .unwrap_err();
+        assert!(err.contains("length"));
     }
 }

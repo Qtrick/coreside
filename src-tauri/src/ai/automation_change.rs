@@ -7,7 +7,7 @@ use crate::automations::{
 };
 
 /// Untrusted model proposal. Never schedules until the user confirms via
-/// `upsert_automation`.
+/// `confirm_automation_change` / `upsert_automation`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AutomationChangePayload {
@@ -27,14 +27,15 @@ pub struct AutomationChangePayload {
 impl AutomationChangePayload {
     /// Structural + product gates for chat proposals.
     pub fn validate(&self) -> Result<(), String> {
-        let requires_ai = self.requires_ai.unwrap_or(false);
-        if matches!(self.action, AutomationAction::AiPrompt { .. }) || requires_ai {
-            return Err(
-                "chat automation proposals cannot use AI-backed actions yet; use a deterministic action"
-                    .into(),
-            );
+        let requires_ai = self
+            .requires_ai
+            .unwrap_or_else(|| matches!(self.action, AutomationAction::AiPrompt { .. }));
+        if matches!(self.action, AutomationAction::AiPrompt { .. }) && !requires_ai {
+            return Err("AI prompt actions must set requiresAi".into());
         }
-        validate_automation(&self.name, &self.trigger, &self.action, false)?;
+        // Chat may propose AI read/summarize prompts; executor enforces budgets,
+        // credentials, recovery, and no recursive scheduling.
+        validate_automation(&self.name, &self.trigger, &self.action, requires_ai)?;
         if let AutomationTrigger::Weekly { weekday, .. } = &self.trigger {
             if *weekday > 6 {
                 return Err("weekday must be 0 (Monday) through 6 (Sunday)".into());
@@ -45,7 +46,34 @@ impl AutomationChangePayload {
                 return Err("changeSummary is too long".into());
             }
         }
+        if let Some(app_id) = &self.application_id {
+            if app_id.trim().is_empty() {
+                return Err("applicationId cannot be empty".into());
+            }
+        }
         Ok(())
+    }
+
+    pub fn effective_requires_ai(&self) -> bool {
+        self.requires_ai
+            .unwrap_or_else(|| matches!(self.action, AutomationAction::AiPrompt { .. }))
+    }
+
+    /// Schedule-relevant equality for confirm binding (ignores changeSummary wording).
+    /// Prevents bait-and-switch if message metadata is rewritten after the user reviewed it.
+    pub fn same_confirm_intent(&self, other: &Self) -> bool {
+        let norm_app = |id: &Option<String>| {
+            id.as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        };
+        self.name.trim() == other.name.trim()
+            && self.trigger == other.trigger
+            && self.action == other.action
+            && self.effective_requires_ai() == other.effective_requires_ai()
+            && norm_app(&self.application_id) == norm_app(&other.application_id)
+            && self.missed_run_policy == other.missed_run_policy
     }
 }
 
@@ -75,24 +103,44 @@ mod tests {
     }
 
     #[test]
-    fn rejects_ai_prompt_from_chat() {
+    fn accepts_ai_prompt_from_chat_when_requires_ai() {
         let payload = AutomationChangePayload {
             name: "Morning review".into(),
             trigger: AutomationTrigger::Daily {
                 time: "08:00".into(),
-                timezone: None,
+                timezone: Some("America/New_York".into()),
             },
             action: AutomationAction::AiPrompt {
-                prompt: "Summarize my tasks".into(),
+                prompt: "Summarize my unfinished study tasks".into(),
                 conversation_id: None,
             },
             requires_ai: Some(true),
+            application_id: Some("app-study".into()),
+            change_summary: Some("Weekday study review".into()),
+            missed_run_policy: None,
+        };
+        assert!(payload.validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_timezone() {
+        let payload = AutomationChangePayload {
+            name: "Morning review".into(),
+            trigger: AutomationTrigger::Daily {
+                time: "08:00".into(),
+                timezone: Some("Not/Real".into()),
+            },
+            action: AutomationAction::SetWorkspaceBackground {
+                workspace_id: DEFAULT_WORKSPACE_ID.into(),
+                preset_id: "preset-1".into(),
+            },
+            requires_ai: Some(false),
             application_id: None,
             change_summary: None,
             missed_run_policy: None,
         };
-        let err = payload.validate().expect_err("ai prompt blocked");
-        assert!(err.contains("AI-backed"));
+        let err = payload.validate().expect_err("bad tz blocked");
+        assert!(err.contains("timezone") || err.contains("Timezone"));
     }
 
     #[test]
@@ -115,5 +163,34 @@ mod tests {
         };
         let err = payload.validate().expect_err("weekday blocked");
         assert!(err.contains("weekday"));
+    }
+
+    #[test]
+    fn same_confirm_intent_ignores_summary_and_requires_ai_default() {
+        let a = AutomationChangePayload {
+            name: " Review ".into(),
+            trigger: AutomationTrigger::Daily {
+                time: "08:00".into(),
+                timezone: None,
+            },
+            action: AutomationAction::AiPrompt {
+                prompt: "Summarize".into(),
+                conversation_id: None,
+            },
+            requires_ai: None,
+            application_id: Some(" app-1 ".into()),
+            change_summary: Some("wording A".into()),
+            missed_run_policy: None,
+        };
+        let b = AutomationChangePayload {
+            name: "Review".into(),
+            trigger: a.trigger.clone(),
+            action: a.action.clone(),
+            requires_ai: Some(true),
+            application_id: Some("app-1".into()),
+            change_summary: Some("wording B".into()),
+            missed_run_policy: None,
+        };
+        assert!(a.same_confirm_intent(&b));
     }
 }

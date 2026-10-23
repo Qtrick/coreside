@@ -240,6 +240,7 @@ permissions = [
   "allow-update-theme-preset-from-current",
   "allow-upsert-added-setting",
   "allow-upsert-automation",
+  "allow-confirm-automation-change",
   "allow-resolve-automation-change",
   "allow-upsert-provider-connection",
   "allow-upsert-tutorial-progress",

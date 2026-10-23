@@ -137,6 +137,118 @@ describe("resolveActionEventsAfterProposal", () => {
     expect(resolved[0]?.status).toBe("completed");
     expect(resolved[0]?.eventType).toBe("change_applied");
   });
+
+  it("resolves automation proposals independently of kernel status", () => {
+    const resolved = resolveActionEventsAfterProposal(
+      [
+        {
+          id: "1",
+          label: "Proposing an automation",
+          status: "awaitingApproval",
+          eventType: "automation_proposed",
+        },
+        {
+          id: "2",
+          label: "Proposed a change",
+          status: "awaitingApproval",
+          eventType: "change_proposed",
+        },
+      ],
+      null,
+      "discarded",
+    );
+    expect(resolved[0]?.status).toBe("cancelled");
+    expect(resolved[1]?.status).toBe("awaitingApproval");
+  });
+
+  it("does not resolve automation rows when only the kernel proposal is applied", () => {
+    const resolved = resolveActionEventsAfterProposal(
+      [
+        {
+          id: "1",
+          label: "Proposing an automation",
+          status: "awaitingApproval",
+          eventType: "automation_proposed",
+        },
+        {
+          id: "2",
+          label: "Proposed a change",
+          status: "awaitingApproval",
+          eventType: "change_proposed",
+        },
+      ],
+      "applied",
+      null,
+    );
+    expect(resolved[0]?.status).toBe("awaitingApproval");
+    expect(resolved[0]?.eventType).toBe("automation_proposed");
+    expect(resolved[1]?.status).toBe("completed");
+    expect(resolved[1]?.eventType).toBe("change_applied");
+  });
+
+  it("marks applied automation as scheduled without touching kernel awaiting rows", () => {
+    const resolved = resolveActionEventsAfterProposal(
+      [
+        {
+          id: "1",
+          label: "Proposing an automation",
+          status: "awaitingApproval",
+          eventType: "automation_proposed",
+        },
+        {
+          id: "2",
+          label: "Proposed a change",
+          status: "awaitingApproval",
+          eventType: "tool_change_proposed",
+        },
+      ],
+      null,
+      "applied",
+    );
+    expect(resolved[0]?.status).toBe("completed");
+    expect(resolved[0]?.eventType).toBe("automation_scheduled");
+    expect(resolved[1]?.status).toBe("awaitingApproval");
+    expect(resolved[1]?.eventType).toBe("tool_change_proposed");
+  });
+
+  it("does not claim Built it for an automation proposal alone", () => {
+    expect(
+      actionTimelineSummary([
+        {
+          id: "1",
+          label: "Proposing an automation",
+          status: "completed",
+          eventType: "automation_proposed",
+        },
+      ]).title,
+    ).toBe("Automation scheduled");
+  });
+
+  it("summarizes awaiting automation proposal without Built it", () => {
+    expect(
+      actionTimelineSummary([
+        {
+          id: "1",
+          label: "Proposing an automation",
+          status: "awaitingApproval",
+          eventType: "automation_proposed",
+        },
+      ]).title,
+    ).toBe("Automation proposed");
+  });
+
+  it("titles automation_scheduled as Automation scheduled", () => {
+    expect(
+      actionTimelineSummary([
+        {
+          id: "1",
+          label: "Automation scheduled",
+          status: "completed",
+          eventType: "automation_scheduled",
+        },
+      ]).title,
+    ).toBe("Automation scheduled");
+  });
 });
 
 describe("duration helpers", () => {

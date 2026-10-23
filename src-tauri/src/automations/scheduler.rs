@@ -8,8 +8,10 @@ use parking_lot::Mutex;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
+use super::ai_exec::{finish_ai_prepare, run_prepared_ai, snapshot_ai_prepare};
 use super::executor::execute_automation;
-use super::models::{compute_next_after, MissedRunPolicy};
+use super::models::{compute_next_after, Automation, AutomationAction, MissedRunPolicy};
+use super::outcome::AutomationRunOutcome;
 use super::validation::MAX_CONSECUTIVE_FAILURES;
 use crate::db::{self, Database};
 use crate::state::AppState;
@@ -170,6 +172,11 @@ fn catch_up_missed(db: &mut Database, handle: &SchedulerHandle) -> Result<(), db
             }
             continue;
         }
+        // AI catch-up needs the unlocked ticker path so provider I/O does not
+        // hold the profile DB mutex during startup.
+        if matches!(automation.action, AutomationAction::AiPrompt { .. }) {
+            continue;
+        }
         if handle.try_begin(&automation.id) {
             if let Err(e) = run_one_db(db, &automation.id) {
                 tracing::error!(automation_id = %automation.id, error = %e, "failed to run automation during catch-up");
@@ -190,16 +197,24 @@ fn pending_approval_total(app: &AppHandle) -> i64 {
 }
 
 fn run_one(state: &AppState, automation_id: &str) {
-    let mut db = state.db.lock();
-    if let Err(e) = run_one_db(&mut db, automation_id) {
+    if let Err(e) = run_one_releasing_lock_for_ai(state, automation_id) {
         tracing::error!(automation_id = %automation_id, error = %e, "automation execution failed");
     }
 }
 
-fn run_one_db(db: &mut Database, automation_id: &str) -> Result<(), db::DbError> {
+struct ClaimedRun {
+    automation: Automation,
+    run_id: String,
+    started: String,
+    next: Option<String>,
+    schedulable: bool,
+    scheduled_at: Option<String>,
+}
+
+fn claim_run(db: &mut Database, automation_id: &str) -> Result<Option<ClaimedRun>, db::DbError> {
     let automation = db::get_automation(db, automation_id)?;
     if !automation.enabled {
-        return Ok(());
+        return Ok(None);
     }
     let started_dt = Utc::now();
     let started = started_dt.to_rfc3339();
@@ -214,6 +229,7 @@ fn run_one_db(db: &mut Database, automation_id: &str) -> Result<(), db::DbError>
             "automation trigger has no next run; disabling"
         );
     }
+    let scheduled_at = automation.next_run_at.clone();
     db::update_automation_schedule(
         db,
         automation_id,
@@ -223,45 +239,54 @@ fn run_one_db(db: &mut Database, automation_id: &str) -> Result<(), db::DbError>
         automation.consecutive_failures,
         schedulable && automation.enabled,
     )?;
+    Ok(Some(ClaimedRun {
+        automation,
+        run_id,
+        started,
+        next,
+        schedulable,
+        scheduled_at,
+    }))
+}
 
-    let result = execute_automation(db, &automation);
-    let (status, summary, err_cat, failures, enabled) = match result {
-        Ok(summary) => ("success", Some(summary), None, 0_i64, true),
-        Err(e) => {
-            let failures = automation.consecutive_failures + 1;
-            let enabled = failures < MAX_CONSECUTIVE_FAILURES;
-            (
-                "error",
-                Some(e.to_string()),
-                Some("execution_error".to_string()),
-                failures,
-                enabled,
-            )
-        }
+fn finalize_run(
+    db: &mut Database,
+    claim: &ClaimedRun,
+    outcome: &AutomationRunOutcome,
+) -> Result<(), db::DbError> {
+    let failures = if outcome.counts_as_failure() {
+        claim.automation.consecutive_failures + 1
+    } else if outcome.status == "success" {
+        0_i64
+    } else {
+        claim.automation.consecutive_failures
+    };
+    let keep_enabled = if outcome.counts_as_failure() {
+        failures < MAX_CONSECUTIVE_FAILURES
+    } else {
+        true
     };
     let completed = Utc::now().to_rfc3339();
     db::insert_automation_run(
         db,
-        &run_id,
-        automation_id,
-        automation.next_run_at.as_deref(),
-        &started,
+        &claim.run_id,
+        &claim.automation.id,
+        claim.scheduled_at.as_deref(),
+        &claim.started,
         Some(&completed),
-        status,
-        summary.as_deref(),
-        err_cat.as_deref(),
+        &outcome.status,
+        Some(outcome.summary.as_str()),
+        outcome.error_category.as_deref(),
     )?;
     db::update_automation_schedule(
         db,
-        automation_id,
-        next.as_deref(),
+        &claim.automation.id,
+        claim.next.as_deref(),
         Some(&completed),
-        Some(status),
+        Some(&outcome.status),
         failures,
-        schedulable && enabled && automation.enabled,
+        claim.schedulable && keep_enabled && claim.automation.enabled,
     )?;
-    // Bound automation_runs growth: keep the newest 100 rows per automation.
-    // Nested SELECT materializes the keep-set so SQLite allows same-table DELETE.
     let _ = db.conn().execute(
         "DELETE FROM automation_runs WHERE automation_id = ?1 AND id NOT IN (
             SELECT id FROM (
@@ -269,28 +294,88 @@ fn run_one_db(db: &mut Database, automation_id: &str) -> Result<(), db::DbError>
                 ORDER BY created_at DESC LIMIT 100
             )
          )",
-        rusqlite::params![automation_id],
+        rusqlite::params![claim.automation.id],
     );
     Ok(())
+}
+
+fn execute_claimed(db: &mut Database, claim: &ClaimedRun) -> AutomationRunOutcome {
+    match execute_automation(db, &claim.automation) {
+        Ok(outcome) => outcome,
+        Err(e) => AutomationRunOutcome::error(e.to_string(), "execution_error"),
+    }
+}
+
+fn execute_ai_unlocked(state: &AppState, claim: &ClaimedRun) -> AutomationRunOutcome {
+    let AutomationAction::AiPrompt { prompt, .. } = &claim.automation.action else {
+        return AutomationRunOutcome::error("Expected AI prompt action", "validation");
+    };
+    if !claim.automation.requires_ai {
+        return AutomationRunOutcome::error(
+            "AI prompt actions must set requiresAi",
+            "validation",
+        );
+    }
+    // DB snapshot only under the mutex; keyring + provider I/O run unlocked.
+    let snapshot = {
+        let db = state.db.lock();
+        snapshot_ai_prepare(&db, &claim.automation, prompt)
+    };
+    match snapshot.and_then(finish_ai_prepare) {
+        Ok(prepared) => run_prepared_ai(prepared),
+        Err(outcome) => outcome,
+    }
+}
+
+/// Production path: release the DB mutex before provider I/O for AI automations.
+fn run_one_releasing_lock_for_ai(
+    state: &AppState,
+    automation_id: &str,
+) -> Result<AutomationRunOutcome, db::DbError> {
+    let claim = {
+        let mut db = state.db.lock();
+        claim_run(&mut db, automation_id)?
+    };
+    let Some(claim) = claim else {
+        return Ok(AutomationRunOutcome::skipped("Automation is disabled"));
+    };
+    let outcome = if matches!(claim.automation.action, AutomationAction::AiPrompt { .. }) {
+        execute_ai_unlocked(state, &claim)
+    } else {
+        let mut db = state.db.lock();
+        execute_claimed(&mut db, &claim)
+    };
+    {
+        let mut db = state.db.lock();
+        finalize_run(&mut db, &claim, &outcome)?;
+    }
+    Ok(outcome)
+}
+
+/// Single-lock path for tests and non-AI catch-up (must not call provider I/O).
+fn run_one_db(db: &mut Database, automation_id: &str) -> Result<AutomationRunOutcome, db::DbError> {
+    let Some(claim) = claim_run(db, automation_id)? else {
+        return Ok(AutomationRunOutcome::skipped("Automation is disabled"));
+    };
+    let outcome = execute_claimed(db, &claim);
+    finalize_run(db, &claim, &outcome)?;
+    Ok(outcome)
 }
 
 pub fn run_now(
     state: &AppState,
     automation_id: &str,
     handle: &SchedulerHandle,
-) -> Result<String, String> {
+) -> Result<AutomationRunOutcome, String> {
     if !state.profile_ready() {
         return Err("Automations are unavailable until Recovery finishes.".into());
     }
     if !handle.try_begin(automation_id) {
-        return Err("Automation is already running".into());
+        return Ok(AutomationRunOutcome::busy());
     }
-    let mut db = state.db.lock();
-    let result = run_one_db(&mut db, automation_id);
+    let result = run_one_releasing_lock_for_ai(state, automation_id);
     handle.end(automation_id);
-    result
-        .map(|_| "Automation run completed".into())
-        .map_err(|e| e.to_string())
+    result.map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -348,5 +433,113 @@ mod tests {
             runs.is_empty(),
             "paused catch-up must not execute automations"
         );
+    }
+
+    #[test]
+    fn awaiting_approval_does_not_increment_consecutive_failures() {
+        use crate::application_kernel::registered_actions::testing::seed_application;
+        use serde_json::json;
+
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("await-fail.db")).unwrap();
+        db::ensure_default_workspace(&db).unwrap();
+        const APP: &str = "app-auto-park";
+        seed_application(&mut db, APP, &["tool_state.set"]);
+
+        let past = (Utc::now() - chrono::Duration::minutes(10)).to_rfc3339();
+        let auto = Automation {
+            id: "auto-park".into(),
+            workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+            owner_tool_id: None,
+            application_id: Some(APP.into()),
+            name: "park for approval".into(),
+            enabled: true,
+            trigger: AutomationTrigger::Interval {
+                interval_minutes: 60,
+                timezone: None,
+            },
+            action: AutomationAction::SetToolStateValue {
+                tool_id: APP.into(),
+                path: "count".into(),
+                value: json!(1),
+            },
+            requires_ai: false,
+            provider_connection_id: None,
+            missed_run_policy: MissedRunPolicy::RunOnce,
+            next_run_at: Some(past.clone()),
+            last_run_at: None,
+            last_status: None,
+            consecutive_failures: 2,
+            waiting_approval: false,
+            permission_ready: true,
+            created_at: past.clone(),
+            updated_at: past,
+        };
+        db::upsert_automation(&mut db, &auto).unwrap();
+
+        let outcome = run_one_db(&mut db, "auto-park").unwrap();
+        assert_eq!(
+            outcome.status, "awaiting_approval",
+            "away tool_state.set without standing grant must park: {}",
+            outcome.summary
+        );
+
+        let after = db::get_automation(&db, "auto-park").unwrap();
+        assert_eq!(
+            after.consecutive_failures, 2,
+            "awaiting_approval must not escalate consecutive failures"
+        );
+        assert!(
+            after.enabled,
+            "parked approval must not disable the automation"
+        );
+        assert_eq!(after.last_status.as_deref(), Some("awaiting_approval"));
+        assert!(after.waiting_approval);
+    }
+
+    #[test]
+    fn real_failure_increments_consecutive_failures() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("real-fail.db")).unwrap();
+        db::ensure_default_workspace(&db).unwrap();
+        let past = (Utc::now() - chrono::Duration::minutes(10)).to_rfc3339();
+        let auto = Automation {
+            id: "auto-fail".into(),
+            workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+            owner_tool_id: None,
+            application_id: None,
+            name: "missing preset".into(),
+            enabled: true,
+            trigger: AutomationTrigger::Interval {
+                interval_minutes: 60,
+                timezone: None,
+            },
+            action: AutomationAction::SetWorkspaceBackground {
+                workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+                preset_id: "does-not-exist".into(),
+            },
+            requires_ai: false,
+            provider_connection_id: None,
+            missed_run_policy: MissedRunPolicy::RunOnce,
+            next_run_at: Some(past.clone()),
+            last_run_at: None,
+            last_status: None,
+            consecutive_failures: 1,
+            waiting_approval: false,
+            permission_ready: true,
+            created_at: past.clone(),
+            updated_at: past,
+        };
+        db::upsert_automation(&mut db, &auto).unwrap();
+
+        let outcome = run_one_db(&mut db, "auto-fail").unwrap();
+        assert!(
+            outcome.counts_as_failure(),
+            "missing preset should be a failure: {} / {:?}",
+            outcome.status,
+            outcome.error_category
+        );
+        let after = db::get_automation(&db, "auto-fail").unwrap();
+        assert_eq!(after.consecutive_failures, 2);
     }
 }

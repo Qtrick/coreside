@@ -2,7 +2,7 @@
  * Chat → automation proposal contract.
  *
  * Mirrors settings/kernel proposals: the agent proposes; the user confirms;
- * Rust upsert_automation + scheduler own persistence and execution.
+ * Rust confirm_automation_change + scheduler own persistence and execution.
  * Never auto-schedule from the model without confirmation.
  */
 
@@ -27,6 +27,11 @@ export type AutomationProposalAction =
       toolId: string;
       path: string;
       value: unknown;
+    }
+  | {
+      type: "ai_prompt";
+      prompt: string;
+      conversationId?: string | null;
     };
 
 export type AutomationChangeProposal = {
@@ -36,7 +41,6 @@ export type AutomationChangeProposal = {
   requiresAi?: boolean;
   applicationId?: string | null;
   changeSummary?: string | null;
-  /** When true, chat proposals must not use ai_prompt (executor deferred). */
   scheduled?: boolean;
 };
 
@@ -51,6 +55,7 @@ const SAFE_ACTION_TYPES = new Set([
   "cycle_workspace_backgrounds",
   "set_workspace_background",
   "set_tool_state_value",
+  "ai_prompt",
 ]);
 
 function asRecord(raw: unknown): Record<string, unknown> | null {
@@ -131,6 +136,17 @@ function parseAction(raw: unknown): AutomationProposalAction | null {
       value: a.value ?? null,
     };
   }
+  if (a.type === "ai_prompt") {
+    const prompt = String(a.prompt ?? "").trim();
+    if (!prompt || prompt.length > 4000) return null;
+    const conversationIdRaw = a.conversationId ?? a.conversation_id;
+    return {
+      type: "ai_prompt",
+      prompt,
+      conversationId:
+        typeof conversationIdRaw === "string" ? conversationIdRaw : null,
+    };
+  }
   return null;
 }
 
@@ -145,15 +161,16 @@ export function parseAutomationChange(
   const trigger = parseTrigger(row.trigger);
   const action = parseAction(row.action);
   if (!trigger || !action) return null;
-  if (row.requiresAi === true || row.requires_ai === true) {
-    // Chat path refuses AI-backed automations until executor support lands.
-    return null;
-  }
+  const requiresAi =
+    row.requiresAi === true ||
+    row.requires_ai === true ||
+    action.type === "ai_prompt";
+  if (action.type === "ai_prompt" && !requiresAi) return null;
   return {
     name,
     trigger,
     action,
-    requiresAi: false,
+    requiresAi,
     applicationId:
       typeof row.applicationId === "string"
         ? row.applicationId
@@ -166,7 +183,8 @@ export function parseAutomationChange(
         : typeof row.change_summary === "string"
           ? row.change_summary
           : null,
-    scheduled: false,
+    // Schedulable after user confirm (status still lives on message metadata).
+    scheduled: true,
   };
 }
 
@@ -182,15 +200,19 @@ export function automationChangeStatusFromMetadata(
 }
 
 export function describeAutomationTrigger(trigger: AutomationProposalTrigger): string {
+  const tz =
+    trigger.timezone && trigger.timezone.trim()
+      ? ` (${trigger.timezone.trim()})`
+      : " (device timezone)";
   if (trigger.type === "interval") {
-    return `Every ${trigger.intervalMinutes} minutes`;
+    return `Every ${trigger.intervalMinutes} minutes${tz}`;
   }
   if (trigger.type === "daily") {
-    return `Daily at ${trigger.time}`;
+    return `Daily at ${trigger.time}${tz}`;
   }
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const day = days[trigger.weekday] ?? `day ${trigger.weekday}`;
-  return `Weekly on ${day} at ${trigger.time}`;
+  return `Weekly on ${day} at ${trigger.time}${tz}`;
 }
 
 export function describeAutomationAction(action: AutomationProposalAction): string {
@@ -199,6 +221,11 @@ export function describeAutomationAction(action: AutomationProposalAction): stri
   }
   if (action.type === "set_workspace_background") {
     return "Set workspace wallpaper";
+  }
+  if (action.type === "ai_prompt") {
+    const short =
+      action.prompt.length > 80 ? `${action.prompt.slice(0, 77)}…` : action.prompt;
+    return `AI summary: ${short}`;
   }
   return `Update ${action.toolId} (${action.path})`;
 }
@@ -241,12 +268,18 @@ export function toUpsertAutomationInput(
             workspaceId: proposal.action.workspaceId,
             presetId: proposal.action.presetId,
           }
-        : {
-            type: "set_tool_state_value",
-            toolId: proposal.action.toolId,
-            path: proposal.action.path,
-            value: proposal.action.value,
-          };
+        : proposal.action.type === "ai_prompt"
+          ? {
+              type: "ai_prompt",
+              prompt: proposal.action.prompt,
+              conversationId: proposal.action.conversationId ?? undefined,
+            }
+          : {
+              type: "set_tool_state_value",
+              toolId: proposal.action.toolId,
+              path: proposal.action.path,
+              value: proposal.action.value,
+            };
 
   // Stable id per source message so re-confirm after reload upserts, not duplicates.
   const sourceMessageId = options?.sourceMessageId?.trim();
@@ -256,7 +289,7 @@ export function toUpsertAutomationInput(
     enabled: true,
     trigger,
     action,
-    requiresAi: false,
+    requiresAi: Boolean(proposal.requiresAi || proposal.action.type === "ai_prompt"),
     applicationId: proposal.applicationId ?? undefined,
   };
 }

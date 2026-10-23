@@ -211,8 +211,19 @@ export function actionTimelineSummary(events: AgentActionEntry[]): {
     return { title: "Working", tone: "active" };
   }
   const statuses = events.map((e) => normalizeActionStatus(e.status));
+  const types = events.map((e) => (e.eventType ?? "").trim());
   if (statuses.some((s) => s === "running" || s === "pending")) {
     return { title: "Working on your request", tone: "active" };
+  }
+  // Automation proposals before generic awaitingApproval so the title is specific.
+  if (types.some((t) => t === "automation_proposed" || t === "automation_scheduled")) {
+    if (statuses.some((s) => s === "awaitingApproval")) {
+      return { title: "Automation proposed", tone: "neutral" };
+    }
+    if (statuses.some((s) => s === "cancelled")) {
+      return { title: "Automation discarded", tone: "neutral" };
+    }
+    return { title: "Automation scheduled", tone: "success" };
   }
   if (statuses.some((s) => s === "awaitingApproval")) {
     return { title: "Ready for your review", tone: "neutral" };
@@ -223,15 +234,18 @@ export function actionTimelineSummary(events: AgentActionEntry[]): {
   if (statuses.every((s) => s === "cancelled")) {
     return { title: "Stopped", tone: "neutral" };
   }
-  const types = events.map((e) => (e.eventType ?? "").trim());
-  if (types.some((t) => t === "change_applied" || t === "tool_change_proposed")) {
+  // Proposal-only turns: do not claim the change was built or the automation ran.
+  if (types.some((t) => t === "change_applied")) {
     return { title: "Built it", tone: "success" };
+  }
+  if (types.some((t) => t === "tool_change_proposed")) {
+    return { title: "Change ready for review", tone: "neutral" };
   }
   if (types.some((t) => t.includes("search") || t === "tool_completed")) {
     return { title: "Finished researching", tone: "success" };
   }
   if (types.some((t) => t.includes("automation"))) {
-    return { title: "Automation ready", tone: "success" };
+    return { title: "Automation updated", tone: "success" };
   }
   return { title: "Done", tone: "success" };
 }
@@ -239,25 +253,48 @@ export function actionTimelineSummary(events: AgentActionEntry[]): {
 /** Capability icon hint for timeline rows (CSS class suffix). */
 /**
  * After the user decides a proposal, message metadata still has awaitingApproval
- * on change_proposed rows. Prefer kernelProposalStatus over stale step status.
+ * on change_proposed / automation_proposed rows. Correlate by event family so an
+ * automation decision does not falsely resolve an unrelated kernel proposal.
  */
 export function resolveActionEventsAfterProposal(
   events: AgentActionEntry[],
   kernelProposalStatus: string | undefined | null,
+  automationChangeStatus?: string | null,
 ): AgentActionEntry[] {
-  const status = (kernelProposalStatus ?? "").toLowerCase();
-  if (status !== "applied" && status !== "discarded" && status !== "rejected") {
-    return events;
-  }
-  const nextStatus: ActionEventStatus =
-    status === "applied" ? "completed" : "cancelled";
+  const kernel = (kernelProposalStatus ?? "").toLowerCase();
+  const automation = (automationChangeStatus ?? "").toLowerCase();
   return events.map((e) => {
     if (normalizeActionStatus(e.status) !== "awaitingApproval") return e;
+    const ty = (e.eventType ?? "").toLowerCase();
+    const isAutomation = ty.includes("automation");
+    const isKernelChange =
+      ty.includes("change") ||
+      ty === "tool_change_proposed" ||
+      ty.includes("propos");
+
+    if (isAutomation) {
+      if (automation !== "applied" && automation !== "discarded" && automation !== "rejected") {
+        return e;
+      }
+      return {
+        ...e,
+        status: (automation === "applied" ? "completed" : "cancelled") as ActionEventStatus,
+        eventType:
+          automation === "applied" ? "automation_scheduled" : e.eventType,
+      };
+    }
+
+    if (!isKernelChange) return e;
+    if (kernel !== "applied" && kernel !== "discarded" && kernel !== "rejected") {
+      return e;
+    }
+    const nextStatus: ActionEventStatus =
+      kernel === "applied" ? "completed" : "cancelled";
     return {
       ...e,
       status: nextStatus,
       eventType:
-        status === "applied"
+        kernel === "applied"
           ? e.eventType === "tool_change_proposed"
             ? "tool_change_proposed"
             : "change_applied"

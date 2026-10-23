@@ -41,10 +41,7 @@ import {
   type ActionLogMode,
   type AgentActionEntry,
 } from "@/lib/action-log";
-import {
-  parseAutomationChange,
-  toUpsertAutomationInput,
-} from "@/lib/automation-proposal";
+import { parseAutomationChange } from "@/lib/automation-proposal";
 import { validateToolDefinition } from "@/lib/tool-schema";
 import { INTERFACE_TRANSPARENCY_DEFAULT } from "@/lib/interface-transparency";
 import {
@@ -3171,16 +3168,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (!pending || get().automationProposalApplying) return;
     set({ automationProposalApplying: true, sendError: null });
     try {
-      await api.upsertAutomation(
-        toUpsertAutomationInput(pending.proposal, {
-          sourceMessageId: pending.messageId,
-        }),
+      const result = await api.confirmAutomationChange(
+        pending.messageId,
+        pending.proposal,
       );
-      try {
-        await api.resolveAutomationChange(pending.messageId, "applied");
-      } catch {
-        // Scheduling succeeded; metadata mark is best-effort for reload UX.
-      }
+      const automationId =
+        typeof result.automation?.id === "string"
+          ? result.automation.id
+          : `auto-chat-${pending.messageId}`;
       set({
         pendingAutomationChange: null,
         automationProposalApplying: false,
@@ -3191,6 +3186,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
                 metadata: {
                   ...(m.metadata ?? {}),
                   automationChangeStatus: "applied",
+                  automationId,
                   pending: false,
                 },
               }

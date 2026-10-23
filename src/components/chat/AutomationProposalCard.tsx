@@ -66,12 +66,18 @@ export function AutomationProposalCard({
         </li>
         <li>{describeAutomationTrigger(proposal.trigger)}</li>
         <li>{describeAutomationAction(proposal.action)}</li>
+        {proposal.requiresAi || proposal.action.type === "ai_prompt" ? (
+          <li>Uses your connected AI provider (read-only summary)</li>
+        ) : null}
+        {proposal.applicationId ? (
+          <li>Scoped to application {proposal.applicationId}</li>
+        ) : null}
         <li>Runs only while Coreside is open</li>
       </ul>
       {resolved ? (
         <p className="muted" role="status" style={{ margin: "0.65rem 0 0" }}>
           {status === "applied"
-            ? "Scheduled."
+            ? "Scheduled. Open Automations to pause, run, or review history."
             : status === "discarded"
               ? "Discarded."
               : "Could not schedule."}

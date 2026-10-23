@@ -218,6 +218,7 @@ pub fn run() {
             commands::list_automations,
             commands::upsert_automation,
             commands::resolve_automation_change,
+            commands::confirm_automation_change,
             commands::set_automation_enabled,
             commands::delete_automation,
             commands::list_automation_runs,
