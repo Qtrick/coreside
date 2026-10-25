@@ -16,14 +16,14 @@ Interactive `send_message` takes a required Tauri `Channel<AgentTurnEvent>` (`on
 | --- | --- | --- |
 | `text` | Channel only — **never** global emit | Skipped (privacy) |
 | `action` / `error` / `operation` / `previewSurface` | Channel only — **never** global emit | **Dropped** (log at debug); no global leak |
-| `sync` / `conflict` | Prefer `subscribe_conversation_sync` fan-out; if any subscriber delivered, **skip** invoke Channel (no double apply). Else invoke Channel if present. Global `app.emit("agent-turn")` **only** when neither scoped path succeeded | Same ordering; global only if no successful scoped send |
+| `sync` / `conflict` | Prefer `subscribe_conversation_sync` fan-out; if any subscriber delivered, **skip** invoke Channel (no double apply). Else invoke Channel if present. When neither succeeds: Sync relies on existing `surface.transaction_applied` log rows; Conflict persists `surface.conflict` for catch-up — **never** `app.emit("agent-turn")` | Same ordering |
 
 Frontend:
 
 - `api.sendMessage` creates `@tauri-apps/api/core` `Channel` and passes `onEvent`.
 - `app-store.sendMessage` applies Channel text/action/error/operation/preview **and** Sync/Conflict for that send.
 - `app-store` also calls `subscribeConversationSync` when the active conversation is set (and tool windows subscribe when `surf-{toolId}` resolves a `conversationId`).
-- `listenAgentTurn` remains as defense-in-depth for **residual** global Sync/Conflict only; private kinds are ignored.
+- `listenAgentTurn` remains for legacy/defense-in-depth only; Rust no longer emits Sync/Conflict on the global bus. Catch-up uses `conversation_event_log` + visibility reconcile.
 - Tool-window bootstrap already ignores text/action/error/operation — keep that (eavesdropping denial).
 
 ### Sync subscriber ACL
@@ -54,7 +54,7 @@ Channel privacy is unchanged: Text never rides the global `agent-turn` bus. Acti
 
 ## What still uses the global bus
 
-- Sync / Conflict **only** when scoped delivery failed (zero successful sync-subscriber sends **and** no invoke Channel success, or missing `conversationId`). Documented residual for tool windows that have not resolved a conversation yet. When any sync subscriber delivers, the global bus must not emit.
+- **Nothing for turn Sync/Conflict/Text/Action/Error/Operation.** Missed Sync is recovered via `conversation_event_log` catch-up (visibility/focus reconcile + subscribe path).
 
 Sync payloads include `conversationId`, `surfaceIds`, `toolIds`, and optional `applicationId`. Frontend `shouldApplyAgentTurnSync` skips reloads when the target does not match the active conversation / tool / surfaces. `shouldShowAppConflict` keeps conflict banners conversation-scoped.
 
@@ -63,7 +63,7 @@ Sync payloads include `conversationId`, `surfaceIds`, `toolIds`, and optional `a
 - Concurrent multi-turn UI binding beyond one active turn per conversation
 - Drop cumulative `text` entirely once reconnect snapshot / resume from last sequence exists
 - Reconnect snapshot / resume from last sequence
-- Tool windows without a resolvable `surf-{toolId}` conversation still rely on residual global Sync
+- Tool windows without a resolvable `surf-{toolId}` conversation rely on catch-up after they obtain a conversation id (no global Sync bus)
 - Queue-drain progress UI without global private payloads (Action/Error/Operation are now silent on drain)
 - Desktop verification of cross-window Sync skip (Application A must not reload B)
 - Dead sync Channels for a **closed** window can linger until the next emit fails a send (same-window remounts now replace by label and no longer absorb Sync)

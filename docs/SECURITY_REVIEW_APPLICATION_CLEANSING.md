@@ -72,13 +72,15 @@ Inventory shows uninvoked registrations including `kernel_mark_last_known_good`,
 
 ## P3 findings / positive controls
 
-### SEC-CSP-002 — `style-src` includes `'unsafe-inline'`
+### SEC-CSP-002 — `style-src-attr` includes `'unsafe-inline'`
 
-Expected for current React styling; `script-src` does not allow `'unsafe-inline'` / `'unsafe-eval'`.
+Current CSP (`tauri.conf.json`): `style-src 'self'`; `style-src-elem 'self'`; `style-src-attr 'unsafe-inline'`.
+
+Phase 1 audit (2026-10): dozens of React `style={{…}}` sites (wallpaper, chat previews, settings, tool renderer, etc.) require attribute inline styles. Removing `style-src-attr 'unsafe-inline'` without migrating those call sites would blank or break UI. **Accepted residual** until a CSS-variable / class migration; `script-src` still has no `'unsafe-inline'` / `'unsafe-eval'`.
 
 ### SEC-CRED-001 — Credential storage (positive)
 
-Provider secrets use OS keyring service `coreside.provider` with accounts `coreside:{connection_id}`. Module docs and code keep secrets out of SQLite. Cleansing fix R3 released the DB mutex before keychain reads.
+Provider secrets use OS keyring service `coreside.provider` (release) or `coreside.provider.dev` (debug / `CORESIDE_PROFILE=dev`) with accounts `coreside:{connection_id}`. Module docs and code keep secrets out of SQLite. Cleansing fix R3 released the DB mutex before keychain reads.
 
 ### SEC-ACT-001 — Registered-action policy (positive)
 

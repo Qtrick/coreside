@@ -90,7 +90,7 @@ pub fn resolve_crawler_data_root() -> PathBuf {
     }
     if cfg!(debug_assertions) {
         if let Some(base) = dirs::data_dir() {
-            return crate::db::product_data_dir(&base).join("crawler");
+            return crate::db::resolve_product_data_dir(&base).join("crawler");
         }
     }
     PathBuf::from("crawler-data-unavailable")

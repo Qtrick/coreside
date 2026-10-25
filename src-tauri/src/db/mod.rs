@@ -380,9 +380,9 @@ fn default_db_path() -> DbResult<PathBuf> {
         }
     }
 
-    // Prefer the platform application data directory.
+    // Prefer the platform application data directory (profile-aware).
     if let Some(base) = dirs::data_dir() {
-        let candidate = product_data_dir(&base).join("coreside.db");
+        let candidate = resolve_product_data_dir(&base).join("coreside.db");
         if let Some(parent) = candidate.parent() {
             if std::fs::create_dir_all(parent).is_ok() {
                 return Ok(candidate);
@@ -427,13 +427,14 @@ pub(crate) fn default_db_path_for_diagnostics() -> DbResult<PathBuf> {
         }
     }
     if let Some(base) = dirs::data_dir() {
-        return Ok(product_data_dir(&base).join("coreside.db"));
+        return Ok(resolve_product_data_dir(&base).join("coreside.db"));
     }
     Err(DbError::Invalid("No application data directory".into()))
 }
 
-/// Canonical OS app-data product folder (`coreside`). Reuses legacy `Coreside`
-/// when that folder already exists so media/attachments/db stay co-located.
+/// Canonical OS app-data product folder for the **release** profile (`coreside`).
+/// Reuses legacy `Coreside` when that folder already exists so media/attachments/db
+/// stay co-located. Prefer [`resolve_product_data_dir`] for live app roots.
 pub fn product_data_dir(base: &Path) -> PathBuf {
     let canonical = base.join("coreside");
     if canonical.exists() {
@@ -444,6 +445,15 @@ pub fn product_data_dir(base: &Path) -> PathBuf {
         return legacy;
     }
     canonical
+}
+
+/// Profile-aware product data directory under an OS app-data base.
+/// Dev profile → `coreside-dev` (no legacy rename). Release → [`product_data_dir`].
+pub fn resolve_product_data_dir(base: &Path) -> PathBuf {
+    match crate::runtime_profile::resolve_runtime_profile() {
+        crate::runtime_profile::RuntimeProfile::Dev => base.join("coreside-dev"),
+        crate::runtime_profile::RuntimeProfile::Release => product_data_dir(base),
+    }
 }
 
 pub fn now_rfc3339() -> String {
@@ -545,6 +555,41 @@ mod tests {
         let dir2 = tempdir().unwrap();
         std::fs::create_dir_all(dir2.path().join("coreside")).unwrap();
         assert_eq!(product_data_dir(dir2.path()), dir2.path().join("coreside"));
+    }
+
+    #[test]
+    fn resolve_product_data_dir_honors_profile_env() {
+        use std::sync::{Mutex, MutexGuard};
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _guard: MutexGuard<'_, ()> = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev_profile = std::env::var("CORESIDE_PROFILE").ok();
+        let prev_share = std::env::var("CORESIDE_DEV_SHARE_DATA").ok();
+        struct Restore(Option<String>, Option<String>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                match &self.0 {
+                    Some(v) => std::env::set_var("CORESIDE_PROFILE", v),
+                    None => std::env::remove_var("CORESIDE_PROFILE"),
+                }
+                match &self.1 {
+                    Some(v) => std::env::set_var("CORESIDE_DEV_SHARE_DATA", v),
+                    None => std::env::remove_var("CORESIDE_DEV_SHARE_DATA"),
+                }
+            }
+        }
+        let _restore = Restore(prev_profile, prev_share);
+        let dir = tempdir().unwrap();
+        std::env::remove_var("CORESIDE_DEV_SHARE_DATA");
+        std::env::set_var("CORESIDE_PROFILE", "dev");
+        assert_eq!(
+            resolve_product_data_dir(dir.path()),
+            dir.path().join("coreside-dev")
+        );
+        std::env::set_var("CORESIDE_PROFILE", "shared");
+        assert_eq!(
+            resolve_product_data_dir(dir.path()),
+            dir.path().join("coreside")
+        );
     }
 
     #[test]

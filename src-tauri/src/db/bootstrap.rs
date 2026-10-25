@@ -3,7 +3,7 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-use super::{product_data_dir, Database, DbError, DbResult};
+use super::{resolve_product_data_dir, Database, DbError, DbResult};
 
 /// Consumer-safe startup states for the protected shell.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -83,7 +83,7 @@ pub(crate) fn classify_open_error(err: &DbError) -> (&'static str, String) {
 pub fn shell_database_path() -> DbResult<PathBuf> {
     let base = dirs::data_dir()
         .ok_or_else(|| DbError::Invalid("Could not resolve application data directory".into()))?;
-    let dir = product_data_dir(&base).join("recovery");
+    let dir = resolve_product_data_dir(&base).join("recovery");
     std::fs::create_dir_all(&dir)
         .map_err(|e| DbError::Invalid(format!("Failed to create recovery directory: {e}")))?;
     Ok(dir.join("shell.db"))

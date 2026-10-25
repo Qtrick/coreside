@@ -16,8 +16,8 @@ use crate::ai::{
     project_context_for_prompt, seal_from_ledger_payload, seal_local_user_submission,
     seal_tool_result_envelope, structured_metadata_value, structured_trust_from_text,
     tool_result_display_summary, AgentCapability, AgentContentPart, AgentMessage, AgentRequest,
-    AgentRole, ApplicationStatePromptSlice, ParsedAgentResponse, ResponseType,
-    AutomationChangePayload, SettingsChangePayload, SourceCitation, StructuredUserInput,
+    AgentRole, ApplicationStatePromptSlice, AutomationChangePayload, ParsedAgentResponse,
+    ResponseType, SettingsChangePayload, SourceCitation, StructuredUserInput,
     StructuredUserInputSubmission, ToolCallRequest, ToolCallResult, ToolChangePayload, ToolLoop,
     ToolLoopContext, PROMPT_VERSION,
 };
@@ -625,6 +625,33 @@ fn turn_event_conversation_id(event: &AgentTurnEvent) -> Option<&str> {
     }
 }
 
+/// Persist a conversation-scoped turn event for reconnect / catch-up.
+/// Never uses the process-wide `agent-turn` bus (tool-window eavesdrop denial).
+fn persist_turn_event_for_catchup(app: &AppHandle, event: &AgentTurnEvent, event_type: &str) {
+    let Some(cid) = turn_event_conversation_id(event) else {
+        return;
+    };
+    let Some(state) = app.try_state::<crate::state::AppState>() else {
+        return;
+    };
+    let db = state.db.lock();
+    let turn_id = match event {
+        AgentTurnEvent::PreviewSurface { turn_id, .. } => Some(turn_id.as_str()),
+        _ => None,
+    };
+    let payload = serde_json::to_value(event).unwrap_or(serde_json::Value::Null);
+    if let Err(e) =
+        crate::runtime_v2::append_conversation_event(&db, cid, turn_id, None, event_type, &payload)
+    {
+        tracing::warn!(
+            error = %e,
+            conversation_id = %cid,
+            event_type,
+            "failed to append turn event to conversation_event_log"
+        );
+    }
+}
+
 /// Deliver a turn event with Channel-scoped privacy for private kinds.
 ///
 /// - Text / Action / Error / Operation / PreviewSurface: send on Channel when
@@ -636,8 +663,9 @@ fn turn_event_conversation_id(event: &AgentTurnEvent) -> Option<&str> {
 /// - Sync / Conflict: prefer `subscribe_conversation_sync` fan-out; if that
 ///   delivers to any live Channel, **do not** also send on the invoke Channel
 ///   (avoids double reload/conflict apply on main). Fall back to invoke
-///   Channel only when no sync subscriber delivered, then residual
-///   `app.emit("agent-turn")` only when neither scoped path succeeded.
+///   Channel only when no sync subscriber delivered. When neither scoped path
+///   succeeds, persist to `conversation_event_log` for catch-up — **never**
+///   `app.emit("agent-turn")` (closes residual cross-window Sync eavesdrop).
 fn emit_turn(
     app: &AppHandle,
     on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
@@ -657,33 +685,15 @@ fn emit_turn(
             if let Some(ch) = on_event {
                 let _ = ch.send(event);
             } else {
-                // Queue-drain / no direct Channel: persist to conversation_event_log
-                // so clients can catch-up or reconnect without leaking across conversations.
-                if let Some(cid) = turn_event_conversation_id(&event) {
-                    if let Some(state) = app.try_state::<crate::state::AppState>() {
-                        let mut db = state.db.lock();
-                        let (event_type, turn_id) = match &event {
-                            AgentTurnEvent::Action { .. } => ("action", None),
-                            AgentTurnEvent::Error { .. } => ("error", None),
-                            AgentTurnEvent::Operation { .. } => ("operation", None),
-                            AgentTurnEvent::PreviewSurface { turn_id, .. } => {
-                                ("preview_surface", Some(turn_id.as_str()))
-                            }
-                            _ => ("turn_event", None),
-                        };
-                        let payload =
-                            serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
-                        if let Err(e) = crate::runtime_v2::append_conversation_event(
-                            &mut db, cid, turn_id, None, event_type, &payload,
-                        ) {
-                            tracing::warn!(
-                                error = %e,
-                                conversation_id = %cid,
-                                "failed to append queue drain event to conversation_event_log"
-                            );
-                        }
-                    }
-                }
+                // Queue-drain / no direct Channel: persist for catch-up.
+                let event_type = match &event {
+                    AgentTurnEvent::Action { .. } => "action",
+                    AgentTurnEvent::Error { .. } => "error",
+                    AgentTurnEvent::Operation { .. } => "operation",
+                    AgentTurnEvent::PreviewSurface { .. } => "preview_surface",
+                    _ => "turn_event",
+                };
+                persist_turn_event_for_catchup(app, &event, event_type);
             }
         }
         AgentTurnEvent::Sync { .. } | AgentTurnEvent::Conflict { .. } => {
@@ -707,11 +717,28 @@ fn emit_turn(
                     }
                 }
             }
-            // 3) Residual global only when neither scoped path delivered.
-            // Documented: tool windows should call subscribe_conversation_sync;
-            // until they do (or when conversation_id is absent), this keeps reload.
+            // 3) No live scoped delivery — never process-wide agent-turn.
+            // Sync(transaction_applied): durable `surface.transaction_applied` is
+            // already written inside the apply savepoint; catch-up reloads from it.
+            // Conflict: persist `surface.conflict` so catch-up can reconcile UI.
             if !scoped_ok {
-                let _ = app.emit("agent-turn", event);
+                match &event {
+                    AgentTurnEvent::Conflict { .. }
+                        if turn_event_conversation_id(&event).is_some() =>
+                    {
+                        persist_turn_event_for_catchup(app, &event, "surface.conflict");
+                    }
+                    AgentTurnEvent::Sync { .. } => {
+                        tracing::debug!(
+                            "Sync undelivered live — relying on conversation_event_log catch-up"
+                        );
+                    }
+                    _ => {
+                        tracing::debug!(
+                            "dropping Sync/Conflict without conversation_id — no scoped delivery"
+                        );
+                    }
+                }
             }
         }
     }
@@ -788,10 +815,7 @@ fn default_status_for_event_type(event_type: &str) -> &'static str {
         | "provider_request_started" => "running",
         "change_proposed" | "tool_change_proposed" | "automation_proposed" => "awaitingApproval",
         "change_failed" | "tool_failed" | "interactive_action_rejected" => "failed",
-        "tool_completed"
-        | "search_completed"
-        | "crawl_completed"
-        | "change_applied"
+        "tool_completed" | "search_completed" | "crawl_completed" | "change_applied"
         | "automation_applied" => "completed",
         _ => "completed",
     }
@@ -941,8 +965,10 @@ fn finalize_open_action_steps(events: &mut [serde_json::Value], cancelled: bool)
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let work_start =
-            matches!(ty.as_str(), "tool_started" | "search_started" | "crawl_started");
+        let work_start = matches!(
+            ty.as_str(),
+            "tool_started" | "search_started" | "crawl_started"
+        );
         let terminal = if cancelled {
             "cancelled"
         } else if work_start {
@@ -950,7 +976,10 @@ fn finalize_open_action_steps(events: &mut [serde_json::Value], cancelled: bool)
         } else {
             "completed"
         };
-        let started_at = evt.get("startedAt").and_then(|v| v.as_i64()).unwrap_or(now_ms);
+        let started_at = evt
+            .get("startedAt")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(now_ms);
         evt["status"] = json!(terminal);
         evt["durationMs"] = json!((now_ms - started_at).max(0));
         evt["completedAt"] = json!(now_ms);
@@ -6077,7 +6106,10 @@ mod recovery_retry_admission_tests {
     #[test]
     fn normalize_action_status_aliases() {
         assert_eq!(normalize_action_status("succeeded"), "completed");
-        assert_eq!(normalize_action_status("awaiting_approval"), "awaitingApproval");
+        assert_eq!(
+            normalize_action_status("awaiting_approval"),
+            "awaitingApproval"
+        );
         assert_eq!(normalize_action_status("running"), "running");
     }
 }

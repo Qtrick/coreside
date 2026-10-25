@@ -44,9 +44,9 @@ describe("scoped turn streaming (mock send path)", () => {
     }
   });
 
-  it("documents scoped Sync subscribe helper and residual global listen", async () => {
-    // Primary: subscribeConversationSync Channel. Residual: listenAgentTurn when
-    // Rust has zero scoped deliveries (see docs/SCOPED_TURN_STREAMING.md).
+  it("documents scoped Sync subscribe helper (no residual global Sync emit)", async () => {
+    // Primary: subscribeConversationSync Channel. Unmet delivery → conversation_event_log
+    // catch-up (Rust never app.emit agent-turn for Sync/Conflict).
     const { listenAgentTurn, subscribeConversationSync, isSyncEventForConversation } =
       await import("@/lib/tauri/events");
     const stop = await listenAgentTurn(() => undefined);
@@ -77,10 +77,10 @@ describe("scoped turn streaming (mock send path)", () => {
     ).toBe(false);
   });
 
-  it("documents that private kinds must not ride the global bus", () => {
-    // Contract: Action / Error / Operation / Text never use app.emit("agent-turn")
-    // when Channel is absent — queue drain drops them (see emit_turn in
-    // message_cmds.rs and docs/SCOPED_TURN_STREAMING.md).
+  it("documents that turn kinds must not ride the global bus", () => {
+    // Contract: Text / Action / Error / Operation / Sync / Conflict never use
+    // app.emit("agent-turn") — see emit_turn in message_cmds.rs and
+    // docs/SCOPED_TURN_STREAMING.md.
     expect(true).toBe(true);
   });
 

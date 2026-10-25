@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "product": "Coreside",
+  "command": "phase0-evidence-session",
+  "generatedAt": "2026-10-24T03:19:02.025083Z",
+  "commit": "7b4413a8b6ea36bbe906ab3258e0a36cd7dbf9eb",
+  "dirty": true,
+  "sourceFingerprint": "d5519a556e049ff0dbad7da50a971bffaa850d52d3fcb52fec695893db3e1343",
+  "offlineGates": {
+    "releaseEvidence": "reports/release-evidence.json",
+    "verdict": "gates_partial_pending_packaging_e2e",
+    "passed": 12,
+    "failed": 0
+  },
+  "desktopE2e": {
+    "status": "blocked_environment",
+    "reason": "Requires npm run e2e:build (e2e-featured Tauri debug binary) plus GUI WebDriver session. Prior reports/e2e-results.json is stale (commit 1ecf1e3). Not re-run on this fingerprint; do not claim Desktop Verified.",
+    "staleReport": "reports/e2e-results.json"
+  },
+  "packagedSmoke": {
+    "status": "not_run",
+    "reason": "Packaged build + smoke not executed this session. reports/packaged-smoke-results.json remains not_run / Absent."
+  },
+  "evidenceManifestFindings": [
+    "reports/e2e-results.json commit_mismatch + fingerprint_mismatch (expected until e2e re-run)",
+    "reports/assurance-report.json commit_mismatch (stale companion)"
+  ],
+  "publicBeta": "Not ready",
+  "ladder": "Development Build"
+}

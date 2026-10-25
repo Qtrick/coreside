@@ -13,7 +13,7 @@
 | Local AI privacy routing | P1 | **Partial** — `access_mode.rs` + Composer disclosure; Journey 17 **not_run** |
 | Hosted Coreside AI gateway + billing | P2 hosted | **Scaffolded** — Edge Functions + entitlements SQL unit-tested; private alpha **Not ready**; separate track |
 | Preview overlay cross-chat leak | P1 | **Mitigated** — `clearPreviewOverlaysMatching` requires `conversationId` for tool/surface clears; unscoped Sync does not wipe unrelated overlays (14 vitest) |
-| Sync / Conflict residual global bus | P1 | **Partial** — scoped `subscribe_conversation_sync` primary; residual `agent-turn` only when no subscriber; multi-window skip desktop **not_run** |
+| Sync / Conflict residual global bus | P1 | **Mitigated** — scoped `subscribe_conversation_sync` primary; unmet delivery persists to `conversation_event_log` (no `agent-turn` emit); multi-window skip desktop **not_run** |
 | Narrow assurance (RC3.6) | P2 evidence | **Passed (narrow)** — `npm run assurance:report` 0 findings on HEAD (dirty tree); not a full release pass |
 | Full desktop E2E 1–16 + packaged smoke | P1 | **Partial** — `e2e-results.json` **passed_partial** (J7) on fp `3c3fa498…`; J1–16 passed; J17–18 **not_run**; not a suite Desktop Verified pass; packaged smoke **not_run** |
 
@@ -41,7 +41,7 @@ Tracked gaps affecting release assurance. Not an exhaustive bug list.
 | Journey 12/13 desktop execution | P1 evidence | **Desktop Verified (journey)** — J12/J13 passed on fp `3c3fa498…`; full orchestrator **passed_partial** (J7) — not a suite Desktop Verified pass |
 | Full turn registry / delta-only IPC | P1 | **Partial** — frontend `turnsById` + delta apply landed; reconnect / delta-only wire / concurrent UI still open |
 | Typed StructuredUserInput (not text delimiter) | P1 | **Unit Verified** — typed seal + trust gate; delimiter not authority; desktop E2E **not_run** (see [STRUCTURED_FORMS_AND_CONTEXT.md](./STRUCTURED_FORMS_AND_CONTEXT.md)) |
-| Progressive preview transaction | P1 | **Partial** — live NDJSON preview + speculative surface paint landed; JSON-blob progressive / desktop E2E remain open (see [PROGRESSIVE_PREVIEW_TRANSACTION.md](./PROGRESSIVE_PREVIEW_TRANSACTION.md)) |
+| Progressive preview transaction | P1 | **Partial** — live NDJSON preview + speculative surface paint landed; local cancel now ignores late Channel preview/text (vitest); JSON-blob progressive / desktop E2E remain open (see [PROGRESSIVE_PREVIEW_TRANSACTION.md](./PROGRESSIVE_PREVIEW_TRANSACTION.md)) |
 | Attachment crash suite + scoped ACL | P1 | **Partial** — crash/reconcile + authorize **Unit Verified**; Journey 11 ACL **Isolated Desktop Verified**; full suite **passed_partial** (J7) |
 | Coherent profile restore | P1 | **Partial** — journal stage ladder + mid-swap → Recovery **Unit Verified** (`reports/restore-transaction-results.json`); packaged FS swap proof **open** (see [DURABLE_PROFILE_ARCHITECTURE.md](./DURABLE_PROFILE_ARCHITECTURE.md)) |
 | Global queue metadata emit | P1 | **Closed** — conversation-scoped `subscribe_conversation_queue` Channel; no process-wide `agent-queue-changed` (see [QUEUE_COORDINATION.md](./QUEUE_COORDINATION.md); Unit Verified, desktop **not_run**) |

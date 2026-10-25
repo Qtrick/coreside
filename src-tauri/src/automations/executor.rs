@@ -40,7 +40,9 @@ pub fn execute_automation(
                     "validation",
                 ));
             }
-            let current = db::get_setting(db, "activeWorkspaceBackgroundId").ok().flatten();
+            let current = db::get_setting(db, "activeWorkspaceBackgroundId")
+                .ok()
+                .flatten();
             let idx = current
                 .as_deref()
                 .and_then(|id| preset_ids.iter().position(|p| p == id))
@@ -79,9 +81,9 @@ pub fn execute_automation(
                 preset.name
             )))
         }
-        AutomationAction::SetToolStateValue { .. } => unreachable!(
-            "SetToolStateValue is routed through the registered-action gateway above"
-        ),
+        AutomationAction::SetToolStateValue { .. } => {
+            unreachable!("SetToolStateValue is routed through the registered-action gateway above")
+        }
         AutomationAction::AiPrompt { .. } => execute_ai_action(db, automation),
     }
 }

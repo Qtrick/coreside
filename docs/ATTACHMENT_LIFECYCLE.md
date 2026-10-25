@@ -2,7 +2,7 @@
 
 **Product:** Coreside  
 **Phase:** RC3.3 Phase 13 partial — authorization + periodic GC + crash-consistency suite  
-**Status:** Partial — atomic DB claim landed; conversation-scoped read auth + `run_attachment_gc` **Unit Verified**; crash/reconcile suite **Unit Verified** (`reports/attachment-crash-results.json`)  
+**Status:** Partial — atomic DB claim landed; conversation-scoped read auth + `run_attachment_gc` **Unit Verified**; periodic GC tick wired (120s, quiescence-aware); crash/reconcile suite **Unit Verified** (`reports/attachment-crash-results.json`)  
 **Access date:** 2026-08-03
 
 ## Authoritative owner
@@ -78,7 +78,7 @@ Command: `npm run test:attachment-crash-consistency`. Report: `reports/attachmen
 - File deletes use `remove_managed_file_no_follow` (no symlink follow).
 - Summary is counts-only (`expired` / `promotedOrphans` / `missingDurable`) — redacted.
 
-`run_attachment_gc` Tauri command wraps the same sweep for scheduler / manual invoke. **Scheduler wiring is next** (not hooked into the automation ticker in this slice).
+`run_attachment_gc` Tauri command wraps the same sweep for scheduler / manual invoke. Periodic tick: `spawn_attachment_gc_scheduler` (120s, idempotent, quiescence-aware) starts with ordinary services alongside the automation scheduler; startup still runs one immediate sweep.
 
 Reports: `reports/attachment-gc-results.json` → **Unit Verified**.
 
@@ -87,5 +87,4 @@ Reports: `reports/attachment-gc-results.json` → **Unit Verified**.
 - Protocol whole-file reads remain bounded but still load into memory (P1)
 - Multimodal provider parts (P1) — **Integrated (unit)**: `AgentContentPart::Image { attachment_id, mime_type, data_base64 }` after `authorize_attachment_access`; OpenAI-family → `image_url` data URLs; Ollama → `images[]`; Anthropic → native base64 `image` blocks; Gemini → `inlineData`. Tool results use sealed JSON envelope (`envelopeHash`, `trust=untrusted_tool_output`); Gemini wraps envelope in `functionResponse`. Send path blocks unsupported image/tool via `validate_provider_send` (draft preserved). Report: `reports/multimodal-provider-results.json`. Desktop E2E **not_run**.
 - Parser-level image bomb budgets (P2)
-- Wire `run_attachment_gc` into a periodic scheduler tick (P2)
 - Desktop / packaged attachment crash proof (open)

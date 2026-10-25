@@ -786,6 +786,17 @@ function restampAbsentGateReports() {
       ) {
         continue;
       }
+      // Never wipe a fresh offline-gates run with an Absent placeholder when the
+      // fingerprint merely advanced — readiness already treats fp/commit drift.
+      if (
+        name === "release-evidence.json" &&
+        Array.isArray(existing?.gates) &&
+        existing.gates.length > 0 &&
+        (existing?.tallies?.passed > 0 ||
+          existing?.tracks?.localByok?.verdict)
+      ) {
+        continue;
+      }
       fs.writeFileSync(abs, JSON.stringify(body, null, 2) + "\n");
     }
   }

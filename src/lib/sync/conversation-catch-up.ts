@@ -120,7 +120,10 @@ async function runCatchUpPages(options: CatchUpOptions): Promise<void> {
       }
       if (ev.sequence <= after) continue;
       if (ev.sequence > maxSeq) maxSeq = ev.sequence;
-      if (ev.eventType === "surface.transaction_applied") {
+      if (
+        ev.eventType === "surface.transaction_applied" ||
+        ev.eventType === "surface.conflict"
+      ) {
         pageNeedsReload = true;
       }
     }

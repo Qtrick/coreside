@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::db::{product_data_dir, DbError, DbResult};
+use crate::db::{product_data_dir, resolve_product_data_dir, DbError, DbResult};
 
 /// Canonical managed roots under the product data directory.
 #[derive(Debug, Clone)]
@@ -23,6 +23,8 @@ pub struct AppPaths {
 impl AppPaths {
     pub fn resolve() -> DbResult<Self> {
         // Test / isolation override: point product roots at a temp (or custom) base.
+        // Override bases always use the release product folder name (`coreside`) so
+        // e2e/temp fixtures stay stable regardless of CORESIDE_PROFILE.
         if let Ok(override_path) = std::env::var("CORESIDE_DATA_DIR") {
             let trimmed = override_path.trim();
             if !trimmed.is_empty() {
@@ -32,11 +34,16 @@ impl AppPaths {
         let base = dirs::data_dir().ok_or_else(|| {
             DbError::Invalid("Could not resolve application data directory".into())
         })?;
-        Ok(Self::from_base(&base))
+        Ok(Self::from_product_root(resolve_product_data_dir(&base)))
     }
 
+    /// Explicit base → release product folder (`coreside` / legacy `Coreside`).
+    /// Used by tests and `CORESIDE_DATA_DIR` overrides.
     pub fn from_base(base: &Path) -> Self {
-        let product_root = product_data_dir(base);
+        Self::from_product_root(product_data_dir(base))
+    }
+
+    fn from_product_root(product_root: PathBuf) -> Self {
         Self {
             database: product_root.join("coreside.db"),
             media: product_root.join("media"),

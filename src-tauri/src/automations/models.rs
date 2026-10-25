@@ -11,9 +11,9 @@ pub fn parse_trigger_timezone(timezone: Option<&str>) -> Result<Option<Tz>, Stri
     let Some(raw) = timezone.map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(None);
     };
-    raw.parse::<Tz>()
-        .map(Some)
-        .map_err(|_| format!("Unsupported timezone '{raw}'. Use an IANA name such as America/New_York."))
+    raw.parse::<Tz>().map(Some).map_err(|_| {
+        format!("Unsupported timezone '{raw}'. Use an IANA name such as America/New_York.")
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

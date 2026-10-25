@@ -85,6 +85,10 @@ Full-text project context search is scoped by `project_id`. FTS rows outside the
 
 Conversation and tool data stay on the device in SQLite under the application data directory. Destructive clears require confirmation in Settings.
 
+## Main-window command allowlist
+
+`coreside-main-default` is not a blanket “every registered command” set. Agent-internal and unused IPC entries (search/fetch helpers, queue drain, policy override, package-byte export, etc.) are omitted so a main-webview XSS cannot invoke them. Rust still registers the commands for in-process use; re-add an `allow-*` only when a real UI caller lands. Tool windows remain on the smaller `coreside-tool-scoped` allowlist.
+
 ## Native-window permissions
 
 The main window matches `src-tauri/capabilities/default.json` (`coreside-main-default`, window `main`). Secondary tool windows match `src-tauri/capabilities/tool-window.json` (`coreside-tool-scoped`, windows `tool-*`). Tool windows receive only their bounded command categories; they do not inherit the main-window capability, arbitrary filesystem/network access, or API keys. Tauri merges matching capabilities, so window globs and capability overlap are audited as a security boundary.

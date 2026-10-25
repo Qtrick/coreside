@@ -21,6 +21,7 @@ mod media;
 mod projects;
 mod quiescence;
 mod research;
+mod runtime_profile;
 mod runtime_v2;
 mod search;
 mod security;
@@ -46,10 +47,13 @@ pub fn run() {
     let config = config::load_config();
     init_tracing(&config.log_level);
 
+    let runtime_profile = runtime_profile::resolve_runtime_profile();
     tracing::info!(
         provider = %config.provider,
         model = %config.model,
         has_key = config.has_api_key(),
+        profile = runtime_profile.as_str(),
+        product_folder = runtime_profile.product_folder(),
         "Coreside starting"
     );
 
@@ -556,12 +560,13 @@ pub fn run() {
 
                 if skip_ordinary_services {
                     tracing::warn!(
-                        "skipping automation scheduler — maintenance Recovery required"
+                        "skipping automation scheduler and attachment gc — maintenance Recovery required"
                     );
                 } else {
                     let handle = scheduler_handle.clone();
                     let app_handle = app.handle().clone();
                     automations::spawn_scheduler(app_handle, handle);
+                    commands::spawn_attachment_gc_scheduler(app.handle().clone());
                 }
             } else {
                 tracing::warn!(

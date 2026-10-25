@@ -6,14 +6,14 @@ Do `npm run dev` (debug adaptive `.app`) and release `Coreside.app` share meanin
 
 ## Current facts (source-verified)
 
-| Concern | Current behavior |
+| Concern | Behavior |
 | --- | --- |
 | Bundle ID | Both use `com.coreside.app` (debug + release) |
-| SQLite / media / attachments / backups / crawler / recovery | `AppPaths` → `dirs::data_dir()/…/coreside` unless `CORESIDE_DATA_DIR` override |
-| Provider keychain | Service `coreside.provider` |
-| Search keychain | `coreside.search` |
+| SQLite / media / attachments / backups / crawler / recovery | Profile-aware `AppPaths` / `resolve_product_data_dir`: release → `…/coreside` (legacy `Coreside` reuse); debug default → `…/coreside-dev`. `CORESIDE_DATA_DIR` override still uses release folder name under the override base. |
+| Provider keychain | `coreside.provider` (release) / `coreside.provider.dev` (dev profile) |
+| Search keychain | `coreside.search` (release) / `coreside.search.dev` (dev profile) |
 | Concurrent processes | P0.4: fail-closed by default; `--allow-concurrent` / `CORESIDE_DEV_ALLOW_CONCURRENT=1` opt-in |
-| E2E | Uses `CORESIDE_DB_PATH` / temp dirs — already isolated |
+| E2E | Uses `CORESIDE_DB_PATH` / `CORESIDE_DATA_DIR` / temp dirs — already isolated |
 | Adaptive Dock | Driven by packaged `.app` + Assets.car; not by data-dir |
 
 Changing `CFBundleIdentifier` alone does **not** isolate AppPaths or keychain services.
@@ -40,12 +40,19 @@ Changing `CFBundleIdentifier` alone does **not** isolate AppPaths or keychain se
 - Explicit `CORESIDE_PROFILE=shared` (or `CORESIDE_DEV_SHARE_DATA=1`) for developers who want today’s behavior
 - Never auto-migrate user data; document copy/import tools later
 
-## Implementation status (this pass)
+## Implementation status
 
-**Not implemented** as a data-path split — too high-risk for silent credential/DB moves mid-P0.4.
+**Implemented** (runtime profile boundary):
 
-**Implemented related safety:** concurrent Coreside fail-closed; branding exact-mirror; process-path robustness.
+- Module: `src-tauri/src/runtime_profile.rs`
+- Paths: `resolve_product_data_dir` + `AppPaths::resolve` / `default_db_path` / recovery shell / crawler fallback
+- Keychain: `credentials::provider_keyring_service` + `search::fetch` search service suffix
+- Defaults: debug builds → `dev`; release builds → `release`
+- Opt-in shared: `CORESIDE_PROFILE=shared` or `CORESIDE_DEV_SHARE_DATA=1`
+- No auto-migration of existing release data into `coreside-dev`
+
+**Also in place:** concurrent Coreside fail-closed; branding exact-mirror; process-path robustness.
 
 ## Classification
 
-`Integrated – Not Verified` → design complete; implementation deferred as **pre-beta required work**.
+`Integrated – Source Verified` (automated unit tests for profile env + folder naming). Packaged desktop interaction of dual profiles remains a manual check.

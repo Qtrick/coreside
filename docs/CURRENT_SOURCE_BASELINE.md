@@ -1,7 +1,7 @@
 # Current Source Baseline (RC3.12)
 
 **Product:** Coreside  
-**Access date:** 2026-10-13
+**Access date:** 2026-10-24
 **Phase:** RC3.12 source intake / development audit<br>
 **Public beta:** **NOT READY**  
 **Hosted AI:** **NOT READY**
@@ -12,9 +12,9 @@
 | --- | --- |
 | Path | `/Users/qunyingfan/Coreside` |
 | Branch | `main` |
-| Commit | `99010ac559085c96048c8ef59b0eed6baf308096` |
+| Commit | `7b4413a8b6ea36bbe906ab3258e0a36cd7dbf9eb` |
 | Dirty | Yes (development evidence only) |
-| Source fingerprint | `024e82342f4872d3d14e2f553fe3813a1b2e6ea77341dbdf78b1004339ad71bf` |
+| Source fingerprint | `2b2cab71445617056becd1e8ed334eaf71c6b173f8845fc03e6feb33c2fe0109` |
 
 ## Uploaded archive
 
@@ -23,8 +23,8 @@
 | Filename | `Coreside Chat AI.zip` |
 | Path | `/Users/qunyingfan/Downloads/Coreside Chat AI.zip` |
 | Expected SHA-256 | `8d455783ca41492259b15f0ed2973c7db14513a8afe352005d5eff8a1eef3155` |
-| Observed SHA-256 | `4af1c1d2b6000eb3d8798fbf9da5300f4d3a7c74fd18a5db49313bb379369c28` |
-| Status | **present_hash_mismatch** |
+| Observed SHA-256 | `n/a` |
+| Status | **archive_unavailable** |
 | Supersedes | `f2547160c00e36d1274ee9fa2867d33eb05deb58a1ab05775c50ef6b990b1114` (`P0.8 newest supplied Coreside archive`) |
 | Partial Update archive | `Partial Update Main (1).zip` / `8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607` |
 
@@ -32,8 +32,8 @@
 
 | File | SHA-256 |
 | --- | --- |
-| `package-lock.json` | `33d18f751b95af3fa3e259e91f7205c04fab4ad8badaa4db2231535fd80d9abf` |
-| `src-tauri/Cargo.lock` | `b64ad87161713f19b77675d96b38081e050c78ec6b8e3d6b3e00f26b49bfbd67` |
+| `package-lock.json` | `f9e699683884804c9672d22f1ae160962e2f5d6077194c46bffdea1eee4824d3` |
+| `src-tauri/Cargo.lock` | `cd57a7c97fd3227fcb1939087a1e03a05f8629f0091e1f3e504dcc0dc5f95c70` |
 
 ## Tool versions
 
@@ -49,12 +49,12 @@
 
 | Metric | Active |
 | --- | --- |
-| `src` files | 230 |
-| Rust `.rs` | 216 |
-| Migrations | 37 |
-| E2E specs | 32 |
-| Tauri commands | 248 |
-| Fingerprint files | 820 |
+| `src` files | 258 |
+| Rust `.rs` | 226 |
+| Migrations | 42 |
+| E2E specs | 42 |
+| Tauri commands | 263 |
+| Fingerprint files | 890 |
 
 ## Archive vs active
 

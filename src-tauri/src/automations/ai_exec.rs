@@ -104,7 +104,9 @@ pub fn snapshot_ai_prepare(
 }
 
 /// Keyring + provider construction — must not hold the application DB mutex.
-pub fn finish_ai_prepare(snapshot: AiPrepareSnapshot) -> Result<PreparedAiChat, AutomationRunOutcome> {
+pub fn finish_ai_prepare(
+    snapshot: AiPrepareSnapshot,
+) -> Result<PreparedAiChat, AutomationRunOutcome> {
     let sources = complete_credential_sources(snapshot.sources);
     let access = resolve_ai_access(&sources);
     if matches!(access.route, AiAccessRoute::Unavailable) {
@@ -186,12 +188,10 @@ pub fn run_prepared_ai(prepared: PreparedAiChat) -> AutomationRunOutcome {
             let text = redact_secrets(&text, None);
             AutomationRunOutcome::success(text)
         }
-        Ok(Err(e)) => {
-            AutomationRunOutcome::error(
-                format!("AI run failed: {}", sanitize_error(&e.to_string(), None)),
-                "provider_error",
-            )
-        }
+        Ok(Err(e)) => AutomationRunOutcome::error(
+            format!("AI run failed: {}", sanitize_error(&e.to_string(), None)),
+            "provider_error",
+        ),
         Err(_) => {
             cancel_watch.cancel();
             AutomationRunOutcome::error("AI automation timed out", "timeout")
@@ -332,7 +332,12 @@ mod tests {
         auto.application_id = Some("app-missing".into());
         // Missing app → no records; still must not panic and must stay bounded.
         let ctx = build_read_context(&db, &auto);
-        assert!(ctx.contains("could not load") || ctx.contains("no data models") || ctx.contains("no records") || ctx.contains("app-missing"));
+        assert!(
+            ctx.contains("could not load")
+                || ctx.contains("no data models")
+                || ctx.contains("no records")
+                || ctx.contains("app-missing")
+        );
         assert!(!ctx.contains("sk-ant-"));
     }
 }

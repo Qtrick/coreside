@@ -2,10 +2,12 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 use tempfile::NamedTempFile;
 use uuid::Uuid;
 
@@ -13,7 +15,12 @@ use super::CommandError;
 use crate::app_paths::AppPaths;
 use crate::security::sanitize_error;
 use crate::state::AppState;
-use tauri::Manager;
+
+/// Periodic attachment GC interval. Startup already runs one immediate sweep;
+/// this tick cleans expired drafts during long sessions without thrashing disk.
+const ATTACHMENT_GC_INTERVAL: Duration = Duration::from_secs(120);
+
+static ATTACHMENT_GC_STARTED: AtomicBool = AtomicBool::new(false);
 
 /// Max decoded bytes per attached file (12 MiB).
 pub const MAX_ATTACHMENT_BYTES: usize = 12 * 1024 * 1024;
@@ -1223,6 +1230,48 @@ pub fn run_attachment_gc(
     Ok(report)
 }
 
+/// Start the periodic attachment GC ticker (idempotent).
+///
+/// Call from ordinary-service startup alongside the automation scheduler.
+/// Skips the first immediate tick — `lib.rs` already runs a startup sweep.
+pub fn spawn_attachment_gc_scheduler(app: AppHandle) {
+    if ATTACHMENT_GC_STARTED.swap(true, Ordering::SeqCst) {
+        tracing::debug!("attachment gc scheduler already running");
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        let mut ticker = tokio::time::interval(ATTACHMENT_GC_INTERVAL);
+        ticker.tick().await; // consume immediate tick
+        loop {
+            ticker.tick().await;
+            let Some(state) = app.try_state::<AppState>() else {
+                continue;
+            };
+            if !state.profile_ready() {
+                continue;
+            }
+            match reconcile_and_sweep_attachments(&state) {
+                Ok(report)
+                    if report.expired > 0
+                        || report.promoted_orphans > 0
+                        || report.missing_durable > 0 =>
+                {
+                    tracing::info!(
+                        expired = report.expired,
+                        promoted = report.promoted_orphans,
+                        missing = report.missing_durable,
+                        "attachment gc tick completed"
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err.message, "attachment gc tick failed");
+                }
+                _ => {}
+            }
+        }
+    });
+}
+
 /// Bounded startup/periodic GC for expired staged attachments and orphaned rows.
 /// Does not delete committed (`attached`) message files.
 pub fn reconcile_and_sweep_attachments(
@@ -1509,6 +1558,13 @@ mod tests {
         assert!(json.contains("expired"));
         assert!(!json.contains('/'));
         assert!(!json.contains("home"));
+    }
+
+    #[test]
+    fn attachment_gc_interval_is_bounded_for_long_sessions() {
+        // Fast enough to clean during a session; slow enough to avoid disk thrash.
+        assert!(ATTACHMENT_GC_INTERVAL.as_secs() >= 60);
+        assert!(ATTACHMENT_GC_INTERVAL.as_secs() <= 600);
     }
 
     /// Seed a staged attachment row + staging file under current AppPaths roots.

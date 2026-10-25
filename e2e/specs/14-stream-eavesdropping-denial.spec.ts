@@ -189,7 +189,7 @@ describe("Journey 14 — stream eavesdropping denial", () => {
       documentation: {
         coreEventDefaultKept: true,
         reason:
-          "Sync/Conflict still use app.emit('agent-turn'); removing core:event:default would break tool Sync. Text is Channel-only and must never appear on the global bus.",
+          "core:event:default remains for non-turn events; turn Sync/Conflict no longer use app.emit('agent-turn') (conversation_event_log catch-up). Text is Channel-only and must never appear on the global bus.",
         proofMode:
           "tool window listened on agent-turn during main live stream; zero Text payloads expected and asserted",
       },

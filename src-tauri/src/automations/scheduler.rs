@@ -311,10 +311,7 @@ fn execute_ai_unlocked(state: &AppState, claim: &ClaimedRun) -> AutomationRunOut
         return AutomationRunOutcome::error("Expected AI prompt action", "validation");
     };
     if !claim.automation.requires_ai {
-        return AutomationRunOutcome::error(
-            "AI prompt actions must set requiresAi",
-            "validation",
-        );
+        return AutomationRunOutcome::error("AI prompt actions must set requiresAi", "validation");
     }
     // DB snapshot only under the mutex; keyring + provider I/O run unlocked.
     let snapshot = {

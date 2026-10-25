@@ -158,11 +158,11 @@ let agentTurnUnlisten: (() => void) | null = null;
 /**
  * Subscribe to process-wide `agent-turn` events. Returns an unsubscribe fn.
  *
- * The global bus must not carry private assistant text. Interactive
- * `send_message` streams deliver text/action/error/operation on a Tauri
- * Channel (authoritative). Sync/Conflict prefer `subscribeConversationSync`;
- * this listener remains as defense-in-depth for residual global emits when
- * no scoped subscribers delivered (see docs/SCOPED_TURN_STREAMING.md).
+ * Rust no longer emits Sync/Conflict/Text/Action/Error/Operation on this bus.
+ * Interactive streams use a Tauri Channel; Sync/Conflict use
+ * `subscribeConversationSync` or `conversation_event_log` catch-up. This
+ * listener remains for legacy/defense-in-depth only (see
+ * docs/SCOPED_TURN_STREAMING.md).
  *
  * Tool windows must ignore text/action/error/operation (eavesdropping denial).
  * Client-side filtering is defense in depth, not authorization.

@@ -112,13 +112,9 @@ pub fn kernel_decide_proposal(
             Some((cid, tid))
         });
     let mut bus = state.event_bus.lock();
-    let result = crate::application_kernel::decide_proposal(
-        &mut db,
-        Some(&mut bus),
-        &proposal_id,
-        approve,
-    )
-    .map_err(map_kernel)?;
+    let result =
+        crate::application_kernel::decide_proposal(&mut db, Some(&mut bus), &proposal_id, approve)
+            .map_err(map_kernel)?;
     if let Some((cid, tid)) = timeline_hook {
         let kind = if approve { "commit" } else { "cancellation" };
         crate::runtime_v2::try_append_turn_timeline_event(

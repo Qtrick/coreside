@@ -25,7 +25,9 @@ pub fn complete_credential_sources(sources: CredentialSources) -> CredentialSour
 
 use thiserror::Error;
 
-const SERVICE: &str = "coreside.provider";
+use crate::runtime_profile::resolve_runtime_profile;
+
+const SERVICE_BASE: &str = "coreside.provider";
 
 #[derive(Debug, Error)]
 pub enum CredentialError {
@@ -41,6 +43,12 @@ pub fn account_for_connection(connection_id: &str) -> String {
     format!("coreside:{connection_id}")
 }
 
+/// Keyring service for provider secrets (`coreside.provider` or `.dev` under the
+/// isolated development profile).
+pub fn provider_keyring_service() -> String {
+    resolve_runtime_profile().keyring_service(SERVICE_BASE)
+}
+
 fn map_keyring_error(err: keyring::Error) -> CredentialError {
     match err {
         keyring::Error::NoEntry => CredentialError::NotFound,
@@ -51,7 +59,7 @@ fn map_keyring_error(err: keyring::Error) -> CredentialError {
 }
 
 fn entry(account: &str) -> Result<keyring::Entry, CredentialError> {
-    keyring::Entry::new(SERVICE, account).map_err(map_keyring_error)
+    keyring::Entry::new(&provider_keyring_service(), account).map_err(map_keyring_error)
 }
 
 /// Store or replace an API key for the given keyring account id.

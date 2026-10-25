@@ -446,6 +446,32 @@ describe("catchUpConversationEvents", () => {
     expect(store.durable.get("c-switch")).toBe(200);
   });
 
+  it("invokes onTransactionApplied for surface.conflict events", async () => {
+    const store: Store = {
+      events: new Map([
+        [
+          "c-conflict",
+          [{ sequence: 1, eventType: "surface.conflict" }],
+        ],
+      ]),
+      durable: new Map([["c-conflict", 0]]),
+    };
+    const memoryCursor = new Map<string, number>();
+    const onTransactionApplied = vi.fn();
+
+    await catchUpConversationEvents({
+      conversationId: "c-conflict",
+      memoryCursor,
+      api: makeApi(store),
+      isActive: () => true,
+      onTransactionApplied,
+      yieldBetweenPages: noYield,
+    });
+
+    expect(onTransactionApplied).toHaveBeenCalledTimes(1);
+    expect(memoryCursor.get("c-conflict")).toBe(1);
+  });
+
   it("invokes onTransactionApplied for surface.transaction_applied events", async () => {
     const store: Store = {
       events: new Map([

@@ -14,8 +14,12 @@ pub const MAX_REDIRECTS: usize = 3;
 pub const MAX_FETCH_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_EXTRACTED_TEXT_CHARS: usize = 32_000;
 
-const SEARCH_KEYRING_SERVICE: &str = "coreside.search";
+const SEARCH_KEYRING_SERVICE_BASE: &str = "coreside.search";
 const BRAVE_ACCOUNT: &str = "brave";
+
+fn search_keyring_service() -> String {
+    crate::runtime_profile::resolve_runtime_profile().keyring_service(SEARCH_KEYRING_SERVICE_BASE)
+}
 
 pub fn search_keyring_account(provider: &str) -> String {
     format!("coreside.search.{provider}")
@@ -53,14 +57,14 @@ pub fn set_search_secret(account: &str, secret: &str) -> Result<(), SearchError>
     if secret.is_empty() {
         return Err(SearchError::Credential("API key cannot be empty".into()));
     }
-    keyring::Entry::new(SEARCH_KEYRING_SERVICE, account)
+    keyring::Entry::new(&search_keyring_service(), account)
         .map_err(|e| SearchError::Credential(e.to_string()))?
         .set_password(secret)
         .map_err(|e| SearchError::Credential(e.to_string()))
 }
 
 pub fn get_search_secret(account: &str) -> Result<String, SearchError> {
-    keyring::Entry::new(SEARCH_KEYRING_SERVICE, account)
+    keyring::Entry::new(&search_keyring_service(), account)
         .map_err(|e| SearchError::Credential(e.to_string()))?
         .get_password()
         .map_err(|e| match e {
@@ -70,7 +74,7 @@ pub fn get_search_secret(account: &str) -> Result<String, SearchError> {
 }
 
 pub fn delete_search_secret(account: &str) -> Result<(), SearchError> {
-    match keyring::Entry::new(SEARCH_KEYRING_SERVICE, account)
+    match keyring::Entry::new(&search_keyring_service(), account)
         .map_err(|e| SearchError::Credential(e.to_string()))?
         .delete_credential()
     {

@@ -44,9 +44,9 @@ pub fn upsert_automation(
     input: UpsertAutomationInput,
 ) -> Result<Automation, CommandError> {
     state.require_profile()?;
-    let requires_ai = input.requires_ai.unwrap_or_else(|| {
-        matches!(input.action, AutomationAction::AiPrompt { .. })
-    });
+    let requires_ai = input
+        .requires_ai
+        .unwrap_or_else(|| matches!(input.action, AutomationAction::AiPrompt { .. }));
     validate_automation(&input.name, &input.trigger, &input.action, requires_ai)
         .map_err(|e| CommandError::new("invalid", e))?;
 
@@ -199,9 +199,9 @@ fn confirm_automation_change_db(
         .map_err(|e| CommandError::new("invalid", e))?;
     let mut msg = db::get_message(db, &message_id)?;
     let mut meta = msg.metadata.unwrap_or_else(|| serde_json::json!({}));
-    let obj = meta.as_object_mut().ok_or_else(|| {
-        CommandError::new("invalid", "Message metadata is not an object")
-    })?;
+    let obj = meta
+        .as_object_mut()
+        .ok_or_else(|| CommandError::new("invalid", "Message metadata is not an object"))?;
     let proposal_val = obj.get("automationChange").cloned().ok_or_else(|| {
         CommandError::new("invalid", "Message has no automation proposal to confirm")
     })?;
@@ -236,9 +236,8 @@ fn confirm_automation_change_db(
         }
         // Status says applied but the row is gone — fall through to recreate.
     }
-    let stored: AutomationChangePayload = serde_json::from_value(proposal_val).map_err(|e| {
-        CommandError::new("invalid", format!("Invalid automation proposal: {e}"))
-    })?;
+    let stored: AutomationChangePayload = serde_json::from_value(proposal_val)
+        .map_err(|e| CommandError::new("invalid", format!("Invalid automation proposal: {e}")))?;
     stored
         .validate()
         .map_err(|e| CommandError::new("invalid", e))?;
@@ -263,10 +262,13 @@ fn confirm_automation_change_db(
     let now = Utc::now();
     let next = compute_next_run(&payload.trigger, now).map(|d| d.to_rfc3339());
     let existing = db::get_automation(db, &auto_id).ok();
-    let application_id = payload.application_id.clone().or_else(|| match &payload.action {
-        AutomationAction::SetToolStateValue { tool_id, .. } => Some(tool_id.clone()),
-        _ => None,
-    });
+    let application_id = payload
+        .application_id
+        .clone()
+        .or_else(|| match &payload.action {
+            AutomationAction::SetToolStateValue { tool_id, .. } => Some(tool_id.clone()),
+            _ => None,
+        });
     let row = Automation {
         id: auto_id,
         workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
@@ -338,10 +340,7 @@ pub fn resolve_automation_change(
         ));
     }
     if status != "discarded" {
-        return Err(CommandError::new(
-            "invalid",
-            "status must be discarded",
-        ));
+        return Err(CommandError::new("invalid", "status must be discarded"));
     }
     let mut db = state.db.lock();
     let mut msg = db::get_message(&db, message_id.trim())?;

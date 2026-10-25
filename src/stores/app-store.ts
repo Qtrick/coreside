@@ -402,7 +402,7 @@ async function catchUpConversationEvents(
   });
 }
 
-/** Shared Sync/Conflict apply path for scoped Channel + residual global bus. */
+/** Shared Sync/Conflict apply path for scoped Channel + catch-up events. */
 function applySyncOrConflictEvent(
   get: SyncListenerGet,
   set: SyncListenerSet,
@@ -527,7 +527,7 @@ function ensureConversationSyncSubscription(
       void catchUpConversationEvents(trimmed, get);
     })
     .catch(() => {
-      // Best-effort; residual global listenAgentTurn remains.
+      // Best-effort; catch-up recovers Sync persisted when no live subscriber.
       void catchUpConversationEvents(trimmed, get);
     });
 }
@@ -668,6 +668,20 @@ function applyAgentTurnChannelEvent(
   }
   if (!("conversationId" in event) || event.conversationId !== turnConversationId) {
     return;
+  }
+  // After local cancel/fail, drop progressive paint/stream that would revive UI.
+  // Still accept interrupted/fatal/error so overlays clear if Rust finishes later.
+  const turnId = get().activeTurnIdByConversation[turnConversationId];
+  const turnStatus = turnId ? get().turnsById[turnId]?.status : undefined;
+  if (turnStatus === "cancelled" || turnStatus === "failed") {
+    if (
+      event.kind === "previewSurface" ||
+      event.kind === "text" ||
+      event.kind === "action" ||
+      (event.kind === "operation" && event.status === "preview")
+    ) {
+      return;
+    }
   }
   const isActive = get().activeConversationId === turnConversationId;
 
@@ -816,8 +830,7 @@ function attachAgentTurnSyncListener(
 ) {
   if (agentTurnSyncAttached) return;
   agentTurnSyncAttached = true;
-  // Residual global bus: private kinds ignored; Sync/Conflict only when Rust
-  // fell back because no scoped subscriber delivered.
+  // Legacy global bus listener (Rust no longer emits turn Sync/Conflict here).
   void listenAgentTurn((event) => {
     applySyncOrConflictEvent(get, set, event);
   });
@@ -2945,14 +2958,29 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   cancelRequest: async () => {
     const id = get().sendingConversationId ?? get().activeConversationId;
-    await api.cancelRequest(id ?? undefined);
-    set((state) => ({
-      sending: false,
-      sendingConversationId: null,
-      agentActions: [],
-      streamingText: null,
-      ...(id ? finalizeTurnInState(state, id, "cancelled") : {}),
-    }));
+    // Mark terminal before awaiting IPC so late Channel preview/text events
+    // are ignored while cancel_request is in flight.
+    if (id) {
+      set((state) => ({
+        sending: false,
+        sendingConversationId: null,
+        agentActions: [],
+        streamingText: null,
+        ...finalizeTurnInState(state, id, "cancelled"),
+      }));
+    } else {
+      set({
+        sending: false,
+        sendingConversationId: null,
+        agentActions: [],
+        streamingText: null,
+      });
+    }
+    try {
+      await api.cancelRequest(id ?? undefined);
+    } catch {
+      // Local cancel already cleared speculative UI; IPC failure is non-fatal.
+    }
   },
 
   retryLastFailed: async () => {
@@ -3528,7 +3556,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           }
         })
         .catch(() => {
-          // Tool may lack a surface row; residual global Sync remains.
+          // Tool may lack a surface row; Sync arrives after conversation resolves.
         });
     } catch (error) {
       set({
