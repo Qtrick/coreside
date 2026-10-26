@@ -2131,6 +2131,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             }))
             .unwrap();
         let parsed = parse_agent_response(&response.raw_text).unwrap();
@@ -2288,6 +2289,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             }))
             .unwrap();
         let create_ops = parse_agent_response(&create.raw_text)
@@ -2373,6 +2375,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             }))
             .unwrap();
         let evolve_parsed = parse_agent_response(&evolve.raw_text).unwrap();
@@ -2572,6 +2575,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             }))
             .unwrap();
         let create_ops = parse_agent_response(&create.raw_text)
@@ -2618,6 +2622,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             }))
             .unwrap();
         let evolve_parsed = parse_agent_response(&evolve.raw_text).unwrap();

@@ -84,6 +84,9 @@ pub fn spawn_scheduler(app: AppHandle, handle: Arc<SchedulerHandle>) {
             if let Some(state) = app.try_state::<AppState>() {
                 if state.profile_ready() {
                     let mut db = state.db.lock();
+                    if let Err(e) = db::reconcile_interrupted_runs(db.conn()) {
+                        tracing::warn!(error = %e, "reconciling interrupted automation runs failed");
+                    }
                     if let Err(e) = catch_up_missed(&mut db, &handle) {
                         tracing::warn!(error = %e, "automation missed-run catch-up failed");
                     }
@@ -153,6 +156,7 @@ fn catch_up_missed(db: &mut Database, handle: &SchedulerHandle) -> Result<(), db
     if handle.is_paused() {
         return Ok(());
     }
+    db::reconcile_interrupted_runs(db.conn())?;
     let now = Utc::now();
     let overdue = db::list_due_automations(db, &now.to_rfc3339())?;
     for automation in overdue {
@@ -219,8 +223,8 @@ fn claim_run(db: &mut Database, automation_id: &str) -> Result<Option<ClaimedRun
     let started_dt = Utc::now();
     let started = started_dt.to_rfc3339();
     let run_id = format!("run-{}", Uuid::new_v4());
-    // Claim the schedule slot BEFORE side effects so a crash mid-execute cannot
-    // leave next_run_at due and re-fire the same mutation indefinitely.
+    // Claim the schedule slot and persist the running claim in automation_runs
+    // within a single atomic transaction before side effects occur.
     let next = compute_next_after(&automation.trigger, started_dt).map(|d| d.to_rfc3339());
     let schedulable = next.is_some();
     if !schedulable {
@@ -230,15 +234,31 @@ fn claim_run(db: &mut Database, automation_id: &str) -> Result<Option<ClaimedRun
         );
     }
     let scheduled_at = automation.next_run_at.clone();
-    db::update_automation_schedule(
-        db,
-        automation_id,
-        next.as_deref(),
-        Some(&started),
-        Some("running"),
-        automation.consecutive_failures,
-        schedulable && automation.enabled,
-    )?;
+
+    db.with_transaction(|conn| {
+        db::insert_automation_run_conn(
+            conn,
+            &run_id,
+            automation_id,
+            scheduled_at.as_deref(),
+            &started,
+            None,
+            "running",
+            None,
+            None,
+        )?;
+        db::update_automation_schedule_conn(
+            conn,
+            automation_id,
+            next.as_deref(),
+            Some(&started),
+            Some("running"),
+            automation.consecutive_failures,
+            schedulable && automation.enabled,
+        )?;
+        Ok(())
+    })?;
+
     Ok(Some(ClaimedRun {
         automation,
         run_id,
@@ -267,35 +287,38 @@ fn finalize_run(
         true
     };
     let completed = Utc::now().to_rfc3339();
-    db::insert_automation_run(
-        db,
-        &claim.run_id,
-        &claim.automation.id,
-        claim.scheduled_at.as_deref(),
-        &claim.started,
-        Some(&completed),
-        &outcome.status,
-        Some(outcome.summary.as_str()),
-        outcome.error_category.as_deref(),
-    )?;
-    db::update_automation_schedule(
-        db,
-        &claim.automation.id,
-        claim.next.as_deref(),
-        Some(&completed),
-        Some(&outcome.status),
-        failures,
-        claim.schedulable && keep_enabled && claim.automation.enabled,
-    )?;
-    let _ = db.conn().execute(
-        "DELETE FROM automation_runs WHERE automation_id = ?1 AND id NOT IN (
-            SELECT id FROM (
-                SELECT id FROM automation_runs WHERE automation_id = ?1
-                ORDER BY created_at DESC LIMIT 100
-            )
-         )",
-        rusqlite::params![claim.automation.id],
-    );
+
+    // Atomic transaction for updating the run record and updating the automation row:
+    db.with_transaction(|conn| {
+        db::update_automation_run_conn(
+            conn,
+            &claim.run_id,
+            Some(&completed),
+            &outcome.status,
+            Some(outcome.summary.as_str()),
+            outcome.error_category.as_deref(),
+        )?;
+        db::update_automation_schedule_conn(
+            conn,
+            &claim.automation.id,
+            claim.next.as_deref(),
+            Some(&completed),
+            Some(&outcome.status),
+            failures,
+            claim.schedulable && keep_enabled && claim.automation.enabled,
+        )?;
+        let _ = conn.execute(
+            "DELETE FROM automation_runs WHERE automation_id = ?1 AND id NOT IN (
+                SELECT id FROM (
+                    SELECT id FROM automation_runs WHERE automation_id = ?1
+                    ORDER BY created_at DESC LIMIT 100
+                )
+             )",
+            rusqlite::params![claim.automation.id],
+        );
+        Ok(())
+    })?;
+
     Ok(())
 }
 
@@ -316,7 +339,7 @@ fn execute_ai_unlocked(state: &AppState, claim: &ClaimedRun) -> AutomationRunOut
     // DB snapshot only under the mutex; keyring + provider I/O run unlocked.
     let snapshot = {
         let db = state.db.lock();
-        snapshot_ai_prepare(&db, &claim.automation, prompt)
+        snapshot_ai_prepare(&db, &claim.automation, &claim.run_id, prompt)
     };
     match snapshot.and_then(finish_ai_prepare) {
         Ok(prepared) => run_prepared_ai(prepared),
@@ -538,5 +561,147 @@ mod tests {
         );
         let after = db::get_automation(&db, "auto-fail").unwrap();
         assert_eq!(after.consecutive_failures, 2);
+    }
+
+    #[test]
+    fn claim_run_persists_running_run_record_before_completion() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("claim-persist.db")).unwrap();
+        db::ensure_default_workspace(&db).unwrap();
+        let past = (Utc::now() - chrono::Duration::minutes(5)).to_rfc3339();
+        let auto = Automation {
+            id: "auto-claim-test".into(),
+            workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+            owner_tool_id: None,
+            application_id: None,
+            name: "Claim test".into(),
+            enabled: true,
+            trigger: AutomationTrigger::Interval {
+                interval_minutes: 30,
+                timezone: None,
+            },
+            action: AutomationAction::AiPrompt {
+                prompt: "Review unfinished work".into(),
+                conversation_id: None,
+            },
+            requires_ai: true,
+            provider_connection_id: None,
+            missed_run_policy: MissedRunPolicy::RunOnce,
+            next_run_at: Some(past.clone()),
+            last_run_at: None,
+            last_status: None,
+            consecutive_failures: 0,
+            waiting_approval: false,
+            permission_ready: true,
+            created_at: past.clone(),
+            updated_at: past,
+        };
+        db::upsert_automation(&mut db, &auto).unwrap();
+
+        let claim = claim_run(&mut db, "auto-claim-test")
+            .expect("claim succeeds")
+            .expect("claim not none");
+        assert_eq!(claim.automation.id, "auto-claim-test");
+
+        // Verify that in SQLite, the run row is ALREADY inserted with status = "running"
+        let runs = db::list_automation_runs(&db, "auto-claim-test", 10).unwrap();
+        assert_eq!(
+            runs.len(),
+            1,
+            "claim must insert run row before effects start"
+        );
+        assert_eq!(runs[0].id, claim.run_id);
+        assert_eq!(runs[0].status, "running");
+        assert!(runs[0].completed_at.is_none());
+
+        // Verify that automation schedule was advanced and last_status is "running"
+        let current_auto = db::get_automation(&db, "auto-claim-test").unwrap();
+        assert_eq!(current_auto.last_status.as_deref(), Some("running"));
+        assert!(current_auto.next_run_at.unwrap() > claim.started);
+
+        // Finalize the run
+        let outcome = AutomationRunOutcome::success("Generated 3 suggestions");
+        finalize_run(&mut db, &claim, &outcome).unwrap();
+
+        // Verify run record updated to terminal outcome
+        let finalized_runs = db::list_automation_runs(&db, "auto-claim-test", 10).unwrap();
+        assert_eq!(finalized_runs.len(), 1);
+        assert_eq!(finalized_runs[0].status, "success");
+        assert_eq!(
+            finalized_runs[0].result_summary.as_deref(),
+            Some("Generated 3 suggestions")
+        );
+        assert!(finalized_runs[0].completed_at.is_some());
+
+        let final_auto = db::get_automation(&db, "auto-claim-test").unwrap();
+        assert_eq!(final_auto.last_status.as_deref(), Some("success"));
+    }
+
+    #[test]
+    fn reconcile_interrupted_runs_recovers_stale_claims() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("reconcile-test.db")).unwrap();
+        db::ensure_default_workspace(&db).unwrap();
+        let now = Utc::now().to_rfc3339();
+
+        let auto = Automation {
+            id: "auto-orphaned".into(),
+            workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+            owner_tool_id: None,
+            application_id: None,
+            name: "Orphaned test".into(),
+            enabled: true,
+            trigger: AutomationTrigger::Daily {
+                time: "08:00".into(),
+                timezone: None,
+            },
+            action: AutomationAction::AiPrompt {
+                prompt: "Test".into(),
+                conversation_id: None,
+            },
+            requires_ai: true,
+            provider_connection_id: None,
+            missed_run_policy: MissedRunPolicy::RunOnce,
+            next_run_at: Some(now.clone()),
+            last_run_at: None,
+            last_status: Some("running".into()),
+            consecutive_failures: 0,
+            waiting_approval: false,
+            permission_ready: true,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        db::upsert_automation(&mut db, &auto).unwrap();
+
+        // Simulate crash leaving run row in "running"
+        db::insert_automation_run(
+            &mut db,
+            "run-stale-1",
+            "auto-orphaned",
+            Some(&now),
+            &now,
+            None,
+            "running",
+            None,
+            None,
+        )
+        .unwrap();
+
+        // On reboot / startup, scheduler calls reconcile_interrupted_runs
+        let reconciled = db::reconcile_interrupted_runs(db.conn()).unwrap();
+        assert_eq!(reconciled, 1);
+
+        let runs = db::list_automation_runs(&db, "auto-orphaned", 10).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, "interrupted");
+        assert!(runs[0].completed_at.is_some());
+        assert!(runs[0]
+            .result_summary
+            .as_deref()
+            .unwrap()
+            .contains("interrupted"));
+
+        let updated_auto = db::get_automation(&db, "auto-orphaned").unwrap();
+        assert_eq!(updated_auto.last_status.as_deref(), Some("interrupted"));
     }
 }

@@ -637,6 +637,9 @@ impl AiProvider for GeminiProvider {
                 "responseSchema": Self::response_schema()
             }
         });
+        if let Some(tokens) = request.max_output_tokens {
+            body["generationConfig"]["maxOutputTokens"] = json!(tokens);
+        }
 
         let _ = SCHEMA_VERSION;
 
@@ -700,6 +703,9 @@ impl AiProvider for GeminiProvider {
 
         let _ = SCHEMA_VERSION;
         let mut body = Self::build_chat_body(&request.system_prompt, &request.messages);
+        if let Some(tokens) = request.max_output_tokens {
+            body["generationConfig"]["maxOutputTokens"] = json!(tokens);
+        }
 
         let _ = tx
             .send(ProviderStreamEvent::ResponseStarted {

@@ -9,7 +9,8 @@
 export type AutomationProposalTrigger =
   | { type: "interval"; intervalMinutes: number; timezone?: string | null }
   | { type: "daily"; time: string; timezone?: string | null }
-  | { type: "weekly"; weekday: number; time: string; timezone?: string | null };
+  | { type: "weekly"; weekday: number; time: string; timezone?: string | null }
+  | { type: "weekdays"; weekdays: number[]; time: string; timezone?: string | null };
 
 export type AutomationProposalAction =
   | {
@@ -95,6 +96,35 @@ function parseTrigger(raw: unknown): AutomationProposalTrigger | null {
     return {
       type: "weekly",
       weekday: day,
+      time,
+      timezone: typeof t.timezone === "string" ? t.timezone : null,
+    };
+  }
+  if (
+    t.type === "weekdays" ||
+    t.type === "weekday_set" ||
+    t.type === "multi_day" ||
+    t.type === "multiDay"
+  ) {
+    const time = typeof t.time === "string" ? t.time.trim() : "";
+    if (!/^\d{1,2}:\d{2}$/.test(time)) return null;
+    const rawDays = Array.isArray(t.weekdays) ? t.weekdays : [];
+    if (rawDays.length === 0) return null;
+    const weekdays: number[] = [];
+    for (const d of rawDays) {
+      const num = Number(d);
+      if (!Number.isInteger(num) || num < 0 || num > 6) {
+        return null;
+      }
+      if (weekdays.includes(num)) {
+        return null;
+      }
+      weekdays.push(num);
+    }
+    weekdays.sort((a, b) => a - b);
+    return {
+      type: "weekdays",
+      weekdays,
       time,
       timezone: typeof t.timezone === "string" ? t.timezone : null,
     };
@@ -210,6 +240,16 @@ export function describeAutomationTrigger(trigger: AutomationProposalTrigger): s
   if (trigger.type === "daily") {
     return `Daily at ${trigger.time}${tz}`;
   }
+  if (trigger.type === "weekdays") {
+    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const isStandardWeekdays =
+      trigger.weekdays.length === 5 &&
+      trigger.weekdays.every((d, idx) => d === idx);
+    const daysLabel = isStandardWeekdays
+      ? "Every weekday"
+      : `Weekly on ${trigger.weekdays.map((d) => days[d] ?? `day ${d}`).join(", ")}`;
+    return `${daysLabel} at ${trigger.time}${tz}`;
+  }
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const day = days[trigger.weekday] ?? `day ${trigger.weekday}`;
   return `Weekly on ${day} at ${trigger.time}${tz}`;
@@ -248,12 +288,19 @@ export function toUpsertAutomationInput(
             time: proposal.trigger.time,
             timezone: proposal.trigger.timezone ?? undefined,
           }
-        : {
-            type: "weekly",
-            weekday: proposal.trigger.weekday,
-            time: proposal.trigger.time,
-            timezone: proposal.trigger.timezone ?? undefined,
-          };
+        : proposal.trigger.type === "weekdays"
+          ? {
+              type: "weekdays",
+              weekdays: proposal.trigger.weekdays,
+              time: proposal.trigger.time,
+              timezone: proposal.trigger.timezone ?? undefined,
+            }
+          : {
+              type: "weekly",
+              weekday: proposal.trigger.weekday,
+              time: proposal.trigger.time,
+              timezone: proposal.trigger.timezone ?? undefined,
+            };
 
   const action =
     proposal.action.type === "cycle_workspace_backgrounds"

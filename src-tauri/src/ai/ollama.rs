@@ -602,7 +602,12 @@ impl OllamaProvider {
         if request.cancel.is_cancelled() {
             return Err(AiError::Cancelled);
         }
-        let body = self.chat_body(&request.system_prompt, &request.messages, false);
+        let mut body = self.chat_body(&request.system_prompt, &request.messages, false);
+        if let Some(tokens) = request.max_output_tokens {
+            if let Some(opts) = body.get_mut("options").and_then(|o| o.as_object_mut()) {
+                opts.insert("num_predict".into(), json!(tokens));
+            }
+        }
         let response = tokio::select! {
             _ = request.cancel.cancelled() => return Err(AiError::Cancelled),
             result = self.client.post(self.chat_url()).json(&body).send() => {
@@ -760,7 +765,12 @@ impl AiProvider for OllamaProvider {
             })
             .await;
 
-        let body = self.chat_body(&request.system_prompt, &request.messages, true);
+        let mut body = self.chat_body(&request.system_prompt, &request.messages, true);
+        if let Some(tokens) = request.max_output_tokens {
+            if let Some(opts) = body.get_mut("options").and_then(|o| o.as_object_mut()) {
+                opts.insert("num_predict".into(), json!(tokens));
+            }
+        }
         let response = tokio::select! {
             _ = request.cancel.cancelled() => {
                 let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;

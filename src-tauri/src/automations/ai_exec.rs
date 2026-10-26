@@ -42,7 +42,9 @@ Rules:\n\
 - If data is missing, say so briefly.";
 
 /// DB-only snapshot: safe to build under the SQLite mutex; no keyring I/O.
+#[derive(Debug)]
 pub struct AiPrepareSnapshot {
+    pub run_id: String,
     automation_id: String,
     automation_name: String,
     prompt: String,
@@ -62,6 +64,7 @@ pub struct PreparedAiChat {
 pub fn snapshot_ai_prepare(
     db: &Database,
     automation: &Automation,
+    run_id: &str,
     prompt: &str,
 ) -> Result<AiPrepareSnapshot, AutomationRunOutcome> {
     let prompt = prompt.trim();
@@ -78,6 +81,12 @@ pub fn snapshot_ai_prepare(
         ));
     }
 
+    if !automation.enabled {
+        return Err(AutomationRunOutcome::blocked(
+            "Automation is paused or disabled",
+        ));
+    }
+
     // Fail closed: if recovery state cannot be read, do not call the provider.
     let rec = get_recovery_state(db).map_err(|_| {
         AutomationRunOutcome::blocked(
@@ -90,11 +99,61 @@ pub fn snapshot_ai_prepare(
         ));
     }
 
+    // Enforce conversation boundary
+    if let super::models::AutomationAction::AiPrompt {
+        conversation_id, ..
+    } = &automation.action
+    {
+        if let Some(cid) = conversation_id.as_deref() {
+            match crate::db::get_conversation(db, cid) {
+                Ok(conv) => {
+                    if conv.workspace_id != automation.workspace_id {
+                        return Err(AutomationRunOutcome::error(
+                            "Conversation workspace mismatch",
+                            "scope_violation",
+                        ));
+                    }
+                }
+                Err(_) => {
+                    return Err(AutomationRunOutcome::error(
+                        format!(
+                            "Conversation {cid} referenced by automation context no longer exists"
+                        ),
+                        "scope_violation",
+                    ));
+                }
+            }
+        }
+    }
+
+    // Enforce application boundary
+    if let Some(app_id) = automation.application_id.as_deref() {
+        match crate::application_kernel::manifest::get_manifest(db, app_id) {
+            Ok(manifest) => {
+                if manifest.disabled
+                    || manifest.lifecycle_state == "disabled"
+                    || manifest.lifecycle_state == "deleted"
+                {
+                    return Err(AutomationRunOutcome::blocked(format!(
+                        "Application {app_id} is disabled or deleted"
+                    )));
+                }
+            }
+            Err(_) => {
+                return Err(AutomationRunOutcome::error(
+                    format!("Application {app_id} referenced by automation does not exist"),
+                    "application_not_found",
+                ));
+            }
+        }
+    }
+
     let connection_id = automation.provider_connection_id.as_deref();
     let sources = read_credential_sources(db, connection_id);
     let context = build_read_context(db, automation);
 
     Ok(AiPrepareSnapshot {
+        run_id: run_id.to_string(),
         automation_id: automation.id.clone(),
         automation_name: automation.name.clone(),
         prompt: prompt.to_string(),
@@ -141,7 +200,8 @@ pub fn finish_ai_prepare(
         system_prompt: SYSTEM_PROMPT.to_string(),
         messages: vec![AgentMessage::text(AgentRole::User, user_body)],
         cancel,
-        idempotency_key: Some(format!("automation-ai-{}", snapshot.automation_id)),
+        idempotency_key: Some(format!("automation-run-{}", snapshot.run_id)),
+        max_output_tokens: Some(1000),
     };
     Ok(PreparedAiChat {
         provider,
@@ -157,7 +217,8 @@ pub fn prepare_ai_prompt(
     automation: &Automation,
     prompt: &str,
 ) -> Result<PreparedAiChat, AutomationRunOutcome> {
-    let snapshot = snapshot_ai_prepare(db, automation, prompt)?;
+    let run_id = format!("run-adhoc-{}", uuid::Uuid::new_v4());
+    let snapshot = snapshot_ai_prepare(db, automation, &run_id, prompt)?;
     finish_ai_prepare(snapshot)
 }
 
@@ -226,8 +287,24 @@ fn build_read_context(db: &Database, automation: &Automation) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut used = 0usize;
     for model in models.into_iter().take(MAX_MODELS) {
-        let rows =
+        let mut rows =
             query_records(db, app_id, &model.model_id, MAX_RECORDS_PER_MODEL).unwrap_or_default();
+        // Prioritize active/unfinished records so summaries focus on actionable tasks
+        rows.sort_by_key(|r| {
+            let is_completed = r
+                .get("completed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+                || r.get("status")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.eq_ignore_ascii_case("completed") || s.eq_ignore_ascii_case("done"))
+                    .unwrap_or(false);
+            if is_completed {
+                1
+            } else {
+                0
+            }
+        });
         let blob = redact_secrets(
             &json!({
                 "modelId": model.model_id,
@@ -339,5 +416,43 @@ mod tests {
                 || ctx.contains("app-missing")
         );
         assert!(!ctx.contains("sk-ant-"));
+    }
+
+    #[test]
+    fn nonexistent_conversation_scope_fails_safely() {
+        let dir = tempdir().unwrap();
+        let db = Database::open_path(&dir.path().join("ai-scope-conv.db")).unwrap();
+        let mut auto = sample(true);
+        auto.action = AutomationAction::AiPrompt {
+            prompt: "Summarize notes".into(),
+            conversation_id: Some("conv-does-not-exist".into()),
+        };
+        let out = snapshot_ai_prepare(&db, &auto, "run-test-1", "Summarize notes").unwrap_err();
+        assert_eq!(out.status, "error");
+        assert_eq!(out.error_category.as_deref(), Some("scope_violation"));
+        assert!(out.summary.contains("no longer exists"));
+    }
+
+    #[test]
+    fn nonexistent_application_scope_fails_safely() {
+        let dir = tempdir().unwrap();
+        let db = Database::open_path(&dir.path().join("ai-scope-app.db")).unwrap();
+        let mut auto = sample(true);
+        auto.application_id = Some("app-does-not-exist".into());
+        let out = snapshot_ai_prepare(&db, &auto, "run-test-2", "Summarize notes").unwrap_err();
+        assert_eq!(out.status, "error");
+        assert_eq!(out.error_category.as_deref(), Some("application_not_found"));
+        assert!(out.summary.contains("does not exist"));
+    }
+
+    #[test]
+    fn paused_automation_blocks_execution() {
+        let dir = tempdir().unwrap();
+        let db = Database::open_path(&dir.path().join("ai-paused.db")).unwrap();
+        let mut auto = sample(true);
+        auto.enabled = false;
+        let out = snapshot_ai_prepare(&db, &auto, "run-test-3", "Summarize notes").unwrap_err();
+        assert_eq!(out.status, "blocked");
+        assert!(out.summary.contains("paused or disabled"));
     }
 }

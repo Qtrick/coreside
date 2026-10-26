@@ -489,7 +489,10 @@ impl AiProvider for AnthropicProvider {
             return Err(AiError::Cancelled);
         }
         let _ = SCHEMA_VERSION;
-        let body = Self::build_body(&request.system_prompt, &request.messages, &self.model);
+        let mut body = Self::build_body(&request.system_prompt, &request.messages, &self.model);
+        if let Some(tokens) = request.max_output_tokens {
+            body["max_tokens"] = json!(tokens);
+        }
         let payload = self.post_messages(body, request.cancel.clone()).await?;
         let raw_text = Self::extract_text(&payload)?;
         let usage = Self::extract_usage(&payload);
@@ -517,6 +520,9 @@ impl AiProvider for AnthropicProvider {
         }
         let _ = SCHEMA_VERSION;
         let mut body = Self::build_body(&request.system_prompt, &request.messages, &self.model);
+        if let Some(tokens) = request.max_output_tokens {
+            body["max_tokens"] = json!(tokens);
+        }
         if let Some(obj) = body.as_object_mut() {
             obj.insert("stream".into(), json!(true));
         }

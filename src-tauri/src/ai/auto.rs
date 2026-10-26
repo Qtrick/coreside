@@ -210,6 +210,7 @@ pub async fn chat_with_auto(
             } else {
                 base_idempotency_key.clone()
             }),
+            max_output_tokens: request.max_output_tokens,
         };
 
         on_action("Generating a response");
@@ -327,6 +328,7 @@ async fn run_chat_stream(
         messages: request.messages.clone(),
         cancel: request.cancel.clone(),
         idempotency_key: Some(idempotency_key.to_string()),
+        max_output_tokens: request.max_output_tokens,
     };
 
     let provider_fut = provider.chat_stream(attempt, tx);
@@ -529,6 +531,7 @@ mod tests {
             messages: vec![AgentMessage::text(crate::ai::AgentRole::User, "hi")],
             cancel: cancel.clone(),
             idempotency_key: Some("k1".into()),
+            max_output_tokens: None,
         };
 
         let started = std::time::Instant::now();
@@ -611,6 +614,7 @@ mod tests {
             messages: vec![AgentMessage::text(crate::ai::AgentRole::User, "hi")],
             cancel,
             idempotency_key: Some("k-fail".into()),
+            max_output_tokens: None,
         };
         let mut saw_delta = false;
         let result = run_chat_stream(&provider, &request, "k-fail", &mut |ev| {
@@ -705,6 +709,7 @@ mod tests {
             messages: vec![AgentMessage::text(crate::ai::AgentRole::User, "hi")],
             cancel,
             idempotency_key: Some("k-silent".into()),
+            max_output_tokens: None,
         };
         let result = run_chat_stream(&provider, &request, "k-silent", &mut |_| {}).await;
         match result {

@@ -3083,6 +3083,7 @@ async fn send_message_inner(
             messages: chat_messages.clone(),
             cancel: cancel.clone(),
             idempotency_key: Some(turn_idem_key.clone()),
+            max_output_tokens: None,
         },
         move |label| {
             let key = api_key_for_cb.as_deref();
@@ -3424,6 +3425,7 @@ async fn send_message_inner(
                 messages: chat_messages.clone(),
                 cancel: cancel.clone(),
                 idempotency_key: Some(Uuid::new_v4().to_string()),
+                max_output_tokens: None,
             },
             move |label| {
                 let key = api_key_for_cb.as_deref();
@@ -3663,6 +3665,7 @@ async fn send_message_inner(
                                 messages: chat_messages.clone(),
                                 cancel: cancel.clone(),
                                 idempotency_key: Some(Uuid::new_v4().to_string()),
+                                max_output_tokens: None,
                             },
                             |_| {},
                             |event| {

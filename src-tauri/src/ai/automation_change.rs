@@ -41,6 +41,16 @@ impl AutomationChangePayload {
                 return Err("weekday must be 0 (Monday) through 6 (Sunday)".into());
             }
         }
+        if let AutomationTrigger::Weekdays { weekdays, .. } = &self.trigger {
+            if weekdays.is_empty() {
+                return Err("weekdays selection cannot be empty".into());
+            }
+            for &w in weekdays {
+                if w > 6 {
+                    return Err("weekday must be 0 (Monday) through 6 (Sunday)".into());
+                }
+            }
+        }
         if let Some(summary) = &self.change_summary {
             if summary.chars().count() > 280 {
                 return Err("changeSummary is too long".into());

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   automationChangeStatusFromMetadata,
+  describeAutomationTrigger,
   parseAutomationChange,
   toUpsertAutomationInput,
 } from "@/lib/automation-proposal";
@@ -163,6 +164,76 @@ describe("parseAutomationChange", () => {
         },
       }),
     ).toBeNull();
+  });
+
+  it("accepts weekdays multi-day trigger", () => {
+    const proposal = parseAutomationChange({
+      name: "Weekday standup reminder",
+      trigger: {
+        type: "weekdays",
+        weekdays: [0, 1, 2, 3, 4],
+        time: "08:30",
+        timezone: "America/New_York",
+      },
+      action: {
+        type: "ai_prompt",
+        prompt: "Review unfinished tasks",
+      },
+    });
+    expect(proposal).not.toBeNull();
+    expect(proposal?.trigger).toEqual({
+      type: "weekdays",
+      weekdays: [0, 1, 2, 3, 4],
+      time: "08:30",
+      timezone: "America/New_York",
+    });
+  });
+
+  it("rejects invalid weekdays trigger (empty or out-of-range days)", () => {
+    expect(
+      parseAutomationChange({
+        name: "Empty days",
+        trigger: { type: "weekdays", weekdays: [], time: "08:30" },
+        action: { type: "ai_prompt", prompt: "Hello" },
+      }),
+    ).toBeNull();
+
+    expect(
+      parseAutomationChange({
+        name: "Out of range day",
+        trigger: { type: "weekdays", weekdays: [0, 7], time: "08:30" },
+        action: { type: "ai_prompt", prompt: "Hello" },
+      }),
+    ).toBeNull();
+
+    expect(
+      parseAutomationChange({
+        name: "Duplicate day",
+        trigger: { type: "weekdays", weekdays: [1, 1], time: "08:30" },
+        action: { type: "ai_prompt", prompt: "Hello" },
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("describeAutomationTrigger", () => {
+  it("describes weekdays trigger accurately", () => {
+    expect(
+      describeAutomationTrigger({
+        type: "weekdays",
+        weekdays: [0, 1, 2, 3, 4],
+        time: "08:00",
+        timezone: "America/New_York",
+      }),
+    ).toBe("Every weekday at 08:00 (America/New_York)");
+
+    expect(
+      describeAutomationTrigger({
+        type: "weekdays",
+        weekdays: [5, 6],
+        time: "10:00",
+      }),
+    ).toBe("Weekly on Sat, Sun at 10:00 (device timezone)");
   });
 });
 

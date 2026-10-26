@@ -75,13 +75,26 @@ export function AutomationProposalCard({
         <li>Runs only while Coreside is open</li>
       </ul>
       {resolved ? (
-        <p className="muted" role="status" style={{ margin: "0.65rem 0 0" }}>
-          {status === "applied"
-            ? "Scheduled. Open Automations to pause, run, or review history."
-            : status === "discarded"
-              ? "Discarded."
-              : "Could not schedule."}
-        </p>
+        <>
+          <p className="muted" role="status" style={{ margin: "0.65rem 0 0" }}>
+            {status === "applied"
+              ? "Scheduled. Open Automations to pause, run, or review history."
+              : status === "discarded"
+                ? "Discarded."
+                : "Could not schedule."}
+          </p>
+          {status === "applied" ? (
+            <div className="preview-actions" style={{ marginTop: "0.5rem" }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => useAppStore.getState().navigateToAutomations()}
+              >
+                Open Automations
+              </button>
+            </div>
+          ) : null}
+        </>
       ) : showActions ? (
         <div className="preview-actions">
           <button

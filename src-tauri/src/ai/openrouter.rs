@@ -433,12 +433,15 @@ impl AiProvider for OpenRouterProvider {
         }
 
         let _ = SCHEMA_VERSION;
-        let body = json!({
+        let mut body = json!({
             "model": self.model,
             "messages": messages,
             "temperature": 0.4,
             "response_format": super::openai_family::openai_response_format(&self.model)
         });
+        if let Some(tokens) = request.max_output_tokens {
+            body["max_tokens"] = json!(tokens);
+        }
 
         let payload = self.post_chat(body, request.cancel.clone()).await?;
         let raw_text = Self::extract_text(&payload)?;
@@ -468,13 +471,16 @@ impl AiProvider for OpenRouterProvider {
         }
         let messages = Self::build_messages(&request.system_prompt, &request.messages);
         let _ = SCHEMA_VERSION;
-        let body = json!({
+        let mut body = json!({
             "model": self.model,
             "messages": messages,
             "temperature": 0.4,
             "stream": true,
             "response_format": super::openai_family::openai_response_format(&self.model)
         });
+        if let Some(tokens) = request.max_output_tokens {
+            body["max_tokens"] = json!(tokens);
+        }
         let _ = tx
             .send(ProviderStreamEvent::ResponseStarted {
                 provider_id: self.provider_id().to_string(),

@@ -93,13 +93,15 @@ pub struct UsageMetadata {
     pub total_tokens: Option<u32>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AgentRequest {
     pub system_prompt: String,
     pub messages: Vec<AgentMessage>,
     pub cancel: CancellationToken,
     /// Stable identity for one logical user/provider operation. Retries must reuse this key.
     pub idempotency_key: Option<String>,
+    /// Upper bound on generated tokens requested from the provider before generation starts.
+    pub max_output_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -78,6 +78,19 @@ pub enum AutomationTrigger {
         #[serde(default)]
         timezone: Option<String>,
     },
+    #[serde(
+        rename = "weekdays",
+        alias = "weekday_set",
+        alias = "multi_day",
+        alias = "multiDay"
+    )]
+    Weekdays {
+        /// 0 = Monday … 6 = Sunday. Nonempty, deduplicated, sorted.
+        weekdays: Vec<u8>,
+        time: String,
+        #[serde(default)]
+        timezone: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -179,7 +192,8 @@ fn trigger_timezone(trigger: &AutomationTrigger) -> Option<&str> {
     match trigger {
         AutomationTrigger::Interval { timezone, .. }
         | AutomationTrigger::Daily { timezone, .. }
-        | AutomationTrigger::Weekly { timezone, .. } => timezone.as_deref(),
+        | AutomationTrigger::Weekly { timezone, .. }
+        | AutomationTrigger::Weekdays { timezone, .. } => timezone.as_deref(),
     }
 }
 
@@ -190,16 +204,14 @@ pub fn compute_next_after(
     trigger: &AutomationTrigger,
     from: DateTime<Utc>,
 ) -> Option<DateTime<Utc>> {
-    match trigger {
-        AutomationTrigger::Interval {
-            interval_minutes, ..
-        } => {
-            // Defense in depth: never schedule faster than the non-AI floor,
-            // even if a row was tampered below validation limits.
-            let mins = (*interval_minutes).max(MIN_SCHEDULE_INTERVAL_MINUTES) as i64;
-            return Some(from + Duration::minutes(mins));
-        }
-        _ => {}
+    if let AutomationTrigger::Interval {
+        interval_minutes, ..
+    } = trigger
+    {
+        // Defense in depth: never schedule faster than the non-AI floor,
+        // even if a row was tampered below validation limits.
+        let mins = (*interval_minutes).max(MIN_SCHEDULE_INTERVAL_MINUTES) as i64;
+        return Some(from + Duration::minutes(mins));
     }
 
     let tz = match parse_trigger_timezone(trigger_timezone(trigger)) {
@@ -244,6 +256,37 @@ pub fn compute_next_after(
                 }
                 None
             }
+            AutomationTrigger::Weekdays { weekdays, time, .. } => {
+                let t = parse_hhmm(time)?;
+                if weekdays.is_empty() {
+                    return None;
+                }
+                let mut targets = Vec::new();
+                for w in weekdays {
+                    match *w {
+                        0 => targets.push(Weekday::Mon),
+                        1 => targets.push(Weekday::Tue),
+                        2 => targets.push(Weekday::Wed),
+                        3 => targets.push(Weekday::Thu),
+                        4 => targets.push(Weekday::Fri),
+                        5 => targets.push(Weekday::Sat),
+                        6 => targets.push(Weekday::Sun),
+                        _ => return None,
+                    }
+                }
+                let mut day = local.date_naive();
+                for _ in 0..14 {
+                    if targets.contains(&day.weekday()) {
+                        if let Some(candidate) = resolve_in_tz(day, t, tz) {
+                            if candidate > local {
+                                return Some(candidate.with_timezone(&Utc));
+                            }
+                        }
+                    }
+                    day += Duration::days(1);
+                }
+                None
+            }
             AutomationTrigger::Interval { .. } => unreachable!(),
         }
     } else {
@@ -273,6 +316,37 @@ pub fn compute_next_after(
                 let mut day = local.date_naive();
                 for _ in 0..8 {
                     if day.weekday() == target {
+                        if let Some(candidate) = resolve_host_local(day, t) {
+                            if candidate > local {
+                                return Some(candidate.with_timezone(&Utc));
+                            }
+                        }
+                    }
+                    day += Duration::days(1);
+                }
+                None
+            }
+            AutomationTrigger::Weekdays { weekdays, time, .. } => {
+                let t = parse_hhmm(time)?;
+                if weekdays.is_empty() {
+                    return None;
+                }
+                let mut targets = Vec::new();
+                for w in weekdays {
+                    match *w {
+                        0 => targets.push(Weekday::Mon),
+                        1 => targets.push(Weekday::Tue),
+                        2 => targets.push(Weekday::Wed),
+                        3 => targets.push(Weekday::Thu),
+                        4 => targets.push(Weekday::Fri),
+                        5 => targets.push(Weekday::Sat),
+                        6 => targets.push(Weekday::Sun),
+                        _ => return None,
+                    }
+                }
+                let mut day = local.date_naive();
+                for _ in 0..14 {
+                    if targets.contains(&day.weekday()) {
                         if let Some(candidate) = resolve_host_local(day, t) {
                             if candidate > local {
                                 return Some(candidate.with_timezone(&Utc));
@@ -452,5 +526,57 @@ mod tests {
             from,
         )
         .is_some());
+    }
+
+    #[test]
+    fn weekdays_multi_day_always_produces_a_next_run() {
+        let start = Utc::now();
+        let mon_to_fri = vec![0, 1, 2, 3, 4];
+        for day in 0..60 {
+            let from = start + Duration::days(day);
+            let next = compute_next_after(
+                &AutomationTrigger::Weekdays {
+                    weekdays: mon_to_fri.clone(),
+                    time: "08:00".into(),
+                    timezone: None,
+                },
+                from,
+            );
+            assert!(next.is_some(), "no next run for weekdays from {from}");
+            let next_utc = next.unwrap();
+            assert!(next_utc > from);
+            // Verify that in local time, the day of week is Mon..=Fri (0..=4 from monday)
+            let local_wd = next_utc
+                .with_timezone(&Local)
+                .weekday()
+                .num_days_from_monday();
+            assert!(local_wd <= 4, "expected weekday 0..=4, got {local_wd}");
+        }
+    }
+
+    #[test]
+    fn weekdays_respects_explicit_timezone_across_dst() {
+        // Test America/New_York across spring DST (March 2026: 2026-03-08 is spring forward)
+        // 2026-03-06 is Friday. 15:00 UTC is 10:00 EST (after 08:00 EST run)
+        let from = DateTime::parse_from_rfc3339("2026-03-06T15:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let next = compute_next_after(
+            &AutomationTrigger::Weekdays {
+                weekdays: vec![0, 1, 2, 3, 4],
+                time: "08:00".into(),
+                timezone: Some("America/New_York".into()),
+            },
+            from,
+        )
+        .expect("next run after Friday 03-06 10:00 EST should be Monday 03-09 08:00 EDT");
+
+        // 2026-03-09 in EDT is UTC-4, so 08:00 EDT is 12:00 UTC
+        assert_eq!(
+            next,
+            DateTime::parse_from_rfc3339("2026-03-09T12:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc)
+        );
     }
 }

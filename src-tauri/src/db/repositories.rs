@@ -521,12 +521,12 @@ pub fn get_message(db: &Database, id: &str) -> DbResult<Message> {
         })
 }
 
-pub fn update_message_metadata(
-    db: &mut Database,
+pub fn update_message_metadata_conn(
+    conn: &rusqlite::Connection,
     id: &str,
     metadata: &serde_json::Value,
 ) -> DbResult<()> {
-    let n = db.conn().execute(
+    let n = conn.execute(
         "UPDATE messages SET metadata = ?1 WHERE id = ?2",
         params![metadata.to_string(), id],
     )?;
@@ -534,6 +534,14 @@ pub fn update_message_metadata(
         return Err(DbError::NotFound(format!("message {id}")));
     }
     Ok(())
+}
+
+pub fn update_message_metadata(
+    db: &mut Database,
+    id: &str,
+    metadata: &serde_json::Value,
+) -> DbResult<()> {
+    update_message_metadata_conn(db.conn(), id, metadata)
 }
 
 /// Delete `message_id` and every later message in the same conversation (by created_at, then id).
@@ -1646,17 +1654,20 @@ pub fn list_automations(db: &Database) -> DbResult<Vec<Automation>> {
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
+pub fn get_automation_conn(conn: &rusqlite::Connection, id: &str) -> DbResult<Automation> {
+    conn.query_row(
+        &format!("SELECT {AUTOMATION_COLS} FROM automations WHERE id = ?1"),
+        [id],
+        map_automation,
+    )
+    .map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(format!("automation {id}")),
+        other => DbError::Sqlite(other),
+    })
+}
+
 pub fn get_automation(db: &Database, id: &str) -> DbResult<Automation> {
-    db.conn()
-        .query_row(
-            &format!("SELECT {AUTOMATION_COLS} FROM automations WHERE id = ?1"),
-            [id],
-            map_automation,
-        )
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(format!("automation {id}")),
-            other => DbError::Sqlite(other),
-        })
+    get_automation_conn(db.conn(), id)
 }
 
 pub fn list_due_automations(db: &Database, now_rfc3339: &str) -> DbResult<Vec<Automation>> {
@@ -1669,11 +1680,15 @@ pub fn list_due_automations(db: &Database, now_rfc3339: &str) -> DbResult<Vec<Au
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
-pub fn upsert_automation(db: &mut Database, automation: &Automation) -> DbResult<Automation> {
+pub fn upsert_automation_conn(
+    conn: &rusqlite::Connection,
+    automation: &Automation,
+) -> DbResult<Automation> {
     let trigger_type = match &automation.trigger {
         AutomationTrigger::Interval { .. } => "interval",
         AutomationTrigger::Daily { .. } => "daily",
         AutomationTrigger::Weekly { .. } => "weekly",
+        AutomationTrigger::Weekdays { .. } => "weekdays",
     };
     let action_type = match &automation.action {
         AutomationAction::CycleWorkspaceBackgrounds { .. } => "cycle_workspace_backgrounds",
@@ -1687,7 +1702,7 @@ pub fn upsert_automation(db: &mut Database, automation: &Automation) -> DbResult
         MissedRunPolicy::Skip => "skip",
         MissedRunPolicy::RunOnce => "run_once",
     };
-    db.conn().execute(
+    conn.execute(
         "INSERT INTO automations (
             id, workspace_id, owner_tool_id, name, enabled, trigger_type, trigger_json,
             action_type, action_json, requires_ai, provider_connection_id, missed_run_policy,
@@ -1727,11 +1742,15 @@ pub fn upsert_automation(db: &mut Database, automation: &Automation) -> DbResult
             if automation.permission_ready { 1 } else { 0 },
         ],
     )?;
-    get_automation(db, &automation.id)
+    get_automation_conn(conn, &automation.id)
 }
 
-pub fn update_automation_schedule(
-    db: &mut Database,
+pub fn upsert_automation(db: &mut Database, automation: &Automation) -> DbResult<Automation> {
+    upsert_automation_conn(db.conn(), automation)
+}
+
+pub fn update_automation_schedule_conn(
+    conn: &rusqlite::Connection,
     id: &str,
     next_run_at: Option<&str>,
     last_run_at: Option<&str>,
@@ -1740,7 +1759,7 @@ pub fn update_automation_schedule(
     enabled: bool,
 ) -> DbResult<()> {
     let now = now_rfc3339();
-    let n = db.conn().execute(
+    let n = conn.execute(
         "UPDATE automations SET next_run_at=?1, last_run_at=?2, last_status=?3,
          consecutive_failures=?4, enabled=?5, updated_at=?6 WHERE id=?7",
         params![
@@ -1757,6 +1776,26 @@ pub fn update_automation_schedule(
         return Err(DbError::NotFound(format!("automation {id}")));
     }
     Ok(())
+}
+
+pub fn update_automation_schedule(
+    db: &mut Database,
+    id: &str,
+    next_run_at: Option<&str>,
+    last_run_at: Option<&str>,
+    last_status: Option<&str>,
+    consecutive_failures: i64,
+    enabled: bool,
+) -> DbResult<()> {
+    update_automation_schedule_conn(
+        db.conn(),
+        id,
+        next_run_at,
+        last_run_at,
+        last_status,
+        consecutive_failures,
+        enabled,
+    )
 }
 
 /// Record whether an application-bound automation is parked on an approval and
@@ -1804,8 +1843,8 @@ pub fn delete_automation(db: &mut Database, id: &str) -> DbResult<()> {
     Ok(())
 }
 
-pub fn insert_automation_run(
-    db: &mut Database,
+pub fn insert_automation_run_conn(
+    conn: &rusqlite::Connection,
     id: &str,
     automation_id: &str,
     scheduled_at: Option<&str>,
@@ -1816,7 +1855,7 @@ pub fn insert_automation_run(
     error_category: Option<&str>,
 ) -> DbResult<()> {
     let created_at = now_rfc3339();
-    db.conn().execute(
+    conn.execute(
         "INSERT INTO automation_runs (
             id, automation_id, scheduled_at, started_at, completed_at, status,
             result_summary, error_category, created_at
@@ -1834,6 +1873,84 @@ pub fn insert_automation_run(
         ],
     )?;
     Ok(())
+}
+
+pub fn insert_automation_run(
+    db: &mut Database,
+    id: &str,
+    automation_id: &str,
+    scheduled_at: Option<&str>,
+    started_at: &str,
+    completed_at: Option<&str>,
+    status: &str,
+    result_summary: Option<&str>,
+    error_category: Option<&str>,
+) -> DbResult<()> {
+    insert_automation_run_conn(
+        db.conn(),
+        id,
+        automation_id,
+        scheduled_at,
+        started_at,
+        completed_at,
+        status,
+        result_summary,
+        error_category,
+    )
+}
+
+pub fn update_automation_run_conn(
+    conn: &rusqlite::Connection,
+    id: &str,
+    completed_at: Option<&str>,
+    status: &str,
+    result_summary: Option<&str>,
+    error_category: Option<&str>,
+) -> DbResult<()> {
+    let n = conn.execute(
+        "UPDATE automation_runs SET completed_at = ?2, status = ?3, result_summary = ?4, error_category = ?5 WHERE id = ?1",
+        params![id, completed_at, status, result_summary, error_category],
+    )?;
+    if n == 0 {
+        return Err(DbError::NotFound(format!("automation run {id}")));
+    }
+    Ok(())
+}
+
+pub fn update_automation_run(
+    db: &mut Database,
+    id: &str,
+    completed_at: Option<&str>,
+    status: &str,
+    result_summary: Option<&str>,
+    error_category: Option<&str>,
+) -> DbResult<()> {
+    update_automation_run_conn(
+        db.conn(),
+        id,
+        completed_at,
+        status,
+        result_summary,
+        error_category,
+    )
+}
+
+/// Reconcile interrupted or stale running claims from prior app lifecycle / crash.
+pub fn reconcile_interrupted_runs(conn: &rusqlite::Connection) -> DbResult<usize> {
+    let now = now_rfc3339();
+    let n = conn.execute(
+        "UPDATE automation_runs SET completed_at = ?1, status = 'interrupted',
+         result_summary = 'Run was interrupted by application restart or process termination',
+         error_category = 'interrupted'
+         WHERE status = 'running'",
+        params![now],
+    )?;
+    conn.execute(
+        "UPDATE automations SET last_status = 'interrupted', updated_at = ?1
+         WHERE last_status = 'running'",
+        params![now],
+    )?;
+    Ok(n)
 }
 
 pub fn list_automation_runs(

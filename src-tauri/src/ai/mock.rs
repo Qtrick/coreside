@@ -1665,6 +1665,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();
@@ -1698,6 +1699,7 @@ mod tests {
             )],
             cancel: cancel.clone(),
             idempotency_key: Some("probe".into()),
+            max_output_tokens: None,
         };
         let started = std::time::Instant::now();
         let join = tokio::spawn(async move { provider.chat_stream(request, tx).await });
@@ -1735,6 +1737,7 @@ mod tests {
             )],
             cancel: CancellationToken::new(),
             idempotency_key: Some("progressive".into()),
+            max_output_tokens: None,
         };
         let join = tokio::spawn(async move { provider.chat_stream(request, tx).await });
 
@@ -1809,6 +1812,7 @@ mod tests {
             )],
             cancel: CancellationToken::new(),
             idempotency_key: Some("progressive-surface".into()),
+            max_output_tokens: None,
         };
         let join = tokio::spawn(async move { provider.chat_stream(request, tx).await });
 
@@ -1918,6 +1922,7 @@ mod tests {
             )],
             cancel: cancel.clone(),
             idempotency_key: Some("progressive-surface-cancel".into()),
+            max_output_tokens: None,
         };
         let join = tokio::spawn(async move { provider.chat_stream(request, tx).await });
 
@@ -1959,6 +1964,7 @@ mod tests {
             messages: vec![AgentMessage::text(crate::ai::AgentRole::User, "hello")],
             cancel: CancellationToken::new(),
             idempotency_key: None,
+            max_output_tokens: None,
         };
         let join = tokio::spawn(async move { provider.chat_stream(request, tx).await });
         let mut saw_delta = false;
@@ -1990,6 +1996,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();
@@ -2025,6 +2032,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();
@@ -2095,6 +2103,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();
@@ -2127,6 +2136,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();
@@ -2155,6 +2165,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();
@@ -2186,6 +2197,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();
@@ -2219,6 +2231,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();
@@ -2343,6 +2356,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();
@@ -2415,6 +2429,7 @@ mod tests {
                     )],
                     cancel: CancellationToken::new(),
                     idempotency_key: None,
+                    max_output_tokens: None,
                 })
                 .await
                 .unwrap();
@@ -2520,6 +2535,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();
@@ -2565,6 +2581,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();
@@ -2600,6 +2617,7 @@ mod tests {
                     messages: vec![AgentMessage::text(crate::ai::AgentRole::User, prompt)],
                     cancel: CancellationToken::new(),
                     idempotency_key: None,
+                    max_output_tokens: None,
                 })
                 .await
                 .unwrap();
@@ -2631,6 +2649,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();
@@ -2652,6 +2671,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();
@@ -2679,6 +2699,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();
@@ -2707,6 +2728,7 @@ mod tests {
                 )],
                 cancel: CancellationToken::new(),
                 idempotency_key: None,
+                max_output_tokens: None,
             })
             .await
             .unwrap();

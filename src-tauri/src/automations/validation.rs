@@ -10,7 +10,8 @@ fn trigger_timezone(trigger: &AutomationTrigger) -> Option<&str> {
     match trigger {
         AutomationTrigger::Interval { timezone, .. }
         | AutomationTrigger::Daily { timezone, .. }
-        | AutomationTrigger::Weekly { timezone, .. } => timezone.as_deref(),
+        | AutomationTrigger::Weekly { timezone, .. }
+        | AutomationTrigger::Weekdays { timezone, .. } => timezone.as_deref(),
     }
 }
 
@@ -39,7 +40,32 @@ pub fn validate_automation(
                 ));
             }
         }
-        AutomationTrigger::Daily { time, .. } | AutomationTrigger::Weekly { time, .. } => {
+        AutomationTrigger::Daily { time, .. } => {
+            if super::models::parse_hhmm(time).is_none() {
+                return Err("Time must be HH:MM".into());
+            }
+        }
+        AutomationTrigger::Weekly { weekday, time, .. } => {
+            if *weekday > 6 {
+                return Err("weekday must be 0 (Monday) through 6 (Sunday)".into());
+            }
+            if super::models::parse_hhmm(time).is_none() {
+                return Err("Time must be HH:MM".into());
+            }
+        }
+        AutomationTrigger::Weekdays { weekdays, time, .. } => {
+            if weekdays.is_empty() {
+                return Err("Weekdays selection cannot be empty".into());
+            }
+            let mut seen = std::collections::HashSet::new();
+            for &w in weekdays {
+                if w > 6 {
+                    return Err("weekday must be 0 (Monday) through 6 (Sunday)".into());
+                }
+                if !seen.insert(w) {
+                    return Err(format!("Duplicate weekday {w} in schedule"));
+                }
+            }
             if super::models::parse_hhmm(time).is_none() {
                 return Err("Time must be HH:MM".into());
             }

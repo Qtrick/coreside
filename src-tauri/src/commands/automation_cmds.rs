@@ -234,7 +234,11 @@ fn confirm_automation_change_db(
                 already_applied: true,
             });
         }
-        // Status says applied but the row is gone — fall through to recreate.
+        // Previously applied and subsequently deleted — do not silently resurrect.
+        return Err(CommandError::new(
+            "conflict",
+            "This automation proposal was already applied and later deleted. To set it up again, ask in chat.",
+        ));
     }
     let stored: AutomationChangePayload = serde_json::from_value(proposal_val)
         .map_err(|e| CommandError::new("invalid", format!("Invalid automation proposal: {e}")))?;
@@ -301,9 +305,6 @@ fn confirm_automation_change_db(
         updated_at: now.to_rfc3339(),
     };
 
-    // Same-connection writes: upsert then stamp message so confirm is recoverable
-    // via stable id if the process dies between the two statements.
-    let automation = db::upsert_automation(db, &row)?;
     obj.insert(
         "automationChangeStatus".into(),
         serde_json::Value::String("applied".into()),
@@ -311,14 +312,21 @@ fn confirm_automation_change_db(
     obj.insert("pending".into(), serde_json::json!(false));
     obj.insert(
         "automationId".into(),
-        serde_json::Value::String(automation.id.clone()),
+        serde_json::Value::String(row.id.clone()),
     );
-    db::update_message_metadata(db, &message_id, &meta)?;
+
+    // Atomic transaction: upsert the automation and update the message metadata together.
+    // If either operation fails, the transaction rolls back cleanly.
+    let automation = db.with_transaction(|conn| {
+        let saved = db::upsert_automation_conn(conn, &row)?;
+        db::update_message_metadata_conn(conn, &message_id, &meta)?;
+        Ok(saved)
+    })?;
     msg.metadata = Some(meta);
     Ok(ConfirmAutomationResult {
         automation,
         message: msg,
-        already_applied,
+        already_applied: false,
     })
 }
 
@@ -595,5 +603,99 @@ mod tests {
             err.message
         );
         assert!(db::list_automations(&db).unwrap().is_empty());
+    }
+
+    #[test]
+    fn confirm_does_not_resurrect_deleted_automation() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("confirm-del.db")).unwrap();
+        let message_id = seed_proposal_message(&mut db, "msg-del");
+        let expected = sample_expected();
+
+        // First confirmation succeeds
+        let res = confirm_automation_change_db(&mut db, &message_id, &expected).unwrap();
+        assert!(!res.already_applied);
+        let auto_id = format!("auto-chat-{message_id}");
+        assert!(db::get_automation(&db, &auto_id).is_ok());
+
+        // User intentionally deletes the automation
+        db::delete_automation(&mut db, &auto_id).unwrap();
+        assert!(db::get_automation(&db, &auto_id).is_err());
+
+        // Retried confirmation of the old proposal must NOT silently resurrect the deleted automation
+        let err = confirm_automation_change_db(&mut db, &message_id, &expected).unwrap_err();
+        assert!(
+            err.message.to_lowercase().contains("deleted")
+                || err.message.to_lowercase().contains("conflict"),
+            "unexpected error message: {}",
+            err.message
+        );
+        assert!(db::get_automation(&db, &auto_id).is_err());
+    }
+
+    #[test]
+    fn confirm_with_weekdays_trigger_persists_correctly() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("confirm-weekdays.db")).unwrap();
+        let message_id = "msg-weekdays-1";
+        db::ensure_default_workspace(&db).unwrap();
+        let conv =
+            db::create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Weekdays chat", None).unwrap();
+
+        let metadata = json!({
+            "automationChange": {
+                "name": "Weekday Review",
+                "trigger": {
+                    "type": "weekdays",
+                    "weekdays": [0, 1, 2, 3, 4],
+                    "time": "08:00",
+                    "timezone": "America/New_York"
+                },
+                "action": {
+                    "type": "ai_prompt",
+                    "prompt": "Review unfinished assignments"
+                },
+                "requiresAi": true
+            },
+            "automationChangeStatus": "pending"
+        });
+
+        let msg = db::insert_message(&mut db, &conv.id, "assistant", "Proposal", Some(&metadata))
+            .unwrap();
+        let message_id = &msg.id;
+
+        let expected = AutomationChangePayload {
+            name: "Weekday Review".into(),
+            trigger: AutomationTrigger::Weekdays {
+                weekdays: vec![0, 1, 2, 3, 4],
+                time: "08:00".into(),
+                timezone: Some("America/New_York".into()),
+            },
+            action: AutomationAction::AiPrompt {
+                prompt: "Review unfinished assignments".into(),
+                conversation_id: None,
+            },
+            requires_ai: Some(true),
+            application_id: None,
+            change_summary: None,
+            missed_run_policy: None,
+        };
+
+        let res = confirm_automation_change_db(&mut db, message_id, &expected).unwrap();
+        assert!(!res.already_applied);
+
+        let auto = db::get_automation(&db, &format!("auto-chat-{message_id}")).unwrap();
+        match auto.trigger {
+            AutomationTrigger::Weekdays {
+                weekdays,
+                time,
+                timezone,
+            } => {
+                assert_eq!(weekdays, vec![0, 1, 2, 3, 4]);
+                assert_eq!(time, "08:00");
+                assert_eq!(timezone.as_deref(), Some("America/New_York"));
+            }
+            other => panic!("expected Weekdays trigger, got {other:?}"),
+        }
     }
 }
