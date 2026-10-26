@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/tauri";
+import { listenAutomationsChanged } from "@/lib/tauri/events";
 import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
 import { useAppStore } from "@/stores/app-store";
 import {
@@ -131,6 +132,40 @@ export function AutomationsPanel({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     void reload();
   }, []);
+
+  // Live synchronization: update panel when backend background runs finish or update
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listenAutomationsChanged(() => {
+      void reload();
+      if (expandedHistoryId) {
+        void loadRuns(expandedHistoryId);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [expandedHistoryId]);
+
+  // Bounded polling while any automation is in 'running' state, paused when tab/window is hidden
+  useEffect(() => {
+    const hasRunning = rows.some((r) => r.lastStatus === "running");
+    if (!hasRunning) return;
+
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        void reload();
+        if (expandedHistoryId) {
+          void loadRuns(expandedHistoryId);
+        }
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [rows, expandedHistoryId]);
 
   const handleRunNow = async (row: Automation) => {
     setBusyId(row.id);

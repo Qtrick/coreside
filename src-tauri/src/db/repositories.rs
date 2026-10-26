@@ -1938,18 +1938,20 @@ pub fn update_automation_run(
 /// Reconcile interrupted or stale running claims from prior app lifecycle / crash.
 pub fn reconcile_interrupted_runs(conn: &rusqlite::Connection) -> DbResult<usize> {
     let now = now_rfc3339();
-    let n = conn.execute(
+    let tx = conn.unchecked_transaction()?;
+    let n = tx.execute(
         "UPDATE automation_runs SET completed_at = ?1, status = 'interrupted',
          result_summary = 'Run was interrupted by application restart or process termination',
          error_category = 'interrupted'
          WHERE status = 'running'",
         params![now],
     )?;
-    conn.execute(
+    tx.execute(
         "UPDATE automations SET last_status = 'interrupted', updated_at = ?1
          WHERE last_status = 'running'",
         params![now],
     )?;
+    tx.commit()?;
     Ok(n)
 }
 

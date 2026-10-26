@@ -31,6 +31,8 @@ pub struct UpsertAutomationInput {
     pub application_id: Option<String>,
 }
 
+pub const AUTOMATIONS_CHANGED_EVENT: &str = "automations-changed";
+
 #[tauri::command]
 pub fn list_automations(state: State<'_, AppState>) -> Result<Vec<Automation>, CommandError> {
     state.require_profile()?;
@@ -40,6 +42,7 @@ pub fn list_automations(state: State<'_, AppState>) -> Result<Vec<Automation>, C
 
 #[tauri::command]
 pub fn upsert_automation(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     input: UpsertAutomationInput,
 ) -> Result<Automation, CommandError> {
@@ -108,11 +111,15 @@ pub fn upsert_automation(
             .unwrap_or_else(|| now.to_rfc3339()),
         updated_at: now.to_rfc3339(),
     };
-    Ok(db::upsert_automation(&mut db, &row)?)
+    let res = db::upsert_automation(&mut db, &row)?;
+    use tauri::Emitter;
+    let _ = app.emit(AUTOMATIONS_CHANGED_EVENT, ());
+    Ok(res)
 }
 
 #[tauri::command]
 pub fn set_automation_enabled(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     automation_id: String,
     enabled: bool,
@@ -125,17 +132,24 @@ pub fn set_automation_enabled(
     if enabled && row.next_run_at.is_none() {
         row.next_run_at = compute_next_run(&row.trigger, Utc::now()).map(|d| d.to_rfc3339());
     }
-    Ok(db::upsert_automation(&mut db, &row)?)
+    let res = db::upsert_automation(&mut db, &row)?;
+    use tauri::Emitter;
+    let _ = app.emit(AUTOMATIONS_CHANGED_EVENT, ());
+    Ok(res)
 }
 
 #[tauri::command]
 pub fn delete_automation(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     automation_id: String,
 ) -> Result<(), CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
-    Ok(db::delete_automation(&mut db, automation_id.trim())?)
+    db::delete_automation(&mut db, automation_id.trim())?;
+    use tauri::Emitter;
+    let _ = app.emit(AUTOMATIONS_CHANGED_EVENT, ());
+    Ok(())
 }
 
 #[tauri::command]
@@ -150,13 +164,17 @@ pub fn list_automation_runs(
 
 #[tauri::command]
 pub fn run_automation_now(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     scheduler: State<'_, std::sync::Arc<SchedulerHandle>>,
     automation_id: String,
 ) -> Result<AutomationRunOutcome, CommandError> {
     state.require_profile()?;
-    crate::automations::run_now(&state, automation_id.trim(), &scheduler)
-        .map_err(|e| CommandError::new("automation", e))
+    let outcome = crate::automations::run_now(&state, automation_id.trim(), &scheduler)
+        .map_err(|e| CommandError::new("automation", e))?;
+    use tauri::Emitter;
+    let _ = app.emit(AUTOMATIONS_CHANGED_EVENT, ());
+    Ok(outcome)
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -175,13 +193,17 @@ pub struct ConfirmAutomationResult {
 /// apply a bait-and-switch rewrite of message metadata after the user reviewed the card.
 #[tauri::command]
 pub fn confirm_automation_change(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     message_id: String,
     expected_change: AutomationChangePayload,
 ) -> Result<ConfirmAutomationResult, CommandError> {
     state.require_profile()?;
     let mut db = state.db.lock();
-    confirm_automation_change_db(&mut db, &message_id, &expected_change)
+    let res = confirm_automation_change_db(&mut db, &message_id, &expected_change)?;
+    use tauri::Emitter;
+    let _ = app.emit(AUTOMATIONS_CHANGED_EVENT, ());
+    Ok(res)
 }
 
 /// DB-core for [`confirm_automation_change`] (testable without Tauri `State`).

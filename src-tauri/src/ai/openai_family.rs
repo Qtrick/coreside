@@ -139,6 +139,16 @@ fn text_parts_for_openai_family(parts: &[AgentContentPart]) -> String {
     flatten_parts_for_provider(&filtered)
 }
 
+/// Whether this OpenAI-family model is an o-series reasoning model (e.g. o1, o3, o4).
+///
+/// Reasoning models reject `temperature` and require `max_completion_tokens` instead
+/// of deprecated `max_tokens`.
+pub fn is_reasoning_model(model: &str) -> bool {
+    let m = model.trim().to_ascii_lowercase();
+    let bare = m.rsplit('/').next().unwrap_or(&m);
+    bare.starts_with("o1") || bare.starts_with("o3") || bare.starts_with("o4")
+}
+
 /// Whether this OpenAI-family model ID is known to accept `response_format: json_schema`.
 ///
 /// Older Chat Completions models only support `json_object`. Unknown / compatible
@@ -154,9 +164,7 @@ pub fn model_supports_json_schema_response_format(model: &str) -> bool {
         || bare.starts_with("gpt-4.1")
         || bare.starts_with("gpt-4.5")
         || bare.starts_with("gpt-5")
-        || bare.starts_with("o1")
-        || bare.starts_with("o3")
-        || bare.starts_with("o4")
+        || is_reasoning_model(bare)
         || bare.contains("gpt-4o")
         || bare.contains("gpt-4.1");
     // Explicitly exclude legacy turbo / 3.5 / instruct which reject json_schema.

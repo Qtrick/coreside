@@ -202,6 +202,17 @@ export async function listenApprovalsChanged(
   return listen("runtime-approvals-changed", () => handler());
 }
 
+/**
+ * Automations or automation run history changed somewhere in the trusted core.
+ * Open Automations panels re-query so runs and statuses stay in sync.
+ */
+export async function listenAutomationsChanged(
+  handler: () => void,
+): Promise<() => void> {
+  if (!isTauriRuntime()) return () => undefined;
+  return listen("automations-changed", () => handler());
+}
+
 /** Hint that committed local_data write/delete affected an application model. */
 export type ApplicationDataChangedEvent = {
   applicationId: string;

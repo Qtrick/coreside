@@ -452,6 +452,49 @@ impl OpenAiProvider {
     }
 }
 
+/// Build OpenAI-compatible chat completion request payload.
+///
+/// Ensures correct parameter usage across provider endpoints:
+/// - Official OpenAI (`provider_id == "openai"`): uses `max_completion_tokens`
+///   (the modern standard; `max_tokens` is deprecated and rejected on reasoning models).
+/// - Reasoning models (`o1`, `o3`, `o4`): omit `temperature` (rejected by OpenAI with 400).
+/// - OpenAI-compatible third-party endpoints: use `max_tokens` (unless reasoning model),
+///   and omit unsupported `stream_options`.
+pub fn build_openai_request_body(
+    provider_id: &str,
+    model: &str,
+    system_prompt: &str,
+    messages: &[AgentMessage],
+    max_output_tokens: Option<u32>,
+    stream: bool,
+) -> Value {
+    let is_reasoning = super::openai_family::is_reasoning_model(model);
+    let is_official_openai = provider_id == "openai";
+    let chat_messages = super::openai_family::build_openai_chat_messages(system_prompt, messages);
+    let mut body = json!({
+        "model": model,
+        "messages": chat_messages,
+        "response_format": super::openai_family::openai_response_format(model)
+    });
+    if !is_reasoning {
+        body["temperature"] = json!(0.4);
+    }
+    if stream {
+        body["stream"] = json!(true);
+        if is_official_openai {
+            body["stream_options"] = json!({ "include_usage": true });
+        }
+    }
+    if let Some(tokens) = max_output_tokens {
+        if is_official_openai || is_reasoning {
+            body["max_completion_tokens"] = json!(tokens);
+        } else {
+            body["max_tokens"] = json!(tokens);
+        }
+    }
+    body
+}
+
 #[async_trait]
 impl AiProvider for OpenAiProvider {
     fn provider_id(&self) -> &str {
@@ -501,12 +544,19 @@ impl AiProvider for OpenAiProvider {
                 });
             }
         }
-        let body = json!({
+        let is_reasoning = super::openai_family::is_reasoning_model(&self.model);
+        let mut body = json!({
             "model": self.model,
             "messages": [{ "role": "user", "content": "ping" }],
-            "max_tokens": 8,
-            "temperature": 0
         });
+        if is_reasoning || self.provider_id == "openai" {
+            body["max_completion_tokens"] = json!(8);
+        } else {
+            body["max_tokens"] = json!(8);
+        }
+        if !is_reasoning {
+            body["temperature"] = json!(0);
+        }
         let _ = self.post_chat(body, cancel).await?;
         Ok(ProviderHealth {
             ok: true,
@@ -519,17 +569,15 @@ impl AiProvider for OpenAiProvider {
         if request.cancel.is_cancelled() {
             return Err(AiError::Cancelled);
         }
-        let messages = Self::build_messages(&request.system_prompt, &request.messages);
         let _ = SCHEMA_VERSION;
-        let mut body = json!({
-            "model": self.model,
-            "messages": messages,
-            "temperature": 0.4,
-            "response_format": super::openai_family::openai_response_format(&self.model)
-        });
-        if let Some(tokens) = request.max_output_tokens {
-            body["max_tokens"] = json!(tokens);
-        }
+        let body = build_openai_request_body(
+            self.provider_id(),
+            &self.model,
+            &request.system_prompt,
+            &request.messages,
+            request.max_output_tokens,
+            false,
+        );
         let payload = self.post_chat(body, request.cancel.clone()).await?;
         let raw_text = Self::extract_text(&payload)?;
         let usage = Self::extract_usage(&payload);
@@ -555,22 +603,15 @@ impl AiProvider for OpenAiProvider {
             let _ = tx.send(ProviderStreamEvent::ResponseCancelled).await;
             return Err(AiError::Cancelled);
         }
-        let messages = Self::build_messages(&request.system_prompt, &request.messages);
         let _ = SCHEMA_VERSION;
-        // stream_options is OpenAI-specific; many compatible servers 400 on unknown fields.
-        let mut body = json!({
-            "model": self.model,
-            "messages": messages,
-            "temperature": 0.4,
-            "stream": true,
-            "response_format": super::openai_family::openai_response_format(&self.model)
-        });
-        if let Some(tokens) = request.max_output_tokens {
-            body["max_tokens"] = json!(tokens);
-        }
-        if self.provider_id == "openai" {
-            body["stream_options"] = json!({ "include_usage": true });
-        }
+        let body = build_openai_request_body(
+            self.provider_id(),
+            &self.model,
+            &request.system_prompt,
+            &request.messages,
+            request.max_output_tokens,
+            true,
+        );
         let _ = tx
             .send(ProviderStreamEvent::ResponseStarted {
                 provider_id: self.provider_id().to_string(),
@@ -737,5 +778,59 @@ mod tests {
         let arr = content.as_array().unwrap();
         assert!(arr.iter().any(|p| p["type"] == "text"));
         assert!(arr.iter().any(|p| p["type"] == "image_url"));
+    }
+
+    #[test]
+    fn build_openai_request_body_handles_reasoning_and_standard_models() {
+        let msg = vec![AgentMessage::text(AgentRole::User, "Hello")];
+
+        // 1. Official OpenAI gpt-4o: uses max_completion_tokens, includes temperature
+        let body_gpt4o =
+            build_openai_request_body("openai", "gpt-4o", "system", &msg, Some(500), false);
+        assert_eq!(body_gpt4o["max_completion_tokens"], 500);
+        assert!(body_gpt4o.get("max_tokens").is_none());
+        assert_eq!(body_gpt4o["temperature"], 0.4);
+
+        // 2. Official OpenAI o1-mini reasoning model: uses max_completion_tokens, OMITS temperature
+        let body_o1 =
+            build_openai_request_body("openai", "o1-mini", "system", &msg, Some(1000), false);
+        assert_eq!(body_o1["max_completion_tokens"], 1000);
+        assert!(body_o1.get("max_tokens").is_none());
+        assert!(
+            body_o1.get("temperature").is_none(),
+            "reasoning models reject temperature"
+        );
+
+        // 3. Official OpenAI o3-mini reasoning model: uses max_completion_tokens, OMITS temperature
+        let body_o3 =
+            build_openai_request_body("openai", "o3-mini", "system", &msg, Some(800), true);
+        assert_eq!(body_o3["max_completion_tokens"], 800);
+        assert!(body_o3.get("max_tokens").is_none());
+        assert!(
+            body_o3.get("temperature").is_none(),
+            "reasoning models reject temperature"
+        );
+        assert_eq!(body_o3["stream"], true);
+        assert!(body_o3.get("stream_options").is_some());
+
+        // 4. Compatible provider with standard model (e.g. llama3): uses max_tokens, includes temperature
+        let body_llama = build_openai_request_body(
+            "compatible",
+            "llama-3-70b",
+            "system",
+            &msg,
+            Some(300),
+            false,
+        );
+        assert_eq!(body_llama["max_tokens"], 300);
+        assert!(body_llama.get("max_completion_tokens").is_none());
+        assert_eq!(body_llama["temperature"], 0.4);
+
+        // 5. Compatible provider with o1 model: uses max_completion_tokens, omits temperature
+        let body_compat_o1 =
+            build_openai_request_body("compatible", "o1-preview", "system", &msg, Some(600), false);
+        assert_eq!(body_compat_o1["max_completion_tokens"], 600);
+        assert!(body_compat_o1.get("max_tokens").is_none());
+        assert!(body_compat_o1.get("temperature").is_none());
     }
 }
