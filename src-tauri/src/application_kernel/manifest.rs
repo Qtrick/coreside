@@ -14,7 +14,7 @@ use rusqlite::params;
 
 use super::permissions::validate_declared_permissions;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplicationManifest {
     pub schema_version: String,

@@ -417,11 +417,13 @@ pub fn apply_change(
             }
         }
 
+        let required_capabilities = compute_required_capability_grants(db, &req.operations)?;
         let hash_payload = serde_json::json!({
             "operations": &req.operations,
             "base_revisions": &base_revisions,
             "summary": &req.summary,
             "conversation_id": &req.conversation_id,
+            "required_capabilities": &required_capabilities,
         });
         let operations_hash = registered_actions::canonical::hash_value(&hash_payload);
         let proposal_id = format!("proposal-{}", Uuid::new_v4());
@@ -429,14 +431,16 @@ pub fn apply_change(
         let expires_at = (chrono::Utc::now() + chrono::Duration::hours(24)).to_rfc3339();
         let ops_json = serde_json::to_string(&req.operations).unwrap_or_else(|_| "[]".into());
         let base_revs_json = serde_json::to_string(&base_revisions).unwrap_or_else(|_| "{}".into());
+        let req_caps_json =
+            serde_json::to_string(&required_capabilities).unwrap_or_else(|_| "[]".into());
 
         db.conn()
             .execute(
                 "INSERT INTO kernel_change_proposals (
                 id, conversation_id, project_id, turn_id, summary, risk, impact_summary,
                 exact_operations_json, exact_operations_hash, base_revisions_json, source_type,
-                model, provider, status, created_at, expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+                model, provider, status, created_at, expires_at, required_capabilities_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
                 rusqlite::params![
                     proposal_id,
                     req.conversation_id,
@@ -453,6 +457,7 @@ pub fn apply_change(
                     req.provider,
                     now,
                     expires_at,
+                    req_caps_json,
                 ],
             )
             .map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?;
@@ -631,7 +636,7 @@ pub fn apply_change(
         let verification = testing::verify_after_change(db, &req.operations).ok();
 
         if let Some(ref v) = verification {
-            if v.is_acceptable() {
+            if v.is_fully_verified() {
                 for op in &req.operations {
                     if let Some(app_id) = op
                         .target
@@ -715,6 +720,138 @@ pub fn apply_change(
     }
 }
 
+/// Authorized capability grant proposal for application evolution.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityGrantProposal {
+    pub pack_id: String,
+    pub display_name: String,
+    pub surface_id: String,
+    pub application_id: Option<String>,
+    pub permissions: Vec<String>,
+    pub user_description: String,
+}
+
+/// Compute required capability additions by inspecting proposed operations against
+/// the existing authorized capabilities on target surfaces.
+pub fn compute_required_capability_grants(
+    db: &Database,
+    operations: &[AppOperation],
+) -> Result<Vec<CapabilityGrantProposal>, KernelError> {
+    use rusqlite::OptionalExtension;
+    let mut grants = Vec::new();
+    let mut surface_packs_cache: HashMap<String, Vec<String>> = HashMap::new();
+
+    for op in operations {
+        let sid_opt = op.target.surface_id.clone().or_else(|| {
+            op.target
+                .tool_id
+                .as_deref()
+                .map(crate::runtime_v2::surfaces::surface_id_for_tool)
+        });
+        let sid = match sid_opt {
+            Some(s) => s,
+            None => continue,
+        };
+
+        if !surface_packs_cache.contains_key(&sid) {
+            let mut existing: Vec<String> = db
+                .conn()
+                .query_row(
+                    "SELECT capability_packs_json FROM surfaces WHERE id = ?",
+                    rusqlite::params![sid],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| KernelError::Db(crate::db::DbError::Sqlite(e)))?
+                .and_then(|json: String| serde_json::from_str(&json).ok())
+                .unwrap_or_default();
+
+            // If this is a newly created surface, seed its packs from the creation operation
+            if existing.is_empty() {
+                for creation_op in operations {
+                    let csid = creation_op.target.surface_id.clone().or_else(|| {
+                        creation_op
+                            .target
+                            .tool_id
+                            .as_deref()
+                            .map(crate::runtime_v2::surfaces::surface_id_for_tool)
+                    });
+                    if csid.as_deref() == Some(&sid) {
+                        if let Some(p) = creation_op
+                            .payload
+                            .get("capabilityPacks")
+                            .and_then(|v| v.as_array())
+                        {
+                            for item in p {
+                                if let Some(s) = item.as_str() {
+                                    existing.push(s.to_string());
+                                }
+                            }
+                        }
+                        if let Some(def) = creation_op.payload.get("definition") {
+                            if let Some(p) = def.get("capabilityPacks").and_then(|v| v.as_array()) {
+                                for item in p {
+                                    if let Some(s) = item.as_str() {
+                                        existing.push(s.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            surface_packs_cache.insert(sid.clone(), existing);
+        }
+
+        let existing_packs = surface_packs_cache.get(&sid).unwrap();
+
+        let mut needed_packs = Vec::new();
+        let _ = crate::runtime_v2::packs::collect_required_packs(&op.payload, &mut needed_packs);
+        if let Some(comp) = op.payload.get("component") {
+            let _ = crate::runtime_v2::packs::collect_required_packs(comp, &mut needed_packs);
+        }
+        if let Some(tool) = op.payload.get("tool") {
+            let _ = crate::runtime_v2::packs::collect_required_packs(tool, &mut needed_packs);
+        }
+
+        for pack_id in needed_packs {
+            if pack_id != "coreside.core" && !existing_packs.contains(&pack_id) {
+                if !grants
+                    .iter()
+                    .any(|g: &CapabilityGrantProposal| g.pack_id == pack_id && g.surface_id == sid)
+                {
+                    if let Some(pack) = crate::runtime_v2::packs::pack_registry().get(&pack_id) {
+                        if pack.enabled {
+                            let user_desc = match pack.id.as_str() {
+                                "coreside.charts" => "Adds Charts to this application. Allows Coreside to render interactive visual charts using the application's data.".to_string(),
+                                "coreside.forms" => "Adds Rich Forms to this application. Allows validation and structured user submissions.".to_string(),
+                                "coreside.svg" => "Adds Declarative SVG scenes to this application.".to_string(),
+                                "coreside.canvas" => "Adds Declarative Canvas 2D rendering to this application.".to_string(),
+                                _ => format!("Adds {} to this application. {}", pack.display_name, pack.agent_description),
+                            };
+                            grants.push(CapabilityGrantProposal {
+                                pack_id: pack.id.clone(),
+                                display_name: pack.display_name.clone(),
+                                surface_id: sid.clone(),
+                                application_id: op
+                                    .target
+                                    .application_id
+                                    .clone()
+                                    .or_else(|| op.target.tool_id.clone()),
+                                permissions: pack.permissions.clone(),
+                                user_description: user_desc,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(grants)
+}
+
 /// Decide (approve or reject) a frozen kernel change proposal with single-use CAS semantics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -739,6 +876,7 @@ pub struct KernelChangeProposalRecord {
     pub decided_at: Option<String>,
     pub applied_at: Option<String>,
     pub transaction_id: Option<String>,
+    pub required_capabilities: Vec<CapabilityGrantProposal>,
 }
 
 fn parse_proposal_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<KernelChangeProposalRecord> {
@@ -769,6 +907,9 @@ fn parse_proposal_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<KernelChangePro
                 )),
             )
         })?;
+    let req_caps_json: String = r.get(20).unwrap_or_else(|_| "[]".to_string());
+    let required_capabilities: Vec<CapabilityGrantProposal> =
+        serde_json::from_str(&req_caps_json).unwrap_or_default();
     Ok(KernelChangeProposalRecord {
         id: r.get(0)?,
         conversation_id: r.get(1)?,
@@ -790,6 +931,7 @@ fn parse_proposal_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<KernelChangePro
         applied_at: r.get(17)?,
         transaction_id: r.get(18)?,
         project_id: r.get(19)?,
+        required_capabilities,
     })
 }
 
@@ -802,7 +944,7 @@ pub fn get_proposal(
             "SELECT id, conversation_id, turn_id, summary, risk, impact_summary, \
                     exact_operations_json, exact_operations_hash, base_revisions_json, \
                     source_type, model, provider, status, error, created_at, expires_at, \
-                    decided_at, applied_at, transaction_id, project_id \
+                    decided_at, applied_at, transaction_id, project_id, required_capabilities_json \
              FROM kernel_change_proposals WHERE id = ?",
             rusqlite::params![proposal_id],
             parse_proposal_row,
@@ -822,7 +964,7 @@ pub fn list_pending_proposals(
     let mut sql = "SELECT id, conversation_id, turn_id, summary, risk, impact_summary, \
                           exact_operations_json, exact_operations_hash, base_revisions_json, \
                           source_type, model, provider, status, error, created_at, expires_at, \
-                          decided_at, applied_at, transaction_id, project_id \
+                          decided_at, applied_at, transaction_id, project_id, required_capabilities_json \
                    FROM kernel_change_proposals WHERE status = 'pending'"
         .to_string();
     if conversation_id.is_some() {
@@ -969,15 +1111,31 @@ pub fn decide_proposal(
         }
     }
 
-    // 3. Verify operations hash
+    // 3. Verify operations hash including required capabilities
     let hash_payload = serde_json::json!({
         "operations": &proposal.exact_operations,
         "base_revisions": &proposal.base_revisions,
         "summary": &proposal.summary,
         "conversation_id": &proposal.conversation_id,
+        "required_capabilities": &proposal.required_capabilities,
     });
     let expected_hash = registered_actions::canonical::hash_value(&hash_payload);
-    if expected_hash != proposal.exact_operations_hash {
+    let legacy_hash = if proposal.required_capabilities.is_empty()
+        && expected_hash != proposal.exact_operations_hash
+    {
+        let legacy_payload = serde_json::json!({
+            "operations": &proposal.exact_operations,
+            "base_revisions": &proposal.base_revisions,
+            "summary": &proposal.summary,
+            "conversation_id": &proposal.conversation_id,
+        });
+        registered_actions::canonical::hash_value(&legacy_payload)
+    } else {
+        expected_hash.clone()
+    };
+    if expected_hash != proposal.exact_operations_hash
+        && legacy_hash != proposal.exact_operations_hash
+    {
         let _ = db.conn().execute(
             "UPDATE kernel_change_proposals SET status = 'failed', error = 'Proposal operations hash mismatch (tampered payload)' WHERE id = ?",
             rusqlite::params![proposal_id],
@@ -997,29 +1155,39 @@ pub fn decide_proposal(
         ));
     }
 
-    // 3.5. Authorize enabled bundled capability packs for user-approved operations
-    for op in &proposal.exact_operations {
-        let comp_type_opt = op
-            .payload
-            .get("component")
-            .and_then(|c| c.get("type"))
-            .and_then(|v| v.as_str())
-            .or_else(|| op.payload.get("type").and_then(|v| v.as_str()));
-        if let Some(comp_type) = comp_type_opt {
-            if let Some(pack) = crate::runtime_v2::packs::resolve_pack_for_component(comp_type) {
-                if pack.enabled && pack.id != "coreside.core" {
-                    let sid_opt = op.target.surface_id.clone().or_else(|| {
-                        op.target
-                            .tool_id
-                            .as_deref()
-                            .map(crate::runtime_v2::surfaces::surface_id_for_tool)
-                    });
-                    if let Some(sid) = sid_opt {
-                        let _ =
-                            crate::runtime_v2::surfaces::grant_capability_pack(db, &sid, &pack.id);
-                    }
-                }
+    // 3.5. Validate that all required capabilities are enabled bundled packs, and
+    // for existing surfaces grant the pack before transaction validation so that
+    // validate_component_type_allowed_for_packs recognizes the authorized pack.
+    for grant in &proposal.required_capabilities {
+        let allowed = crate::runtime_v2::packs::bundled_packs()
+            .iter()
+            .any(|p| p.id == grant.pack_id && p.enabled);
+        if !allowed {
+            if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
+                tracing::error!(error = %rb_err, "ROLLBACK failed during invalid pack rejection");
             }
+            return Err(KernelError::Validation(format!(
+                "Unsupported or disabled capability pack: {}",
+                grant.pack_id
+            )));
+        }
+
+        let surface_exists: bool = db
+            .conn()
+            .query_row(
+                "SELECT 1 FROM surfaces WHERE id = ?",
+                rusqlite::params![grant.surface_id],
+                |_| Ok(()),
+            )
+            .is_ok();
+        if surface_exists {
+            crate::runtime_v2::surfaces::grant_capability_pack(db, &grant.surface_id, &grant.pack_id)
+                .map_err(|e| {
+                    if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
+                        tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during capability grant");
+                    }
+                    KernelError::Db(e)
+                })?;
         }
     }
 
@@ -1131,7 +1299,43 @@ pub fn decide_proposal(
         return Err(KernelError::Db(e));
     }
 
+    // 4b. For newly created surfaces, ensure capability packs are granted if not already granted in step 3.5
+    for grant in &proposal.required_capabilities {
+        let already_granted = crate::runtime_v2::surfaces::get_surface(db, &grant.surface_id)
+            .map(|s| s.capability_packs.contains(&grant.pack_id))
+            .unwrap_or(false);
+        if !already_granted {
+            crate::runtime_v2::surfaces::grant_capability_pack(db, &grant.surface_id, &grant.pack_id)
+                .map_err(|e| {
+                    if let Err(rb_err) = db.conn().execute_batch("ROLLBACK") {
+                        tracing::error!(error = %rb_err, original_error = %e, "ROLLBACK failed during capability grant");
+                    }
+                    KernelError::Db(e)
+                })?;
+        }
+    }
+
     let verification = testing::verify_after_change(db, &ops).ok();
+    if let Some(ref v) = verification {
+        if v.is_fully_verified() {
+            for op in &ops {
+                if let Some(app_id) = op
+                    .target
+                    .application_id
+                    .as_deref()
+                    .or_else(|| op.payload.get("applicationId").and_then(|x| x.as_str()))
+                    .or_else(|| {
+                        op.payload
+                            .get("tool")
+                            .and_then(|t| t.get("id"))
+                            .and_then(|x| x.as_str())
+                    })
+                {
+                    let _ = manifest::mark_last_known_good(db, app_id);
+                }
+            }
+        }
+    }
 
     for (i, effect) in deferred.iter().enumerate() {
         if let Err(e) = enqueue_outbox(
@@ -3150,6 +3354,520 @@ mod tests {
         assert_eq!(records[0]["streak"], 5);
     }
 
+    #[test]
+    fn research_organizer_vertical_slice_crud_three_stage_evolution_and_automation() {
+        use crate::ai::{
+            parse_agent_response, AgentMessage, AgentRequest, AiProvider, MockAiProvider,
+        };
+        use crate::application_kernel::registered_actions::context::{
+            ActionRunContext, Presence, Venue,
+        };
+        use crate::application_kernel::registered_actions::gateway::execute_registered_action;
+        use tokio_util::sync::CancellationToken;
+
+        let mut db = test_db();
+        let conv = create_conversation(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            "Research Organizer Journey",
+            None,
+        )
+        .unwrap();
+
+        let provider = MockAiProvider::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        // 1. Natural Language Creation of Personal Research Organizer
+        let create_resp = rt
+            .block_on(provider.chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Build me a personal research organizer where I can save topics, sources, notes, tags, and reading status.",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+                max_output_tokens: None,
+            }))
+            .unwrap();
+
+        let create_parsed = parse_agent_response(&create_resp.raw_text).unwrap();
+        assert!(create_parsed.payload.application_plan.is_some());
+        let create_ops = create_parsed
+            .payload
+            .inspection_operations()
+            .expect("Research organizer plan must compile to operations");
+
+        let create_prop = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Create Personal Research Organizer".into(),
+                operations: create_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .proposal_id
+        .unwrap();
+
+        assert!(decide_proposal(&mut db, None, &create_prop, true)
+            .unwrap()
+            .is_committed());
+
+        let app_id = "tool-research-organizer";
+        assert!(crate::application_kernel::manifest::get_manifest(&db, app_id).is_ok());
+        let model =
+            crate::application_kernel::data::get_model(&db, app_id, "researchItems").unwrap();
+        assert!(model.fields.iter().any(|f| f.field_id == "title"));
+        assert!(model.fields.iter().any(|f| f.field_id == "topic"));
+        assert!(model.fields.iter().any(|f| f.field_id == "readingStatus"));
+
+        let ctx = ActionRunContext {
+            actor: "user".into(),
+            venue: Venue::Application,
+            presence: Presence::Present,
+            application_id: Some(app_id.into()),
+            project_id: None,
+            conversation_id: Some(conv.id.clone()),
+            session_id: "sess-ro".into(),
+            run_id: "run-ro-1".into(),
+            trigger: None,
+            surface_id: Some(format!("surf-{app_id}")),
+            component_id: Some("ro-add-btn".into()),
+            depth: 0,
+        };
+
+        // 2. Perform durable CRUD operations through registered actions
+        let write_item =
+            |db: &mut Database, data: serde_json::Value| -> String {
+                let res = execute_registered_action(
+                    db,
+                    &ctx,
+                    "local_data.write",
+                    &serde_json::json!({
+                        "modelId": "researchItems",
+                        "data": data,
+                    }),
+                    None,
+                );
+                let approval_id = match res {
+                crate::application_kernel::registered_actions::ActionOutcome::PendingApproval {
+                    approval_id,
+                    ..
+                } => approval_id,
+                crate::application_kernel::registered_actions::ActionOutcome::Ok { data, .. } => {
+                    return data.get("recordId").and_then(|v| v.as_str()).unwrap().to_string();
+                }
+                other => panic!("expected write pending approval or ok, got {other:?}"),
+            };
+                crate::application_kernel::registered_actions::approvals::decide(
+                    db,
+                    &approval_id,
+                    true,
+                    None,
+                    "user",
+                )
+                .unwrap();
+                let res2 = execute_registered_action(
+                    db,
+                    &ctx,
+                    "local_data.write",
+                    &serde_json::json!({
+                        "modelId": "researchItems",
+                        "data": data,
+                    }),
+                    Some(&approval_id),
+                );
+                match res2 {
+                    crate::application_kernel::registered_actions::ActionOutcome::Ok {
+                        data,
+                        ..
+                    } => data
+                        .get("recordId")
+                        .and_then(|v| v.as_str())
+                        .unwrap()
+                        .to_string(),
+                    other => panic!("expected write ok, got {other:?}"),
+                }
+            };
+
+        let id1 = write_item(
+            &mut db,
+            serde_json::json!({
+                "title": "Attention Is All You Need",
+                "topic": "AI",
+                "sourceUrl": "https://arxiv.org/abs/1706.03762",
+                "notes": "Original transformer architecture",
+                "tags": "transformers, llm",
+                "readingStatus": "finished"
+            }),
+        );
+
+        let id2 = write_item(
+            &mut db,
+            serde_json::json!({
+                "title": "Formal Verification of Microkernels",
+                "topic": "Systems",
+                "sourceUrl": "https://sel4.systems",
+                "notes": "Comprehensive OS verification proof",
+                "tags": "seL4, os, proof",
+                "readingStatus": "unread"
+            }),
+        );
+
+        let id3 = write_item(
+            &mut db,
+            serde_json::json!({
+                "title": "Memory Safety in Systems Programming",
+                "topic": "Security",
+                "sourceUrl": "https://rust-lang.org",
+                "notes": "Ownership and borrow checker fundamentals",
+                "tags": "rust, memory, safety",
+                "readingStatus": "reading"
+            }),
+        );
+
+        let records =
+            crate::application_kernel::data::query_records(&db, app_id, "researchItems", 50)
+                .unwrap();
+        assert_eq!(records.len(), 3);
+
+        // Edit item 2
+        let rec2 = records.iter().find(|r| r["_id"] == id2).unwrap();
+        let ver2 = rec2["_version"].as_i64().unwrap();
+        let edit_res = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &serde_json::json!({
+                "modelId": "researchItems",
+                "recordId": id2,
+                "baseVersion": ver2,
+                "data": { "notes": "Read through theorem statement; verify invariants" }
+            }),
+            None,
+        );
+        let edit_appr = match edit_res {
+            crate::application_kernel::registered_actions::ActionOutcome::PendingApproval {
+                approval_id,
+                ..
+            } => approval_id,
+            crate::application_kernel::registered_actions::ActionOutcome::Ok { .. } => {
+                String::new()
+            }
+            other => panic!("expected edit pending or ok, got {other:?}"),
+        };
+        if !edit_appr.is_empty() {
+            crate::application_kernel::registered_actions::approvals::decide(
+                &mut db, &edit_appr, true, None, "user",
+            )
+            .unwrap();
+            let _ = execute_registered_action(
+                &mut db,
+                &ctx,
+                "local_data.write",
+                &serde_json::json!({
+                    "modelId": "researchItems",
+                    "recordId": id2,
+                    "baseVersion": ver2,
+                    "data": { "notes": "Read through theorem statement; verify invariants" }
+                }),
+                Some(&edit_appr),
+            );
+        }
+
+        // Delete item 3
+        let rec3 = records.iter().find(|r| r["_id"] == id3).unwrap();
+        let ver3 = rec3["_version"].as_i64().unwrap();
+        let del_res = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.delete",
+            &serde_json::json!({
+                "modelId": "researchItems",
+                "recordId": id3,
+                "baseVersion": ver3
+            }),
+            None,
+        );
+        let del_appr = match del_res {
+            crate::application_kernel::registered_actions::ActionOutcome::PendingApproval {
+                approval_id,
+                ..
+            } => approval_id,
+            crate::application_kernel::registered_actions::ActionOutcome::Ok { .. } => {
+                String::new()
+            }
+            other => panic!("expected delete pending or ok, got {other:?}"),
+        };
+        if !del_appr.is_empty() {
+            crate::application_kernel::registered_actions::approvals::decide(
+                &mut db, &del_appr, true, None, "user",
+            )
+            .unwrap();
+            let _ = execute_registered_action(
+                &mut db,
+                &ctx,
+                "local_data.delete",
+                &serde_json::json!({
+                    "modelId": "researchItems",
+                    "recordId": id3,
+                    "baseVersion": ver3
+                }),
+                Some(&del_appr),
+            );
+        }
+
+        let records_remaining =
+            crate::application_kernel::data::query_records(&db, app_id, "researchItems", 50)
+                .unwrap();
+        assert_eq!(records_remaining.len(), 2);
+
+        // 3. Stage 1 Evolution: Add Unfinished Reading Queue View
+        let cur_rev1 = get_surface(&db, &format!("surf-{app_id}"))
+            .unwrap()
+            .current_revision;
+        let evolve1_resp = rt
+            .block_on(provider.chat(AgentRequest {
+                system_prompt: format!("{{\"definitionRevision\": {cur_rev1}}}"),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Add an unfinished reading queue organized by topic to my research organizer.",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+                max_output_tokens: None,
+            }))
+            .unwrap();
+
+        let evolve1_parsed = parse_agent_response(&evolve1_resp.raw_text).unwrap();
+        let evolve1_plan = evolve1_parsed.payload.application_plan.unwrap();
+        assert_eq!(
+            evolve1_plan.kind,
+            crate::application_kernel::application_plan::ApplicationPlanKind::Evolve
+        );
+        let scope1 = crate::application_kernel::application_plan::lineage_scope_for_plan(
+            &db,
+            &evolve1_plan,
+            Some(&conv.id),
+            None,
+        )
+        .unwrap();
+        let evolve1_ops = crate::application_kernel::application_plan::compile_plan_against_db(
+            &db,
+            &evolve1_plan,
+            &scope1,
+        )
+        .unwrap()
+        .compiled
+        .operations;
+
+        let prop1 = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Add reading queue".into(),
+                operations: evolve1_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .proposal_id
+        .unwrap();
+
+        assert!(decide_proposal(&mut db, None, &prop1, true)
+            .unwrap()
+            .is_committed());
+
+        // Verify records remain intact after Stage 1 evolution!
+        let records_after_stage1 =
+            crate::application_kernel::data::query_records(&db, app_id, "researchItems", 50)
+                .unwrap();
+        assert_eq!(records_after_stage1.len(), 2);
+        assert!(
+            records_after_stage1
+                .iter()
+                .any(|r| r["title"] == "Attention Is All You Need"
+                    && r["readingStatus"] == "finished")
+        );
+        assert!(records_after_stage1
+            .iter()
+            .any(|r| r["title"] == "Formal Verification of Microkernels"
+                && r["notes"] == "Read through theorem statement; verify invariants"));
+
+        // 4. Stage 2 Evolution: Add Analytics & Charts with Explicit Capability Pack Authorization
+        let cur_rev2 = get_surface(&db, &format!("surf-{app_id}"))
+            .unwrap()
+            .current_revision;
+        let evolve2_resp = rt
+            .block_on(provider.chat(AgentRequest {
+                system_prompt: format!("{{\"definitionRevision\": {cur_rev2}}}"),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Add progress analytics and charts showing weekly reading progress and topic breakdown to my research organizer.",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+                max_output_tokens: None,
+            }))
+            .unwrap();
+
+        let evolve2_parsed = parse_agent_response(&evolve2_resp.raw_text).unwrap();
+        let evolve2_plan = evolve2_parsed.payload.application_plan.unwrap();
+        assert_eq!(
+            evolve2_plan.kind,
+            crate::application_kernel::application_plan::ApplicationPlanKind::Evolve
+        );
+        let scope2 = crate::application_kernel::application_plan::lineage_scope_for_plan(
+            &db,
+            &evolve2_plan,
+            Some(&conv.id),
+            None,
+        )
+        .unwrap();
+        let evolve2_ops = crate::application_kernel::application_plan::compile_plan_against_db(
+            &db,
+            &evolve2_plan,
+            &scope2,
+        )
+        .unwrap()
+        .compiled
+        .operations;
+
+        let prop2_res = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Add analytics charts".into(),
+                operations: evolve2_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let prop2 = prop2_res.proposal_id.unwrap();
+
+        // Verify Rust kernel computed required capability additions!
+        let prop_record = get_proposal(&db, &prop2).unwrap();
+        assert!(prop_record
+            .required_capabilities
+            .iter()
+            .any(|c| c.pack_id == "coreside.charts"));
+
+        let decide2_res = decide_proposal(&mut db, None, &prop2, true).unwrap();
+        assert!(decide2_res.is_committed());
+
+        // Verify capability was transactionally granted across surface, manifest, and document!
+        let surface_after2 = get_surface(&db, &format!("surf-{app_id}")).unwrap();
+        assert!(surface_after2
+            .capability_packs
+            .contains(&"coreside.charts".to_string()));
+        let manifest_after2 =
+            crate::application_kernel::manifest::get_manifest(&db, app_id).unwrap();
+        assert!(manifest_after2
+            .manifest
+            .capabilities
+            .contains(&"coreside.charts".to_string()));
+        let doc2 =
+            crate::runtime_v2::SoftwareDocument::from_value(&surface_after2.definition).unwrap();
+        assert!(doc2
+            .capability_packs
+            .contains(&"coreside.charts".to_string()));
+
+        // Verify chart components are present!
+        let comp_ids2: Vec<String> = doc2
+            .flatten_components()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert!(comp_ids2.iter().any(|id| id == "ro-chart-pace"));
+        assert!(comp_ids2.iter().any(|id| id == "ro-chart-topics"));
+
+        // Verify existing records 100% intact after Stage 2 capability evolution!
+        let records_after_stage2 =
+            crate::application_kernel::data::query_records(&db, app_id, "researchItems", 50)
+                .unwrap();
+        assert_eq!(records_after_stage2.len(), 2);
+
+        // 5. Stage 3 Evolution: Reorganize Views into compact 3-column dashboard
+        let cur_rev3 = get_surface(&db, &format!("surf-{app_id}"))
+            .unwrap()
+            .current_revision;
+        let evolve3_resp = rt
+            .block_on(provider.chat(AgentRequest {
+                system_prompt: format!("{{\"definitionRevision\": {cur_rev3}}}"),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Reorganize the views of my research organizer into a compact 3-column dashboard.",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+                max_output_tokens: None,
+            }))
+            .unwrap();
+
+        let evolve3_parsed = parse_agent_response(&evolve3_resp.raw_text).unwrap();
+        let evolve3_plan = evolve3_parsed.payload.application_plan.unwrap();
+        let scope3 = crate::application_kernel::application_plan::lineage_scope_for_plan(
+            &db,
+            &evolve3_plan,
+            Some(&conv.id),
+            None,
+        )
+        .unwrap();
+        let evolve3_ops = crate::application_kernel::application_plan::compile_plan_against_db(
+            &db,
+            &evolve3_plan,
+            &scope3,
+        )
+        .unwrap()
+        .compiled
+        .operations;
+
+        let prop3 = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Reorganize views".into(),
+                operations: evolve3_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .proposal_id
+        .unwrap();
+
+        let decide3_res = decide_proposal(&mut db, None, &prop3, true).unwrap();
+        assert!(decide3_res.is_committed());
+        let txn3_id = decide3_res.apply.as_ref().unwrap().transaction.id.clone();
+
+        // Verify surface updated and records remain intact!
+        let surface_after3 = get_surface(&db, &format!("surf-{app_id}")).unwrap();
+        assert_eq!(surface_after3.definition["layout"]["columns"], 3);
+        let records_after_stage3 =
+            crate::application_kernel::data::query_records(&db, app_id, "researchItems", 50)
+                .unwrap();
+        assert_eq!(records_after_stage3.len(), 2);
+
+        // 6. Safe Undo: Revert Stage 3 layout reorganization back to Stage 2 while preserving all user data!
+        crate::runtime_v2::transactions::undo_transaction(&mut db, &txn3_id).unwrap();
+
+        let surface_undone = get_surface(&db, &format!("surf-{app_id}")).unwrap();
+        assert_eq!(surface_undone.definition["layout"]["columns"], 2);
+        let records_after_undo =
+            crate::application_kernel::data::query_records(&db, app_id, "researchItems", 50)
+                .unwrap();
+        assert_eq!(records_after_undo.len(), 2);
+    }
+
     /// Regression: decide_proposal must apply surface.create before data.model_upsert
     /// in-order via apply_transaction_deferred — never pre-apply data.* first.
     #[test]
@@ -3485,6 +4203,425 @@ mod tests {
         assert!(
             get_surface(&db, "surf-tool-study-planner").is_err(),
             "tool canvas must roll back with the failed inline bind"
+        );
+    }
+
+    #[test]
+    fn compute_required_capability_grants_identifies_needed_packs() {
+        let mut db = test_db();
+        crate::db::ensure_default_workspace(&db).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Caps test", None).unwrap();
+
+        // 1. Create a surface with only coreside.core
+        let mut surf = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "test-cap-tool",
+            &json!({
+                "schemaVersion": "1",
+                "title": "Test Cap App",
+                "capabilityPacks": ["coreside.core"],
+                "views": []
+            }),
+            &["coreside.core".into()],
+        )
+        .unwrap();
+
+        // 2. An operation adding a chartLine component must require coreside.charts
+        let chart_op = AppOperation {
+            id: "op-chart-1".into(),
+            op_type: "component.insert".into(),
+            target: OperationTarget {
+                surface_id: Some(surf.id.clone()),
+                application_id: Some("test-cap-tool".into()),
+                tool_id: Some("test-cap-tool".into()),
+                ..Default::default()
+            },
+            base_revision: Some(surf.current_revision),
+            payload: json!({
+                "component": {
+                    "type": "chartLine",
+                    "props": {
+                        "title": "Progress Trends"
+                    }
+                }
+            }),
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        };
+
+        let grants = compute_required_capability_grants(&db, &[chart_op]).unwrap();
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].pack_id, "coreside.charts");
+        assert_eq!(grants[0].display_name, "Charts");
+        assert_eq!(grants[0].surface_id, surf.id);
+        assert!(grants[0].user_description.contains("Charts"));
+        assert!(grants[0].permissions.contains(&"render".to_string()));
+
+        // 3. If surface already has coreside.charts, no grant should be required
+        surf.capability_packs.push("coreside.charts".into());
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET capability_packs_json = ? WHERE id = ?",
+                rusqlite::params![
+                    serde_json::to_string(&surf.capability_packs).unwrap(),
+                    surf.id
+                ],
+            )
+            .unwrap();
+
+        let chart_op2 = AppOperation {
+            id: "op-chart-2".into(),
+            op_type: "component.insert".into(),
+            target: OperationTarget {
+                surface_id: Some(surf.id.clone()),
+                application_id: Some("test-cap-tool".into()),
+                ..Default::default()
+            },
+            base_revision: Some(surf.current_revision),
+            payload: json!({
+                "component": {
+                    "type": "chartBar"
+                }
+            }),
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        };
+
+        let grants2 = compute_required_capability_grants(&db, &[chart_op2]).unwrap();
+        assert!(
+            grants2.is_empty(),
+            "already granted pack must not require new grant"
+        );
+    }
+
+    #[test]
+    fn proposal_exact_operations_hash_covers_required_capabilities_and_fails_closed_on_tamper() {
+        let mut db = test_db();
+        crate::db::ensure_default_workspace(&db).unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Caps test", None).unwrap();
+
+        let surf = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "test-tamper-tool",
+            &json!({
+                "schemaVersion": "1",
+                "title": "Tamper Test",
+                "capabilityPacks": ["coreside.core"],
+                "views": []
+            }),
+            &["coreside.core".into()],
+        )
+        .unwrap();
+
+        let chart_op = AppOperation {
+            id: "op-chart-tamper".into(),
+            op_type: "component.insert".into(),
+            target: OperationTarget {
+                surface_id: Some(surf.id.clone()),
+                application_id: Some("test-tamper-tool".into()),
+                tool_id: Some("test-tamper-tool".into()),
+                ..Default::default()
+            },
+            base_revision: Some(surf.current_revision),
+            payload: json!({
+                "component": {
+                    "type": "chartLine",
+                    "props": { "data": [] }
+                }
+            }),
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        };
+
+        let res = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Add chart".into(),
+                operations: vec![chart_op],
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let proposal_id = res.proposal_id.expect("proposal created");
+
+        let proposal = get_proposal(&db, &proposal_id).unwrap();
+        assert_eq!(proposal.required_capabilities.len(), 1);
+        assert_eq!(proposal.required_capabilities[0].pack_id, "coreside.charts");
+
+        // Adversarial test: Tampering with required_capabilities_json in SQLite must invalidate hash
+        db.conn()
+            .execute(
+                "UPDATE kernel_change_proposals SET required_capabilities_json = '[]' WHERE id = ?",
+                rusqlite::params![proposal_id],
+            )
+            .unwrap();
+
+        let err = decide_proposal(&mut db, None, &proposal_id, true)
+            .expect_err("tampered required_capabilities must fail closed on hash mismatch");
+        assert!(
+            matches!(&err, KernelError::Validation(msg) if msg.contains("hash mismatch")),
+            "expected hash mismatch error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn decide_proposal_transactionally_grants_capability_pack_across_surface_manifest_and_doc() {
+        let mut db = test_db();
+        crate::db::ensure_default_workspace(&db).unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Caps grant test", None).unwrap();
+
+        // Register application manifest first
+        let manifest = crate::application_kernel::manifest::ApplicationManifest {
+            schema_version: "1".into(),
+            application_id: "test-grant-tool".into(),
+            instance_id: "inst-grant-1".into(),
+            name: "Test Grant Tool".into(),
+            version: 1,
+            capabilities: vec!["coreside.core".into()],
+            permissions: vec!["local_data.read".into(), "local_data.write".into()],
+            ..Default::default()
+        };
+        crate::application_kernel::manifest::upsert_manifest(&mut db, manifest).unwrap();
+
+        let surf = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "test-grant-tool",
+            &json!({
+                "schemaVersion": "1",
+                "title": "Test Grant Tool",
+                "capabilityPacks": ["coreside.core"],
+                "views": []
+            }),
+            &["coreside.core".into()],
+        )
+        .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES ('test-grant-tool', ?, 'Test Grant Tool', '', '{}', '{}', 1, ?, ?)",
+                rusqlite::params![DEFAULT_WORKSPACE_ID, now, now],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET tool_id = 'test-grant-tool' WHERE id = ?",
+                rusqlite::params![surf.id],
+            )
+            .unwrap();
+
+        let chart_op = AppOperation {
+            id: "op-chart-grant".into(),
+            op_type: "component.insert".into(),
+            target: OperationTarget {
+                surface_id: Some(surf.id.clone()),
+                application_id: Some("test-grant-tool".into()),
+                tool_id: Some("test-grant-tool".into()),
+                ..Default::default()
+            },
+            base_revision: Some(surf.current_revision),
+            payload: json!({
+                "component": {
+                    "id": "c-chart-1",
+                    "type": "chartLine",
+                    "props": {}
+                }
+            }),
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        };
+
+        let res = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Grant charts capability".into(),
+                operations: vec![chart_op],
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let proposal_id = res.proposal_id.expect("proposal created");
+
+        let applied = decide_proposal(&mut db, None, &proposal_id, true).unwrap();
+        assert_eq!(applied.outcome, CommitOutcome::Committed);
+
+        // Verify surface capability_packs_json has coreside.charts
+        let updated_surf = get_surface(&db, &surf.id).unwrap();
+        assert!(updated_surf
+            .capability_packs
+            .contains(&"coreside.charts".to_string()));
+
+        // Verify SoftwareDocument definition has coreside.charts
+        let doc = crate::runtime_v2::software_document::SoftwareDocument::from_value(
+            &updated_surf.definition,
+        )
+        .unwrap();
+        assert!(doc
+            .capability_packs
+            .contains(&"coreside.charts".to_string()));
+
+        // Verify authoritative application manifest has coreside.charts
+        let m = crate::application_kernel::manifest::get_manifest(&db, "test-grant-tool").unwrap();
+        assert!(m
+            .manifest
+            .capabilities
+            .contains(&"coreside.charts".to_string()));
+    }
+
+    #[test]
+    fn adversarial_capability_escalation_attempt_fails_closed() {
+        use std::collections::HashMap;
+
+        let mut db = test_db();
+        let conv = create_conversation(
+            &mut db,
+            DEFAULT_WORKSPACE_ID,
+            "Adversarial Escalation",
+            None,
+        )
+        .unwrap();
+
+        let surf = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "test-escalate-tool",
+            &json!({
+                "schemaVersion": "1",
+                "title": "Test Escalate Tool",
+                "capabilityPacks": ["coreside.core"],
+                "views": []
+            }),
+            &["coreside.core".into()],
+        )
+        .unwrap();
+
+        // 1. Attempting to approve a proposal with forged/unsupported capability pack fails closed
+        let now = chrono::Utc::now();
+        let forged_grants = vec![CapabilityGrantProposal {
+            pack_id: "coreside.shell_execution".into(),
+            display_name: "Shell Execution".into(),
+            surface_id: surf.id.clone(),
+            application_id: None,
+            permissions: vec![],
+            user_description: "Forged shell execution pack".into(),
+        }];
+        let op_dummy = op("component.insert");
+        let hash_payload = serde_json::json!({
+            "operations": vec![op_dummy.clone()],
+            "base_revisions": HashMap::<String, i64>::new(),
+            "summary": "Malicious escalation",
+            "conversation_id": Some(conv.id.clone()),
+            "required_capabilities": &forged_grants,
+        });
+        let forged_hash = registered_actions::canonical::hash_value(&hash_payload);
+        let proposal_id = "prop-forged-escalation";
+        db.conn().execute(
+            "INSERT INTO kernel_change_proposals (
+                id, conversation_id, project_id, turn_id, status, risk,
+                impact_summary, summary, exact_operations_json, exact_operations_hash,
+                base_revisions_json, required_capabilities_json, created_at, expires_at
+             ) VALUES (?, ?, NULL, NULL, 'pending', 'automatic', '', 'Malicious escalation', ?, ?, '{}', ?, ?, NULL)",
+            rusqlite::params![
+                proposal_id,
+                conv.id,
+                serde_json::to_string(&vec![op_dummy]).unwrap(),
+                forged_hash,
+                serde_json::to_string(&forged_grants).unwrap(),
+                now.to_rfc3339()
+            ],
+        ).unwrap();
+
+        let decide_err = decide_proposal(&mut db, None, proposal_id, true).unwrap_err();
+        assert!(
+            matches!(decide_err, KernelError::Validation(ref msg) if msg.contains("Unsupported or disabled capability pack"))
+        );
+
+        // 2. Inserting a chart component into a surface with only coreside.core without the pack grant fails
+        let unapproved_chart_op = AppOperation {
+            id: "op-unapproved-chart".into(),
+            op_type: "component.insert".into(),
+            target: OperationTarget {
+                surface_id: Some(surf.id.clone()),
+                ..Default::default()
+            },
+            base_revision: Some(surf.current_revision),
+            payload: json!({
+                "component": {
+                    "id": "chart-sneak",
+                    "type": "chartLine",
+                    "props": {}
+                }
+            }),
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        };
+
+        // When applying directly without capability expansion
+        let direct_txn = crate::runtime_v2::transactions::create_transaction(
+            &mut db,
+            Some(&conv.id),
+            None,
+            None,
+            "Sneak chart into surface without capability",
+            &[unapproved_chart_op],
+            false,
+        )
+        .unwrap();
+        let apply_res =
+            crate::runtime_v2::transactions::apply_transaction(&mut db, &direct_txn.id).unwrap();
+        assert_eq!(
+            apply_res.transaction.status, "failed",
+            "Transaction must fail when inserting unapproved capability component"
+        );
+        assert!(
+            apply_res.surfaces.is_empty(),
+            "No surfaces may be updated on unapproved capability insertion"
+        );
+        assert!(
+            apply_res
+                .conflicts
+                .iter()
+                .any(|c| c.contains("coreside.charts")),
+            "Conflict must cite missing coreside.charts pack: {:?}",
+            apply_res.conflicts
         );
     }
 }

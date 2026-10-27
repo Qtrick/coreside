@@ -50,6 +50,14 @@ export function ChangeProposalCard({
     risk: string;
     status: string;
     operations: unknown[];
+    requiredCapabilities?: Array<{
+      packId: string;
+      displayName: string;
+      surfaceId: string;
+      applicationId?: string;
+      permissions: string[];
+      userDescription: string;
+    }>;
     error?: string | null;
   } | null>(null);
 
@@ -63,14 +71,23 @@ export function ChangeProposalCard({
         const loadedOps = Array.isArray(rec.exactOperations)
           ? (rec.exactOperations as unknown[])
           : [];
+        const loadedReqCaps = Array.isArray(rec.requiredCapabilities)
+          ? (rec.requiredCapabilities as Array<{
+              packId: string;
+              displayName: string;
+              surfaceId: string;
+              applicationId?: string;
+              permissions: string[];
+              userDescription: string;
+            }>)
+          : [];
         setProposalData({
           summary: (rec.summary as string) || initialSummary,
           impactSummary: (rec.impactSummary as string) || initialImpactSummary,
           risk: (rec.risk as string) || initialRisk,
           status: (rec.status as string) || initialStatus || "pending",
-          // Kernel row is authoritative. Empty exactOperations → empty state
-          // (Apply still goes through applyPendingKernelProposal / decide_proposal).
           operations: loadedOps,
+          requiredCapabilities: loadedReqCaps,
           error: (rec.error as string) || null,
         });
       })
@@ -255,6 +272,33 @@ export function ChangeProposalCard({
         </p>
         <p style={{ margin: "0.25rem 0 0" }}>{evolution.whatWillBePreserved}</p>
       </div>
+
+      {proposalData?.requiredCapabilities && proposalData.requiredCapabilities.length > 0 ? (
+        <div
+          style={{
+            marginTop: "0.65rem",
+            padding: "0.65rem 0.85rem",
+            borderRadius: "var(--radius-sm, 8px)",
+            background: "var(--core-card-overlay, rgba(0, 0, 0, 0.03))",
+            border: "1px solid var(--border)",
+          }}
+          data-testid="proposal-capabilities-section"
+        >
+          <p className="muted" style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600 }}>
+            Capabilities & permissions
+          </p>
+          <div style={{ marginTop: "0.35rem", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+            {proposalData.requiredCapabilities.map((cap) => (
+              <div key={`${cap.packId}-${cap.surfaceId}`} style={{ fontSize: "0.85rem", lineHeight: 1.4 }}>
+                <span className="badge" style={{ marginRight: "0.4rem", fontSize: "0.75rem" }}>
+                  {cap.displayName}
+                </span>
+                <span>{cap.userDescription}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {loadedEmptyProposal ? (
         <p className="muted" role="status" style={{ margin: "0.65rem 0 0" }}>

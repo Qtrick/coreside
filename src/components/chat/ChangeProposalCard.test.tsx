@@ -80,4 +80,45 @@ describe("ChangeProposalCard", () => {
     await waitFor(() => expect(applyPending).not.toHaveBeenCalled());
     expect(screen.getByRole("button", { name: "Discard proposed change" })).toBeEnabled();
   });
+
+  it("discloses required capability packs and permissions when evolution adds new capabilities", async () => {
+    kernelGetProposal.mockResolvedValue({
+      summary: "Add Progress Chart",
+      impactSummary: "Adds visual progress analytics",
+      risk: "write",
+      status: "pending",
+      exactOperations: [{ op: "component.insert" }],
+      requiredCapabilities: [
+        {
+          packId: "coreside.charts",
+          displayName: "Charts",
+          surfaceId: "surf-study",
+          permissions: ["render"],
+          userDescription: "Adds Charts to this application. Allows Coreside to render interactive visual charts using the application's data.",
+        },
+      ],
+      error: null,
+    });
+
+    render(
+      <ChangeProposalCard
+        proposalId="proposal-charts-1"
+        summary="Add Progress Chart"
+        impactSummary="Adds visual progress analytics"
+        risk="write"
+        operations={[{ op: "component.insert" }]}
+        messageId="message-1"
+        conversationId="conversation-1"
+      />,
+    );
+
+    await screen.findByTestId("proposal-capabilities-section");
+    expect(screen.getByText("Capabilities & permissions")).toBeInTheDocument();
+    expect(screen.getByText("Charts")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Adds Charts to this application. Allows Coreside to render interactive visual charts using the application's data.",
+      ),
+    ).toBeInTheDocument();
+  });
 });

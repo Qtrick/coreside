@@ -98,7 +98,7 @@ export const ActionSchema = z.discriminatedUnion("type", [
     type: z.literal("appendItem"),
     target: z.string().min(1),
     item: z.unknown().optional(),
-    itemFromState: z.record(z.string()).optional(),
+    itemFromState: z.record(z.string(), z.string()).optional(),
   }),
   z.object({
     type: z.literal("removeItem"),
@@ -115,8 +115,8 @@ export const ActionSchema = z.discriminatedUnion("type", [
     id: z.string().optional(),
     idFromState: z.string().optional(),
     indexFromState: z.string().optional(),
-    patch: z.record(z.unknown()).optional(),
-    patchFromState: z.record(z.string()).optional(),
+    patch: z.record(z.string(), z.unknown()).optional(),
+    patchFromState: z.record(z.string(), z.string()).optional(),
   }),
   z.object({
     type: z.literal("selectTab"),
@@ -129,20 +129,20 @@ export const ActionSchema = z.discriminatedUnion("type", [
     includeFields: z.array(z.string()).optional(),
     componentId: z.string().optional(),
     silent: z.boolean().optional(),
-    values: z.record(z.unknown()).optional(),
-    eventPayload: z.record(z.unknown()).optional(),
+    values: z.record(z.string(), z.unknown()).optional(),
+    eventPayload: z.record(z.string(), z.unknown()).optional(),
   }),
   z.object({
     type: z.literal("dispatchInteractive"),
     actionId: z.string().min(1),
-    params: z.record(z.unknown()).optional(),
-    paramsFromState: z.record(z.string()).optional(),
+    params: z.record(z.string(), z.unknown()).optional(),
+    paramsFromState: z.record(z.string(), z.string()).optional(),
   }),
   z.object({
     type: z.literal("invokeRegisteredAction"),
     actionName: z.string().min(1),
-    input: z.record(z.unknown()).optional(),
-    inputFromState: z.record(z.string()).optional(),
+    input: z.record(z.string(), z.unknown()).optional(),
+    inputFromState: z.record(z.string(), z.string()).optional(),
     componentId: z.string().optional(),
     resultKey: z.string().optional(),
   }),
@@ -181,7 +181,7 @@ export const ToolComponentSchema: z.ZodType<ToolComponent> = z.lazy(() =>
   z.object({
     id: z.string().min(1),
     type: z.string().min(1),
-    props: z.record(z.unknown()).optional(),
+    props: z.record(z.string(), z.unknown()).optional(),
     children: z.array(ToolComponentSchema).optional(),
     actions: z.array(ActionSchema).optional(),
     valueKey: z.string().optional(),
@@ -225,8 +225,8 @@ export type ToolLayout = z.infer<typeof ToolLayoutSchema>;
 
 export const DataSourceSchema = z.object({
   actionName: z.string().min(1),
-  input: z.record(z.unknown()).optional(),
-  inputFromState: z.record(z.string()).optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
+  inputFromState: z.record(z.string(), z.string()).optional(),
   resultKey: z.string().min(1),
   refreshOn: z.array(z.string()).optional(),
 });
@@ -277,7 +277,7 @@ export const ToolInteractionEventSchema = z.object({
   surfaceId: z.string().optional(),
   componentId: z.string().optional(),
   eventName: z.string(),
-  values: z.record(z.unknown()),
+  values: z.record(z.string(), z.unknown()),
   conversationId: z.string().optional(),
   silent: z.boolean().optional(),
 });

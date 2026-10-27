@@ -66,6 +66,12 @@ impl VerificationResult {
             "verified" | "verified_with_warnings" | "passed"
         )
     }
+
+    /// Strict promotion gate: True ONLY when all tests and renderer facts are fully verified.
+    /// Unverified visual assertions (`verified_with_warnings`) must never promote to Last Known Good.
+    pub fn is_fully_verified(&self) -> bool {
+        matches!(self.status.as_str(), "verified" | "passed")
+    }
 }
 
 pub fn upsert_test(db: &mut Database, application_id: &str, test: DeclarativeTest) -> DbResult<()> {

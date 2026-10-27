@@ -32,6 +32,8 @@ export const SchemaWallpaperTypeSchema = z.enum([
 
 export type SchemaWallpaperType = z.infer<typeof SchemaWallpaperTypeSchema>;
 
+// Zod 4: `.transform()` after `.optional()` makes the output key required
+// (`T | undefined`). Trailing `.optional()` restores omit-able keys for builders.
 const optionalHexColor = z
   .string()
   .optional()
@@ -48,7 +50,8 @@ const optionalHexColor = z
   .transform((v) => {
     if (v == null || v === "") return v;
     return normalizeCanonicalHex(v) ?? v;
-  });
+  })
+  .optional();
 
 export const SchemaWallpaperConfigSchema = z.object({
   schemaVersion: z.string().default("1"),

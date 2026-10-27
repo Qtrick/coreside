@@ -28,10 +28,10 @@ export const DocumentSectionSchema = z.object({
   layout: z.string().optional(),
   parentRegionId: z.string().optional(),
   slot: z.string().optional(),
-  responsive: z.record(z.unknown()).optional(),
+  responsive: z.record(z.string(), z.unknown()).optional(),
   instanceId: z.string().optional(),
   components: z.array(z.any()).default([]),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type DocumentSection = {
@@ -76,7 +76,7 @@ export const ActionContractSchema = z.object({
   actionName: z.string().min(1),
   description: z.string().optional(),
   resultKey: z.string().optional(),
-  inputFromState: z.record(z.string()).optional(),
+  inputFromState: z.record(z.string(), z.string()).optional(),
 });
 
 export type ActionContract = z.infer<typeof ActionContractSchema>;
@@ -98,7 +98,7 @@ export const SoftwareDocumentSchema = z.object({
   sections: z.array(DocumentSectionSchema).default([]),
   stateContracts: z.array(StateContractSchema).default([]),
   actionContracts: z.array(ActionContractSchema).default([]),
-  designTokens: z.record(z.unknown()).optional(),
+  designTokens: z.record(z.string(), z.unknown()).optional(),
   capabilityPacks: z.array(z.string()).default(["coreside.core"]),
 });
 

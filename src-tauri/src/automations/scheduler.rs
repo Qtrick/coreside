@@ -302,7 +302,7 @@ pub fn claim_run(
         if let Some(ref slot) = scheduled_at {
             let slot_exists: bool = conn
                 .query_row(
-                    "SELECT 1 FROM automation_runs WHERE automation_id = ?1 AND scheduled_at = ?2 LIMIT 1",
+                    "SELECT 1 FROM automation_scheduled_slots WHERE automation_id = ?1 AND scheduled_at = ?2 LIMIT 1",
                     rusqlite::params![automation_id, slot],
                     |_| Ok(true),
                 )
@@ -381,6 +381,14 @@ pub fn claim_run(
             None,
             None,
         )?;
+
+        if let Some(ref slot) = scheduled_at {
+            conn.execute(
+                "INSERT INTO automation_scheduled_slots (automation_id, scheduled_at, run_id, claimed_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![automation_id, slot, &run_id, &started],
+            )?;
+        }
 
         Ok(Some(ClaimedRun {
             automation,
@@ -1498,42 +1506,51 @@ mod tests {
         let mut db = db;
         db::upsert_automation(&mut db, &auto).unwrap();
 
-        // Insert first scheduled run for this slot:
-        let res1 = db.with_transaction(|conn| {
-            db::insert_automation_run_conn(
-                conn,
-                "run-slot-1",
-                "auto-constraint-test",
-                Some(slot_time),
-                "2026-10-27T10:00:01Z",
-                None,
-                "running",
-                None,
-                None,
-            )
-        });
+        // Worker 1 claims the scheduled slot:
+        let claim1 = claim_run(&mut db, "auto-constraint-test", RunOrigin::Scheduled).unwrap();
         assert!(
-            res1.is_ok(),
-            "first run insert on scheduled slot should succeed"
+            claim1.is_some(),
+            "first worker claim on scheduled slot must succeed"
         );
 
-        // Attempting to insert a second run on the exact same scheduled slot must fail the DB constraint:
+        // Attempting to claim the exact same scheduled slot must be rejected:
+        let claim2 = claim_run(&mut db, "auto-constraint-test", RunOrigin::Scheduled).unwrap();
+        assert!(
+            claim2.is_none(),
+            "second claim on same slot must be rejected"
+        );
+
+        // Direct DB-level check: inserting duplicate into automation_scheduled_slots must fail unique constraint:
         let res2 = db.with_transaction(|conn| {
-            db::insert_automation_run_conn(
-                conn,
-                "run-slot-2",
-                "auto-constraint-test",
-                Some(slot_time),
-                "2026-10-27T10:00:02Z",
-                None,
-                "running",
-                None,
-                None,
+            conn.execute(
+                "INSERT INTO automation_scheduled_slots (automation_id, scheduled_at, run_id, claimed_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params!["auto-constraint-test", slot_time, "run-slot-2", "2026-10-27T10:00:02Z"],
             )
+            .map_err(db::DbError::Sqlite)
         });
         assert!(
             res2.is_err(),
-            "inserting duplicate scheduled slot must violate unique constraint"
+            "inserting duplicate into automation_scheduled_slots must violate PK constraint"
+        );
+
+        // Historical preservation: automation_runs itself CAN hold historical audit records without being deleted:
+        let res_history = db.with_transaction(|conn| {
+            db::insert_automation_run_conn(
+                conn,
+                "run-slot-history-dup",
+                "auto-constraint-test",
+                Some(slot_time),
+                "2026-10-27T10:00:02Z",
+                Some("2026-10-27T10:00:05Z"),
+                "failed",
+                Some("Earlier failure"),
+                Some("timeout"),
+            )
+        });
+        assert!(
+            res_history.is_ok(),
+            "automation_runs preserves all historical runs without deletion"
         );
 
         // However, manual runs (scheduled_at IS NULL) must NOT violate uniqueness:

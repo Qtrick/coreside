@@ -939,6 +939,17 @@ pub fn grant_capability_pack(
         .find(|p| p != "coreside.core")
         .unwrap_or_else(|| pack_id.to_string());
 
+    // Security: target pack must be an allowed bundled and enabled capability pack
+    let pack_meta = super::packs::bundled_packs()
+        .into_iter()
+        .find(|p| p.id == target_pack)
+        .ok_or_else(|| DbError::Invalid(format!("unknown capability pack: {target_pack}")))?;
+    if !pack_meta.enabled {
+        return Err(DbError::Invalid(format!(
+            "capability pack is disabled: {target_pack}"
+        )));
+    }
+
     let mut packs = current.capability_packs.clone();
     if !packs.contains(&target_pack) {
         packs.push(target_pack.clone());
@@ -952,27 +963,26 @@ pub fn grant_capability_pack(
             params![packs_json, now, surface_id],
         )?;
 
-        // If definition is a SoftwareDocument, sync doc.capability_packs
+        // If definition is a SoftwareDocument, sync doc.capability_packs with error propagation
         if let Ok(mut doc) =
             super::software_document::SoftwareDocument::from_value(&current.definition)
         {
             doc.capability_packs = packs.clone();
-            if let Ok(def_json) = serde_json::to_string(&doc) {
-                let _ = db.conn().execute(
-                    "UPDATE surfaces SET definition_json = ?1 WHERE id = ?2",
-                    params![def_json, surface_id],
-                );
-            }
+            let def_json = serde_json::to_string(&doc)?;
+            db.conn().execute(
+                "UPDATE surfaces SET definition_json = ?1 WHERE id = ?2",
+                params![def_json, surface_id],
+            )?;
         }
 
-        // If surface has an authoritative application manifest, update manifest capabilities
+        // If surface has an authoritative application manifest, update manifest capabilities with error propagation
         if let Some(tool_id) = current.tool_id.as_deref() {
             if let Ok(mut m) = crate::application_kernel::manifest::get_manifest(db, tool_id) {
                 if !m.manifest.capabilities.contains(&target_pack) {
                     m.manifest.capabilities.push(target_pack);
                     m.manifest.capabilities.sort();
                     m.manifest.capabilities.dedup();
-                    let _ = crate::application_kernel::manifest::upsert_manifest(db, m.manifest);
+                    crate::application_kernel::manifest::upsert_manifest(db, m.manifest)?;
                 }
             }
         }

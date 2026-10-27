@@ -244,7 +244,7 @@ pub fn required_packs_for_definition(definition: &Value) -> Result<Vec<String>, 
     normalize_capability_packs(&packs)
 }
 
-fn collect_required_packs(value: &Value, packs: &mut Vec<String>) -> Result<(), String> {
+pub fn collect_required_packs(value: &Value, packs: &mut Vec<String>) -> Result<(), String> {
     if let Some(component_type) = value.get("type").and_then(|v| v.as_str()) {
         let pack = resolve_pack_for_component(component_type).ok_or_else(|| {
             format!("component type '{component_type}' is not in any enabled capability pack")

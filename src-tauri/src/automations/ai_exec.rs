@@ -383,12 +383,29 @@ fn build_read_context(db: &Database, automation: &Automation) -> String {
                 || id == "taskstatus"
                 || id == "progress"
                 || id == "stage"
+                || id == "readingstatus"
+                || id.ends_with("status")
+                || id.ends_with("_status")
         });
 
         // 3. Detect priority field
         let priority_field = model.fields.iter().find(|f| {
             let id = f.field_id.to_lowercase();
             id == "priority" || id == "urgency" || id == "importance"
+        });
+
+        // 3.5. Detect quantity/stock field for inventory tracking
+        let quantity_field = model.fields.iter().find(|f| {
+            let is_num = matches!(f.field_type.as_str(), "integer" | "decimal");
+            if !is_num {
+                return false;
+            }
+            let id = f.field_id.to_lowercase();
+            id == "quantity"
+                || id == "stock"
+                || id == "inventory"
+                || id == "count"
+                || id.ends_with("quantity")
         });
 
         // 4. Detect due date field — explicit due/deadline names only (not any date field).
@@ -415,40 +432,46 @@ fn build_read_context(db: &Database, automation: &Automation) -> String {
             });
             selection_criteria = format!("{} == false", comp_f.field_id);
         } else if let Some(stat_f) = status_field {
-            // Case-insensitive exclude of completed/done; NULL/missing status = unfinished.
+            // Case-insensitive exclude of completed/done/finished; NULL/missing status = unfinished.
             filters.push(QueryFilter {
                 field: stat_f.field_id.clone(),
                 op: "not_in".into(),
-                value: json!(["completed", "done"]),
+                value: json!(["completed", "done", "finished"]),
             });
             selection_criteria = format!(
-                "{} not in ('completed','done') (case-insensitive; missing counts unfinished)",
+                "{} not in ('completed','done','finished') (case-insensitive; missing counts unfinished)",
                 stat_f.field_id
             );
+        } else if let Some(qty_f) = quantity_field {
+            selection_criteria = format!("sorted by {} asc (low stock priority)", qty_f.field_id);
+            sort = Some(QuerySort {
+                field: qty_f.field_id.clone(),
+                direction: "asc".into(),
+            });
         } else {
             selection_criteria = "all records (most recently updated)".into();
         }
 
-        if let Some(prio_f) = priority_field {
-            // Number fields sort numerically; enum uses enum_values order; text maps
-            // high/medium/low ranks in plan_order (not lexicographic).
-            let can_sort = matches!(
-                prio_f.field_type.as_str(),
-                "integer" | "decimal" | "duration" | "enum" | "text" | "string" | "long_text"
-            );
-            if can_sort {
+        if sort.is_none() {
+            if let Some(prio_f) = priority_field {
+                let can_sort = matches!(
+                    prio_f.field_type.as_str(),
+                    "integer" | "decimal" | "duration" | "enum" | "text" | "string" | "long_text"
+                );
+                if can_sort {
+                    sort = Some(QuerySort {
+                        field: prio_f.field_id.clone(),
+                        direction: "desc".into(),
+                    });
+                    selection_criteria.push_str(&format!(", sorted by {} desc", prio_f.field_id));
+                }
+            } else if let Some(due_f) = due_date_field {
                 sort = Some(QuerySort {
-                    field: prio_f.field_id.clone(),
-                    direction: "desc".into(),
+                    field: due_f.field_id.clone(),
+                    direction: "asc".into(),
                 });
-                selection_criteria.push_str(&format!(", sorted by {} desc", prio_f.field_id));
+                selection_criteria.push_str(&format!(", sorted by {} asc", due_f.field_id));
             }
-        } else if let Some(due_f) = due_date_field {
-            sort = Some(QuerySort {
-                field: due_f.field_id.clone(),
-                direction: "asc".into(),
-            });
-            selection_criteria.push_str(&format!(", sorted by {} asc", due_f.field_id));
         }
 
         let query = RecordQuery {
@@ -1351,5 +1374,101 @@ mod tests {
         assert_eq!(records[0]["title"], "Cell Biology Lab Report");
         assert_eq!(records[0]["subject"], "Biology");
         assert_eq!(records[1]["title"], "Calculus Problem Set 4");
+    }
+
+    #[test]
+    fn automation_context_handles_reading_status_and_excludes_finished() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("ai-ro.db")).unwrap();
+        let app_id = "tool-research-organizer";
+        let ro_model = crate::application_kernel::data::DataModelDefinition {
+            model_id: "researchItems".into(),
+            display_name: "Research Items".into(),
+            schema_version: 1,
+            fields: vec![
+                crate::application_kernel::data::DataField {
+                    field_id: "title".into(),
+                    field_type: "text".into(),
+                    required: true,
+                    default: None,
+                    enum_values: None,
+                },
+                crate::application_kernel::data::DataField {
+                    field_id: "topic".into(),
+                    field_type: "text".into(),
+                    required: true,
+                    default: None,
+                    enum_values: None,
+                },
+                crate::application_kernel::data::DataField {
+                    field_id: "readingStatus".into(),
+                    field_type: "enum".into(),
+                    required: false,
+                    default: Some(json!("unread")),
+                    enum_values: Some(vec!["unread".into(), "reading".into(), "finished".into()]),
+                },
+            ],
+        };
+        setup_test_app(&mut db, app_id, None, vec![ro_model]);
+
+        crate::application_kernel::data::create_record(
+            &mut db,
+            app_id,
+            "researchItems",
+            json!({
+                "title": "Attention Is All You Need",
+                "topic": "AI",
+                "readingStatus": "finished"
+            }),
+        )
+        .unwrap();
+
+        crate::application_kernel::data::create_record(
+            &mut db,
+            app_id,
+            "researchItems",
+            json!({
+                "title": "seL4 Microkernel Verification",
+                "topic": "Systems",
+                "readingStatus": "unread"
+            }),
+        )
+        .unwrap();
+
+        crate::application_kernel::data::create_record(
+            &mut db,
+            app_id,
+            "researchItems",
+            json!({
+                "title": "Memory Safety in Rust",
+                "topic": "Security",
+                "readingStatus": "reading"
+            }),
+        )
+        .unwrap();
+
+        let mut auto = sample(true);
+        auto.application_id = Some(app_id.into());
+        auto.action = AutomationAction::AiPrompt {
+            prompt: "Summarize my unread and in-progress research items.".into(),
+            conversation_id: None,
+        };
+
+        let ctx = build_read_context(&db, &auto);
+        let snap: serde_json::Value = serde_json::from_str(&ctx).unwrap();
+        assert_eq!(snap["totalRecordsInModel"], 3);
+        assert_eq!(snap["matchingRelevantCount"], 2);
+
+        let records = snap["records"].as_array().unwrap();
+        assert_eq!(records.len(), 2);
+        assert!(records
+            .iter()
+            .any(|r| r["title"] == "seL4 Microkernel Verification"));
+        assert!(records
+            .iter()
+            .any(|r| r["title"] == "Memory Safety in Rust"));
+        assert!(!records
+            .iter()
+            .any(|r| r["title"] == "Attention Is All You Need"));
     }
 }

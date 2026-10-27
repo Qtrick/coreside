@@ -28,7 +28,7 @@ export const AppOperationSchema = z.object({
   transactionGroup: z.string().optional().nullable(),
   idempotencyKey: z.string().optional().nullable(),
   dependsOn: z.array(z.string()).optional().nullable(),
-  payload: z.record(z.unknown()).or(z.unknown()).default({}),
+  payload: z.record(z.string(), z.unknown()).or(z.unknown()).default({}),
   requiresApproval: z.boolean().optional().nullable(),
   destructive: z.boolean().optional().nullable(),
   audience: z
@@ -61,7 +61,7 @@ export const AgentResponseV2Schema = z.object({
   operations: z.array(AppOperationSchema).default([]),
   silent: z.boolean().optional().nullable(),
   citations: z.array(z.unknown()).optional().nullable(),
-  diagnostics: z.record(z.unknown()).optional().nullable(),
+  diagnostics: z.record(z.string(), z.unknown()).optional().nullable(),
 });
 
 export type AgentResponseV2 = z.infer<typeof AgentResponseV2Schema>;
@@ -78,7 +78,7 @@ export const SurfaceRecordSchema = z.object({
   toolId: z.string().nullable().optional(),
   messageId: z.string().nullable().optional(),
   name: z.string(),
-  definition: z.union([ToolDefinitionSchema, z.record(z.unknown())]),
+  definition: z.union([ToolDefinitionSchema, z.record(z.string(), z.unknown())]),
   currentRevision: z.number().int(),
   lifecycleState: z.string(),
   archived: z.boolean(),

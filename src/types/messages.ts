@@ -9,7 +9,7 @@ export const ChatMessageSchema = z.object({
   role: MessageRoleSchema,
   content: z.string(),
   createdAt: z.string(),
-  metadata: z.record(z.unknown()).optional().nullable(),
+  metadata: z.record(z.string(), z.unknown()).optional().nullable(),
   status: z.enum(["ok", "error", "pending"]).optional(),
   errorMessage: z.string().optional().nullable(),
 });

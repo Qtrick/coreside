@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 43 forward migrations (001–043; includes `043_atomic_automation_scheduled_slots.sql`)
+**Count:** 44 forward migrations (001–044; includes `044_lossless_slots_and_explicit_capabilities.sql`)
 
 ## Inventory
 
@@ -50,7 +50,8 @@
 | 040 | `040_backfill_inline_surface_message_id.sql` | Backfill `message_id` on legacy chat-inline surfaces so fail-closed ownership filtering does not hide them |
 | 041 | `041_repair_ambiguous_inline_surface_message_id.sql` | Clear ambiguous 040 bindings only when another assistant message sits between the surface and the bound message |
 | 042 | `042_generated_data_revisions.sql` | Monotonic per-application/model data revisions for query freshness and missed-event reconciliation |
-| 043 | `043_atomic_automation_scheduled_slots.sql` | Enforce atomic scheduled slot uniqueness on automation_runs with unique partial index |
+| 043 | `043_atomic_automation_scheduled_slots.sql` | Dedicated `automation_scheduled_slots` claim table for lossless slot exclusivity without deleting historical run rows |
+| 044 | `044_lossless_slots_and_explicit_capabilities.sql` | Drop legacy partial index on `automation_runs`, guarantee `automation_scheduled_slots`, and add `required_capabilities_json` to `kernel_change_proposals` |
 
 ## What is verified
 

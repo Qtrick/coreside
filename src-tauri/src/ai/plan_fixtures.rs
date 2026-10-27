@@ -1786,7 +1786,378 @@ pub fn task_tracker_add_due_dates_plan(base_revision: Option<i64>) -> Applicatio
     }
 }
 
-/// Serialize a plan as a full agent response JSON string (schema v1 + applicationPlan).
+fn research_items_model_v1() -> DataModelDefinition {
+    DataModelDefinition {
+        model_id: "researchItems".into(),
+        display_name: "Research Items".into(),
+        schema_version: 1,
+        fields: vec![
+            DataField {
+                field_id: "title".into(),
+                field_type: "text".into(),
+                required: true,
+                default: None,
+                enum_values: None,
+            },
+            DataField {
+                field_id: "topic".into(),
+                field_type: "text".into(),
+                required: true,
+                default: None,
+                enum_values: None,
+            },
+            DataField {
+                field_id: "sourceUrl".into(),
+                field_type: "text".into(),
+                required: false,
+                default: None,
+                enum_values: None,
+            },
+            DataField {
+                field_id: "notes".into(),
+                field_type: "text".into(),
+                required: false,
+                default: None,
+                enum_values: None,
+            },
+            DataField {
+                field_id: "tags".into(),
+                field_type: "text".into(),
+                required: false,
+                default: None,
+                enum_values: None,
+            },
+            DataField {
+                field_id: "readingStatus".into(),
+                field_type: "enum".into(),
+                required: false,
+                default: Some(json!("unread")),
+                enum_values: Some(vec!["unread".into(), "reading".into(), "finished".into()]),
+            },
+        ],
+    }
+}
+
+fn research_organizer_tool_v1() -> ToolDefinition {
+    ToolDefinition {
+        id: "tool-research-organizer".into(),
+        name: "Research Organizer".into(),
+        description: "Save topics, sources, notes, tags, and reading status.".into(),
+        layout: json!({ "type": "dashboard", "columns": 2, "density": "normal" }),
+        components: vec![
+            ToolComponent {
+                id: "ro-heading".into(),
+                component_type: "heading".into(),
+                props: Some(json!({ "text": "Personal Research Organizer", "level": 1 })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "ro-search".into(),
+                component_type: "textInput".into(),
+                value_key: Some("roSearch".into()),
+                props: Some(
+                    json!({ "label": "Search Research", "placeholder": "Search by title, topic, or tags..." }),
+                ),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "ro-topic-filter".into(),
+                component_type: "select".into(),
+                value_key: Some("roTopicFilter".into()),
+                props: Some(json!({
+                    "label": "Topic Filter",
+                    "options": [
+                        { "label": "All Topics", "value": "" },
+                        { "label": "AI", "value": "AI" },
+                        { "label": "Security", "value": "Security" },
+                        { "label": "Systems", "value": "Systems" }
+                    ]
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "ro-items-table".into(),
+                component_type: "dataTable".into(),
+                props: Some(json!({
+                    "columns": [
+                        { "id": "title", "accessor": "title", "header": "Title" },
+                        { "id": "topic", "accessor": "topic", "header": "Topic" },
+                        { "id": "sourceUrl", "accessor": "sourceUrl", "header": "Source" },
+                        { "id": "readingStatus", "accessor": "readingStatus", "header": "Status" },
+                        { "id": "notes", "accessor": "notes", "header": "Notes" }
+                    ],
+                    "rowsKey": "roItemsResult",
+                    "selectionKey": "roSelectedId",
+                    "dataSource": {
+                        "actionName": "local_data.query",
+                        "input": { "modelId": "researchItems", "limit": 100 },
+                        "resultKey": "roItemsResult"
+                    }
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "ro-new-title".into(),
+                component_type: "textInput".into(),
+                value_key: Some("roNewTitle".into()),
+                props: Some(json!({ "label": "Title", "placeholder": "Paper or Article Title" })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "ro-new-topic".into(),
+                component_type: "textInput".into(),
+                value_key: Some("roNewTopic".into()),
+                props: Some(json!({ "label": "Topic", "placeholder": "e.g. AI, Security" })),
+                ..Default::default()
+            },
+            ToolComponent {
+                id: "ro-add-btn".into(),
+                component_type: "button".into(),
+                props: Some(json!({ "label": "Add Research Item" })),
+                actions: Some(vec![
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.write".into(),
+                        input: Some(
+                            json!({ "modelId": "researchItems", "data": { "readingStatus": "unread" } }),
+                        ),
+                        input_from_state: Some(
+                            [
+                                ("data.title".into(), "roNewTitle".into()),
+                                ("data.topic".into(), "roNewTopic".into()),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        ),
+                        component_id: None,
+                        result_key: None,
+                    },
+                    ActionDefinition::InvokeRegisteredAction {
+                        action_name: "local_data.query".into(),
+                        input: Some(json!({ "modelId": "researchItems", "limit": 100 })),
+                        input_from_state: None,
+                        component_id: None,
+                        result_key: Some("roItemsResult".into()),
+                    },
+                ]),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    }
+}
+
+fn research_organizer_tool_v2_queue() -> ToolDefinition {
+    let mut tool = research_organizer_tool_v1();
+    tool.components.extend([
+        ToolComponent {
+            id: "ro-queue-heading".into(),
+            component_type: "heading".into(),
+            props: Some(json!({ "text": "Unfinished Research Queue", "level": 2 })),
+            ..Default::default()
+        },
+        ToolComponent {
+            id: "ro-queue-table".into(),
+            component_type: "dataTable".into(),
+            props: Some(json!({
+                "columns": [
+                    { "id": "title", "accessor": "title", "header": "Unfinished Item" },
+                    { "id": "topic", "accessor": "topic", "header": "Topic" },
+                    { "id": "readingStatus", "accessor": "readingStatus", "header": "Status" }
+                ],
+                "rowsKey": "roQueueResult",
+                "dataSource": {
+                    "actionName": "local_data.query",
+                    "input": {
+                        "modelId": "researchItems",
+                        "filters": [{ "field": "readingStatus", "op": "neq", "value": "finished" }],
+                        "limit": 100
+                    },
+                    "resultKey": "roQueueResult"
+                }
+            })),
+            ..Default::default()
+        },
+    ]);
+    tool
+}
+
+fn research_organizer_tool_v3_analytics() -> ToolDefinition {
+    let mut tool = research_organizer_tool_v2_queue();
+    tool.components.extend([
+        ToolComponent {
+            id: "ro-analytics-heading".into(),
+            component_type: "heading".into(),
+            props: Some(json!({ "text": "Research Analytics & Reading Progress", "level": 2 })),
+            ..Default::default()
+        },
+        ToolComponent {
+            id: "ro-chart-pace".into(),
+            component_type: "chartLine".into(),
+            props: Some(json!({
+                "title": "Weekly Reading Progress",
+                "data": [
+                    { "label": "Week 1", "value": 4 },
+                    { "label": "Week 2", "value": 7 },
+                    { "label": "Week 3", "value": 11 }
+                ]
+            })),
+            ..Default::default()
+        },
+        ToolComponent {
+            id: "ro-chart-topics".into(),
+            component_type: "chartBar".into(),
+            props: Some(json!({
+                "title": "Research by Topic",
+                "data": [
+                    { "label": "AI", "value": 8 },
+                    { "label": "Security", "value": 5 },
+                    { "label": "Systems", "value": 4 }
+                ]
+            })),
+            ..Default::default()
+        },
+    ]);
+    tool
+}
+
+fn research_organizer_tool_v4_reorganized() -> ToolDefinition {
+    let mut tool = research_organizer_tool_v3_analytics();
+    tool.layout = json!({ "type": "dashboard", "columns": 3, "density": "compact" });
+    for comp in &mut tool.components {
+        if comp.id == "ro-heading" {
+            comp.props = Some(json!({ "text": "Research Workspace & Intelligence", "level": 1 }));
+        }
+    }
+    tool
+}
+
+pub fn research_organizer_create_plan() -> ApplicationPlan {
+    ApplicationPlan {
+        schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+        plan_id: "plan-research-organizer-create".into(),
+        kind: ApplicationPlanKind::Create,
+        summary:
+            "Create Personal Research Organizer with topics, sources, notes, and reading status"
+                .into(),
+        application_id: Some("tool-research-organizer".into()),
+        base_revision: None,
+        steps: vec![
+            PlanStep {
+                id: "1".into(),
+                description: "Create researchItems data model".into(),
+            },
+            PlanStep {
+                id: "2".into(),
+                description: "Create Research Organizer surface with catalog table and input form"
+                    .into(),
+            },
+        ],
+        intents: vec![
+            ChangeIntent::CreateSurface {
+                tool: research_organizer_tool_v1(),
+                change_summary: Some("Create Personal Research Organizer".into()),
+            },
+            ChangeIntent::UpsertDataModel {
+                application_id: "tool-research-organizer".into(),
+                model: research_items_model_v1(),
+            },
+        ],
+        tests: vec![],
+        diagnostics: Some(json!({ "fixture": "research_organizer_create_plan" })),
+    }
+}
+
+pub fn research_organizer_evolve_reading_queue_plan(base_revision: Option<i64>) -> ApplicationPlan {
+    ApplicationPlan {
+        schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+        plan_id: "plan-research-organizer-queue".into(),
+        kind: ApplicationPlanKind::Evolve,
+        summary: "Add unfinished reading queue organized by topic".into(),
+        application_id: Some("tool-research-organizer".into()),
+        base_revision,
+        steps: vec![
+            PlanStep {
+                id: "1".into(),
+                description: "Preserve researchItems model and all existing records".into(),
+            },
+            PlanStep {
+                id: "2".into(),
+                description: "Add unfinished reading queue table filtered by readingStatus".into(),
+            },
+        ],
+        intents: vec![ChangeIntent::UpdateSurface {
+            tool_id: "tool-research-organizer".into(),
+            tool: research_organizer_tool_v2_queue(),
+            change_summary: Some("Add unfinished reading queue".into()),
+            base_revision,
+        }],
+        tests: vec![],
+        diagnostics: Some(json!({ "fixture": "research_organizer_queue_plan" })),
+    }
+}
+
+pub fn research_organizer_evolve_analytics_plan(base_revision: Option<i64>) -> ApplicationPlan {
+    ApplicationPlan {
+        schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+        plan_id: "plan-research-organizer-analytics".into(),
+        kind: ApplicationPlanKind::Evolve,
+        summary: "Add reading progress charts and topic distribution analytics".into(),
+        application_id: Some("tool-research-organizer".into()),
+        base_revision,
+        steps: vec![
+            PlanStep {
+                id: "1".into(),
+                description: "Preserve researchItems model and all existing records".into(),
+            },
+            PlanStep {
+                id: "2".into(),
+                description: "Add chartLine reading pace and chartBar topic breakdown requiring coreside.charts".into(),
+            },
+        ],
+        intents: vec![
+            ChangeIntent::UpdateSurface {
+                tool_id: "tool-research-organizer".into(),
+                tool: research_organizer_tool_v3_analytics(),
+                change_summary: Some("Add reading progress charts and topic analytics".into()),
+                base_revision,
+            },
+        ],
+        tests: vec![],
+        diagnostics: Some(json!({ "fixture": "research_organizer_analytics_plan" })),
+    }
+}
+
+pub fn research_organizer_reorganize_views_plan(base_revision: Option<i64>) -> ApplicationPlan {
+    ApplicationPlan {
+        schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+        plan_id: "plan-research-organizer-reorganize".into(),
+        kind: ApplicationPlanKind::Evolve,
+        summary: "Reorganize views into compact layout without altering existing data".into(),
+        application_id: Some("tool-research-organizer".into()),
+        base_revision,
+        steps: vec![
+            PlanStep {
+                id: "1".into(),
+                description: "Preserve researchItems model and all existing records".into(),
+            },
+            PlanStep {
+                id: "2".into(),
+                description:
+                    "Update layout to compact 3-column dashboard with updated workspace branding"
+                        .into(),
+            },
+        ],
+        intents: vec![ChangeIntent::UpdateSurface {
+            tool_id: "tool-research-organizer".into(),
+            tool: research_organizer_tool_v4_reorganized(),
+            change_summary: Some("Reorganize views into compact 3-column dashboard".into()),
+            base_revision,
+        }],
+        tests: vec![],
+        diagnostics: Some(json!({ "fixture": "research_organizer_reorganize_plan" })),
+    }
+}
+
 pub fn plan_response_json(assistant_message: &str, plan: &ApplicationPlan) -> String {
     let tool_change = crate::application_kernel::application_plan::derive_tool_change(plan);
     json!({

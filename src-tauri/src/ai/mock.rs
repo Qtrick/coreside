@@ -305,6 +305,49 @@ impl MockAiProvider {
             );
         }
 
+        // Research Organizer evolve: reading queue
+        if (lower.contains("queue") || lower.contains("unfinished"))
+            && !create_ish
+            && lower.contains("research")
+        {
+            let rev = observed_revision.unwrap_or(1);
+            let plan =
+                super::plan_fixtures::research_organizer_evolve_reading_queue_plan(Some(rev));
+            return super::plan_fixtures::plan_response_json(
+                "I added an unfinished reading queue organized by topic to your Research Organizer. All existing research items were preserved.",
+                &plan,
+            );
+        }
+
+        // Research Organizer evolve: progress analytics & charts
+        if (lower.contains("progress") || lower.contains("chart") || lower.contains("analytics"))
+            && !create_ish
+            && (lower.contains("research") || lower.contains("organizer"))
+        {
+            let rev = observed_revision.unwrap_or(2);
+            let plan = super::plan_fixtures::research_organizer_evolve_analytics_plan(Some(rev));
+            return super::plan_fixtures::plan_response_json(
+                "I added a progress and analytics section with weekly reading pace and topic breakdown charts to your Research Organizer. All existing research items were preserved.",
+                &plan,
+            );
+        }
+
+        // Research Organizer evolve: reorganize views
+        if (lower.contains("reorganize")
+            || lower.contains("views")
+            || lower.contains("compact")
+            || lower.contains("dashboard"))
+            && !create_ish
+            && (lower.contains("research") || lower.contains("organizer"))
+        {
+            let rev = observed_revision.unwrap_or(3);
+            let plan = super::plan_fixtures::research_organizer_reorganize_views_plan(Some(rev));
+            return super::plan_fixtures::plan_response_json(
+                "I reorganized the views of your Research Organizer into a compact 3-column workspace layout. All existing data was preserved.",
+                &plan,
+            );
+        }
+
         // Journey 32: intentional compile failure, then success after repair keyword.
         if lower.contains("progressive repair recovery") {
             if lower.contains("after repair") || lower.contains("ready after repair") {
@@ -358,6 +401,22 @@ impl MockAiProvider {
             let plan = super::plan_fixtures::multi_surface_planner_create_plan();
             return super::plan_fixtures::plan_response_json(
                 "I created a Study Planner with a persistent dashboard and a related conversation summary surface.",
+                &plan,
+            );
+        }
+
+        if lower.contains("research organizer")
+            || lower.contains("research-organizer")
+            || (lower.contains("research")
+                && (lower.contains("topics")
+                    || lower.contains("sources")
+                    || lower.contains("notes")
+                    || lower.contains("reading status")
+                    || lower.contains("organizer")))
+        {
+            let plan = super::plan_fixtures::research_organizer_create_plan();
+            return super::plan_fixtures::plan_response_json(
+                "I created a personal Research Organizer with topics, sources, notes, tags, and reading status tracking.",
                 &plan,
             );
         }

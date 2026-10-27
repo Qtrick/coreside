@@ -4,7 +4,7 @@ import { SourceCitationSchema } from "./search";
 
 export const ToolCallRequestSchema = z.object({
   capability: z.string(),
-  arguments: z.record(z.unknown()).optional().default({}),
+  arguments: z.record(z.string(), z.unknown()).optional().default({}),
 });
 export type ToolCallRequest = z.infer<typeof ToolCallRequestSchema>;
 
@@ -262,10 +262,10 @@ export const SendMessageResultSchema = z.object({
   toolChange: ToolChangeSchema.nullable().optional(),
   settingsChange: SettingsChangeSchema.nullable().optional(),
   /** Chat automation proposal — confirm via upsertAutomation before schedule. */
-  automationChange: z.record(z.unknown()).nullable().optional(),
+  automationChange: z.record(z.string(), z.unknown()).nullable().optional(),
   diagnostics: AgentDiagnosticsSchema,
   userMessageId: z.string().nullable().optional(),
-  runtimeV2: z.record(z.unknown()).nullable().optional(),
+  runtimeV2: z.record(z.string(), z.unknown()).nullable().optional(),
   queued: z.boolean().nullable().optional(),
   queueItemId: z.string().nullable().optional(),
 });

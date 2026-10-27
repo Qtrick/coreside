@@ -14,6 +14,8 @@ pub use models::{
     MissedRunPolicy,
 };
 pub use outcome::AutomationRunOutcome;
-pub use scheduler::{compute_next_run, run_now, spawn_scheduler, SchedulerHandle};
+pub use scheduler::{
+    claim_run, compute_next_run, run_now, spawn_scheduler, RunOrigin, SchedulerHandle,
+};
 #[allow(unused_imports)] // Re-exported for callers / docs.
 pub use validation::{validate_automation, MIN_AI_INTERVAL_MINUTES, MIN_INTERVAL_MINUTES};
