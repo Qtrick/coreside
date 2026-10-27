@@ -965,6 +965,7 @@ fn study_planner_tool_v1() -> ToolDefinition {
                 props: Some(json!({
                     "columns": [
                         { "id": "title", "accessor": "title", "header": "Task" },
+                        { "id": "subject", "accessor": "subject", "header": "Subject" },
                         { "id": "status", "accessor": "status", "header": "Status" },
                         { "id": "dueDate", "accessor": "dueDate", "header": "Due" },
                         { "id": "notes", "accessor": "notes", "header": "Notes" }
@@ -1008,6 +1009,16 @@ fn study_planner_tool_v1() -> ToolDefinition {
                 ..Default::default()
             },
             ToolComponent {
+                id: "sp-new-subject".into(),
+                component_type: "textInput".into(),
+                value_key: Some("newStudyTaskSubject".into()),
+                props: Some(json!({
+                    "label": "Subject",
+                    "placeholder": "e.g. Biology, Math, History"
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
                 id: "sp-new-due".into(),
                 component_type: "dateInput".into(),
                 value_key: Some("newStudyTaskDueDate".into()),
@@ -1038,6 +1049,7 @@ fn study_planner_tool_v1() -> ToolDefinition {
                         input_from_state: Some(
                             [
                                 ("data.title".into(), "newStudyTaskTitle".into()),
+                                ("data.subject".into(), "newStudyTaskSubject".into()),
                                 ("data.dueDate".into(), "newStudyTaskDueDate".into()),
                                 ("data.notes".into(), "newStudyTaskNotes".into()),
                             ]
@@ -1050,6 +1062,10 @@ fn study_planner_tool_v1() -> ToolDefinition {
                     study_tasks_query_refresh(),
                     ActionDefinition::SetValue {
                         target: "newStudyTaskTitle".into(),
+                        value: json!(""),
+                    },
+                    ActionDefinition::SetValue {
+                        target: "newStudyTaskSubject".into(),
                         value: json!(""),
                     },
                     ActionDefinition::SetValue {
@@ -1116,6 +1132,16 @@ fn study_planner_tool_v1() -> ToolDefinition {
                 ..Default::default()
             },
             ToolComponent {
+                id: "sp-edit-subject".into(),
+                component_type: "textInput".into(),
+                value_key: Some("editStudyTaskSubject".into()),
+                props: Some(json!({
+                    "label": "Edit Subject",
+                    "placeholder": "Update subject"
+                })),
+                ..Default::default()
+            },
+            ToolComponent {
                 id: "sp-edit-notes".into(),
                 component_type: "textArea".into(),
                 value_key: Some("editStudyTaskNotes".into()),
@@ -1147,6 +1173,7 @@ fn study_planner_tool_v1() -> ToolDefinition {
                             [
                                 ("recordId".into(), "selectedStudyTaskId".into()),
                                 ("baseVersion".into(), "selectedStudyTaskVersion".into()),
+                                ("data.subject".into(), "editStudyTaskSubject".into()),
                                 ("data.notes".into(), "editStudyTaskNotes".into()),
                                 ("data.dueDate".into(), "editStudyTaskDueDate".into()),
                             ]
@@ -1230,13 +1257,19 @@ fn study_tasks_model_v1() -> DataModelDefinition {
                 enum_values: None,
             },
             DataField {
+                field_id: "subject".into(),
+                field_type: "text".into(),
+                required: false,
+                default: None,
+                enum_values: None,
+            },
+            DataField {
                 field_id: "status".into(),
                 field_type: "enum".into(),
                 required: false,
                 default: Some(json!("todo")),
                 enum_values: Some(vec!["todo".into(), "in_progress".into(), "done".into()]),
             },
-            // Priority remains a Journey 31 evolve step (schema v2).
             DataField {
                 field_id: "dueDate".into(),
                 field_type: "date".into(),
@@ -1417,6 +1450,159 @@ pub fn multi_surface_planner_add_priority_plan(base_revision: Option<i64>) -> Ap
         ],
         tests: vec![],
         diagnostics: Some(json!({ "fixture": "multi_surface_planner_priority_plan" })),
+    }
+}
+
+fn study_planner_tool_v3_calendar() -> ToolDefinition {
+    let mut tool = study_planner_tool_v2_priority();
+    tool.components.extend([
+        ToolComponent {
+            id: "sp-calendar-heading".into(),
+            component_type: "heading".into(),
+            props: Some(json!({ "text": "Calendar & Subject Schedule", "level": 2 })),
+            ..Default::default()
+        },
+        ToolComponent {
+            id: "sp-subject-filter".into(),
+            component_type: "select".into(),
+            value_key: Some("studyTasksSubjectFilter".into()),
+            props: Some(json!({
+                "label": "Filter by Subject",
+                "options": [
+                    { "label": "All Subjects", "value": "" },
+                    { "label": "Math", "value": "Math" },
+                    { "label": "Science", "value": "Science" },
+                    { "label": "History", "value": "History" },
+                    { "label": "English", "value": "English" }
+                ]
+            })),
+            ..Default::default()
+        },
+        ToolComponent {
+            id: "sp-calendar-table".into(),
+            component_type: "dataTable".into(),
+            props: Some(json!({
+                "columns": [
+                    { "id": "dueDate", "accessor": "dueDate", "header": "Date" },
+                    { "id": "subject", "accessor": "subject", "header": "Subject" },
+                    { "id": "title", "accessor": "title", "header": "Assignment" },
+                    { "id": "priority", "accessor": "priority", "header": "Priority" },
+                    { "id": "status", "accessor": "status", "header": "Status" }
+                ],
+                "rowsKey": "studyTasksResult",
+                "selectionKey": "selectedStudyTaskId",
+                "selectionVersionKey": "selectedStudyTaskVersion",
+                "pageSize": 25,
+                "searchKey": "studyTasksSubjectFilter"
+            })),
+            ..Default::default()
+        },
+    ]);
+    tool
+}
+
+pub fn multi_surface_planner_add_calendar_view_plan(base_revision: Option<i64>) -> ApplicationPlan {
+    ApplicationPlan {
+        schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+        plan_id: "plan-study-planner-calendar".into(),
+        kind: ApplicationPlanKind::Evolve,
+        summary: "Add calendar view and organize assignments by subject".into(),
+        application_id: Some("tool-study-planner".into()),
+        base_revision,
+        steps: vec![
+            PlanStep {
+                id: "1".into(),
+                description: "Preserve studyTasks model and compatible assignment records".into(),
+            },
+            PlanStep {
+                id: "2".into(),
+                description:
+                    "Add Calendar view and subject filter while keeping existing controls intact"
+                        .into(),
+            },
+        ],
+        intents: vec![ChangeIntent::UpdateSurface {
+            tool_id: "tool-study-planner".into(),
+            tool: study_planner_tool_v3_calendar(),
+            change_summary: Some("Add calendar view and organize by subject".into()),
+            base_revision,
+        }],
+        tests: vec![],
+        diagnostics: Some(json!({ "fixture": "multi_surface_planner_calendar_plan" })),
+    }
+}
+
+fn study_planner_tool_v4_progress() -> ToolDefinition {
+    let mut tool = study_planner_tool_v3_calendar();
+    tool.components.extend([
+        ToolComponent {
+            id: "sp-progress-heading".into(),
+            component_type: "heading".into(),
+            props: Some(json!({ "text": "Completion Trends & Weekly Workload", "level": 2 })),
+            ..Default::default()
+        },
+        ToolComponent {
+            id: "sp-chart-completion".into(),
+            component_type: "chartLine".into(),
+            props: Some(json!({
+                "title": "Completion Trends",
+                "ariaLabel": "Weekly assignment completion trends",
+                "data": [
+                    { "label": "Week 1", "value": 3 },
+                    { "label": "Week 2", "value": 5 },
+                    { "label": "Week 3", "value": 8 },
+                    { "label": "Week 4", "value": 12 }
+                ]
+            })),
+            ..Default::default()
+        },
+        ToolComponent {
+            id: "sp-chart-workload".into(),
+            component_type: "chartBar".into(),
+            props: Some(json!({
+                "title": "Weekly Workload by Subject",
+                "ariaLabel": "Hours and tasks per subject",
+                "data": [
+                    { "label": "Math", "value": 6 },
+                    { "label": "Science", "value": 4 },
+                    { "label": "History", "value": 3 },
+                    { "label": "English", "value": 5 }
+                ]
+            })),
+            ..Default::default()
+        },
+    ]);
+    tool
+}
+
+pub fn multi_surface_planner_add_progress_page_plan(base_revision: Option<i64>) -> ApplicationPlan {
+    ApplicationPlan {
+        schema_version: APPLICATION_PLAN_SCHEMA_VERSION.into(),
+        plan_id: "plan-study-planner-progress".into(),
+        kind: ApplicationPlanKind::Evolve,
+        summary: "Add progress page with completion trends and weekly workload".into(),
+        application_id: Some("tool-study-planner".into()),
+        base_revision,
+        steps: vec![
+            PlanStep {
+                id: "1".into(),
+                description: "Preserve studyTasks model and all existing records".into(),
+            },
+            PlanStep {
+                id: "2".into(),
+                description: "Add completion trends chartLine and weekly workload chartBar".into(),
+            },
+        ],
+        intents: vec![ChangeIntent::UpdateSurface {
+            tool_id: "tool-study-planner".into(),
+            tool: study_planner_tool_v4_progress(),
+            change_summary: Some(
+                "Add progress page with completion trends and weekly workload".into(),
+            ),
+            base_revision,
+        }],
+        tests: vec![],
+        diagnostics: Some(json!({ "fixture": "multi_surface_planner_progress_plan" })),
     }
 }
 

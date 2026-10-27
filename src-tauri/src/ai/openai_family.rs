@@ -139,14 +139,17 @@ fn text_parts_for_openai_family(parts: &[AgentContentPart]) -> String {
     flatten_parts_for_provider(&filtered)
 }
 
-/// Whether this OpenAI-family model is an o-series reasoning model (e.g. o1, o3, o4).
+/// Whether this OpenAI-family model is a reasoning model (o-series or gpt-5*).
 ///
 /// Reasoning models reject `temperature` and require `max_completion_tokens` instead
-/// of deprecated `max_tokens`.
+/// of deprecated `max_tokens`. Accepts vendor-prefixed IDs (`openai/gpt-5-mini`).
 pub fn is_reasoning_model(model: &str) -> bool {
     let m = model.trim().to_ascii_lowercase();
     let bare = m.rsplit('/').next().unwrap_or(&m);
-    bare.starts_with("o1") || bare.starts_with("o3") || bare.starts_with("o4")
+    bare.starts_with("o1")
+        || bare.starts_with("o3")
+        || bare.starts_with("o4")
+        || bare.starts_with("gpt-5")
 }
 
 /// Whether this OpenAI-family model ID is known to accept `response_format: json_schema`.
@@ -524,5 +527,29 @@ mod tests {
             "json_object"
         );
         assert!(!model_supports_json_schema_response_format(""));
+    }
+
+    #[test]
+    fn is_reasoning_model_covers_o_series_and_gpt5() {
+        for id in [
+            "o1",
+            "o1-mini",
+            "o3-mini",
+            "o4-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5.1",
+            "openai/gpt-5-mini",
+            "openrouter/openai/gpt-5",
+        ] {
+            assert!(is_reasoning_model(id), "expected reasoning model: {id}");
+        }
+        for id in ["gpt-4o", "gpt-4.1", "gpt-4-turbo", "llama-3-70b", ""] {
+            assert!(
+                !is_reasoning_model(id),
+                "expected non-reasoning model: {id}"
+            );
+        }
     }
 }

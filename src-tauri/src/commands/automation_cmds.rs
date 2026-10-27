@@ -170,8 +170,17 @@ pub fn run_automation_now(
     automation_id: String,
 ) -> Result<AutomationRunOutcome, CommandError> {
     state.require_profile()?;
-    let outcome = crate::automations::run_now(&state, automation_id.trim(), &scheduler)
-        .map_err(|e| CommandError::new("automation", e))?;
+    let app_for_start = app.clone();
+    let outcome = crate::automations::run_now(
+        &state,
+        automation_id.trim(),
+        &scheduler,
+        Some(&move || {
+            use tauri::Emitter;
+            let _ = app_for_start.emit(AUTOMATIONS_CHANGED_EVENT, ());
+        }),
+    )
+    .map_err(|e| CommandError::new("automation", e))?;
     use tauri::Emitter;
     let _ = app.emit(AUTOMATIONS_CHANGED_EVENT, ());
     Ok(outcome)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/tauri";
 import { listenAutomationsChanged } from "@/lib/tauri/events";
 import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
@@ -76,11 +76,18 @@ export function AutomationsPanel({ onBack }: { onBack: () => void }) {
   const [loadingRunsId, setLoadingRunsId] = useState<string | null>(null);
   const [copiedRunId, setCopiedRunId] = useState<string | null>(null);
 
+  const reloadSeqRef = useRef(0);
+  const runsSeqRef = useRef<Record<string, number>>({});
+  const expandedHistoryIdRef = useRef(expandedHistoryId);
+  expandedHistoryIdRef.current = expandedHistoryId;
+
   const navigateToSettings = useAppStore((s) => s.navigateToSettings);
 
   const reload = async () => {
+    const seq = ++reloadSeqRef.current;
     try {
       const raw = await api.listAutomations();
+      if (seq !== reloadSeqRef.current) return;
       setRows(
         raw.map((row) => ({
           id: String(row.id ?? ""),
@@ -99,14 +106,17 @@ export function AutomationsPanel({ onBack }: { onBack: () => void }) {
       );
       setError(null);
     } catch (err) {
+      if (seq !== reloadSeqRef.current) return;
       setError(err instanceof Error ? err.message : "Could not load automations");
     }
   };
 
   const loadRuns = async (automationId: string) => {
+    const seq = (runsSeqRef.current[automationId] = (runsSeqRef.current[automationId] ?? 0) + 1);
     setLoadingRunsId(automationId);
     try {
       const rawRuns = await api.listAutomationRuns(automationId);
+      if (seq !== runsSeqRef.current[automationId]) return;
       const mappedRuns: AutomationRun[] = rawRuns.map((r) => ({
         id: String(r.id ?? ""),
         automationId: String(r.automationId ?? r.automation_id ?? automationId),
@@ -123,9 +133,12 @@ export function AutomationsPanel({ onBack }: { onBack: () => void }) {
         [automationId]: mappedRuns,
       }));
     } catch (err) {
+      if (seq !== runsSeqRef.current[automationId]) return;
       setError(err instanceof Error ? err.message : "Could not load run history");
     } finally {
-      setLoadingRunsId(null);
+      if (seq === runsSeqRef.current[automationId]) {
+        setLoadingRunsId(null);
+      }
     }
   };
 
@@ -135,37 +148,27 @@ export function AutomationsPanel({ onBack }: { onBack: () => void }) {
 
   // Live synchronization: update panel when backend background runs finish or update
   useEffect(() => {
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     void listenAutomationsChanged(() => {
       void reload();
-      if (expandedHistoryId) {
-        void loadRuns(expandedHistoryId);
+      const currentExpandedId = expandedHistoryIdRef.current;
+      if (currentExpandedId) {
+        void loadRuns(currentExpandedId);
       }
     }).then((fn) => {
+      if (cancelled) {
+        fn();
+        return;
+      }
       unlisten = fn;
     });
 
     return () => {
+      cancelled = true;
       if (unlisten) unlisten();
     };
-  }, [expandedHistoryId]);
-
-  // Bounded polling while any automation is in 'running' state, paused when tab/window is hidden
-  useEffect(() => {
-    const hasRunning = rows.some((r) => r.lastStatus === "running");
-    if (!hasRunning) return;
-
-    const interval = setInterval(() => {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        void reload();
-        if (expandedHistoryId) {
-          void loadRuns(expandedHistoryId);
-        }
-      }
-    }, 2500);
-
-    return () => clearInterval(interval);
-  }, [rows, expandedHistoryId]);
+  }, []);
 
   const handleRunNow = async (row: Automation) => {
     setBusyId(row.id);

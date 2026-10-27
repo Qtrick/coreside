@@ -63,7 +63,7 @@ fn default_limit() -> u64 {
 #[serde(rename_all = "camelCase")]
 pub struct QueryFilter {
     pub field: String,
-    /// eq | neq | lt | lte | gt | gte | in | contains
+    /// eq | neq | lt | lte | gt | gte | in | not_in | contains
     pub op: String,
     pub value: Value,
 }
@@ -382,6 +382,32 @@ fn plan_query(def: &DataModelDefinition, query: &RecordQuery) -> DbResult<Planne
                 }
                 extra_parts.push(format!("{expr} IN ({})", placeholders.join(", ")));
             }
+            "not_in" | "notin" | "not_in_ci" => {
+                // Case-insensitive exclusion; missing/NULL field values count as matching
+                // (treated as unfinished for status-style filters).
+                let arr = filter
+                    .value
+                    .as_array()
+                    .ok_or_else(|| DbError::Invalid("not_in filter requires an array".into()))?;
+                if arr.is_empty() || arr.len() > MAX_ENUM_IN_VALUES {
+                    return Err(DbError::Invalid(format!(
+                        "not_in filter requires 1..{MAX_ENUM_IN_VALUES} values"
+                    )));
+                }
+                let mut placeholders = Vec::new();
+                for v in arr {
+                    let s = scalar_string(v, "not_in value")?.to_ascii_lowercase();
+                    if s.chars().count() > MAX_FILTER_VALUE_LEN {
+                        return Err(DbError::Invalid("filter value too long".into()));
+                    }
+                    placeholders.push("?");
+                    extra_params.push(SqlValue::Text(s));
+                }
+                extra_parts.push(format!(
+                    "({expr} IS NULL OR LOWER(CAST({expr} AS TEXT)) NOT IN ({}))",
+                    placeholders.join(", ")
+                ));
+            }
             _ => {
                 return Err(DbError::Invalid(format!("unsupported filter op: {op}")));
             }
@@ -495,6 +521,9 @@ fn plan_order(def: &DataModelDefinition, sort: Option<&QuerySort>) -> DbResult<S
                 .find(|f| f.field_id == other)
                 .ok_or_else(|| DbError::Invalid(format!("unknown sort field: {other}")))?;
             let expr = json_extract_expr(other);
+            let id_lower = other.to_ascii_lowercase();
+            let is_priority_named =
+                matches!(id_lower.as_str(), "priority" | "urgency" | "importance");
             match field_def.field_type.as_str() {
                 "integer" | "decimal" | "duration" => {
                     format!("CAST({expr} AS REAL) {dir}")
@@ -508,9 +537,15 @@ fn plan_order(def: &DataModelDefinition, sort: Option<&QuerySort>) -> DbResult<S
                         }
                         cases.push_str(&format!("ELSE {n} END {dir}", n = values.len()));
                         cases
+                    } else if is_priority_named {
+                        priority_text_rank_sql(&expr, &dir)
                     } else {
                         format!("{expr} {dir}")
                     }
+                }
+                "text" | "string" | "long_text" if is_priority_named => {
+                    // Avoid lexicographic high < low < medium; map known ranks.
+                    priority_text_rank_sql(&expr, &dir)
                 }
                 _ => format!("{expr} {dir}"),
             }
@@ -518,6 +553,16 @@ fn plan_order(def: &DataModelDefinition, sort: Option<&QuerySort>) -> DbResult<S
     };
 
     Ok(format!("{primary}, id DESC"))
+}
+
+/// Rank common priority labels so DESC puts high before medium before low.
+fn priority_text_rank_sql(expr: &str, dir: &str) -> String {
+    format!(
+        "CASE LOWER(CAST({expr} AS TEXT)) \
+         WHEN 'critical' THEN 4 WHEN 'urgent' THEN 4 WHEN 'high' THEN 3 \
+         WHEN 'medium' THEN 2 WHEN 'normal' THEN 2 WHEN 'low' THEN 1 \
+         ELSE 0 END {dir}"
+    )
 }
 
 fn plan_aggregate(def: &DataModelDefinition, agg: &AggregateSpec) -> DbResult<PlannedAggregate> {
@@ -797,6 +842,9 @@ fn assert_op_for_field_type(field_type: &str, op: &str) -> DbResult<()> {
                 | "gt"
                 | "gte"
                 | "in"
+                | "not_in"
+                | "notin"
+                | "not_in_ci"
         ),
         "date" | "time" | "date_time" | "created_at" | "updated_at" => matches!(
             op,
@@ -804,15 +852,33 @@ fn assert_op_for_field_type(field_type: &str, op: &str) -> DbResult<()> {
         ),
         "enum" => matches!(
             op,
-            "eq" | "equals" | "neq" | "notequals" | "not_equals" | "in"
+            "eq" | "equals"
+                | "neq"
+                | "notequals"
+                | "not_equals"
+                | "in"
+                | "not_in"
+                | "notin"
+                | "not_in_ci"
         ),
         "text" | "long_text" | "reference" | "media_ref" | "surface_ref" | "tool_ref" => matches!(
             op,
-            "eq" | "equals" | "neq" | "notequals" | "not_equals" | "contains" | "in"
+            "eq" | "equals"
+                | "neq"
+                | "notequals"
+                | "not_equals"
+                | "contains"
+                | "in"
+                | "not_in"
+                | "notin"
+                | "not_in_ci"
         ),
         // Object/array/json never coerce to text for filters.
         "json" | "object" | "array" => false,
-        _ => matches!(op, "eq" | "equals" | "neq" | "notequals" | "not_equals"),
+        _ => matches!(
+            op,
+            "eq" | "equals" | "neq" | "notequals" | "not_equals" | "not_in" | "notin" | "not_in_ci"
+        ),
     };
     if !allowed {
         return Err(DbError::Invalid(format!(

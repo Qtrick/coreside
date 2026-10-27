@@ -391,11 +391,20 @@ fn build_read_context(db: &Database, automation: &Automation) -> String {
             id == "priority" || id == "urgency" || id == "importance"
         });
 
-        // 4. Detect due date field
+        // 4. Detect due date field — explicit due/deadline names only (not any date field).
         let due_date_field = model.fields.iter().find(|f| {
-            let is_date = matches!(f.field_type.as_str(), "date" | "date_time" | "time");
             let id = f.field_id.to_lowercase();
-            is_date || id == "duedate" || id == "due_date" || id == "deadline" || id == "targetdate"
+            matches!(
+                id.as_str(),
+                "due"
+                    | "duedate"
+                    | "due_date"
+                    | "dueat"
+                    | "due_at"
+                    | "deadline"
+                    | "targetdate"
+                    | "target_date"
+            )
         });
 
         if let Some(comp_f) = completion_field {
@@ -406,22 +415,34 @@ fn build_read_context(db: &Database, automation: &Automation) -> String {
             });
             selection_criteria = format!("{} == false", comp_f.field_id);
         } else if let Some(stat_f) = status_field {
+            // Case-insensitive exclude of completed/done; NULL/missing status = unfinished.
             filters.push(QueryFilter {
                 field: stat_f.field_id.clone(),
-                op: "neq".into(),
-                value: json!("completed"),
+                op: "not_in".into(),
+                value: json!(["completed", "done"]),
             });
-            selection_criteria = format!("{} != 'completed'", stat_f.field_id);
+            selection_criteria = format!(
+                "{} not in ('completed','done') (case-insensitive; missing counts unfinished)",
+                stat_f.field_id
+            );
         } else {
             selection_criteria = "all records (most recently updated)".into();
         }
 
         if let Some(prio_f) = priority_field {
-            sort = Some(QuerySort {
-                field: prio_f.field_id.clone(),
-                direction: "desc".into(),
-            });
-            selection_criteria.push_str(&format!(", sorted by {} desc", prio_f.field_id));
+            // Number fields sort numerically; enum uses enum_values order; text maps
+            // high/medium/low ranks in plan_order (not lexicographic).
+            let can_sort = matches!(
+                prio_f.field_type.as_str(),
+                "integer" | "decimal" | "duration" | "enum" | "text" | "string" | "long_text"
+            );
+            if can_sort {
+                sort = Some(QuerySort {
+                    field: prio_f.field_id.clone(),
+                    direction: "desc".into(),
+                });
+                selection_criteria.push_str(&format!(", sorted by {} desc", prio_f.field_id));
+            }
         } else if let Some(due_f) = due_date_field {
             sort = Some(QuerySort {
                 field: due_f.field_id.clone(),
@@ -825,8 +846,39 @@ mod tests {
                 DataField {
                     field_id: "status".into(),
                     field_type: "text".into(),
+                    required: false,
+                    default: None,
+                    enum_values: None,
+                },
+            ],
+            schema_version: 1,
+        }
+    }
+
+    fn priority_only_model() -> DataModelDefinition {
+        DataModelDefinition {
+            model_id: "tickets".into(),
+            display_name: "Tickets".into(),
+            fields: vec![
+                DataField {
+                    field_id: "title".into(),
+                    field_type: "text".into(),
                     required: true,
-                    default: Some(json!("todo")),
+                    default: None,
+                    enum_values: None,
+                },
+                DataField {
+                    field_id: "priority".into(),
+                    field_type: "text".into(),
+                    required: false,
+                    default: None,
+                    enum_values: None,
+                },
+                DataField {
+                    field_id: "createdOn".into(),
+                    field_type: "date".into(),
+                    required: false,
+                    default: None,
                     enum_values: None,
                 },
             ],
@@ -1031,13 +1083,108 @@ mod tests {
         assert_eq!(snapshot["modelId"], "tasks");
         assert_eq!(snapshot["totalRecordsInModel"], 5);
         assert_eq!(snapshot["matchingRelevantCount"], 2);
-        assert_eq!(snapshot["selectionCriteria"], "status != 'completed'");
+        assert!(snapshot["selectionCriteria"]
+            .as_str()
+            .unwrap()
+            .contains("not in"));
 
         let records = snapshot["records"].as_array().unwrap();
         assert_eq!(records.len(), 2);
         for rec in records {
-            assert_ne!(rec["status"], "completed");
+            let st = rec["status"].as_str().unwrap_or("").to_ascii_lowercase();
+            assert!(st != "completed" && st != "done");
         }
+    }
+
+    #[test]
+    fn context_status_filter_excludes_done_completed_case_insensitive_and_keeps_missing() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("ai-status-ci.db")).unwrap();
+        let app_id = "app-tasks-ci";
+        setup_test_app(&mut db, app_id, None, vec![status_task_model()]);
+
+        for (title, status) in [
+            ("Done Titlecase", Some("Done")),
+            ("Completed Titlecase", Some("Completed")),
+            ("DONE upper", Some("DONE")),
+            ("Active", Some("todo")),
+            ("Missing status", None),
+        ] {
+            let mut data = json!({ "title": title });
+            if let Some(st) = status {
+                data["status"] = json!(st);
+            }
+            crate::application_kernel::data::create_record(&mut db, app_id, "tasks", data).unwrap();
+        }
+
+        let mut auto = sample(true);
+        auto.application_id = Some(app_id.into());
+
+        let ctx = build_read_context(&db, &auto);
+        let snapshot: serde_json::Value = serde_json::from_str(&ctx).unwrap();
+        assert_eq!(snapshot["totalRecordsInModel"], 5);
+        assert_eq!(snapshot["matchingRelevantCount"], 2);
+
+        let titles: Vec<&str> = snapshot["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["title"].as_str().unwrap())
+            .collect();
+        assert!(titles.contains(&"Active"));
+        assert!(titles.contains(&"Missing status"));
+        assert!(!titles
+            .iter()
+            .any(|t| t.contains("Done") || t.contains("Completed") || t.contains("DONE")));
+    }
+
+    #[test]
+    fn context_sorts_text_priority_by_rank_not_lexicographic_and_ignores_non_due_dates() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("ai-prio.db")).unwrap();
+        let app_id = "app-prio";
+        setup_test_app(&mut db, app_id, None, vec![priority_only_model()]);
+
+        for (title, priority, created) in [
+            ("Low item", "low", "2026-01-01"),
+            ("High item", "high", "2026-06-01"),
+            ("Medium item", "medium", "2026-03-01"),
+        ] {
+            crate::application_kernel::data::create_record(
+                &mut db,
+                app_id,
+                "tickets",
+                json!({
+                    "title": title,
+                    "priority": priority,
+                    "createdOn": created,
+                }),
+            )
+            .unwrap();
+        }
+
+        let mut auto = sample(true);
+        auto.application_id = Some(app_id.into());
+
+        let ctx = build_read_context(&db, &auto);
+        let snapshot: serde_json::Value = serde_json::from_str(&ctx).unwrap();
+        let criteria = snapshot["selectionCriteria"].as_str().unwrap();
+        assert!(
+            criteria.contains("priority") && criteria.contains("desc"),
+            "expected priority sort, got {criteria}"
+        );
+        assert!(
+            !criteria.contains("createdOn"),
+            "non-due date fields must not drive sort: {criteria}"
+        );
+
+        let titles: Vec<&str> = snapshot["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["title"].as_str().unwrap())
+            .collect();
+        assert_eq!(titles, vec!["High item", "Medium item", "Low item"]);
     }
 
     #[test]
@@ -1127,5 +1274,82 @@ mod tests {
         // The API key secret pattern MUST be redacted!
         assert!(!ctx.contains("sk-ant-api03-abcdef1234567890"));
         assert!(ctx.contains("[REDACTED_API_KEY]") || !ctx.contains("sk-ant-"));
+    }
+
+    #[test]
+    fn automation_survives_application_evolution_and_continues_reading_compatible_records() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("ai-evolve.db")).unwrap();
+        let app_id = "tool-study-planner";
+        setup_test_app(&mut db, app_id, None, vec![study_planner_model()]);
+
+        // Insert study assignments with subject and due date
+        crate::application_kernel::data::create_record(
+            &mut db,
+            app_id,
+            "assignments",
+            json!({
+                "title": "Cell Biology Lab Report",
+                "completed": false,
+                "priority": "high",
+                "dueDate": "2026-11-01",
+                "subject": "Biology"
+            }),
+        )
+        .unwrap();
+
+        crate::application_kernel::data::create_record(
+            &mut db,
+            app_id,
+            "assignments",
+            json!({
+                "title": "Calculus Problem Set 4",
+                "completed": false,
+                "priority": "medium",
+                "dueDate": "2026-11-05",
+                "subject": "Math"
+            }),
+        )
+        .unwrap();
+
+        let mut auto = sample(true);
+        auto.application_id = Some(app_id.into());
+        auto.action = AutomationAction::AiPrompt {
+            prompt: "Review my high-priority study assignments for this week.".into(),
+            conversation_id: None,
+        };
+
+        // 1. Initial read context
+        let ctx_before = build_read_context(&db, &auto);
+        let snap_before: serde_json::Value = serde_json::from_str(&ctx_before).unwrap();
+        assert_eq!(snap_before["totalRecordsInModel"], 2);
+        assert_eq!(snap_before["matchingRelevantCount"], 2);
+
+        // 2. Simulate application evolution: updating manifest description and adding route
+        if let Ok(mut m) = crate::application_kernel::manifest::get_manifest(&db, app_id) {
+            m.manifest.description =
+                "Evolved study planner with calendar and progress views".into();
+            m.manifest
+                .routes
+                .push(crate::application_kernel::manifest::ManifestRoute {
+                    route_id: "calendar".into(),
+                    title: "Calendar View".into(),
+                    surface_id: Some("surf-calendar".into()),
+                });
+            crate::application_kernel::manifest::upsert_manifest(&mut db, m.manifest).unwrap();
+        }
+
+        // 3. Post-evolution context query
+        let ctx_after = build_read_context(&db, &auto);
+        let snap_after: serde_json::Value = serde_json::from_str(&ctx_after).unwrap();
+        assert_eq!(snap_after["totalRecordsInModel"], 2);
+        assert_eq!(snap_after["matchingRelevantCount"], 2);
+
+        let records = snap_after["records"].as_array().unwrap();
+        assert_eq!(records.len(), 2);
+        // Verify high priority item is ranked first
+        assert_eq!(records[0]["title"], "Cell Biology Lab Report");
+        assert_eq!(records[0]["subject"], "Biology");
+        assert_eq!(records[1]["title"], "Calculus Problem Set 4");
     }
 }

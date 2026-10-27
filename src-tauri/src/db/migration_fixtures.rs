@@ -503,7 +503,7 @@ mod tests {
             .iter()
             .map(|(n, _)| *n)
             .collect::<Vec<_>>();
-        assert_eq!(names.len(), 42);
+        assert_eq!(names.len(), 43);
         for (i, name) in names.iter().enumerate() {
             let expected = format!("{:03}_", i + 1);
             assert!(
@@ -511,8 +511,8 @@ mod tests {
                 "migration {i} should start with {expected}, got {name}"
             );
         }
-        assert_eq!(names[41], LATEST_MIGRATION);
-        assert_eq!(LATEST_MIGRATION, "042_generated_data_revisions");
+        assert_eq!(names[42], LATEST_MIGRATION);
+        assert_eq!(LATEST_MIGRATION, "043_atomic_automation_scheduled_slots");
     }
 
     #[test]
@@ -1023,6 +1023,100 @@ mod tests {
                 "SELECT COUNT(*) FROM surfaces WHERE id IN ('surf-ambig','surf-ok','surf-legit')"
             ),
             3
+        );
+    }
+
+    #[test]
+    fn migration_043_enforces_scheduled_slot_uniqueness() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("from042-slots.db");
+        {
+            let mut db =
+                Database::open_path_through(&path, "042_generated_data_revisions").unwrap();
+            crate::db::ensure_default_workspace(&db).unwrap();
+            let auto = crate::automations::Automation {
+                id: "auto-slot-test".into(),
+                workspace_id: DEFAULT_WORKSPACE_ID.into(),
+                owner_tool_id: None,
+                application_id: None,
+                name: "Slot Test".into(),
+                enabled: true,
+                trigger: crate::automations::AutomationTrigger::Interval {
+                    interval_minutes: 60,
+                    timezone: None,
+                },
+                action: crate::automations::AutomationAction::AiPrompt {
+                    prompt: "test".into(),
+                    conversation_id: None,
+                },
+                requires_ai: false,
+                provider_connection_id: None,
+                missed_run_policy: crate::automations::MissedRunPolicy::RunOnce,
+                next_run_at: Some("2026-10-26T20:00:00Z".into()),
+                last_run_at: None,
+                last_status: None,
+                consecutive_failures: 0,
+                waiting_approval: false,
+                permission_ready: true,
+                created_at: "2026-10-26T19:00:00Z".into(),
+                updated_at: "2026-10-26T19:00:00Z".into(),
+            };
+            crate::db::upsert_automation(&mut db, &auto).unwrap();
+
+            // Insert duplicate slots in pre-043 schema
+            crate::db::insert_automation_run_conn(
+                db.conn(),
+                "run-slot-1",
+                "auto-slot-test",
+                Some("2026-10-26T20:00:00Z"),
+                "2026-10-26T20:00:01Z",
+                Some("2026-10-26T20:00:05Z"),
+                "success",
+                Some("First"),
+                None,
+            )
+            .unwrap();
+            crate::db::insert_automation_run_conn(
+                db.conn(),
+                "run-slot-2",
+                "auto-slot-test",
+                Some("2026-10-26T20:00:00Z"),
+                "2026-10-26T20:00:02Z",
+                Some("2026-10-26T20:00:06Z"),
+                "success",
+                Some("Second"),
+                None,
+            )
+            .unwrap();
+        }
+
+        // Migrate to latest (runs 043)
+        let db = Database::open_path(&path).unwrap();
+        assert_latest(&db);
+
+        // Verify deduplication: only 1 run for that slot survives
+        let c: i64 = db.conn().query_row(
+            "SELECT COUNT(*) FROM automation_runs WHERE automation_id = 'auto-slot-test' AND scheduled_at = '2026-10-26T20:00:00Z'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(c, 1, "043 should deduplicate identical scheduled slots");
+
+        // Verify unique constraint: inserting another run with same slot fails
+        let err = crate::db::insert_automation_run_conn(
+            db.conn(),
+            "run-slot-3",
+            "auto-slot-test",
+            Some("2026-10-26T20:00:00Z"),
+            "2026-10-26T20:00:03Z",
+            None,
+            "running",
+            None,
+            None,
+        );
+        assert!(
+            err.is_err(),
+            "inserting duplicate scheduled slot must fail unique constraint"
         );
     }
 }

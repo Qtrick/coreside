@@ -68,6 +68,7 @@ logs/
 reports/release-evidence.json
 reports/local-beta-readiness.json
 reports/packaging-results.json
+reports/packaged-smoke-results.json
 reports/e2e-results.json
 reports/generated-task-tracker-results.json
 # Ephemeral multi-phase E2E harness state (local paths / hostnames)

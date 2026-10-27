@@ -29,12 +29,12 @@ describe("Journey 13 — wallpaper targeted update", () => {
   it("applies Matrix and commits transparency with non-uniform canvas pixels", async () => {
     await waitForAppReady();
     await openSettings();
-    await openSettingsCategory("Appearance");
+    await openSettingsCategory("Customization");
 
     const wallpapersHeading = await $("#wallpapers-heading");
     await wallpapersHeading.waitForExist({
       timeout: 15_000,
-      timeoutMsg: "wallpapers-heading not found in Appearance",
+      timeoutMsg: "wallpapers-heading not found in Customization",
     });
     await browser.execute((el) => {
       (el as HTMLElement).scrollIntoView?.({ block: "center" });

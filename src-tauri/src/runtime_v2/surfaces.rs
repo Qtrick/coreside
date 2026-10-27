@@ -923,6 +923,63 @@ pub fn update_surface_definition(
     get_surface(db, surface_id)
 }
 
+/// Grant an enabled bundled capability pack to an existing surface.
+/// This is an authoritative Rust kernel mutation invoked when a user approves
+/// an evolution proposal that introduces components requiring bundled capability packs.
+pub fn grant_capability_pack(
+    db: &mut Database,
+    surface_id: &str,
+    pack_id: &str,
+) -> DbResult<Vec<String>> {
+    let current = get_surface(db, surface_id)?;
+    let normalized = super::packs::normalize_capability_packs(&[pack_id.to_string()])
+        .map_err(DbError::Invalid)?;
+    let target_pack = normalized
+        .into_iter()
+        .find(|p| p != "coreside.core")
+        .unwrap_or_else(|| pack_id.to_string());
+
+    let mut packs = current.capability_packs.clone();
+    if !packs.contains(&target_pack) {
+        packs.push(target_pack.clone());
+        packs.sort();
+        packs.dedup();
+
+        let packs_json = serde_json::to_string(&packs)?;
+        let now = now_rfc3339();
+        db.conn().execute(
+            "UPDATE surfaces SET capability_packs_json = ?1, updated_at = ?2 WHERE id = ?3",
+            params![packs_json, now, surface_id],
+        )?;
+
+        // If definition is a SoftwareDocument, sync doc.capability_packs
+        if let Ok(mut doc) =
+            super::software_document::SoftwareDocument::from_value(&current.definition)
+        {
+            doc.capability_packs = packs.clone();
+            if let Ok(def_json) = serde_json::to_string(&doc) {
+                let _ = db.conn().execute(
+                    "UPDATE surfaces SET definition_json = ?1 WHERE id = ?2",
+                    params![def_json, surface_id],
+                );
+            }
+        }
+
+        // If surface has an authoritative application manifest, update manifest capabilities
+        if let Some(tool_id) = current.tool_id.as_deref() {
+            if let Ok(mut m) = crate::application_kernel::manifest::get_manifest(db, tool_id) {
+                if !m.manifest.capabilities.contains(&target_pack) {
+                    m.manifest.capabilities.push(target_pack);
+                    m.manifest.capabilities.sort();
+                    m.manifest.capabilities.dedup();
+                    let _ = crate::application_kernel::manifest::upsert_manifest(db, m.manifest);
+                }
+            }
+        }
+    }
+    Ok(packs)
+}
+
 pub fn promote_inline_to_tool(
     db: &mut Database,
     surface_id: &str,

@@ -2,7 +2,7 @@
 
 **Product:** Coreside v0.1.0  
 **Location:** `src-tauri/migrations/`  
-**Count:** 42 forward migrations (001–042; includes `042_generated_data_revisions.sql`)
+**Count:** 43 forward migrations (001–043; includes `043_atomic_automation_scheduled_slots.sql`)
 
 ## Inventory
 
@@ -50,6 +50,7 @@
 | 040 | `040_backfill_inline_surface_message_id.sql` | Backfill `message_id` on legacy chat-inline surfaces so fail-closed ownership filtering does not hide them |
 | 041 | `041_repair_ambiguous_inline_surface_message_id.sql` | Clear ambiguous 040 bindings only when another assistant message sits between the surface and the bound message |
 | 042 | `042_generated_data_revisions.sql` | Monotonic per-application/model data revisions for query freshness and missed-event reconciliation |
+| 043 | `043_atomic_automation_scheduled_slots.sql` | Enforce atomic scheduled slot uniqueness on automation_runs with unique partial index |
 
 ## What is verified
 

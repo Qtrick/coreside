@@ -832,5 +832,19 @@ mod tests {
         assert_eq!(body_compat_o1["max_completion_tokens"], 600);
         assert!(body_compat_o1.get("max_tokens").is_none());
         assert!(body_compat_o1.get("temperature").is_none());
+
+        // 6. gpt-5* (incl. vendor prefix) is treated as reasoning: max_completion_tokens, no temperature
+        for model in ["gpt-5", "gpt-5-mini", "gpt-5-nano", "openai/gpt-5-mini"] {
+            let body = build_openai_request_body("openai", model, "system", &msg, Some(700), false);
+            assert_eq!(
+                body["max_completion_tokens"], 700,
+                "gpt-5 family must use max_completion_tokens ({model})"
+            );
+            assert!(body.get("max_tokens").is_none(), "{model}");
+            assert!(
+                body.get("temperature").is_none(),
+                "gpt-5 family must omit temperature ({model})"
+            );
+        }
     }
 }

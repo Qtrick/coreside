@@ -268,6 +268,43 @@ impl MockAiProvider {
             );
         }
 
+        // Study Planner calendar view evolve (Part 7.4)
+        if lower.contains("calendar")
+            && !create_ish
+            && (lower.contains("study")
+                || lower.contains("planner")
+                || lower.contains("assignment")
+                || lower.contains("task"))
+        {
+            let rev = observed_revision.unwrap_or(1);
+            let plan =
+                super::plan_fixtures::multi_surface_planner_add_calendar_view_plan(Some(rev));
+            return super::plan_fixtures::plan_response_json(
+                "I added a calendar view and organized assignments by subject to your Study Planner. All existing assignments were preserved.",
+                &plan,
+            );
+        }
+
+        // Study Planner progress page evolve (Part 7.5)
+        if (lower.contains("progress page")
+            || lower.contains("completion trends")
+            || lower.contains("weekly workload")
+            || (lower.contains("workload")
+                && (lower.contains("study")
+                    || lower.contains("planner")
+                    || lower.contains("assignment")
+                    || lower.contains("task"))))
+            && !create_ish
+        {
+            let rev = observed_revision.unwrap_or(2);
+            let plan =
+                super::plan_fixtures::multi_surface_planner_add_progress_page_plan(Some(rev));
+            return super::plan_fixtures::plan_response_json(
+                "I added a progress page with completion trends and weekly workload charts to your Study Planner. All existing assignments were preserved.",
+                &plan,
+            );
+        }
+
         // Journey 32: intentional compile failure, then success after repair keyword.
         if lower.contains("progressive repair recovery") {
             if lower.contains("after repair") || lower.contains("ready after repair") {

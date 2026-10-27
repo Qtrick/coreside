@@ -15,6 +15,7 @@ use super::outcome::AutomationRunOutcome;
 use super::validation::MAX_CONSECUTIVE_FAILURES;
 use crate::db::{self, Database};
 use crate::state::AppState;
+use rusqlite::OptionalExtension;
 
 pub use super::models::compute_next_after as compute_next_run;
 
@@ -134,9 +135,18 @@ pub fn spawn_scheduler(app: AppHandle, handle: Arc<SchedulerHandle>) {
                 let id = automation.id.clone();
                 tauri::async_runtime::spawn_blocking(move || {
                     let parked_before = pending_approval_total(&app_clone);
+                    let app_for_start = app_clone.clone();
                     if let Some(state) = app_clone.try_state::<AppState>() {
                         if state.profile_ready() {
-                            run_one(&state, &id);
+                            run_one(
+                                &state,
+                                &id,
+                                Some(&move || {
+                                    use tauri::Emitter;
+                                    let _ = app_for_start
+                                        .emit(crate::commands::AUTOMATIONS_CHANGED_EVENT, ());
+                                }),
+                            );
                         }
                     }
                     handle_clone.end(&id);
@@ -201,8 +211,10 @@ fn pending_approval_total(app: &AppHandle) -> i64 {
         .unwrap_or(-1)
 }
 
-fn run_one(state: &AppState, automation_id: &str) {
-    if let Err(e) = run_one_releasing_lock_for_ai(state, automation_id, RunOrigin::Scheduled) {
+fn run_one(state: &AppState, automation_id: &str, on_start: Option<&dyn Fn()>) {
+    if let Err(e) =
+        run_one_releasing_lock_for_ai(state, automation_id, RunOrigin::Scheduled, on_start)
+    {
         tracing::error!(automation_id = %automation_id, error = %e, "automation execution failed");
     }
 }
@@ -224,51 +236,140 @@ pub struct ClaimedRun {
     pub origin: RunOrigin,
 }
 
+/// After this age a stuck `last_status=running` claim may be reclaimed.
+const STALE_RUNNING_SECS: i64 = 15 * 60;
+
 pub fn claim_run(
     db: &mut Database,
     automation_id: &str,
     origin: RunOrigin,
 ) -> Result<Option<ClaimedRun>, db::DbError> {
-    let automation = db::get_automation(db, automation_id)?;
-    if !automation.enabled {
-        return Ok(None);
-    }
-    // Exclusivity: prevent duplicate concurrent runs across workers/connections.
-    if automation.last_status.as_deref() == Some("running") {
-        tracing::debug!(
-            automation_id,
-            "automation is already running; skipping duplicate claim"
-        );
-        return Ok(None);
-    }
-
     let started_dt = Utc::now();
     let started = started_dt.to_rfc3339();
+    let stale_before = (started_dt - chrono::Duration::seconds(STALE_RUNNING_SECS)).to_rfc3339();
     let run_id = format!("run-{}", Uuid::new_v4());
 
-    // Scheduled/catch-up runs advance next_run_at to the subsequent cycle.
-    // Manual "Run now" executions do NOT silently shift or skip a fixed daily/weekly/weekday schedule.
-    let (next, scheduled_at) = match origin {
-        RunOrigin::Manual => (automation.next_run_at.clone(), None),
-        RunOrigin::Scheduled | RunOrigin::CatchUp => {
-            let next_dt =
-                compute_next_after(&automation.trigger, started_dt).map(|d| d.to_rfc3339());
-            (next_dt, automation.next_run_at.clone())
+    let claimed = db.with_transaction(|conn| {
+        // Authoritative fetch inside write transaction so read and claim are strictly atomic.
+        let automation = match db::get_automation_conn(conn, automation_id) {
+            Ok(a) => a,
+            Err(db::DbError::NotFound(_)) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        if !automation.enabled {
+            return Ok(None);
         }
-    };
 
-    let schedulable = match origin {
-        RunOrigin::Manual => true,
-        _ => next.is_some(),
-    };
-    if !schedulable {
-        tracing::warn!(
-            automation_id,
-            "automation trigger has no next run; disabling"
-        );
-    }
+        // Active run check: if already running and not stale, skip claim
+        if automation.last_status.as_deref() == Some("running") {
+            if let Some(ref last_run) = automation.last_run_at {
+                if last_run.as_str() > stale_before.as_str() {
+                    tracing::debug!(
+                        automation_id,
+                        "automation is actively running; skipping duplicate claim"
+                    );
+                    return Ok(None);
+                }
+            }
+        }
 
-    db.with_transaction(|conn| {
+        // Scheduled/catch-up runs always advance next_run_at to the subsequent cycle.
+        // Manual "Run now" keeps a future scheduled slot, but if next_run_at is already
+        // due (at/before now), advance it so the ticker does not immediately re-fire.
+        let (next, scheduled_at) = match origin {
+            RunOrigin::Manual => {
+                let overdue = automation
+                    .next_run_at
+                    .as_deref()
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .is_some_and(|dt| dt.with_timezone(&Utc) <= started_dt);
+                if overdue {
+                    let next_dt =
+                        compute_next_after(&automation.trigger, started_dt).map(|d| d.to_rfc3339());
+                    (next_dt, None)
+                } else {
+                    (automation.next_run_at.clone(), None)
+                }
+            }
+            RunOrigin::Scheduled | RunOrigin::CatchUp => {
+                let next_dt =
+                    compute_next_after(&automation.trigger, started_dt).map(|d| d.to_rfc3339());
+                (next_dt, automation.next_run_at.clone())
+            }
+        };
+
+        // If this claim represents a scheduled slot, ensure it hasn't already been claimed or executed.
+        if let Some(ref slot) = scheduled_at {
+            let slot_exists: bool = conn
+                .query_row(
+                    "SELECT 1 FROM automation_runs WHERE automation_id = ?1 AND scheduled_at = ?2 LIMIT 1",
+                    rusqlite::params![automation_id, slot],
+                    |_| Ok(true),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if slot_exists {
+                tracing::debug!(
+                    automation_id,
+                    slot,
+                    "scheduled slot already executed or claimed; skipping duplicate claim"
+                );
+                return Ok(None);
+            }
+        }
+
+        let schedulable = match origin {
+            RunOrigin::Manual => true,
+            _ => next.is_some(),
+        };
+        if !schedulable {
+            tracing::warn!(
+                automation_id,
+                "automation trigger has no next run; disabling"
+            );
+        }
+
+        let enabled_flag = if schedulable && automation.enabled {
+            1
+        } else {
+            0
+        };
+        let failures = automation.consecutive_failures;
+
+        // Clear stale running rows so a crashed finalize cannot block forever.
+        conn.execute(
+            "UPDATE automation_runs SET completed_at = ?1, status = 'interrupted',
+             result_summary = 'Run exceeded staleness timeout and was reclaimed',
+             error_category = 'stale_running'
+             WHERE automation_id = ?2 AND status = 'running' AND started_at <= ?3",
+            rusqlite::params![&started, automation_id, &stale_before],
+        )?;
+
+        // Atomic exclusivity: claim only when not actively running (or after stale clear).
+        let n = conn.execute(
+            "UPDATE automations SET next_run_at = ?1, last_run_at = ?2, last_status = 'running',
+             consecutive_failures = ?3, enabled = ?4, updated_at = ?2
+             WHERE id = ?5 AND (
+                 last_status IS NULL OR last_status != 'running'
+                 OR (last_run_at IS NOT NULL AND last_run_at <= ?6)
+             )",
+            rusqlite::params![
+                next.as_deref(),
+                &started,
+                failures,
+                enabled_flag,
+                automation_id,
+                &stale_before,
+            ],
+        )?;
+        if n == 0 {
+            tracing::debug!(
+                automation_id,
+                "automation is already running; skipping duplicate claim"
+            );
+            return Ok(None);
+        }
+
         db::insert_automation_run_conn(
             conn,
             &run_id,
@@ -280,27 +381,19 @@ pub fn claim_run(
             None,
             None,
         )?;
-        db::update_automation_schedule_conn(
-            conn,
-            automation_id,
-            next.as_deref(),
-            Some(&started),
-            Some("running"),
-            automation.consecutive_failures,
-            schedulable && automation.enabled,
-        )?;
-        Ok(())
+
+        Ok(Some(ClaimedRun {
+            automation,
+            run_id,
+            started,
+            next,
+            schedulable,
+            scheduled_at,
+            origin,
+        }))
     })?;
 
-    Ok(Some(ClaimedRun {
-        automation,
-        run_id,
-        started,
-        next,
-        schedulable,
-        scheduled_at,
-        origin,
-    }))
+    Ok(claimed)
 }
 
 pub fn finalize_run(
@@ -368,15 +461,15 @@ pub fn finalize_run(
             (Some(completed.clone()), Some(outcome.status.clone()))
         };
 
-        // Update the run record:
-        let _ = db::update_automation_run_conn(
+        // Update the run record (propagate errors — do not leave last_status=running).
+        db::update_automation_run_conn(
             conn,
             &claim.run_id,
             Some(&completed),
             &outcome.status,
             Some(outcome.summary.as_str()),
             outcome.error_category.as_deref(),
-        );
+        )?;
 
         // Update the automation schedule:
         db::update_automation_schedule_conn(
@@ -406,6 +499,66 @@ pub fn finalize_run(
     })?;
 
     Ok(())
+}
+
+/// Best-effort clear of a stuck `running` claim after finalize fails mid-flight.
+fn clear_stuck_running_claim(db: &mut Database, claim: &ClaimedRun) {
+    let completed = Utc::now().to_rfc3339();
+    if let Err(e) = db.with_transaction(|conn| {
+        if let Err(run_err) = db::update_automation_run_conn(
+            conn,
+            &claim.run_id,
+            Some(&completed),
+            "error",
+            Some("Finalization failed; cleared stuck running state"),
+            Some("finalize_error"),
+        ) {
+            tracing::warn!(
+                automation_id = %claim.automation.id,
+                run_id = %claim.run_id,
+                error = %run_err,
+                "could not mark automation run after finalize failure"
+            );
+        }
+        let n = conn.execute(
+            "UPDATE automations SET last_status = 'error', updated_at = ?1
+             WHERE id = ?2 AND last_status = 'running'",
+            rusqlite::params![&completed, &claim.automation.id],
+        )?;
+        if n == 0 {
+            tracing::debug!(
+                automation_id = %claim.automation.id,
+                "stuck-running clear skipped (status already changed)"
+            );
+        }
+        Ok(())
+    }) {
+        tracing::error!(
+            automation_id = %claim.automation.id,
+            error = %e,
+            "best-effort clear of stuck running automation failed"
+        );
+    }
+}
+
+fn finalize_run_or_clear(
+    db: &mut Database,
+    claim: &ClaimedRun,
+    outcome: &AutomationRunOutcome,
+) -> Result<(), db::DbError> {
+    match finalize_run(db, claim, outcome) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            tracing::error!(
+                automation_id = %claim.automation.id,
+                run_id = %claim.run_id,
+                error = %e,
+                "finalize_run failed; clearing stuck running status"
+            );
+            clear_stuck_running_claim(db, claim);
+            Err(e)
+        }
+    }
 }
 
 fn execute_claimed(db: &mut Database, claim: &ClaimedRun) -> AutomationRunOutcome {
@@ -438,6 +591,7 @@ fn run_one_releasing_lock_for_ai(
     state: &AppState,
     automation_id: &str,
     origin: RunOrigin,
+    on_start: Option<&dyn Fn()>,
 ) -> Result<AutomationRunOutcome, db::DbError> {
     let claim = {
         let mut db = state.db.lock();
@@ -448,6 +602,9 @@ fn run_one_releasing_lock_for_ai(
             "Automation is disabled or currently busy",
         ));
     };
+    if let Some(notify) = on_start {
+        notify();
+    }
     let outcome = if matches!(claim.automation.action, AutomationAction::AiPrompt { .. }) {
         execute_ai_unlocked(state, &claim)
     } else {
@@ -456,7 +613,7 @@ fn run_one_releasing_lock_for_ai(
     };
     {
         let mut db = state.db.lock();
-        finalize_run(&mut db, &claim, &outcome)?;
+        finalize_run_or_clear(&mut db, &claim, &outcome)?;
     }
     Ok(outcome)
 }
@@ -473,7 +630,7 @@ pub fn run_one_db(
         ));
     };
     let outcome = execute_claimed(db, &claim);
-    finalize_run(db, &claim, &outcome)?;
+    finalize_run_or_clear(db, &claim, &outcome)?;
     Ok(outcome)
 }
 
@@ -481,6 +638,7 @@ pub fn run_now(
     state: &AppState,
     automation_id: &str,
     handle: &SchedulerHandle,
+    on_start: Option<&dyn Fn()>,
 ) -> Result<AutomationRunOutcome, String> {
     if !state.profile_ready() {
         return Err("Automations are unavailable until Recovery finishes.".into());
@@ -488,7 +646,7 @@ pub fn run_now(
     if !handle.try_begin(automation_id) {
         return Ok(AutomationRunOutcome::busy());
     }
-    let result = run_one_releasing_lock_for_ai(state, automation_id, RunOrigin::Manual);
+    let result = run_one_releasing_lock_for_ai(state, automation_id, RunOrigin::Manual, on_start);
     handle.end(automation_id);
     result.map_err(|e| e.to_string())
 }
@@ -1054,6 +1212,66 @@ mod tests {
     }
 
     #[test]
+    fn manual_run_now_advances_overdue_next_run_at() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("manual-overdue.db")).unwrap();
+        db::ensure_default_workspace(&db).unwrap();
+        let overdue = (Utc::now() - chrono::Duration::hours(2)).to_rfc3339();
+
+        let auto = Automation {
+            id: "auto-manual-overdue".into(),
+            workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+            owner_tool_id: None,
+            application_id: None,
+            name: "Overdue Digest".into(),
+            enabled: true,
+            trigger: AutomationTrigger::Interval {
+                interval_minutes: 60,
+                timezone: None,
+            },
+            action: AutomationAction::AiPrompt {
+                prompt: "Digest".into(),
+                conversation_id: None,
+            },
+            requires_ai: true,
+            provider_connection_id: None,
+            missed_run_policy: MissedRunPolicy::RunOnce,
+            next_run_at: Some(overdue.clone()),
+            last_run_at: None,
+            last_status: None,
+            consecutive_failures: 0,
+            waiting_approval: false,
+            permission_ready: true,
+            created_at: overdue.clone(),
+            updated_at: overdue.clone(),
+        };
+        db::upsert_automation(&mut db, &auto).unwrap();
+
+        let claim = claim_run(&mut db, "auto-manual-overdue", RunOrigin::Manual)
+            .unwrap()
+            .unwrap();
+        let advanced = claim
+            .next
+            .as_deref()
+            .expect("overdue manual claim advances next");
+        assert_ne!(
+            advanced,
+            overdue.as_str(),
+            "manual run must advance overdue next_run_at"
+        );
+        let advanced_dt = chrono::DateTime::parse_from_rfc3339(advanced)
+            .unwrap()
+            .with_timezone(&Utc);
+        assert!(
+            advanced_dt > Utc::now() - chrono::Duration::seconds(5),
+            "advanced next_run_at should be in the future"
+        );
+
+        let stored = db::get_automation(&db, "auto-manual-overdue").unwrap();
+        assert_eq!(stored.next_run_at.as_deref(), Some(advanced));
+    }
+
+    #[test]
     fn concurrent_claim_of_running_automation_is_rejected() {
         let dir = tempdir().unwrap();
         let mut db = Database::open_path(&dir.path().join("concurrent-claim.db")).unwrap();
@@ -1166,5 +1384,193 @@ mod tests {
         let after = db::get_automation(&db, "auto-order-test").unwrap();
         assert_eq!(after.last_status.as_deref(), Some("success"));
         assert_eq!(after.last_run_at.as_deref(), Some(t30.as_str()));
+    }
+
+    #[test]
+    fn concurrent_claims_on_same_scheduled_slot_prevent_duplicate_execution() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("concurrent-slot.db")).unwrap();
+        db::ensure_default_workspace(&db).unwrap();
+        let slot_time = "2026-10-27T09:00:00Z";
+
+        let auto = Automation {
+            id: "auto-slot-dup".into(),
+            workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+            owner_tool_id: None,
+            application_id: None,
+            name: "Duplicate Slot Test".into(),
+            enabled: true,
+            trigger: AutomationTrigger::Daily {
+                time: "09:00".into(),
+                timezone: None,
+            },
+            action: AutomationAction::SetWorkspaceBackground {
+                workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+                preset_id: "preset-1".into(),
+            },
+            requires_ai: false,
+            provider_connection_id: None,
+            missed_run_policy: MissedRunPolicy::RunOnce,
+            next_run_at: Some(slot_time.into()),
+            last_run_at: None,
+            last_status: None,
+            consecutive_failures: 0,
+            waiting_approval: false,
+            permission_ready: true,
+            created_at: slot_time.into(),
+            updated_at: slot_time.into(),
+        };
+        db::upsert_automation(&mut db, &auto).unwrap();
+
+        // Worker 1 claims the scheduled slot:
+        let claim1 = claim_run(&mut db, "auto-slot-dup", RunOrigin::Scheduled).unwrap();
+        assert!(
+            claim1.is_some(),
+            "first worker must successfully claim slot"
+        );
+        let claim1 = claim1.unwrap();
+        assert_eq!(claim1.scheduled_at.as_deref(), Some(slot_time));
+
+        // Worker 2 attempts to claim while worker 1 is running:
+        let claim2 = claim_run(&mut db, "auto-slot-dup", RunOrigin::Scheduled).unwrap();
+        assert!(
+            claim2.is_none(),
+            "second worker must be rejected because automation is running"
+        );
+
+        // Now suppose worker 1 completes:
+        let outcome = AutomationRunOutcome::success("Done");
+        finalize_run(&mut db, &claim1, &outcome).unwrap();
+
+        // Even if next_run_at was somehow pointing at the same slot,
+        // claim_run detects that a run for (automation_id, scheduled_at) already exists and rejects it.
+        db.with_transaction(|conn| {
+            conn.execute(
+                "UPDATE automations SET next_run_at = ?1, last_status = 'success' WHERE id = ?2",
+                rusqlite::params![slot_time, "auto-slot-dup"],
+            )
+            .map_err(db::DbError::Sqlite)?;
+            Ok(())
+        })
+        .unwrap();
+
+        let claim3 = claim_run(&mut db, "auto-slot-dup", RunOrigin::Scheduled).unwrap();
+        assert!(
+            claim3.is_none(),
+            "claim for already-executed scheduled slot must be rejected even if automation is idle"
+        );
+    }
+
+    #[test]
+    fn database_level_unique_constraint_enforces_slot_exclusivity() {
+        let dir = tempdir().unwrap();
+        let db = Database::open_path(&dir.path().join("slot-constraint.db")).unwrap();
+        db::ensure_default_workspace(&db).unwrap();
+        let slot_time = "2026-10-27T10:00:00Z";
+
+        let auto = Automation {
+            id: "auto-constraint-test".into(),
+            workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+            owner_tool_id: None,
+            application_id: None,
+            name: "Constraint Test".into(),
+            enabled: true,
+            trigger: AutomationTrigger::Daily {
+                time: "10:00".into(),
+                timezone: None,
+            },
+            action: AutomationAction::SetWorkspaceBackground {
+                workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+                preset_id: "preset-1".into(),
+            },
+            requires_ai: false,
+            provider_connection_id: None,
+            missed_run_policy: MissedRunPolicy::RunOnce,
+            next_run_at: Some(slot_time.into()),
+            last_run_at: None,
+            last_status: None,
+            consecutive_failures: 0,
+            waiting_approval: false,
+            permission_ready: true,
+            created_at: slot_time.into(),
+            updated_at: slot_time.into(),
+        };
+        let mut db = db;
+        db::upsert_automation(&mut db, &auto).unwrap();
+
+        // Insert first scheduled run for this slot:
+        let res1 = db.with_transaction(|conn| {
+            db::insert_automation_run_conn(
+                conn,
+                "run-slot-1",
+                "auto-constraint-test",
+                Some(slot_time),
+                "2026-10-27T10:00:01Z",
+                None,
+                "running",
+                None,
+                None,
+            )
+        });
+        assert!(
+            res1.is_ok(),
+            "first run insert on scheduled slot should succeed"
+        );
+
+        // Attempting to insert a second run on the exact same scheduled slot must fail the DB constraint:
+        let res2 = db.with_transaction(|conn| {
+            db::insert_automation_run_conn(
+                conn,
+                "run-slot-2",
+                "auto-constraint-test",
+                Some(slot_time),
+                "2026-10-27T10:00:02Z",
+                None,
+                "running",
+                None,
+                None,
+            )
+        });
+        assert!(
+            res2.is_err(),
+            "inserting duplicate scheduled slot must violate unique constraint"
+        );
+
+        // However, manual runs (scheduled_at IS NULL) must NOT violate uniqueness:
+        let res_manual1 = db.with_transaction(|conn| {
+            db::insert_automation_run_conn(
+                conn,
+                "run-manual-1",
+                "auto-constraint-test",
+                None,
+                "2026-10-27T10:05:00Z",
+                None,
+                "running",
+                None,
+                None,
+            )
+        });
+        assert!(
+            res_manual1.is_ok(),
+            "first manual run insert should succeed"
+        );
+
+        let res_manual2 = db.with_transaction(|conn| {
+            db::insert_automation_run_conn(
+                conn,
+                "run-manual-2",
+                "auto-constraint-test",
+                None,
+                "2026-10-27T10:06:00Z",
+                None,
+                "running",
+                None,
+                None,
+            )
+        });
+        assert!(
+            res_manual2.is_ok(),
+            "multiple manual runs (NULL scheduled_at) are allowed"
+        );
     }
 }

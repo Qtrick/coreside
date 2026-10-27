@@ -997,6 +997,32 @@ pub fn decide_proposal(
         ));
     }
 
+    // 3.5. Authorize enabled bundled capability packs for user-approved operations
+    for op in &proposal.exact_operations {
+        let comp_type_opt = op
+            .payload
+            .get("component")
+            .and_then(|c| c.get("type"))
+            .and_then(|v| v.as_str())
+            .or_else(|| op.payload.get("type").and_then(|v| v.as_str()));
+        if let Some(comp_type) = comp_type_opt {
+            if let Some(pack) = crate::runtime_v2::packs::resolve_pack_for_component(comp_type) {
+                if pack.enabled && pack.id != "coreside.core" {
+                    let sid_opt = op.target.surface_id.clone().or_else(|| {
+                        op.target
+                            .tool_id
+                            .as_deref()
+                            .map(crate::runtime_v2::surfaces::surface_id_for_tool)
+                    });
+                    if let Some(sid) = sid_opt {
+                        let _ =
+                            crate::runtime_v2::surfaces::grant_capability_pack(db, &sid, &pack.id);
+                    }
+                }
+            }
+        }
+    }
+
     // 4. Apply frozen operations (retain project scope so isolation guards run)
     let ops = crate::runtime_v2::normalize_operations_for_validation(&proposal.exact_operations);
     let mut deferred = Vec::new();
@@ -2492,6 +2518,636 @@ mod tests {
                 .any(|sc| sc.key == "newTaskTitle"),
             "prior newTaskTitle state contract must survive evolve"
         );
+    }
+
+    #[test]
+    fn study_planner_vertical_slice_crud_and_two_stage_evolution() {
+        use crate::ai::{
+            parse_agent_response, AgentMessage, AgentRequest, AiProvider, MockAiProvider,
+        };
+        use crate::application_kernel::registered_actions::context::{
+            ActionRunContext, Presence, Venue,
+        };
+        use crate::application_kernel::registered_actions::gateway::execute_registered_action;
+        use tokio_util::sync::CancellationToken;
+
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Study Planner E2E", None).unwrap();
+
+        let provider = MockAiProvider::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        // 1. Natural Language Creation of Study Planner
+        let create_resp = rt
+            .block_on(provider.chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Build me a study planner with assignments, subjects, deadlines, priorities, notes, and a dashboard",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+                max_output_tokens: None,
+            }))
+            .unwrap();
+
+        let create_parsed = parse_agent_response(&create_resp.raw_text).unwrap();
+        assert!(create_parsed.payload.application_plan.is_some());
+        let create_ops = create_parsed
+            .payload
+            .inspection_operations()
+            .expect("Study planner plan must compile");
+
+        let create_prop = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Create Study Planner".into(),
+                operations: create_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .proposal_id
+        .unwrap();
+
+        let _ = crate::db::insert_message(
+            &mut db,
+            &conv.id,
+            "assistant",
+            "Proposed Study Planner",
+            Some(&serde_json::json!({
+                "runtimeV2": {
+                    "proposalId": create_prop,
+                    "status": "pending",
+                    "operations": [{"type": "placeholder"}],
+                }
+            })),
+        )
+        .unwrap();
+
+        assert!(decide_proposal(&mut db, None, &create_prop, true)
+            .unwrap()
+            .is_committed());
+
+        let app_id = "tool-study-planner";
+        assert!(crate::application_kernel::manifest::get_manifest(&db, app_id).is_ok());
+        let model = crate::application_kernel::data::get_model(&db, app_id, "studyTasks").unwrap();
+        assert!(model.fields.iter().any(|f| f.field_id == "subject"));
+        assert!(model.fields.iter().any(|f| f.field_id == "title"));
+
+        let ctx = ActionRunContext {
+            actor: "user".into(),
+            venue: Venue::Application,
+            presence: Presence::Present,
+            application_id: Some(app_id.into()),
+            project_id: None,
+            conversation_id: Some(conv.id.clone()),
+            session_id: "sess-sp".into(),
+            run_id: "run-sp-1".into(),
+            trigger: None,
+            surface_id: Some(format!("surf-{app_id}")),
+            component_id: Some("sp-add-btn".into()),
+            depth: 0,
+        };
+
+        // 2. Add multiple assignments across subjects
+        let write_record =
+            |db: &mut Database, data: serde_json::Value| -> String {
+                let res = execute_registered_action(
+                    db,
+                    &ctx,
+                    "local_data.write",
+                    &serde_json::json!({
+                        "modelId": "studyTasks",
+                        "data": data,
+                    }),
+                    None,
+                );
+                let approval_id = match res {
+                crate::application_kernel::registered_actions::ActionOutcome::PendingApproval {
+                    approval_id,
+                    ..
+                } => approval_id,
+                crate::application_kernel::registered_actions::ActionOutcome::Ok { data, .. } => {
+                    return data.get("recordId").and_then(|v| v.as_str()).unwrap().to_string();
+                }
+                other => panic!("expected write pending approval or ok, got {other:?}"),
+            };
+                crate::application_kernel::registered_actions::approvals::decide(
+                    db,
+                    &approval_id,
+                    true,
+                    None,
+                    "user",
+                )
+                .unwrap();
+                let res2 = execute_registered_action(
+                    db,
+                    &ctx,
+                    "local_data.write",
+                    &serde_json::json!({
+                        "modelId": "studyTasks",
+                        "data": data,
+                    }),
+                    Some(&approval_id),
+                );
+                match res2 {
+                    crate::application_kernel::registered_actions::ActionOutcome::Ok {
+                        data,
+                        ..
+                    } => data
+                        .get("recordId")
+                        .and_then(|v| v.as_str())
+                        .unwrap()
+                        .to_string(),
+                    other => panic!("expected write ok, got {other:?}"),
+                }
+            };
+
+        let id1 = write_record(
+            &mut db,
+            serde_json::json!({
+                "title": "Read Chapter 4",
+                "subject": "Biology",
+                "status": "todo",
+                "dueDate": "2026-10-30",
+                "notes": "Focus on cellular respiration"
+            }),
+        );
+
+        let id2 = write_record(
+            &mut db,
+            serde_json::json!({
+                "title": "Problem Set 5",
+                "subject": "Math",
+                "status": "todo",
+                "dueDate": "2026-10-28",
+                "notes": "Exercises 1 to 20"
+            }),
+        );
+
+        let id3 = write_record(
+            &mut db,
+            serde_json::json!({
+                "title": "Essay Outline",
+                "subject": "English",
+                "status": "todo",
+                "dueDate": "2026-10-25",
+                "notes": "Draft thesis statement"
+            }),
+        );
+
+        // Verify all 3 records persisted
+        let all_records =
+            crate::application_kernel::data::query_records(&db, app_id, "studyTasks", 50).unwrap();
+        assert_eq!(all_records.len(), 3);
+
+        // Edit assignment 2
+        let rec2 = all_records.iter().find(|r| r["_id"] == id2).unwrap();
+        let ver2 = rec2["_version"].as_i64().unwrap();
+        let edit_res = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &serde_json::json!({
+                "modelId": "studyTasks",
+                "recordId": id2,
+                "baseVersion": ver2,
+                "data": { "notes": "Completed odd exercises; need office hours for 17" }
+            }),
+            None,
+        );
+        let edit_appr = match edit_res {
+            crate::application_kernel::registered_actions::ActionOutcome::PendingApproval {
+                approval_id,
+                ..
+            } => approval_id,
+            crate::application_kernel::registered_actions::ActionOutcome::Ok { .. } => {
+                String::new()
+            }
+            other => panic!("expected edit pending or ok, got {other:?}"),
+        };
+        if !edit_appr.is_empty() {
+            crate::application_kernel::registered_actions::approvals::decide(
+                &mut db, &edit_appr, true, None, "user",
+            )
+            .unwrap();
+            let _ = execute_registered_action(
+                &mut db,
+                &ctx,
+                "local_data.write",
+                &serde_json::json!({
+                    "modelId": "studyTasks",
+                    "recordId": id2,
+                    "baseVersion": ver2,
+                    "data": { "notes": "Completed odd exercises; need office hours for 17" }
+                }),
+                Some(&edit_appr),
+            );
+        }
+
+        // Mark assignment 1 as done
+        let rec1 = all_records.iter().find(|r| r["_id"] == id1).unwrap();
+        let ver1 = rec1["_version"].as_i64().unwrap();
+        let done_res = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &serde_json::json!({
+                "modelId": "studyTasks",
+                "recordId": id1,
+                "baseVersion": ver1,
+                "data": { "status": "done" }
+            }),
+            None,
+        );
+        let done_appr = match done_res {
+            crate::application_kernel::registered_actions::ActionOutcome::PendingApproval {
+                approval_id,
+                ..
+            } => approval_id,
+            crate::application_kernel::registered_actions::ActionOutcome::Ok { .. } => {
+                String::new()
+            }
+            other => panic!("expected done pending or ok, got {other:?}"),
+        };
+        if !done_appr.is_empty() {
+            crate::application_kernel::registered_actions::approvals::decide(
+                &mut db, &done_appr, true, None, "user",
+            )
+            .unwrap();
+            let _ = execute_registered_action(
+                &mut db,
+                &ctx,
+                "local_data.write",
+                &serde_json::json!({
+                    "modelId": "studyTasks",
+                    "recordId": id1,
+                    "baseVersion": ver1,
+                    "data": { "status": "done" }
+                }),
+                Some(&done_appr),
+            );
+        }
+
+        // Delete assignment 3
+        let rec3 = all_records.iter().find(|r| r["_id"] == id3).unwrap();
+        let ver3 = rec3["_version"].as_i64().unwrap();
+        let del_res = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.delete",
+            &serde_json::json!({
+                "modelId": "studyTasks",
+                "recordId": id3,
+                "baseVersion": ver3
+            }),
+            None,
+        );
+        let del_appr = match del_res {
+            crate::application_kernel::registered_actions::ActionOutcome::PendingApproval {
+                approval_id,
+                ..
+            } => approval_id,
+            crate::application_kernel::registered_actions::ActionOutcome::Ok { .. } => {
+                String::new()
+            }
+            other => panic!("expected del pending or ok, got {other:?}"),
+        };
+        if !del_appr.is_empty() {
+            crate::application_kernel::registered_actions::approvals::decide(
+                &mut db, &del_appr, true, None, "user",
+            )
+            .unwrap();
+            let _ = execute_registered_action(
+                &mut db,
+                &ctx,
+                "local_data.delete",
+                &serde_json::json!({
+                    "modelId": "studyTasks",
+                    "recordId": id3,
+                    "baseVersion": ver3
+                }),
+                Some(&del_appr),
+            );
+        }
+
+        // 3. Verify filtered queries
+        let q_biology = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.query",
+            &serde_json::json!({
+                "modelId": "studyTasks",
+                "filters": [{ "field": "subject", "op": "eq", "value": "Biology" }]
+            }),
+            None,
+        );
+        match q_biology {
+            crate::application_kernel::registered_actions::ActionOutcome::Ok { data, .. } => {
+                let recs = data.get("records").and_then(|v| v.as_array()).unwrap();
+                assert_eq!(recs.len(), 1);
+                assert_eq!(recs[0]["subject"], "Biology");
+                assert_eq!(recs[0]["status"], "done");
+            }
+            other => panic!("expected query ok, got {other:?}"),
+        }
+
+        // 4. Evolution Stage 1: Add Calendar View & Organize by Subject
+        let cur_rev1 = get_surface(&db, &format!("surf-{app_id}"))
+            .unwrap()
+            .current_revision;
+        let evolve1_resp = rt
+            .block_on(provider.chat(AgentRequest {
+                system_prompt: format!("{{\"definitionRevision\": {cur_rev1}}}"),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Add a calendar view and organize assignments by subject. Keep my existing assignments.",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+                max_output_tokens: None,
+            }))
+            .unwrap();
+
+        let evolve1_parsed = parse_agent_response(&evolve1_resp.raw_text).unwrap();
+        let evolve1_plan = evolve1_parsed.payload.application_plan.unwrap();
+        assert_eq!(
+            evolve1_plan.kind,
+            crate::application_kernel::application_plan::ApplicationPlanKind::Evolve
+        );
+        let scope1 = crate::application_kernel::application_plan::lineage_scope_for_plan(
+            &db,
+            &evolve1_plan,
+            Some(&conv.id),
+            None,
+        )
+        .unwrap();
+        let evolve1_ops = crate::application_kernel::application_plan::compile_plan_against_db(
+            &db,
+            &evolve1_plan,
+            &scope1,
+        )
+        .unwrap()
+        .compiled
+        .operations;
+
+        let prop1 = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Add calendar view".into(),
+                operations: evolve1_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .proposal_id
+        .unwrap();
+
+        assert!(decide_proposal(&mut db, None, &prop1, true)
+            .unwrap()
+            .is_committed());
+
+        // Verify remaining assignments are 100% intact after Stage 1 evolution!
+        let records_after_stage1 =
+            crate::application_kernel::data::query_records(&db, app_id, "studyTasks", 50).unwrap();
+        assert_eq!(records_after_stage1.len(), 2);
+        assert!(records_after_stage1
+            .iter()
+            .any(|r| r["title"] == "Read Chapter 4" && r["status"] == "done"));
+        assert!(records_after_stage1
+            .iter()
+            .any(|r| r["title"] == "Problem Set 5"
+                && r["notes"] == "Completed odd exercises; need office hours for 17"));
+
+        // Verify calendar components exist in surface
+        let surface_after1 = get_surface(&db, &format!("surf-{app_id}")).unwrap();
+        let doc1 =
+            crate::runtime_v2::SoftwareDocument::from_value(&surface_after1.definition).unwrap();
+        let comp_ids1: Vec<String> = doc1
+            .flatten_components()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert!(comp_ids1.iter().any(|id| id == "sp-calendar-table"));
+        assert!(comp_ids1.iter().any(|id| id == "sp-subject-filter"));
+
+        // 5. Evolution Stage 2: Add Progress Page with Completion Trends and Weekly Workload
+        let cur_rev2 = get_surface(&db, &format!("surf-{app_id}"))
+            .unwrap()
+            .current_revision;
+        let evolve2_resp = rt
+            .block_on(provider.chat(AgentRequest {
+                system_prompt: format!("{{\"definitionRevision\": {cur_rev2}}}"),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Add a progress page with completion trends and weekly workload.",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+                max_output_tokens: None,
+            }))
+            .unwrap();
+
+        let evolve2_parsed = parse_agent_response(&evolve2_resp.raw_text).unwrap();
+        let evolve2_plan = evolve2_parsed.payload.application_plan.unwrap();
+        assert_eq!(
+            evolve2_plan.kind,
+            crate::application_kernel::application_plan::ApplicationPlanKind::Evolve
+        );
+        let scope2 = crate::application_kernel::application_plan::lineage_scope_for_plan(
+            &db,
+            &evolve2_plan,
+            Some(&conv.id),
+            None,
+        )
+        .unwrap();
+        let evolve2_ops = crate::application_kernel::application_plan::compile_plan_against_db(
+            &db,
+            &evolve2_plan,
+            &scope2,
+        )
+        .unwrap()
+        .compiled
+        .operations;
+
+        let prop2 = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Add progress page".into(),
+                operations: evolve2_ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .proposal_id
+        .unwrap();
+
+        let res2 = decide_proposal(&mut db, None, &prop2, true).unwrap();
+        assert!(
+            res2.is_committed(),
+            "decide_proposal failed for prop2: outcome={:?}, conflicts={:?}",
+            res2.outcome,
+            res2.conflicts
+        );
+
+        // Verify records still intact after Stage 2 evolution!
+        let records_after_stage2 =
+            crate::application_kernel::data::query_records(&db, app_id, "studyTasks", 50).unwrap();
+        assert_eq!(records_after_stage2.len(), 2);
+
+        // Verify chartLine and chartBar components exist in surface
+        let surface_after2 = get_surface(&db, &format!("surf-{app_id}")).unwrap();
+        let doc2 =
+            crate::runtime_v2::SoftwareDocument::from_value(&surface_after2.definition).unwrap();
+        let comp_ids2: Vec<String> = doc2
+            .flatten_components()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert!(comp_ids2.iter().any(|id| id == "sp-chart-completion"));
+        assert!(comp_ids2.iter().any(|id| id == "sp-chart-workload"));
+    }
+
+    #[test]
+    fn habit_tracker_second_application_vertical_slice() {
+        use crate::ai::{
+            parse_agent_response, AgentMessage, AgentRequest, AiProvider, MockAiProvider,
+        };
+        use crate::application_kernel::registered_actions::context::{
+            ActionRunContext, Presence, Venue,
+        };
+        use crate::application_kernel::registered_actions::gateway::execute_registered_action;
+        use tokio_util::sync::CancellationToken;
+
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Habit Tracker Slice", None)
+            .unwrap();
+
+        let provider = MockAiProvider::new();
+        let response = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(provider.chat(AgentRequest {
+                system_prompt: "test".into(),
+                messages: vec![AgentMessage::text(
+                    crate::ai::AgentRole::User,
+                    "Build me a habit tracker to log daily routines and streaks",
+                )],
+                cancel: CancellationToken::new(),
+                idempotency_key: None,
+                max_output_tokens: None,
+            }))
+            .unwrap();
+
+        let parsed = parse_agent_response(&response.raw_text).unwrap();
+        assert!(parsed.payload.application_plan.is_some());
+        let ops = parsed.payload.inspection_operations().unwrap();
+
+        let change_res = apply_change(
+            &mut db,
+            None,
+            ChangeRequest {
+                conversation_id: Some(conv.id.clone()),
+                summary: "Create Habit Tracker".into(),
+                operations: ops,
+                source_type: "agent".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let proposal_id = change_res.proposal_id.unwrap();
+        assert!(decide_proposal(&mut db, None, &proposal_id, true)
+            .unwrap()
+            .is_committed());
+
+        let app_id = "tool-habit-tracker";
+        assert!(crate::application_kernel::manifest::get_manifest(&db, app_id).is_ok());
+        let model = crate::application_kernel::data::get_model(&db, app_id, "habits").unwrap();
+        assert!(model.fields.iter().any(|f| f.field_id == "title"));
+        assert!(model.fields.iter().any(|f| f.field_id == "streak"));
+
+        let ctx = ActionRunContext {
+            actor: "user".into(),
+            venue: Venue::Application,
+            presence: Presence::Present,
+            application_id: Some(app_id.into()),
+            project_id: None,
+            conversation_id: Some(conv.id.clone()),
+            session_id: "sess-ht".into(),
+            run_id: "run-ht-1".into(),
+            trigger: None,
+            surface_id: Some(format!("surf-{app_id}")),
+            component_id: Some("hb-add-btn".into()),
+            depth: 0,
+        };
+
+        // Write habit record
+        let write = execute_registered_action(
+            &mut db,
+            &ctx,
+            "local_data.write",
+            &serde_json::json!({
+                "modelId": "habits",
+                "data": {
+                    "title": "Morning Meditation",
+                    "streak": 5,
+                    "lastDone": "2026-10-26"
+                }
+            }),
+            None,
+        );
+        let approval_id = match write {
+            crate::application_kernel::registered_actions::ActionOutcome::PendingApproval {
+                approval_id,
+                ..
+            } => approval_id,
+            crate::application_kernel::registered_actions::ActionOutcome::Ok { .. } => {
+                String::new()
+            }
+            other => panic!("expected pending approval or ok, got {other:?}"),
+        };
+        if !approval_id.is_empty() {
+            crate::application_kernel::registered_actions::approvals::decide(
+                &mut db,
+                &approval_id,
+                true,
+                None,
+                "user",
+            )
+            .unwrap();
+            let _ = execute_registered_action(
+                &mut db,
+                &ctx,
+                "local_data.write",
+                &serde_json::json!({
+                    "modelId": "habits",
+                    "data": {
+                        "title": "Morning Meditation",
+                        "streak": 5,
+                        "lastDone": "2026-10-26"
+                    }
+                }),
+                Some(&approval_id),
+            );
+        }
+
+        // Query habit records
+        let records =
+            crate::application_kernel::data::query_records(&db, app_id, "habits", 20).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["title"], "Morning Meditation");
+        assert_eq!(records[0]["streak"], 5);
     }
 
     /// Regression: decide_proposal must apply surface.create before data.model_upsert
