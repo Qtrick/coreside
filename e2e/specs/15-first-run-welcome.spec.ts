@@ -39,5 +39,55 @@ describe("Journey 15 — first-run welcome", () => {
     await expect(takeTour).toBeDisplayed();
     const explore = await $('button[data-action="dismiss-welcome"], button*=Explore on my own');
     await expect(explore).toBeDisplayed();
+    const continueBtn = await $('button[data-action="continue-onboarding"]');
+    await expect(continueBtn).toBeDisplayed();
+
+    // Advance to Screen 2: Appearance
+    await continueBtn.click();
+
+    await browser.waitUntil(
+      async () => {
+        const title = await $("#onboarding-appearance-title");
+        return title.isDisplayed().catch(() => false);
+      },
+      {
+        timeout: 10_000,
+        timeoutMsg: "Appearance selection step never appeared after clicking Continue",
+      },
+    );
+
+    const appearanceTitle = await $("#onboarding-appearance-title");
+    await expect(appearanceTitle).toHaveText(expect.stringContaining("Choose your appearance"));
+
+    // Verify theme preview options
+    const lightOption = await $('[data-testid="theme-option-light"]');
+    await expect(lightOption).toBeDisplayed();
+    const darkOption = await $('[data-testid="theme-option-dark"]');
+    await expect(darkOption).toBeDisplayed();
+
+    // Select dark theme in draft
+    await darkOption.click();
+
+    // Confirm appearance and enter application
+    const startBtn = await $('button[data-action="start-using-coreside"]');
+    await expect(startBtn).toBeDisplayed();
+    await startBtn.click();
+
+    // Verify modal dismissed and long tour does NOT auto-launch
+    await browser.waitUntil(
+      async () => {
+        const modal = await $(".onboarding-modal");
+        const modalExists = await modal.isDisplayed().catch(() => false);
+        return !modalExists;
+      },
+      {
+        timeout: 10_000,
+        timeoutMsg: "Onboarding dialog remained visible after Start using Coreside",
+      },
+    );
+
+    const tourOverlay = await $(".tutorial-overlay");
+    const tourExists = await tourOverlay.isDisplayed().catch(() => false);
+    expect(tourExists).toBe(false);
   });
 });

@@ -88,6 +88,7 @@ export type UpsertTutorialProgressInput = {
 export type CoordinatorPhase =
   | "idle"
   | "welcome"
+  | "appearance"
   | "tour"
   | "completed"
   | "skipped";

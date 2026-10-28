@@ -98,4 +98,5 @@ Every AI assistant operating in this repository must uphold these shared behavio
 7. **No unprompted git mutations**: Never run `git add`, `git commit`, or `git push` automatically without explicit user instruction.
 8. **Preserve user work**: Keep unrelated modified files intact.
 9. **Check and fix npm vulnerabilities**: Always check npm after making changes to code to find and fix vulnerabilities so that when `npm install` runs, there are zero vulnerabilities (`npm audit` must report 0 vulnerabilities).
-10. **Standard close**: Conclude with `git status --short` and the copy/paste-safe suggested Conventional Commit.
+10. **Future feature pipeline**: Consult FUTURE.md before planning feature work. Respect dormant gates and never expose unfinished features in consumer UI. When a feature is completed and verified, mark it COMPLETED and compress its entry into a concise summary with code/test links.
+11. **Standard close**: Conclude with `git status --short` and the copy/paste-safe suggested Conventional Commit.

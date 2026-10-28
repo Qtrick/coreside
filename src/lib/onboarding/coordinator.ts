@@ -56,6 +56,14 @@ export function showWelcome(state: CoordinatorState): CoordinatorState {
   return { ...state, phase: "welcome", activeTutorialId: null, stepIndex: 0 };
 }
 
+export function advanceToAppearance(state: CoordinatorState): CoordinatorState {
+  return { ...state, phase: "appearance", activeTutorialId: null, stepIndex: 0 };
+}
+
+export function backToWelcome(state: CoordinatorState): CoordinatorState {
+  return { ...state, phase: "welcome", activeTutorialId: null, stepIndex: 0 };
+}
+
 export function startTour(
   state: CoordinatorState,
   tutorialId: string = ESSENTIALS_TUTORIAL_ID,

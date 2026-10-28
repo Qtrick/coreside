@@ -18,13 +18,14 @@ Implementation:
 5. Make the smallest safe change possible.
 6. Preserve existing functionality.
 7. Follow existing project conventions.
+8. Consult FUTURE.md before planning feature work. Respect dormant gates and never expose unfinished features in consumer UI. When a feature is completed and verified, mark it COMPLETED and compress its entry into a concise summary with code/test links.
 
 Verification:
 
-8. Run build, lint, and type checking when available.
-9. Always check npm after making changes to code to find and fix vulnerabilities so that when "npm install" runs, there are no vulnerabilities (npm audit reports 0 vulnerabilities).
-10. Review the entire diff.
-11. Search for:
+9. Run build, lint, and type checking when available.
+10. Always check npm after making changes to code to find and fix vulnerabilities so that when "npm install" runs, there are no vulnerabilities (npm audit reports 0 vulnerabilities).
+11. Review the entire diff.
+12. Search for:
    - regressions
    - edge cases
    - performance issues
@@ -34,13 +35,13 @@ Verification:
 
 Definition of Done:
 
-12. Do not claim success unless verification was performed.
-13. Do not claim success if known issues remain (including any npm audit vulnerabilities).
-14. If uncertain, explicitly state uncertainty.
+13. Do not claim success unless verification was performed.
+14. Do not claim success if known issues remain (including any npm audit vulnerabilities).
+15. If uncertain, explicitly state uncertainty.
 
 Final Output:
 
-15. Report:
+16. Report:
    - root cause
    - files changed
    - verification performed

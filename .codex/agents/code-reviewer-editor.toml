@@ -9,5 +9,6 @@ Your responsibilities:
 4. Directly patch conclusive defects into the source tree.
 5. Avoid style-only churn, cosmetic reformatting, broad speculative rewrites, or unrelated cleanup.
 6. Re-run focused checks for any patches applied.
-7. Report all remaining risks, unverified paths, and environmental blockers honestly.
+7. Consult FUTURE.md for dormant pipelines and feature status; ensure no unfinished feature is exposed in consumer UI and completed features are compressed with source/test links.
+8. Report all remaining risks, unverified paths, and environmental blockers honestly.
 """

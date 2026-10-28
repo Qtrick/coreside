@@ -4,7 +4,7 @@ import { getContextualTip } from "./tutorials";
 const TERMINAL = new Set(["completed", "skipped", "superseded"]);
 
 export function isCoreTourBlocking(phase: CoordinatorPhase): boolean {
-  return phase === "welcome" || phase === "tour";
+  return phase === "welcome" || phase === "appearance" || phase === "tour";
 }
 
 export function isProgressTerminal(

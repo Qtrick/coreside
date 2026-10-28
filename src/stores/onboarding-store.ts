@@ -4,8 +4,10 @@ import { canOfferContextualTip } from "@/lib/onboarding/contextual";
 import {
   activeStep,
   activeTutorial,
+  advanceToAppearance,
   applyPersistedProgress,
   backStep,
+  backToWelcome,
   completeTour,
   emptyCoordinatorState,
   nextStep,
@@ -38,6 +40,9 @@ type OnboardingStore = CoordinatorState & {
   /** Close / Escape — preserves in_progress resume state. */
   pause: () => Promise<void>;
   finish: () => Promise<void>;
+  goToAppearance: () => void;
+  goToWelcome: () => void;
+  completeOnboarding: () => Promise<void>;
   dismissWelcome: () => Promise<void>;
   resetEssentials: () => Promise<void>;
   /** Offer a contextual tip when eligible; no-ops when blocked. */
@@ -144,12 +149,13 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
     });
     try {
       const state = await persist(result);
-      set({
-        ...state,
+      set((current) => ({
+        ...current,
+        progressById: { ...current.progressById, ...state.progressById },
         phase: "idle",
         welcomeEligible: false,
         activeContextualId: null,
-      });
+      }));
     } catch (e) {
       console.error("Failed to persist tutorial skip", e);
     }
@@ -167,11 +173,12 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
     });
     try {
       const state = await persist(result);
-      set({
-        ...state,
+      set((current) => ({
+        ...current,
+        progressById: { ...current.progressById, ...state.progressById },
         phase: "idle",
         activeContextualId: null,
-      });
+      }));
     } catch (e) {
       console.error("Failed to persist tutorial pause", e);
     }
@@ -189,14 +196,47 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
     });
     try {
       const state = await persist(result);
-      set({
-        ...state,
+      set((current) => ({
+        ...current,
+        progressById: { ...current.progressById, ...state.progressById },
         phase: "completed",
         welcomeEligible: false,
         activeContextualId: null,
-      });
+      }));
     } catch (e) {
       console.error("Failed to persist tutorial completion", e);
+    }
+  },
+
+  goToAppearance: () => {
+    set(advanceToAppearance(get()));
+  },
+
+  goToWelcome: () => {
+    set(backToWelcome(get()));
+  },
+
+  completeOnboarding: async () => {
+    const priorState = get();
+    const result = completeTour({ ...priorState, activeTutorialId: ESSENTIALS_TUTORIAL_ID });
+    set({
+      phase: "idle",
+      welcomeEligible: false,
+      activeContextualId: null,
+      activeTutorialId: null,
+      stepIndex: 0,
+    });
+    try {
+      const state = await persist(result);
+      set((current) => ({
+        ...current,
+        progressById: { ...current.progressById, ...state.progressById },
+        phase: "idle",
+        welcomeEligible: false,
+        activeContextualId: null,
+      }));
+    } catch (e) {
+      console.error("Failed to persist onboarding completion", e);
     }
   },
 
@@ -213,12 +253,13 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
     });
     try {
       const state = await persist(result);
-      set({
-        ...state,
+      set((current) => ({
+        ...current,
+        progressById: { ...current.progressById, ...state.progressById },
         phase: "idle",
         welcomeEligible: false,
         activeContextualId: null,
-      });
+      }));
     } catch (e) {
       console.error("Failed to persist welcome dismissal", e);
     }

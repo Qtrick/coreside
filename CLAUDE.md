@@ -31,7 +31,8 @@ In Coreside, conversational interactions progressively assemble into persistent 
 2. **Implement, do not merely recommend**: Resolve defects directly with minimal, production-quality fixes and regression tests.
 3. **Evidence integrity**: Never claim production readiness or visual verification without active, reproducible evidence.
 4. **No unprompted git commands**: Never execute `git add`, `git commit`, or `git push` automatically.
-5. **Session Close**: Always conclude with `git status --short` and a suggested Conventional Commit.
+5. **Future feature pipeline**: Consult FUTURE.md before planning feature work. Respect dormant gates and never expose unfinished features in consumer UI. When a feature is completed and verified, mark it COMPLETED and compress its entry into a concise summary with code/test links.
+6. **Session Close**: Always conclude with `git status --short` and a suggested Conventional Commit.
 
 ## Suggested Commit Message Format (STRICT)
 - Standard Conventional Commits format (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`, `perf:`).

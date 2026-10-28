@@ -1,11 +1,11 @@
 {
   "schemaVersion": 2,
   "product": "Coreside",
-  "accessDate": "2026-09-28",
-  "generatedAt": "2026-09-28T15:46:57.245Z",
-  "commit": "47a4732c6567ee601f4e9497d2529f3272972975",
+  "accessDate": "2026-10-28",
+  "generatedAt": "2026-10-28T05:42:30.832Z",
+  "commit": "ee505f647f447964319192b84afe4e021635052a",
   "dirty": true,
-  "sourceFingerprint": "b71a4865eed73d2580fcfea05cada0f3e1702e28d1a76fbd1d692fa7a07631ee",
+  "sourceFingerprint": "2b2cab71445617056becd1e8ed334eaf71c6b173f8845fc03e6feb33c2fe0109",
   "command": "audit:partial-update",
   "exitStatus": 0,
   "publicBeta": "Not ready",
@@ -26,8 +26,8 @@
     "filename": "Partial Update Main.zip",
     "path": "/Users/qunyingfan/Downloads/Partial Update Main.zip",
     "expectedSha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
-    "observedSha256": "8666c226cb875deae8a73e6d2c7c09965f311b09c3db15ea1d1305261a3eb607",
-    "status": "present_hash_match"
+    "observedSha256": null,
+    "status": "archive_unavailable"
   },
   "partialUpdateSource": {
     "root": ".reference/partial-update/partialupdate-main",
@@ -136,7 +136,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": null
     },
@@ -187,7 +187,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": null
     },
@@ -261,7 +261,7 @@
         }
       ],
       "gapPriority": "P0",
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": null
     },
@@ -312,7 +312,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": null
     },
@@ -376,7 +376,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": null
     },
@@ -437,7 +437,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": null
     },
@@ -490,7 +490,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": null
     },
@@ -550,7 +550,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": null
     },
@@ -601,7 +601,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": null
     },
@@ -654,7 +654,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": null
     },
@@ -693,7 +693,7 @@
           ]
         }
       ],
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": "Arbitrary HTML in the protected webview is rejected; Coreside uses trusted declarative components.",
       "deferReason": null
     },
@@ -733,7 +733,7 @@
           ]
         }
       ],
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": "Model-generated script execution is rejected; registered actions only.",
       "deferReason": null
     },
@@ -771,7 +771,7 @@
           ]
         }
       ],
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": "CDN script/link injection rejected; bundled capability packs only.",
       "deferReason": null
     },
@@ -810,7 +810,7 @@
           ]
         }
       ],
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": "iframe form POST + clientSecret trust path rejected; typed StructuredUserInput is the secure equivalent.",
       "deferReason": null
     },
@@ -847,7 +847,7 @@
           "hits": []
         }
       ],
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": "Global/model CSS on protected chrome rejected; semantic tokens + capability styles only.",
       "deferReason": null
     },
@@ -878,7 +878,7 @@
           "misses": []
         }
       ],
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": "Public multiuser collaboration deferred; local-first consumer beta priority."
     },
@@ -909,7 +909,7 @@
           "misses": []
         }
       ],
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": "Hosted identity deferred relative to local BYOK consumer track."
     },
@@ -963,7 +963,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": null
     },
@@ -1014,7 +1014,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": null
     },
@@ -1073,7 +1073,7 @@
         }
       ],
       "gapPriority": null,
-      "accessDate": "2026-09-28",
+      "accessDate": "2026-10-28",
       "rejectReason": null,
       "deferReason": null
     }
