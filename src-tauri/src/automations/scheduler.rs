@@ -298,6 +298,10 @@ pub fn claim_run(
             }
         };
 
+        // Use a savepoint so that if claiming fails (e.g. concurrent slot claim or running automation),
+        // we roll back cleanly and return Ok(None) without leaking partial mutations or constraint errors.
+        conn.execute_batch("SAVEPOINT claim_slot;")?;
+
         // If this claim represents a scheduled slot, ensure it hasn't already been claimed or executed.
         if let Some(ref slot) = scheduled_at {
             let slot_exists: bool = conn
@@ -309,6 +313,7 @@ pub fn claim_run(
                 .optional()?
                 .unwrap_or(false);
             if slot_exists {
+                conn.execute_batch("ROLLBACK TO SAVEPOINT claim_slot; RELEASE SAVEPOINT claim_slot;")?;
                 tracing::debug!(
                     automation_id,
                     slot,
@@ -363,6 +368,7 @@ pub fn claim_run(
             ],
         )?;
         if n == 0 {
+            conn.execute_batch("ROLLBACK TO SAVEPOINT claim_slot; RELEASE SAVEPOINT claim_slot;")?;
             tracing::debug!(
                 automation_id,
                 "automation is already running; skipping duplicate claim"
@@ -383,12 +389,39 @@ pub fn claim_run(
         )?;
 
         if let Some(ref slot) = scheduled_at {
-            conn.execute(
-                "INSERT INTO automation_scheduled_slots (automation_id, scheduled_at, run_id, claimed_at)
+            let inserted = conn.execute(
+                "INSERT OR IGNORE INTO automation_scheduled_slots (automation_id, scheduled_at, run_id, claimed_at)
                  VALUES (?1, ?2, ?3, ?4)",
                 rusqlite::params![automation_id, slot, &run_id, &started],
             )?;
+            if inserted == 0 {
+                conn.execute_batch("ROLLBACK TO SAVEPOINT claim_slot; RELEASE SAVEPOINT claim_slot;")?;
+                tracing::debug!(
+                    automation_id,
+                    slot,
+                    "scheduled slot already executed or claimed; skipping duplicate claim"
+                );
+                return Ok(None);
+            }
         }
+
+        // Prune old scheduled slots alongside runs
+        let _ = conn.execute(
+            "DELETE FROM automation_scheduled_slots WHERE automation_id = ?1 AND (
+                (SELECT COUNT(*) FROM automation_runs WHERE automation_id = ?1) > 0
+                AND (
+                    run_id NOT IN (SELECT id FROM automation_runs WHERE automation_id = ?1)
+                    OR scheduled_at < (
+                        SELECT MIN(scheduled_at)
+                        FROM automation_runs
+                        WHERE automation_id = ?1 AND scheduled_at IS NOT NULL
+                    )
+                )
+             )",
+            rusqlite::params![automation_id],
+        );
+
+        conn.execute_batch("RELEASE SAVEPOINT claim_slot;")?;
 
         Ok(Some(ClaimedRun {
             automation,
@@ -501,6 +534,24 @@ pub fn finalize_run(
             rusqlite::params![claim.automation.id],
         ) {
             tracing::warn!(automation_id = %claim.automation.id, error = %e, "pruning old automation runs failed");
+        }
+
+        // Prune old scheduled slots alongside runs
+        if let Err(e) = conn.execute(
+            "DELETE FROM automation_scheduled_slots WHERE automation_id = ?1 AND (
+                (SELECT COUNT(*) FROM automation_runs WHERE automation_id = ?1) > 0
+                AND (
+                    run_id NOT IN (SELECT id FROM automation_runs WHERE automation_id = ?1)
+                    OR scheduled_at < (
+                        SELECT MIN(scheduled_at)
+                        FROM automation_runs
+                        WHERE automation_id = ?1 AND scheduled_at IS NOT NULL
+                    )
+                )
+             )",
+            rusqlite::params![claim.automation.id],
+        ) {
+            tracing::warn!(automation_id = %claim.automation.id, error = %e, "pruning old automation scheduled slots failed");
         }
 
         Ok(())
@@ -1158,7 +1209,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut db = Database::open_path(&dir.path().join("manual-slot.db")).unwrap();
         db::ensure_default_workspace(&db).unwrap();
-        let planned_8am = "2026-10-27T08:00:00Z";
+        let planned_8am = (Utc::now() + chrono::Duration::hours(24)).to_rfc3339();
 
         let auto = Automation {
             id: "auto-manual-test".into(),
@@ -1178,14 +1229,14 @@ mod tests {
             requires_ai: true,
             provider_connection_id: None,
             missed_run_policy: MissedRunPolicy::RunOnce,
-            next_run_at: Some(planned_8am.into()),
+            next_run_at: Some(planned_8am.clone()),
             last_run_at: None,
             last_status: None,
             consecutive_failures: 0,
             waiting_approval: false,
             permission_ready: true,
-            created_at: planned_8am.into(),
-            updated_at: planned_8am.into(),
+            created_at: planned_8am.clone(),
+            updated_at: planned_8am.clone(),
         };
         db::upsert_automation(&mut db, &auto).unwrap();
 
@@ -1203,7 +1254,7 @@ mod tests {
         let auto_after_claim = db::get_automation(&db, "auto-manual-test").unwrap();
         assert_eq!(
             auto_after_claim.next_run_at.as_deref(),
-            Some(planned_8am),
+            Some(planned_8am.as_str()),
             "manual Run now must NOT advance a scheduled daily slot into the future"
         );
 
@@ -1214,7 +1265,7 @@ mod tests {
         let final_auto = db::get_automation(&db, "auto-manual-test").unwrap();
         assert_eq!(
             final_auto.next_run_at.as_deref(),
-            Some(planned_8am),
+            Some(planned_8am.as_str()),
             "scheduled 8 AM run remains intact after manual run completes"
         );
     }
@@ -1589,5 +1640,177 @@ mod tests {
             res_manual2.is_ok(),
             "multiple manual runs (NULL scheduled_at) are allowed"
         );
+    }
+
+    #[test]
+    fn concurrent_claim_with_insert_or_ignore_avoids_constraint_error() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("concurrent-insert-ignore.db")).unwrap();
+        db::ensure_default_workspace(&db).unwrap();
+        let slot_time = "2026-10-27T10:00:00Z";
+
+        let auto = Automation {
+            id: "auto-race-test".into(),
+            workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+            owner_tool_id: None,
+            application_id: None,
+            name: "Race Test".into(),
+            enabled: true,
+            trigger: AutomationTrigger::Daily {
+                time: "10:00".into(),
+                timezone: None,
+            },
+            action: AutomationAction::SetWorkspaceBackground {
+                workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+                preset_id: "preset-1".into(),
+            },
+            requires_ai: false,
+            provider_connection_id: None,
+            missed_run_policy: MissedRunPolicy::RunOnce,
+            next_run_at: Some(slot_time.into()),
+            last_run_at: None,
+            last_status: None,
+            consecutive_failures: 0,
+            waiting_approval: false,
+            permission_ready: true,
+            created_at: slot_time.into(),
+            updated_at: slot_time.into(),
+        };
+        db::upsert_automation(&mut db, &auto).unwrap();
+
+        // Simulate a pre-existing slot record inserted by a racing claimant
+        db.with_transaction(|conn| {
+            conn.execute(
+                "INSERT INTO automation_scheduled_slots (automation_id, scheduled_at, run_id, claimed_at)
+                 VALUES (?1, ?2, 'run-already-claimed', '2026-10-27T10:00:00Z')",
+                rusqlite::params!["auto-race-test", slot_time],
+            )
+            .map_err(db::DbError::Sqlite)
+        })
+        .unwrap();
+
+        // Calling claim_run must return Ok(None) without throwing a SQLite constraint violation
+        let claim = claim_run(&mut db, "auto-race-test", RunOrigin::Scheduled).unwrap();
+        assert!(claim.is_none(), "claim_run must return Ok(None) when slot is already claimed");
+    }
+
+    #[test]
+    fn prunes_automation_scheduled_slots_alongside_runs() {
+        let dir = tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("prune-slots.db")).unwrap();
+        db::ensure_default_workspace(&db).unwrap();
+        let now = Utc::now();
+
+        let auto = Automation {
+            id: "auto-prune-test".into(),
+            workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+            owner_tool_id: None,
+            application_id: None,
+            name: "Prune Test".into(),
+            enabled: true,
+            trigger: AutomationTrigger::Interval {
+                interval_minutes: 5,
+                timezone: None,
+            },
+            action: AutomationAction::SetWorkspaceBackground {
+                workspace_id: db::DEFAULT_WORKSPACE_ID.into(),
+                preset_id: "preset-1".into(),
+            },
+            requires_ai: false,
+            provider_connection_id: None,
+            missed_run_policy: MissedRunPolicy::RunOnce,
+            next_run_at: Some(now.to_rfc3339()),
+            last_run_at: None,
+            last_status: None,
+            consecutive_failures: 0,
+            waiting_approval: false,
+            permission_ready: true,
+            created_at: now.to_rfc3339(),
+            updated_at: now.to_rfc3339(),
+        };
+        db::upsert_automation(&mut db, &auto).unwrap();
+
+        // Insert 105 runs and matching scheduled slots
+        db.with_transaction(|conn| {
+            for i in 0..105 {
+                let run_id = format!("run-prune-{i:03}");
+                let time = (now - chrono::Duration::minutes(105 - i)).to_rfc3339();
+                db::insert_automation_run_conn(
+                    conn,
+                    &run_id,
+                    "auto-prune-test",
+                    Some(&time),
+                    &time,
+                    Some(&time),
+                    "success",
+                    Some("Ok"),
+                    None,
+                )?;
+                conn.execute(
+                    "INSERT INTO automation_scheduled_slots (automation_id, scheduled_at, run_id, claimed_at)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params!["auto-prune-test", time, run_id, time],
+                )?;
+            }
+            conn.execute(
+                "UPDATE automation_runs SET created_at = started_at WHERE automation_id = 'auto-prune-test'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let runs_before: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM automation_runs WHERE automation_id = 'auto-prune-test'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(runs_before, 105);
+
+        let slots_before: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM automation_scheduled_slots WHERE automation_id = 'auto-prune-test'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(slots_before, 105);
+
+        // Finalize a dummy run to trigger pruning
+        let claim = ClaimedRun {
+            automation: auto,
+            run_id: "run-prune-104".into(),
+            started: now.to_rfc3339(),
+            next: Some((now + chrono::Duration::minutes(5)).to_rfc3339()),
+            schedulable: true,
+            scheduled_at: None,
+            origin: RunOrigin::Manual,
+        };
+        let outcome = AutomationRunOutcome::success("Prune trigger");
+        finalize_run(&mut db, &claim, &outcome).unwrap();
+
+        let runs_after: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM automation_runs WHERE automation_id = 'auto-prune-test'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(runs_after, 100, "runs must be pruned to 100");
+
+        let slots_after: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM automation_scheduled_slots WHERE automation_id = 'auto-prune-test'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(slots_after, 100, "scheduled slots must be pruned alongside runs");
     }
 }

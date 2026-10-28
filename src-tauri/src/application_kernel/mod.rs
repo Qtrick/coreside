@@ -732,6 +732,38 @@ pub struct CapabilityGrantProposal {
     pub user_description: String,
 }
 
+fn extract_declared_packs(value: &serde_json::Value, packs: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(arr) = map.get("capabilityPacks").and_then(|v| v.as_array()) {
+                for item in arr {
+                    if let Some(s) = item.as_str() {
+                        if !packs.contains(&s.to_string()) {
+                            packs.push(s.to_string());
+                        }
+                    }
+                }
+            }
+            for (k, v) in map {
+                if k == "definition"
+                    || k == "tool"
+                    || k == "component"
+                    || k == "sections"
+                    || k == "views"
+                {
+                    extract_declared_packs(v, packs);
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                extract_declared_packs(v, packs);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Compute required capability additions by inspecting proposed operations against
 /// the existing authorized capabilities on target surfaces.
 pub fn compute_required_capability_grants(
@@ -743,19 +775,29 @@ pub fn compute_required_capability_grants(
     let mut surface_packs_cache: HashMap<String, Vec<String>> = HashMap::new();
 
     for op in operations {
-        let sid_opt = op.target.surface_id.clone().or_else(|| {
-            op.target
-                .tool_id
-                .as_deref()
-                .map(crate::runtime_v2::surfaces::surface_id_for_tool)
-        });
+        let sid_opt = op
+            .target
+            .surface_id
+            .clone()
+            .or_else(|| {
+                op.target
+                    .tool_id
+                    .as_deref()
+                    .map(crate::runtime_v2::surfaces::surface_id_for_tool)
+            })
+            .or_else(|| {
+                op.target
+                    .application_id
+                    .as_deref()
+                    .map(crate::runtime_v2::surfaces::surface_id_for_tool)
+            });
         let sid = match sid_opt {
             Some(s) => s,
             None => continue,
         };
 
         if !surface_packs_cache.contains_key(&sid) {
-            let mut existing: Vec<String> = db
+            let existing: Vec<String> = db
                 .conn()
                 .query_row(
                     "SELECT capability_packs_json FROM surfaces WHERE id = ?",
@@ -767,87 +809,75 @@ pub fn compute_required_capability_grants(
                 .and_then(|json: String| serde_json::from_str(&json).ok())
                 .unwrap_or_default();
 
-            // If this is a newly created surface, seed its packs from the creation operation
-            if existing.is_empty() {
-                for creation_op in operations {
-                    let csid = creation_op.target.surface_id.clone().or_else(|| {
-                        creation_op
-                            .target
-                            .tool_id
-                            .as_deref()
-                            .map(crate::runtime_v2::surfaces::surface_id_for_tool)
-                    });
-                    if csid.as_deref() == Some(&sid) {
-                        if let Some(p) = creation_op
-                            .payload
-                            .get("capabilityPacks")
-                            .and_then(|v| v.as_array())
-                        {
-                            for item in p {
-                                if let Some(s) = item.as_str() {
-                                    existing.push(s.to_string());
-                                }
-                            }
-                        }
-                        if let Some(def) = creation_op.payload.get("definition") {
-                            if let Some(p) = def.get("capabilityPacks").and_then(|v| v.as_array()) {
-                                for item in p {
-                                    if let Some(s) = item.as_str() {
-                                        existing.push(s.to_string());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
             surface_packs_cache.insert(sid.clone(), existing);
         }
 
         let existing_packs = surface_packs_cache.get(&sid).unwrap();
 
         let mut needed_packs = Vec::new();
-        let _ = crate::runtime_v2::packs::collect_required_packs(&op.payload, &mut needed_packs);
+        extract_declared_packs(&op.payload, &mut needed_packs);
+
+        crate::runtime_v2::packs::collect_required_packs(&op.payload, &mut needed_packs)
+            .map_err(KernelError::Validation)?;
+        if let Some(def) = op.payload.get("definition") {
+            crate::runtime_v2::packs::collect_required_packs(def, &mut needed_packs)
+                .map_err(KernelError::Validation)?;
+        }
         if let Some(comp) = op.payload.get("component") {
-            let _ = crate::runtime_v2::packs::collect_required_packs(comp, &mut needed_packs);
+            crate::runtime_v2::packs::collect_required_packs(comp, &mut needed_packs)
+                .map_err(KernelError::Validation)?;
         }
         if let Some(tool) = op.payload.get("tool") {
-            let _ = crate::runtime_v2::packs::collect_required_packs(tool, &mut needed_packs);
+            crate::runtime_v2::packs::collect_required_packs(tool, &mut needed_packs)
+                .map_err(KernelError::Validation)?;
+            if let Some(def) = tool.get("definition") {
+                crate::runtime_v2::packs::collect_required_packs(def, &mut needed_packs)
+                    .map_err(KernelError::Validation)?;
+            }
         }
 
         for pack_id in needed_packs {
-            if pack_id != "coreside.core" && !existing_packs.contains(&pack_id) {
-                if !grants
+            if pack_id != "coreside.core"
+                && !existing_packs.contains(&pack_id)
+                && !grants
                     .iter()
                     .any(|g: &CapabilityGrantProposal| g.pack_id == pack_id && g.surface_id == sid)
-                {
-                    if let Some(pack) = crate::runtime_v2::packs::pack_registry().get(&pack_id) {
-                        if pack.enabled {
-                            let user_desc = match pack.id.as_str() {
-                                "coreside.charts" => "Adds Charts to this application. Allows Coreside to render interactive visual charts using the application's data.".to_string(),
-                                "coreside.forms" => "Adds Rich Forms to this application. Allows validation and structured user submissions.".to_string(),
-                                "coreside.svg" => "Adds Declarative SVG scenes to this application.".to_string(),
-                                "coreside.canvas" => "Adds Declarative Canvas 2D rendering to this application.".to_string(),
-                                _ => format!("Adds {} to this application. {}", pack.display_name, pack.agent_description),
-                            };
-                            grants.push(CapabilityGrantProposal {
-                                pack_id: pack.id.clone(),
-                                display_name: pack.display_name.clone(),
-                                surface_id: sid.clone(),
-                                application_id: op
-                                    .target
-                                    .application_id
-                                    .clone()
-                                    .or_else(|| op.target.tool_id.clone()),
-                                permissions: pack.permissions.clone(),
-                                user_description: user_desc,
-                            });
+            {
+                if let Some(pack) = crate::runtime_v2::packs::pack_registry().get(&pack_id) {
+                        if !pack.enabled {
+                            return Err(KernelError::Validation(format!(
+                                "Unsupported or disabled capability pack: {}",
+                                pack_id
+                            )));
                         }
+                        let user_desc = match pack.id.as_str() {
+                            "coreside.charts" => "Adds Charts to this application. Allows Coreside to render interactive visual charts using the application's data.".to_string(),
+                            "coreside.forms" => "Adds Rich Forms to this application. Allows validation and structured user submissions.".to_string(),
+                            "coreside.svg" => "Adds Declarative SVG scenes to this application.".to_string(),
+                            "coreside.canvas" => "Adds Declarative Canvas 2D rendering to this application.".to_string(),
+                            _ => format!("Adds {} to this application. {}", pack.display_name, pack.agent_description),
+                        };
+                        grants.push(CapabilityGrantProposal {
+                            pack_id: pack.id.clone(),
+                            display_name: pack.display_name.clone(),
+                            surface_id: sid.clone(),
+                            application_id: op
+                                .target
+                                .application_id
+                                .clone()
+                                .or_else(|| op.target.tool_id.clone()),
+                            permissions: pack.permissions.clone(),
+                            user_description: user_desc,
+                        });
+                    } else {
+                        return Err(KernelError::Validation(format!(
+                            "Unsupported or disabled capability pack: {}",
+                            pack_id
+                        )));
                     }
                 }
             }
         }
-    }
 
     Ok(grants)
 }
@@ -907,9 +937,20 @@ fn parse_proposal_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<KernelChangePro
                 )),
             )
         })?;
-    let req_caps_json: String = r.get(20).unwrap_or_else(|_| "[]".to_string());
-    let required_capabilities: Vec<CapabilityGrantProposal> =
-        serde_json::from_str(&req_caps_json).unwrap_or_default();
+    let req_caps_raw: Option<String> = r.get(20).ok();
+    let required_capabilities: Vec<CapabilityGrantProposal> = match req_caps_raw {
+        Some(ref raw) if !raw.trim().is_empty() => serde_json::from_str(raw).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                20,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("proposal required_capabilities_json is malformed: {e}"),
+                )),
+            )
+        })?,
+        _ => Vec::new(),
+    };
     Ok(KernelChangeProposalRecord {
         id: r.get(0)?,
         conversation_id: r.get(1)?,
@@ -999,7 +1040,7 @@ pub fn decide_proposal(
     approve: bool,
 ) -> Result<ChangeResult, KernelError> {
     let now = chrono::Utc::now();
-    let proposal = get_proposal(db, proposal_id)?;
+    let mut proposal = get_proposal(db, proposal_id)?;
 
     if proposal.status != "pending" {
         return Err(KernelError::Validation(format!(
@@ -1144,6 +1185,19 @@ pub fn decide_proposal(
         return Err(KernelError::Validation(
             "Proposal operations hash mismatch (tampered payload)".into(),
         ));
+    }
+
+    let is_legacy = expected_hash != proposal.exact_operations_hash
+        && legacy_hash == proposal.exact_operations_hash;
+    if is_legacy {
+        proposal.required_capabilities =
+            compute_required_capability_grants(db, &proposal.exact_operations)?;
+        let req_caps_json =
+            serde_json::to_string(&proposal.required_capabilities).unwrap_or_else(|_| "[]".into());
+        let _ = db.conn().execute(
+            "UPDATE kernel_change_proposals SET required_capabilities_json = ? WHERE id = ?",
+            rusqlite::params![req_caps_json, proposal_id],
+        );
     }
 
     if proposal.exact_operations.is_empty() {
@@ -4306,6 +4360,143 @@ mod tests {
     }
 
     #[test]
+    fn surface_create_declaring_capability_pack_emits_grant_proposal() {
+        let mut db = test_db();
+        crate::db::ensure_default_workspace(&db).unwrap();
+        let _conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Create caps test", None).unwrap();
+
+        let create_op = AppOperation {
+            id: "op-create-charts".into(),
+            op_type: "surface.create".into(),
+            target: OperationTarget {
+                surface_id: Some("surf-declared-charts".into()),
+                application_id: Some("chart-app".into()),
+                tool_id: Some("chart-app".into()),
+                ..Default::default()
+            },
+            base_revision: Some(0),
+            payload: json!({
+                "capabilityPacks": ["coreside.charts"],
+                "definition": {
+                    "title": "Chart App",
+                    "components": []
+                }
+            }),
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        };
+
+        let grants = compute_required_capability_grants(&db, &[create_op]).unwrap();
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].pack_id, "coreside.charts");
+        assert_eq!(grants[0].surface_id, "surf-declared-charts");
+        assert_eq!(grants[0].display_name, "Charts");
+    }
+
+    #[test]
+    fn decide_proposal_recomputes_grants_for_legacy_hash_proposals() {
+        let mut db = test_db();
+        crate::db::ensure_default_workspace(&db).unwrap();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Legacy proposal test", None)
+                .unwrap();
+
+        let surf = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "legacy-tool",
+            &json!({
+                "schemaVersion": "1",
+                "title": "Legacy Tool",
+                "capabilityPacks": ["coreside.core"],
+                "views": []
+            }),
+            &["coreside.core".into()],
+        )
+        .unwrap();
+
+        let chart_op = AppOperation {
+            id: "op-legacy-chart".into(),
+            op_type: "component.insert".into(),
+            target: OperationTarget {
+                surface_id: Some(surf.id.clone()),
+                ..Default::default()
+            },
+            base_revision: Some(surf.current_revision),
+            payload: json!({
+                "component": {
+                    "id": "c-chart-legacy",
+                    "type": "chartLine",
+                    "props": {}
+                }
+            }),
+            transaction_group: None,
+            idempotency_key: None,
+            depends_on: None,
+            requires_approval: None,
+            destructive: None,
+            audience: None,
+        };
+
+        let mut base_revisions = HashMap::new();
+        base_revisions.insert(surf.id.clone(), surf.current_revision);
+
+        let legacy_payload = json!({
+            "operations": vec![&chart_op],
+            "base_revisions": &base_revisions,
+            "summary": "Add legacy chart",
+            "conversation_id": conv.id.clone(),
+        });
+        let legacy_hash = registered_actions::canonical::hash_value(&legacy_payload);
+        let proposal_id = format!("proposal-{}", Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+        let expires_at = (chrono::Utc::now() + chrono::Duration::hours(24)).to_rfc3339();
+        let ops_json = serde_json::to_string(&vec![chart_op]).unwrap();
+        let base_revs_json = serde_json::to_string(&base_revisions).unwrap();
+
+        // Stored with empty required_capabilities_json and legacy operations hash:
+        db.conn()
+            .execute(
+                "INSERT INTO kernel_change_proposals (
+                    id, conversation_id, project_id, turn_id, summary, risk, impact_summary,
+                    status, exact_operations_json, exact_operations_hash, base_revisions_json,
+                    required_capabilities_json, created_at, expires_at
+                ) VALUES (?1, ?2, NULL, NULL, ?3, 'low', 'Legacy summary', 'pending', ?4, ?5, ?6, '[]', ?7, ?8)",
+                rusqlite::params![
+                    proposal_id,
+                    conv.id,
+                    "Add legacy chart",
+                    ops_json,
+                    legacy_hash,
+                    base_revs_json,
+                    now,
+                    expires_at,
+                ],
+            )
+            .unwrap();
+
+        // Decide proposal should verify via legacy hash, recompute required grants, grant coreside.charts, and commit
+        let res = decide_proposal(&mut db, None, &proposal_id, true)
+            .expect("legacy proposal must recompute grants and succeed");
+        assert_eq!(res.outcome, CommitOutcome::Committed);
+
+        let updated_surf = get_surface(&db, &surf.id).unwrap();
+        assert!(
+            updated_surf
+                .capability_packs
+                .contains(&"coreside.charts".to_string()),
+            "surface must have received coreside.charts grant through legacy proposal decision"
+        );
+    }
+
+    #[test]
     fn proposal_exact_operations_hash_covers_required_capabilities_and_fails_closed_on_tamper() {
         let mut db = test_db();
         crate::db::ensure_default_workspace(&db).unwrap();
@@ -4623,5 +4814,52 @@ mod tests {
             "Conflict must cite missing coreside.charts pack: {:?}",
             apply_res.conflicts
         );
+    }
+
+    #[test]
+    fn parse_proposal_row_rejects_corrupted_capabilities_json() {
+        let mut db = test_db();
+        let conv =
+            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Corrupt Cap Conv", None).unwrap();
+
+        let proposal_id = "prop-corrupt-cap-json";
+        let now = chrono::Utc::now().to_rfc3339();
+        db.conn()
+            .execute(
+                "INSERT INTO kernel_change_proposals (
+                    id, conversation_id, project_id, turn_id, status, risk,
+                    impact_summary, summary, exact_operations_json, exact_operations_hash,
+                    base_revisions_json, required_capabilities_json, created_at, expires_at
+                 ) VALUES (?, ?, NULL, NULL, 'pending', 'automatic', '', 'Corrupt summary', '[]', 'dummy-hash', '{}', ?, ?, NULL)",
+                rusqlite::params![
+                    proposal_id,
+                    conv.id,
+                    "{\"corrupted_json\": [unclosed",
+                    now,
+                ],
+            )
+            .unwrap();
+
+        let res = get_proposal(&db, proposal_id);
+        assert!(
+            res.is_err(),
+            "Reading proposal with corrupted capabilities JSON must fail closed"
+        );
+        let err = res.unwrap_err();
+        eprintln!("ACTUAL ERROR: {err:?}");
+        match err {
+            KernelError::Db(crate::db::DbError::Sqlite(
+                rusqlite::Error::FromSqlConversionFailure(idx, _, ref e),
+            )) => {
+                assert_eq!(
+                    idx, 20,
+                    "column 20 is required_capabilities_json in PROPOSAL_SELECT_FIELDS"
+                );
+                assert!(e
+                    .to_string()
+                    .contains("required_capabilities_json is malformed"));
+            }
+            other => panic!("expected FromSqlConversionFailure, got: {other:?}"),
+        }
     }
 }

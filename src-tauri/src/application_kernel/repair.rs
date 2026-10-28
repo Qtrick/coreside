@@ -253,18 +253,21 @@ mod tests {
             status: "verified".into(),
             message: "ok".into(),
             test_results: vec![],
+            ..Default::default()
         }
         .is_acceptable());
         assert!(VerificationResult {
             status: "verified_with_warnings".into(),
             message: "ok".into(),
             test_results: vec![],
+            ..Default::default()
         }
         .is_acceptable());
         assert!(!VerificationResult {
             status: "failed".into(),
             message: "no".into(),
             test_results: vec![],
+            ..Default::default()
         }
         .is_acceptable());
     }
@@ -277,6 +280,7 @@ mod tests {
             status: "failed".into(),
             message: "boom".into(),
             test_results: vec![],
+            ..Default::default()
         };
         let err = run_bounded_repair(
             &mut db,
@@ -343,6 +347,7 @@ mod tests {
             status: "failed".into(),
             message: "records missing".into(),
             test_results: vec![],
+            ..Default::default()
         };
         let result = run_bounded_repair(&mut db, app_id, &surface_id, &def, &failed).unwrap();
         assert!(

@@ -654,7 +654,36 @@ mod tests {
     #[test]
     fn unavailable_provider_is_explicit() {
         let dir = tempdir().unwrap();
-        let db = Database::open_path(&dir.path().join("ai2.db")).unwrap();
+        let mut db = Database::open_path(&dir.path().join("ai2.db")).unwrap();
+        crate::db::ensure_default_workspace(&db).unwrap();
+        let conn = crate::db::ProviderConnection {
+            id: "conn-unavail".into(),
+            provider: "custom".into(),
+            label: "Unavailable".into(),
+            base_url: Some("http://127.0.0.1:1".into()),
+            model_default: Some("custom-model".into()),
+            keyring_account: "key-unavail".into(),
+            is_active: true,
+            last_status: None,
+            last_tested_at: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+            provider_descriptor_id: None,
+            protocol_family: None,
+            auth_mode: Some("api_key_bearer".into()),
+            endpoint_class: None,
+            api_version: None,
+            region: None,
+            deployment: None,
+            organization_id: None,
+            project_id: None,
+            capability_profile_json: None,
+            capability_checked_at: None,
+            model_catalog_checked_at: None,
+            provider_preset_version: None,
+            enabled: true,
+        };
+        crate::db::upsert_provider_connection(&mut db, &conn).unwrap();
         let out = execute_ai_prompt(&db, &sample(true), "Summarize tasks").unwrap();
         assert_eq!(out.status, "error");
         let cat = out.error_category.as_deref().unwrap_or("");

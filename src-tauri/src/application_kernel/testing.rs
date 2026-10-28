@@ -53,24 +53,46 @@ pub struct VerificationResult {
     pub status: String,
     pub message: String,
     pub test_results: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tests_executed: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renderer_verified: Option<bool>,
 }
 
 impl VerificationResult {
-    /// True when post-change verify is acceptable for continue / mark-LKG / stop-repair.
-    ///
-    /// `verify_after_change` emits `verified` / `verified_with_warnings` / `failed`.
-    /// `passed` is accepted for renderer-fact and provenance-aligned callers.
+    /// True when post-change verify is acceptable for continue / apply-commit / stop-repair.
+    /// Untested and structural-only apps can safely remain applied, but must NOT promote to LKG without proof.
     pub fn is_acceptable(&self) -> bool {
         matches!(
             self.status.as_str(),
-            "verified" | "verified_with_warnings" | "passed"
+            "verified"
+                | "renderer_passed"
+                | "verified_with_warnings"
+                | "passed"
+                | "structural_passed"
+                | "untested"
         )
     }
 
     /// Strict promotion gate: True ONLY when all tests and renderer facts are fully verified.
-    /// Unverified visual assertions (`verified_with_warnings`) must never promote to Last Known Good.
+    /// Untested, structural-only, or warnings must never promote to Last Known Good.
     pub fn is_fully_verified(&self) -> bool {
-        matches!(self.status.as_str(), "verified" | "passed")
+        matches!(self.status.as_str(), "verified" | "renderer_passed")
+    }
+}
+
+impl Default for VerificationResult {
+    fn default() -> Self {
+        Self {
+            status: "untested".into(),
+            message: String::new(),
+            test_results: Vec::new(),
+            level: Some("untested".into()),
+            tests_executed: Some(0),
+            renderer_verified: Some(false),
+        }
     }
 }
 
@@ -322,17 +344,58 @@ pub fn verify_after_change(
                 apps.insert(id.to_string());
             }
         }
+        if let Some(tool_id) = op.target.tool_id.as_ref() {
+            apps.insert(tool_id.clone());
+        }
     }
     let mut results = Vec::new();
     let mut failed = false;
     let mut unverified = false;
-    for app in apps {
-        if let Ok(m) = super::manifest::get_manifest(db, &app) {
-            if let Err(e) = super::manifest::validate_manifest(&m.manifest) {
+    let mut total_tests_executed = 0;
+
+    for app in &apps {
+        match super::manifest::get_manifest(db, app) {
+            Ok(m) => {
+                if m.disabled || m.lifecycle_state == "disabled" || m.lifecycle_state == "suspended"
+                {
+                    failed = true;
+                    results.push(json!({
+                        "applicationId": app,
+                        "error": format!("application '{app}' is disabled or suspended"),
+                    }));
+                } else if let Err(e) = super::manifest::validate_manifest(&m.manifest) {
+                    failed = true;
+                    results.push(json!({ "applicationId": app, "error": e }));
+                }
+            }
+            Err(DbError::NotFound(_)) => {
+                // If it's a known tool in tools table or bound to a surface, manifest is expected
+                let tool_exists: bool = db
+                    .conn()
+                    .query_row(
+                        "SELECT 1 FROM tools WHERE id = ?1 UNION SELECT 1 FROM surfaces WHERE tool_id = ?1",
+                        params![app],
+                        |_| Ok(()),
+                    )
+                    .is_ok();
+                if tool_exists {
+                    failed = true;
+                    results.push(json!({
+                        "applicationId": app,
+                        "error": format!("missing expected manifest for tool/application '{app}'"),
+                    }));
+                }
+            }
+            Err(e) => {
+                // Corrupted manifest or Sqlite error must fail closed
                 failed = true;
-                results.push(json!({ "applicationId": app, "error": e }));
+                results.push(json!({
+                    "applicationId": app,
+                    "error": format!("failed to load manifest for application '{app}': {e}"),
+                }));
             }
         }
+
         let mut stmt = db.conn().prepare(
             "SELECT test_id FROM generated_tests WHERE application_id = ?1 AND enabled = 1 ORDER BY test_id LIMIT ?2",
         )?;
@@ -343,8 +406,10 @@ pub fn verify_after_change(
             .filter_map(|r| r.ok())
             .collect();
         drop(stmt);
+
         for tid in ids {
-            match run_test(db, &app, &tid) {
+            total_tests_executed += 1;
+            match run_test(db, app, &tid) {
                 Ok(run) => {
                     let status = run.get("status").and_then(|v| v.as_str()).unwrap_or("");
                     if status == "failed" {
@@ -369,17 +434,65 @@ pub fn verify_after_change(
             }
         }
     }
-    let status = if failed {
-        "failed"
+
+    let (status, level, message): (&str, &str, String) = if failed {
+        let first_err = results
+            .iter()
+            .find_map(|r| r.get("error").and_then(|e| e.as_str()))
+            .unwrap_or("Post-change verification failed")
+            .to_string();
+        ("failed", "failed", first_err)
+    } else if total_tests_executed == 0 {
+        (
+            "untested",
+            "structural_passed",
+            "Manifest validated; 0 tests executed (renderer verification pending)".into(),
+        )
     } else if unverified {
-        "verified_with_warnings"
+        (
+            "verified_with_warnings",
+            "renderer_pending",
+            "Tests executed; renderer assertions pending live verification".into(),
+        )
     } else {
-        "verified"
+        (
+            "structural_passed",
+            "structural_passed",
+            "Structural assertions passed; renderer verification required for visual proof".into(),
+        )
     };
+
+    // Update application_manifest_versions with truthful test status
+    for app in &apps {
+        let test_status_for_db = if failed {
+            "failed"
+        } else if total_tests_executed == 0 {
+            "untested"
+        } else if unverified {
+            "not_verified"
+        } else {
+            "structural_passed"
+        };
+        let _ = db.conn().execute(
+            "UPDATE application_manifest_versions SET validation_status = ?1, test_status = ?2
+             WHERE application_id = ?3 AND version = (
+                 SELECT current_version FROM application_manifests WHERE application_id = ?3
+             )",
+            params![
+                if failed { "failed" } else { "passed" },
+                test_status_for_db,
+                app
+            ],
+        );
+    }
+
     Ok(VerificationResult {
         status: status.into(),
-        message: "Post-change verification complete".into(),
+        message: message.into(),
         test_results: results,
+        level: Some(level.into()),
+        tests_executed: Some(total_tests_executed),
+        renderer_verified: Some(false),
     })
 }
 
@@ -432,6 +545,9 @@ pub struct RendererVerifyRequest {
     /// Optional conversation scope — must match mount when provided.
     #[serde(default)]
     pub conversation_id: Option<String>,
+    /// Bound surface revision — a stale request for an older revision is rejected.
+    #[serde(default)]
+    pub revision: Option<i64>,
 }
 
 /// Trusted facts reported by the live renderer after Rust has validated the mount.
@@ -457,6 +573,45 @@ pub struct RendererVerifyResult {
     /// Assertion bound at authorize time — accept must match (confused-deputy guard).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authorized_assertion: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_version: Option<i64>,
+}
+
+impl Default for RendererVerifyRequest {
+    fn default() -> Self {
+        Self {
+            application_id: String::new(),
+            surface_id: String::new(),
+            mount_instance_id: String::new(),
+            assertion: "render_ok".into(),
+            expected: None,
+            target: None,
+            conversation_id: None,
+            revision: None,
+        }
+    }
+}
+
+impl Default for RendererVerifyResult {
+    fn default() -> Self {
+        Self {
+            status: "not_verified".into(),
+            verified: false,
+            message: String::new(),
+            fact: None,
+            authorized_assertion: None,
+            application_id: None,
+            surface_id: None,
+            revision: None,
+            application_version: None,
+        }
+    }
 }
 
 /// Authorize a renderer verification request against the mount registry.
@@ -480,6 +635,14 @@ pub fn authorize_renderer_verify(
     if !app_matches {
         return Err("application/surface identity mismatch".into());
     }
+    if let Some(expected_rev) = req.revision {
+        if surface.current_revision != expected_rev {
+            return Err(format!(
+                "surface revision mismatch: request expected revision {}, but current revision is {}",
+                expected_rev, surface.current_revision
+            ));
+        }
+    }
     if let Some(wanted) = req.conversation_id.as_ref() {
         match surface.conversation_id.as_ref() {
             Some(actual) if actual == wanted => {}
@@ -499,14 +662,25 @@ pub fn authorize_renderer_verify(
                     message: "mount instance not registered for surface".into(),
                     fact: None,
                     authorized_assertion: None,
+                    application_id: Some(req.application_id.clone()),
+                    surface_id: Some(req.surface_id.clone()),
+                    revision: Some(surface.current_revision),
+                    application_version: None,
                 });
             }
+            let app_ver = super::manifest::get_manifest(db, &req.application_id)
+                .ok()
+                .map(|m| m.current_version);
             Ok(RendererVerifyResult {
                 status: "authorized".into(),
                 verified: false,
                 message: "mount authorized; await renderer fact".into(),
                 fact: None,
                 authorized_assertion: Some(req.assertion.clone()),
+                application_id: Some(req.application_id.clone()),
+                surface_id: Some(req.surface_id.clone()),
+                revision: Some(surface.current_revision),
+                application_version: app_ver,
             })
         }
         crate::runtime_v2::mount_registry::RendererReadiness::NotMounted => {
@@ -516,6 +690,10 @@ pub fn authorize_renderer_verify(
                 message: "no live renderer mount".into(),
                 fact: None,
                 authorized_assertion: None,
+                application_id: Some(req.application_id.clone()),
+                surface_id: Some(req.surface_id.clone()),
+                revision: Some(surface.current_revision),
+                application_version: None,
             })
         }
         crate::runtime_v2::mount_registry::RendererReadiness::Stale { reason } => {
@@ -525,6 +703,10 @@ pub fn authorize_renderer_verify(
                 message: format!("stale renderer mount: {reason}"),
                 fact: None,
                 authorized_assertion: None,
+                application_id: Some(req.application_id.clone()),
+                surface_id: Some(req.surface_id.clone()),
+                revision: Some(surface.current_revision),
+                application_version: None,
             })
         }
     }
@@ -559,14 +741,73 @@ pub fn accept_renderer_fact(
         } else {
             "failed".into()
         },
-        verified: true,
+        verified: fact.ok,
         message: fact
             .detail
             .clone()
             .unwrap_or_else(|| "renderer fact accepted".into()),
         fact: Some(fact),
         authorized_assertion: Some(expected.to_string()),
+        application_id: authorized.application_id.clone(),
+        surface_id: authorized.surface_id.clone(),
+        revision: authorized.revision,
+        application_version: authorized.application_version,
     })
+}
+
+/// Accept a renderer fact with DB persistence, checking concurrent revision and recording test run + version status.
+pub fn accept_renderer_fact_with_db(
+    db: &mut Database,
+    authorized: &RendererVerifyResult,
+    fact: RendererVerifyFact,
+) -> Result<RendererVerifyResult, String> {
+    if let (Some(sid), Some(expected_rev)) = (authorized.surface_id.as_deref(), authorized.revision)
+    {
+        let current_surf =
+            crate::runtime_v2::surfaces::get_surface(db, sid).map_err(|e| e.to_string())?;
+        if current_surf.current_revision != expected_rev {
+            return Err(format!(
+                "stale renderer fact: surface revision changed from {} to {}",
+                expected_rev, current_surf.current_revision
+            ));
+        }
+    }
+    let res = accept_renderer_fact(authorized, fact)?;
+    if let Some(app_id) = authorized.application_id.as_deref() {
+        let app_ver = authorized.application_version.unwrap_or_else(|| {
+            super::manifest::get_manifest(db, app_id)
+                .map(|m| m.current_version)
+                .unwrap_or(1)
+        });
+        let run_id = format!("rendrun-{}", Uuid::new_v4());
+        let fact_json = serde_json::to_string(res.fact.as_ref().unwrap()).unwrap_or_default();
+        let status = if res.verified { "passed" } else { "failed" };
+        let _ = db.conn().execute(
+            "INSERT INTO generated_test_runs (id, application_id, test_id, application_version, status, result_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                run_id,
+                app_id,
+                format!(
+                    "renderer-{}",
+                    authorized
+                        .authorized_assertion
+                        .as_deref()
+                        .unwrap_or("unknown")
+                ),
+                app_ver,
+                status,
+                fact_json,
+                now_rfc3339()
+            ],
+        );
+        let _ = db.conn().execute(
+            "UPDATE application_manifest_versions SET test_status = ?1, validation_status = 'passed'
+             WHERE application_id = ?2 AND version = ?3",
+            params![status, app_id, app_ver],
+        );
+    }
+    Ok(res)
 }
 
 #[cfg(test)]
@@ -929,6 +1170,7 @@ mod tests {
             expected: None,
             target: None,
             conversation_id: None,
+            ..Default::default()
         };
         let result = authorize_renderer_verify(&db, &mounts, &req).unwrap();
         assert_eq!(result.status, "not_verified");
@@ -971,6 +1213,7 @@ mod tests {
             expected: None,
             target: None,
             conversation_id: None,
+            ..Default::default()
         };
         let err = authorize_renderer_verify(&db, &mounts, &req).unwrap_err();
         assert!(
@@ -987,6 +1230,7 @@ mod tests {
             message: "no live renderer mount".into(),
             fact: None,
             authorized_assertion: None,
+            ..Default::default()
         };
         let err = accept_renderer_fact(
             &unauthorized,
@@ -1008,6 +1252,7 @@ mod tests {
             message: "mount authorized; await renderer fact".into(),
             fact: None,
             authorized_assertion: Some("run_arbitrary_script".into()),
+            ..Default::default()
         };
         let err = accept_renderer_fact(
             &authorized,
@@ -1029,6 +1274,7 @@ mod tests {
             message: "mount authorized; await renderer fact".into(),
             fact: None,
             authorized_assertion: Some("render_ok".into()),
+            ..Default::default()
         };
         let err = accept_renderer_fact(
             &authorized,
@@ -1053,6 +1299,7 @@ mod tests {
             message: "mount authorized; await renderer fact".into(),
             fact: None,
             authorized_assertion: Some("render_ok".into()),
+            ..Default::default()
         };
         let accepted = accept_renderer_fact(
             &authorized,
@@ -1065,5 +1312,409 @@ mod tests {
         .unwrap();
         assert_eq!(accepted.status, "passed");
         assert!(accepted.verified);
+    }
+
+    #[test]
+    fn zero_tests_produces_untested_and_blocks_lkg() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("zero-tests.db")).unwrap();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "Conv Zero",
+            None,
+        )
+        .unwrap();
+        let surf = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            Some("tool-zero"),
+            "Zero Tests Surface",
+            &serde_json::json!({"id": "doc-zero", "name": "Zero App", "components": []}),
+            &[],
+        )
+        .unwrap();
+        crate::application_kernel::manifest::ensure_manifest_for_tool(
+            &mut db,
+            "tool-zero",
+            "Zero Tests App",
+            &surf.id,
+        )
+        .unwrap();
+
+        let ops: Vec<AppOperation> = serde_json::from_value(serde_json::json!([{
+            "id": "op-1",
+            "type": "surface.create",
+            "target": { "applicationId": "tool-zero" },
+            "payload": { "applicationId": "tool-zero" }
+        }]))
+        .unwrap();
+
+        let result = verify_after_change(&mut db, &ops).unwrap();
+        assert_eq!(result.status, "untested");
+        assert_eq!(result.level.as_deref(), Some("structural_passed"));
+        assert_eq!(result.tests_executed, Some(0));
+        assert_eq!(result.renderer_verified, Some(false));
+        // is_acceptable allows non-breaking application apply
+        assert!(result.is_acceptable());
+        // but strict promotion gate is NOT verified
+        assert!(!result.is_fully_verified());
+
+        // LKG promotion must fail
+        let lkg_err =
+            crate::application_kernel::manifest::mark_last_known_good(&mut db, "tool-zero")
+                .unwrap_err();
+        assert!(matches!(lkg_err, DbError::Invalid(_)));
+    }
+
+    #[test]
+    fn structural_tests_only_produces_structural_passed_and_blocks_lkg() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("struct-tests.db")).unwrap();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "Conv Struct",
+            None,
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES ('tool-struct', 'ws-personal-default', 'Struct App', '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                [],
+            )
+            .unwrap();
+        let surf = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Struct Surface",
+            &serde_json::json!({"id": "doc-struct", "name": "Struct App", "components": []}),
+            &[],
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET tool_id = 'tool-struct' WHERE id = ?1",
+                params![&surf.id],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tool_state (tool_id, state_json) VALUES ('tool-struct', '{\"ready\":true}')",
+                [],
+            )
+            .unwrap();
+        crate::application_kernel::manifest::ensure_manifest_for_tool(
+            &mut db,
+            "tool-struct",
+            "Struct App",
+            &surf.id,
+        )
+        .unwrap();
+
+        // Register a structural-only test
+        let test = DeclarativeTest {
+            test_id: "test-struct-1".into(),
+            name: "record_check".into(),
+            test_type: "smoke".into(),
+            actions: vec![],
+            assertions: vec![TestAssertion {
+                assertion: "state_equals".into(),
+                target: Some("ready".into()),
+                expected: Some(serde_json::json!(true)),
+            }],
+            timeout_ms: 1000,
+        };
+        upsert_test(&mut db, "tool-struct", test).unwrap();
+
+        let ops: Vec<AppOperation> = serde_json::from_value(serde_json::json!([{
+            "id": "op-1",
+            "type": "surface.create",
+            "target": { "applicationId": "tool-struct" },
+            "payload": { "applicationId": "tool-struct" }
+        }]))
+        .unwrap();
+
+        let result = verify_after_change(&mut db, &ops).unwrap();
+        assert_eq!(result.status, "structural_passed");
+        assert_eq!(result.level.as_deref(), Some("structural_passed"));
+        assert_eq!(result.tests_executed, Some(1));
+        assert_eq!(result.renderer_verified, Some(false));
+        // Structural tests passing allows continued operation but NOT full LKG promotion
+        assert!(result.is_acceptable());
+        assert!(!result.is_fully_verified());
+
+        // LKG promotion must fail
+        let lkg_err =
+            crate::application_kernel::manifest::mark_last_known_good(&mut db, "tool-struct")
+                .unwrap_err();
+        assert!(matches!(lkg_err, DbError::Invalid(_)));
+    }
+
+    #[test]
+    fn missing_manifest_in_verify_after_change_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("missing-manifest.db")).unwrap();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "Conv MM",
+            None,
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES ('tool-nonexistent', 'ws-personal-default', 'MM App', '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                [],
+            )
+            .unwrap();
+        let surf = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "MM Surface",
+            &serde_json::json!({"id": "doc-mm", "name": "MM", "components": []}),
+            &[],
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET tool_id = 'tool-nonexistent' WHERE id = ?1",
+                params![&surf.id],
+            )
+            .unwrap();
+
+        let ops: Vec<AppOperation> = serde_json::from_value(serde_json::json!([{
+            "id": "op-1",
+            "type": "surface.patch",
+            "target": { "surfaceId": surf.id, "applicationId": "tool-nonexistent" },
+            "payload": {}
+        }]))
+        .unwrap();
+
+        let result = verify_after_change(&mut db, &ops).unwrap();
+        assert_eq!(result.status, "failed");
+        assert_eq!(result.level.as_deref(), Some("failed"));
+        assert!(result.message.contains("missing expected manifest"));
+        assert!(!result.is_acceptable());
+        assert!(!result.is_fully_verified());
+    }
+
+    #[test]
+    fn corrupt_manifest_in_verify_after_change_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("corrupt-manifest.db")).unwrap();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "Conv CM",
+            None,
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES ('tool-cm', 'ws-personal-default', 'CM App', '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                [],
+            )
+            .unwrap();
+        let surf = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "CM Surface",
+            &serde_json::json!({"id": "doc-cm", "name": "CM", "components": []}),
+            &[],
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET tool_id = 'tool-cm' WHERE id = ?1",
+                params![&surf.id],
+            )
+            .unwrap();
+        crate::application_kernel::manifest::ensure_manifest_for_tool(
+            &mut db, "tool-cm", "CM App", &surf.id,
+        )
+        .unwrap();
+
+        // Corrupt the manifest JSON in SQLite
+        db.conn()
+            .execute(
+                "UPDATE application_manifests SET manifest_json = '{invalid_json' WHERE application_id = 'tool-cm'",
+                [],
+            )
+            .unwrap();
+
+        let ops: Vec<AppOperation> = serde_json::from_value(serde_json::json!([{
+            "id": "op-1",
+            "type": "surface.patch",
+            "target": { "surfaceId": surf.id, "applicationId": "tool-cm" },
+            "payload": {}
+        }]))
+        .unwrap();
+
+        let result = verify_after_change(&mut db, &ops).unwrap();
+        assert_eq!(result.status, "failed");
+        assert!(result.message.contains("malformed") || result.message.contains("corrupt"));
+        assert!(!result.is_acceptable());
+    }
+
+    #[test]
+    fn authorize_renderer_verify_rejects_revision_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("rend-rev-mismatch.db")).unwrap();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "Rend Rev Conv",
+            None,
+        )
+        .unwrap();
+        let surf = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Rend Surface",
+            &serde_json::json!({
+                "id": "doc-rend",
+                "name": "Rend Surface",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        let mut mounts = crate::runtime_v2::mount_registry::MountRegistry::new();
+        mounts
+            .register(&db, "main", &surf.id, "mount-123", None, None, 1, 1)
+            .unwrap();
+
+        // Current revision is 1; request asks for revision 99 (stale revision attack)
+        let req = RendererVerifyRequest {
+            application_id: surf.id.clone(),
+            surface_id: surf.id.clone(),
+            mount_instance_id: "mount-123".into(),
+            assertion: "render_ok".into(),
+            expected: None,
+            target: None,
+            conversation_id: None,
+            revision: Some(99),
+        };
+        let err = authorize_renderer_verify(&db, &mounts, &req).unwrap_err();
+        assert!(err.contains("revision mismatch"));
+    }
+
+    #[test]
+    fn accept_renderer_fact_with_db_detects_concurrent_revision_and_updates_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open_path(&dir.path().join("rend-accept-db.db")).unwrap();
+        let conv = crate::db::create_conversation(
+            &mut db,
+            crate::db::DEFAULT_WORKSPACE_ID,
+            "Rend Accept Conv",
+            None,
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO tools (id, workspace_id, name, description, layout, definition_json, current_version, created_at, updated_at)
+                 VALUES ('tool-accept', 'ws-personal-default', 'Accept App', '', 'stack', '{}', 1, datetime('now'), datetime('now'))",
+                [],
+            )
+            .unwrap();
+        let surf = crate::runtime_v2::surfaces::create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Accept Surface",
+            &serde_json::json!({
+                "id": "doc-accept",
+                "name": "Accept Surface",
+                "layout": "stack",
+                "components": [{"id": "t", "type": "text", "props": {"text": "hi"}}]
+            }),
+            &[],
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET tool_id = 'tool-accept' WHERE id = ?1",
+                params![&surf.id],
+            )
+            .unwrap();
+        let man = crate::application_kernel::manifest::ensure_manifest_for_tool(
+            &mut db,
+            "tool-accept",
+            "Accept App",
+            &surf.id,
+        )
+        .unwrap();
+
+        let mut mounts = crate::runtime_v2::mount_registry::MountRegistry::new();
+        mounts
+            .register(
+                &db,
+                "main",
+                &surf.id,
+                "mount-abc",
+                Some("tool-accept"),
+                None,
+                1,
+                1,
+            )
+            .unwrap();
+
+        let req = RendererVerifyRequest {
+            application_id: "tool-accept".into(),
+            surface_id: surf.id.clone(),
+            mount_instance_id: "mount-abc".into(),
+            assertion: "render_ok".into(),
+            expected: None,
+            target: None,
+            conversation_id: None,
+            revision: Some(surf.current_revision),
+        };
+
+        let authorized = authorize_renderer_verify(&db, &mounts, &req).unwrap();
+        assert_eq!(authorized.status, "authorized");
+        assert_eq!(authorized.application_version, Some(man.current_version));
+
+        let fact = RendererVerifyFact {
+            assertion: "render_ok".into(),
+            ok: true,
+            detail: Some("rendered cleanly".into()),
+        };
+
+        // Accepting fact with db updates validation and test_status to 'passed'
+        let accepted = accept_renderer_fact_with_db(&mut db, &authorized, fact).unwrap();
+        assert_eq!(accepted.status, "passed");
+        assert!(accepted.verified);
+
+        // Verification evidence is now present in SQLite
+        let test_status: String = db.conn().query_row(
+            "SELECT test_status FROM application_manifest_versions WHERE application_id = 'tool-accept' AND version = ?1",
+            rusqlite::params![man.current_version],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(test_status, "passed");
+
+        // Now LKG promotion succeeds!
+        crate::application_kernel::manifest::mark_last_known_good(&mut db, "tool-accept").unwrap();
+        let lkg_v: i64 = db.conn().query_row(
+            "SELECT last_known_good_version FROM application_manifests WHERE application_id = 'tool-accept'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(lkg_v, man.current_version);
     }
 }

@@ -964,7 +964,21 @@ pub fn grant_capability_pack(
         )?;
 
         // If definition is a SoftwareDocument, sync doc.capability_packs with error propagation
-        if let Ok(mut doc) =
+        if current.definition.get("sections").is_some() {
+            let mut doc =
+                super::software_document::SoftwareDocument::from_value(&current.definition)
+                    .map_err(|e| {
+                        DbError::Corrupted(format!(
+                            "corrupt SoftwareDocument on surface '{surface_id}': {e}"
+                        ))
+                    })?;
+            doc.capability_packs = packs.clone();
+            let def_json = serde_json::to_string(&doc)?;
+            db.conn().execute(
+                "UPDATE surfaces SET definition_json = ?1 WHERE id = ?2",
+                params![def_json, surface_id],
+            )?;
+        } else if let Ok(mut doc) =
             super::software_document::SoftwareDocument::from_value(&current.definition)
         {
             doc.capability_packs = packs.clone();
@@ -976,13 +990,32 @@ pub fn grant_capability_pack(
         }
 
         // If surface has an authoritative application manifest, update manifest capabilities with error propagation
+        // Avoid manifest version drift: update manifest_json in-place for current_version rather than bumping version
         if let Some(tool_id) = current.tool_id.as_deref() {
-            if let Ok(mut m) = crate::application_kernel::manifest::get_manifest(db, tool_id) {
-                if !m.manifest.capabilities.contains(&target_pack) {
-                    m.manifest.capabilities.push(target_pack);
-                    m.manifest.capabilities.sort();
-                    m.manifest.capabilities.dedup();
-                    crate::application_kernel::manifest::upsert_manifest(db, m.manifest)?;
+            match crate::application_kernel::manifest::get_manifest(db, tool_id) {
+                Ok(mut m) => {
+                    if !m.manifest.capabilities.contains(&target_pack) {
+                        m.manifest.capabilities.push(target_pack);
+                        m.manifest.capabilities.sort();
+                        m.manifest.capabilities.dedup();
+                        let m_json = serde_json::to_string(&m.manifest)?;
+                        let now = now_rfc3339();
+                        db.conn().execute(
+                            "UPDATE application_manifests SET manifest_json = ?1, updated_at = ?2 WHERE application_id = ?3",
+                            params![m_json, now, tool_id],
+                        )?;
+                        db.conn().execute(
+                            "UPDATE application_manifest_versions SET manifest_json = ?1 WHERE application_id = ?2 AND version = ?3",
+                            params![m_json, tool_id, m.current_version],
+                        )?;
+                    }
+                }
+                Err(DbError::NotFound(_)) => {
+                    // Legitimate: legacy tools or standalone surfaces may not have an ApplicationManifest
+                }
+                Err(e) => {
+                    // Propagate real database or corruption errors
+                    return Err(e);
                 }
             }
         }
@@ -2558,5 +2591,92 @@ mod tests {
         let authorized_bound = resolve_and_authorize_surface_scope(&db, &bound.id, None, None)
             .expect("no expected scope must pass even with bindings");
         assert_eq!(authorized_bound.id, bound.id);
+    }
+
+    #[test]
+    fn grant_capability_pack_fails_closed_on_corrupt_software_document() {
+        let mut db = test_db();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Corrupt Doc", None).unwrap();
+        let valid_doc = serde_json::json!({
+            "schemaVersion": "1",
+            "title": "Valid Surface",
+            "sections": [],
+            "capabilityPacks": ["coreside.core"],
+        });
+        let surface = create_inline_surface(
+            &mut db,
+            &conv.id,
+            None,
+            None,
+            "Corrupt Surface",
+            &valid_doc,
+            &["coreside.core".into()],
+        )
+        .unwrap();
+
+        // Directly corrupt the definition_json in SQLite to simulate corrupted stored document
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET definition_json = '{\"schemaVersion\":\"1\",\"sections\":true}' WHERE id = ?1",
+                rusqlite::params![&surface.id],
+            )
+            .unwrap();
+
+        let res = grant_capability_pack(&mut db, &surface.id, "coreside.charts");
+        assert!(
+            res.is_err(),
+            "grant_capability_pack must fail closed on corrupt SoftwareDocument"
+        );
+        match res.unwrap_err() {
+            crate::db::DbError::Corrupted(msg) => {
+                assert!(msg.contains("corrupt SoftwareDocument on surface"));
+            }
+            other => panic!("expected DbError::Corrupted, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn grant_capability_pack_in_place_prevents_version_drift() {
+        let mut db = test_db();
+        let tool_id = "tool-no-drift";
+        let tool = task_tracker_shaped_tool(tool_id);
+        let applied =
+            apply_tool_change(&mut db, DEFAULT_WORKSPACE_ID, &tool, "create", None, "test")
+                .unwrap();
+
+        // Create surface from tool
+        let surface =
+            upsert_surface_from_tool(&mut db, &applied.definition, DEFAULT_WORKSPACE_ID, 1)
+                .unwrap();
+
+        // Ensure manifest exists for the tool
+        let manifest_rec = crate::application_kernel::manifest::ensure_manifest_for_tool(
+            &mut db,
+            tool_id,
+            "Clean App",
+            &surface.id,
+        )
+        .unwrap();
+        assert_eq!(manifest_rec.current_version, 1);
+
+        // Now grant coreside.charts
+        grant_capability_pack(&mut db, &surface.id, "coreside.charts").unwrap();
+
+        // 1. Surface definition updated
+        let s = get_surface(&db, &surface.id).unwrap();
+        assert!(s.capability_packs.contains(&"coreside.charts".to_string()));
+
+        // 2. Manifest updated with coreside.charts
+        let updated_m = crate::application_kernel::manifest::get_manifest(&db, tool_id).unwrap();
+        assert!(updated_m
+            .manifest
+            .capabilities
+            .contains(&"coreside.charts".to_string()));
+
+        // 3. Manifest version did NOT bump unnecessarily (no version drift)
+        assert_eq!(
+            updated_m.current_version, 1,
+            "grant_capability_pack must update capabilities in-place without version drift"
+        );
     }
 }

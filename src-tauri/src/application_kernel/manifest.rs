@@ -262,6 +262,14 @@ pub fn sync_software_document_contracts(
 }
 
 pub fn upsert_manifest(db: &mut Database, mut m: ApplicationManifest) -> DbResult<ManifestRecord> {
+    for sref in &mut m.surfaces {
+        if sref.definition_ref.is_none() {
+            if let Ok(surf) = crate::runtime_v2::surfaces::get_surface(db, &sref.surface_id) {
+                sref.definition_ref =
+                    Some(serde_json::to_string(&surf.definition).unwrap_or_default());
+            }
+        }
+    }
     validate_manifest(&m).map_err(DbError::Invalid)?;
     if m.version <= 0 {
         m.version = 1;
@@ -479,6 +487,41 @@ pub fn list_manifests(db: &Database) -> DbResult<Vec<ManifestRecord>> {
 
 pub fn mark_last_known_good(db: &mut Database, application_id: &str) -> DbResult<()> {
     let rec = get_manifest(db, application_id)?;
+    // Truthful verification evidence check:
+    // A version must only be promoted to last-known-good if it has truthful verification evidence.
+    let row: Option<(Option<String>, Option<String>)> = db
+        .conn()
+        .query_row(
+            "SELECT validation_status, test_status FROM application_manifest_versions WHERE application_id = ?1 AND version = ?2",
+            params![application_id, rec.current_version],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(DbError::Sqlite)?;
+
+    let (val_status, test_status) = match row {
+        Some(statuses) => statuses,
+        None => {
+            return Err(DbError::Invalid(format!(
+                "cannot mark application '{}' v{} as last-known-good: version record missing",
+                application_id, rec.current_version
+            )));
+        }
+    };
+
+    let val_ok = val_status.as_deref() == Some("passed");
+    let test_ok = matches!(
+        test_status.as_deref(),
+        Some("passed") | Some("verified") | Some("renderer_passed")
+    );
+
+    if !val_ok || !test_ok {
+        return Err(DbError::Invalid(format!(
+            "cannot mark application '{}' v{} as last-known-good: unverified (validation_status: {:?}, test_status: {:?})",
+            application_id, rec.current_version, val_status, test_status
+        )));
+    }
+
     let now = now_rfc3339();
     db.conn().execute(
         "UPDATE application_manifests SET
@@ -489,7 +532,7 @@ pub fn mark_last_known_good(db: &mut Database, application_id: &str) -> DbResult
         params![application_id, now],
     )?;
     db.conn().execute(
-        "UPDATE application_manifest_versions SET is_known_good = 1, validation_status = 'passed', test_status = 'passed'
+        "UPDATE application_manifest_versions SET is_known_good = 1
          WHERE application_id = ?1 AND version = ?2",
         params![application_id, rec.current_version],
     )?;
@@ -504,22 +547,185 @@ pub fn restore_last_known_good(
     let lkg = rec
         .last_known_good_version
         .ok_or_else(|| DbError::Invalid("no last-known-good version".into()))?;
-    let json: String = db.conn().query_row(
-        "SELECT manifest_json FROM application_manifest_versions
-         WHERE application_id = ?1 AND version = ?2 AND is_known_good = 1",
-        params![application_id, lkg],
-        |row| row.get(0),
-    )?;
-    let mut m: ApplicationManifest = serde_json::from_str(&json)?;
-    m.version = lkg;
-    let now = now_rfc3339();
-    db.conn().execute(
-        "UPDATE application_manifests SET
-            current_version = ?2, manifest_json = ?3, health_state = 'healthy',
-            lifecycle_state = 'restored', disabled = 0, crash_count = 0, updated_at = ?4
-         WHERE application_id = ?1",
-        params![application_id, lkg, json, now],
-    )?;
+
+    // Perform atomic restoration inside a transaction
+    db.with_transaction(|conn| {
+        let json: String = conn
+            .query_row(
+                "SELECT manifest_json FROM application_manifest_versions
+                 WHERE application_id = ?1 AND version = ?2 AND is_known_good = 1",
+                params![application_id, lkg],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(DbError::Sqlite)?
+            .ok_or_else(|| {
+                DbError::NotFound(format!(
+                    "last-known-good manifest version {lkg} for application '{application_id}'"
+                ))
+            })?;
+
+        let mut m: ApplicationManifest = serde_json::from_str(&json).map_err(|e| {
+            DbError::Corrupted(format!("corrupt last-known-good manifest JSON: {e}"))
+        })?;
+        m.version = lkg;
+        let now = now_rfc3339();
+
+        // 1. Restore manifest record
+        conn.execute(
+            "UPDATE application_manifests SET
+                current_version = ?2, manifest_json = ?3, health_state = 'healthy',
+                lifecycle_state = 'restored', disabled = 0, crash_count = 0, updated_at = ?4
+             WHERE application_id = ?1",
+            params![application_id, lkg, json, now],
+        )
+        .map_err(DbError::Sqlite)?;
+
+        // 2. Coherent restoration of surfaces:
+        // Restore surface definitions and capability packs for all surfaces declared in the LKG manifest
+        let caps_json = serde_json::to_string(&m.capabilities)
+            .map_err(|e| DbError::Invalid(e.to_string()))?;
+
+        for surf in &m.surfaces {
+            let surface_exists: bool = conn
+                .query_row(
+                    "SELECT 1 FROM surfaces WHERE id = ?1",
+                    params![&surf.surface_id],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(DbError::Sqlite)?
+                .is_some();
+
+            if surface_exists {
+                // Find definition snapshot: first from definition_ref if present
+                let def_json = if let Some(ref d) = surf.definition_ref {
+                    if !d.trim().is_empty() {
+                        Some(d.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                // If not in definition_ref, check surface_versions
+                let def_json = match def_json {
+                    Some(d) => d,
+                    None => {
+                        let from_sv: Option<String> = conn
+                            .query_row(
+                                "SELECT definition_json FROM surface_versions WHERE surface_id = ?1 ORDER BY revision DESC LIMIT 1",
+                                params![&surf.surface_id],
+                                |r| r.get(0),
+                            )
+                            .optional()
+                            .map_err(DbError::Sqlite)?;
+                        match from_sv {
+                            Some(d) => d,
+                            None => {
+                                // If surface row exists, use its current definition as fallback
+                                conn.query_row(
+                                    "SELECT definition_json FROM surfaces WHERE id = ?1",
+                                    params![&surf.surface_id],
+                                    |r| r.get(0),
+                                )
+                                .optional()
+                                .map_err(DbError::Sqlite)?
+                                .unwrap_or_else(|| "{}".to_string())
+                            }
+                        }
+                    }
+                };
+
+                // Get current revision so we bump it for live subscribers
+                let current_rev: i64 = conn
+                    .query_row(
+                        "SELECT current_revision FROM surfaces WHERE id = ?1",
+                        params![&surf.surface_id],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .map_err(DbError::Sqlite)?
+                    .unwrap_or(1);
+                let next_rev = current_rev + 1;
+
+                conn.execute(
+                    "UPDATE surfaces SET
+                        definition_json = ?1,
+                        current_revision = ?2,
+                        capability_packs_json = ?3,
+                        lifecycle_state = 'active',
+                        archived = 0,
+                        error_json = NULL,
+                        updated_at = ?4
+                     WHERE id = ?5",
+                    params![def_json, next_rev, caps_json, now, &surf.surface_id],
+                )
+                .map_err(DbError::Sqlite)?;
+
+                // Record restoration version in surface_versions
+                let sv_id = format!("sv-{}", Uuid::new_v4());
+                conn.execute(
+                    "INSERT INTO surface_versions (id, surface_id, revision, definition_json, change_summary, created_at)
+                     VALUES (?1, ?2, ?3, ?4, 'Restored from last-known-good checkpoint', ?5)",
+                    params![sv_id, &surf.surface_id, next_rev, def_json, now],
+                )
+                .map_err(DbError::Sqlite)?;
+            }
+        }
+
+        // 3. Restore tools table if a tool row matches application_id
+        let tool_exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM tools WHERE id = ?1",
+                params![application_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(DbError::Sqlite)?
+            .is_some();
+
+        if tool_exists {
+            let primary_def: Option<String> = m.surfaces.first().and_then(|s| {
+                conn.query_row(
+                    "SELECT definition_json FROM surfaces WHERE id = ?1",
+                    params![&s.surface_id],
+                    |r| r.get(0),
+                )
+                .ok()
+            });
+
+            if let Some(def) = primary_def {
+                let tool_rev: i64 = conn
+                    .query_row(
+                        "SELECT current_version FROM tools WHERE id = ?1",
+                        params![application_id],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(1);
+                let next_tool_rev = tool_rev + 1;
+                conn.execute(
+                    "UPDATE tools SET
+                        name = ?1,
+                        description = ?2,
+                        definition_json = ?3,
+                        current_version = ?4,
+                        updated_at = ?5
+                     WHERE id = ?6",
+                    params![m.name, m.description, def, next_tool_rev, now, application_id],
+                )
+                .map_err(DbError::Sqlite)?;
+            }
+        }
+
+        // 4. Data Preservation:
+        // User data in generated_data_records is explicitly preserved untouched.
+        // No records are deleted during restoration.
+
+        Ok(())
+    })?;
+
     get_manifest(db, application_id)
 }
 
@@ -922,6 +1128,12 @@ mod tests {
         let app_id = ensure_manifest_for_tool(&mut db, "tool-crash", "Notes", "surface-tool-crash")
             .unwrap()
             .application_id;
+        db.conn()
+            .execute(
+                "UPDATE application_manifest_versions SET validation_status = 'passed', test_status = 'passed' WHERE application_id = ?1",
+                params![&app_id],
+            )
+            .unwrap();
         mark_last_known_good(&mut db, &app_id).unwrap();
 
         // Retryable failures are transient and must not count as crashes.
@@ -1041,6 +1253,161 @@ mod tests {
         assert_eq!(
             m.action_descriptor_hashes.get("local_data.query"),
             Some(&"sha256:abc1234".to_string())
+        );
+    }
+
+    #[test]
+    fn mark_last_known_good_rejects_unverified_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("lkg_verify.db")).unwrap();
+        let app_id = ensure_manifest_for_tool(&mut db, "tool-lkg-test", "LKG App", "surf-lkg-test")
+            .unwrap()
+            .application_id;
+
+        // 1. If test_status is 'untested' (e.g. from zero-tests or structural-only), LKG promotion fails closed
+        db.conn()
+            .execute(
+                "UPDATE application_manifest_versions SET validation_status = 'passed', test_status = 'untested' WHERE application_id = ?1",
+                params![&app_id],
+            )
+            .unwrap();
+        let err = mark_last_known_good(&mut db, &app_id).unwrap_err();
+        match err {
+            crate::db::DbError::Invalid(msg) => {
+                assert!(msg.contains("last-known-good: unverified"));
+            }
+            other => panic!("expected DbError::Invalid, got: {other:?}"),
+        }
+
+        // 2. If test_status is 'failed', promotion fails closed
+        db.conn()
+            .execute(
+                "UPDATE application_manifest_versions SET validation_status = 'passed', test_status = 'failed' WHERE application_id = ?1",
+                params![&app_id],
+            )
+            .unwrap();
+        assert!(mark_last_known_good(&mut db, &app_id).is_err());
+
+        // 3. If test_status is verified ('renderer_passed'), promotion succeeds
+        db.conn()
+            .execute(
+                "UPDATE application_manifest_versions SET validation_status = 'passed', test_status = 'renderer_passed' WHERE application_id = ?1",
+                params![&app_id],
+            )
+            .unwrap();
+        mark_last_known_good(&mut db, &app_id).unwrap();
+        let m = get_manifest(&db, &app_id).unwrap();
+        assert_eq!(m.last_known_good_version, Some(1));
+    }
+
+    #[test]
+    fn restore_last_known_good_restores_surface_definitions_and_preserves_records() {
+        use serde_json::json;
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::db::Database::open_path(&dir.path().join("restore_surf.db")).unwrap();
+        let tool_id = "tool-restore-test";
+        let surf_id = "surf-restore-test";
+
+        // Create surface row with v1 definition
+        let v1_def = json!({
+            "schemaVersion": "1",
+            "title": "Version 1 Title",
+            "views": []
+        });
+        db.conn()
+            .execute(
+                "INSERT INTO surfaces (id, instance_id, name, current_revision, definition_json, created_at, updated_at)
+                 VALUES (?1, ?2, 'Original Surface', 1, ?3, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                params![surf_id, format!("inst-{surf_id}"), serde_json::to_string(&v1_def).unwrap()],
+            )
+            .unwrap();
+
+        let app_id = ensure_manifest_for_tool(&mut db, tool_id, "Original App", surf_id)
+            .unwrap()
+            .application_id;
+
+        // Verify version 1 and mark as LKG
+        db.conn()
+            .execute(
+                "UPDATE application_manifest_versions SET validation_status = 'passed', test_status = 'passed' WHERE application_id = ?1",
+                params![&app_id],
+            )
+            .unwrap();
+        mark_last_known_good(&mut db, &app_id).unwrap();
+
+        // Now add user data records for v1
+        db.conn()
+            .execute(
+                "INSERT INTO generated_data_records (id, application_id, model_id, data_json, record_version, created_at, updated_at)
+                 VALUES ('rec-1', ?1, 'tasks', '{\"title\":\"Item 1\"}', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                params![&app_id],
+            )
+            .unwrap();
+
+        // Evolve surface to v2 (broken layout or changed title)
+        let v2_def = json!({
+            "schemaVersion": "1",
+            "title": "Broken Version 2 Title",
+            "views": []
+        });
+        db.conn()
+            .execute(
+                "UPDATE surfaces SET definition_json = ?1, current_revision = 2 WHERE id = ?2",
+                params![serde_json::to_string(&v2_def).unwrap(), surf_id],
+            )
+            .unwrap();
+
+        // User creates more data while on v2
+        db.conn()
+            .execute(
+                "INSERT INTO generated_data_records (id, application_id, model_id, data_json, record_version, created_at, updated_at)
+                 VALUES ('rec-2', ?1, 'tasks', '{\"title\":\"Item 2\"}', 1, '2026-01-01T01:00:00Z', '2026-01-01T01:00:00Z')",
+                params![&app_id],
+            )
+            .unwrap();
+
+        // Also bump manifest version to 2 (without marking it LKG)
+        let mut m2 = get_manifest(&db, &app_id).unwrap().manifest;
+        m2.name = "Broken Version 2".into();
+        upsert_manifest(&mut db, m2).unwrap();
+
+        // Verify current state is v2
+        let current_m = get_manifest(&db, &app_id).unwrap();
+        assert_eq!(current_m.current_version, 2);
+
+        // Now restore LKG
+        let restored = restore_last_known_good(&mut db, &app_id).unwrap();
+        assert_eq!(restored.current_version, 1);
+        assert_eq!(restored.manifest.name, "Original App");
+
+        // Verify surface definition restored to v1
+        let surface_row: (String, i64) = db
+            .conn()
+            .query_row(
+                "SELECT definition_json, current_revision FROM surfaces WHERE id = ?1",
+                params![surf_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let restored_def: serde_json::Value = serde_json::from_str(&surface_row.0).unwrap();
+        assert_eq!(restored_def["title"], "Version 1 Title");
+        assert_eq!(
+            surface_row.1, 3,
+            "current_revision should be bumped upon restore"
+        );
+
+        // Verify both rec-1 and rec-2 user data records are PRESERVED!
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM generated_data_records WHERE application_id = ?1",
+                params![&app_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 2,
+            "all user records must be preserved across restore"
         );
     }
 }
