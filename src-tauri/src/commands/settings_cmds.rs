@@ -115,10 +115,10 @@ pub struct AppSettings {
     pub developer_mode: bool,
 }
 
-const DEFAULT_ACCENT_PRIMARY_LIGHT: &str = "#2f8f63";
-const DEFAULT_ACCENT_PRIMARY_DARK: &str = "#69c994";
-const DEFAULT_ACCENT_SECONDARY_LIGHT: &str = "#d38b3d";
-const DEFAULT_ACCENT_SECONDARY_DARK: &str = "#e0a158";
+const DEFAULT_ACCENT_PRIMARY_LIGHT: &str = "#171717";
+const DEFAULT_ACCENT_PRIMARY_DARK: &str = "#fafafa";
+const DEFAULT_ACCENT_SECONDARY_LIGHT: &str = "#737373";
+const DEFAULT_ACCENT_SECONDARY_DARK: &str = "#a3a3a3";
 const DEFAULT_BACKGROUND_LIGHT: &str = "#f5f5f5";
 const DEFAULT_BACKGROUND_DARK: &str = "#0a0a0a";
 const DEFAULT_SURFACE_LIGHT: &str = "#ffffff";

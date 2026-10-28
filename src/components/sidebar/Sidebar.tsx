@@ -226,6 +226,7 @@ export function Sidebar() {
         className="btn btn-primary btn-block"
         onClick={() => void createConversation()}
         aria-label="New chat"
+        data-coreside-tour="sidebar-new-chat"
       >
         <MessageSquarePlus size={iconSize} aria-hidden />
         <span className="nav-label">New chat</span>
@@ -331,7 +332,11 @@ export function Sidebar() {
         </div>
       </section>
 
-      <section className="sidebar-section sidebar-section-apps" aria-label="Personal apps">
+      <section
+        className="sidebar-section sidebar-section-apps"
+        aria-label="Personal apps"
+        data-coreside-tour="sidebar-apps"
+      >
         <div className="sidebar-section-label">Apps</div>
         <div className="sidebar-nav">
           {tools.length === 0 ? (

@@ -332,10 +332,10 @@ export const AppSettingsSchema = z.object({
     )
     .optional()
     .default(DEFAULT_DOCK_ICON),
-  accentPrimaryLight: z.string().optional().default("#2f8f63"),
-  accentPrimaryDark: z.string().optional().default("#69c994"),
-  accentSecondaryLight: z.string().optional().default("#d38b3d"),
-  accentSecondaryDark: z.string().optional().default("#e0a158"),
+  accentPrimaryLight: z.string().optional().default("#171717"),
+  accentPrimaryDark: z.string().optional().default("#fafafa"),
+  accentSecondaryLight: z.string().optional().default("#737373"),
+  accentSecondaryDark: z.string().optional().default("#a3a3a3"),
   backgroundLight: z.string().optional().default("#f5f5f5"),
   backgroundDark: z.string().optional().default("#0a0a0a"),
   surfaceLight: z.string().optional().default("#ffffff"),

@@ -6374,17 +6374,37 @@ body > .window-overlay-root > *,
   pointer-events: none;
 }
 
-.tutorial-spotlight {
+.tutorial-scrim {
   position: fixed;
-  border-radius: 12px;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
-  border: 2px solid var(--accent-primary, #2f8f63);
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 1100;
+  pointer-events: auto;
+  transition: opacity var(--motion-duration-panel) ease;
+}
+
+.tutorial-scrim-fullscreen {
+  inset: 0;
+}
+
+.tutorial-spotlight,
+.tutorial-spotlight-ring {
+  position: fixed;
+  z-index: 1101;
+  border-radius: var(--radius-sm);
+  border: 2px solid var(--accent-primary, #fafafa);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 0 16px rgba(0, 0, 0, 0.35);
   pointer-events: none;
   transition: top 0.2s ease, left 0.2s ease, width 0.2s ease, height 0.2s ease;
 }
 
-.tutorial-overlay.reduced-motion .tutorial-spotlight {
+.tutorial-overlay.reduced-motion .tutorial-spotlight,
+.tutorial-overlay.reduced-motion .tutorial-spotlight-ring {
   transition: none;
+}
+
+.tutorial-popover-positioner {
+  pointer-events: auto;
+  z-index: 1102;
 }
 
 .tutorial-popover {

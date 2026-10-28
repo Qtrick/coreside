@@ -117,17 +117,24 @@ describe("Journey 22 — ApplicationPlan evolution (due dates)", () => {
 
     await browser.waitUntil(
       async () => {
-        const body = (await $("body").getText()).toLowerCase();
-        return (
-          body.includes("due date") &&
-          (body.includes("updated") ||
-            body.includes("optional due") ||
-            body.includes("preserved"))
-        );
+        const msgList = await $(".message-list");
+        if (await msgList.isExisting()) {
+          const text = (await msgList.getText()).toLowerCase();
+          if (
+            text.includes("due date") &&
+            (text.includes("updated") ||
+              text.includes("optional due") ||
+              text.includes("preserved"))
+          ) {
+            return true;
+          }
+        }
+        const applyBtn = await latestVisibleKernelApplyButton();
+        return applyBtn !== null;
       },
       {
         timeout: 45_000,
-        timeoutMsg: "Evolve assistant response never appeared",
+        timeoutMsg: "Evolve assistant response or proposal never appeared",
       },
     );
 

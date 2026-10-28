@@ -22,7 +22,7 @@ export function ChatPanel() {
     : null;
 
   return (
-    <section className="chat-panel" aria-label="Conversation">
+    <section className="chat-panel" aria-label="Conversation" data-coreside-tour="chat-panel">
       <header className="panel-header">
         <div>
           <h1>{active?.title ?? "Conversation"}</h1>

@@ -132,36 +132,96 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
   },
 
   skip: async () => {
+    const priorState = get();
+    const result = skipTour(priorState);
+    // Immediately close overlay synchronously to prevent double-clicks or lag
     set({
-      ...(await persist(skipTour(get()))),
+      phase: "idle",
       welcomeEligible: false,
+      activeTutorialId: null,
+      stepIndex: 0,
       activeContextualId: null,
     });
+    try {
+      const state = await persist(result);
+      set({
+        ...state,
+        phase: "idle",
+        welcomeEligible: false,
+        activeContextualId: null,
+      });
+    } catch (e) {
+      console.error("Failed to persist tutorial skip", e);
+    }
   },
 
   pause: async () => {
+    const priorState = get();
+    const result = pauseTour(priorState);
+    // Immediately close overlay synchronously to prevent lingering state
     set({
-      ...(await persist(pauseTour(get()))),
+      phase: "idle",
+      activeTutorialId: null,
+      stepIndex: 0,
       activeContextualId: null,
     });
+    try {
+      const state = await persist(result);
+      set({
+        ...state,
+        phase: "idle",
+        activeContextualId: null,
+      });
+    } catch (e) {
+      console.error("Failed to persist tutorial pause", e);
+    }
   },
 
   finish: async () => {
+    const priorState = get();
+    const result = completeTour(priorState);
     set({
-      ...(await persist(completeTour(get()))),
+      phase: "completed",
       welcomeEligible: false,
+      activeTutorialId: null,
+      stepIndex: 0,
       activeContextualId: null,
     });
+    try {
+      const state = await persist(result);
+      set({
+        ...state,
+        phase: "completed",
+        welcomeEligible: false,
+        activeContextualId: null,
+      });
+    } catch (e) {
+      console.error("Failed to persist tutorial completion", e);
+    }
   },
 
   dismissWelcome: async () => {
+    const priorState = get();
+    const result = skipTour({ ...priorState, activeTutorialId: ESSENTIALS_TUTORIAL_ID });
+    // Immediately dismiss welcome dialog synchronously to prevent double clicks or re-entry
     set({
-      ...(await persist(
-        skipTour({ ...get(), activeTutorialId: ESSENTIALS_TUTORIAL_ID }),
-      )),
+      phase: "idle",
       welcomeEligible: false,
       activeContextualId: null,
+      activeTutorialId: null,
+      stepIndex: 0,
     });
+    try {
+      const state = await persist(result);
+      set({
+        ...state,
+        phase: "idle",
+        welcomeEligible: false,
+        activeContextualId: null,
+      });
+    } catch (e) {
+      console.error("Failed to persist welcome dismissal", e);
+    }
   },
 
   resetEssentials: async () => {

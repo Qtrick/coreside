@@ -14,7 +14,7 @@ export function WelcomeDialog() {
         <button
           type="button"
           className="provider-modal-backdrop"
-          aria-label="Explore on my own"
+          aria-label="Later, explore on my own"
           tabIndex={-1}
           onClick={() => void dismissWelcome()}
         />
@@ -46,9 +46,10 @@ export function WelcomeDialog() {
             <button
               type="button"
               className="btn btn-secondary"
+              data-action="dismiss-welcome"
               onClick={() => void dismissWelcome()}
             >
-              Explore on my own
+              Later, explore on my own
             </button>
           </div>
         </div>

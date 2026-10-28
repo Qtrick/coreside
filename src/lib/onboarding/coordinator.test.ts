@@ -90,7 +90,7 @@ describe("onboarding coordinator", () => {
         tutorialVersion: 1,
         status: "in_progress",
         currentStepId: "app-panel",
-        completedStepIds: ["welcome", "chat-composer"],
+        completedStepIds: ["welcome", "sidebar-new-chat", "chat-composer"],
         startedAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
         completedAt: null,
@@ -99,7 +99,7 @@ describe("onboarding coordinator", () => {
       },
     ]);
     const result = startTour(seeded, ESSENTIALS_TUTORIAL_ID, true);
-    expect(result.state.stepIndex).toBe(2);
+    expect(result.state.stepIndex).toBe(3);
   });
 
   it("skip from welcome marks essentials skipped without requiring active tour", () => {

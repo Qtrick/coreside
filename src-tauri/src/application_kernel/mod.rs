@@ -844,40 +844,40 @@ pub fn compute_required_capability_grants(
                     .any(|g: &CapabilityGrantProposal| g.pack_id == pack_id && g.surface_id == sid)
             {
                 if let Some(pack) = crate::runtime_v2::packs::pack_registry().get(&pack_id) {
-                        if !pack.enabled {
-                            return Err(KernelError::Validation(format!(
-                                "Unsupported or disabled capability pack: {}",
-                                pack_id
-                            )));
-                        }
-                        let user_desc = match pack.id.as_str() {
+                    if !pack.enabled {
+                        return Err(KernelError::Validation(format!(
+                            "Unsupported or disabled capability pack: {}",
+                            pack_id
+                        )));
+                    }
+                    let user_desc = match pack.id.as_str() {
                             "coreside.charts" => "Adds Charts to this application. Allows Coreside to render interactive visual charts using the application's data.".to_string(),
                             "coreside.forms" => "Adds Rich Forms to this application. Allows validation and structured user submissions.".to_string(),
                             "coreside.svg" => "Adds Declarative SVG scenes to this application.".to_string(),
                             "coreside.canvas" => "Adds Declarative Canvas 2D rendering to this application.".to_string(),
                             _ => format!("Adds {} to this application. {}", pack.display_name, pack.agent_description),
                         };
-                        grants.push(CapabilityGrantProposal {
-                            pack_id: pack.id.clone(),
-                            display_name: pack.display_name.clone(),
-                            surface_id: sid.clone(),
-                            application_id: op
-                                .target
-                                .application_id
-                                .clone()
-                                .or_else(|| op.target.tool_id.clone()),
-                            permissions: pack.permissions.clone(),
-                            user_description: user_desc,
-                        });
-                    } else {
-                        return Err(KernelError::Validation(format!(
-                            "Unsupported or disabled capability pack: {}",
-                            pack_id
-                        )));
-                    }
+                    grants.push(CapabilityGrantProposal {
+                        pack_id: pack.id.clone(),
+                        display_name: pack.display_name.clone(),
+                        surface_id: sid.clone(),
+                        application_id: op
+                            .target
+                            .application_id
+                            .clone()
+                            .or_else(|| op.target.tool_id.clone()),
+                        permissions: pack.permissions.clone(),
+                        user_description: user_desc,
+                    });
+                } else {
+                    return Err(KernelError::Validation(format!(
+                        "Unsupported or disabled capability pack: {}",
+                        pack_id
+                    )));
                 }
             }
         }
+    }
 
     Ok(grants)
 }
@@ -4402,9 +4402,8 @@ mod tests {
     fn decide_proposal_recomputes_grants_for_legacy_hash_proposals() {
         let mut db = test_db();
         crate::db::ensure_default_workspace(&db).unwrap();
-        let conv =
-            create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Legacy proposal test", None)
-                .unwrap();
+        let conv = create_conversation(&mut db, DEFAULT_WORKSPACE_ID, "Legacy proposal test", None)
+            .unwrap();
 
         let surf = create_inline_surface(
             &mut db,

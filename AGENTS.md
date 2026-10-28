@@ -66,6 +66,7 @@ Project-scoped Codex agent definitions reside under `.codex/agents/`.
   - *Human visual verified*
   - *Unverified* / *Absent* / *Blocked*
 - **Readiness Standard**: Product readiness remains `Development Build / Not ready` until every release gate is satisfied.
+- **NPM Vulnerability Hygiene**: Always check npm after making changes to code to find and fix vulnerabilities so that when `npm install` runs, there are no vulnerabilities (`npm audit` reports 0 vulnerabilities).
 
 ---
 
@@ -96,4 +97,5 @@ Every AI assistant operating in this repository must uphold these shared behavio
 6. **Integrity of claims**: Never claim production readiness or visual verification without active, reproducible evidence.
 7. **No unprompted git mutations**: Never run `git add`, `git commit`, or `git push` automatically without explicit user instruction.
 8. **Preserve user work**: Keep unrelated modified files intact.
-9. **Standard close**: Conclude with `git status --short` and the copy/paste-safe suggested Conventional Commit.
+9. **Check and fix npm vulnerabilities**: Always check npm after making changes to code to find and fix vulnerabilities so that when `npm install` runs, there are zero vulnerabilities (`npm audit` must report 0 vulnerabilities).
+10. **Standard close**: Conclude with `git status --short` and the copy/paste-safe suggested Conventional Commit.

@@ -5,6 +5,7 @@
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  constants,
   copyFileSync,
   cpSync,
   existsSync,
@@ -199,7 +200,11 @@ export function installDebugBinaryIntoDevApp() {
   const tmp = `${DEV_EXECUTABLE}.tmp-${process.pid}`;
   assertUnderRoot(tmp, "dev executable temp");
   try {
-    copyFileSync(DEBUG_BINARY, tmp);
+    try {
+      copyFileSync(DEBUG_BINARY, tmp, constants.COPYFILE_FICLONE);
+    } catch {
+      copyFileSync(DEBUG_BINARY, tmp);
+    }
     chmodSync(tmp, 0o755);
     renameSync(tmp, DEV_EXECUTABLE);
     chmodSync(DEV_EXECUTABLE, 0o755);
@@ -367,8 +372,7 @@ export function printIdentityReport({
   console.log(`CFBundleIdentifier: ${BUNDLE_ID}`);
   console.log("CFBundleIconName: Icon");
   console.log(
-    `Adaptive package requirements: ${
-      v.ok ? "satisfied" : `FAILED (${v.errors.join("; ")})`
+    `Adaptive package requirements: ${v.ok ? "satisfied" : `FAILED (${v.errors.join("; ")})`
     }`,
   );
   return v;

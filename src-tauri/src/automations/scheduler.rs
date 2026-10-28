@@ -405,12 +405,13 @@ pub fn claim_run(
             }
         }
 
-        // Prune old scheduled slots alongside runs
+        // Prune old scheduled slots alongside runs (excluding active claim run_id)
         let _ = conn.execute(
-            "DELETE FROM automation_scheduled_slots WHERE automation_id = ?1 AND (
+            "DELETE FROM automation_scheduled_slots WHERE automation_id = ?1 AND run_id != ?2 AND (
                 (SELECT COUNT(*) FROM automation_runs WHERE automation_id = ?1) > 0
                 AND (
-                    run_id NOT IN (SELECT id FROM automation_runs WHERE automation_id = ?1)
+                    (run_id NOT IN (SELECT id FROM automation_runs WHERE automation_id = ?1)
+                     AND claimed_at < datetime('now', '-1 hour'))
                     OR scheduled_at < (
                         SELECT MIN(scheduled_at)
                         FROM automation_runs
@@ -418,7 +419,7 @@ pub fn claim_run(
                     )
                 )
              )",
-            rusqlite::params![automation_id],
+            rusqlite::params![automation_id, &run_id],
         );
 
         conn.execute_batch("RELEASE SAVEPOINT claim_slot;")?;
@@ -1691,7 +1692,10 @@ mod tests {
 
         // Calling claim_run must return Ok(None) without throwing a SQLite constraint violation
         let claim = claim_run(&mut db, "auto-race-test", RunOrigin::Scheduled).unwrap();
-        assert!(claim.is_none(), "claim_run must return Ok(None) when slot is already claimed");
+        assert!(
+            claim.is_none(),
+            "claim_run must return Ok(None) when slot is already claimed"
+        );
     }
 
     #[test]
@@ -1811,6 +1815,9 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(slots_after, 100, "scheduled slots must be pruned alongside runs");
+        assert_eq!(
+            slots_after, 100,
+            "scheduled slots must be pruned alongside runs"
+        );
     }
 }

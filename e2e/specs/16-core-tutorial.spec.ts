@@ -51,9 +51,24 @@ describe("Journey 16 — core tutorial", () => {
     const overlay = await $(".tutorial-overlay");
     await expect(overlay).toBeExisting();
 
+    // Verify dimming scrim and spotlight ring exist around target
+    const scrim = await $(".tutorial-scrim");
+    await expect(scrim).toBeExisting();
+
+    const spotlight = await $(".tutorial-spotlight");
+    await expect(spotlight).toBeExisting();
+
     const stepTitle = await $("#tutorial-step-title");
     await expect(stepTitle).toBeExisting();
     const firstTitle = await stepTitle.getText();
+    expect(firstTitle).toBe("Start with a conversation");
+
+    // Verify popover is within viewport
+    const popover = await $(".tutorial-popover");
+    await expect(popover).toBeExisting();
+    const popoverLocation = await popover.getLocation();
+    expect(popoverLocation.x).toBeGreaterThanOrEqual(0);
+    expect(popoverLocation.y).toBeGreaterThanOrEqual(0);
 
     // WebDriver treats the popover as non-interactable while enter motion runs
     // (computed opacity can remain 0 briefly). Programmatic click matches user intent.
@@ -77,5 +92,8 @@ describe("Journey 16 — core tutorial", () => {
         timeoutMsg: "Tutorial step did not advance after Next",
       },
     );
+
+    const secondTitle = await (await $("#tutorial-step-title")).getText();
+    expect(secondTitle).toBe("Ask in chat");
   });
 });

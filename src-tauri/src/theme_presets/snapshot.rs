@@ -80,10 +80,10 @@ impl AppearanceSnapshot {
         Ok(Self {
             schema_version: APPEARANCE_SNAPSHOT_SCHEMA_VERSION,
             theme_preference,
-            accent_primary_light: color("accentPrimaryLight", "#2f8f63")?,
-            accent_primary_dark: color("accentPrimaryDark", "#69c994")?,
-            accent_secondary_light: color("accentSecondaryLight", "#d38b3d")?,
-            accent_secondary_dark: color("accentSecondaryDark", "#e0a158")?,
+            accent_primary_light: color("accentPrimaryLight", "#171717")?,
+            accent_primary_dark: color("accentPrimaryDark", "#fafafa")?,
+            accent_secondary_light: color("accentSecondaryLight", "#737373")?,
+            accent_secondary_dark: color("accentSecondaryDark", "#a3a3a3")?,
             background_light: color("backgroundLight", "#f5f5f5")?,
             background_dark: color("backgroundDark", "#0a0a0a")?,
             surface_light: color("surfaceLight", "#ffffff")?,
@@ -368,10 +368,10 @@ mod tests {
     fn sample_map() -> std::collections::HashMap<String, String> {
         let mut map = std::collections::HashMap::new();
         map.insert("theme".into(), "dark".into());
-        map.insert("accentPrimaryLight".into(), "#2f8f63".into());
-        map.insert("accentPrimaryDark".into(), "#69c994".into());
-        map.insert("accentSecondaryLight".into(), "#d38b3d".into());
-        map.insert("accentSecondaryDark".into(), "#e0a158".into());
+        map.insert("accentPrimaryLight".into(), "#171717".into());
+        map.insert("accentPrimaryDark".into(), "#fafafa".into());
+        map.insert("accentSecondaryLight".into(), "#737373".into());
+        map.insert("accentSecondaryDark".into(), "#a3a3a3".into());
         map.insert("backgroundLight".into(), "#f5f5f5".into());
         map.insert("backgroundDark".into(), "#0a0a0a".into());
         map.insert("surfaceLight".into(), "#ffffff".into());

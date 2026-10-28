@@ -886,14 +886,14 @@ export type SurfacePalette = {
 
 export type AppearancePalette = AccentPalette & SurfacePalette;
 
-const DEFAULT_ACCENTS: AccentPalette = {
-  accentPrimaryLight: "#2f8f63",
-  accentPrimaryDark: "#69c994",
-  accentSecondaryLight: "#d38b3d",
-  accentSecondaryDark: "#e0a158",
+export const DEFAULT_ACCENTS: AccentPalette = {
+  accentPrimaryLight: "#171717",
+  accentPrimaryDark: "#fafafa",
+  accentSecondaryLight: "#737373",
+  accentSecondaryDark: "#a3a3a3",
 };
 
-const DEFAULT_SURFACES: SurfacePalette = {
+export const DEFAULT_SURFACES: SurfacePalette = {
   backgroundLight: "#f5f5f5",
   backgroundDark: "#0a0a0a",
   surfaceLight: "#ffffff",
@@ -908,7 +908,7 @@ const DEFAULT_SURFACES: SurfacePalette = {
   textSecondaryDark: "#a3a3a3",
 };
 
-const DEFAULT_APPEARANCE: AppearancePalette = {
+export const DEFAULT_APPEARANCE: AppearancePalette = {
   ...DEFAULT_ACCENTS,
   ...DEFAULT_SURFACES,
 };
@@ -1037,7 +1037,7 @@ function syncCommittedWallpaperFromSettings(input: {
   wallpaperCommittedGen = wallpaperApplyGen;
 }
 
-function appearanceFromSettings(settings: Partial<AppearancePalette>): AppearancePalette {
+export function appearanceFromSettings(settings: Partial<AppearancePalette>): AppearancePalette {
   return {
     accentPrimaryLight:
       settings.accentPrimaryLight ?? DEFAULT_APPEARANCE.accentPrimaryLight,

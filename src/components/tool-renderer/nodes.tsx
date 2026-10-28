@@ -1065,7 +1065,7 @@ export function SwitchNode({ component }: ToolNodeProps) {
 
 export function ColorInputNode({ component }: ToolNodeProps) {
   const key = stateKeyFor(component, "valueKey");
-  const [value, setVal] = useBoundState(key, asString(component.props?.defaultValue, "#2f8f63"));
+  const [value, setVal] = useBoundState(key, asString(component.props?.defaultValue, "#171717"));
   return (
     <label className="tr-color" data-component-id={component.id}>
       {asString(component.props?.label, "Color")}

@@ -19,6 +19,10 @@ export type TutorialStep = {
   body: string;
   /** Stable `data-coreside-tour` value when this step spotlights UI. */
   target?: string;
+  /** Fallback `data-coreside-tour` if the primary target is absent on the current screen. */
+  fallbackTarget?: string;
+  /** Whether the spotlighted target should allow pointer interaction during this step. */
+  interactive?: boolean;
   kind: TutorialStepKind;
   /** Optional primary CTA label override. */
   nextLabel?: string;

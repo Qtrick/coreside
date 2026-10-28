@@ -37,7 +37,7 @@ describe("Journey 15 — first-run welcome", () => {
 
     const takeTour = await $("button=Take the 3-minute tour");
     await expect(takeTour).toBeDisplayed();
-    const explore = await $("button=Explore on my own");
+    const explore = await $('button[data-action="dismiss-welcome"], button*=Explore on my own');
     await expect(explore).toBeDisplayed();
   });
 });

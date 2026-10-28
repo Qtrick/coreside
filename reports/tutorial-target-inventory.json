@@ -1,17 +1,20 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-10-13T21:07:15.700Z",
-  "commit": "99010ac559085c96048c8ef59b0eed6baf308096",
+  "generatedAt": "2026-10-28T04:37:32.046Z",
+  "commit": "6f328032561e5190bcc1335c9a3073fdb9511719",
   "dirty": true,
-  "fingerprint": "024e82342f4872d3d14e2f553fe3813a1b2e6ea77341dbdf78b1004339ad71bf",
+  "fingerprint": "2b2cab71445617056becd1e8ed334eaf71c6b173f8845fc03e6feb33c2fe0109",
   "command": "audit:tutorial-targets",
   "declaredTargets": [
     "ai-connections-nav",
     "app-panel",
     "chat-composer",
     "chat-composer-send",
+    "chat-panel",
     "help-learning-nav",
+    "sidebar-apps",
+    "sidebar-new-chat",
     "sidebar-projects"
   ],
   "presentInSource": [
@@ -20,8 +23,11 @@
     "app-panel",
     "chat-composer",
     "chat-composer-send",
+    "chat-panel",
     "help-learning",
     "help-learning-nav",
+    "sidebar-apps",
+    "sidebar-new-chat",
     "sidebar-projects"
   ],
   "missingInDom": [],
@@ -31,39 +37,54 @@
   ],
   "occurrences": [
     {
+      "id": "chat-panel",
+      "file": "src/components/chat/ChatPanel.tsx",
+      "line": 25
+    },
+    {
       "id": "chat-composer",
       "file": "src/components/chat/Composer.tsx",
-      "line": 355
+      "line": 356
     },
     {
       "id": "chat-composer-send",
       "file": "src/components/chat/Composer.tsx",
-      "line": 482
+      "line": 484
     },
     {
       "id": "help-learning",
       "file": "src/components/settings/SettingsPanel.tsx",
-      "line": 448
+      "line": 449
     },
     {
       "id": "help-learning-nav",
       "file": "src/components/settings/SettingsPanel.tsx",
-      "line": 448
+      "line": 449
     },
     {
       "id": "ai-access",
       "file": "src/components/settings/SettingsPanel.tsx",
-      "line": 448
+      "line": 449
     },
     {
       "id": "ai-connections-nav",
       "file": "src/components/settings/SettingsPanel.tsx",
-      "line": 448
+      "line": 449
+    },
+    {
+      "id": "sidebar-new-chat",
+      "file": "src/components/sidebar/Sidebar.tsx",
+      "line": 229
     },
     {
       "id": "sidebar-projects",
       "file": "src/components/sidebar/Sidebar.tsx",
-      "line": 209
+      "line": 235
+    },
+    {
+      "id": "sidebar-apps",
+      "file": "src/components/sidebar/Sidebar.tsx",
+      "line": 338
     },
     {
       "id": "app-panel",
@@ -73,7 +94,7 @@
     {
       "id": "app-panel",
       "file": "src/components/tool-canvas/ToolCanvas.tsx",
-      "line": 562
+      "line": 565
     }
   ]
 }

@@ -2,9 +2,12 @@ import type { ContextualTipDefinition, TutorialDefinition } from "./types";
 
 /** Tour target ids — must match `data-coreside-tour` in the shell. */
 export const TOUR_TARGETS = {
+  sidebarNewChat: "sidebar-new-chat",
   composer: "chat-composer",
   composerSend: "chat-composer-send",
+  sidebarApps: "sidebar-apps",
   appPanel: "app-panel",
+  chatPanel: "chat-panel",
   sidebarProjects: "sidebar-projects",
   aiConnections: "ai-connections-nav",
   helpLearning: "help-learning-nav",
@@ -81,10 +84,20 @@ export const TUTORIALS: readonly TutorialDefinition[] = [
         nextLabel: "Start tour",
       },
       {
+        id: "sidebar-new-chat",
+        title: "Start with a conversation",
+        body: "Conversations are where you begin creating and modifying things. Click New chat whenever you want a fresh start.",
+        target: TOUR_TARGETS.sidebarNewChat,
+        fallbackTarget: TOUR_TARGETS.chatPanel,
+        interactive: true,
+        kind: "spotlight",
+      },
+      {
         id: "chat-composer",
         title: "Ask in chat",
         body: "Type here to talk with Coreside. Mentions and attachments appear in this composer when you need them.",
         target: TOUR_TARGETS.composer,
+        fallbackTarget: TOUR_TARGETS.chatPanel,
         kind: "spotlight",
       },
       {
@@ -92,6 +105,7 @@ export const TUTORIALS: readonly TutorialDefinition[] = [
         title: "Apps live beside chat",
         body: "When you create or open an app, it appears in this panel. Your apps stay in the sidebar under Apps.",
         target: TOUR_TARGETS.appPanel,
+        fallbackTarget: TOUR_TARGETS.sidebarApps,
         kind: "spotlight",
       },
       {
@@ -99,6 +113,7 @@ export const TUTORIALS: readonly TutorialDefinition[] = [
         title: "Preview before changes land",
         body: "When Coreside proposes a change, you can review it first. Nothing permanent happens without your say.",
         target: TOUR_TARGETS.composerSend,
+        fallbackTarget: TOUR_TARGETS.sidebarNewChat,
         kind: "spotlight",
       },
       {

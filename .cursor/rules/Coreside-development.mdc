@@ -22,8 +22,9 @@ Implementation:
 Verification:
 
 8. Run build, lint, and type checking when available.
-9. Review the entire diff.
-10. Search for:
+9. Always check npm after making changes to code to find and fix vulnerabilities so that when "npm install" runs, there are no vulnerabilities (npm audit reports 0 vulnerabilities).
+10. Review the entire diff.
+11. Search for:
    - regressions
    - edge cases
    - performance issues
@@ -33,13 +34,13 @@ Verification:
 
 Definition of Done:
 
-11. Do not claim success unless verification was performed.
-12. Do not claim success if known issues remain.
-13. If uncertain, explicitly state uncertainty.
+12. Do not claim success unless verification was performed.
+13. Do not claim success if known issues remain (including any npm audit vulnerabilities).
+14. If uncertain, explicitly state uncertainty.
 
 Final Output:
 
-14. Report:
+15. Report:
    - root cause
    - files changed
    - verification performed
