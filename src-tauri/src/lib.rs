@@ -538,44 +538,20 @@ pub fn run() {
                         // without competing for SQLite database locks or disk I/O.
                         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
 
-                        if let Some(state) = app_handle_for_sweep.try_state::<AppState>() {
-                            // Background deferred maintenance: turn journal compaction and cache cleanup
-                            // execute safely without blocking native window startup or first paint.
-                            {
-                                let db = state.db.lock();
-                                if let Err(e) = crate::runtime_v2::compact_turn_journal(&db, 30, 14) {
-                                    tracing::warn!(error = %e, "failed to compact turn journal");
-                                }
-                            }
-                            if let Ok(paths) = app_paths::AppPaths::resolve() {
-                                let report = cache_cleaner::clean_stale_caches(&paths);
-                                let total_removed = report.stale_restore_staging_removed
-                                    + report.stale_attachment_staging_removed
-                                    + report.orphaned_temp_files_removed;
-                                if total_removed > 0 || report.crawler_bytes_freed > 0 || !report.errors.is_empty() {
-                                    tracing::info!(
-                                        restore_staging = report.stale_restore_staging_removed,
-                                        attachment_staging = report.stale_attachment_staging_removed,
-                                        orphaned_temps = report.orphaned_temp_files_removed,
-                                        crawler_freed = %cache_cleaner::format_bytes(report.crawler_bytes_freed),
-                                        errors = report.errors.len(),
-                                        "background cache cleanup completed"
+                        let app_handle = app_handle_for_sweep.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            if let Some(state) = app_handle.try_state::<AppState>() {
+                                let cancel = tokio_util::sync::CancellationToken::new();
+                                if let Ok(paths) = app_paths::AppPaths::resolve() {
+                                    let outcome = maintenance::execute_deferred_startup_maintenance(
+                                        &state,
+                                        &paths,
+                                        &cancel,
                                     );
+                                    tracing::info!(?outcome, "deferred startup maintenance completed");
                                 }
                             }
-                            match commands::reconcile_and_sweep_attachments(&state) {
-                                Ok(report) if report.expired > 0 || report.promoted_orphans > 0 || report.missing_durable > 0 => {
-                                    tracing::info!(
-                                        expired = report.expired,
-                                        promoted = report.promoted_orphans,
-                                        missing = report.missing_durable,
-                                        "attachment sweep completed"
-                                    );
-                                }
-                                Err(err) => tracing::warn!(error = %err.message, "attachment sweep failed"),
-                                _ => {}
-                            }
-                        }
+                        });
                     });
                 }
             } else {
@@ -592,12 +568,14 @@ pub fn run() {
             tauri::RunEvent::Ready => {
                 branding::apply_display_name();
             }
-            tauri::RunEvent::WindowEvent { label, event, .. } => {
-                if let tauri::WindowEvent::Destroyed = event {
-                    if let Some(state) = app.try_state::<AppState>() {
-                        // Drop renderer mounts only. Durable surfaces stay in SQLite.
-                        state.mount_registry.lock().clear_window(&label);
-                    }
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::Destroyed,
+                ..
+            } => {
+                if let Some(state) = app.try_state::<AppState>() {
+                    // Drop renderer mounts only. Durable surfaces stay in SQLite.
+                    state.mount_registry.lock().clear_window(&label);
                 }
             }
             tauri::RunEvent::Exit => {

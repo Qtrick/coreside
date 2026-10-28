@@ -1342,24 +1342,74 @@ async fn emit_buffered_text_fluidly(
     text_seq: &mut u64,
     cancel: &CancellationToken,
 ) {
+    emit_buffered_text_fluidly_with_delay(
+        app,
+        on_event,
+        conversation_id,
+        turn_id,
+        text,
+        text_seq,
+        cancel,
+        None,
+    )
+    .await;
+}
+
+pub(crate) async fn emit_buffered_text_fluidly_with_delay(
+    app: &AppHandle,
+    on_event: Option<&tauri::ipc::Channel<AgentTurnEvent>>,
+    conversation_id: &str,
+    turn_id: &str,
+    text: &str,
+    text_seq: &mut u64,
+    cancel: &CancellationToken,
+    custom_frame_delay: Option<Duration>,
+) -> usize {
+    emit_buffered_text_frames_core(
+        conversation_id,
+        turn_id,
+        text,
+        text_seq,
+        cancel,
+        custom_frame_delay,
+        |event| emit_turn(app, on_event, event),
+    )
+    .await
+}
+
+pub(crate) async fn emit_buffered_text_frames_core(
+    conversation_id: &str,
+    turn_id: &str,
+    text: &str,
+    text_seq: &mut u64,
+    cancel: &CancellationToken,
+    custom_frame_delay: Option<Duration>,
+    mut emit: impl FnMut(AgentTurnEvent),
+) -> usize {
     if text.is_empty() {
-        return;
+        return 0;
     }
 
     // ponytail: fast-path for tests, E2E fixtures, and short text emits immediately
-    // with zero artificial delay or IPC explosion.
-    if cfg!(test) || std::env::var("CORESIDE_E2E").is_ok() || text.len() <= 64 {
-        emit_turn(
-            app,
-            on_event,
-            make_text_event(conversation_id, text.to_string(), None, text_seq, turn_id),
-        );
-        return;
+    // with zero artificial delay or IPC explosion when custom delay is not requested.
+    if custom_frame_delay.is_none()
+        && (cfg!(test) || std::env::var("CORESIDE_E2E").is_ok() || text.len() <= 64)
+    {
+        emit(make_text_event(
+            conversation_id,
+            text.to_string(),
+            None,
+            text_seq,
+            turn_id,
+        ));
+        return 1;
     }
 
     let frames = compute_buffered_text_frames(text);
     let total_frames = frames.len();
     let mut last_emitted: Option<String> = None;
+    let mut emitted_count = 0;
+    let frame_delay = custom_frame_delay.unwrap_or(Duration::from_millis(16));
 
     for (idx, frame) in frames.into_iter().enumerate() {
         if cancel.is_cancelled() {
@@ -1367,13 +1417,15 @@ async fn emit_buffered_text_fluidly(
         }
         let prev_text = last_emitted.as_deref();
         let event = make_text_event(conversation_id, frame.clone(), prev_text, text_seq, turn_id);
-        emit_turn(app, on_event, event);
+        emit(event);
         last_emitted = Some(frame);
+        emitted_count += 1;
 
-        if idx + 1 < total_frames {
-            tokio::time::sleep(Duration::from_millis(16)).await;
+        if idx + 1 < total_frames && !frame_delay.is_zero() {
+            tokio::time::sleep(frame_delay).await;
         }
     }
+    emitted_count
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -4907,6 +4959,87 @@ mod buffered_text_frame_tests {
         let unicode_frames = compute_buffered_text_frames(unicode_msg);
         assert!(!unicode_frames.is_empty());
         assert_eq!(unicode_frames.last().unwrap(), unicode_msg);
+    }
+
+    #[tokio::test]
+    async fn emit_buffered_text_frames_core_with_delay_zero_emits_all_frames_and_increments_seq() {
+        use super::emit_buffered_text_frames_core;
+        use std::time::Duration;
+        use tokio_util::sync::CancellationToken;
+
+        let text = "This is a long response from the model that is meant to test whether buffered text framing correctly splits and presents incremental updates to the user interface smoothly.";
+        let cancel = CancellationToken::new();
+        let mut seq = 0u64;
+        let mut events = Vec::new();
+
+        let emitted = emit_buffered_text_frames_core(
+            "conv-1",
+            "turn-1",
+            text,
+            &mut seq,
+            &cancel,
+            Some(Duration::ZERO),
+            |ev| events.push(ev),
+        )
+        .await;
+
+        assert_eq!(emitted, events.len());
+        assert!((4..=11).contains(&emitted));
+        assert_eq!(seq, emitted as u64);
+    }
+
+    #[tokio::test]
+    async fn emit_buffered_text_frames_core_stops_early_on_cancellation() {
+        use super::emit_buffered_text_frames_core;
+        use std::time::Duration;
+        use tokio_util::sync::CancellationToken;
+
+        let text = "This is a long response meant to verify that cancellation interrupts the frame emission loop.";
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let mut seq = 0u64;
+        let mut events = Vec::new();
+
+        let emitted = emit_buffered_text_frames_core(
+            "conv-1",
+            "turn-1",
+            text,
+            &mut seq,
+            &cancel,
+            Some(Duration::ZERO),
+            |ev| events.push(ev),
+        )
+        .await;
+
+        assert_eq!(emitted, 0);
+        assert_eq!(events.len(), 0);
+        assert_eq!(seq, 0);
+    }
+
+    #[tokio::test]
+    async fn emit_buffered_text_frames_core_short_text_fast_path() {
+        use super::emit_buffered_text_frames_core;
+        use tokio_util::sync::CancellationToken;
+
+        let text = "Short message";
+        let cancel = CancellationToken::new();
+        let mut seq = 0u64;
+        let mut events = Vec::new();
+
+        let emitted = emit_buffered_text_frames_core(
+            "conv-1",
+            "turn-1",
+            text,
+            &mut seq,
+            &cancel,
+            None,
+            |ev| events.push(ev),
+        )
+        .await;
+
+        assert_eq!(emitted, 1);
+        assert_eq!(events.len(), 1);
+        assert_eq!(seq, 1);
     }
 }
 

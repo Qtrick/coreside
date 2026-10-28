@@ -501,7 +501,8 @@ function ensureConversationSyncSubscription(
   const trimmed = (conversationId ?? "").trim();
   if (
     !opts?.force &&
-    trimmed === (conversationSyncConversationId ?? "")
+    trimmed === (conversationSyncConversationId ?? "") &&
+    conversationSyncUnlisten != null
   ) {
     return;
   }
@@ -527,6 +528,9 @@ function ensureConversationSyncSubscription(
       void catchUpConversationEvents(trimmed, get);
     })
     .catch(() => {
+      if (conversationSyncConversationId === trimmed) {
+        conversationSyncConversationId = null;
+      }
       // Best-effort; catch-up recovers Sync persisted when no live subscriber.
       void catchUpConversationEvents(trimmed, get);
     });
@@ -1304,6 +1308,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
             api.listTools().catch(() => []),
             api.listProjects().catch(() => []),
           ]);
+          set({ tools, projects });
           if (aiStatus) {
             // Lazy catalog: only fetch when disclosure allows provider model listing.
             const modelCatalog = aiStatus.disclosure?.showProviderCatalog
@@ -1318,7 +1323,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
                   : (modelCatalog?.selected ?? "auto"),
             });
           }
-          set({ tools, projects });
         })();
 
         await Promise.all([chatHydration, secondaryHydration]);

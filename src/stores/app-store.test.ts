@@ -158,6 +158,49 @@ describe("app-store bootstrap concurrency, idempotency, and decoupled hydration"
     });
   });
 
+  it("commits tools and projects without waiting for delayed getModelCatalog", async () => {
+    mockGetAiStatus.mockResolvedValue({
+      provider: "openai",
+      model: "gpt-4o",
+      disclosure: { showProviderCatalog: true },
+    });
+    mockListTools.mockResolvedValue([
+      { id: "tool-1", name: "Calculator", description: "calc", version: "1.0.0" },
+    ]);
+    mockListProjects.mockResolvedValue([
+      { id: "proj-1", name: "Project Alpha", createdAt: "2026-10-28T00:00:00Z", updatedAt: "2026-10-28T00:00:00Z" },
+    ]);
+
+    let resolveCatalog: (val: unknown) => void = () => {};
+    const slowCatalog = new Promise((resolve) => {
+      resolveCatalog = resolve;
+    });
+    mockGetModelCatalog.mockReturnValueOnce(slowCatalog);
+
+    const store = useAppStore.getState();
+    const bootPromise = store.bootstrap();
+
+    // Wait microtask ticks for Phase 1 & initial secondary hydration to run
+    await new Promise((r) => setTimeout(r, 20));
+
+    // tools and projects must already be committed to the store even though modelCatalog is still pending
+    expect(useAppStore.getState().tools).toHaveLength(1);
+    expect(useAppStore.getState().projects).toHaveLength(1);
+    expect(useAppStore.getState().modelCatalog).toBeNull();
+
+    // Settle model catalog
+    resolveCatalog({
+      selected: "gpt-4o",
+      models: [{ id: "gpt-4o", name: "GPT-4o" }],
+    });
+    await bootPromise;
+
+    expect(useAppStore.getState().modelCatalog).toEqual({
+      selected: "gpt-4o",
+      models: [{ id: "gpt-4o", name: "GPT-4o" }],
+    });
+  });
+
   it("halts early on recoveryRequired status without navigating to chat or loading secondary data", async () => {
     mockGetBootstrapStatus.mockResolvedValueOnce({
       status: "recoveryRequired",
