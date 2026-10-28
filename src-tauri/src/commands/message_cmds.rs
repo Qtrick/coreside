@@ -1287,6 +1287,50 @@ fn provider_supports_progressive_ops(provider_id: &str) -> bool {
 
 /// Post-hoc UI typing animation for a **complete buffered** assistant string.
 ///
+/// Chunking calculation for fluid text presentation.
+/// Bounded to at most 10 frames (~160ms total at 16ms/frame) with word boundary snapping.
+pub fn compute_buffered_text_frames(text: &str) -> Vec<String> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    if text.len() <= 64 {
+        return vec![text.to_string()];
+    }
+    let char_indices: Vec<(usize, char)> = text.char_indices().collect();
+    let total_chars = char_indices.len();
+    let num_frames = total_chars.clamp(4, 10);
+    let chunk_size = (total_chars + num_frames - 1) / num_frames;
+
+    let mut frames = Vec::with_capacity(num_frames + 1);
+    let mut cursor = 0;
+    while cursor < total_chars {
+        let mut next_cursor = (cursor + chunk_size).min(total_chars);
+        if next_cursor < total_chars {
+            for offset in 0..8 {
+                if next_cursor + offset < total_chars
+                    && char_indices[next_cursor + offset].1.is_whitespace()
+                {
+                    next_cursor += offset + 1;
+                    break;
+                }
+            }
+        }
+        let byte_end = if next_cursor >= total_chars {
+            text.len()
+        } else {
+            char_indices[next_cursor].0
+        };
+        frames.push(text[..byte_end].to_string());
+        cursor = next_cursor;
+    }
+    if let Some(last) = frames.last() {
+        if last.as_str() != text {
+            frames.push(text.to_string());
+        }
+    }
+    frames
+}
+
 /// This is **not** provider live streaming. Skip when `ResolvedChat.streamed_live`
 /// is true — live TextDelta events already reached the UI via `chat_stream`.
 async fn emit_buffered_text_fluidly(
@@ -1301,53 +1345,35 @@ async fn emit_buffered_text_fluidly(
     if text.is_empty() {
         return;
     }
-    let chars: Vec<char> = text.chars().collect();
-    let mut emitted = String::new();
-    let mut since_emit = 0usize;
 
-    for ch in chars {
+    // ponytail: fast-path for tests, E2E fixtures, and short text emits immediately
+    // with zero artificial delay or IPC explosion.
+    if cfg!(test) || std::env::var("CORESIDE_E2E").is_ok() || text.len() <= 64 {
+        emit_turn(
+            app,
+            on_event,
+            make_text_event(conversation_id, text.to_string(), None, text_seq, turn_id),
+        );
+        return;
+    }
+
+    let frames = compute_buffered_text_frames(text);
+    let total_frames = frames.len();
+    let mut last_emitted: Option<String> = None;
+
+    for (idx, frame) in frames.into_iter().enumerate() {
         if cancel.is_cancelled() {
             break;
         }
-        let previous_owned = if emitted.is_empty() {
-            None
-        } else {
-            Some(emitted.clone())
-        };
-        emitted.push(ch);
-        since_emit += 1;
-        let boundary = ch.is_whitespace() || matches!(ch, '.' | ',' | ';' | ':' | '!' | '?');
-        if since_emit >= 2 || boundary {
-            let event = make_text_event(
-                conversation_id,
-                emitted.clone(),
-                previous_owned.as_deref(),
-                text_seq,
-                turn_id,
-            );
-            emit_turn(app, on_event, event);
-            since_emit = 0;
-            let delay = if boundary { 18 } else { 10 };
-            tokio::time::sleep(Duration::from_millis(delay)).await;
+        let prev_text = last_emitted.as_deref();
+        let event = make_text_event(conversation_id, frame.clone(), prev_text, text_seq, turn_id);
+        emit_turn(app, on_event, event);
+        last_emitted = Some(frame);
+
+        if idx + 1 < total_frames {
+            tokio::time::sleep(Duration::from_millis(16)).await;
         }
     }
-
-    let previous = if emitted.is_empty() || emitted.as_str() == text {
-        None
-    } else {
-        Some(emitted.as_str())
-    };
-    emit_turn(
-        app,
-        on_event,
-        make_text_event(
-            conversation_id,
-            text.to_string(),
-            previous,
-            text_seq,
-            turn_id,
-        ),
-    );
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -4829,6 +4855,58 @@ mod provider_settlement_tests {
             assert_eq!(msg, err.code());
             assert_eq!(state, TurnState::Failed);
         }
+    }
+}
+
+#[cfg(test)]
+mod buffered_text_frame_tests {
+    use super::compute_buffered_text_frames;
+
+    #[test]
+    fn empty_text_returns_no_frames() {
+        assert!(compute_buffered_text_frames("").is_empty());
+    }
+
+    #[test]
+    fn short_text_returns_single_frame() {
+        let text = "Hello world from Coreside!";
+        let frames = compute_buffered_text_frames(text);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0], text);
+    }
+
+    #[test]
+    fn long_text_bounded_to_at_most_ten_frames_and_monotonic() {
+        for length in [500, 2000, 10000] {
+            let text = "The quick brown fox jumps over the lazy dog. ".repeat(length / 45 + 1);
+            let frames = compute_buffered_text_frames(&text);
+            assert!(
+                frames.len() <= 11,
+                "frames for length {length} was {}, exceeding bound of 11",
+                frames.len()
+            );
+            assert_eq!(
+                frames.last().unwrap(),
+                &text,
+                "terminal frame must match full input text"
+            );
+            for i in 1..frames.len() {
+                assert!(
+                    frames[i].starts_with(&frames[i - 1]),
+                    "frame {i} must extend frame {}",
+                    i - 1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn multibyte_unicode_and_emojis_safe() {
+        let unicode_msg =
+            "你好，世界！🚀 这是多字节字符测试。AI 助手可以流式渲染任何语言的文本。✨🎉💻";
+        let unicode_frames = compute_buffered_text_frames(unicode_msg);
+        assert!(!unicode_frames.is_empty());
+        assert_eq!(unicode_frames.last().unwrap(), unicode_msg);
     }
 }
 

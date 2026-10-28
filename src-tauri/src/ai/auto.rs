@@ -127,14 +127,48 @@ pub fn peek_assistant_message(partial: &str) -> Option<String> {
     let idx = partial.find(KEY)?;
     let after = &partial[idx + KEY.len()..];
     let colon = after.find(':')?;
-    let mut rest = after[colon + 1..].trim_start();
-    if !rest.starts_with('"') {
-        return None;
+    let rest = after[colon + 1..].trim_start();
+    let rest = rest.strip_prefix('"')?;
+
+    let quote_pos = rest.find('"');
+    let backslash_pos = rest.find('\\');
+
+    // Fast-path: when there are no backslashes before the closing quote (or if unclosed and
+    // no backslashes in rest), the slice contains zero escape sequences.
+    // We avoid character-by-character loops and allocate exactly slice.len() bytes.
+    let unescaped_slice = match (quote_pos, backslash_pos) {
+        (Some(q), None) => Some(&rest[..q]),
+        (Some(q), Some(b)) if q < b => Some(&rest[..q]),
+        (None, None) => Some(rest),
+        _ => None,
+    };
+
+    if let Some(slice) = unescaped_slice {
+        if slice.is_empty() {
+            return None;
+        }
+        return Some(slice.to_owned());
     }
-    rest = &rest[1..];
-    let mut out = String::new();
-    let mut chars = rest.chars();
-    let mut closed = false;
+
+    // Escaped slow path: find where the assistant message string terminates by scanning
+    // for an unescaped quote. Bytes '"' and '\\' are ASCII and never part of UTF-8 multi-byte codes.
+    let bytes = rest.as_bytes();
+    let mut i = 0;
+    let mut end = rest.len();
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2;
+        } else if bytes[i] == b'"' {
+            end = i;
+            break;
+        } else {
+            i += 1;
+        }
+    }
+
+    let slice = &rest[..end.min(rest.len())];
+    let mut out = String::with_capacity(slice.len());
+    let mut chars = slice.chars();
     while let Some(c) = chars.next() {
         if c == '\\' {
             match chars.next() {
@@ -146,16 +180,11 @@ pub fn peek_assistant_message(partial: &str) -> Option<String> {
                 Some(n) => out.push(n),
                 None => break,
             }
-        } else if c == '"' {
-            closed = true;
-            break;
         } else {
             out.push(c);
         }
     }
-    if out.is_empty() && !closed {
-        return None;
-    }
+
     if out.is_empty() {
         return None;
     }
@@ -451,6 +480,87 @@ mod tests {
         let complete = r#"{"assistantMessage":"Done","responseType":"message"}"#;
         assert_eq!(peek_assistant_message(complete).as_deref(), Some("Done"));
         assert!(peek_assistant_message(r#"{"schemaVersion":"1"}"#).is_none());
+    }
+
+    #[test]
+    fn peek_assistant_message_escapes_and_special_characters() {
+        // Escaped quotes and newlines
+        let escaped = r#"{"assistantMessage":"Line 1\nLine 2\t\"quoted\"\r\nDone"}"#;
+        assert_eq!(
+            peek_assistant_message(escaped).as_deref(),
+            Some("Line 1\nLine 2\t\"quoted\"\r\nDone")
+        );
+
+        // Incomplete escape at stream boundary
+        let cut_escape = r#"{"assistantMessage":"Incomplete escape: \"#;
+        assert_eq!(
+            peek_assistant_message(cut_escape).as_deref(),
+            Some("Incomplete escape: ")
+        );
+
+        // Escaped backslashes
+        let backslash = r#"{"assistantMessage":"Path C:\\Users\\Desktop"}"#;
+        assert_eq!(
+            peek_assistant_message(backslash).as_deref(),
+            Some("Path C:\\Users\\Desktop")
+        );
+
+        // Unicode and emojis
+        let unicode = r#"{"assistantMessage":"Hello 🌍 🚀 世界"}"#;
+        assert_eq!(
+            peek_assistant_message(unicode).as_deref(),
+            Some("Hello 🌍 🚀 世界")
+        );
+
+        // Downstream backslashes in subsequent JSON fields do not defeat the fast path
+        let downstream_escapes = r#"{"assistantMessage":"Clean message","payload":{"code":"fn main() {\n    println!(\"hello\");\n}"}}"#;
+        assert_eq!(
+            peek_assistant_message(downstream_escapes).as_deref(),
+            Some("Clean message")
+        );
+    }
+
+    #[test]
+    fn peek_assistant_message_invalid_or_non_string_formats() {
+        // Tolerates arbitrary whitespace before and after colon
+        let padded = r#"{"assistantMessage"   :   "Padded text"}"#;
+        assert_eq!(
+            peek_assistant_message(padded).as_deref(),
+            Some("Padded text")
+        );
+
+        // Non-string values must return None
+        assert!(peek_assistant_message(r#"{"assistantMessage": 12345}"#).is_none());
+        assert!(peek_assistant_message(r#"{"assistantMessage": true}"#).is_none());
+        assert!(peek_assistant_message(r#"{"assistantMessage": {}}"#).is_none());
+
+        // Empty message returns None (does not show blank bubble)
+        assert!(peek_assistant_message(r#"{"assistantMessage":""}"#).is_none());
+
+        // Substring key does not match
+        assert!(peek_assistant_message(r#"{"not_assistantMessage":"text"}"#).is_none());
+    }
+
+    #[test]
+    fn peek_assistant_message_large_payload_slice_scan_performance() {
+        // 50KB payload with repeated peek operations simulating live SSE stream chunks
+        let large_body =
+            "The model is generating continuous structured data with rich content. ".repeat(700);
+        let partial_json = format!(r#"{{"schemaVersion":"1","assistantMessage":"{large_body}"#);
+
+        let start = std::time::Instant::now();
+        for _ in 0..100 {
+            let peeked = peek_assistant_message(&partial_json);
+            assert!(peeked.is_some());
+            assert_eq!(peeked.unwrap().len(), large_body.len());
+        }
+        let elapsed = start.elapsed();
+        // 100 peeks across 50KB payloads must execute well under 50ms (average < 0.5ms per peek)
+        assert!(
+            elapsed.as_millis() < 50,
+            "100 peeks took {:?}, slice scanning should be sub-millisecond",
+            elapsed
+        );
     }
 
     struct DelayedLiveProvider;

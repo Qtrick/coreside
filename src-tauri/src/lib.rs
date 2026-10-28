@@ -64,26 +64,6 @@ pub fn run() {
         if let Err(e) = crate::runtime_v2::mark_interrupted_in_flight(&database) {
             tracing::warn!(error = %e, "failed to mark interrupted in-flight turns");
         }
-        if let Err(e) = crate::runtime_v2::compact_turn_journal(&database, 30, 14) {
-            tracing::warn!(error = %e, "failed to compact turn journal on startup");
-        }
-        // Smart cache cleanup: remove stale staging dirs, orphaned temps, oversized crawler data.
-        if let Ok(paths) = app_paths::AppPaths::resolve() {
-            let report = cache_cleaner::clean_stale_caches(&paths);
-            let total_removed = report.stale_restore_staging_removed
-                + report.stale_attachment_staging_removed
-                + report.orphaned_temp_files_removed;
-            if total_removed > 0 || report.crawler_bytes_freed > 0 || !report.errors.is_empty() {
-                tracing::info!(
-                    restore_staging = report.stale_restore_staging_removed,
-                    attachment_staging = report.stale_attachment_staging_removed,
-                    orphaned_temps = report.orphaned_temp_files_removed,
-                    crawler_freed = %cache_cleaner::format_bytes(report.crawler_bytes_freed),
-                    errors = report.errors.len(),
-                    "startup cache cleanup completed"
-                );
-            }
-        }
         #[cfg(feature = "e2e")]
         e2e_support::maybe_seed(&mut database);
     } else {
@@ -429,23 +409,6 @@ pub fn run() {
                         _ => {}
                     }
                 }
-                let app_handle_for_sweep = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Some(state) = app_handle_for_sweep.try_state::<AppState>() {
-                        match commands::reconcile_and_sweep_attachments(&state) {
-                            Ok(report) if report.expired > 0 || report.promoted_orphans > 0 || report.missing_durable > 0 => {
-                                tracing::info!(
-                                    expired = report.expired,
-                                    promoted = report.promoted_orphans,
-                                    missing = report.missing_durable,
-                                    "attachment sweep completed"
-                                );
-                            }
-                            Err(err) => tracing::warn!(error = %err.message, "attachment sweep failed"),
-                            _ => {}
-                        }
-                    }
-                });
 
                 let mut skip_ordinary_services = false;
                 if let Ok(paths) = app_paths::AppPaths::resolve() {
@@ -560,13 +523,60 @@ pub fn run() {
 
                 if skip_ordinary_services {
                     tracing::warn!(
-                        "skipping automation scheduler and attachment gc — maintenance Recovery required"
+                        "skipping automation scheduler, background maintenance, and attachment gc — maintenance Recovery required"
                     );
                 } else {
                     let handle = scheduler_handle.clone();
                     let app_handle = app.handle().clone();
                     automations::spawn_scheduler(app_handle, handle);
                     commands::spawn_attachment_gc_scheduler(app.handle().clone());
+
+                    let app_handle_for_sweep = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        // Defer non-critical startup maintenance by 1.5s to allow the frontend
+                        // critical shell and active conversation to complete initial hydration
+                        // without competing for SQLite database locks or disk I/O.
+                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+                        if let Some(state) = app_handle_for_sweep.try_state::<AppState>() {
+                            // Background deferred maintenance: turn journal compaction and cache cleanup
+                            // execute safely without blocking native window startup or first paint.
+                            {
+                                let db = state.db.lock();
+                                if let Err(e) = crate::runtime_v2::compact_turn_journal(&db, 30, 14) {
+                                    tracing::warn!(error = %e, "failed to compact turn journal");
+                                }
+                            }
+                            if let Ok(paths) = app_paths::AppPaths::resolve() {
+                                let report = cache_cleaner::clean_stale_caches(&paths);
+                                let total_removed = report.stale_restore_staging_removed
+                                    + report.stale_attachment_staging_removed
+                                    + report.orphaned_temp_files_removed;
+                                if total_removed > 0 || report.crawler_bytes_freed > 0 || !report.errors.is_empty() {
+                                    tracing::info!(
+                                        restore_staging = report.stale_restore_staging_removed,
+                                        attachment_staging = report.stale_attachment_staging_removed,
+                                        orphaned_temps = report.orphaned_temp_files_removed,
+                                        crawler_freed = %cache_cleaner::format_bytes(report.crawler_bytes_freed),
+                                        errors = report.errors.len(),
+                                        "background cache cleanup completed"
+                                    );
+                                }
+                            }
+                            match commands::reconcile_and_sweep_attachments(&state) {
+                                Ok(report) if report.expired > 0 || report.promoted_orphans > 0 || report.missing_durable > 0 => {
+                                    tracing::info!(
+                                        expired = report.expired,
+                                        promoted = report.promoted_orphans,
+                                        missing = report.missing_durable,
+                                        "attachment sweep completed"
+                                    );
+                                }
+                                Err(err) => tracing::warn!(error = %err.message, "attachment sweep failed"),
+                                _ => {}
+                            }
+                        }
+                    });
                 }
             } else {
                 tracing::warn!(

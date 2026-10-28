@@ -838,7 +838,7 @@ function attachAgentTurnSyncListener(
 
 function resolveTheme(theme: ThemePreference): "light" | "dark" {
   if (theme === "system") {
-    if (typeof window !== "undefined" && window.matchMedia) {
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
       return window.matchMedia("(prefers-color-scheme: dark)").matches
         ? "dark"
         : "light";
@@ -1081,6 +1081,16 @@ let interfaceTransparencyCommitGen = 0;
  */
 let interfaceTransparencyCommittedGen = 0;
 /**
+ * In-flight bootstrap promise reuse.
+ * Concurrent bootstrap calls (e.g. React 18 StrictMode mount or focus triggers)
+ * coalesce into a single execution to prevent duplicate hydration or event listeners.
+ */
+let bootstrapInFlight: Promise<void> | null = null;
+
+export function _resetBootstrapInFlightForTests(): void {
+  bootstrapInFlight = null;
+}
+/**
  * In-flight same-target promise reuse (pointerup + blur / duplicate preset).
  * Different targets start a new commit; only the latest gen may paint Zustand.
  */
@@ -1197,117 +1207,132 @@ export const useAppStore = create<AppStore>((set, get) => ({
   testingConnection: false,
   connectionTestMessage: null,
 
-  bootstrap: async () => {
-    try {
-      const bootstrapStatus = await api.getBootstrapStatus();
-      if (bootstrapStatus.status === "recoveryRequired") {
+  bootstrap: () => {
+    if (bootstrapInFlight) {
+      return bootstrapInFlight;
+    }
+    bootstrapInFlight = (async () => {
+      try {
+        const bootstrapStatus = await api.getBootstrapStatus();
+        if (bootstrapStatus.status === "recoveryRequired") {
+          set({
+            bootstrapped: true,
+            bootError: null,
+            bootstrapStatus,
+            appInfo: await api.getAppInfo().catch(() => null),
+          });
+          return;
+        }
+
+        // Phase 1 — critical shell: only what the shell needs to render.
+        // Never block first paint on keychain/provider/catalog work.
+        const [appInfo, settings, conversations] = await Promise.all([
+          api.getAppInfo(),
+          api.getSettings(),
+          api.listConversations(),
+        ]);
+
+        const theme = settings.theme ?? "system";
+        const resolved = resolveTheme(theme);
+        const appearance = appearanceFromSettings(settings);
+        const wallpaper = wallpaperFromSettings(settings);
+        const interfaceTransparency =
+          typeof settings.interfaceTransparency === "number"
+            ? Math.min(100, Math.max(0, Math.round(settings.interfaceTransparency)))
+            : INTERFACE_TRANSPARENCY_DEFAULT;
+        committedInterfaceTransparency = interfaceTransparency;
+        interfaceTransparencyCommittedGen = interfaceTransparencyCommitGen;
+        syncCommittedWallpaperFromSettings({
+          wallpaper,
+          globalWallpaperJson: settings.wallpaperJson ?? null,
+        });
         set({
           bootstrapped: true,
           bootError: null,
-          bootstrapStatus,
-          appInfo: await api.getAppInfo().catch(() => null),
+          bootstrapStatus: { status: "ready" },
+          appInfo,
+          theme,
+          resolvedTheme: resolved,
+          appearance,
+          wallpaper,
+          globalWallpaperJson: settings.wallpaperJson ?? null,
+          interfaceTransparency,
+          adaptiveWindowSizing:
+            settings.adaptiveWindowSizing === "ask" ||
+            settings.adaptiveWindowSizing === "off" ||
+            settings.adaptiveWindowSizing === "smart"
+              ? settings.adaptiveWindowSizing
+              : "smart",
+          chatToolSplitRatio:
+            typeof settings.chatToolSplitRatio === "number"
+              ? Math.min(0.72, Math.max(0.28, settings.chatToolSplitRatio))
+              : 0.5,
+          sidebarCollapsed: settings.sidebarCollapsed ?? false,
+          preferredModel: settings.preferredModel ?? "auto",
+          dockIcon: parseDockIconConfig(settings.dockIcon ?? DEFAULT_DOCK_ICON),
+          dockIconError: null,
+          developerMode: Boolean(settings.developerMode),
+          actionLogEnabled: Boolean(settings.actionLogEnabled) || settings.actionLogMode === "always" || settings.actionLogMode === "intelligent",
+          actionLogMode:
+            settings.actionLogMode === "always" ||
+            settings.actionLogMode === "intelligent" ||
+            settings.actionLogMode === "off"
+              ? settings.actionLogMode
+              : settings.actionLogEnabled
+                ? "always"
+                : "off",
+          conversations,
         });
-        return;
-      }
 
-      // Phase 1 — critical shell: only what the shell needs to render.
-      // Never block first paint on keychain/provider/catalog work.
-      const [appInfo, settings, conversations] = await Promise.all([
-        api.getAppInfo(),
-        api.getSettings(),
-        api.listConversations(),
-      ]);
+        attachAgentTurnSyncListener(get, set);
+        attachConversationSyncReconcile(get, set);
 
-      const theme = settings.theme ?? "system";
-      const resolved = resolveTheme(theme);
-      const appearance = appearanceFromSettings(settings);
-      const wallpaper = wallpaperFromSettings(settings);
-      const interfaceTransparency =
-        typeof settings.interfaceTransparency === "number"
-          ? Math.min(100, Math.max(0, Math.round(settings.interfaceTransparency)))
-          : INTERFACE_TRANSPARENCY_DEFAULT;
-      committedInterfaceTransparency = interfaceTransparency;
-      interfaceTransparencyCommittedGen = interfaceTransparencyCommitGen;
-      syncCommittedWallpaperFromSettings({
-        wallpaper,
-        globalWallpaperJson: settings.wallpaperJson ?? null,
-      });
-      set({
-        bootstrapped: true,
-        bootError: null,
-        bootstrapStatus: { status: "ready" },
-        appInfo,
-        theme,
-        resolvedTheme: resolved,
-        appearance,
-        wallpaper,
-        globalWallpaperJson: settings.wallpaperJson ?? null,
-        interfaceTransparency,
-        adaptiveWindowSizing:
-          settings.adaptiveWindowSizing === "ask" ||
-          settings.adaptiveWindowSizing === "off" ||
-          settings.adaptiveWindowSizing === "smart"
-            ? settings.adaptiveWindowSizing
-            : "smart",
-        chatToolSplitRatio:
-          typeof settings.chatToolSplitRatio === "number"
-            ? Math.min(0.72, Math.max(0.28, settings.chatToolSplitRatio))
-            : 0.5,
-        sidebarCollapsed: settings.sidebarCollapsed ?? false,
-        preferredModel: settings.preferredModel ?? "auto",
-        dockIcon: parseDockIconConfig(settings.dockIcon ?? DEFAULT_DOCK_ICON),
-        dockIconError: null,
-        developerMode: Boolean(settings.developerMode),
-        actionLogEnabled: Boolean(settings.actionLogEnabled) || settings.actionLogMode === "always" || settings.actionLogMode === "intelligent",
-        actionLogMode:
-          settings.actionLogMode === "always" ||
-          settings.actionLogMode === "intelligent" ||
-          settings.actionLogMode === "off"
-            ? settings.actionLogMode
-            : settings.actionLogEnabled
-              ? "always"
-              : "off",
-        conversations,
-      });
+        // Phase 1.5 — active chat hydration: immediately open the first conversation
+        // so returning users see their messages and conversation pane without waiting for
+        // secondary provider status, tool listing, or model catalog.
+        const current = get().conversations;
+        const chatHydration =
+          current.length > 0 && !get().activeConversationId
+            ? get().navigateToChat(current[0].id)
+            : Promise.resolve();
 
-      attachAgentTurnSyncListener(get, set);
-      attachConversationSyncReconcile(get, set);
+        // Phase 2 — secondary hydration: provider status, catalog, tools,
+        // projects settle concurrently in background without delaying chat view.
+        const secondaryHydration = (async () => {
+          const [aiStatus, tools, projects] = await Promise.all([
+            api.getAiStatus().catch(() => null),
+            api.listTools().catch(() => []),
+            api.listProjects().catch(() => []),
+          ]);
+          if (aiStatus) {
+            // Lazy catalog: only fetch when disclosure allows provider model listing.
+            const modelCatalog = aiStatus.disclosure?.showProviderCatalog
+              ? await api.getModelCatalog().catch(() => null)
+              : null;
+            set({
+              aiStatus,
+              modelCatalog,
+              preferredModel:
+                get().preferredModel !== "auto"
+                  ? get().preferredModel
+                  : (modelCatalog?.selected ?? "auto"),
+            });
+          }
+          set({ tools, projects });
+        })();
 
-      // Phase 2 — secondary hydration: provider status, catalog, tools,
-      // projects. Independent calls settle without blocking each other.
-      const [aiStatus, tools, projects] = await Promise.all([
-        api.getAiStatus().catch(() => null),
-        api.listTools().catch(() => []),
-        api.listProjects().catch(() => []),
-      ]);
-      if (aiStatus) {
-        // Lazy catalog: only fetch when disclosure allows provider model listing.
-        const modelCatalog = aiStatus.disclosure?.showProviderCatalog
-          ? await api.getModelCatalog().catch(() => null)
-          : null;
+        await Promise.all([chatHydration, secondaryHydration]);
+      } catch (error) {
         set({
-          aiStatus,
-          modelCatalog,
-          preferredModel:
-            get().preferredModel !== "auto"
-              ? get().preferredModel
-              : (modelCatalog?.selected ?? "auto"),
+          bootstrapped: true,
+          bootError:
+            error instanceof Error ? error.message : "Failed to start Coreside",
         });
       }
-      set({ tools, projects });
-
-      // Phase 3 — active chat hydration.
-      const current = get().conversations;
-      if (current.length > 0) {
-        await get().navigateToChat(current[0].id);
-      }
-    } catch (error) {
-      set({
-        bootstrapped: true,
-        bootError:
-          error instanceof Error ? error.message : "Failed to start Coreside",
-      });
-    }
+    })().finally(() => {
+      bootstrapInFlight = null;
+    });
+    return bootstrapInFlight;
   },
 
   setTheme: async (theme) => {
@@ -1719,6 +1744,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (mode === "off") return;
     const reducedMotion =
       typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (mode === "ask") {
       const asked = get().windowExpandAskedToolIds;
@@ -2416,6 +2442,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ activeToolId: null, activeTool: null, toolState: {} });
     const reducedMotion =
       typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     void api.windowOrchestratorRestore(reducedMotion).catch(() => undefined);
   },

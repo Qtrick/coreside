@@ -117,20 +117,26 @@ describe("Journey 22 — ApplicationPlan evolution (due dates)", () => {
 
     await browser.waitUntil(
       async () => {
-        const msgList = await $(".message-list");
-        if (await msgList.isExisting()) {
-          const text = (await msgList.getText()).toLowerCase();
-          if (
-            text.includes("due date") &&
-            (text.includes("updated") ||
-              text.includes("optional due") ||
-              text.includes("preserved"))
-          ) {
-            return true;
+        const applyBtn = await latestVisibleKernelApplyButton();
+        if (applyBtn !== null) {
+          return true;
+        }
+        const bubbles = await $$(".message-bubble-assistant");
+        if (bubbles.length > 0) {
+          const latest = bubbles[bubbles.length - 1];
+          if (await latest.isExisting()) {
+            const text = (await latest.getText()).toLowerCase();
+            if (
+              text.includes("due date") &&
+              (text.includes("updated") ||
+                text.includes("optional due") ||
+                text.includes("preserved"))
+            ) {
+              return true;
+            }
           }
         }
-        const applyBtn = await latestVisibleKernelApplyButton();
-        return applyBtn !== null;
+        return false;
       },
       {
         timeout: 45_000,

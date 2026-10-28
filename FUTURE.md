@@ -107,3 +107,14 @@ Established typed stage registry in `src/lib/onboarding/stages.ts` supporting fu
 - **Source**: `src/lib/onboarding/stages.ts`.
 - **Tests**: `src/lib/onboarding/stages.test.ts`.
 
+### PERF-001: Native Startup Deferred Maintenance & Decoupled Frontend Hydration — COMPLETED
+Offloaded SQLite turn journal compaction, attachment reconciliation, and disk cache pruning from synchronous startup to a deferred asynchronous background worker with safe Recovery-mode gating. Decoupled frontend active chat navigation from secondary provider catalog inspection and coalesced concurrent bootstrap requests into a shared in-flight promise.
+- **Source**: `src-tauri/src/lib.rs`, `src/stores/app-store.ts`.
+- **Tests**: `src/stores/app-store.test.ts`.
+
+### CHAT-001: Bounded Fluid Text Presentation & Fast-Path Slice Stream Parsing — COMPLETED
+Replaced unbounded character-by-character timer delay in buffered text delivery with bounded chunking (at most 10 frames, ~160ms total) with word-boundary snapping and immediate test/E2E emission. Added ASCII slice scanning fast path for unescaped partial JSON assistant message peeking to eliminate per-character unescaping loops during live streaming.
+- **Source**: `src-tauri/src/commands/message_cmds.rs`, `src-tauri/src/ai/auto.rs`.
+- **Tests**: `src-tauri/src/commands/message_cmds.rs` (`buffered_text_frame_tests`), `src-tauri/src/ai/auto.rs` (`peek_assistant_message_large_payload_slice_scan_performance`).
+
+
