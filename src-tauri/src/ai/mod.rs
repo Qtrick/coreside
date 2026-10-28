@@ -781,6 +781,8 @@ mod provider_factory_tests {
 
     #[test]
     fn hosted_route_failure_does_not_fall_back_to_local() {
+        let _guard = crate::credentials::keyring_test_guard();
+        let _ = crate::credentials::clear_session();
         let access = ResolvedAiAccess {
             credentials: ResolvedCredentials {
                 provider: "coreside_hosted".into(),

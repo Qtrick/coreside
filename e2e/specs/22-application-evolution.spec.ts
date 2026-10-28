@@ -110,6 +110,14 @@ describe("Journey 22 — ApplicationPlan evolution (due dates)", () => {
       },
     );
 
+    // In compact layout mode, active tool canvas hides the chat panel.
+    // Return to chat before sending the evolution prompt so composer and bubbles are visible.
+    const backToChat = await $('[aria-label="Back to chat"]');
+    if ((await backToChat.isExisting()) && (await backToChat.isDisplayed())) {
+      await backToChat.click();
+    }
+
+    await composer.waitForClickable({ timeout: 10_000 });
     await composer.click();
     await composer.setValue("Add due dates to my task tracker");
     await send.waitForClickable({ timeout: 10_000 });

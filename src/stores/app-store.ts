@@ -362,6 +362,11 @@ let conversationSyncReconcileAttached = false;
 /** Active conversation-scoped Sync Channel unlisten (main / tool window). */
 let conversationSyncUnlisten: (() => void) | null = null;
 let conversationSyncConversationId: string | null = null;
+/** Monotonic generation preventing ABA and stale in-flight subscriptions from becoming live. */
+let conversationSyncGeneration = 0;
+/** In-flight subscription promise to coalesce concurrent calls for the same conversation. */
+let conversationSyncPendingPromise: Promise<(() => void) | null> | null = null;
+let conversationSyncPendingId: string | null = null;
 /** Per-conversation catch-up cursor for conversation_event_log. */
 const conversationEventCursor = new Map<string, number>();
 /** ponytail: one in-flight catch-up per conversation; ceiling = process-local. */
@@ -499,41 +504,59 @@ function ensureConversationSyncSubscription(
   opts?: { force?: boolean },
 ) {
   const trimmed = (conversationId ?? "").trim();
-  if (
-    !opts?.force &&
-    trimmed === (conversationSyncConversationId ?? "") &&
-    conversationSyncUnlisten != null
-  ) {
-    return;
+  if (!opts?.force && trimmed === (conversationSyncConversationId ?? "")) {
+    if (conversationSyncUnlisten != null) {
+      return;
+    }
+    if (conversationSyncPendingId === trimmed && conversationSyncPendingPromise != null) {
+      return;
+    }
   }
+
+  const ticket = ++conversationSyncGeneration;
   conversationSyncUnlisten?.();
   conversationSyncUnlisten = null;
+  conversationSyncPendingPromise = null;
+  conversationSyncPendingId = null;
   conversationSyncConversationId = trimmed || null;
   if (!trimmed) return;
+
+  conversationSyncPendingId = trimmed;
   // Subscribe first, then catch up. Catch-up→subscribe leaves a gap where
   // durable applies can land unseen; overlap only causes an extra reload.
-  void api
+  const promise = api
     .subscribeConversationSync({
       conversationId: trimmed,
       onEvent: (event) => {
+        if (conversationSyncGeneration !== ticket || conversationSyncConversationId !== trimmed) {
+          return;
+        }
         applySyncOrConflictEvent(get, set, event);
       },
     })
     .then((stop) => {
-      if (conversationSyncConversationId !== trimmed) {
+      if (conversationSyncGeneration !== ticket || conversationSyncConversationId !== trimmed) {
         stop();
-        return;
+        return null;
       }
+      conversationSyncPendingPromise = null;
+      conversationSyncPendingId = null;
       conversationSyncUnlisten = stop;
       void catchUpConversationEvents(trimmed, get);
+      return stop;
     })
     .catch(() => {
-      if (conversationSyncConversationId === trimmed) {
+      if (conversationSyncGeneration === ticket && conversationSyncConversationId === trimmed) {
+        conversationSyncPendingPromise = null;
+        conversationSyncPendingId = null;
         conversationSyncConversationId = null;
       }
       // Best-effort; catch-up recovers Sync persisted when no live subscriber.
       void catchUpConversationEvents(trimmed, get);
+      return null;
     });
+
+  conversationSyncPendingPromise = promise;
 }
 
 /**
@@ -1093,6 +1116,43 @@ let bootstrapInFlight: Promise<void> | null = null;
 
 export function _resetBootstrapInFlightForTests(): void {
   bootstrapInFlight = null;
+}
+
+export function _resetConversationSyncForTests(): void {
+  conversationSyncUnlisten?.();
+  conversationSyncUnlisten = null;
+  conversationSyncConversationId = null;
+  conversationSyncGeneration += 1;
+  conversationSyncPendingPromise = null;
+  conversationSyncPendingId = null;
+  conversationEventCursor.clear();
+  conversationCatchUpInFlight.clear();
+}
+
+export function _ensureConversationSyncSubscriptionForTests(
+  conversationId: string | null,
+  opts?: { force?: boolean },
+): void {
+  ensureConversationSyncSubscription(
+    conversationId,
+    useAppStore.getState as unknown as SyncListenerGet,
+    useAppStore.setState as unknown as SyncListenerSet,
+    opts,
+  );
+}
+
+export function _getConversationSyncStateForTests(): {
+  conversationId: string | null;
+  hasUnlisten: boolean;
+  generation: number;
+  hasPending: boolean;
+} {
+  return {
+    conversationId: conversationSyncConversationId,
+    hasUnlisten: conversationSyncUnlisten != null,
+    generation: conversationSyncGeneration,
+    hasPending: conversationSyncPendingPromise != null,
+  };
 }
 /**
  * In-flight same-target promise reuse (pointerup + blur / duplicate preset).

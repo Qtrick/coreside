@@ -5,6 +5,8 @@
 mod hosted_session;
 mod resolve;
 
+#[cfg(test)]
+pub(crate) use hosted_session::tests::keyring_test_guard;
 pub use hosted_session::{
     access_token, adapter_connected, clear_session, contract_default_plan_presentation,
     contract_plan_catalog_summaries, ensure_fresh_access_token, fetch_server_plan_presentation,

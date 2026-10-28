@@ -13,11 +13,28 @@ describe("global.css token contract", () => {
     for (const ch of css) {
       if (ch === "{") depth += 1;
       if (ch === "}") depth -= 1;
-      expect(depth).toBeGreaterThanOrEqual(0);
+      if (depth < 0) break;
     }
     expect(depth).toBe(0);
     expect(css).toMatch(
       /\.wallpaper-filter-presets\s*\{[^}]*display:\s*flex;[^}]*\}/,
     );
+  });
+
+  it("detects premature closing and unclosed braces correctly", () => {
+    function checkBraceBalance(snippet: string): boolean {
+      let depth = 0;
+      for (const ch of snippet) {
+        if (ch === "{") depth += 1;
+        if (ch === "}") depth -= 1;
+        if (depth < 0) break;
+      }
+      return depth === 0;
+    }
+
+    expect(checkBraceBalance(".a { color: red; }")).toBe(true);
+    expect(checkBraceBalance(".a { color: red; } }")).toBe(false);
+    expect(checkBraceBalance("} .a { color: red; {")).toBe(false);
+    expect(checkBraceBalance(".a { color: red;")).toBe(false);
   });
 });

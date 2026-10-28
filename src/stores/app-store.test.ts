@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useAppStore, _resetBootstrapInFlightForTests } from "./app-store";
+import {
+  useAppStore,
+  _resetBootstrapInFlightForTests,
+  _resetConversationSyncForTests,
+  _ensureConversationSyncSubscriptionForTests,
+  _getConversationSyncStateForTests,
+} from "./app-store";
 
 const mockGetBootstrapStatus = vi.fn();
 const mockGetAppInfo = vi.fn();
@@ -23,7 +29,7 @@ vi.mock("@/lib/tauri", () => ({
     listProjects: () => mockListProjects(),
     getModelCatalog: () => mockGetModelCatalog(),
     getMessages: (...args: unknown[]) => mockGetMessages(...args),
-    subscribeConversationSync: () => mockSubscribeConversationSync(),
+    subscribeConversationSync: (...args: unknown[]) => mockSubscribeConversationSync(...args),
     setWorkspaceAppearance: vi.fn(),
     applyAppearanceBundle: vi.fn(),
     getSurface: vi.fn(async () => null),
@@ -45,6 +51,7 @@ describe("app-store bootstrap concurrency, idempotency, and decoupled hydration"
   beforeEach(() => {
     vi.clearAllMocks();
     _resetBootstrapInFlightForTests();
+    _resetConversationSyncForTests();
 
     // Reset store state between tests
     useAppStore.setState({
@@ -238,5 +245,171 @@ describe("app-store bootstrap concurrency, idempotency, and decoupled hydration"
 
     expect(mockGetSettings).toHaveBeenCalledTimes(2);
     expect(useAppStore.getState().bootError).toBeNull();
+  });
+
+  it("coalesces concurrent navigateToChat subscriptions for the same conversation without leaking unlisteners", async () => {
+    let unlistenCalled = 0;
+    const stopFn = vi.fn(() => {
+      unlistenCalled += 1;
+    });
+
+    let resolveSub: (val: () => void) => void = () => {};
+    mockSubscribeConversationSync.mockImplementation(
+      () =>
+        new Promise<() => void>((resolve) => {
+          resolveSub = () => resolve(stopFn);
+        }),
+    );
+
+    const store = useAppStore.getState();
+
+    // Two concurrent calls for conv-1 while subscription is pending
+    const [p1, p2] = [store.navigateToChat("conv-1"), store.navigateToChat("conv-1")];
+
+    // Exactly one subscribe call should be initiated (coalesced)
+    expect(mockSubscribeConversationSync).toHaveBeenCalledTimes(1);
+
+    resolveSub(stopFn);
+    await Promise.all([p1, p2]);
+
+    expect(unlistenCalled).toBe(0);
+  });
+
+  it("disposes stale subscriptions and ensures only latest generation becomes active during rapid A -> B -> A navigation", async () => {
+    const stops: Record<string, () => void> = {
+      "sub-1": vi.fn(),
+      "sub-2": vi.fn(),
+      "sub-3": vi.fn(),
+    };
+    const resolvers: Record<string, () => void> = {};
+
+    let callCount = 0;
+    mockSubscribeConversationSync.mockImplementation(() => {
+      callCount += 1;
+      const key = `sub-${callCount}`;
+      return new Promise<() => void>((resolve) => {
+        resolvers[key] = () => resolve(stops[key]);
+      });
+    });
+
+    const store = useAppStore.getState();
+
+    // User navigates A -> B -> A
+    const navA1 = store.navigateToChat("conv-1");
+    const navB = store.navigateToChat("conv-2");
+    const navA2 = store.navigateToChat("conv-1");
+
+    // Settle out-of-order: first conv-1 settles, then conv-2 settles, then second conv-1 settles
+    resolvers["sub-1"]();
+    await navA1;
+
+    // First subscription was superseded by navB and navA2, so its returned stopFn must be called immediately
+    expect(stops["sub-1"]).toHaveBeenCalledTimes(1);
+
+    resolvers["sub-2"]();
+    await navB;
+    // B was also superseded by second A, so its returned stopFn must be called immediately
+    expect(stops["sub-2"]).toHaveBeenCalledTimes(1);
+
+    resolvers["sub-3"]();
+    await navA2;
+    // Third subscription (second A) is current and active, so its stopFn must NOT be called
+    expect(stops["sub-3"]).not.toHaveBeenCalled();
+    expect(useAppStore.getState().activeConversationId).toBe("conv-1");
+  });
+
+  it("allows subscription retry when a previous attempt fails and clears sync state", async () => {
+    mockSubscribeConversationSync.mockRejectedValueOnce(new Error("Channel connection failed"));
+
+    _ensureConversationSyncSubscriptionForTests("conv-1");
+
+    // Wait microtask tick for catch handler to settle
+    await new Promise((r) => setTimeout(r, 10));
+
+    // State must be cleared after failure to allow retry
+    const failedState = _getConversationSyncStateForTests();
+    expect(failedState.conversationId).toBeNull();
+    expect(failedState.hasUnlisten).toBe(false);
+
+    // Subsequent subscription attempt for the same conversation succeeds
+    const stopFn = vi.fn();
+    mockSubscribeConversationSync.mockResolvedValueOnce(stopFn);
+
+    _ensureConversationSyncSubscriptionForTests("conv-1");
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(mockSubscribeConversationSync).toHaveBeenCalledTimes(2);
+    const retryState = _getConversationSyncStateForTests();
+    expect(retryState.conversationId).toBe("conv-1");
+    expect(retryState.hasUnlisten).toBe(true);
+  });
+
+  it("ignores onEvent calls from superseded subscription ticket", async () => {
+    let capturedOnEvent1: ((event: unknown) => void) | undefined;
+    mockSubscribeConversationSync.mockImplementationOnce(
+      ({ onEvent }: { onEvent: (event: unknown) => void }) => {
+        capturedOnEvent1 = onEvent;
+        return Promise.resolve(vi.fn());
+      },
+    );
+
+    _ensureConversationSyncSubscriptionForTests("conv-1");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(capturedOnEvent1).toBeDefined();
+
+    // User switches to conv-2, advancing generation ticket
+    mockSubscribeConversationSync.mockResolvedValueOnce(vi.fn());
+    _ensureConversationSyncSubscriptionForTests("conv-2");
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Stale event arriving from first subscription's channel
+    const event = {
+      kind: "conflict",
+      conversationId: "conv-1",
+      message: "stale conflict",
+    };
+    capturedOnEvent1!(event);
+
+    expect(useAppStore.getState().appConflict).toBeNull();
+  });
+
+  it("tears down subscription when navigating to empty or null conversation", async () => {
+    const stopFn = vi.fn();
+    mockSubscribeConversationSync.mockResolvedValueOnce(stopFn);
+
+    _ensureConversationSyncSubscriptionForTests("conv-1");
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(_getConversationSyncStateForTests().hasUnlisten).toBe(true);
+
+    _ensureConversationSyncSubscriptionForTests(null);
+    expect(stopFn).toHaveBeenCalledTimes(1);
+    const state = _getConversationSyncStateForTests();
+    expect(state.conversationId).toBeNull();
+    expect(state.hasUnlisten).toBe(false);
+  });
+
+  it("forces resubscription when force option is true even for the same conversation", async () => {
+    const stopFn1 = vi.fn();
+    const stopFn2 = vi.fn();
+    mockSubscribeConversationSync
+      .mockResolvedValueOnce(stopFn1)
+      .mockResolvedValueOnce(stopFn2);
+
+    _ensureConversationSyncSubscriptionForTests("conv-1");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockSubscribeConversationSync).toHaveBeenCalledTimes(1);
+
+    // Call again with default force: false (no-op)
+    _ensureConversationSyncSubscriptionForTests("conv-1");
+    expect(mockSubscribeConversationSync).toHaveBeenCalledTimes(1);
+    expect(stopFn1).not.toHaveBeenCalled();
+
+    // Call with force: true
+    _ensureConversationSyncSubscriptionForTests("conv-1", { force: true });
+    expect(stopFn1).toHaveBeenCalledTimes(1);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockSubscribeConversationSync).toHaveBeenCalledTimes(2);
+    expect(_getConversationSyncStateForTests().hasUnlisten).toBe(true);
   });
 });

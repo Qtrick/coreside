@@ -378,14 +378,14 @@ pub fn clear_session() -> Result<(), CredentialError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::sync::{Mutex, MutexGuard};
 
     /// Serializes all hosted_session keyring tests (parallel `cargo test` safe).
     static HOSTED_KEYRING_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-    fn keyring_test_guard() -> MutexGuard<'static, ()> {
+    pub(crate) fn keyring_test_guard() -> MutexGuard<'static, ()> {
         HOSTED_KEYRING_TEST_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner())

@@ -87,6 +87,10 @@ pub struct AppState {
     /// Ephemeral renderer mount registry (window-authoritative; not durable).
     pub mount_registry: Mutex<MountRegistry>,
     pub maintenance: Mutex<MaintenanceMode>,
+    /// Dedicated lifecycle cancellation token for background/deferred startup maintenance.
+    pub maintenance_cancel: Mutex<Option<CancellationToken>>,
+    /// Mutual exclusion flag for deferred maintenance workers.
+    pub maintenance_worker_active: std::sync::atomic::AtomicBool,
     /// Pause/stop gate for profile-dependent subsystems during maintenance/restore.
     pub quiescence: QuiescenceCoordinator,
 }
@@ -117,6 +121,8 @@ impl AppState {
             event_bus: Mutex::new(event_bus),
             mount_registry: Mutex::new(MountRegistry::new()),
             maintenance: Mutex::new(MaintenanceMode::default()),
+            maintenance_cancel: Mutex::new(None),
+            maintenance_worker_active: std::sync::atomic::AtomicBool::new(false),
             quiescence: QuiescenceCoordinator::default(),
         }
     }
@@ -250,6 +256,7 @@ impl AppState {
         &self,
         operation_type: &str,
     ) -> Result<String, crate::commands::CommandError> {
+        self.cancel_maintenance();
         let id = self.maintenance.lock().begin(operation_type)?;
         let _pause_token: PauseToken = self.quiescence.pause();
         if let Ok(paths) = crate::app_paths::AppPaths::resolve() {
@@ -303,6 +310,7 @@ impl AppState {
 
     /// Replace the active database after a successful retry or restore.
     pub fn replace_profile_database(&self, mut db: Database) {
+        self.cancel_maintenance();
         let mut event_bus = EventBus::load_from_db(&db);
         let _ = crate::runtime_v2::outbox::flush_pending_outbox(&mut db, Some(&mut event_bus));
         *self.event_bus.lock() = event_bus;
@@ -364,7 +372,37 @@ impl AppState {
         }
     }
 
+    pub fn register_maintenance_cancel(&self, token: CancellationToken) {
+        *self.maintenance_cancel.lock() = Some(token);
+    }
+
+    pub fn cancel_maintenance(&self) {
+        if let Some(token) = self.maintenance_cancel.lock().take() {
+            token.cancel();
+        }
+    }
+
+    pub fn try_begin_deferred_maintenance(&self) -> bool {
+        if self.maintenance_status().active || self.quiescence.is_paused() {
+            return false;
+        }
+        self.maintenance_worker_active
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .is_ok()
+    }
+
+    pub fn end_deferred_maintenance(&self) {
+        self.maintenance_worker_active
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
     pub fn cancel_all(&self) {
+        self.cancel_maintenance();
         let map = self.active_requests.lock();
         for token in map.values() {
             token.cancel();

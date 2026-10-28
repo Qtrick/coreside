@@ -4984,7 +4984,7 @@ mod buffered_text_frame_tests {
         .await;
 
         assert_eq!(emitted, events.len());
-        assert!((4..=11).contains(&emitted));
+        assert!(emitted >= 4 && emitted <= 11);
         assert_eq!(seq, emitted as u64);
     }
 

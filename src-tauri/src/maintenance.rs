@@ -188,6 +188,8 @@ pub enum DeferredMaintenanceOutcome {
     SkippedQuiescence,
     SkippedMaintenanceActive,
     SkippedRecoveryRequired,
+    SkippedAlreadyRunning,
+    SkippedGenerationChanged,
     Cancelled,
 }
 
@@ -213,6 +215,18 @@ pub fn execute_deferred_startup_maintenance(
     if state.quiescence.is_paused() {
         return DeferredMaintenanceOutcome::SkippedQuiescence;
     }
+    if !state.try_begin_deferred_maintenance() {
+        return DeferredMaintenanceOutcome::SkippedAlreadyRunning;
+    }
+    struct WorkerGuard<'a>(&'a AppState);
+    impl Drop for WorkerGuard<'_> {
+        fn drop(&mut self) {
+            self.0.end_deferred_maintenance();
+        }
+    }
+    let _guard = WorkerGuard(state);
+
+    let initial_gen = state.quiescence.generation();
 
     match crate::maintenance_journal::load_journal(paths) {
         Ok(Some(journal)) => {
@@ -230,10 +244,19 @@ pub fn execute_deferred_startup_maintenance(
     if cancel.is_cancelled() {
         return DeferredMaintenanceOutcome::Cancelled;
     }
+    if state.quiescence.generation() != initial_gen {
+        return DeferredMaintenanceOutcome::SkippedGenerationChanged;
+    }
 
     // 1. Compact turn journal with strictly scoped database mutex lock
     let journal_compacted = {
         let db = state.db.lock();
+        if cancel.is_cancelled() {
+            return DeferredMaintenanceOutcome::Cancelled;
+        }
+        if state.quiescence.generation() != initial_gen {
+            return DeferredMaintenanceOutcome::SkippedGenerationChanged;
+        }
         match crate::runtime_v2::compact_turn_journal(&db, 30, 14) {
             Ok(_) => true,
             Err(e) => {
@@ -245,6 +268,9 @@ pub fn execute_deferred_startup_maintenance(
 
     if cancel.is_cancelled() {
         return DeferredMaintenanceOutcome::Cancelled;
+    }
+    if state.quiescence.generation() != initial_gen {
+        return DeferredMaintenanceOutcome::SkippedGenerationChanged;
     }
     if state.maintenance_status().active {
         return DeferredMaintenanceOutcome::SkippedMaintenanceActive;
@@ -274,6 +300,9 @@ pub fn execute_deferred_startup_maintenance(
 
     if cancel.is_cancelled() {
         return DeferredMaintenanceOutcome::Cancelled;
+    }
+    if state.quiescence.generation() != initial_gen {
+        return DeferredMaintenanceOutcome::SkippedGenerationChanged;
     }
     if state.maintenance_status().active {
         return DeferredMaintenanceOutcome::SkippedMaintenanceActive;
@@ -398,5 +427,155 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn deferred_maintenance_cancelled_via_state_cancel_all() {
+        let (_dir, paths, state) = test_fixture();
+        let cancel = CancellationToken::new();
+        state.register_maintenance_cancel(cancel.clone());
+
+        let state = std::sync::Arc::new(state);
+        let paths = std::sync::Arc::new(paths);
+        let state_clone = state.clone();
+        let paths_clone = paths.clone();
+        let cancel_clone = cancel.clone();
+
+        let db_guard = state.db.lock();
+        let handle = std::thread::spawn(move || {
+            execute_deferred_startup_maintenance(&state_clone, &paths_clone, &cancel_clone)
+        });
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        state.cancel_all();
+        drop(db_guard);
+
+        let outcome = handle.join().unwrap();
+        assert_eq!(outcome, DeferredMaintenanceOutcome::Cancelled);
+    }
+
+    #[test]
+    fn deferred_maintenance_cancelled_via_replace_profile_database() {
+        let (dir, paths, state) = test_fixture();
+        let cancel = CancellationToken::new();
+        state.register_maintenance_cancel(cancel.clone());
+
+        let new_db = Database::open_path(&dir.path().join("replaced.db")).unwrap();
+        state.replace_profile_database(new_db);
+
+        assert!(
+            cancel.is_cancelled(),
+            "replace_profile_database must cancel in-flight maintenance request"
+        );
+        let outcome = execute_deferred_startup_maintenance(&state, &paths, &cancel);
+        assert_eq!(outcome, DeferredMaintenanceOutcome::Cancelled);
+    }
+
+    #[test]
+    fn deferred_maintenance_skips_when_generation_changes_after_authorization() {
+        let (_dir, paths, state) = test_fixture();
+        let cancel = CancellationToken::new();
+
+        let state = std::sync::Arc::new(state);
+        let paths = std::sync::Arc::new(paths);
+        let state_clone = state.clone();
+        let paths_clone = paths.clone();
+        let cancel_clone = cancel.clone();
+
+        // Hold db lock to pause execute_deferred_startup_maintenance right after authorization checks
+        let db_guard = state.db.lock();
+
+        let handle = std::thread::spawn(move || {
+            execute_deferred_startup_maintenance(&state_clone, &paths_clone, &cancel_clone)
+        });
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Profile generation bumped mid-execution (after authorization)
+        state.quiescence.bump_generation();
+        drop(db_guard);
+
+        let outcome = handle.join().unwrap();
+        assert!(
+            matches!(
+                outcome,
+                DeferredMaintenanceOutcome::SkippedGenerationChanged | DeferredMaintenanceOutcome::Cancelled
+            ),
+            "expected SkippedGenerationChanged or Cancelled when generation bumps after authorization, got {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn deferred_maintenance_mutual_exclusion_second_call_skipped() {
+        let (_dir, paths, state) = test_fixture();
+        let cancel1 = CancellationToken::new();
+        let cancel2 = CancellationToken::new();
+
+        let state = std::sync::Arc::new(state);
+        let paths = std::sync::Arc::new(paths);
+        let state_clone = state.clone();
+        let paths_clone = paths.clone();
+        let cancel1_clone = cancel1.clone();
+
+        // Hold db lock so first call remains running in background
+        let db_guard = state.db.lock();
+
+        let handle = std::thread::spawn(move || {
+            execute_deferred_startup_maintenance(&state_clone, &paths_clone, &cancel1_clone)
+        });
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Second concurrent invocation must not overlap and return SkippedAlreadyRunning
+        let outcome2 = execute_deferred_startup_maintenance(&state, &paths, &cancel2);
+
+        drop(db_guard);
+        let outcome1 = handle.join().unwrap();
+
+        assert_eq!(
+            outcome2,
+            DeferredMaintenanceOutcome::SkippedAlreadyRunning,
+            "concurrent call to execute_deferred_startup_maintenance must return SkippedAlreadyRunning"
+        );
+        assert!(matches!(
+            outcome1,
+            DeferredMaintenanceOutcome::Completed { .. }
+        ));
+    }
+
+    #[test]
+    fn deferred_maintenance_cancelled_via_begin_maintenance() {
+        let (_dir, paths, state) = test_fixture();
+        let cancel = CancellationToken::new();
+        state.register_maintenance_cancel(cancel.clone());
+
+        let maint_id = state.begin_maintenance("backup").expect("begin backup");
+        assert!(
+            cancel.is_cancelled(),
+            "begin_maintenance must cancel in-flight maintenance token"
+        );
+        let outcome = execute_deferred_startup_maintenance(&state, &paths, &cancel);
+        assert_eq!(outcome, DeferredMaintenanceOutcome::Cancelled);
+
+        state.clear_maintenance(&maint_id).expect("clear backup");
+    }
+
+    #[test]
+    fn try_begin_deferred_maintenance_respects_quiescence_pause_and_release() {
+        let (_dir, _paths, state) = test_fixture();
+
+        // When quiescence is paused, cannot begin
+        let pause_token = state.quiescence.pause();
+        assert!(!state.try_begin_deferred_maintenance());
+
+        // Once resumed with matching token, can begin
+        assert!(state.quiescence.resume(pause_token));
+        assert!(state.try_begin_deferred_maintenance());
+
+        // Cannot begin again while already active
+        assert!(!state.try_begin_deferred_maintenance());
+
+        // Releasing allows next worker to begin
+        state.end_deferred_maintenance();
+        assert!(state.try_begin_deferred_maintenance());
+        state.end_deferred_maintenance();
     }
 }

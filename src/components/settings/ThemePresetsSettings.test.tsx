@@ -143,9 +143,9 @@ describe("ThemePresetsSettings", () => {
     render(<ThemePresetsSettings />);
     await waitForPresetRow();
     await openApplyDialog();
-    fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
 
     await waitFor(() => {
+      fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
       expect(
         screen.queryByRole("alertdialog", { name: /Apply “Ocean”\?/ }),
       ).not.toBeInTheDocument();

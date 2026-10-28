@@ -32,6 +32,20 @@ pub struct BackupCreated {
 #[tauri::command]
 pub fn create_profile_backup(state: State<'_, AppState>) -> Result<BackupCreated, CommandError> {
     state.require_profile()?;
+    let maintenance_id = state.begin_maintenance("backup")?;
+    struct BackupExitGuard<'a> {
+        state: &'a AppState,
+        id: String,
+    }
+    impl Drop for BackupExitGuard<'_> {
+        fn drop(&mut self) {
+            let _ = self.state.clear_maintenance(&self.id);
+        }
+    }
+    let _guard = BackupExitGuard {
+        state: &state,
+        id: maintenance_id.clone(),
+    };
     let db = state.db.lock();
     let paths =
         AppPaths::resolve().map_err(|e| CommandError::new("storage_unavailable", e.to_string()))?;
@@ -855,6 +869,91 @@ mod tests {
             assert!(state.maintenance_status().active);
             // Must not clear_maintenance — journal stays for Recovery.
             assert!(load_journal(&paths).unwrap().is_some());
+        });
+    }
+
+    #[test]
+    fn backup_maintenance_mutual_exclusion_and_quiescence() {
+        use crate::app_paths::with_test_data_dir;
+        use crate::quiescence::QuiescedSubsystem;
+
+        let dir = tempdir().unwrap();
+        with_test_data_dir(dir.path(), |paths| {
+            let db = crate::db::Database::open_path(&paths.database).unwrap();
+            let state = AppState::new_for_test(db);
+
+            // 1. Begin backup maintenance
+            let backup_id = state.begin_maintenance("backup").expect("begin backup");
+            assert!(!state.quiescence.allows(QuiescedSubsystem::AttachmentGc));
+            assert!(!state.quiescence.allows(QuiescedSubsystem::QueueDrain));
+            assert!(!state.quiescence.allows(QuiescedSubsystem::PatchScheduler));
+            assert!(state.maintenance_status().active);
+            assert_eq!(
+                state.maintenance_status().operation_id.as_deref(),
+                Some(backup_id.as_str())
+            );
+            assert_eq!(
+                state.maintenance_status().operation_type.as_deref(),
+                Some("backup")
+            );
+
+            // 2. Concurrent maintenance cannot begin
+            let err = state.begin_maintenance("restore").unwrap_err();
+            assert_eq!(err.code, "maintenance_in_progress");
+
+            // 3. Deferred maintenance worker reservation fails while backup is active
+            assert!(!state.try_begin_deferred_maintenance());
+
+            // 4. Clean exit resumes quiescence and clears active maintenance
+            state.clear_maintenance(&backup_id).expect("clear backup");
+            assert!(state.quiescence.allows(QuiescedSubsystem::AttachmentGc));
+            assert!(state.quiescence.allows(QuiescedSubsystem::QueueDrain));
+            assert!(state.quiescence.allows(QuiescedSubsystem::PatchScheduler));
+            assert!(!state.maintenance_status().active);
+
+            // 5. Subsequent maintenance can now proceed
+            let next_id = state
+                .begin_maintenance("restore")
+                .expect("subsequent restore");
+            state.clear_maintenance(&next_id).expect("clear restore");
+        });
+    }
+
+    #[test]
+    fn backup_exit_guard_clears_maintenance_on_early_drop() {
+        use crate::app_paths::with_test_data_dir;
+
+        let dir = tempdir().unwrap();
+        with_test_data_dir(dir.path(), |paths| {
+            let db = crate::db::Database::open_path(&paths.database).unwrap();
+            let state = AppState::new_for_test(db);
+
+            let run_simulated_backup = || -> Result<(), &'static str> {
+                let maintenance_id = state.begin_maintenance("backup").map_err(|_| "maint_err")?;
+                struct BackupExitGuard<'a> {
+                    state: &'a AppState,
+                    id: String,
+                }
+                impl Drop for BackupExitGuard<'_> {
+                    fn drop(&mut self) {
+                        let _ = self.state.clear_maintenance(&self.id);
+                    }
+                }
+                let _guard = BackupExitGuard {
+                    state: &state,
+                    id: maintenance_id,
+                };
+                assert!(state.maintenance_status().active);
+                // Simulate early error before completing backup
+                Err("simulated archive error")
+            };
+
+            let res = run_simulated_backup();
+            assert!(res.is_err());
+            // Guard drop must clear active maintenance and resume quiescence
+            assert!(!state.maintenance_status().active);
+            assert!(state.try_begin_deferred_maintenance());
+            state.end_deferred_maintenance();
         });
     }
 }

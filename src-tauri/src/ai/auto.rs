@@ -125,11 +125,17 @@ pub struct ResolvedChat {
 pub fn peek_assistant_message(partial: &str) -> Option<String> {
     const KEY: &str = "\"assistantMessage\"";
 
+    let trimmed_partial = partial.trim_start();
+    if !trimmed_partial.starts_with('{') {
+        return None;
+    }
+
     // Scan for top-level `"assistantMessage"` at depth 1 in the JSON structure,
-    // ensuring it is neither inside a preceding string literal nor a nested object.
+    // ensuring it is neither inside a preceding string literal nor a nested object or array.
     let mut in_str = false;
     let mut esc = false;
-    let mut depth: usize = 0;
+    let mut obj_depth: usize = 0;
+    let mut arr_depth: usize = 0;
     let mut target_idx = None;
 
     let bytes = partial.as_bytes();
@@ -152,21 +158,28 @@ pub fn peek_assistant_message(partial: &str) -> Option<String> {
         }
 
         match b {
-            b'{' | b'[' => {
-                depth += 1;
+            b'{' => {
+                obj_depth += 1;
                 i += 1;
             }
-            b'}' | b']' => {
-                depth = depth.saturating_sub(1);
+            b'}' => {
+                obj_depth = obj_depth.saturating_sub(1);
+                i += 1;
+            }
+            b'[' => {
+                arr_depth += 1;
+                i += 1;
+            }
+            b']' => {
+                arr_depth = arr_depth.saturating_sub(1);
                 i += 1;
             }
             b'"' => {
-                if depth == 1 && partial[i..].starts_with(KEY) {
+                if obj_depth == 1 && arr_depth == 0 && partial[i..].starts_with(KEY) {
                     let after = &partial[i + KEY.len()..];
                     let trimmed = after.trim_start();
                     if trimmed.starts_with(':') {
                         target_idx = Some(i);
-                        break;
                     }
                 }
                 in_str = true;
@@ -271,10 +284,10 @@ pub fn peek_assistant_message(partial: &str) -> Option<String> {
                         break;
                     }
                     let Ok(hex_str) = std::str::from_utf8(&slice_bytes[i + 2..i + 6]) else {
-                        break;
+                        return None;
                     };
                     let Ok(code_unit) = u16::from_str_radix(hex_str, 16) else {
-                        break;
+                        return None;
                     };
 
                     if (0xD800..=0xDBFF).contains(&code_unit) {
@@ -284,17 +297,17 @@ pub fn peek_assistant_message(partial: &str) -> Option<String> {
                             break;
                         }
                         if slice_bytes[i + 6] != b'\\' || slice_bytes[i + 7] != b'u' {
-                            break;
+                            return None;
                         }
                         let Ok(low_hex_str) = std::str::from_utf8(&slice_bytes[i + 8..i + 12])
                         else {
-                            break;
+                            return None;
                         };
                         let Ok(low_code_unit) = u16::from_str_radix(low_hex_str, 16) else {
-                            break;
+                            return None;
                         };
                         if !(0xDC00..=0xDFFF).contains(&low_code_unit) {
-                            break;
+                            return None;
                         }
                         let code_point = 0x10000
                             + (((code_unit as u32) - 0xD800) << 10)
@@ -305,7 +318,7 @@ pub fn peek_assistant_message(partial: &str) -> Option<String> {
                         i += 12;
                     } else if (0xDC00..=0xDFFF).contains(&code_unit) {
                         // Unpaired low surrogate: invalid.
-                        break;
+                        return None;
                     } else {
                         // Standard BMP code point.
                         if let Some(ch) = char::from_u32(code_unit as u32) {
@@ -314,15 +327,9 @@ pub fn peek_assistant_message(partial: &str) -> Option<String> {
                         i += 6;
                     }
                 }
-                other => {
-                    if other < 128 {
-                        out.push(other as char);
-                        i += 2;
-                    } else {
-                        let ch = slice[i + 1..].chars().next().unwrap();
-                        out.push(ch);
-                        i += 1 + ch.len_utf8();
-                    }
+                _ => {
+                    // Invalid JSON escape sequence: do not fabricate characters.
+                    return None;
                 }
             }
         } else if slice_bytes[i] < 128 {
@@ -731,6 +738,121 @@ mod tests {
         assert_eq!(
             peek_assistant_message(nested_security).as_deref(),
             Some("Real message")
+        );
+    }
+
+    #[test]
+    fn peek_assistant_message_invalid_escape_reproduction() {
+        let raw = r#"{"assistantMessage":"test\q123"}"#;
+        let res = peek_assistant_message(raw);
+        assert_ne!(
+            res.as_deref(),
+            Some("testq123"),
+            "must NOT decode \\q into q (fabricating text from invalid escape)"
+        );
+        assert_eq!(res, None, "invalid JSON escape sequence must return None");
+    }
+
+    #[test]
+    fn peek_assistant_message_root_array_reproduction() {
+        assert_eq!(
+            peek_assistant_message(r#"[{"assistantMessage":"in array"}]"#),
+            None,
+            "root array containing object with assistantMessage must return None"
+        );
+        assert_eq!(
+            peek_assistant_message(r#"["assistantMessage"]"#),
+            None,
+            "root array containing string assistantMessage must return None"
+        );
+        assert_eq!(
+            peek_assistant_message(r#"["assistantMessage": "in array"]"#),
+            None,
+            "root array with key-value syntax must return None"
+        );
+    }
+
+    #[test]
+    fn peek_assistant_message_array_nested_key_reproduction() {
+        let nested_arr = r#"{"arr":[{"assistantMessage":"hidden"}]}"#;
+        assert_eq!(
+            peek_assistant_message(nested_arr),
+            None,
+            "array-nested assistantMessage key must return None"
+        );
+    }
+
+    #[test]
+    fn peek_assistant_message_duplicate_keys_last_wins_reproduction() {
+        let duplicate = r#"{"assistantMessage":"first","assistantMessage":"second"}"#;
+        assert_eq!(
+            peek_assistant_message(duplicate).as_deref(),
+            Some("second"),
+            "duplicate assistantMessage keys must return last occurrence matching serde_json"
+        );
+    }
+
+    #[test]
+    fn peek_assistant_message_strict_surrogate_and_escape_edge_cases() {
+        // High surrogate followed by non-surrogate or invalid escape returns None
+        assert_eq!(
+            peek_assistant_message(r#"{"assistantMessage":"\uD800\u0041"}"#),
+            None,
+            "high surrogate followed by ASCII character escape must return None"
+        );
+        assert_eq!(
+            peek_assistant_message(r#"{"assistantMessage":"\uD800not_escape"}"#),
+            None,
+            "high surrogate not followed by \\u must return None"
+        );
+        assert_eq!(
+            peek_assistant_message(r#"{"assistantMessage":"\uD800\uD800"}"#),
+            None,
+            "high surrogate followed by second high surrogate must return None"
+        );
+
+        // Unpaired low surrogate returns None
+        assert_eq!(
+            peek_assistant_message(r#"{"assistantMessage":"\uDC00"}"#),
+            None,
+            "unpaired low surrogate must return None"
+        );
+
+        // Invalid hex characters in \\u escape
+        assert_eq!(
+            peek_assistant_message(r#"{"assistantMessage":"\u12G4"}"#),
+            None,
+            "non-hex digits in \\u escape must return None"
+        );
+
+        // Non-object root primitives return None
+        assert_eq!(peek_assistant_message(r#""plain string""#), None);
+        assert_eq!(peek_assistant_message("12345"), None);
+        assert_eq!(peek_assistant_message("true"), None);
+        assert_eq!(peek_assistant_message("null"), None);
+
+        // Tolerates leading whitespace before root object
+        assert_eq!(
+            peek_assistant_message("  \n\t  {\"assistantMessage\":\"trimmed start\"}").as_deref(),
+            Some("trimmed start")
+        );
+
+        // Incomplete surrogate pair at chunk boundary breaks cleanly without corrupted chars
+        assert_eq!(
+            peek_assistant_message(r#"{"assistantMessage":"boundary \uD83D\uDC"#).as_deref(),
+            Some("boundary ")
+        );
+
+        // Trailing lone backslash at chunk boundary breaks cleanly
+        assert_eq!(
+            peek_assistant_message(r#"{"assistantMessage":"trailing \"#).as_deref(),
+            Some("trailing ")
+        );
+
+        // Standard JSON escape characters decoded correctly
+        assert_eq!(
+            peek_assistant_message(r#"{"assistantMessage":"\b\f\n\r\t\"\\/\/"}"#).as_deref(),
+            Some("\x08\x0C\n\r\t\"\\//")
         );
     }
 

@@ -533,20 +533,31 @@ pub fn run() {
 
                     let app_handle_for_sweep = app.handle().clone();
                     tauri::async_runtime::spawn(async move {
+                        let cancel = tokio_util::sync::CancellationToken::new();
+                        if let Some(state) = app_handle_for_sweep.try_state::<AppState>() {
+                            state.register_maintenance_cancel(cancel.clone());
+                        }
+
                         // Defer non-critical startup maintenance by 1.5s to allow the frontend
                         // critical shell and active conversation to complete initial hydration
                         // without competing for SQLite database locks or disk I/O.
-                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                        tokio::select! {
+                            _ = cancel.cancelled() => {
+                                tracing::info!("deferred startup maintenance cancelled before execution window");
+                                return;
+                            }
+                            _ = tokio::time::sleep(std::time::Duration::from_millis(1500)) => {}
+                        }
 
                         let app_handle = app_handle_for_sweep.clone();
+                        let cancel_for_worker = cancel.clone();
                         tauri::async_runtime::spawn_blocking(move || {
                             if let Some(state) = app_handle.try_state::<AppState>() {
-                                let cancel = tokio_util::sync::CancellationToken::new();
                                 if let Ok(paths) = app_paths::AppPaths::resolve() {
                                     let outcome = maintenance::execute_deferred_startup_maintenance(
                                         &state,
                                         &paths,
-                                        &cancel,
+                                        &cancel_for_worker,
                                     );
                                     tracing::info!(?outcome, "deferred startup maintenance completed");
                                 }
