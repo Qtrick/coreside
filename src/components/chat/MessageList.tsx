@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { MessageSquare } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
+import { api } from "@/lib/tauri";
+import type { ChatMessage } from "@/types/messages";
 import { shouldShowActionLog } from "@/lib/action-log";
 import { deriveAgentPresence } from "@/lib/agent-activity";
 import { parseAutomationChange } from "@/lib/automation-proposal";
@@ -18,8 +20,43 @@ function messageHasConfirmableProposal(
   return Boolean(parseAutomationChange(metadata?.automationChange));
 }
 
-export function MessageList() {
-  const messages = useAppStore((s) => s.messages);
+interface MessageListProps {
+  conversationId?: string | null;
+}
+
+export function MessageList({ conversationId: propConversationId }: MessageListProps = {}) {
+  const globalConversationId = useAppStore((s) => s.activeConversationId);
+  const activeConversationId =
+    propConversationId !== undefined ? propConversationId : globalConversationId;
+  const storeMessages = useAppStore((s) => s.messages);
+  const isBackgroundPane = Boolean(
+    propConversationId && propConversationId !== globalConversationId,
+  );
+  const [backgroundMessages, setBackgroundMessages] = useState<ChatMessage[] | null>(null);
+
+  useEffect(() => {
+    if (isBackgroundPane && propConversationId) {
+      let cancelled = false;
+      void api.getMessages(propConversationId).then(
+        (msgs) => {
+          if (!cancelled) setBackgroundMessages(msgs);
+        },
+        () => {
+          if (!cancelled) setBackgroundMessages([]);
+        },
+      );
+      return () => {
+        cancelled = true;
+      };
+    } else {
+      setBackgroundMessages(null);
+    }
+  }, [isBackgroundPane, propConversationId]);
+
+  const messages = isBackgroundPane && backgroundMessages !== null
+    ? backgroundMessages
+    : storeMessages;
+
   const sending = useAppStore((s) => s.sending);
   const sendingConversationId = useAppStore((s) => s.sendingConversationId);
   const agentActions = useAppStore((s) => s.agentActions);
@@ -28,16 +65,15 @@ export function MessageList() {
   const messagesLoading = useAppStore((s) => s.messagesLoading);
   const messagesError = useAppStore((s) => s.messagesError);
   const sendError = useAppStore((s) => s.sendError);
-  const activeConversationId = useAppStore((s) => s.activeConversationId);
   const navigateToSettings = useAppStore((s) => s.navigateToSettings);
   const activeTurnId = useAppStore((s) =>
-    s.activeConversationId
-      ? (s.activeTurnIdByConversation[s.activeConversationId] ?? null)
+    activeConversationId
+      ? (s.activeTurnIdByConversation[activeConversationId] ?? null)
       : null,
   );
   const streamLastSequence = useAppStore((s) => {
-    if (!s.activeConversationId) return null;
-    const turnId = s.activeTurnIdByConversation[s.activeConversationId];
+    if (!activeConversationId) return null;
+    const turnId = s.activeTurnIdByConversation[activeConversationId];
     if (!turnId) return null;
     const seq = s.turnsById[turnId]?.lastSequence;
     return typeof seq === "number" ? seq : null;
@@ -59,11 +95,11 @@ export function MessageList() {
     sendingConversationId === activeConversationId;
 
   useEffect(() => {
-    if (streamingText) {
+    if (streamingText && liveHere) {
       setHoldStreamText(streamingText);
       setHoldingReveal(true);
     }
-  }, [streamingText]);
+  }, [streamingText, liveHere]);
 
   useEffect(() => {
     if (liveHere) setHoldingReveal(true);

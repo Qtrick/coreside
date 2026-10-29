@@ -1,6 +1,5 @@
 import { Sidebar } from "@/components/sidebar/Sidebar";
-import { ChatPanel } from "@/components/chat/ChatPanel";
-import { ToolCanvas } from "@/components/tool-canvas/ToolCanvas";
+import { WorkspaceView } from "@/components/workspace/WorkspaceView";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { AutomationsPanel } from "@/components/automations/AutomationsPanel";
 import { ProviderSetupDialog } from "@/components/providers/ProviderSetupDialog";
@@ -9,12 +8,10 @@ import { LiveWallpaper } from "@/components/wallpaper/LiveWallpaper";
 import { MediaLibrary } from "@/components/media/MediaLibrary";
 import { ProjectPage } from "@/components/projects/ProjectPage";
 import { ProjectsListPage } from "@/components/projects/ProjectsListPage";
-import { ChatToolSplitter } from "@/components/layout/ChatToolSplitter";
 import { resolveActiveWallpaper } from "@/lib/wallpaper";
 import { wallpaperDataAttribute } from "@/types/wallpaper";
 import {
   classifyLayoutMode,
-  clampSplitForWidth,
   clampSplitRatio,
   LAYOUT_SAFE,
   NARROW_SIDEBAR_MEDIA_QUERY,
@@ -40,12 +37,10 @@ import { TutorialOverlay } from "@/components/onboarding/TutorialOverlay";
 import { ContextualEducationHost } from "@/components/onboarding/ContextualEducationHost";
 import { useOnboardingStore } from "@/stores/onboarding-store";
 import { useAppStore } from "@/stores/app-store";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function AppShell() {
   const [commandOpen, setCommandOpen] = useState(false);
-  const [mainWidth, setMainWidth] = useState(0);
-  const [liveSplit, setLiveSplit] = useState<number | null>(null);
   const mainRef = useRef<HTMLDivElement>(null);
   const [narrowViewport, setNarrowViewport] = useState(
     () =>
@@ -73,7 +68,6 @@ export function AppShell() {
   const globalWallpaperJson = useAppStore((s) => s.globalWallpaperJson);
   const interfaceTransparency = useAppStore((s) => s.interfaceTransparency);
   const chatToolSplitRatio = useAppStore((s) => s.chatToolSplitRatio);
-  const setChatToolSplitRatio = useAppStore((s) => s.setChatToolSplitRatio);
   const layoutMode = useAppStore((s) => s.layoutMode);
   const setLayoutMode = useAppStore((s) => s.setLayoutMode);
   const projects = useAppStore((s) => s.projects);
@@ -183,11 +177,6 @@ export function AppShell() {
   const showToolCanvas =
     view.kind === "chat" && activeToolId && !overlayMode;
 
-  const splitRatio = clampSplitForWidth(
-    liveSplit ?? chatToolSplitRatio,
-    mainWidth || 1,
-  );
-
   useEffect(() => {
     const el = mainRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -198,7 +187,6 @@ export function AppShell() {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const width = entry.contentRect.width;
-        setMainWidth(width);
         if (!showToolCanvas) {
           if (layoutMode !== "wide" && layoutMode !== "standard") {
             setLayoutMode(
@@ -259,34 +247,6 @@ export function AppShell() {
   const renameTarget = conversations.find((c) => c.id === renameConversationId);
   const deleteTarget = conversations.find((c) => c.id === deleteConversationId);
 
-  const chatToolMain = (
-    <div
-      ref={mainRef}
-      className={mainClasses}
-      style={
-        showToolCanvas && layoutMode !== "compact"
-          ? ({
-              "--chat-split-fr": `${splitRatio}fr`,
-              "--tool-split-fr": `${1 - splitRatio}fr`,
-            } as CSSProperties)
-          : undefined
-      }
-    >
-      <ChatPanel />
-      {showToolCanvas && layoutMode !== "compact" ? (
-        <ChatToolSplitter
-          ratio={splitRatio}
-          mainWidth={mainWidth}
-          onChange={setLiveSplit}
-          onCommit={(r) => {
-            setLiveSplit(null);
-            void setChatToolSplitRatio(r);
-          }}
-        />
-      ) : null}
-      {showToolCanvas ? <ToolCanvas /> : null}
-    </div>
-  );
 
   const mainPanel = (() => {
     switch (view.kind) {
@@ -332,7 +292,11 @@ export function AppShell() {
           />
         );
       default:
-        return chatToolMain;
+        return (
+          <div ref={mainRef} className={mainClasses}>
+            <WorkspaceView />
+          </div>
+        );
     }
   })();
 

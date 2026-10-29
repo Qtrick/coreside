@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-10-13T21:07:15.115Z",
-  "commit": "99010ac559085c96048c8ef59b0eed6baf308096",
+  "generatedAt": "2026-10-29T01:16:56.169Z",
+  "commit": "af8dec0343b366edc75f75040f7132a76fee3c3f",
   "dirty": true,
   "command": "audit:dead-controls",
   "evidenceLevel": "Scaffolded",

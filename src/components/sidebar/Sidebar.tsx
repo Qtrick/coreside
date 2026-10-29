@@ -1,114 +1,41 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Folder,
-  FolderPlus,
-  Image,
-  MessageSquare,
-  MessageSquarePlus,
-  RefreshCw,
-  Settings,
-  Wrench,
-} from "lucide-react";
-import { CoresideLogo } from "@/components/branding/CoresideLogo";
-import { ChatContextMenu } from "@/components/context-menu/ChatContextMenu";
-import { ProjectContextMenu } from "@/components/context-menu/ProjectContextMenu";
-import { useContextMenuTrigger } from "@/components/context-menu/use-context-menu";
-import { ProjectList } from "@/components/projects/ProjectList";
-import { EMPTY_STATES } from "@/lib/empty-states";
+import { useEffect, useState } from "react";
+import { IconRail, type RailDestination } from "./IconRail";
+import { ContextualSidebar, type ContextualMode } from "./ContextualSidebar";
 import { NARROW_SIDEBAR_MEDIA_QUERY } from "@/lib/layout-mode";
-import { isCurrentChat } from "@/lib/navigation";
-import type { Project } from "@/types/project";
-import type { Conversation } from "@/types/messages";
-import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/stores/app-store";
-import { api } from "@/lib/tauri";
-
-const ICON_EXPANDED = 16;
-const ICON_COLLAPSED = 22;
-const LOGO_SIZE = 28;
+import { useShallow } from "zustand/react/shallow";
 
 export function Sidebar() {
-  // Shallow-compared selector: the sidebar stays mounted during chat
-  // streaming, so a full-store subscription would re-render it per token.
   const {
     sidebarCollapsed,
     toggleSidebar,
     view,
-    conversations,
-    activeConversationId,
-    navigateToChat,
-    createConversation,
-    tools,
-    activeToolId,
-    selectTool,
-    navigateToSettings,
-    navigateToAutomations,
-    navigateToMedia,
-    navigateToProjects,
-    navigateToProject,
-    projects,
-    projectsExpanded,
-    setProjectsExpanded,
-    activeProjectId,
-    setCreateProjectDialogOpen,
-    setEditProjectDialogOpen,
-    setAddChatsDialogOpen,
-    setManageContextDialogOpen,
-    setDeleteProjectDialogOpen,
-    setRenameConversationDialogOpen,
-    setDeleteConversationDialogOpen,
-    createChatInProject,
-    assignChats,
-    removeChatFromProject,
-    duplicateConversation,
-    archiveProject,
-    restoreProject,
-    resolvedTheme,
   } = useAppStore(
     useShallow((s) => ({
       sidebarCollapsed: s.sidebarCollapsed,
       toggleSidebar: s.toggleSidebar,
       view: s.view,
-      conversations: s.conversations,
-      activeConversationId: s.activeConversationId,
-      navigateToChat: s.navigateToChat,
-      createConversation: s.createConversation,
-      tools: s.tools,
-      activeToolId: s.activeToolId,
-      selectTool: s.selectTool,
-      navigateToSettings: s.navigateToSettings,
-      navigateToAutomations: s.navigateToAutomations,
-      navigateToMedia: s.navigateToMedia,
-      navigateToProjects: s.navigateToProjects,
-      navigateToProject: s.navigateToProject,
-      projects: s.projects,
-      projectsExpanded: s.projectsExpanded,
-      setProjectsExpanded: s.setProjectsExpanded,
-      activeProjectId: s.activeProjectId,
-      setCreateProjectDialogOpen: s.setCreateProjectDialogOpen,
-      setEditProjectDialogOpen: s.setEditProjectDialogOpen,
-      setAddChatsDialogOpen: s.setAddChatsDialogOpen,
-      setManageContextDialogOpen: s.setManageContextDialogOpen,
-      setDeleteProjectDialogOpen: s.setDeleteProjectDialogOpen,
-      setRenameConversationDialogOpen: s.setRenameConversationDialogOpen,
-      setDeleteConversationDialogOpen: s.setDeleteConversationDialogOpen,
-      createChatInProject: s.createChatInProject,
-      assignChats: s.assignChats,
-      removeChatFromProject: s.removeChatFromProject,
-      duplicateConversation: s.duplicateConversation,
-      archiveProject: s.archiveProject,
-      restoreProject: s.restoreProject,
-      resolvedTheme: s.resolvedTheme,
     })),
   );
 
+  const [activeRailDestination, setActiveRailDestination] = useState<RailDestination>(() => {
+    if (view.kind === "settings") return "settings";
+    if (view.kind === "automations") return "automations";
+    if (view.kind === "media") return "media";
+    if (view.kind === "tools") return "apps";
+    return "workspace";
+  });
+
+  const [contextualMode, setContextualMode] = useState<ContextualMode>(() => {
+    return view.kind === "tools" ? "apps" : "chats_projects";
+  });
+
   const [narrowViewport, setNarrowViewport] = useState(
-    () => typeof window !== "undefined" &&
+    () =>
+      typeof window !== "undefined" &&
       Boolean(window.matchMedia?.(NARROW_SIDEBAR_MEDIA_QUERY).matches),
   );
+
   useEffect(() => {
     if (!window.matchMedia) return;
     const media = window.matchMedia(NARROW_SIDEBAR_MEDIA_QUERY);
@@ -118,377 +45,72 @@ export function Sidebar() {
     return () => media.removeEventListener("change", update);
   }, []);
 
+  // Sync active destination with global view changes
+  useEffect(() => {
+    if (view.kind === "settings") {
+      setActiveRailDestination("settings");
+    } else if (view.kind === "automations") {
+      setActiveRailDestination("automations");
+    } else if (view.kind === "media") {
+      setActiveRailDestination("media");
+    } else if (view.kind === "tools") {
+      setActiveRailDestination("apps");
+      setContextualMode("apps");
+    } else if (view.kind === "chat" || view.kind === "project" || view.kind === "projects") {
+      setActiveRailDestination("workspace");
+    }
+  }, [view.kind]);
+
   const effectiveCollapsed = sidebarCollapsed || narrowViewport;
-  const iconSize = effectiveCollapsed ? ICON_COLLAPSED : ICON_EXPANDED;
-  const chatMenu = useContextMenuTrigger();
-  const projectMenu = useContextMenuTrigger();
-  const [menuChat, setMenuChat] = useState<Conversation | null>(null);
-  const [menuProject, setMenuProject] = useState<Project | null>(null);
 
-  const projectNameById = useMemo(
-    () => new Map(projects.map((p) => [p.id, p.name])),
-    [projects],
-  );
-
-  const sidebarChats = useMemo(
-    () =>
-      [...conversations]
-        .filter((c) => !c.archived)
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    [conversations],
-  );
-
-  const openChatMenu = (chat: Conversation, event: React.MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setMenuChat(chat);
-    chatMenu.openFromEvent(event);
+  const handleSelectRailDestination = (dest: RailDestination) => {
+    setActiveRailDestination(dest);
+    if (dest === "workspace") {
+      setContextualMode("chats_projects");
+      if (effectiveCollapsed && !narrowViewport) {
+        void toggleSidebar();
+      }
+    } else if (dest === "apps") {
+      setContextualMode("apps");
+      if (effectiveCollapsed && !narrowViewport) {
+        void toggleSidebar();
+      }
+    }
   };
 
-  const openProjectMenu = (project: Project, event: React.MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setMenuProject(project);
-    projectMenu.openFromEvent(event);
+  const handleContextualModeChange = (mode: ContextualMode) => {
+    setContextualMode(mode);
+    if (mode === "apps") {
+      setActiveRailDestination("apps");
+    } else {
+      setActiveRailDestination("workspace");
+    }
   };
 
-  const isChatActive = (id: string) =>
-    isCurrentChat(view, activeConversationId, id);
+  const handleCollapseContextual = () => {
+    if (!narrowViewport) {
+      void toggleSidebar();
+    }
+  };
 
   return (
     <aside
-      className={`sidebar${effectiveCollapsed ? " collapsed" : ""}`}
-      aria-label="Coreside sidebar"
+      className={`sidebar dual-sidebar${effectiveCollapsed ? " collapsed" : ""}`}
+      aria-label="Coreside navigation"
+      data-testid="dual-sidebar"
     >
-      <div className="sidebar-brand">
-        {effectiveCollapsed ? (
-          <button
-            type="button"
-            className="sidebar-brand-toggle"
-            onClick={() => {
-              // Viewport-forced compact mode cannot expand; avoid toggling the
-              // persisted preference (which would flip expand → collapse).
-              if (narrowViewport) return;
-              void toggleSidebar();
-            }}
-            disabled={narrowViewport}
-            aria-label={
-              narrowViewport
-                ? "Sidebar stays compact on narrow windows"
-                : "Expand sidebar"
-            }
-            aria-expanded={false}
-          >
-            <CoresideLogo
-              appearance={resolvedTheme}
-              size={LOGO_SIZE}
-              className="wordmark-logo brand-logo"
-            />
-            <ChevronRight
-              size={ICON_COLLAPSED}
-              className="brand-expand-icon"
-              aria-hidden
-            />
-          </button>
-        ) : (
-          <>
-            <button
-              type="button"
-              className="wordmark"
-              onClick={() => {
-                if (activeConversationId) void navigateToChat(activeConversationId);
-                else useAppStore.setState({ view: { kind: "chat", conversationId: null } });
-              }}
-              aria-label="Coreside home"
-            >
-              <CoresideLogo
-                appearance={resolvedTheme}
-                size={LOGO_SIZE}
-                className="wordmark-logo"
-              />
-              <span className="wordmark-text">Coreside</span>
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={() => void toggleSidebar()}
-              aria-label="Collapse sidebar"
-              aria-expanded={true}
-            >
-              <ChevronLeft size={18} />
-            </button>
-          </>
-        )}
-      </div>
+      {/* 1. Permanent Left Icon Rail */}
+      <IconRail
+        activeDestination={activeRailDestination}
+        onSelectDestination={handleSelectRailDestination}
+      />
 
-      <button
-        type="button"
-        className="btn btn-primary btn-block"
-        onClick={() => void createConversation()}
-        aria-label="New chat"
-        data-coreside-tour="sidebar-new-chat"
-      >
-        <MessageSquarePlus size={iconSize} aria-hidden />
-        <span className="nav-label">New chat</span>
-      </button>
-
-      <section className="sidebar-section" aria-label="Projects" data-coreside-tour="sidebar-projects">
-        <div className="sidebar-section-header">
-          <button
-            type="button"
-            className="sidebar-section-toggle"
-            onClick={() => setProjectsExpanded(!projectsExpanded)}
-            aria-expanded={projectsExpanded}
-            aria-label="Projects"
-          >
-            <Folder size={iconSize} aria-hidden />
-            <span className="nav-label">Projects</span>
-            {!effectiveCollapsed ? (
-              <ChevronDown
-                size={14}
-                className={`section-chevron${projectsExpanded ? " open" : ""}`}
-                aria-hidden
-              />
-            ) : null}
-          </button>
-          {!effectiveCollapsed ? (
-            <button
-              type="button"
-              className="sidebar-inline-btn"
-              aria-label="New project"
-              onClick={() => setCreateProjectDialogOpen(true)}
-            >
-              <FolderPlus size={14} />
-            </button>
-          ) : null}
-        </div>
-        {projectsExpanded ? (
-          <div className="sidebar-nav">
-            <ProjectList
-              projects={projects}
-              conversations={conversations}
-              activeProjectId={activeProjectId}
-              collapsed={effectiveCollapsed}
-              onOpenProject={(id) => void navigateToProject(id)}
-              onViewAllProject={(id) => void navigateToProject(id)}
-              onChatOpen={(id) => void navigateToChat(id)}
-              onProjectContextMenu={openProjectMenu}
-              onProjectOverflow={openProjectMenu}
-            />
-            {!effectiveCollapsed ? (
-              <button
-                type="button"
-                className="sidebar-nav-btn muted-link"
-                onClick={() => navigateToProjects()}
-              >
-                View all projects
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-      </section>
-
-      <section className="sidebar-section grow" aria-label="Recent chats">
-        <div className="sidebar-section-label">Chats</div>
-        <div className="sidebar-nav">
-          {sidebarChats.length === 0 ? (
-            <p className="muted sidebar-empty-hint">
-              <span className="nav-label">{EMPTY_STATES.sidebarNoChats.hint}</span>
-            </p>
-          ) : (
-            sidebarChats.map((conversation) => (
-              <div key={conversation.id} className="sidebar-nav-row">
-                <button
-                  type="button"
-                  className={`sidebar-nav-btn${isChatActive(conversation.id) ? " active" : ""}`}
-                  onClick={() => void navigateToChat(conversation.id)}
-                  onContextMenu={(event) => openChatMenu(conversation, event)}
-                  aria-label={conversation.title}
-                  title={conversation.title}
-                >
-                  {effectiveCollapsed ? (
-                    <MessageSquare size={iconSize} aria-hidden />
-                  ) : null}
-                  <span className="nav-label">{conversation.title}</span>
-                  {conversation.projectId && !effectiveCollapsed ? (
-                    <span className="nav-badge">
-                      {projectNameById.get(conversation.projectId) ?? "Project"}
-                    </span>
-                  ) : null}
-                </button>
-                {!effectiveCollapsed ? (
-                  <button
-                    type="button"
-                    className="sidebar-overflow-btn"
-                    aria-label={`More actions for ${conversation.title}`}
-                    onClick={(event) => openChatMenu(conversation, event)}
-                  >
-                    <span aria-hidden>⋯</span>
-                  </button>
-                ) : null}
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-
-      <section
-        className="sidebar-section sidebar-section-apps"
-        aria-label="Personal apps"
-        data-coreside-tour="sidebar-apps"
-      >
-        <div className="sidebar-section-label">Apps</div>
-        <div className="sidebar-nav">
-          {tools.length === 0 ? (
-            <p className="muted sidebar-empty-hint">
-              <span className="nav-label">{EMPTY_STATES.sidebarNoApps.hint}</span>
-            </p>
-          ) : (
-            tools.map((tool) => (
-              <button
-                key={tool.id}
-                type="button"
-                className={`sidebar-nav-btn${
-                  view.kind === "chat" && activeToolId === tool.id ? " active" : ""
-                }`}
-                onClick={() => void selectTool(tool.id)}
-                aria-label={tool.name}
-                title={tool.name}
-              >
-                <Wrench size={iconSize} aria-hidden />
-                <span className="nav-label">{tool.name}</span>
-                {tool.version != null ? (
-                  <span className="nav-meta">v{tool.version}</span>
-                ) : null}
-              </button>
-            ))
-          )}
-        </div>
-      </section>
-
-      <div className="sidebar-section">
-        <button
-          type="button"
-          className={`sidebar-settings-btn${view.kind === "media" ? " active" : ""}`}
-          onClick={() => navigateToMedia()}
-          aria-label="Media library"
-          title="Media library"
-        >
-          <Image size={iconSize} aria-hidden />
-          <span className="nav-label">Media</span>
-        </button>
-        <button
-          type="button"
-          className={`sidebar-settings-btn${view.kind === "automations" ? " active" : ""}`}
-          onClick={() => navigateToAutomations()}
-          aria-label="Automations"
-          title="Automations"
-        >
-          <RefreshCw size={iconSize} aria-hidden />
-          <span className="nav-label">Automations</span>
-        </button>
-        <button
-          type="button"
-          className={`sidebar-settings-btn${view.kind === "settings" ? " active" : ""}`}
-          onClick={() => navigateToSettings()}
-          aria-label="Settings"
-          title="Settings"
-        >
-          <Settings size={iconSize} aria-hidden />
-          <span className="nav-label">Settings</span>
-        </button>
-      </div>
-
-      {menuChat ? (
-        <ChatContextMenu
-          open={chatMenu.open}
-          x={chatMenu.x}
-          y={chatMenu.y}
-          conversationId={menuChat.id}
-          conversationTitle={menuChat.title}
-          projectId={menuChat.projectId}
-          projects={projects}
-          isCurrent={isChatActive(menuChat.id)}
-          onClose={chatMenu.close}
-          onOpen={() => void navigateToChat(menuChat.id)}
-          onRename={() => setRenameConversationDialogOpen(menuChat.id)}
-          onAddToProject={(projectId) =>
-            void assignChats(projectId, [menuChat.id])
-          }
-          onMoveToProject={(projectId) =>
-            void assignChats(projectId, [menuChat.id])
-          }
-          onRemoveFromProject={() =>
-            void removeChatFromProject(menuChat.id)
-          }
-          onOpenProject={() => {
-            if (menuChat.projectId) void navigateToProject(menuChat.projectId);
-          }}
-          onDuplicate={() => void duplicateConversation(menuChat.id)}
-          onExport={async () => {
-            try {
-              const messages = await api.getMessages(menuChat.id);
-              const exportData = {
-                conversationId: menuChat.id,
-                title: menuChat.title,
-                exportedAt: new Date().toISOString(),
-                messages,
-              };
-              const blob = new Blob([JSON.stringify(exportData, null, 2)], {
-                type: "application/json",
-              });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              const safeTitle =
-                menuChat.title.replace(/[^a-zA-Z0-9_-]/g, "_") || "chat";
-              a.download = `${safeTitle}-export.json`;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-              URL.revokeObjectURL(url);
-            } catch (err) {
-              console.error("Failed to export chat:", err);
-            }
-          }}
-          onDelete={() => {
-            chatMenu.close();
-            // In-app dialog — window.confirm is unreliable in Tauri WKWebView.
-            setDeleteConversationDialogOpen(menuChat.id);
-          }}
-        />
-      ) : null}
-
-      {menuProject ? (
-        <ProjectContextMenu
-          open={projectMenu.open}
-          x={projectMenu.x}
-          y={projectMenu.y}
-          project={menuProject}
-          onClose={projectMenu.close}
-          onOpen={() => void navigateToProject(menuProject.id)}
-          onNewChat={() => void createChatInProject(menuProject.id)}
-          onAddChats={() => setAddChatsDialogOpen(menuProject.id)}
-          onRename={() => setEditProjectDialogOpen(menuProject.id)}
-          onEditInstructions={() => setEditProjectDialogOpen(menuProject.id)}
-          onManageContext={() => setManageContextDialogOpen(menuProject.id)}
-          onExport={() => {
-            const path = window.prompt(
-              "Export file name (saved under Coreside exports):",
-              `${menuProject.name}.coreside-project.json`,
-            );
-            if (path) {
-              void import("@/lib/tauri").then(({ api }) =>
-                api.exportProject(menuProject.id, path),
-              );
-            }
-          }}
-          onArchiveToggle={() =>
-            void (menuProject.archived
-              ? restoreProject(menuProject.id)
-              : archiveProject(menuProject.id))
-          }
-          onDelete={() => setDeleteProjectDialogOpen(menuProject.id)}
+      {/* 2. Wider Contextual Sidebar (Collapsible) */}
+      {!effectiveCollapsed ? (
+        <ContextualSidebar
+          mode={contextualMode}
+          onModeChange={handleContextualModeChange}
+          onCollapse={handleCollapseContextual}
         />
       ) : null}
     </aside>

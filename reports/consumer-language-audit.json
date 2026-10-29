@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-10-13T21:07:15.504Z",
-  "commit": "99010ac559085c96048c8ef59b0eed6baf308096",
+  "generatedAt": "2026-10-29T01:16:59.989Z",
+  "commit": "af8dec0343b366edc75f75040f7132a76fee3c3f",
   "dirty": true,
-  "fingerprint": "024e82342f4872d3d14e2f553fe3813a1b2e6ea77341dbdf78b1004339ad71bf",
+  "fingerprint": "2b2cab71445617056becd1e8ed334eaf71c6b173f8845fc03e6feb33c2fe0109",
   "command": "audit:consumer-language",
-  "scannedFiles": 217,
+  "scannedFiles": 269,
   "findingCount": 3,
   "terms": [
     {

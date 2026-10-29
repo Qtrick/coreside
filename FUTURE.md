@@ -117,4 +117,9 @@ Replaced unbounded character-by-character timer delay in buffered text delivery 
 - **Source**: `src-tauri/src/commands/message_cmds.rs`, `src-tauri/src/ai/auto.rs`.
 - **Tests**: `src-tauri/src/commands/message_cmds.rs` (`buffered_text_frame_tests`), `src-tauri/src/ai/auto.rs` (`peek_assistant_message_large_payload_slice_scan_performance`).
 
+### WKS-001: Multi-Pane Dynamic Workspace Grid & Dual-Sidebar Navigation — COMPLETED
+Replaced single-column layout with a Zen Browser inspired dual-sidebar (IconRail + collapsible ContextualSidebar with unified search, projects, and apps) and multi-pane workspace grid supporting 1, 2 (vertical & horizontal), 3, and 4 pane split configurations. Features tab lifecycle with re-ordering and max constraints, focus isolation preventing background panes from stealing focus on mount, scoped conversation and tool IDs eliminating cross-pane data pollution, accessible resize splitters, and gated SQLite resource reconciliation.
+- **Source**: `src/components/workspace/WorkspaceView.tsx`, `src/components/workspace/WorkspaceGrid.tsx`, `src/components/workspace/WorkspacePane.tsx`, `src/components/workspace/WorkspaceTabStrip.tsx`, `src/components/workspace/WorkspaceDashboard.tsx`, `src/components/sidebar/IconRail.tsx`, `src/components/sidebar/ContextualSidebar.tsx`, `src/stores/workspace-store.ts`.
+- **Tests**: `src/components/workspace/WorkspaceView.test.tsx`, `src/components/sidebar/DualSidebar.test.tsx`, `src/stores/workspace-store.test.ts`.
+
 

@@ -8,8 +8,18 @@ import { ProjectIndicator } from "./ProjectIndicator";
 import { EMPTY_STATES, openHelpAndLearning } from "@/lib/empty-states";
 import { useAppStore } from "@/stores/app-store";
 
-export function ChatPanel() {
-  const activeConversationId = useAppStore((s) => s.activeConversationId);
+interface ChatPanelProps {
+  conversationId?: string | null;
+  autoFocus?: boolean;
+}
+
+export function ChatPanel({
+  conversationId: propConversationId,
+  autoFocus = true,
+}: ChatPanelProps = {}) {
+  const globalConversationId = useAppStore((s) => s.activeConversationId);
+  const activeConversationId =
+    propConversationId !== undefined ? propConversationId : globalConversationId;
   const conversations = useAppStore((s) => s.conversations);
   const projects = useAppStore((s) => s.projects);
   const createConversation = useAppStore((s) => s.createConversation);
@@ -59,8 +69,8 @@ export function ChatPanel() {
         <>
           <ConversationQueue conversationId={activeConversationId} />
           <GenerationRecoveryBanner conversationId={activeConversationId} />
-          <MessageList />
-          <Composer />
+          <MessageList conversationId={activeConversationId} />
+          <Composer conversationId={activeConversationId} autoFocus={autoFocus} />
         </>
       ) : (
         <div className="empty-state">

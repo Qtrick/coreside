@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-10-28T04:37:32.046Z",
-  "commit": "6f328032561e5190bcc1335c9a3073fdb9511719",
+  "generatedAt": "2026-10-29T01:16:52.600Z",
+  "commit": "af8dec0343b366edc75f75040f7132a76fee3c3f",
   "dirty": true,
   "fingerprint": "2b2cab71445617056becd1e8ed334eaf71c6b173f8845fc03e6feb33c2fe0109",
   "command": "audit:tutorial-targets",
@@ -39,17 +39,17 @@
     {
       "id": "chat-panel",
       "file": "src/components/chat/ChatPanel.tsx",
-      "line": 25
+      "line": 31
     },
     {
       "id": "chat-composer",
       "file": "src/components/chat/Composer.tsx",
-      "line": 356
+      "line": 371
     },
     {
       "id": "chat-composer-send",
       "file": "src/components/chat/Composer.tsx",
-      "line": 484
+      "line": 499
     },
     {
       "id": "help-learning",
@@ -73,18 +73,18 @@
     },
     {
       "id": "sidebar-new-chat",
-      "file": "src/components/sidebar/Sidebar.tsx",
-      "line": 229
+      "file": "src/components/sidebar/ContextualSidebar.tsx",
+      "line": 363
     },
     {
       "id": "sidebar-projects",
-      "file": "src/components/sidebar/Sidebar.tsx",
-      "line": 235
+      "file": "src/components/sidebar/ContextualSidebar.tsx",
+      "line": 404
     },
     {
       "id": "sidebar-apps",
-      "file": "src/components/sidebar/Sidebar.tsx",
-      "line": 338
+      "file": "src/components/sidebar/ContextualSidebar.tsx",
+      "line": 508
     },
     {
       "id": "app-panel",

@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
   "product": "Coreside",
-  "generatedAt": "2026-10-13T21:07:15.115Z",
-  "commit": "99010ac559085c96048c8ef59b0eed6baf308096",
+  "generatedAt": "2026-10-29T01:16:56.169Z",
+  "commit": "af8dec0343b366edc75f75040f7132a76fee3c3f",
   "dirty": true,
   "command": "audit:interactive-controls",
   "evidenceLevel": "Scaffolded",
   "note": "Static regex inventory only — not runtime interactivity proof.",
-  "filesScanned": 101,
-  "filesWithControls": 70,
-  "approximateTotalControls": 766,
+  "filesScanned": 131,
+  "filesWithControls": 81,
+  "approximateTotalControls": 911,
   "files": [
     {
       "file": "src/components/action-log/ActionLog.tsx",
@@ -49,10 +49,19 @@
     },
     {
       "file": "src/components/automations/AutomationsPanel.tsx",
-      "approximateControlCount": 16,
+      "approximateControlCount": 22,
       "counts": {
-        "button": 8,
-        "onClick": 8
+        "button": 11,
+        "onClick": 11
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/AutomationProposalCard.tsx",
+      "approximateControlCount": 6,
+      "counts": {
+        "button": 3,
+        "onClick": 3
       },
       "flags": {}
     },
@@ -126,6 +135,15 @@
       "flags": {}
     },
     {
+      "file": "src/components/chat/GenerationRecoveryBanner.tsx",
+      "approximateControlCount": 6,
+      "counts": {
+        "button": 3,
+        "onClick": 3
+      },
+      "flags": {}
+    },
+    {
       "file": "src/components/chat/InlineSurface.test.tsx",
       "approximateControlCount": 2,
       "counts": {
@@ -154,20 +172,20 @@
     },
     {
       "file": "src/components/chat/MessageBubble.tsx",
-      "approximateControlCount": 14,
+      "approximateControlCount": 15,
       "counts": {
         "button": 6,
         "onClick": 7,
-        "anchor": 1
+        "anchor": 2
       },
       "flags": {}
     },
     {
       "file": "src/components/chat/MessageList.tsx",
-      "approximateControlCount": 8,
+      "approximateControlCount": 10,
       "counts": {
-        "button": 4,
-        "onClick": 4
+        "button": 5,
+        "onClick": 5
       },
       "flags": {}
     },
@@ -181,6 +199,15 @@
     },
     {
       "file": "src/components/chat/ProjectIndicator.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/chat/RecoveredPreviewHost.tsx",
       "approximateControlCount": 2,
       "counts": {
         "button": 1,
@@ -326,10 +353,10 @@
     },
     {
       "file": "src/components/onboarding/WelcomeDialog.tsx",
-      "approximateControlCount": 6,
+      "approximateControlCount": 17,
       "counts": {
-        "button": 3,
-        "onClick": 3
+        "button": 7,
+        "onClick": 10
       },
       "flags": {}
     },
@@ -592,6 +619,25 @@
       }
     },
     {
+      "file": "src/components/settings/ThemePresetsSettings.test.tsx",
+      "approximateControlCount": 4,
+      "counts": {
+        "menuitem": 4
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/settings/ThemePresetsSettings.tsx",
+      "approximateControlCount": 57,
+      "counts": {
+        "button": 26,
+        "onClick": 26,
+        "input_type": 2,
+        "menuitem": 3
+      },
+      "flags": {}
+    },
+    {
       "file": "src/components/settings/WallpaperSettings.tsx",
       "approximateControlCount": 27,
       "counts": {
@@ -604,11 +650,23 @@
       }
     },
     {
-      "file": "src/components/sidebar/Sidebar.tsx",
-      "approximateControlCount": 26,
+      "file": "src/components/sidebar/ContextualSidebar.tsx",
+      "approximateControlCount": 29,
       "counts": {
-        "button": 13,
-        "onClick": 13
+        "button": 14,
+        "onClick": 14,
+        "input_type": 1
+      },
+      "flags": {
+        "placeholder": true
+      }
+    },
+    {
+      "file": "src/components/sidebar/IconRail.tsx",
+      "approximateControlCount": 18,
+      "counts": {
+        "button": 9,
+        "onClick": 9
       },
       "flags": {}
     },
@@ -663,11 +721,11 @@
     },
     {
       "file": "src/components/tool-renderer/nodes.tsx",
-      "approximateControlCount": 53,
+      "approximateControlCount": 55,
       "counts": {
-        "button": 18,
+        "button": 19,
         "type_submit": 1,
-        "onClick": 20,
+        "onClick": 21,
         "input_type": 13,
         "select": 1
       },
@@ -694,12 +752,55 @@
       "flags": {}
     },
     {
+      "file": "src/components/ui/ModalPortal.test.tsx",
+      "approximateControlCount": 1,
+      "counts": {
+        "button": 1
+      },
+      "flags": {}
+    },
+    {
       "file": "src/components/wallpaper/WallpaperProposalDialog.tsx",
       "approximateControlCount": 12,
       "counts": {
         "button": 4,
         "onClick": 4,
         "input_type": 4
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/workspace/WorkspaceDashboard.tsx",
+      "approximateControlCount": 10,
+      "counts": {
+        "button": 5,
+        "onClick": 5
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/workspace/WorkspaceGrid.tsx",
+      "approximateControlCount": 2,
+      "counts": {
+        "button": 1,
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/workspace/WorkspacePane.tsx",
+      "approximateControlCount": 1,
+      "counts": {
+        "onClick": 1
+      },
+      "flags": {}
+    },
+    {
+      "file": "src/components/workspace/WorkspaceTabStrip.tsx",
+      "approximateControlCount": 13,
+      "counts": {
+        "button": 6,
+        "onClick": 7
       },
       "flags": {}
     }

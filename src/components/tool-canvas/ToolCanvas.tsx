@@ -91,10 +91,41 @@ function isApplicationUnavailable(
   return { blocked: false, message: "" };
 }
 
-export function ToolCanvas() {
+interface ToolCanvasProps {
+  toolId?: string | null;
+}
+
+export function ToolCanvas({ toolId: propToolId }: ToolCanvasProps = {}) {
   // Selectors, not the whole store: this canvas stays mounted while chat
   // streams, and a full-store subscription re-renders the tool on every token.
-  const activeTool = useAppStore((s) => s.activeTool);
+  const globalActiveTool = useAppStore((s) => s.activeTool);
+  const [backgroundTool, setBackgroundTool] = useState<ToolDefinition | null>(null);
+
+  const isBackgroundTool = Boolean(
+    propToolId && propToolId !== globalActiveTool?.id,
+  );
+
+  useEffect(() => {
+    if (isBackgroundTool && propToolId) {
+      let cancelled = false;
+      void api.getTool(propToolId).then(
+        (t) => {
+          if (!cancelled) setBackgroundTool(t);
+        },
+        () => {
+          if (!cancelled) setBackgroundTool(null);
+        },
+      );
+      return () => {
+        cancelled = true;
+      };
+    } else {
+      setBackgroundTool(null);
+    }
+  }, [isBackgroundTool, propToolId]);
+
+  const activeTool: ToolDefinition | null =
+    isBackgroundTool && backgroundTool ? backgroundTool : globalActiveTool;
   const toolState = useAppStore((s) => s.toolState);
   const previewSurfacesByKey = useAppStore((s) => s.previewSurfacesByKey);
   const updateToolState = useAppStore((s) => s.updateToolState);

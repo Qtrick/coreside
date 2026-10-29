@@ -63,7 +63,15 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function Composer() {
+interface ComposerProps {
+  conversationId?: string | null;
+  autoFocus?: boolean;
+}
+
+export function Composer({
+  conversationId: propConversationId,
+  autoFocus = true,
+}: ComposerProps = {}) {
   const sendMessage = useAppStore((s) => s.sendMessage);
   const cancelRequest = useAppStore((s) => s.cancelRequest);
   const openProviderSetup = useAppStore((s) => s.openProviderSetup);
@@ -72,7 +80,9 @@ export function Composer() {
   const aiStatus = useAppStore((s) => s.aiStatus);
   const sendError = useAppStore((s) => s.sendError);
   const tools = useAppStore((s) => s.tools);
-  const activeConversationId = useAppStore((s) => s.activeConversationId);
+  const globalConversationId = useAppStore((s) => s.activeConversationId);
+  const activeConversationId =
+    propConversationId !== undefined ? propConversationId : globalConversationId;
   const setChatDraft = useAppStore((s) => s.setChatDraft);
   const sendingHere =
     sending &&
@@ -110,8 +120,10 @@ export function Composer() {
     Boolean(mentionQuery) && !needsSetup && !mentionSuppressed;
 
   useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
+    if (autoFocus) {
+      textareaRef.current?.focus();
+    }
+  }, [autoFocus]);
 
   useEffect(() => {
     const onPrefill = (e: Event) => {
@@ -285,6 +297,9 @@ export function Composer() {
       return [];
     });
     setStaging(false);
+    if (sendConversationId && useAppStore.getState().activeConversationId !== sendConversationId) {
+      await useAppStore.getState().navigateToChat(sendConversationId);
+    }
     const ok = await sendMessage(
       content || "Shared attachments",
       structured,
