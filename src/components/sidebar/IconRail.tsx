@@ -192,7 +192,6 @@ export function IconRail({
         >
           <div className="avatar-circle">
             <User size={16} aria-hidden />
-            <span className="avatar-status-dot" aria-hidden="true" />
           </div>
         </button>
 

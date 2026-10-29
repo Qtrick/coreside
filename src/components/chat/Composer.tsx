@@ -127,16 +127,24 @@ export function Composer({
 
   useEffect(() => {
     const onPrefill = (e: Event) => {
-      const custom = e as CustomEvent<{ text: string }>;
+      const custom = e as CustomEvent<{ text: string; conversationId?: string | null }>;
+      if (custom.detail?.conversationId !== undefined && custom.detail.conversationId !== activeConversationId) return;
       if (custom.detail?.text) {
-        setValue(custom.detail.text);
-        setCaret(custom.detail.text.length);
-        textareaRef.current?.focus();
+        setValue((prev) => {
+          const next = prev.trim()
+            ? `${prev.trim()}\n\n${custom.detail.text}`
+            : custom.detail.text;
+          setTimeout(() => {
+            setCaret(next.length);
+            textareaRef.current?.focus();
+          }, 0);
+          return next;
+        });
       }
     };
     window.addEventListener("coreside:prefill-composer", onPrefill);
     return () => window.removeEventListener("coreside:prefill-composer", onPrefill);
-  }, []);
+  }, [activeConversationId]);
 
   useEffect(() => {
     const el = textareaRef.current;

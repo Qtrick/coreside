@@ -28,8 +28,8 @@ export const LAYOUT_SAFE = {
 /** Media query string kept in sync with LAYOUT_SAFE.narrowSidebarMaxWidth. */
 export const NARROW_SIDEBAR_MEDIA_QUERY = `(max-width: ${LAYOUT_SAFE.narrowSidebarMaxWidth}px)`;
 
-export const SIDEBAR_WIDTH_COLLAPSED = 80;
-export const SIDEBAR_WIDTH_EXPANDED = 272;
+export const SIDEBAR_WIDTH_COLLAPSED = 68;
+export const SIDEBAR_WIDTH_EXPANDED = 388;
 
 export type LayoutMetrics = {
   shellWidth: number;

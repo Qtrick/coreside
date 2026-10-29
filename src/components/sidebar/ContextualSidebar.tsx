@@ -150,10 +150,12 @@ export function ContextualSidebar({
     }
   }, [searchFocused]);
 
-  // Global ⌘K shortcut focuses search input
+  // Global ⌘K shortcut focuses search input.
+  // Exclude Shift modifier so Cmd+Shift+K is reserved exclusively for AppShell's
+  // command palette (no conflict between the two handlers).
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
@@ -537,9 +539,8 @@ export function ContextualSidebar({
                   <button
                     key={tool.id}
                     type="button"
-                    className={`sidebar-nav-btn${
-                      view.kind === "chat" && activeToolId === tool.id ? " active" : ""
-                    }`}
+                    className={`sidebar-nav-btn${view.kind === "chat" && activeToolId === tool.id ? " active" : ""
+                      }`}
                     onClick={() => void selectTool(tool.id)}
                     aria-label={tool.name}
                     title={tool.name}

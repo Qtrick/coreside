@@ -445,9 +445,9 @@ export function ToolCanvas({ toolId: propToolId }: ToolCanvasProps = {}) {
         const summary = `Tool form submitted (${payload.eventName})`;
         const isSilent = Boolean(
           payload.silent ||
-            payload.eventName.startsWith("game.") ||
-            payload.eventName.endsWith(".silent") ||
-            payload.values.silent === true,
+          payload.eventName.startsWith("game.") ||
+          payload.eventName.endsWith(".silent") ||
+          payload.values.silent === true,
         );
         const sid = surfaceId ?? surfaceIdForTool(toolId);
         // Flush scheduled ToolCanvas state with OCC before sealing the envelope.
@@ -538,7 +538,7 @@ export function ToolCanvas({ toolId: propToolId }: ToolCanvasProps = {}) {
     previewOverlay?.state ??
     (canonicalSurface && canonicalState && Object.keys(canonicalState).length > 0
       ? // Store/toolState last so Sync dirty reconciliation and live typing win.
-        { ...canonicalState, ...toolState }
+      { ...canonicalState, ...toolState }
       : toolState);
   const inspectingReplay =
     !isPreviewPaint && isInteractive && interactive.replayState != null;
@@ -780,45 +780,45 @@ export function ToolCanvas({ toolId: propToolId }: ToolCanvasProps = {}) {
           />
         ) : (
           <>
-          {isInteractive && !isPreviewPaint ? (
-            <InteractiveStatusBar
-              view={interactive.view}
-              error={interactive.error}
-              pending={interactive.pending}
-              history={interactive.history}
-              replaySeq={interactive.replaySeq}
-              onUndo={() => void interactive.undo()}
-              onLoadHistory={() => void interactive.loadHistory()}
-              onReplayAt={(seq) => void interactive.replayAt(seq)}
-              onClearReplay={interactive.clearReplay}
+            {isInteractive && !isPreviewPaint ? (
+              <InteractiveStatusBar
+                view={interactive.view}
+                error={interactive.error}
+                pending={interactive.pending}
+                history={interactive.history}
+                replaySeq={interactive.replaySeq}
+                onUndo={() => void interactive.undo()}
+                onLoadHistory={() => void interactive.loadHistory()}
+                onReplayAt={(seq) => void interactive.replayAt(seq)}
+                onClearReplay={interactive.clearReplay}
+              />
+            ) : null}
+            <ToolRenderer
+              tool={renderTool ?? activeTool}
+              state={renderState}
+              onStateChange={
+                isPreviewPaint || inspectingReplay ? () => undefined : onStateChange
+              }
+              onPersistState={
+                isPreviewPaint || inspectingReplay ? async () => undefined : onPersistState
+              }
+              isCustomizing={isCustomizing}
+              mode={isPreviewPaint ? "preview" : isCustomizing ? "customize" : "live"}
+              selectedComponentId={selectedComponentId}
+              onSelectComponent={(c) => setSelectedComponentId(c.id)}
+              // Only a real manifest id — never invent one for legacy tools.
+              applicationId={manifestRecord?.applicationId ?? null}
+              surfaceId={surfaceId}
+              conversationId={activeConversationId}
+              projectId={activeProjectId}
+              onSubmitToAgent={isPreviewPaint ? undefined : onSubmitToAgent}
+              onPendingApproval={onPendingApproval}
+              onInteractiveDispatch={
+                isInteractive && !isPreviewPaint && !inspectingReplay
+                  ? interactive.dispatch
+                  : undefined
+              }
             />
-          ) : null}
-          <ToolRenderer
-            tool={renderTool ?? activeTool}
-            state={renderState}
-            onStateChange={
-              isPreviewPaint || inspectingReplay ? () => undefined : onStateChange
-            }
-            onPersistState={
-              isPreviewPaint || inspectingReplay ? async () => undefined : onPersistState
-            }
-            isCustomizing={isCustomizing}
-            mode={isPreviewPaint ? "preview" : isCustomizing ? "customize" : "live"}
-            selectedComponentId={selectedComponentId}
-            onSelectComponent={(c) => setSelectedComponentId(c.id)}
-            // Only a real manifest id — never invent one for legacy tools.
-            applicationId={manifestRecord?.applicationId ?? null}
-            surfaceId={surfaceId}
-            conversationId={activeConversationId}
-            projectId={activeProjectId}
-            onSubmitToAgent={isPreviewPaint ? undefined : onSubmitToAgent}
-            onPendingApproval={onPendingApproval}
-            onInteractiveDispatch={
-              isInteractive && !isPreviewPaint && !inspectingReplay
-                ? interactive.dispatch
-                : undefined
-            }
-          />
           </>
         )}
       </div>

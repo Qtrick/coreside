@@ -7486,7 +7486,7 @@ body > .window-overlay-root > *,
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   background: var(--core-background);
   border-right: 1px solid var(--border-subtle);
   padding: 8px 0 16px;
@@ -7524,7 +7524,8 @@ body > .window-overlay-root > *,
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 12px 0;
+  padding: 14px 0;
+  margin-top: 12px;
 }
 
 .icon-rail-btn {
@@ -7558,6 +7559,7 @@ body > .window-overlay-root > *,
   flex-direction: column;
   align-items: center;
   width: 100%;
+  margin-top: auto;
 }
 
 .icon-rail-avatar-btn {
@@ -8454,3 +8456,145 @@ body > .window-overlay-root > *,
   }
 }
 
+
+/* ==========================================================================
+   CORESIDE DESIGN RECONCILIATION — October 2026
+   Source of truth: approved dark workspace reference, not legacy sidebar.
+   Fixes: old 272px grid track clipping 388px dual sidebar; layout of
+   icon rail; search/segmented-switcher truncation; first-chat dashboard.
+   ========================================================================== */
+.app-shell,
+.app-shell.no-tool,
+.app-shell.settings-mode {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+}
+.app-shell.sidebar-collapsed,
+.app-shell.sidebar-collapsed.no-tool,
+.app-shell.settings-mode.sidebar-collapsed {
+  grid-template-columns: var(--sidebar-collapsed-width) minmax(0, 1fr);
+}
+.app-shell > .dual-sidebar {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.icon-rail,
+.contextual-sidebar { box-sizing: border-box; }
+.icon-rail { flex: 0 0 var(--nav-rail-width); }
+.contextual-sidebar {
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 0;
+  max-width: none;
+  padding: 22px 16px 18px;
+  background: var(--core-background);
+}
+.contextual-header { min-height: 42px; margin-bottom: 22px; }
+.contextual-brand { gap: 10px; min-width: 0; }
+.contextual-title { font-size: 1rem; font-weight: 650; }
+.contextual-search-box { flex: none; margin-bottom: 12px; min-width: 0; }
+.contextual-search-input { height: 40px; padding-left: 34px; padding-right: 46px; border-radius: 10px; }
+.contextual-new-chat-btn { height: 44px; border-radius: 10px; margin-bottom: 16px; }
+.contextual-segmented-switcher {
+  flex: none;
+  width: 100%;
+  margin-bottom: 18px;
+  border-radius: 10px;
+  padding: 4px;
+  min-width: 0;
+}
+.contextual-tab { height: 36px; padding: 0 6px; white-space: nowrap; min-width: 0; font-size: 0.76rem; }
+.contextual-tab span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.contextual-content { min-width: 0; scrollbar-width: thin; }
+.contextual-content .sidebar-section { min-width: 0; }
+.contextual-sidebar .sidebar-nav-row,
+.contextual-sidebar .sidebar-nav-btn { min-width: 0; }
+.contextual-sidebar .sidebar-nav-btn .nav-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.contextual-sidebar .sidebar-nav-btn .nav-time { margin-left: auto; flex-shrink: 0; }
+.contextual-sidebar .sidebar-nav-btn { min-height: 39px; padding-inline: 11px 35px; }
+.contextual-sidebar .sidebar-nav-btn.active { box-shadow: var(--zen-selected-shadow); }
+.contextual-sidebar .sidebar-nav-btn.active::before { display: none; }
+.contextual-sidebar .sidebar-overflow-btn { right: 7px; }
+.icon-rail-nav { justify-content: flex-start; }
+.icon-rail-bottom { flex-shrink: 0; }
+.icon-rail-btn { width: 42px; height: 42px; border-radius: 12px; }
+.icon-rail-btn.active { transform: translateY(-1px); }
+/* Workspace chrome must not steal vertical room from the dashboard. */
+.workspace-tab-strip { height: 52px; min-height: 52px; padding-inline: 16px; }
+.workspace-tab { height: 34px; padding-inline: 13px; border-radius: 9px 9px 5px 5px; }
+.workspace-tab.active { box-shadow: 0 2px 8px rgba(0,0,0,.14), inset 0 1px 0 rgba(255,255,255,.09); }
+.workspace-pane { min-width: 0; }
+.workspace-dashboard { min-height: 0; }
+.dashboard-content-scroll {
+  justify-content: flex-start;
+  align-items: center;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 24px 28px 28px;
+  scrollbar-width: thin;
+}
+.dashboard-hero {
+  flex-shrink: 0;
+  margin-top: auto;
+  margin-bottom: 30px;
+}
+.dashboard-quick-actions {
+  flex-shrink: 0;
+  width: min(100%, 680px);
+  max-width: 680px;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+.quick-action-card { min-height: 118px; height: auto; padding: 17px; border-radius: 14px; }
+.dashboard-suggestions-card {
+  flex-shrink: 0;
+  width: min(100%, 550px);
+  max-width: 550px;
+  margin-bottom: auto;
+  border-radius: 15px;
+}
+.dashboard-mark-container { margin-bottom: 21px; }
+.dashboard-title { font-size: clamp(1.6rem, 2.3vw, 2.2rem); }
+.dashboard-composer-host {
+  position: relative;
+  flex: 0 0 auto;
+  width: min(100%, 1010px);
+  max-width: 1010px;
+  padding: 10px 24px 22px;
+  margin: 0 auto;
+  background: var(--core-background);
+  z-index: 1;
+}
+.dashboard-composer-host .composer-box:focus-within { box-shadow: 0 0 0 1px var(--border); }
+.dashboard-composer-host .composer-box:has(textarea:focus-visible) { outline: 2px solid var(--border); outline-offset: 2px; }
+/* Avoid extra app chrome when a first conversation has no messages. */
+.workspace-chat-welcome { height: 100%; min-height: 0; }
+/* At smaller sizes retain full rail and a readable primary workspace. */
+@media (max-width: 1100px) {
+  .app-shell:not(.sidebar-collapsed),
+  .app-shell.no-tool:not(.sidebar-collapsed),
+  .app-shell.settings-mode:not(.sidebar-collapsed) {
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  }
+  .app-shell > .dual-sidebar:not(.collapsed) {
+    width: 100%; max-width: 100%;
+  }
+}
+@media (max-width: 760px) {
+  .dashboard-quick-actions { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .dashboard-content-scroll { padding: 24px 18px; }
+  .dashboard-composer-host { padding: 8px 14px 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .icon-rail-btn.active { transform: none; }
+}
+
+/* Compact, legible two-way contextual switcher in the approved image. */
+.contextual-tab svg { display: none; }
+.contextual-tab { gap: 0; }

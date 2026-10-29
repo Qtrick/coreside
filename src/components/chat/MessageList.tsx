@@ -211,56 +211,56 @@ export function MessageList({ conversationId: propConversationId }: MessageListP
     );
   }
 
-const STARTER_PROMPTS = [
-  {
-    title: "Task Manager",
-    desc: "Persistent task board with priorities, statuses, and filtering",
-    prompt:
-      "Build me a task manager with persistent tasks, priority, status, create, edit, delete, search, and filtering.",
-  },
-  {
-    title: "Habit Tracker",
-    desc: "Daily habit tracking with streaks, metrics, and progress logs",
-    prompt:
-      "Build a habit tracker to log daily habits, completion streaks, notes, and progress overview.",
-  },
-  {
-    title: "Research Organizer",
-    desc: "Structured research topics with key findings, tags, and summary",
-    prompt:
-      "Build a research organizer with search, categorized findings, tags, and summary view.",
-  },
-  {
-    title: "Study Dashboard",
-    desc: "Subject cards, flashcard statistics, deadlines, and study timer",
-    prompt:
-      "Build a study dashboard with subject cards, flashcard review stats, upcoming deadlines, and study timer.",
-  },
-  {
-    title: "Quiz App",
-    desc: "Interactive question banks, multi-choice scoring, and review mode",
-    prompt:
-      "Build a quiz app with question banks, interactive choices, score calculation, and review mode.",
-  },
-  {
-    title: "Finance Tracker",
-    desc: "Income and expense records with category breakdown and budget summary",
-    prompt:
-      "Build a finance tracker for income, expenses, category breakdown, and monthly budget summary.",
-  },
-  {
-    title: "Media Organizer",
-    desc: "Catalog books, games, movies, personal ratings, and wishlist",
-    prompt:
-      "Build a media organizer to catalog books, movies, games, ratings, and wishlist.",
-  },
-  {
-    title: "Personal Dashboard",
-    desc: "Daily agenda, quick metrics, high-priority actions, and notes",
-    prompt:
-      "Build a personal dashboard with daily agenda, quick actions, metric cards, and notes.",
-  },
-];
+  const STARTER_PROMPTS = [
+    {
+      title: "Task Manager",
+      desc: "Persistent task board with priorities, statuses, and filtering",
+      prompt:
+        "Build me a task manager with persistent tasks, priority, status, create, edit, delete, search, and filtering.",
+    },
+    {
+      title: "Habit Tracker",
+      desc: "Daily habit tracking with streaks, metrics, and progress logs",
+      prompt:
+        "Build a habit tracker to log daily habits, completion streaks, notes, and progress overview.",
+    },
+    {
+      title: "Research Organizer",
+      desc: "Structured research topics with key findings, tags, and summary",
+      prompt:
+        "Build a research organizer with search, categorized findings, tags, and summary view.",
+    },
+    {
+      title: "Study Dashboard",
+      desc: "Subject cards, flashcard statistics, deadlines, and study timer",
+      prompt:
+        "Build a study dashboard with subject cards, flashcard review stats, upcoming deadlines, and study timer.",
+    },
+    {
+      title: "Quiz App",
+      desc: "Interactive question banks, multi-choice scoring, and review mode",
+      prompt:
+        "Build a quiz app with question banks, interactive choices, score calculation, and review mode.",
+    },
+    {
+      title: "Finance Tracker",
+      desc: "Income and expense records with category breakdown and budget summary",
+      prompt:
+        "Build a finance tracker for income, expenses, category breakdown, and monthly budget summary.",
+    },
+    {
+      title: "Media Organizer",
+      desc: "Catalog books, games, movies, personal ratings, and wishlist",
+      prompt:
+        "Build a media organizer to catalog books, movies, games, ratings, and wishlist.",
+    },
+    {
+      title: "Personal Dashboard",
+      desc: "Daily agenda, quick metrics, high-priority actions, and notes",
+      prompt:
+        "Build a personal dashboard with daily agenda, quick actions, metric cards, and notes.",
+    },
+  ];
 
   if (messages.length === 0 && !liveHere) {
     return (
@@ -353,8 +353,8 @@ const STARTER_PROMPTS = [
           }
           const isSilent = Boolean(
             message.metadata &&
-              typeof message.metadata === "object" &&
-              (message.metadata as Record<string, unknown>).silent === true,
+            typeof message.metadata === "object" &&
+            (message.metadata as Record<string, unknown>).silent === true,
           );
           // Silent app interactions (e.g. game moves) remain persisted and auditable,
           // but hide ordinary chat bubbles unless Action Log mode is always on.

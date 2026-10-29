@@ -30,11 +30,11 @@
   --radius-md: var(--radius);
   --radius-lg: 16px;
   --radius-pill: 999px;
-  /* Keep 272px expanded / 80px collapsed in sync with AppShell layout math (Journey 5). */
-  --sidebar-width: 272px;
-  --sidebar-collapsed-width: 80px;
-  --nav-rail-width: 60px;
-  --nav-contextual-width: 280px;
+  /* One authoritative track size for the permanent rail + contextual panel. */
+  --nav-rail-width: 68px;
+  --nav-contextual-width: 320px;
+  --sidebar-width: calc(var(--nav-rail-width) + var(--nav-contextual-width));
+  --sidebar-collapsed-width: var(--nav-rail-width);
 
   /* Zen Browser inspired elevated selected surface (Monochrome & Restrained) */
   --zen-selected-bg: rgba(0, 0, 0, 0.05);

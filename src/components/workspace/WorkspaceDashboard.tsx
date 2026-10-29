@@ -27,11 +27,13 @@ function getContextualGreeting(): string {
 }
 
 interface WorkspaceDashboardProps {
+  conversationId?: string | null;
   onActionSelect?: (prompt: string) => void;
   autoFocus?: boolean;
 }
 
 export function WorkspaceDashboard({
+  conversationId,
   onActionSelect,
   autoFocus = true,
 }: WorkspaceDashboardProps) {
@@ -47,7 +49,7 @@ export function WorkspaceDashboard({
     }
     window.dispatchEvent(
       new CustomEvent("coreside:prefill-composer", {
-        detail: { text },
+        detail: { text, conversationId: conversationId ?? null },
       }),
     );
   };
@@ -90,6 +92,7 @@ export function WorkspaceDashboard({
   return (
     <div
       className="workspace-dashboard"
+      role="region"
       aria-label="Workspace Dashboard"
       data-testid="workspace-dashboard"
     >
@@ -176,7 +179,7 @@ export function WorkspaceDashboard({
 
       {/* Actual Chat Composer at bottom */}
       <div className="dashboard-composer-host">
-        <Composer autoFocus={autoFocus} />
+        <Composer conversationId={conversationId} autoFocus={autoFocus} />
       </div>
     </div>
   );

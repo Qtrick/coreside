@@ -1,4 +1,5 @@
 import { MessageSquarePlus } from "lucide-react";
+import { WorkspaceDashboard } from "@/components/workspace/WorkspaceDashboard";
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
 import { ConversationQueue } from "./ConversationQueue";
@@ -30,6 +31,23 @@ export function ChatPanel({
   const activeProject = active?.projectId
     ? projects.find((p) => p.id === active.projectId)
     : null;
+  const messageCount = useAppStore((s) => s.messages.length);
+  const messagesLoading = useAppStore((s) => s.messagesLoading);
+  const messagesError = useAppStore((s) => s.messagesError);
+  const sendingHere = useAppStore((s) =>
+    s.sending && s.sendingConversationId === activeConversationId,
+  );
+  const currentGlobal = activeConversationId === globalConversationId;
+
+  // A newly created, *empty* conversation uses the real dashboard composer.
+  // Background panes still use ChatPanel/MessageList's scoped data loading.
+  if (active && currentGlobal && messageCount === 0 && !messagesLoading && !messagesError && !sendingHere) {
+    return (
+      <div className="workspace-chat-welcome" data-testid="chat-welcome-dashboard">
+        <WorkspaceDashboard conversationId={activeConversationId} autoFocus={autoFocus} />
+      </div>
+    );
+  }
 
   return (
     <section className="chat-panel" aria-label="Conversation" data-coreside-tour="chat-panel">
