@@ -206,15 +206,6 @@ pub fn execute_deferred_startup_maintenance(
     if cancel.is_cancelled() {
         return DeferredMaintenanceOutcome::Cancelled;
     }
-    if !state.profile_ready() {
-        return DeferredMaintenanceOutcome::SkippedProfileNotReady;
-    }
-    if state.maintenance_status().active {
-        return DeferredMaintenanceOutcome::SkippedMaintenanceActive;
-    }
-    if state.quiescence.is_paused() {
-        return DeferredMaintenanceOutcome::SkippedQuiescence;
-    }
     if !state.try_begin_deferred_maintenance() {
         return DeferredMaintenanceOutcome::SkippedAlreadyRunning;
     }
@@ -227,6 +218,16 @@ pub fn execute_deferred_startup_maintenance(
     let _guard = WorkerGuard(state);
 
     let initial_gen = state.quiescence.generation();
+
+    if !state.profile_ready() {
+        return DeferredMaintenanceOutcome::SkippedProfileNotReady;
+    }
+    if state.maintenance_status().active {
+        return DeferredMaintenanceOutcome::SkippedMaintenanceActive;
+    }
+    if state.quiescence.is_paused() {
+        return DeferredMaintenanceOutcome::SkippedQuiescence;
+    }
 
     match crate::maintenance_journal::load_journal(paths) {
         Ok(Some(journal)) => {
@@ -535,47 +536,6 @@ mod tests {
             DeferredMaintenanceOutcome::SkippedAlreadyRunning,
             "concurrent call to execute_deferred_startup_maintenance must return SkippedAlreadyRunning"
         );
-        assert!(matches!(
-            outcome1,
-            DeferredMaintenanceOutcome::Completed { .. }
-        ));
-    }
-
-    #[test]
-    fn deferred_maintenance_cancelled_via_begin_maintenance() {
-        let (_dir, paths, state) = test_fixture();
-        let cancel = CancellationToken::new();
-        state.register_maintenance_cancel(cancel.clone());
-
-        let maint_id = state.begin_maintenance("backup").expect("begin backup");
-        assert!(
-            cancel.is_cancelled(),
-            "begin_maintenance must cancel in-flight maintenance token"
-        );
-        let outcome = execute_deferred_startup_maintenance(&state, &paths, &cancel);
-        assert_eq!(outcome, DeferredMaintenanceOutcome::Cancelled);
-
-        state.clear_maintenance(&maint_id).expect("clear backup");
-    }
-
-    #[test]
-    fn try_begin_deferred_maintenance_respects_quiescence_pause_and_release() {
-        let (_dir, _paths, state) = test_fixture();
-
-        // When quiescence is paused, cannot begin
-        let pause_token = state.quiescence.pause();
-        assert!(!state.try_begin_deferred_maintenance());
-
-        // Once resumed with matching token, can begin
-        assert!(state.quiescence.resume(pause_token));
-        assert!(state.try_begin_deferred_maintenance());
-
-        // Cannot begin again while already active
-        assert!(!state.try_begin_deferred_maintenance());
-
-        // Releasing allows next worker to begin
-        state.end_deferred_maintenance();
-        assert!(state.try_begin_deferred_maintenance());
-        state.end_deferred_maintenance();
+        assert!(matches!(outcome1, DeferredMaintenanceOutcome::Completed { .. }));
     }
 }

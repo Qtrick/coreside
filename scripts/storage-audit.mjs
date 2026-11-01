@@ -189,6 +189,7 @@ export function discoverInventory(opts = {}) {
   const tmpDir = opts.tmpDir ?? os.tmpdir();
   const tauri = path.join(root, "src-tauri");
   const inRepoTarget = path.join(tauri, "target");
+  const rootTarget = path.join(root, "target");
 
   /** @type {InventoryItem[]} */
   const items = [
@@ -199,6 +200,14 @@ export function discoverInventory(opts = {}) {
       safeToClean: true,
       kind: "cargo-target",
       reason: "Compiled Cargo/Tauri debug+release objects (rebuilt on next build)",
+    },
+    {
+      id: "root-rust-target",
+      category: "Root Rust Build Artifacts (stale)",
+      path: rootTarget,
+      safeToClean: true,
+      kind: "cargo-target",
+      reason: "Stale Cargo target directory in repository root (compiled objects)",
     },
     {
       id: "vite-cache",
